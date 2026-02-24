@@ -8,7 +8,7 @@
 
 +nearby(within_radius<0.5, Id, D:asc>) <- dist(Id, D)
 
-// Initial: 1(0.1), 4(0.3), 6(0.45), 2(0.5) — all within 0.5
+// Initial: 1(0.1), 4(0.3), 6(0.45), 2(0.5) - all within 0.5
 ?nearby(X, Y)
 
 // Retract an item that was within radius

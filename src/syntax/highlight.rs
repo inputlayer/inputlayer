@@ -121,7 +121,7 @@ impl Highlighter for DatalogHelper {
     }
 
     fn highlight_char(&self, _line: &str, _pos: usize, _forced: bool) -> bool {
-        // Always re-highlight — the grammar is fast enough for interactive use
+        // Always re-highlight - the grammar is fast enough for interactive use
         true
     }
 }

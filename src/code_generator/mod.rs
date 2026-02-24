@@ -27,7 +27,7 @@ use differential_dataflow::operators::{Reduce, Threshold};
 use differential_dataflow::Collection;
 use parking_lot::Mutex;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -87,7 +87,7 @@ fn format_panic_payload(payload: Box<dyn std::any::Any + Send>) -> String {
 }
 
 /// Tolerance for float equality comparisons in filters and joins.
-/// `FLOAT_EQ_TOLERANCE` (~2.2e-16) is far too tight for practical use — values that
+/// `FLOAT_EQ_TOLERANCE` (~2.2e-16) is far too tight for practical use - values that
 /// differ by normal floating-point rounding (e.g. `0.1 + 0.2`) would compare
 /// as unequal. 1e-10 is tight enough for 64-bit precision while tolerating
 /// accumulated rounding in typical Datalog arithmetic.
@@ -235,7 +235,7 @@ impl CodeGenerator {
         let ir_clone = ir.clone();
         let result_limit = self.max_result_rows;
 
-        // Execute DD computation with panic safety — DD bugs (e.g. merge_batcher
+        // Execute DD computation with panic safety - DD bugs (e.g. merge_batcher
         // out-of-bounds) should produce an error, not crash the server.
         catch_unwind(AssertUnwindSafe(|| {
             timely::execute_directly(move |worker| {
@@ -296,7 +296,7 @@ impl CodeGenerator {
         })?;
 
         if is_query_cancelled() {
-            // If we hit the result limit, the cancel was self-triggered — return results
+            // If we hit the result limit, the cancel was self-triggered - return results
             let collected = results.lock().len();
             if result_limit == 0 || collected < result_limit {
                 return Err("Query cancelled due to timeout".to_string());
@@ -341,7 +341,7 @@ impl CodeGenerator {
             // implicit base case via a Scan node, and treat all inputs as recursive.
             if std::env::var("IL_DEBUG").is_ok() {
                 eprintln!(
-                    "DEBUG: all inputs reference '{recursive_rel}' — using base facts as implicit base case"
+                    "DEBUG: all inputs reference '{recursive_rel}' - using base facts as implicit base case"
                 );
             }
             let base = vec![IRNode::Scan {
@@ -363,6 +363,26 @@ impl CodeGenerator {
                 );
             }
             return self.execute_transitive_closure_optimized(&edge_relation, recursive_rel);
+        }
+
+        // Try bound TC pattern (Magic Sets adorned TC)
+        if let Some((edge_rel, seeds, bound_col)) =
+            self.detect_bound_tc_pattern(&base_inputs, &recursive_inputs, recursive_rel)
+        {
+            if std::env::var("IL_DEBUG").is_ok() {
+                eprintln!(
+                    "DEBUG: detected bound TC pattern: edge='{}', seeds={}, bound_col={}",
+                    edge_rel,
+                    seeds.len(),
+                    bound_col
+                );
+            }
+            return self.execute_bound_transitive_closure_optimized(
+                &edge_rel,
+                recursive_rel,
+                &seeds,
+                bound_col,
+            );
         }
 
         // For complex patterns, use the general DD iterative approach.
@@ -503,6 +523,154 @@ impl CodeGenerator {
         }
     }
 
+    /// Detect a **bound** transitive closure pattern produced by Magic Sets.
+    ///
+    /// Only matches the standard TC form with `_bf` adornment (first arg bound):
+    ///   base: reach_bf(X, Y) <- magic_reach_bf(X), edge(X, Y)
+    ///   recursive: reach_bf(X, Z) <- magic_reach_bf(X), reach_bf(X, Y), edge(Y, Z)
+    ///
+    /// The recursive IR must have the exact join structure:
+    ///   edge.col1 = recursive.col0 (standard TC join keys)
+    ///
+    /// Returns `(edge_relation, seed_values, bound_col=0)` if the pattern matches.
+    fn detect_bound_tc_pattern(
+        &self,
+        base_inputs: &[IRNode],
+        recursive_inputs: &[IRNode],
+        recursive_rel: &str,
+    ) -> Option<(String, Vec<Tuple>, usize)> {
+        if base_inputs.len() != 1 || recursive_inputs.len() != 1 {
+            return None;
+        }
+
+        // Only support _bf adornment (first arg bound, standard TC structure)
+        if !recursive_rel.ends_with("_bf") {
+            return None;
+        }
+
+        // Helper: extract the relation name from a Scan or Map(Scan) node
+        fn scan_relation(ir: &IRNode) -> Option<&str> {
+            match ir {
+                IRNode::Scan { relation, .. } => Some(relation),
+                IRNode::Map { input, .. } => scan_relation(input),
+                _ => None,
+            }
+        }
+
+        // Helper: check if an IR tree transitively contains a Scan of a relation
+        fn contains_scan(ir: &IRNode, rel: &str) -> bool {
+            match ir {
+                IRNode::Scan { relation, .. } => relation == rel,
+                IRNode::Map { input, .. }
+                | IRNode::Filter { input, .. }
+                | IRNode::Distinct { input }
+                | IRNode::Compute { input, .. } => contains_scan(input, rel),
+                IRNode::Join { left, right, .. } => {
+                    contains_scan(left, rel) || contains_scan(right, rel)
+                }
+                _ => false,
+            }
+        }
+
+        // Helper: find the edge relation and verify the join structure in the
+        // recursive input. We need a Join where:
+        //   - One side is keyed by [1] and contains the recursive relation
+        //   - Other side is keyed by [0] and is a direct scan of the edge relation
+        // This handles the adorned pattern where the recursive side is
+        // Join(magic_guard, reach_bf), not just Scan(reach_bf).
+        fn find_tc_join<'a>(ir: &'a IRNode, recursive_rel: &str) -> Option<&'a str> {
+            match ir {
+                IRNode::Join {
+                    left,
+                    right,
+                    left_keys,
+                    right_keys,
+                    ..
+                } => {
+                    // Pattern: left[key=1] JOIN right[key=0]
+                    // Left contains recursive rel, right is edge scan
+                    if left_keys == &[1] && right_keys == &[0] && contains_scan(left, recursive_rel)
+                    {
+                        if let Some(r) = scan_relation(right) {
+                            if !r.starts_with("magic_") && r != recursive_rel {
+                                return Some(r);
+                            }
+                        }
+                    }
+                    // Swapped: left[key=0] JOIN right[key=1]
+                    if left_keys == &[0]
+                        && right_keys == &[1]
+                        && contains_scan(right, recursive_rel)
+                    {
+                        if let Some(l) = scan_relation(left) {
+                            if !l.starts_with("magic_") && l != recursive_rel {
+                                return Some(l);
+                            }
+                        }
+                    }
+                    // Recurse into children (the TC join may be wrapped)
+                    find_tc_join(left, recursive_rel).or_else(|| find_tc_join(right, recursive_rel))
+                }
+                IRNode::Map { input, .. } | IRNode::Filter { input, .. } => {
+                    find_tc_join(input, recursive_rel)
+                }
+                _ => None,
+            }
+        }
+
+        // Find the edge relation from the recursive input's join structure
+        let edge_rel = find_tc_join(&recursive_inputs[0], recursive_rel)?;
+
+        // Verify edge relation has 2-column tuples in input_tuples
+        let edge_tuples = self.input_tuples.get(edge_rel)?;
+        if edge_tuples.is_empty() || edge_tuples[0].values().len() != 2 {
+            return None;
+        }
+
+        // Find the magic relation name and verify it has seed tuples
+        let magic_name = format!("magic_{recursive_rel}");
+        let magic_tuples = self.input_tuples.get(&magic_name)?;
+        if magic_tuples.is_empty() {
+            return None;
+        }
+
+        // Verify the base case only has scans of the magic relation and the edge
+        // relation (no negation, no extra joins that would change semantics)
+        fn collect_scans_local(ir: &IRNode, scans: &mut Vec<String>) {
+            match ir {
+                IRNode::Scan { relation, .. } => scans.push(relation.clone()),
+                IRNode::Map { input, .. }
+                | IRNode::Filter { input, .. }
+                | IRNode::Distinct { input }
+                | IRNode::Compute { input, .. } => collect_scans_local(input, scans),
+                IRNode::Join { left, right, .. } => {
+                    collect_scans_local(left, scans);
+                    collect_scans_local(right, scans);
+                }
+                // Antijoin/negation means this isn't a simple TC - bail out
+                _ => scans.push("__unsupported__".to_string()),
+            }
+        }
+
+        let mut base_scans = Vec::new();
+        collect_scans_local(&base_inputs[0], &mut base_scans);
+
+        // Base case must scan exactly: the magic relation + the edge relation
+        // No unsupported nodes, no extra relations
+        if base_scans.iter().any(|s| s == "__unsupported__") {
+            return None;
+        }
+        let base_set: HashSet<&str> = base_scans.iter().map(String::as_str).collect();
+        if base_set.len() != 2
+            || !base_set.contains(magic_name.as_str())
+            || !base_set.contains(edge_rel)
+        {
+            return None;
+        }
+
+        Some((edge_rel.to_string(), magic_tuples.clone(), 0))
+    }
+
     /// Optimized transitive closure using DD's native .`iterative()` scope
     ///
     /// This is O(n) for chain graphs vs O(n²) for naive iteration.
@@ -628,7 +796,7 @@ impl CodeGenerator {
         })?;
 
         if is_query_cancelled() {
-            // If we hit the result limit, the cancel was self-triggered — return results
+            // If we hit the result limit, the cancel was self-triggered - return results
             let collected = results.lock().len();
             if result_limit == 0 || collected < result_limit {
                 return Err("Query cancelled due to timeout".to_string());
@@ -637,6 +805,167 @@ impl CodeGenerator {
 
         // Extract results
         // parking_lot::Mutex never poisons, so into_inner() returns the value directly
+        let final_results = Arc::try_unwrap(results)
+            .map_err(|_| "Failed to extract results")?
+            .into_inner();
+
+        Ok(final_results)
+    }
+
+    /// Optimized bound transitive closure using DD's native `.iterative()` scope.
+    ///
+    /// Like `execute_transitive_closure_optimized` but for Magic Sets adorned TC:
+    /// only seed-matching edges bootstrap the fixpoint, while the full edge set
+    /// is used for the recursive join step.
+    fn execute_bound_transitive_closure_optimized(
+        &self,
+        edge_relation: &str,
+        recursive_rel: &str,
+        seed_values: &[Tuple],
+        bound_col: usize,
+    ) -> Result<Vec<Tuple>, String> {
+        match self.semiring_type {
+            SemiringType::Boolean => self.execute_bound_transitive_closure_typed::<BooleanDiff>(
+                edge_relation,
+                recursive_rel,
+                seed_values,
+                bound_col,
+            ),
+            _ => self.execute_bound_transitive_closure_typed::<isize>(
+                edge_relation,
+                recursive_rel,
+                seed_values,
+                bound_col,
+            ),
+        }
+    }
+
+    fn execute_bound_transitive_closure_typed<R: DiffType>(
+        &self,
+        edge_relation: &str,
+        _recursive_rel: &str,
+        seed_values: &[Tuple],
+        bound_col: usize,
+    ) -> Result<Vec<Tuple>, String> {
+        let results = Arc::new(Mutex::new(Vec::new()));
+        let results_clone = Arc::clone(&results);
+        let result_limit = self.max_result_rows;
+
+        // Get all edges
+        let all_edges: Vec<Tuple> = self
+            .input_tuples
+            .get(edge_relation)
+            .cloned()
+            .unwrap_or_default();
+
+        if all_edges.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Pre-filter seed edges: only edges where edge[bound_col] ∈ seed values
+        let seed_set: HashSet<&Value> = seed_values.iter().filter_map(|t| t.get(0)).collect();
+
+        let seed_edges: Vec<Tuple> = all_edges
+            .iter()
+            .filter(|e| e.get(bound_col).is_some_and(|v| seed_set.contains(v)))
+            .cloned()
+            .collect();
+
+        if seed_edges.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let all_edge_data = all_edges;
+        let seed_edge_data = seed_edges;
+
+        catch_unwind(AssertUnwindSafe(|| {
+            timely::execute_directly(move |worker| {
+                let mut probe = ProbeHandle::new();
+
+                worker.dataflow::<(), _, _>(|scope| {
+                    // Two edge collections: seed-filtered for base, full for recursive
+                    let seed_edge_collection: Collection<_, Tuple, R> = Collection::new(
+                        seed_edge_data
+                            .clone()
+                            .to_stream(scope)
+                            .map(|x| (x, (), R::one())),
+                    );
+
+                    let all_edge_collection: Collection<_, Tuple, R> = Collection::new(
+                        all_edge_data
+                            .clone()
+                            .to_stream(scope)
+                            .map(|x| (x, (), R::one())),
+                    );
+
+                    let tc_result = scope.iterative::<Iter, _, _>(|inner| {
+                        let variable: SemigroupVariable<_, Tuple, R> =
+                            SemigroupVariable::new(inner, Product::new((), 1));
+
+                        let seed_edges_in = seed_edge_collection.enter(inner);
+                        let all_edges_in = all_edge_collection.enter(inner);
+
+                        // Recursive: tc(x, z) <- tc(x, y), ALL_edges(y, z)
+                        let tc_keyed = variable.map(|tuple| {
+                            let x = tuple.get(0).cloned().unwrap_or(Value::Null);
+                            let y = tuple.get(1).cloned().unwrap_or(Value::Null);
+                            (Tuple::new(vec![y]), x)
+                        });
+
+                        let edges_keyed = all_edges_in.map(|tuple| {
+                            let y = tuple.get(0).cloned().unwrap_or(Value::Null);
+                            let z = tuple.get(1).cloned().unwrap_or(Value::Null);
+                            (Tuple::new(vec![y]), z)
+                        });
+
+                        let recursive = tc_keyed
+                            .join(&edges_keyed)
+                            .map(|(_y_key, (x, z))| Tuple::new(vec![x, z]));
+
+                        // Base = seed edges only (not all edges)
+                        let next = seed_edges_in.concat(&recursive).distinct_core::<R>();
+
+                        variable.set(&next);
+                        next.leave()
+                    });
+
+                    tc_result
+                        .inner
+                        .inspect(move |(data, _time, _diff)| {
+                            let mut guard = results_clone.lock();
+                            if result_limit == 0 || guard.len() < result_limit {
+                                guard.push(data.clone());
+                                if result_limit > 0 && guard.len() >= result_limit {
+                                    signal_query_cancel();
+                                }
+                            }
+                        })
+                        .probe_with(&mut probe);
+                });
+
+                while !probe.done() {
+                    if is_query_cancelled() {
+                        break;
+                    }
+                    worker.step();
+                    std::thread::yield_now();
+                }
+            });
+        }))
+        .map_err(|e| {
+            format!(
+                "Internal error in query execution: {}",
+                format_panic_payload(e)
+            )
+        })?;
+
+        if is_query_cancelled() {
+            let collected = results.lock().len();
+            if result_limit == 0 || collected < result_limit {
+                return Err("Query cancelled due to timeout".to_string());
+            }
+        }
+
         let final_results = Arc::try_unwrap(results)
             .map_err(|_| "Failed to extract results")?
             .into_inner();
@@ -884,7 +1213,7 @@ impl CodeGenerator {
         })?;
 
         if is_query_cancelled() {
-            // If we hit the result limit, the cancel was self-triggered — return results
+            // If we hit the result limit, the cancel was self-triggered - return results
             let collected = results.lock().len();
             if result_limit == 0 || collected < result_limit {
                 return Err("Query cancelled due to timeout".to_string());
@@ -3474,7 +3803,7 @@ impl CodeGenerator {
         })?;
 
         if is_query_cancelled() {
-            // If we hit the result limit, the cancel was self-triggered — return results
+            // If we hit the result limit, the cancel was self-triggered - return results
             let collected = results.lock().len();
             if result_limit == 0 || collected < result_limit {
                 return Err("Query cancelled due to timeout".to_string());
@@ -3614,7 +3943,7 @@ impl CodeGenerator {
         })?;
 
         if is_query_cancelled() {
-            // If we hit the result limit, the cancel was self-triggered — return results
+            // If we hit the result limit, the cancel was self-triggered - return results
             let collected = results.lock().len();
             if result_limit == 0 || collected < result_limit {
                 return Err("Query cancelled due to timeout".to_string());
@@ -8030,7 +8359,7 @@ mod tests {
     /// Ensures set_query_cancel_flag / is_query_cancelled communicate properly.
     #[test]
     fn test_query_cancel_flag_mechanism() {
-        // Initially no flag set — not cancelled
+        // Initially no flag set - not cancelled
         assert!(
             !is_query_cancelled(),
             "Should not be cancelled when no flag is set"

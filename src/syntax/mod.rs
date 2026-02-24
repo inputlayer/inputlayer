@@ -115,7 +115,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
             Rule::punctuation => TokenKind::Punctuation,
             Rule::whitespace => TokenKind::Whitespace,
             Rule::any_char => TokenKind::Unknown,
-            // line, token, and hidden rules are structural — skip
+            // line, token, and hidden rules are structural - skip
             _ => continue,
         };
 
@@ -158,11 +158,11 @@ const SCHEMA_TYPES: &[&str] = &[
 /// Promote flat tokens to semantic variants based on structural context.
 ///
 /// Applies three passes over the token stream:
-/// 1. **Head/body split** — identifiers after `<-` become `BodyIdentifier`
-/// 2. **Schema columns** — `name: type` patterns promote name to `SchemaColumn`
-/// 3. **Sort order** — `:desc`/`:asc` annotations become `SortOrder`
+/// 1. **Head/body split** - identifiers after `<-` become `BodyIdentifier`
+/// 2. **Schema columns** - `name: type` patterns promote name to `SchemaColumn`
+/// 3. **Sort order** - `:desc`/`:asc` annotations become `SortOrder`
 pub fn semanticize(tokens: &mut [Token], input: &str) {
-    // Pass 1: Head/body split — find RuleArrow and promote identifiers after it
+    // Pass 1: Head/body split - find RuleArrow and promote identifiers after it
     if let Some(arrow_idx) = tokens.iter().position(|t| t.kind == TokenKind::RuleArrow) {
         for token in &mut tokens[arrow_idx + 1..] {
             if token.kind == TokenKind::Identifier {
@@ -171,7 +171,7 @@ pub fn semanticize(tokens: &mut [Token], input: &str) {
         }
     }
 
-    // Pass 2: Schema columns — look for `Identifier + Punctuation(":") + type`
+    // Pass 2: Schema columns - look for `Identifier + Punctuation(":") + type`
     // Scan windows of 3 non-whitespace tokens
     let non_ws: Vec<usize> = tokens
         .iter()
@@ -213,7 +213,7 @@ pub fn semanticize(tokens: &mut [Token], input: &str) {
         }
     }
 
-    // Pass 3: Sort order — look for `Punctuation(":") + Identifier("desc"|"asc")`
+    // Pass 3: Sort order - look for `Punctuation(":") + Identifier("desc"|"asc")`
     for window in non_ws.windows(2) {
         let (i_colon, i_sort) = (window[0], window[1]);
         let colon_tok = &tokens[i_colon];
@@ -517,7 +517,7 @@ mod tests {
 
     #[test]
     fn test_semanticize_no_arrow() {
-        // Fact assertions have no body — all identifiers stay as Identifier
+        // Fact assertions have no body - all identifiers stay as Identifier
         let input = "+edge(1, 2)";
         let tokens = semantic_token_kinds(input);
         assert!(!tokens.iter().any(|t| t.0 == TokenKind::BodyIdentifier));
@@ -526,7 +526,7 @@ mod tests {
 
     #[test]
     fn test_semanticize_preserves_head() {
-        // Query marker — identifiers in head position stay as Identifier
+        // Query marker - identifiers in head position stay as Identifier
         let input = "?relation(X, Y)";
         let tokens = semantic_token_kinds(input);
         assert_eq!(tokens[1], (TokenKind::Identifier, "relation"));

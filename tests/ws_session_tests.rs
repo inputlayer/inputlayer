@@ -100,7 +100,7 @@ async fn test_multiple_sessions_independent_close() {
 #[tokio::test]
 async fn test_notify_without_subscriber_does_not_panic() {
     let (handler, _tmp) = create_test_handler();
-    // No subscriber — send goes to empty channel — must not panic
+    // No subscriber - send goes to empty channel - must not panic
     handler.notify_persistent_update("default", "edge", "insert", 5);
     // Reaching here means no panic
 }
@@ -110,7 +110,7 @@ async fn test_notify_after_subscriber_dropped_does_not_panic() {
     let (handler, _tmp) = create_test_handler();
     let rx = handler.subscribe_notifications();
     drop(rx);
-    // Receiver dropped — must not panic on send
+    // Receiver dropped - must not panic on send
     handler.notify_persistent_update("default", "edge", "insert", 5);
     // Reaching here means no panic
 }

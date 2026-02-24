@@ -1,4 +1,4 @@
-// Test: Three-way join — SIP can propagate bindings across multiple relations.
+// Test: Three-way join - SIP can propagate bindings across multiple relations.
 .kg create test_sip_three_way_n80t03
 .kg use test_sip_three_way_n80t03
 

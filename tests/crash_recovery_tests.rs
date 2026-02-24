@@ -208,7 +208,7 @@ fn test_recovery_with_mixed_valid_invalid_wal_entries() {
         durability_mode: DurabilityMode::Immediate,
         ..Default::default()
     })
-    .expect("Recovery should succeed — corrupted last line is tolerated");
+    .expect("Recovery should succeed - corrupted last line is tolerated");
 
     // The valid entry written before corruption should be recovered
     let shards = persist.list_shards().unwrap();
@@ -421,7 +421,7 @@ fn test_read_with_missing_batch_file() {
         }
     }
 
-    // Re-create persist — load_shards() detects missing batch files and removes stale refs
+    // Re-create persist - load_shards() detects missing batch files and removes stale refs
     let persist = create_test_persist_with_config(path.clone(), 100);
     let result = persist.read("db:edge", 0);
 

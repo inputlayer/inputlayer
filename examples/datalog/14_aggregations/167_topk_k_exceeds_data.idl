@@ -1,5 +1,5 @@
 // Test: K larger than dataset
-// Description: top_k with K=5 but only 2 rows — should return all rows, not crash
+// Description: top_k with K=5 but only 2 rows - should return all rows, not crash
 
 .kg create test_topk_exceed_n14t167
 .kg use test_topk_exceed_n14t167

@@ -9,25 +9,25 @@
 // Top 3 with threshold >= 100, descending
 +high(top_k_threshold<3, 100, Id, Points:desc>) <- score(Id, Points)
 
-// Initial: 1(300), 2(200), 3(150) — all >= 100 and within K=3
+// Initial: 1(300), 2(200), 3(150) - all >= 100 and within K=3
 ?high(X, Y)
 
-// Retract top scorer — 4(100) should now enter the top 3
+// Retract top scorer - 4(100) should now enter the top 3
 -score(1, 300)
 
-// Now: 2(200), 3(150), 4(100) — all still >= threshold
+// Now: 2(200), 3(150), 4(100) - all still >= threshold
 ?high(X, Y)
 
 // Add a new score below threshold
 +score[(6, 80)]
 
-// No change — 80 is below threshold 100
+// No change - 80 is below threshold 100
 ?high(X, Y)
 
 // Add a new score above threshold
 +score[(7, 250)]
 
-// Now K=3: 7(250), 2(200), 3(150) — 4(100) pushed out by K limit
+// Now K=3: 7(250), 2(200), 3(150) - 4(100) pushed out by K limit
 ?high(X, Y)
 
 .kg use default

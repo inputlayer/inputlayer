@@ -83,7 +83,7 @@ pub struct StorageEngine {
     persist: Arc<FilePersist>,
     /// Logical timestamp for DD updates (monotonically increasing)
     logical_time: AtomicU64,
-    /// KG names pending async cleanup — prevents same-name recreation and blocks persist writes
+    /// KG names pending async cleanup - prevents same-name recreation and blocks persist writes
     dropping_kgs: parking_lot::RwLock<HashSet<String>>,
 }
 
@@ -293,7 +293,7 @@ impl StorageEngine {
                 }
             }
         }
-        // Remove tombstone — name is now safe to reuse
+        // Remove tombstone - name is now safe to reuse
         self.dropping_kgs.write().remove(&cleanup.name);
         let elapsed_ms = start.elapsed().as_millis() as u64;
         info!(kg = %cleanup.name, elapsed_ms, "kg_drop_finish_complete");
@@ -887,7 +887,7 @@ impl StorageEngine {
         db.drop_relation(name)
             .map_err(|e| StorageError::Other(format!("Failed to drop relation: {e}")))?;
 
-        // Clean up persist shard (fire-and-forget — WAL + batch files)
+        // Clean up persist shard (fire-and-forget - WAL + batch files)
         let shard = format!("{kg}:{name}");
         let _ = self.persist.delete_shard(&shard);
 
@@ -2296,7 +2296,7 @@ impl KnowledgeGraph {
                 }
             }
             let count_before = existing.len();
-            // Remove tuples — O(n) scan with O(1) per-element lookup
+            // Remove tuples - O(n) scan with O(1) per-element lookup
             existing.retain(|tuple| !remove_set.contains(tuple));
             final_count = existing.len();
             deleted_count = count_before - final_count;
@@ -2543,7 +2543,7 @@ impl KnowledgeGraph {
     /// Clear all facts from relations whose name starts with the given prefix.
     ///
     /// Returns a list of (relation_name, deleted_count) for each affected relation.
-    /// Does NOT remove the relations themselves or their schemas — only clears data.
+    /// Does NOT remove the relations themselves or their schemas - only clears data.
     pub fn clear_relations_by_prefix(
         &mut self,
         prefix: &str,
@@ -5712,7 +5712,7 @@ mod tests {
         storage.insert_into("nocost_kg", "a", vec![(1, 2)]).unwrap();
         storage.insert_into("nocost_kg", "b", vec![(2, 3)]).unwrap();
 
-        // Join query — should succeed with unlimited cost
+        // Join query - should succeed with unlimited cost
         let result =
             storage.execute_query_tuples_on("nocost_kg", "result(X, Y, Z) <- a(X, Y), b(Y, Z)");
         assert!(

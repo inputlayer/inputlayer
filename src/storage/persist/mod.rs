@@ -146,7 +146,7 @@ impl FilePersist {
         let replayed = persist.replay_wal()?;
 
         // Crash-safe WAL drain: if we replayed any entries, flush them to batch
-        // files and clear the WAL immediately. This makes replay idempotent —
+        // files and clear the WAL immediately. This makes replay idempotent -
         // on a second crash, there are no stale WAL entries to double-apply.
         if replayed > 0 {
             let shard_names: Vec<String> = {
@@ -220,7 +220,7 @@ impl FilePersist {
                             shard = %meta.name,
                             batch_id = %batch_ref.id,
                             path = %batch_ref.path.display(),
-                            "Batch file missing — removing stale reference"
+                            "Batch file missing - removing stale reference"
                         );
                         removed_count += 1;
                     }
@@ -316,7 +316,7 @@ impl FilePersist {
     ///
     /// Writes to `{name}.json.tmp`, calls `sync_all()`, then renames to `{name}.json`.
     /// Rename is atomic on POSIX, so the metadata file is always either the old
-    /// or new version — never a corrupt half-written state.
+    /// or new version - never a corrupt half-written state.
     fn save_shard_meta(&self, meta: &ShardMeta) -> StorageResult<()> {
         let dir = self.config.path.join("shards");
         let final_path = dir.join(format!("{}.json", sanitize_name(&meta.name)));
@@ -446,7 +446,7 @@ impl PersistBackend for FilePersist {
         if should_flush {
             self.flush(shard)?;
         } else if self.config.max_wal_size_bytes > 0 {
-            // Check WAL size — force flush all dirty shards if WAL is too large
+            // Check WAL size - force flush all dirty shards if WAL is too large
             let wal_size = self.wal.lock().file_size();
             if wal_size > self.config.max_wal_size_bytes {
                 tracing::info!(
@@ -530,7 +530,7 @@ impl PersistBackend for FilePersist {
         state.meta.advance_since(new_since);
         self.save_shard_meta(&state.meta)?;
 
-        // Step 3: Delete old batch files LAST (safe — metadata no longer references them)
+        // Step 3: Delete old batch files LAST (safe - metadata no longer references them)
         // If we crash here, we have orphaned files but no data loss.
         for batch_ref in &old_batches {
             let _ = fs::remove_file(&batch_ref.path);
@@ -605,12 +605,12 @@ impl PersistBackend for FilePersist {
         state.buffer.clear();
 
         if let Err(e) = self.save_shard_meta(&state.meta) {
-            // Metadata save failed — clean up the orphaned batch file
+            // Metadata save failed - clean up the orphaned batch file
             let _ = fs::remove_file(&path);
             return Err(e);
         }
 
-        // Step 3: Remove WAL entries LAST (safe — metadata already points to batch)
+        // Step 3: Remove WAL entries LAST (safe - metadata already points to batch)
         {
             let mut wal = self.wal.lock();
             wal.remove_shard_entries(shard)?;
@@ -624,7 +624,7 @@ impl PersistBackend for FilePersist {
         let removed_state = {
             let mut shards = self.shards.write();
             shards.remove(shard)
-        }; // write lock released — other shards unblocked
+        }; // write lock released - other shards unblocked
 
         // Step 2: Delete batch files FIRST (crash-safe ordering)
         // If we crash here, metadata still references them but they're gone.
@@ -642,7 +642,7 @@ impl PersistBackend for FilePersist {
             }
         }
 
-        // Step 3: Selective WAL filter — remove only this shard's entries
+        // Step 3: Selective WAL filter - remove only this shard's entries
         // Other shards' WAL data is PRESERVED (no need to flush them)
         {
             let mut wal = self.wal.lock();
@@ -695,7 +695,7 @@ fn infer_schema_from_updates(updates: &[Update]) -> TupleSchema {
 /// - diff column (Int64)
 fn write_updates_parquet(path: &PathBuf, updates: &[Update]) -> StorageResult<()> {
     if updates.is_empty() {
-        // No data to write — skip creating the file entirely.
+        // No data to write - skip creating the file entirely.
         // The caller handles absence of batch files gracefully.
         return Ok(());
     }
@@ -740,7 +740,7 @@ fn write_updates_parquet(path: &PathBuf, updates: &[Update]) -> StorageResult<()
     let file = match fs::File::create(&tmp_path) {
         Ok(f) => f,
         Err(e) => {
-            // ENOSPC or permission error — no temp file to clean up
+            // ENOSPC or permission error - no temp file to clean up
             return Err(StorageError::Other(format!(
                 "Failed to create batch file '{}': {e}",
                 tmp_path.display()

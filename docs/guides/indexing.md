@@ -192,29 +192,29 @@ hnsw_nearest("index_name", QueryVec, K, IdVar, DistVar, EfSearch)
 | Parameter | Description |
 |-----------|-------------|
 | `index_name` | Name of the HNSW index (string literal) |
-| `QueryVec` | Query vector — a variable bound to a vector value, or a vector literal |
+| `QueryVec` | Query vector - a variable bound to a vector value, or a vector literal |
 | `K` | Number of nearest neighbors to return (integer, >= 1) |
 | `IdVar` | Output variable bound to the ID of each neighbor |
 | `DistVar` | Output variable bound to the distance to each neighbor |
 | `EfSearch` | Optional search beam width override (higher = better recall, slower) |
 
-**Example — basic nearest neighbor search:**
+**Example - basic nearest neighbor search:**
 ```datalog
 ?hnsw_nearest("doc_emb_idx", [0.1, 0.2, 0.3, 0.4], 10, Id, Distance)
 ```
 
-**Example — using a query vector from a relation:**
+**Example - using a query vector from a relation:**
 ```datalog
 ?query_embedding(QV), hnsw_nearest("doc_emb_idx", QV, 5, Id, Dist)
 ```
 
-**Example — joining results with the base relation:**
+**Example - joining results with the base relation:**
 ```datalog
 ?hnsw_nearest("doc_emb_idx", [0.1, 0.2, 0.3, 0.4], 10, Id, Dist),
   documents(Id, Title, _)
 ```
 
-**Example — with custom ef_search for higher recall:**
+**Example - with custom ef_search for higher recall:**
 ```datalog
 ?hnsw_nearest("doc_emb_idx", [0.1, 0.2, 0.3, 0.4], 10, Id, Dist, 200)
 ```

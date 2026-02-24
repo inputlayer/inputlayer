@@ -27,7 +27,7 @@ pub enum AggregateFunc {
     Max,
     Avg,
     /// Top-K aggregate: select top k tuples ordered by order_var
-    /// Syntax: `top_k<2, Name, Score:desc>` — vars inside aggregate, `:desc`/`:asc` marks order var
+    /// Syntax: `top_k<2, Name, Score:desc>` - vars inside aggregate, `:desc`/`:asc` marks order var
     TopK {
         k: usize,
         order_var: String,
@@ -685,7 +685,7 @@ impl AggregateFunc {
         )
     }
 
-    /// Check if this is a simple (scalar) aggregate — many rows → 1 value per group
+    /// Check if this is a simple (scalar) aggregate - many rows → 1 value per group
     pub fn is_simple(&self) -> bool {
         matches!(
             self,
@@ -1115,7 +1115,7 @@ impl Rule {
                 vars.insert(distance_var.clone());
                 if let Term::Variable(v) = query {
                     // Query variable is consumed (must be bound elsewhere), not produced
-                    // Don't add it here — it must be bound by a positive atom
+                    // Don't add it here - it must be bound by a positive atom
                     let _ = v;
                 }
             }

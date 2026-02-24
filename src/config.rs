@@ -271,6 +271,10 @@ pub struct OptimizationConfig {
 
     #[serde(default = "default_true")]
     pub enable_boolean_specialization: bool,
+
+    /// Magic Sets demand-driven rewriting for recursive queries
+    #[serde(default = "default_true")]
+    pub enable_magic_sets: bool,
 }
 
 /// Logging configuration
@@ -323,7 +327,7 @@ pub struct HttpConfig {
     pub ws_idle_timeout_ms: u64,
 
     /// Graceful shutdown timeout in seconds. If the storage lock cannot be acquired
-    /// within this time during shutdown, WAL flush is skipped (safe — replayed on restart).
+    /// within this time during shutdown, WAL flush is skipped (safe - replayed on restart).
     #[serde(default = "default_shutdown_timeout_secs")]
     pub shutdown_timeout_secs: u64,
 
@@ -543,7 +547,7 @@ impl Config {
         if self.storage.performance.query_timeout_ms > 600_000 {
             tracing::warn!(
                 value_ms = self.storage.performance.query_timeout_ms,
-                "query_timeout_ms exceeds 10 minutes — queries may appear hung"
+                "query_timeout_ms exceeds 10 minutes - queries may appear hung"
             );
         }
 
@@ -614,6 +618,7 @@ impl Config {
                 enable_sip_rewriting: true,
                 enable_subplan_sharing: true,
                 enable_boolean_specialization: true,
+                enable_magic_sets: true,
             },
             logging: LoggingConfig {
                 level: "info".to_string(),

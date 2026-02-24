@@ -133,28 +133,28 @@ operations:
       Send any valid Datalog statement or meta command as raw text.
 
       **Supported statement types:**
-      - `+relation[(v1, v2), ...]` — Insert persistent facts
-      - `relation(v1, v2)` — Insert session-scoped (ephemeral) fact
-      - `-relation(X, Y) <- condition` — Delete facts matching condition
-      - `?relation(X, Y)` — Query a relation
-      - `+rule(X, Y) <- body(X, Y)` — Add persistent rule
-      - `rule(X, Y) <- body(X, Y)` — Add session-scoped rule
+      - `+relation[(v1, v2), ...]` - Insert persistent facts
+      - `relation(v1, v2)` - Insert session-scoped (ephemeral) fact
+      - `-relation(X, Y) <- condition` - Delete facts matching condition
+      - `?relation(X, Y)` - Query a relation
+      - `+rule(X, Y) <- body(X, Y)` - Add persistent rule
+      - `rule(X, Y) <- body(X, Y)` - Add session-scoped rule
 
       **Meta commands:**
-      - `.kg list` / `.kg create <name>` / `.kg use <name>` / `.kg drop <name>` — KG management
-      - `.kg acl list` / `.kg acl grant <kg> <user> <role>` / `.kg acl revoke <kg> <user>` — Access control
-      - `.user list` / `.user create` / `.user drop` / `.user password` / `.user role` — User management
-      - `.rel` / `.rel <name>` / `.rel drop <name>` — List / describe / drop relations
-      - `.rule list` / `.rule show <name>` / `.rule drop <name>` — Rule management
-      - `.rule drop prefix <prefix>` — Drop rules by prefix
-      - `.rule remove <name> <index>` — Remove specific rule clause
-      - `.session list` / `.session clear` — Session management
-      - `.index list` / `.index create ...` / `.index drop <name>` — Index management
-      - `.clear prefix <prefix>` — Clear relations by prefix
-      - `.explain <query>` — Show query plan without executing
-      - `.help` — Show available commands
-      - `.status` — Server status
-      - `.compact` — Trigger compaction
+      - `.kg list` / `.kg create <name>` / `.kg use <name>` / `.kg drop <name>` - KG management
+      - `.kg acl list` / `.kg acl grant <kg> <user> <role>` / `.kg acl revoke <kg> <user>` - Access control
+      - `.user list` / `.user create` / `.user drop` / `.user password` / `.user role` - User management
+      - `.rel` / `.rel <name>` / `.rel drop <name>` - List / describe / drop relations
+      - `.rule list` / `.rule show <name>` / `.rule drop <name>` - Rule management
+      - `.rule drop prefix <prefix>` - Drop rules by prefix
+      - `.rule remove <name> <index>` - Remove specific rule clause
+      - `.session list` / `.session clear` - Session management
+      - `.index list` / `.index create ...` / `.index drop <name>` - Index management
+      - `.clear prefix <prefix>` - Clear relations by prefix
+      - `.explain <query>` - Show query plan without executing
+      - `.help` - Show available commands
+      - `.status` - Server status
+      - `.compact` - Trigger compaction
     messages:
       - $ref: '#/channels/ws/messages/execute'
 

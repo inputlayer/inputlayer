@@ -16,7 +16,7 @@
 // Remove base clause (clause 1), keep recursive
 .rule remove reach 1
 
-// Recursive without base case — no results
+// Recursive without base case - no results
 ?reach(X, Y)
 
 // Add new base clause sourcing from different relation

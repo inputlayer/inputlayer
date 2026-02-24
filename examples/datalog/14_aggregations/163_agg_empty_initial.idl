@@ -7,7 +7,7 @@
 // Define rule before any facts
 +total(sum<X>) <- numbers(X)
 
-// No facts yet — should return no results
+// No facts yet - should return no results
 ?total(X)
 
 // Now add facts

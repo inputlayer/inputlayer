@@ -310,7 +310,7 @@ fn parse_aggregate(input: &str) -> Option<Term> {
                 }
 
                 // Standard aggregates with single variable parameter
-                // Reject multi-variable aggregates like sum<X, Y> — only one variable allowed
+                // Reject multi-variable aggregates like sum<X, Y> - only one variable allowed
                 if params.contains(',') {
                     return None;
                 }

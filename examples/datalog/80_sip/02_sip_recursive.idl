@@ -1,4 +1,4 @@
-// Test: Recursive transitive closure — SIP prunes search space with bound start node.
+// Test: Recursive transitive closure - SIP prunes search space with bound start node.
 .kg create test_sip_recursive_n80t02
 .kg use test_sip_recursive_n80t02
 

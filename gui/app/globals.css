@@ -117,7 +117,7 @@
   --warning: oklch(0.78 0.14 75);
   --warning-foreground: oklch(0.2 0.02 75);
 
-  /* Syntax highlighting (dark) — matches ANSI colors from src/syntax/mod.rs */
+  /* Syntax highlighting (dark) - matches ANSI colors from src/syntax/mod.rs */
   --syn-comment: oklch(0.55 0.02 260);
   --syn-string: oklch(0.72 0.16 145);
   --syn-meta: oklch(0.75 0.18 310);

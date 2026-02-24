@@ -105,56 +105,56 @@ enum WsResponse {
 ///
 /// ### Client → Server Messages
 ///
-/// **Query** — Execute a Datalog query in the session context:
+/// **Query** - Execute a Datalog query in the session context:
 /// ```json
 /// {"type": "query", "query": "?edge(X, Y)"}
 /// ```
 ///
-/// **Insert Ephemeral Facts** — Add session-scoped facts:
+/// **Insert Ephemeral Facts** - Add session-scoped facts:
 /// ```json
 /// {"type": "insert_facts", "relation": "edge", "tuples": [[1, 2], [3, 4]]}
 /// ```
 ///
-/// **Retract Ephemeral Facts** — Remove session-scoped facts:
+/// **Retract Ephemeral Facts** - Remove session-scoped facts:
 /// ```json
 /// {"type": "retract_facts", "relation": "edge", "tuples": [[1, 2]]}
 /// ```
 ///
-/// **Add Ephemeral Rule** — Add a session-scoped rule (exactly one rule per message):
+/// **Add Ephemeral Rule** - Add a session-scoped rule (exactly one rule per message):
 /// ```json
 /// {"type": "add_rule", "rule": "path(X, Y) <- edge(X, Y)"}
 /// ```
 ///
-/// **Ping** — Keep-alive:
+/// **Ping** - Keep-alive:
 /// ```json
 /// {"type": "ping"}
 /// ```
 ///
 /// ### Server → Client Messages
 ///
-/// **Result** — Query results with per-row provenance tracking:
+/// **Result** - Query results with per-row provenance tracking:
 /// ```json
 /// {"type": "result", "columns": ["x", "y"], "rows": [[1, 2]], "row_count": 1,
 ///  "execution_time_ms": 5, "row_provenance": ["persistent"],
 ///  "metadata": {"has_ephemeral": false, "ephemeral_sources": [], "warnings": []}}
 /// ```
 ///
-/// **Ack** — Acknowledgement for insert/retract/add_rule operations:
+/// **Ack** - Acknowledgement for insert/retract/add_rule operations:
 /// ```json
 /// {"type": "ack", "message": "Inserted 2 fact(s) into 'edge'"}
 /// ```
 ///
-/// **Error** — Error response:
+/// **Error** - Error response:
 /// ```json
 /// {"type": "error", "message": "Invalid query syntax"}
 /// ```
 ///
-/// **Pong** — Response to ping:
+/// **Pong** - Response to ping:
 /// ```json
 /// {"type": "pong"}
 /// ```
 ///
-/// **Notification** — Push notification when persistent data changes in the session's KG:
+/// **Notification** - Push notification when persistent data changes in the session's KG:
 /// ```json
 /// {"type": "notification", "event": "persistent_update", "knowledge_graph": "default",
 ///  "relation": "edge", "operation": "insert", "count": 5}
@@ -239,7 +239,7 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
     };
     let mut last_activity = std::time::Instant::now();
 
-    // Cumulative notification lag — disconnect if subscriber falls too far behind
+    // Cumulative notification lag - disconnect if subscriber falls too far behind
     let max_lag = handler.config().http.rate_limit.notification_buffer_size as u64;
     let mut total_lagged: u64 = 0;
 
@@ -380,7 +380,7 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
                         {
                             Ok(kg) => kg,
                             Err(_) => {
-                                // Session was closed — notify client before disconnecting
+                                // Session was closed - notify client before disconnecting
                                 let err_msg = WsResponse::Error {
                                     message: "Session closed".to_string(),
                                 };
@@ -399,7 +399,7 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
                             PersistentNotification::SchemaChange { knowledge_graph, .. } => knowledge_graph,
                         };
                         // Only forward notifications for this session's knowledge graph
-                        // (KgChange notifications are always forwarded — they affect the KG list)
+                        // (KgChange notifications are always forwarded - they affect the KG list)
                         let is_kg_change = matches!(notif, PersistentNotification::KgChange { .. });
                         if *notif_kg == session_kg || is_kg_change {
                             if let Ok(json) = serde_json::to_string(&notif) {
@@ -431,7 +431,7 @@ async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        // Notification channel closed — server shutting down
+                        // Notification channel closed - server shutting down
                         let shutdown_msg = WsResponse::Error {
                             message: "Server shutting down".to_string(),
                         };
@@ -724,7 +724,7 @@ enum GlobalWsResponse {
 ///
 /// ## Client → Server Messages
 ///
-/// **Execute** — Send any Datalog statement or meta command as raw text:
+/// **Execute** - Send any Datalog statement or meta command as raw text:
 /// ```json
 /// {"type": "execute", "program": "+edge(1,2)."}
 /// {"type": "execute", "program": "?edge(X,Y)"}
@@ -732,35 +732,35 @@ enum GlobalWsResponse {
 /// {"type": "execute", "program": ".rule list"}
 /// ```
 ///
-/// **Ping** — Keep-alive:
+/// **Ping** - Keep-alive:
 /// ```json
 /// {"type": "ping"}
 /// ```
 ///
 /// ## Server → Client Messages
 ///
-/// **Connected** — Sent on connection:
+/// **Connected** - Sent on connection:
 /// ```json
 /// {"type": "connected", "session_id": 42, "knowledge_graph": "default"}
 /// ```
 ///
-/// **Result** — Command/query results:
+/// **Result** - Command/query results:
 /// ```json
 /// {"type": "result", "columns": ["col0", "col1"], "rows": [[1, 2]], "row_count": 1,
 ///  "total_count": 1, "truncated": false, "execution_time_ms": 5}
 /// ```
 ///
-/// **Error** — Error:
+/// **Error** - Error:
 /// ```json
 /// {"type": "error", "message": "..."}
 /// ```
 ///
-/// **Pong** — Response to ping:
+/// **Pong** - Response to ping:
 /// ```json
 /// {"type": "pong"}
 /// ```
 ///
-/// **Notification** — Push notification for persistent data changes:
+/// **Notification** - Push notification for persistent data changes:
 /// ```json
 /// {"type": "notification", "event": "persistent_update", ...}
 /// ```
@@ -990,7 +990,7 @@ async fn handle_global_ws_connection(
         }
     }
 
-    // Cumulative notification lag — disconnect if subscriber falls too far behind
+    // Cumulative notification lag - disconnect if subscriber falls too far behind
     let max_lag = handler.config().http.rate_limit.notification_buffer_size as u64;
     let mut total_lagged: u64 = 0;
 
@@ -1179,7 +1179,7 @@ async fn handle_global_ws_connection(
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        // Notification channel closed — server shutting down
+                        // Notification channel closed - server shutting down
                         let shutdown_msg = GlobalWsResponse::Error {
                             message: "Server shutting down".to_string(),
                             validation_errors: None,
@@ -1300,9 +1300,9 @@ async fn process_and_send_global_ws_message(
 ///
 /// For small results (< STREAMING_THRESHOLD bytes when serialized), sends a
 /// single `result` message. For large results, streams the data as:
-/// 1. `result_start` — schema, metadata, totals
-/// 2. `result_chunk` (×N) — batches of up to STREAMING_CHUNK_ROWS rows
-/// 3. `result_end` — row_count + chunk_count summary
+/// 1. `result_start` - schema, metadata, totals
+/// 2. `result_chunk` (×N) - batches of up to STREAMING_CHUNK_ROWS rows
+/// 3. `result_end` - row_count + chunk_count summary
 ///
 /// Returns `true` if connection still alive, `false` to close.
 async fn send_global_execute(

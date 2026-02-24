@@ -141,7 +141,7 @@ impl PersistedCredentials {
 // ── Per-KG Authorization (ACLs) ─────────────────────────────────────────────
 
 /// Per-KG role controlling access to a specific knowledge graph.
-/// Separate from the global `Role` — both must pass for an operation.
+/// Separate from the global `Role` - both must pass for an operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum KgRole {
@@ -327,7 +327,7 @@ fn authorize_editor_meta(cmd: &MetaCommand) -> Result<(), String> {
             Ok(())
         }
 
-        // KG ACL commands — editors can list ACLs but not modify
+        // KG ACL commands - editors can list ACLs but not modify
         MetaCommand::KgAclList(_) => Ok(()),
         MetaCommand::KgAclGrant { .. } | MetaCommand::KgAclRevoke { .. } => {
             Err("Permission denied: only KG owners or admins can manage ACLs".to_string())
@@ -437,7 +437,7 @@ fn authorize_viewer_meta(cmd: &MetaCommand) -> Result<(), String> {
             Err("Permission denied: only admins can manage API keys".to_string())
         }
 
-        // KG ACL — viewers can list but not modify
+        // KG ACL - viewers can list but not modify
         MetaCommand::KgAclList(_) => Ok(()),
         MetaCommand::KgAclGrant { .. } | MetaCommand::KgAclRevoke { .. } => {
             Err("Permission denied: only KG owners or admins can manage ACLs".to_string())

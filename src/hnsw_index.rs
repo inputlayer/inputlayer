@@ -459,7 +459,7 @@ unsafe impl Sync for HnswIndex {}
 // ── Index Persistence ──────────────────────────────────────────────────────
 
 /// Serializable representation of an HNSW index for persistence.
-/// The HNSW graph topology is NOT saved — it's rebuilt from vectors on load.
+/// The HNSW graph topology is NOT saved - it's rebuilt from vectors on load.
 #[derive(Serialize, Deserialize)]
 struct PersistedHnswIndex {
     /// Index configuration
@@ -752,7 +752,7 @@ mod tests {
                 metric,
                 results.len()
             );
-            // id=0 is an exact match for the query — must be in top-5
+            // id=0 is an exact match for the query - must be in top-5
             assert!(
                 results.iter().any(|(id, _)| *id == 0),
                 "id=0 should be in top-5 for {:?}, got {:?}",
@@ -998,7 +998,7 @@ mod tests {
 
         assert_eq!(index.metric(), DistanceMetric::Manhattan);
 
-        // Search near origin — L1 distance from (0.1, 0.1):
+        // Search near origin - L1 distance from (0.1, 0.1):
         // to (0,0) = 0.2, to (1,0) = 1.0, to (0,1) = 1.0, to (1,1) = 1.8
         let results = index.search(&[0.1, 0.1], 4, Some(100));
         assert_eq!(results.len(), 4);

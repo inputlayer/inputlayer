@@ -620,7 +620,7 @@ mod tests {
             })]
             #[test]
             fn parse_statement_never_panics(input in "\\PC{0,200}") {
-                // We don't care about the result — just that it doesn't panic
+                // We don't care about the result - just that it doesn't panic
                 let _ = parse_statement(&input);
             }
 
@@ -650,7 +650,7 @@ mod tests {
                 let result = parse_statement(&input);
                 match result {
                     Ok(Statement::Query(_)) => {} // Expected
-                    Ok(_) => {} // Some other valid parse — fine
+                    Ok(_) => {} // Some other valid parse - fine
                     Err(e) => {
                         prop_assert!(!e.is_empty());
                     }

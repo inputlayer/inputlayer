@@ -1,4 +1,4 @@
-# InputLayer IDL — VS Code Extension
+# InputLayer IDL - VS Code Extension
 
 Syntax highlighting for InputLayer Datalog (`.idl` / `.dl`) files.
 
@@ -20,9 +20,9 @@ Rules distinguish **head** (definition) from **body** (references):
 +triangle(A, B, C) <- edge(A, B), edge(B, C), edge(C, A)
 │         │            │    │
 │         │            │    └─ Variable (light blue)
-│         │            └────── Body relation (teal/green — distinct from head)
+│         │            └────── Body relation (teal/green - distinct from head)
 │         └─────────────────── Variable (light blue)
-└───────────────────────────── Head relation (yellow — definition)
+└───────────────────────────── Head relation (yellow - definition)
 ```
 
 Schema declarations distinguish column names from relation names:
@@ -30,9 +30,9 @@ Schema declarations distinguish column names from relation names:
 ```
 +employee(emp_id: int, name: string, embedding: vector)
 │         │       │
-│         │       └─ Type (blue — keyword color)
-│         └───────── Column name (member color — distinct from relation)
-└─────────────────── Relation name (yellow — head)
+│         │       └─ Type (blue - keyword color)
+│         └───────── Column name (member color - distinct from relation)
+└─────────────────── Relation name (yellow - head)
 ```
 
 ### Arrow ligature

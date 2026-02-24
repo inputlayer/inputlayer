@@ -38,7 +38,7 @@ use std::sync::OnceLock;
 
 static TRACE_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
 
-/// InputLayer — streaming deductive knowledge graph database
+/// InputLayer - streaming deductive knowledge graph database
 #[derive(Parser, Debug)]
 #[command(name = "inputlayer-server", version, about)]
 struct Cli {
@@ -106,7 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         } else {
             "Box<dyn Any>".to_string()
         };
-        tracing::error!(location, payload, "PANIC — thread panicked");
+        tracing::error!(location, payload, "PANIC - thread panicked");
         eprintln!("PANIC at {location}: {payload}");
     }));
 

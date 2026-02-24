@@ -526,6 +526,7 @@ fn test_sip_chain_join_correctness() {
         enable_sip_rewriting: true,
         enable_subplan_sharing: true,
         enable_boolean_specialization: true,
+        enable_magic_sets: true,
     };
 
     let mut engine = DatalogEngine::with_config(config);
@@ -555,6 +556,7 @@ fn test_sip_two_way_join_correctness() {
         enable_sip_rewriting: true,
         enable_subplan_sharing: true,
         enable_boolean_specialization: true,
+        enable_magic_sets: true,
     };
 
     let mut engine = DatalogEngine::with_config(config);
@@ -582,6 +584,7 @@ fn test_sip_with_dangling_tuples() {
         enable_sip_rewriting: true,
         enable_subplan_sharing: true,
         enable_boolean_specialization: true,
+        enable_magic_sets: true,
     };
 
     let mut engine = DatalogEngine::with_config(config);

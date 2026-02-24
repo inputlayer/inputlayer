@@ -1,5 +1,5 @@
 // Test: Duplicate aggregation rule submission (idempotency)
-// Description: Submit exact same aggregation rule twice — should be silently ignored
+// Description: Submit exact same aggregation rule twice - should be silently ignored
 
 .kg create test_dup_agg_rule_n14t152
 .kg use test_dup_agg_rule_n14t152

@@ -136,6 +136,11 @@ name = "aggregation_benchmarks"
 path = "benches/aggregation_benchmarks.rs"
 harness = false
 
+[[bench]]
+name = "production_benchmarks"
+path = "benches/production_benchmarks.rs"
+harness = false
+
 [features]
 default = []
 # Enable vector similarity search operations

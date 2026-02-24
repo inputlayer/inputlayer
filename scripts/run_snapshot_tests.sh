@@ -231,7 +231,7 @@ cleanup() {
 trap cleanup EXIT
 
 # Parallel worker: processes one test file, writes result to temp dir
-# Runs synchronously — no background processes. Timeout via perl alarm.
+# Runs synchronously - no background processes. Timeout via perl alarm.
 run_test_parallel() {
     local test_file="$1"
     local expected_file="${test_file}.out"
@@ -250,7 +250,7 @@ run_test_parallel() {
     fi
 
     # Run the test with perl alarm timeout (synchronous, no extra processes)
-    # Retry once on empty output (transient connection failure — no state was modified)
+    # Retry once on empty output (transient connection failure - no state was modified)
     local attempt
     for attempt in 1 2; do
         perl -e 'alarm shift; exec @ARGV' "$TEST_TIMEOUT" \
@@ -570,7 +570,7 @@ else
     if ! check_server; then
         echo -e "${YELLOW}Server died during parallel tests, attempting restart...${NC}"
         if ! restart_server_keep_data; then
-            echo -e "${RED}Could not restart server — skipping leak check and sequential tests${NC}"
+            echo -e "${RED}Could not restart server - skipping leak check and sequential tests${NC}"
             SERVER_ALIVE=false
         fi
     fi
@@ -604,7 +604,7 @@ else
                 done
             fi
         else
-            # Server is dead and couldn't restart — count sequential tests as failures
+            # Server is dead and couldn't restart - count sequential tests as failures
             echo ""
             echo -e "${RED}Skipping $SEQUENTIAL_COUNT sequential tests (server unavailable)${NC}"
             FAILED=$((FAILED + SEQUENTIAL_COUNT))

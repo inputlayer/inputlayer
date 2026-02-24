@@ -246,7 +246,7 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
         .nest("/v1", api_routes);
 
     // Apply authentication middleware.
-    // Auth is always required — API keys are validated against the _internal KG.
+    // Auth is always required - API keys are validated against the _internal KG.
     // Health/live/ready endpoints and WebSocket paths bypass auth.
     // NOTE: Layer ordering matters! In Axum, .layer(A).layer(B) means B runs first.
     // Auth middleware needs Extension<Handler>, so Extension must be the OUTER layer.
@@ -595,7 +595,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 
-    /// Auth: Multiple valid keys — any one should work.
+    /// Auth: Multiple valid keys - any one should work.
     #[tokio::test]
     async fn test_auth_multiple_keys_any_valid() {
         let (handler, _key1, _tmp) = make_handler_with_api_key();

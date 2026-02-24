@@ -297,7 +297,7 @@ async fn test_vector_schema_declared_dimension_enforced_over() {
         schema_result.is_ok(),
         "Schema declaration with vector(3) should succeed, got: {schema_result:?}"
     );
-    // Insert a 4-element vector — should fail dimension check
+    // Insert a 4-element vector - should fail dimension check
     let result = handler
         .query_program(None, "+embed[(1, [1.0, 2.0, 3.0, 4.0])]".to_string())
         .await;
@@ -326,7 +326,7 @@ async fn test_vector_schema_declared_dimension_enforced_under() {
         .query_program(None, "+embed(id: int, v: vector(3))".to_string())
         .await
         .unwrap();
-    // Insert a 2-element vector — should fail
+    // Insert a 2-element vector - should fail
     let result = handler
         .query_program(None, "+embed[(1, [1.0, 2.0])]".to_string())
         .await;
@@ -355,7 +355,7 @@ async fn test_vector_schema_exact_dimension_accepted() {
         .query_program(None, "+embed(id: int, v: vector(3))".to_string())
         .await
         .unwrap();
-    // Exactly 3 elements — should succeed
+    // Exactly 3 elements - should succeed
     let result = handler
         .query_program(None, "+embed[(1, [1.0, 2.0, 3.0])]".to_string())
         .await;

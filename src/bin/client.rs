@@ -345,7 +345,7 @@ impl WsClient {
                             | WsResponse::KgChange { .. }
                             | WsResponse::SchemaChange { .. }
                     ) {
-                        // Skip notifications — they'll be displayed by the REPL idle loop
+                        // Skip notifications - they'll be displayed by the REPL idle loop
                         continue;
                     }
                     // Handle streaming: accumulate chunks into a single Result
@@ -428,7 +428,7 @@ impl WsClient {
                 }
                 Err(_) => {
                     return Err(format!(
-                        "Streaming timeout ({}s) — received {} rows so far",
+                        "Streaming timeout ({}s) - received {} rows so far",
                         self.timeout_secs,
                         all_rows.len()
                     ))
@@ -785,7 +785,7 @@ fn http_to_ws_url(http_url: &str) -> String {
 /// Check if an error message indicates a fatal connection loss
 /// (as opposed to a recoverable server-side error like "Unknown relation").
 /// Check if an error indicates a true connection loss (not just a slow response).
-/// Response timeouts are NOT connection errors — the connection may still be alive,
+/// Response timeouts are NOT connection errors - the connection may still be alive,
 /// just slow under load. Only closed/failed/reset connections abort the script.
 fn is_connection_error(msg: &str) -> bool {
     msg.contains("WebSocket connection closed")
@@ -1016,7 +1016,7 @@ async fn handle_statement(
     stmt: Statement,
 ) -> Result<(), String> {
     match stmt {
-        // Client-only commands — never sent to server
+        // Client-only commands - never sent to server
         Statement::Meta(MetaCommand::Help) => {
             print_help();
             Ok(())
@@ -1037,7 +1037,7 @@ async fn handle_statement(
             let head_relation = rule.head.relation.clone();
             let head_arity = rule.head.effective_arity();
 
-            // Send the rule to the server (silently — don't display "Session rule added")
+            // Send the rule to the server (silently - don't display "Session rule added")
             state.ws.send_execute(raw_text).await?;
             let resp = state.ws.recv_response().await?;
             if let WsResponse::Error { message } = resp {
@@ -1109,12 +1109,12 @@ async fn handle_statement(
             handle_rel_describe(state, raw_text, name).await
         }
 
-        // Everything else — send raw text to server via WebSocket
+        // Everything else - send raw text to server via WebSocket
         _ => ws_execute_and_display(state, raw_text).await,
     }
 }
 
-/// Handle `.rel <name>` — prints header, table, and custom footer.
+/// Handle `.rel <name>` - prints header, table, and custom footer.
 async fn handle_rel_describe(
     state: &mut ReplState,
     raw_text: &str,
@@ -1351,7 +1351,7 @@ fn display_table_result(
     }
 }
 
-/// Display a relation data table (for `.rel <name>`) — no footer, caller handles it.
+/// Display a relation data table (for `.rel <name>`) - no footer, caller handles it.
 fn display_relation_table(
     columns: &[String],
     rows: &[Vec<serde_json::Value>],
