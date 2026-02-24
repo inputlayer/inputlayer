@@ -14,6 +14,7 @@ Progressive tutorials from installation to advanced features:
 - [Core Concepts](guides/core-concepts.md) - Facts, rules, and data modeling
 - [REPL Guide](guides/repl.md) - Interactive usage
 - [Recursion](guides/recursion.md) - Recursive queries and transitive closure
+- [Python SDK](guides/python-sdk.md) - Python OLM client (no Datalog required)
 - [Troubleshooting](guides/troubleshooting.md) - Common errors and solutions
 
 ### [Reference](reference/)
@@ -51,6 +52,7 @@ Architecture and implementation details:
 | Task | Go to |
 |------|-------|
 | Install InputLayer | [Installation Guide](guides/installation.md) |
+| Use the Python SDK | [Python SDK Guide](guides/python-sdk.md) |
 | Learn the basics | [First Program](guides/first-program.md) |
 | Look up a function | [Function Reference](reference/functions.md) |
 | Find a command | [Commands Reference](reference/commands.md) |

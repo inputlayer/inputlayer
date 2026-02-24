@@ -123,13 +123,24 @@ The data directory contains:
 └── metadata/          # System metadata
 ```
 
+## Python SDK
+
+To interact with InputLayer from Python (no Datalog required):
+
+```bash
+pip install inputlayer
+```
+
+See the [Python SDK Guide](python-sdk.md) for full documentation.
+
 ## Next Steps
 
 Now that you have InputLayer installed:
 
 1. **[Your First Program](first-program.md)** - Write your first Datalog program
-2. **[Core Concepts](core-concepts.md)** - Understand facts, rules, and queries
-3. **[REPL Guide](repl.md)** - Master the interactive environment
+2. **[Python SDK](python-sdk.md)** - Use Python instead of raw Datalog
+3. **[Core Concepts](core-concepts.md)** - Understand facts, rules, and queries
+4. **[REPL Guide](repl.md)** - Master the interactive environment
 
 ## Troubleshooting
 

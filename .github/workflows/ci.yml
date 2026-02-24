@@ -74,6 +74,14 @@ jobs:
       - name: Clean stale debug artifacts
         run: rm -rf target/debug 2>/dev/null || true
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python SDK dependencies
+        run: pip install -e "packages/inputlayer-py[dev]"
+
       - name: Run all tests (CI mode)
         run: make ci-test-all
 

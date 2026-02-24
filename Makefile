@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run deny
+.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run deny python-test
 
 SHELL := /bin/bash
 
@@ -76,6 +76,25 @@ test-all: check
 	rm -f "$$SNAP_TMPFILE"; \
 	if [ $$SNAP_EXIT -ne 0 ]; then FAILURES=$$((FAILURES + 1)); fi; \
 	echo ""; \
+	echo "=== Python SDK Tests ==="; \
+	if python -m pytest --version >/dev/null 2>&1; then \
+		PY_TMPFILE=$$(mktemp); \
+		set -o pipefail; \
+		cd packages/inputlayer-py && python -m pytest tests/ -v 2>&1 | tee "$$PY_TMPFILE"; \
+		PY_EXIT=$${PIPESTATUS[0]}; \
+		cd ../..; \
+		PY_LINE=$$(grep -E "passed" "$$PY_TMPFILE" | tail -1); \
+		PY_PASSED=$$(echo "$$PY_LINE" | grep -oE '[0-9]+ passed' | awk '{print $$1}'); \
+		PY_FAILED=$$(echo "$$PY_LINE" | grep -oE '[0-9]+ failed' | awk '{print $$1}'); \
+		PY_PASSED=$${PY_PASSED:-0}; \
+		PY_FAILED=$${PY_FAILED:-0}; \
+		rm -f "$$PY_TMPFILE"; \
+		if [ $$PY_EXIT -ne 0 ]; then FAILURES=$$((FAILURES + 1)); fi; \
+	else \
+		echo "SKIPPED: python/pytest not available (pip install -e 'packages/inputlayer-py[dev]')"; \
+		PY_PASSED=0; PY_FAILED=0; \
+	fi; \
+	echo ""; \
 	echo "=== Cleanup Verification ==="; \
 	STALE_DATA=""; \
 	if [ -d "./data" ]; then \
@@ -91,8 +110,8 @@ test-all: check
 	fi; \
 	rm -rf ./data 2>/dev/null || true; \
 	echo ""; \
-	TOTAL=$$(($$UNIT_PASSED + $${SNAP_PASSED:-0})); \
-	TOTAL_FAILED=$$(($$UNIT_FAILED + $${SNAP_FAILED:-0})); \
+	TOTAL=$$(($$UNIT_PASSED + $${SNAP_PASSED:-0} + $${PY_PASSED:-0})); \
+	TOTAL_FAILED=$$(($$UNIT_FAILED + $${SNAP_FAILED:-0} + $${PY_FAILED:-0})); \
 	echo "==========================================="; \
 	echo "              TEST SUMMARY"; \
 	echo "==========================================="; \
@@ -102,6 +121,7 @@ test-all: check
 	printf "  | %-14s | %-48s |\n" "Build" "$$BUILD_STATUS"; \
 	printf "  | %-14s | %-48s |\n" "Cargo Tests" "$$UNIT_PASSED passed, $$UNIT_FAILED failed, $$UNIT_IGNORED ignored"; \
 	printf "  | %-14s | %-48s |\n" "Snapshot Tests" "$${SNAP_PASSED:-0} passed, $${SNAP_FAILED:-0} failed"; \
+	printf "  | %-14s | %-48s |\n" "Python Tests" "$${PY_PASSED:-0} passed, $${PY_FAILED:-0} failed"; \
 	printf "  | %-14s | %-48s |\n" "TOTAL" "$$TOTAL passed, $$TOTAL_FAILED failed"; \
 	echo ""; \
 	echo "==========================================="; \
@@ -160,6 +180,25 @@ ci-test-all:
 	rm -f "$$SNAP_TMPFILE"; \
 	if [ $$SNAP_EXIT -ne 0 ]; then FAILURES=$$((FAILURES + 1)); fi; \
 	echo ""; \
+	echo "=== Python SDK Tests ==="; \
+	if python -m pytest --version >/dev/null 2>&1; then \
+		PY_TMPFILE=$$(mktemp); \
+		set -o pipefail; \
+		cd packages/inputlayer-py && python -m pytest tests/ -v 2>&1 | tee "$$PY_TMPFILE"; \
+		PY_EXIT=$${PIPESTATUS[0]}; \
+		cd ../..; \
+		PY_LINE=$$(grep -E "passed" "$$PY_TMPFILE" | tail -1); \
+		PY_PASSED=$$(echo "$$PY_LINE" | grep -oE '[0-9]+ passed' | awk '{print $$1}'); \
+		PY_FAILED=$$(echo "$$PY_LINE" | grep -oE '[0-9]+ failed' | awk '{print $$1}'); \
+		PY_PASSED=$${PY_PASSED:-0}; \
+		PY_FAILED=$${PY_FAILED:-0}; \
+		rm -f "$$PY_TMPFILE"; \
+		if [ $$PY_EXIT -ne 0 ]; then FAILURES=$$((FAILURES + 1)); fi; \
+	else \
+		echo "SKIPPED: python/pytest not available (pip install -e 'packages/inputlayer-py[dev]')"; \
+		PY_PASSED=0; PY_FAILED=0; \
+	fi; \
+	echo ""; \
 	echo "==========================================="; \
 	echo "           CI TEST SUMMARY"; \
 	echo "==========================================="; \
@@ -169,6 +208,7 @@ ci-test-all:
 	printf "  | %-14s | %-48s |\n" "Build" "$$BUILD_STATUS"; \
 	printf "  | %-14s | %-48s |\n" "Unit Tests" "$$UNIT_PASSED passed, $$UNIT_FAILED failed"; \
 	printf "  | %-14s | %-48s |\n" "Snapshot Tests" "$${SNAP_PASSED:-0} passed, $${SNAP_FAILED:-0} failed"; \
+	printf "  | %-14s | %-48s |\n" "Python Tests" "$${PY_PASSED:-0} passed, $${PY_FAILED:-0} failed"; \
 	echo ""; \
 	echo "==========================================="; \
 	if [ $$FAILURES -ne 0 ]; then \
@@ -205,6 +245,10 @@ test-affected:
 
 # Legacy alias for e2e-test
 snapshot-test: e2e-test
+
+# Tier 4: Python SDK tests (inputlayer-py package)
+python-test:
+	cd packages/inputlayer-py && python -m pytest tests/ -v
 
 # Code Quality
 

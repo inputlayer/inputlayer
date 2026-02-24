@@ -19,6 +19,12 @@ Guides from basics to advanced features.
 | [Core Concepts](core-concepts.md) | Data modeling, identity semantics, update patterns | 20 min |
 | [REPL Guide](repl.md) | Interactive usage with the REPL | 15 min |
 
+### Client SDKs
+
+| Guide | Description | Time |
+|-------|-------------|------|
+| [Python SDK](python-sdk.md) | Python OLM - define schemas, queries, rules, and migrations in pure Python | 30 min |
+
 ### Advanced Features (60+ minutes)
 
 | Guide | Description | Time |
