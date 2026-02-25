@@ -2,24 +2,37 @@
 
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { Loader2 } from "lucide-react"
+import { useDatalogStore } from "@/lib/datalog-store"
+import { ConnectionScreen } from "@/components/connection-screen"
+import { SplashScreen } from "@/components/splash-screen"
 
 export default function HomePage() {
   const router = useRouter()
+  const { connection, isInitialized, isRestoringSession, initFromStorage } = useDatalogStore()
 
   useEffect(() => {
-    // Redirect to query editor as the default page
-    router.replace("/query")
+    initFromStorage()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Show loading while redirecting
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="flex flex-col items-center gap-3">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">Loading...</p>
-      </div>
-    </div>
-  )
+  // Redirect to /query once we have an active connection
+  useEffect(() => {
+    if (isInitialized && !isRestoringSession && connection?.status === "connected") {
+      router.replace("/query")
+    }
+  }, [isInitialized, isRestoringSession, connection?.status, router])
+
+  // Show splash while initializing or restoring
+  if (!isInitialized || isRestoringSession) {
+    return <SplashScreen />
+  }
+
+  // Show splash while connecting/reconnecting
+  if (connection?.status === "connecting" || connection?.status === "reconnecting") {
+    const msg = connection.status === "reconnecting" ? "Reconnecting..." : "Connecting..."
+    return <SplashScreen status={msg} />
+  }
+
+  // Not connected — show login screen at "/"
+  return <ConnectionScreen />
 }

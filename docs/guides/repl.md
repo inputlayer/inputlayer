@@ -97,7 +97,7 @@ temp(X) <- edge(1, X)    // Add session rule
 
 ### File Commands (`.load`)
 
-Load and execute Datalog files:
+Load and execute InputLayer files:
 
 | Command | Description |
 |---------|-------------|

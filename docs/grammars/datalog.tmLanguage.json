@@ -1,0 +1,117 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Datalog",
+  "scopeName": "source.datalog",
+  "fileTypes": ["dl", "datalog", "idl"],
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#string" },
+    { "include": "#meta-command" },
+    { "include": "#query-marker" },
+    { "include": "#rule-arrow" },
+    { "include": "#negation-prefix" },
+    { "include": "#comparison-op" },
+    { "include": "#operator-prefix" },
+    { "include": "#number" },
+    { "include": "#aggregate" },
+    { "include": "#builtin-fn" },
+    { "include": "#keyword" },
+    { "include": "#variable" },
+    { "include": "#identifier" },
+    { "include": "#arith-op" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comment": {
+      "patterns": [
+        {
+          "name": "comment.block.datalog",
+          "begin": "/\\*",
+          "end": "\\*/",
+          "patterns": [
+            { "include": "#comment" }
+          ]
+        },
+        {
+          "name": "comment.line.double-slash.datalog",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "string": {
+      "name": "string.quoted.double.datalog",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.datalog",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "meta-command": {
+      "name": "keyword.control.command.datalog",
+      "match": "\\.(?:kg(?:\\s+(?:create|list|use|drop))?|rel|rule(?:\\s+(?:list|drop|remove|def|clear|edit))?|session(?:\\s+(?:clear|drop))?|index(?:\\s+(?:list|create|drop|stats|rebuild))?|idx|load|compact|status|help|quit|exit|\\?|q)\\b"
+    },
+    "query-marker": {
+      "name": "keyword.operator.query.datalog",
+      "match": "\\?(?=[A-Za-z])"
+    },
+    "rule-arrow": {
+      "name": "keyword.operator.arrow.datalog",
+      "match": "<-"
+    },
+    "negation-prefix": {
+      "name": "keyword.operator.negation.datalog",
+      "match": "!(?=[A-Za-z])"
+    },
+    "comparison-op": {
+      "name": "keyword.operator.comparison.datalog",
+      "match": ">=|<=|!=|[<>=]"
+    },
+    "operator-prefix": {
+      "name": "keyword.operator.prefix.datalog",
+      "match": "[+\\-](?=[a-z\"\\[])"
+    },
+    "number": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.datalog",
+          "match": "\\b[0-9]+\\.[0-9]+(?:[eE][+\\-]?[0-9]+)?\\b"
+        },
+        {
+          "name": "constant.numeric.integer.datalog",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "aggregate": {
+      "name": "entity.name.function.aggregate.datalog",
+      "match": "\\b(?:count_distinct|count|sum|avg|top_k_threshold|top_k|within_radius|min|max)(?![A-Za-z0-9_])"
+    },
+    "builtin-fn": {
+      "name": "entity.name.function.builtin.datalog",
+      "match": "\\b(?:euclidean_int8|euclidean|cosine_int8|cosine|dot_int8|dot|manhattan_int8|manhattan|normalize|vec_dim|vec_add|vec_scale|quantize_linear|quantize_symmetric|dequantize_scaled|dequantize|lsh_multi_probe|lsh_bucket|lsh_probes|hnsw_nearest|time_decay_linear|time_decay|time_diff|time_add|time_sub|time_now|time_before|time_after|time_between|within_last|intervals_overlap|interval_contains|interval_duration|point_in_interval|abs_int64|abs_float64|abs|sqrt|pow|log|exp|sin|cos|tan|floor|ceil|sign|to_float|to_int|min_val|max_val|len|upper|lower|trim|substr|replace|concat)(?![A-Za-z0-9_])"
+    },
+    "keyword": {
+      "name": "keyword.type.datalog",
+      "match": "\\b(?:type|true|false|int|string|bool|float|list)(?![A-Za-z0-9_])"
+    },
+    "variable": {
+      "name": "variable.other.datalog",
+      "match": "\\b[A-Z_][A-Za-z0-9_]*\\b"
+    },
+    "identifier": {
+      "name": "entity.name.tag.datalog",
+      "match": "\\b[a-z][A-Za-z0-9_]*\\b"
+    },
+    "arith-op": {
+      "name": "keyword.operator.arithmetic.datalog",
+      "match": "[+\\-*/]"
+    },
+    "punctuation": {
+      "name": "punctuation.datalog",
+      "match": "[()\\[\\]{},.:;<>]"
+    }
+  }
+}

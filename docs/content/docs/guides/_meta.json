@@ -1,0 +1,20 @@
+{
+  "quickstart": "Quick Start",
+  "installation": "Installation",
+  "first-program": "Your First Program",
+  "core-concepts": "Data Modeling",
+  "repl": "REPL Guide",
+  "recursion": "Recursion",
+  "vectors": "Vector Search",
+  "indexing": "Indexing",
+  "temporal": "Temporal Reasoning",
+  "persistence": "Persistence",
+  "configuration": "Configuration",
+  "rest-api": "REST API",
+  "python-sdk": "Python SDK",
+  "deployment": "Deployment",
+  "authentication": "Authentication",
+  "websocket-api": "WebSocket API",
+  "migrations": "Migrations",
+  "troubleshooting": "Troubleshooting"
+}

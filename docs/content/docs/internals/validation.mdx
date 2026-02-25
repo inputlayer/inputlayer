@@ -1,0 +1,657 @@
+# Pre-Dataflow Validation Layer
+
+> Status: Planned Architecture - The design below is not yet implemented. It describes the target validation system.
+
+## Problem Statement
+
+Differential Dataflow (DD) operates on streaming deltas with multiplicities. It has no native concept of type enforcement. Once data enters DD, it flows through computation - "rejecting" invalid data would require expensive rollback.
+
+**Solution:** Validate data types *before* they enter the dataflow. Create a validation gate that enforces schemas at the boundary.
+
+**Scope:** Type validation only.
+
+## Architecture Overview
+
+```
+                    +-------------------------------------+
+                    |         VALIDATION LAYER            |
+                    |                                     |
+  +user(1, "alice") |  +----------+      +----------+    |
+  ----------------->|  |  Schema  |----->|   Type   |    |
+                    |  |  Lookup  |      |  Checker |    |
+                    |  +----------+      +----------+    |
+                    |                          |         |
+                    |                          v         |
+                    |        Ok(tuple) or Err(type error)|
+                    +----------------------+-------------+
+                                           |
+                         +-----------------+--------------+
+                         |                                |
+                         v                                v
+                    +---------+                      +---------+
+                    |   DD    |                      |  Error  |
+                    | Ingest  |                      | Response|
+                    +---------+                      +---------+
+```
+
+## What We Validate
+
+| Check | Example | When |
+|-------|---------|------|
+| Arity | `user` expects 2 columns, got 3 | Insert |
+| Type match | Column 1 expects `int`, got `"alice"` | Insert |
+| Type compatibility | Existing data matches new schema | Schema registration |
+
+## Components
+
+### 1. Schema Registry
+
+Stores relation schemas with type information.
+
+```rust
+pub struct SchemaRegistry {
+    /// Persistent schemas (loaded from disk, saved on change)
+    persistent: HashMap<String, RelationSchema>,
+
+    /// Session schemas (memory only, cleared on disconnect)
+    session: HashMap<String, RelationSchema>,
+}
+
+pub struct RelationSchema {
+    pub name: String,
+    pub columns: Vec<ColumnDef>,
+}
+
+pub struct ColumnDef {
+    pub name: String,
+    pub dtype: DataType,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum DataType {
+    Int,
+    Float,
+    String,
+    Bool,
+    Vector(usize),  // dimensionality
+}
+
+impl SchemaRegistry {
+    /// Get effective schema for a relation.
+    /// Session schema shadows persistent if both exist.
+    pub fn get(&self, relation: &str) -> Option<&RelationSchema> {
+        self.session.get(relation)
+            .or_else(|| self.persistent.get(relation))
+    }
+
+    /// Register a persistent schema.
+    pub fn register_persistent(
+        &mut self,
+        schema: RelationSchema,
+        existing_data: Option<&[Vec<Value>]>,
+    ) -> Result<(), SchemaError> {
+        // If data exists, validate it matches the schema
+        if let Some(tuples) = existing_data {
+            for tuple in tuples {
+                TypeChecker::check(&schema, tuple)?;
+            }
+        }
+
+        self.persistent.insert(schema.name.clone(), schema);
+        self.persist_to_disk()?;
+        Ok(())
+    }
+
+    /// Register a session schema.
+    pub fn register_session(
+        &mut self,
+        schema: RelationSchema,
+        existing_data: Option<&[Vec<Value>]>,
+    ) -> Result<(), SchemaError> {
+        // Same validation as persistent
+        if let Some(tuples) = existing_data {
+            for tuple in tuples {
+                TypeChecker::check(&schema, tuple)?;
+            }
+        }
+
+        self.session.insert(schema.name.clone(), schema);
+        Ok(())
+    }
+
+    /// Clear session schemas (on disconnect).
+    pub fn clear_session(&mut self) {
+        self.session.clear();
+    }
+}
+```
+
+### 2. Type Checker
+
+Validates that values match declared types.
+
+```rust
+pub struct TypeChecker;
+
+impl TypeChecker {
+    pub fn check(
+        schema: &RelationSchema,
+        tuple: &[Value],
+    ) -> Result<(), TypeError> {
+        // Arity check
+        if tuple.len() != schema.columns.len() {
+            return Err(TypeError::ArityMismatch {
+                relation: schema.name.clone(),
+                expected: schema.columns.len(),
+                got: tuple.len(),
+            });
+        }
+
+        // Type check each column
+        for (i, (value, col)) in tuple.iter().zip(&schema.columns).enumerate() {
+            if !value.matches_type(&col.dtype) {
+                return Err(TypeError::TypeMismatch {
+                    relation: schema.name.clone(),
+                    column: col.name.clone(),
+                    column_index: i,
+                    expected: col.dtype.clone(),
+                    got: value.type_name(),
+                    value: value.clone(),
+                });
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Value {
+    pub fn matches_type(&self, dtype: &DataType) -> bool {
+        match (self, dtype) {
+            (Value::Int(_), DataType::Int) => true,
+            (Value::Float(_), DataType::Float) => true,
+            (Value::String(_), DataType::String) => true,
+            (Value::Bool(_), DataType::Bool) => true,
+            (Value::Vector(v), DataType::Vector(dim)) => v.len() == *dim,
+            // Int can widen to Float
+            (Value::Int(_), DataType::Float) => true,
+            _ => false,
+        }
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Value::Int(_) => "int",
+            Value::Float(_) => "float",
+            Value::String(_) => "string",
+            Value::Bool(_) => "bool",
+            Value::Vector(v) => "vector",
+        }
+    }
+}
+```
+
+### 3. Validation Layer
+
+Orchestrates validation for all operations.
+
+```rust
+pub struct ValidationLayer {
+    schema_registry: SchemaRegistry,
+}
+
+impl ValidationLayer {
+    /// Validate an insert operation. Called before DD ingest.
+    pub fn validate_insert(
+        &self,
+        relation: &str,
+        tuple: &[Value],
+    ) -> Result<(), ValidationError> {
+        // If no schema, allow anything (schema-less mode)
+        let Some(schema) = self.schema_registry.get(relation) else {
+            return Ok(());
+        };
+
+        // Type check
+        TypeChecker::check(schema, tuple)?;
+
+        Ok(())
+    }
+
+    /// Validate a batch insert.
+    pub fn validate_batch(
+        &self,
+        relation: &str,
+        tuples: &[Vec<Value>],
+    ) -> Result<(), ValidationError> {
+        let Some(schema) = self.schema_registry.get(relation) else {
+            return Ok(());
+        };
+
+        for tuple in tuples {
+            TypeChecker::check(schema, tuple)?;
+        }
+
+        Ok(())
+    }
+
+    /// Register a schema, validating against existing data.
+    pub fn register_schema(
+        &mut self,
+        schema: RelationSchema,
+        persistent: bool,
+        existing_data: Option<&[Vec<Value>]>,
+    ) -> Result<(), SchemaError> {
+        if persistent {
+            self.schema_registry.register_persistent(schema, existing_data)
+        } else {
+            self.schema_registry.register_session(schema, existing_data)
+        }
+    }
+}
+```
+
+## Schema Persistence
+
+Schemas follow the same session vs persistent pattern as rules:
+
+```datalog
+// Persistent schema - saved with knowledge graph
++user(id: int, name: string)
+
+// Session schema - temporary, current connection only
+user(id: int, name: string)
+```
+
+### Lifecycle Comparison
+
+| Aspect | Session Schema | Persistent Schema |
+|--------|---------------|-------------------|
+| Syntax | `rel(col: type)` | `+rel(col: type)` |
+| Storage | Memory only | Persisted to disk |
+| Lifetime | Until disconnect | Survives restart |
+| Use case | Scripts, testing | Production data |
+
+## Ingestion Modes
+
+InputLayer supports two ingestion patterns: schema-first (traditional) and data-first (exploratory).
+
+### Schema-First Ingestion
+
+Define the schema before inserting data. All inserts are validated immediately.
+
+```datalog
+.kg create mydb
+.kg use mydb
+
+// 1. Define schema
++user(id: int, email: string, active: bool)
+
+// 2. Insert data - each insert is validated
++user(1, "alice@x.com", true)        // OK
++user(2, "bob@x.com", false)         // OK
++user("bad", "charlie@x.com", true)  // ERROR: "bad" is not int
+```
+
+**Advantages:**
+- Catch type errors immediately at insert time
+- Clear contract for what data looks like
+- Better for production systems
+
+**Bulk loading with schema-first:**
+```datalog
++product(sku: string, name: string, price: float)
+
+// Bulk insert - all tuples validated before any are inserted
++product[
+    ("SKU001", "Widget", 9.99),
+    ("SKU002", "Gadget", 19.99),
+    ("SKU003", "Gizmo", 29.99)
+]
+```
+
+**File loading with schema-first:**
+```datalog
++sensor_reading(timestamp: int, sensor_id: string, value: float)
+
+// Load validates each row against schema
+.load sensors.idl
+```
+
+### Data-First Ingestion
+
+Insert data without a schema (schema-less mode), then optionally add a schema later.
+
+```datalog
+.kg use mydb
+
+// 1. Insert data freely - no validation
++user(1, "alice@x.com")
++user(2, "bob@x.com")
++user(3, "charlie@x.com")
+
+// 2. Later, add schema - validates existing data
++user(id: int, email: string)
+// Success: all existing data matches schema
+```
+
+**Advantages:**
+- Quick prototyping and exploration
+- Import data first, figure out types later
+- Flexible for ad-hoc analysis
+
+**Schema-less behavior:**
+```datalog
+// Without schema, anything goes
++mixed(1, "text")
++mixed("also text", 42)
++mixed(true, [1.0, 2.0, 3.0])
+// All accepted - no type enforcement
+```
+
+**Adding schema to existing data:**
+```datalog
+// Existing data
++event(1, "click", 1704067200)
++event(2, "view", 1704067260)
+
+// Try to add schema
++event(id: int, type: string, timestamp: int)
+// Success: existing data matches
+
+// But if data doesn't match...
++log(1, "info", "message")
++log("bad", "error", "another")  // String in first column
+
++log(id: int, level: string, msg: string)
+// ERROR: Existing data violates schema
+//   Row ("bad", "error", "another"): column 'id' expected int, got string
+```
+
+### Schema Rejection on Type Mismatch
+
+If existing data doesn't match the proposed schema, the schema definition is **rejected** (not the data):
+
+```datalog
++user(1, "alice")
++user("not-an-int", "bob")     // String in first column - allowed without schema
+
++user(id: int, name: string)
+// Error: Cannot register schema for 'user'
+//   Existing data violates type requirements
+//   Row ("not-an-int", "bob"): column 'id' expected int, got string "abc"
+//   Fix the data before registering the schema
+```
+
+The user must fix the data first:
+
+```datalog
+-user("not-an-int", "bob")     // Remove bad row
++user(id: int, name: string)   // Now schema can be registered
+```
+
+### Mixed Workflow
+
+You can switch between modes as needed:
+
+```datalog
+// Start schema-less for exploration
++experiment(1, "trial-a", 0.5)
++experiment(2, "trial-b", 0.7)
+
+// Query and analyze
+?experiment(Id, Name, Score), Score > 0.6
+
+// Happy with structure? Lock it down with persistent schema
++experiment(id: int, name: string, score: float)
+
+// Future inserts are now validated
++experiment(3, "trial-c", 0.8)     // OK
++experiment("bad", "trial-d", 0.9) // ERROR
+```
+
+### Session Schema for Testing
+
+Use session schemas to temporarily validate without persisting:
+
+```datalog
+// Production has no schema (legacy data)
+// But you want to validate a batch before inserting
+
+// Define session schema (not persisted)
+user(id: int, email: string)
+
+// Test your data
++user(1, "test@x.com")  // Validated against session schema
+
+// Clear session when done
+.session clear
+```
+
+### Implementation Flow
+
+```
+Insert Request
+      |
+      v
++-----------------+
+| Schema exists?  |
++--------+--------+
+         |
+    +----+----+
+    |         |
+    v         v
+   Yes        No
+    |         |
+    v         |
++--------+    |
+|Validate|    |
+| types  |    |
++---+----+    |
+    |         |
+    v         v
+  Pass?    Insert
+    |      (no validation)
+  +-+-+
+  |   |
+  v   v
+ Yes  No
+  |   |
+  v   v
+Insert Error
+
+
+Schema Registration Request
+           |
+           v
+  +-----------------+
+  | Data exists for |
+  | this relation?  |
+  +--------+--------+
+           |
+      +----+----+
+      |         |
+      v         v
+     Yes        No
+      |         |
+      v         |
++-----------+   |
+| Validate  |   |
+| all rows  |   |
++-----+-----+   |
+      |         |
+      v         v
+   All pass?  Register
+      |       schema
+    +-+-+
+    |   |
+    v   v
+   Yes  No
+    |   |
+    v   v
+Register Reject
+schema   schema
+```
+
+## Integration
+
+### Statement Executor
+
+```rust
+impl StatementExecutor {
+    pub fn execute_insert(
+        &mut self,
+        relation: &str,
+        tuples: Vec<Vec<Value>>,
+    ) -> Result<InsertResult, ExecuteError> {
+        // Validate all tuples first
+        self.validation.validate_batch(relation, &tuples)?;
+
+        // Insert into DD
+        self.dataflow.insert(relation, &tuples)?;
+
+        Ok(InsertResult { count: tuples.len() })
+    }
+
+    pub fn execute_schema(
+        &mut self,
+        schema: RelationSchema,
+        persistent: bool,
+    ) -> Result<(), ExecuteError> {
+        // Get existing data for this relation
+        let existing = self.dataflow.scan(&schema.name)?;
+        let existing_ref: Option<&[Vec<Value>]> = if existing.is_empty() {
+            None
+        } else {
+            Some(&existing)
+        };
+
+        // Register schema (validates existing data)
+        self.validation.register_schema(schema, persistent, existing_ref)?;
+
+        Ok(())
+    }
+}
+```
+
+### Database Load
+
+```rust
+impl Database {
+    pub fn open(path: &Path) -> Result<Self, DbError> {
+        // 1. Load persistent schemas
+        let schemas = SchemaRegistry::load_from_disk(path)?;
+
+        // 2. Initialize validation layer
+        let validation = ValidationLayer::new(schemas);
+
+        // 3. Load data into DD
+        let dataflow = Dataflow::load_from_disk(path)?;
+
+        // Note: No constraint index rebuilding needed!
+
+        Ok(Database { dataflow, validation })
+    }
+}
+```
+
+### Storage Format
+
+```
+data/
+  mydb/
+    rules/                  # Persistent rule definitions
+      catalog.json          # Rule catalog
+  persist/
+    shards/                 # Shard metadata
+    batches/                # Compacted batch files (Parquet)
+    wal/                    # Write-ahead log
+  metadata/                 # System metadata
+```
+
+```json
+{
+  "version": 1,
+  "schemas": {
+    "user": {
+      "columns": [
+        {"name": "id", "type": "int"},
+        {"name": "email", "type": "string"}
+      ]
+    },
+    "embedding": {
+      "columns": [
+        {"name": "id", "type": "int"},
+        {"name": "vec", "type": {"vector": 128}}
+      ]
+    }
+  }
+}
+```
+
+## Syntax
+
+The schema syntax:
+
+```ebnf
+schema      ::= prefix? predicate "(" column_list ")" "." ;
+prefix      ::= "+" ;
+column_list ::= column ("," column)* ;
+column      ::= name ":" type ;
+type        ::= "int" | "float" | "string" | "bool" | vector_type ;
+vector_type ::= "vector" "[" integer "]" ;
+```
+
+Examples:
+```datalog
++user(id: int, name: string, active: bool)
++embedding(id: int, vec: vector[128])
+product(sku: string, price: float)  // Session schema
+```
+
+## Error Messages
+
+Clear, actionable error messages:
+
+```
+Error: Type mismatch in relation 'user'
+  Column 'id' (index 0): expected int, got string
+  Value: "not-a-number"
+
+Error: Arity mismatch in relation 'user'
+  Expected 2 columns, got 3
+  Schema: user(id: int, name: string)
+
+Error: Cannot register schema for 'user'
+  Existing data violates type requirements
+  Row 5: column 'id' expected int, got string "abc"
+  Fix the data before registering the schema
+```
+
+## Migration Path
+
+### Type Validation
+- Implement `SchemaRegistry` and `TypeChecker`
+- Validate types on insert
+- Schema persistence
+
+### Derived Data Types
+- Infer output types for rules
+- Warn when rule output doesn't match view schema
+
+### Type Inference (Optional)
+- Infer schemas from data patterns
+- Suggest schemas based on inserted data
+
+## Summary
+
+| Feature | Status |
+|---------|--------|
+| Type validation (int, float, string, bool, vector) | Included |
+| Arity checking | Included |
+| Session vs persistent schemas | Included |
+| Schema-first workflow | Included |
+| Data-first workflow | Included |
+| Reject schema if data violates types | Included |
+
+This keeps the system simple and DD-friendly while providing useful type safety.

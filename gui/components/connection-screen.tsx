@@ -80,7 +80,7 @@ export function ConnectionScreen() {
           <div className="mb-4">
             <Logo size="lg" />
           </div>
-          <p className="mt-1.5 text-sm text-muted-foreground">Connect to a Datalog server to get started</p>
+          <p className="mt-1.5 text-sm text-muted-foreground">Connect to an InputLayer server to get started</p>
         </div>
 
         {/* Connection form */}
@@ -89,7 +89,7 @@ export function ConnectionScreen() {
             <Server className="h-5 w-5 text-muted-foreground" />
             <div>
               <p className="text-sm font-medium">Server Connection</p>
-              <p className="text-xs text-muted-foreground">Enter your Datalog server details</p>
+              <p className="text-xs text-muted-foreground">Enter your InputLayer server details</p>
             </div>
           </div>
 

@@ -8,7 +8,7 @@
 
 ## Overview
 
-InputLayer is an incremental Datalog database engine built on Differential Dataflow (DD). The architecture supports:
+InputLayer is an incremental database engine built on Differential Dataflow (DD). The architecture supports:
 
 - **Persistent incremental computation** via DDComputation with shared arrangements
 - **Lock-free concurrent reads** via ArcSwap snapshot system

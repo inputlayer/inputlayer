@@ -1,77 +1,77 @@
 # InputLayer Documentation
 
-Welcome to the InputLayer documentation. InputLayer is an incremental Datalog database engine built on Differential Dataflow.
+Welcome to the InputLayer documentation. InputLayer is a reasoning engine for AI agents — a modern database that stores facts, defines rules, and derives everything that logically follows.
 
-## Documentation Sections
+## Documentation Structure
 
-### [Guides](guides/)
-**Start here if you're new to InputLayer.**
+All documentation content lives in **`docs/content/`** as MDX files — this is the single source of truth.
 
-Progressive tutorials from installation to advanced features:
-- [Quick Start](guides/quickstart.md) - Get running in 5 minutes
-- [Installation](guides/installation.md) - Detailed setup instructions
-- [First Program](guides/first-program.md) - Your first Datalog queries
-- [Core Concepts](guides/core-concepts.md) - Facts, rules, and data modeling
-- [REPL Guide](guides/repl.md) - Interactive usage
-- [Recursion](guides/recursion.md) - Recursive queries and transitive closure
-- [Python SDK](guides/python-sdk.md) - Python OLM client (no Datalog required)
-- [Troubleshooting](guides/troubleshooting.md) - Common errors and solutions
+### Authoring
 
-### [Reference](reference/)
-**Quick lookup for commands, functions, and syntax.**
+Edit files in `docs/content/`. Navigation is controlled by `_meta.json` files in each directory.
 
-Redis-style reference documentation:
-- [Commands](reference/commands.md) - All meta commands (`.kg`, `.rule`, `.load`, etc.)
-- [Functions](reference/functions.md) - All 55 builtin functions
-- [Syntax Cheatsheet](reference/syntax-cheatsheet.md) - One-page syntax reference
+### Viewing
 
-### [Specification](spec/)
-**Authoritative language specification.**
+| Method | URL |
+|--------|-----|
+| **GUI (InputLayer Studio)** | Navigate to `/docs` in the GUI — works without a server connection |
+| **GitHub Pages** | Deployed automatically on push to `main` |
+| **Local dev** | `cd docs/site && npm install && npm run dev` |
 
-Complete InputLayer Datalog specification:
-- [Syntax](spec/syntax.md) - Complete grammar and EBNF
-- [Types](spec/types.md) - Type system (9 value types)
-- [Rules](spec/rules.md) - Persistent and session rules
-- [Queries](spec/queries.md) - Query syntax and semantics
-- [Errors](spec/errors.md) - Error code reference
+### Content Map
 
-### [Internals](internals/)
-**For contributors and developers.**
+```
+docs/content/
+├── index.mdx                    # Landing page
+└── docs/
+    ├── guides/                  # Step-by-step tutorials (18 pages)
+    │   ├── quickstart.mdx
+    │   ├── installation.mdx
+    │   ├── first-program.mdx
+    │   ├── python-sdk.mdx
+    │   ├── deployment.mdx
+    │   ├── authentication.mdx
+    │   ├── websocket-api.mdx
+    │   ├── migrations.mdx
+    │   └── ...
+    ├── reference/               # API reference (6 pages)
+    │   ├── commands.mdx
+    │   ├── functions.mdx
+    │   ├── syntax.mdx
+    │   └── ...
+    ├── spec/                    # Formal specification (7 pages)
+    │   ├── types.mdx
+    │   ├── rules.mdx
+    │   ├── queries.mdx
+    │   └── ...
+    └── internals/               # Architecture docs (7 pages)
+        ├── architecture.mdx
+        ├── coding-standards.mdx
+        └── ...
+```
 
-Architecture and implementation details:
-- [Architecture](internals/architecture.md) - System design overview
-- [Coding Standards](internals/coding-standards.md) - Code style and patterns
-- [Type System](internals/type-system.md) - Value types and coercion
-- [Validation](internals/validation.md) - Validation layer design
-- [Roadmap](internals/roadmap.md) - Feature roadmap
+### Renderers
 
----
+- **Nextra site** (`docs/site/`) — Static site for GitHub Pages. Copies content at build time.
+- **GUI docs viewer** (`gui/scripts/bundle-docs.mjs`) — Bundles content into the GUI at build time.
+
+### Syntax Highlighting
+
+Code blocks with ` ```datalog ` get syntax highlighting via a TextMate grammar at `docs/grammars/datalog.tmLanguage.json`.
 
 ## Quick Links
 
 | Task | Go to |
 |------|-------|
-| Install InputLayer | [Installation Guide](guides/installation.md) |
-| Use the Python SDK | [Python SDK Guide](guides/python-sdk.md) |
-| Learn the basics | [First Program](guides/first-program.md) |
-| Look up a function | [Function Reference](reference/functions.md) |
-| Find a command | [Commands Reference](reference/commands.md) |
-| Understand the architecture | [Architecture](internals/architecture.md) |
-| Report a bug | [GitHub Issues](https://github.com/inputlayer/inputlayer/issues) |
-
----
+| Install InputLayer | `docs/content/docs/guides/installation.mdx` |
+| Use the Python SDK | `docs/content/docs/guides/python-sdk.mdx` |
+| Learn the basics | `docs/content/docs/guides/first-program.mdx` |
+| Look up a function | `docs/content/docs/reference/functions.mdx` |
+| Find a command | `docs/content/docs/reference/commands.mdx` |
+| Deploy in production | `docs/content/docs/guides/deployment.mdx` |
 
 ## Test Coverage
 
-InputLayer is thoroughly tested:
-- **1435 unit tests** across all modules
-- **1107 snapshot tests** for end-to-end validation
-- All tests passing continuously
-
----
-
-## Version
-
-**Current**: v0.1.0 (Production-Ready)
-
-See [Roadmap](internals/roadmap.md) for version history and planned features.
+- **3,107 unit tests** across all modules
+- **1,121 snapshot tests** for end-to-end validation
+- 0 failures, 0 ignored

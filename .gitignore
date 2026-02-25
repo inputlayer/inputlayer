@@ -38,6 +38,24 @@ gui/package-lock.json
 gui/.turbo/
 gui/.vercel/
 
+# Front (marketing site) - Build artifacts and dependencies
+front/node_modules/
+front/.next/
+front/dist/
+front/out/
+front/package-lock.json
+front/pnpm-lock.yaml
+
+# Front - Auto-generated docs bundle
+front/lib/docs-bundle.ts
+
+# Docs site (legacy Nextra) - Build artifacts
+docs/site/node_modules/
+docs/site/.next/
+docs/site/dist/
+docs/site/out/
+docs/site/package-lock.json
+
 rfcs/
 proposals/
 

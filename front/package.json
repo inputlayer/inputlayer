@@ -1,0 +1,35 @@
+{
+  "name": "inputlayer-front",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "prebuild": "node scripts/bundle-docs.mjs",
+    "build": "node scripts/bundle-docs.mjs && next build --webpack",
+    "dev": "node scripts/bundle-docs.mjs && next dev --webpack",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@radix-ui/react-collapsible": "1.1.2",
+    "@radix-ui/react-slot": "1.1.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.454.0",
+    "next": "16.0.7",
+    "next-themes": "^0.4.6",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-markdown": "^9.1.0",
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^3.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.9",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "postcss": "^8.5",
+    "tailwindcss": "^4.1.9",
+    "tw-animate-css": "1.3.3",
+    "typescript": "^5"
+  }
+}

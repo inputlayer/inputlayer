@@ -137,7 +137,7 @@ See the [Python SDK Guide](python-sdk.md) for full documentation.
 
 Now that you have InputLayer installed:
 
-1. **[Your First Program](first-program.md)** - Write your first Datalog program
+1. **[Your First Program](first-program.md)** - Write your first InputLayer program
 2. **[Python SDK](python-sdk.md)** - Use Python instead of raw Datalog
 3. **[Core Concepts](core-concepts.md)** - Understand facts, rules, and queries
 4. **[REPL Guide](repl.md)** - Master the interactive environment

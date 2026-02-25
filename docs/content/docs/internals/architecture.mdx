@@ -1,0 +1,848 @@
+# InputLayer Architecture
+
+**Version**: 3.0 (Production-Ready)
+**Date**: 2026-02-05
+**Status**: All architectural issues resolved, ready for HNSW indexing
+
+---
+
+## Overview
+
+InputLayer is an incremental database engine built on Differential Dataflow (DD). The architecture supports:
+
+- **Persistent incremental computation** via DDComputation with shared arrangements
+- **Lock-free concurrent reads** via ArcSwap snapshot system
+- **Rule materialization** with automatic cascade invalidation
+- **Session isolation** for ephemeral facts and rules
+- **Multi-worker parallel execution** for batch queries
+
+**Test Coverage**: ~3107 unit tests + ~1121 snapshot tests = ~4228 total, all passing.
+
+---
+
+## 1. Architecture Overview
+
+```
++-----------------------------------------------------------------------------+
+|                              StorageEngine                                    |
+|                    DashMap<String, Arc<RwLock<KnowledgeGraph>>>              |
+|                                                                               |
+|  +-------------------------------------------------------------------------+ |
+|  |                        KnowledgeGraph                                    | |
+|  |                                                                          | |
+|  |  +--------------------+  +--------------------+  +-------------------+  | |
+|  |  |   DatalogEngine    |  |    RuleCatalog     |  |  DDComputation    |  | |
+|  |  |                    |  |                    |  |   (Optional)      |  | |
+|  |  | input_tuples:      |  | rules: HashMap     |  |                   |  | |
+|  |  |   HashMap<String,  |  | catalog.json       |  | InputSessions     |  | |
+|  |  |   Vec<Tuple>>      |  |                    |  | TraceAgents       |  | |
+|  |  |                    |  | Stratification     |  | Arrangements      |  | |
+|  |  | num_workers: usize |  | Validation         |  | ProbeHandle<u64>  |  | |
+|  |  +--------------------+  +--------------------+  |                   |  | |
+|  |                                                   | DerivedRelations |  | |
+|  |  +--------------------------------------------+  |   Manager        |  | |
+|  |  |        ArcSwap<KnowledgeGraphSnapshot>      |  +-------------------+  | |
+|  |  |                                             |                          | |
+|  |  |  input_tuples: Arc<HashMap>                |                          | |
+|  |  |  rules: Arc<Vec<Rule>>                     |                          | |
+|  |  |  materialized_relations: Arc<HashSet>      |                          | |
+|  |  |  num_workers: usize                        |                          | |
+|  |  +--------------------------------------------+                          | |
+|  +-------------------------------------------------------------------------+ |
+|                                                                               |
+|  +-------------------------------------------------------------------------+ |
+|  |                          FilePersist                                     | |
+|  |              WAL (Write-Ahead Log) + Parquet Batch Files                | |
+|  +-------------------------------------------------------------------------+ |
++-----------------------------------------------------------------------------+
+```
+
+---
+
+## 2. Core Components
+
+### 2.1 StorageEngine
+
+**Purpose**: Multi-knowledge-graph storage with concurrent access.
+
+```rust
+pub struct StorageEngine {
+    knowledge_graphs: DashMap<String, Arc<RwLock<KnowledgeGraph>>>,
+    logical_time: AtomicU64,
+    persist: Arc<FilePersist>,
+    config: StorageConfig,
+}
+```
+
+**Key Features**:
+- **DashMap** enables concurrent access to different KGs without global locking
+- **Logical timestamps** provide monotonically increasing write ordering
+- **Per-KG locking** allows parallel queries to different knowledge graphs
+
+### 2.2 KnowledgeGraph
+
+**Purpose**: Single knowledge graph with data, rules, and optional incremental computation.
+
+```rust
+pub struct KnowledgeGraph {
+    name: String,
+    engine: DatalogEngine,
+    rule_catalog: RuleCatalog,
+    schema_catalog: SchemaCatalog,  // Per-KG schema isolation
+    snapshot: ArcSwap<KnowledgeGraphSnapshot>,
+    dd_computation: Option<DDComputation>,
+    num_workers: usize,
+}
+```
+
+**Key Features**:
+- **DatalogEngine**: Holds base relation data (`input_tuples`, private with accessors)
+- **RuleCatalog**: Persistent rule storage with stratification validation
+- **SchemaCatalog**: Per-KG schema validation (isolated from other KGs)
+- **Snapshot**: Lock-free point-in-time consistent views via ArcSwap
+- **DDComputation**: Optional persistent incremental computation (returns `Result`)
+
+### 2.3 KnowledgeGraphSnapshot
+
+**Purpose**: Immutable point-in-time view for lock-free reads.
+
+```rust
+pub struct KnowledgeGraphSnapshot {
+    version: u64,
+    timestamp: u64,
+    input_tuples: Arc<HashMap<String, Vec<Tuple>>>,
+    rules: Arc<Vec<Rule>>,
+    materialized_relations: Arc<HashSet<String>>,
+    num_workers: usize,
+}
+```
+
+**Key Features**:
+- **Arc-wrapped data** enables O(1) clone operations
+- **ArcSwap** provides atomic snapshot publication
+- **Materialization awareness** skips rules for already-materialized relations
+- **Session isolation** via `execute_with_session_facts()` method
+
+### 2.4 DDComputation
+
+**Purpose**: Persistent incremental computation with shared arrangements.
+
+```rust
+pub struct DDComputation {
+    command_tx: Sender<DDCommand>,
+    current_time: Arc<AtomicU64>,
+    max_write_time: Arc<AtomicU64>,
+    derived_relations: Arc<Mutex<DerivedRelationsManager>>,
+    known_relations: Mutex<HashSet<String>>,
+    worker_handle: Option<JoinHandle<()>>,
+}
+```
+
+**Architecture**:
+```
+Main Thread --command_tx--> DD Worker Thread
+                            +- Owns timely Worker<u64>
+                            +- Owns InputSessions per relation
+                            +- Owns TraceAgents (arrangements)
+                            +- Steps worker in event loop
+                            +- Processes commands between steps
+```
+
+**Command Protocol**:
+```rust
+enum DDCommand {
+    InsertDelta { relation, updates: Vec<(Tuple, u64, isize)> },
+    AdvanceTime(u64),
+    WaitUntilCaughtUp(u64, oneshot::Sender<()>),
+    AddRelation(String),
+    RegisterRule { name, dependencies },
+    RemoveRule(String),
+    SetMaterialized { relation, tuples },
+    NotifyBaseUpdate(String),
+    ReadRelation(String, oneshot::Sender<Vec<Tuple>>),
+    Shutdown,
+}
+```
+
+### 2.5 DerivedRelationsManager
+
+**Purpose**: Manage materialized derived relations with validity tracking.
+
+```rust
+pub struct DerivedRelationsManager {
+    compiled_rules: HashMap<String, CompiledRule>,
+    materialized: HashMap<String, MaterializedRelation>,
+    base_to_derived: HashMap<String, HashSet<String>>,
+    derived_to_derived: HashMap<String, HashSet<String>>,
+    base_versions: HashMap<String, u64>,
+}
+
+pub struct MaterializedRelation {
+    tuples: Vec<Tuple>,
+    version: u64,
+    base_versions: HashMap<String, u64>,
+    valid: bool,
+    materialized_at: u64,
+}
+```
+
+**Key Features**:
+- **Dependency tracking** maps base relations to derived relations
+- **Cascade invalidation** automatically invalidates dependent materializations
+- **Validity tracking** ensures queries see consistent data
+- **Version management** for optimistic concurrency
+
+---
+
+## 3. Data Flow Paths
+
+### 3.1 Write Path
+
+```
+Insert Request
+    |
+    v
+FilePersist.append() --------------------------> Durability (WAL)
+    |
+    v
+KnowledgeGraph.insert_in_memory()
+    |
+    +-> engine.input_tuples.insert() -----------> In-memory state
+    |
+    +-> DDComputation.insert() (if enabled)
+        |
+        +-> InputSession.update(tuple, time, +1)
+        |
+        +-> notify_base_update() ---------------> Cascade invalidation
+            |
+            +-> Invalidate dependent materializations
+    |
+    v
+auto_rematerialize_invalid_rules() -------------> Recompute materializations
+    |
+    v
+publish_snapshot() -----------------------------> Atomic snapshot publication
+    |
+    +-> Merge valid materializations into input_tuples
+    |
+    +-> ArcSwap.store(new_snapshot)
+```
+
+### 3.2 Read Path (Query)
+
+```
+Query Request
+    |
+    v
+Handler.query_program()
+    |
+    +-> Validate session rules -----------------> validate_rule()
+    |
+    +-> Parse statements
+    |
+    +-> Collect session facts and rules
+    |
+    v
+StorageEngine.execute_query_with_session_facts_on()
+    |
+    v
+KnowledgeGraphSnapshot.execute_with_session_facts()
+    |
+    +-> Clone input_tuples (isolated copy)
+    |
+    +-> Add session facts to clone
+    |
+    +-> Build combined program:
+    |   +-> Persistent rules (skip if materialized)
+    |   +-> Session rules
+    |   +-> Query
+    |
+    +-> DatalogEngine.execute_tuples()
+        |
+        +-> CodeGenerator with num_workers config
+    |
+    v
+Results (concurrent queries unaffected)
+```
+
+### 3.3 Materialization Flow
+
+```
+Rule Registration
+    |
+    v
+RuleCatalog.register_rule()
+    |
+    +-> Stratification validation
+    |
+    +-> DDComputation.register_rule()
+        |
+        +-> DerivedRelationsManager.register_rule()
+    |
+    v
+auto_materialize_rule()
+    |
+    +-> Execute rule against current data
+    |
+    +-> DDComputation.set_materialized()
+    |
+    v
+publish_snapshot()
+    |
+    +-> Merge materialized tuples into snapshot
+    |
+    +-> Record materialized_relations set
+```
+
+---
+
+## 4. Consistency Guarantees
+
+### 4.1 Snapshot Consistency
+
+**Guarantee**: Point-in-time consistent views via immutable Arc-wrapped data.
+
+- Readers get consistent snapshots without holding locks
+- Snapshot cloning is O(1) due to Arc sharing
+- Session facts isolation via cloned HashMap
+- No TOCTOU vulnerabilities (lock held through publication)
+
+### 4.2 Write Consistency
+
+**Guarantee**: All writes are durable before acknowledgment.
+
+- WAL append before in-memory update
+- DD shadow writes propagate with proper timestamps
+- Cascade invalidation is atomic (compute-then-apply pattern)
+
+### 4.3 Read-After-Write Consistency
+
+**Guarantee**: Via `read_relation_consistent()` in DDComputation.
+
+```rust
+pub fn read_relation_consistent(&self, relation: &str) -> Result<Vec<Tuple>> {
+    // 1. Advance time to max_write_time + 1
+    // 2. Wait for DD frontier to pass
+    // 3. Read from arrangement cursor
+}
+```
+
+### 4.4 Session Isolation
+
+**Guarantee**: Session facts and rules don't affect concurrent queries.
+
+```rust
+pub fn execute_with_session_facts(
+    &self,
+    program: &str,
+    session_facts: Vec<(String, Tuple)>,
+) -> Result<Vec<Tuple>> {
+    // Clone input_tuples (isolated copy)
+    let mut isolated = (*self.input_tuples).clone();
+
+    // Add session facts to the clone
+    for (relation, tuple) in session_facts {
+        isolated.entry(relation).or_default().push(tuple);
+    }
+
+    // Execute against isolated state
+    // ...
+}
+```
+
+---
+
+## 5. Rule System
+
+### 5.1 Persistent Rules (`+` prefix)
+
+```datalog
++path(X, Y) <- edge(X, Y)
++path(X, Z) <- path(X, Y), edge(Y, Z)
+```
+
+**Characteristics**:
+- Stored in RuleCatalog (JSON persistence)
+- Registered with DDComputation for dependency tracking
+- Auto-materialized on registration and base data changes
+- Cascade invalidation when dependencies change
+
+### 5.2 Session Rules (no prefix)
+
+```datalog
+reachable_from(Y) <- path(1, Y)
+?reachable_from(X)
+```
+
+**Characteristics**:
+- Ephemeral (per-request lifecycle)
+- Validated for stratification before execution
+- Can reference materialized persistent rules
+- Computed fresh each time (not cached)
+
+### 5.3 Rule Validation
+
+```rust
+/// Validate single rule (self-negation, head safety, range restriction)
+pub fn validate_rule(rule: &Rule, name: &str) -> Result<(), String>;
+
+/// Validate rule set for stratification (negation cycles)
+pub fn validate_rules_stratification(rules: &[Rule]) -> Result<(), String>;
+```
+
+**Checks**:
+- **Self-negation**: Can't negate own head
+- **Head variable safety**: All head variables must be bound by positive atoms
+- **Range restriction**: Variables in negated atoms must be bound by positive atoms
+- **Stratification**: No mutual negation cycles
+
+---
+
+## 6. Data Types
+
+### 6.1 Unified Tuple Format
+
+```rust
+pub struct Tuple(pub Vec<Value>);
+
+pub enum Value {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    String(Arc<String>),
+    Vector(Arc<Vec<f32>>),
+    VectorInt8(Arc<Vec<i8>>),
+}
+```
+
+**Key Features**:
+- **Single format** throughout the system (Tuple2 removed)
+- **Arbitrary arity** tuples
+- **Vector support** for similarity search
+- **Abomonation** implemented for multi-worker DD
+
+### 6.2 Abomonation Implementation
+
+```rust
+// Proper entomb/exhume for multi-worker DD communication
+unsafe impl Abomonation for Value {
+    unsafe fn entomb<W: Write>(&self, write: &mut W) -> IoResult<()> {
+        // Write tag + data in custom format
+    }
+
+    unsafe fn exhume<'b>(&mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+        // Reconstruct Value from bytes with proper Arc allocations
+    }
+}
+```
+
+### 6.3 AST Display Implementations
+
+All AST types implement `Display` for consistent Datalog text formatting:
+
+```rust
+impl Display for Term { ... }      // Variables, constants, aggregates, etc.
+impl Display for Atom { ... }      // relation(arg1, arg2, ...)
+impl Display for BodyPredicate { ... }  // Positive, negated, comparison
+impl Display for Rule { ... }      // head <- body
+impl Display for ArithExpr { ... } // Arithmetic expressions
+impl Display for AggregateFunc { ... }  // count, sum, top_k<...>, etc.
+impl Display for ComparisonOp { ... }   // =, !=, <, <=, >, >=
+```
+
+**Usage**: All components use `term.to_string()` instead of duplicate formatting functions.
+
+---
+
+## 7. Execution Model
+
+### 7.1 Batch Execution (CodeGenerator)
+
+```rust
+pub struct CodeGenerator {
+    input_data: HashMap<String, Vec<Tuple>>,
+}
+
+pub struct ExecutionConfig {
+    num_workers: usize,
+}
+```
+
+**Execution Paths**:
+1. **Non-recursive**: Single `execute_directly` call
+2. **Transitive closure**: DD iterative scope with `SemigroupVariable`
+3. **General recursive**: DD `.iterative()` scope with live collections
+
+**Parallelization**:
+- Rayon-based parallel execution for scan/filter/map
+- Join queries use single-worker DD for correctness
+- Configurable via `num_workers`
+
+### 7.2 Incremental Execution (DDComputation)
+
+```rust
+impl DDComputation {
+    // Returns Result - no more panicking on initialization errors
+    pub fn new(relations: Vec<String>) -> Result<Self, String>;
+
+    pub fn insert(&self, relation: &str, tuples: Vec<Tuple>, time: u64) -> Result<()>;
+    pub fn delete(&self, relation: &str, tuples: Vec<Tuple>, time: u64) -> Result<()>;
+    pub fn read_relation_consistent(&self, relation: &str) -> Result<Vec<Tuple>>;
+}
+```
+
+**Features**:
+- **Fire-and-forget inserts**: Shadow writes don't block query execution
+- **Lazy time advancement**: Writes buffer, time only advances on consistent reads
+- **Dynamic relations**: InputSessions created at runtime
+
+---
+
+## 8. Persistence Layer
+
+### 8.1 WAL (Write-Ahead Log)
+
+```rust
+pub struct Update {
+    pub data: Tuple,
+    pub time: u64,
+    pub diff: i64,  // +1 for insert, -1 for delete
+}
+
+pub struct WalEntry {
+    pub shard: String,
+    pub update: Update,
+}
+```
+
+### 8.2 Batch Files (Parquet)
+
+```rust
+pub struct ShardMeta {
+    pub shard: String,
+    pub batches: Vec<BatchMeta>,
+    pub since: u64,   // Compaction frontier
+    pub upper: u64,   // Write frontier
+}
+```
+
+### 8.3 Recovery Sequence
+
+```
+1. Load shard metadata from disk
+2. Create DDComputation for each KG
+3. Replay batch files through InputSessions
+4. Replay WAL entries since last batch
+5. Step workers until frontier advances past WAL upper
+6. DDComputation is live and ready
+```
+
+---
+
+## 9. Protocol Layer
+
+### 9.1 Handler
+
+```rust
+pub struct Handler {
+    storage: Arc<RwLock<StorageEngine>>,
+    start_time: Instant,
+    query_count: AtomicU64,
+    insert_count: AtomicU64,
+}
+```
+
+**Key Features**:
+- **Read lock** for all query operations (concurrent queries)
+- **Explicit KG naming** via `_on()`, `_into()`, `_from()` variants
+- **Session fact isolation** via `execute_query_with_session_facts_on()`
+- **Per-KG schema validation** delegated to StorageEngine (schemas isolated per KG)
+
+### 9.2 Statement Types
+
+```rust
+pub enum Statement {
+    SchemaDecl(SchemaDecl),
+    PersistentRule(Rule),      // +name(...) <- body
+    SessionRule(Rule),          // name(...) <- body
+    PersistentFact(Fact),      // +relation(values)
+    SessionFact(Fact),          // relation(values)
+    Query(Query),               // ?body
+    ConditionalDelete(Rule),   // -relation(X) <- condition
+    DotCommand(DotCommand),    // .kg, .rule, .rel, etc.
+}
+```
+
+---
+
+## 10. HNSW Indexing Readiness
+
+### 10.1 Prerequisites (All Complete)
+
+| Prerequisite | Status | Description |
+|-------------|--------|-------------|
+| Abomonation fix | Done | Proper exhume() for multi-worker DD |
+| Generic timestamps | Done | CodeGenerator uses `G::Timestamp: Lattice + Ord + Default` |
+| DDComputation | Done | Persistent incremental computation |
+| Insert path wiring | Done | Shadow writes to DDComputation |
+| Consistent reads | Done | Lazy time advancement + frontier tracking |
+| Rule materialization | Done | DerivedRelationsManager with validity tracking |
+| Auto-materialization | Done | Persistent rules auto-materialize |
+| Session isolation | Done | Cloned snapshots for session facts |
+
+### 10.2 HNSW Integration Points
+
+```
+Insert -> Persist WAL -> In-Memory State -> DDComputation
+                                              |
+                                              v
+                                        Arrangement
+                                              |
+                                              v
+                                    [HNSW INDEX SINK]
+                                              |
+                                    On insert: hnsw.insert(embedding, id)
+                                    On delete: tombstone.add(id)
+```
+
+### 10.3 Required Extensions for HNSW
+
+1. **IndexManager** in KnowledgeGraph
+2. **IRNode::IndexScan** in IR
+3. **`.index create/drop/rebuild`** commands
+4. **Query planning** for distance predicates
+
+---
+
+## 11. Configuration
+
+### 11.1 Performance Configuration
+
+```toml
+[storage.performance]
+num_threads = 4       # Workers for parallel execution
+batch_size = 1000     # Batch size for operations
+```
+
+### 11.2 Storage Configuration
+
+```toml
+[storage]
+data_dir = "./data"
+auto_create_kg = true
+default_kg = "default"
+```
+
+### 11.3 Environment Variables
+
+All environment variables use the `IL_` prefix:
+
+| Variable | Purpose |
+|----------|---------|
+| `IL_DEBUG` | Enable debug output for IR building, execution, and optimization |
+| `IL_DEBUG_SESSION` | Enable debug output for session fact handling |
+
+---
+
+## 12. Query Optimization
+
+InputLayer includes query optimization infrastructure for improving join performance.
+
+### 12.1 Optimization Modules
+
+| Module | File | Purpose |
+|--------|------|---------|
+| **Bloom Filter** | `src/bloom_filter.rs` | Probabilistic set membership testing |
+| **Hash Index** | `src/hash_index.rs` | O(1) join key lookups with Bloom acceleration |
+| **Statistics** | `src/statistics.rs` | Cardinality and selectivity estimation |
+| **Join Planning** | `src/join_planning/mod.rs` | Join ordering via MST algorithm |
+| **SIP Rewriting** | `src/sip_rewriting/mod.rs` | Sideways Information Passing |
+| **Subplan Sharing** | `src/subplan_sharing/mod.rs` | Common subexpression elimination |
+
+### 12.2 Bloom Filter
+
+Space-efficient probabilistic data structure for fast set membership testing.
+
+```rust
+use inputlayer::bloom_filter::{BloomFilter, BloomFilterBuilder};
+
+// Create filter for 10K elements with 1% false positive rate
+let mut filter = BloomFilter::new(10_000, 0.01);
+filter.insert(&"key1");
+filter.insert(&"key2");
+
+// Check membership (no false negatives, possible false positives)
+if filter.might_contain(&"key1") {
+    // Definitely present or false positive
+}
+```
+
+**Properties:**
+- No false negatives: if `might_contain()` returns `false`, the element is definitely not present
+- Possible false positives: if `might_contain()` returns `true`, element might or might not be present
+- Space efficient: ~10 bits per element for 1% false positive rate
+
+### 12.3 Hash Index
+
+Accelerates join key lookups with Bloom filter pre-filtering.
+
+```rust
+use inputlayer::hash_index::{HashIndex, HashIndexManager, JoinKeySpec};
+
+// Create index for edge(src, dst) on column 0
+let spec = JoinKeySpec::new("edge", vec![0]);
+let mut index = HashIndex::new(spec);
+
+// Build from tuples
+index.build_from_tuples(&edge_tuples);
+
+// Lookup with Bloom filter check first
+if let Some(matching) = index.lookup(&key) {
+    for tuple in matching {
+        // Process matching tuples
+    }
+}
+```
+
+### 12.4 Statistics Manager
+
+Collects and maintains relation statistics for query optimization.
+
+```rust
+use inputlayer::statistics::{StatisticsManager, RelationStats};
+
+let mut stats_manager = StatisticsManager::new();
+
+// Update statistics for a relation
+stats_manager.update_stats("edge", &edge_tuples);
+
+// Get cardinality estimate
+if let Some(stats) = stats_manager.get_stats("edge") {
+    println!("Cardinality: {}", stats.cardinality);
+    println!("Distinct values in col 0: {}", stats.column_stats[0].distinct_count);
+}
+
+// Estimate join selectivity
+let selectivity = stats_manager.estimate_join_selectivity("edge", 0, "node", 0);
+```
+
+### 12.5 BloomSemijoin IR Node
+
+The IR includes a `BloomSemijoin` node for semijoin reduction:
+
+```rust
+IRNode::BloomSemijoin {
+    input: Box<IRNode>,           // Relation to filter
+    filter_source: Box<IRNode>,   // Relation providing filter keys
+    input_key_columns: Vec<usize>,
+    filter_key_columns: Vec<usize>,
+    output_schema: Vec<String>,
+}
+```
+
+This node filters `input` to keep only tuples whose key columns exist in `filter_source`, implemented via Differential Dataflow's `semijoin()` operator.
+
+---
+
+## 13. File Reference
+
+| File | Purpose |
+|------|---------|
+| `src/lib.rs` | DatalogEngine, public API |
+| `src/ast/mod.rs` | AST types with Display implementations |
+| `src/value/mod.rs` | Value, Tuple, Abomonation |
+| `src/storage_engine/mod.rs` | StorageEngine, KnowledgeGraph |
+| `src/storage_engine/snapshot.rs` | KnowledgeGraphSnapshot |
+| `src/incremental.rs` | IncrementalEngine |
+| `src/derived_relations.rs` | DerivedRelationsManager |
+| `src/rule_catalog.rs` | RuleCatalog, validation |
+| `src/schema/catalog.rs` | SchemaCatalog (per-KG) |
+| `src/code_generator/mod.rs` | CodeGenerator, execution |
+| `src/protocol/handler.rs` | Request handling |
+| `src/storage/persist/mod.rs` | FilePersist, WAL, batches |
+| `src/bloom_filter.rs` | Bloom filter implementation |
+| `src/hash_index.rs` | Hash index with Bloom acceleration |
+| `src/statistics.rs` | Statistics collection and estimation |
+| `src/ir/mod.rs` | Intermediate Representation nodes |
+| `src/join_planning/mod.rs` | Join order optimization |
+| `src/sip_rewriting/mod.rs` | Sideways Information Passing |
+| `src/subplan_sharing/mod.rs` | Common subexpression elimination |
+
+---
+
+## 14. Architectural Patterns
+
+### 14.1 Arc-Wrapped Data for Sharing
+
+All persistent data wrapped in Arc for O(1) cloning:
+```rust
+input_tuples: Arc<HashMap<String, Vec<Tuple>>>
+rules: Arc<Vec<Rule>>
+materialized_relations: Arc<HashSet<String>>
+```
+
+### 14.2 ArcSwap for Atomic Publishing
+
+```rust
+self.snapshot.store(Arc::new(new_snapshot));  // O(1) atomic swap
+```
+
+### 14.3 Fire-and-Forget Shadow Writes
+
+```rust
+dd.insert(relation, tuples, time)?;  // Returns immediately
+// DD processes asynchronously
+```
+
+### 14.4 Lazy Time Advancement
+
+```rust
+max_write_time.store(time, Ordering::Relaxed);  // Track writes
+// Only advance on read: max_write_time + 1
+```
+
+### 14.5 Atomic Cascade Invalidation
+
+```rust
+// Compute invalidation set (read-only)
+let to_invalidate = self.compute_invalidation_set(base_relation);
+
+// Bump version
+*version += 1;
+
+// Apply all invalidations atomically
+for rel in &to_invalidate {
+    mat.invalidate();
+}
+```
+
+### 14.6 Session Isolation via Cloning
+
+```rust
+let mut isolated = (*snapshot.input_tuples).clone();
+isolated.insert(session_fact);
+// Execute against isolated copy
+```
+
+---
+
+## 15. Summary
+
+InputLayer's architecture provides:
+
+| Capability | Implementation |
+|-----------|----------------|
+| **Incremental computation** | DDComputation with persistent arrangements |
+| **Lock-free reads** | ArcSwap snapshot system |
+| **Concurrent writes** | DashMap + per-KG locking |
+| **Rule materialization** | DerivedRelationsManager with auto-rematerialization |
+| **Schema isolation** | Per-KG SchemaCatalog |
+| **Session isolation** | Cloned snapshots for ephemeral data |
+| **Parallel execution** | Rayon-based multi-worker batch queries |
+| **Durability** | WAL + Parquet batch files |
+| **Consistency** | Frontier tracking, atomic cascade invalidation |
+
+**Test Coverage**: ~3107 unit tests + ~1121 snapshot tests = ~4228 total, all passing.
+
+**HNSW Readiness**: All prerequisites complete. Indexes can attach as arrangement sinks.

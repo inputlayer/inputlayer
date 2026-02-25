@@ -241,7 +241,7 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
         .route("/api/ws-docs", get(asyncapi_docs));
 
     // Mount routes at root (backward compat) and /v1/ prefix (#25)
-    let mut app = Router::new()
+    let mut api_app = Router::new()
         .merge(api_routes.clone())
         .nest("/v1", api_routes);
 
@@ -250,7 +250,7 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
     // Health/live/ready endpoints and WebSocket paths bypass auth.
     // NOTE: Layer ordering matters! In Axum, .layer(A).layer(B) means B runs first.
     // Auth middleware needs Extension<Handler>, so Extension must be the OUTER layer.
-    app = app
+    api_app = api_app
         .layer(middleware::from_fn(auth_middleware))
         .layer(Extension(handler));
 
@@ -263,7 +263,7 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
         } else {
             None
         };
-    app = app
+    api_app = api_app
         .layer(middleware::from_fn(connection_limit_middleware))
         .layer(Extension(conn_semaphore));
 
@@ -276,7 +276,12 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
         } else {
             None
         };
-    app = app.layer(Extension(WsSemaphore(ws_semaphore)));
+    api_app = api_app.layer(Extension(WsSemaphore(ws_semaphore)));
+
+    // Outer router: API routes + GUI static files.
+    // GUI static files are served as a fallback (no auth required).
+    // Shared middleware (CORS, body limit, rate limit, version header) applies to both.
+    let mut app = Router::new().merge(api_app);
 
     if let Some(cors) = cors {
         app = app.layer(cors);
@@ -294,7 +299,7 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
         .layer(middleware::from_fn(ip_rate_limit_middleware))
         .layer(Extension(ip_limiter));
 
-    // Serve GUI static files if enabled
+    // Serve GUI static files if enabled (outside auth middleware — GUI is public)
     if config.gui.enabled {
         let static_dir = &config.gui.static_dir;
         let index_file = format!("{static_dir}/index.html");

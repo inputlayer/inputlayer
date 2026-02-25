@@ -1,0 +1,175 @@
+# Installation
+
+Install and run InputLayer on your system.
+
+## Prerequisites
+
+- **Rust 1.88+** - InputLayer is written in Rust
+- **Cargo** - Rust's package manager (comes with Rust)
+
+### Installing Rust
+
+If you don't have Rust installed, use [rustup](https://rustup.rs/):
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+After installation, restart your terminal or run:
+```bash
+source $HOME/.cargo/env
+```
+
+Verify installation:
+```bash
+rustc --version  # Should show 1.88.0 or higher
+cargo --version
+```
+
+## Installation Options
+
+### Option 1: Install from crates.io (Recommended)
+
+```bash
+cargo install inputlayer --bin inputlayer-client
+```
+
+This installs the `inputlayer-client` binary to `~/.cargo/bin/`.
+
+### Option 2: Build from Source
+
+```bash
+# Clone the repository
+git clone https://github.com/inputlayer/inputlayer.git
+cd inputlayer
+
+# Build in release mode
+cargo build --release
+
+# The binaries are in target/release/
+./target/release/inputlayer-server   # Start server first
+./target/release/inputlayer-client   # Then connect with client
+```
+
+### Option 3: Run without Installing
+
+For quick testing without installing:
+
+```bash
+cargo run --release --bin inputlayer-server &
+cargo run --release --bin inputlayer-client
+```
+
+## Verify Installation
+
+Start the server, then connect with the client:
+
+```bash
+inputlayer-server &
+inputlayer-client
+```
+
+You should see:
+
+```
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+```
+
+Try a simple command:
+
+```
+> .kg list
+Knowledge graphs:
+  default
+```
+
+Type `.quit` to exit.
+
+## Configuration (Optional)
+
+InputLayer works out of the box with sensible defaults. For customization, create a config file:
+
+**Location options:**
+1. `./config.toml` (current directory, auto-loaded)
+2. `./config.local.toml` (local overrides, git-ignored, auto-loaded)
+3. Custom path via `--config <path>` CLI flag
+
+**Example configuration:**
+
+```toml
+[storage]
+data_dir = "./data"
+default_knowledge_graph = "default"
+
+[storage.performance]
+num_threads = 4
+
+[storage.persist]
+buffer_size = 10000
+durability_mode = "batched"
+```
+
+## Data Directory
+
+By default, InputLayer stores data in `./data/` (current working directory). Set `data_dir` in the config file to customize.
+
+The data directory contains:
+```
+./data/
+├── default/           # Default knowledge graph
+│   └── rules/         # Persistent rule definitions (catalog.json)
+├── persist/           # DD-native persist layer
+│   ├── shards/        # Shard metadata
+│   ├── batches/       # Compacted batch files
+│   └── wal/           # Write-ahead log
+└── metadata/          # System metadata
+```
+
+## Next Steps
+
+Now that you have InputLayer installed:
+
+1. **[Your First Program](first-program)** - Write your first InputLayer program
+2. **[Core Concepts](core-concepts)** - Understand facts, rules, and queries
+3. **[REPL Guide](repl)** - Master the interactive environment
+
+## Troubleshooting
+
+### Command not found: inputlayer-client
+
+Make sure `~/.cargo/bin` is in your PATH:
+
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"
+```
+
+Add this line to your `~/.bashrc` or `~/.zshrc` for persistence.
+
+### Build fails with missing dependencies
+
+On some Linux systems, you may need development libraries:
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install build-essential pkg-config libssl-dev
+
+# Fedora
+sudo dnf install gcc pkg-config openssl-devel
+
+# macOS (if needed)
+xcode-select --install
+```
+
+### Permission denied when writing data
+
+Ensure you have write permissions to the data directory:
+
+```bash
+mkdir -p ./data
+chmod 755 ./data
+```

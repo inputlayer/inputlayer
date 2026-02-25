@@ -10,7 +10,7 @@ const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono"
 
 export const metadata: Metadata = {
   title: "InputLayer",
-  description: "Modern studio for managing Datalog databases, relations, and queries",
+  description: "Modern studio for managing InputLayer databases, relations, and queries",
   icons: {
     icon: [
       {

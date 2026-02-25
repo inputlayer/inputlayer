@@ -99,7 +99,7 @@ export function ViewPerformanceTab({ view }: ViewPerformanceTabProps) {
             <FileText className="h-4 w-4 text-muted-foreground" />
             <h3 className="text-sm font-medium">Rule Definition</h3>
           </div>
-          <p className="text-xs text-muted-foreground mt-0.5">Datalog clauses defining this rule</p>
+          <p className="text-xs text-muted-foreground mt-0.5">Clauses defining this rule</p>
         </div>
         <div className="p-4">
           <pre className="rounded-md bg-muted/30 p-3 font-mono text-xs text-foreground overflow-x-auto">
