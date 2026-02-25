@@ -369,10 +369,10 @@ front-deploy: front-build
 	touch "$$TMPDIR/.nojekyll"; \
 	cd "$$TMPDIR" && \
 	git init && \
-	git checkout -b gh-pages && \
+	git checkout -b main && \
 	git add -A && \
 	git commit -m "Deploy website" && \
 	git remote add origin git@github.com:inputlayer/inputlayer.github.io.git && \
-	git push -f origin gh-pages && \
+	git push -f origin main && \
 	cd / && rm -rf "$$TMPDIR"; \
 	echo "Deployed to https://inputlayer.github.io/"
