@@ -145,4 +145,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-AGPL-3.0-or-later - see [LICENSE](LICENSE).
+This project is dual-licensed:
+
+- **AGPL-3.x** for open-source use — see [LICENSE](LICENSE)
+- **Commercial License** available for organizations that cannot comply with AGPL terms
+
+For commercial licensing inquiries, please [email us](mailto:sam@inputlayer.ai).

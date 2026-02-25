@@ -2,9 +2,9 @@
 
 Welcome to InputLayer! This guide will help you get started contributing to the project.
 
-> **Project Status: Pre-Alpha**
+> **Project Status: Alpha**
 >
-> We're in active development with no external users yet. This means:
+> We're in active development. This means:
 > - **No backwards compatibility requirements** - APIs can change freely
 > - **Breaking changes are encouraged** if they improve the codebase
 > - **Delete deprecated code immediately** - don't maintain legacy paths
