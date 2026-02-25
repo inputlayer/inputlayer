@@ -1,0 +1,382 @@
+# Temporal Reasoning Tutorial
+
+14 built-in temporal functions: event processing, time-decay scoring, and interval analysis.
+
+## Timestamp Basics
+
+Timestamps in InputLayer are Unix milliseconds (64-bit integers):
+
+```datalog
+// Store events with timestamps
++events(1, "login", 1704067200000)      // 2024-01-01 00:00:00 UTC
++events(2, "purchase", 1704153600000)   // 2024-01-02 00:00:00 UTC
++events(3, "logout", 1704240000000)     // 2024-01-03 00:00:00 UTC
+```
+
+### Common Time Constants
+
+| Duration | Milliseconds |
+|----------|-------------|
+| 1 second | 1000 |
+| 1 minute | 60000 |
+| 1 hour | 3600000 |
+| 1 day | 86400000 |
+| 1 week | 604800000 |
+
+---
+
+## Core Time Functions
+
+### `time_now()`
+
+Get the current timestamp:
+
+```datalog
+? Now = time_now()
+```
+
+**Returns:** Current Unix timestamp in milliseconds.
+
+### `time_diff(t1, t2)`
+
+Calculate the difference between two timestamps:
+
+```datalog
+? events(Id1, _, T1), events(Id2, _, T2),
+   Id1 < Id2,
+   Diff = time_diff(T1, T2)
+```
+
+**Returns:** `t1 - t2` in milliseconds (can be negative).
+
+### `time_add(ts, duration_ms)`
+
+Add duration to a timestamp:
+
+```datalog
+// Calculate when session expires (24 hours after login)
++session_expires(UserId, time_add(LoginTime, 86400000)) <-
+    login_events(UserId, LoginTime)
+
+? session_expires(UserId, ExpiresAt)
+```
+
+### `time_sub(ts, duration_ms)`
+
+Subtract duration from a timestamp:
+
+```datalog
+// Find the timestamp 1 hour ago
+? Now = time_now(),
+   OneHourAgo = time_sub(Now, 3600000)
+```
+
+---
+
+## Time Comparisons
+
+### `time_before(t1, t2)`
+
+Check if t1 is before t2:
+
+```datalog
+// Find events that happened before a cutoff
++old_events(Id, Type) <-
+    events(Id, Type, Ts),
+    cutoff(Cutoff),
+    time_before(Ts, Cutoff)
+```
+
+**Returns:** Boolean `true` if t1 < t2.
+
+### `time_after(t1, t2)`
+
+Check if t1 is after t2:
+
+```datalog
+// Find events after a specific date
++recent_events(Id, Type) <-
+    events(Id, Type, Ts),
+    start_date(Start),
+    time_after(Ts, Start)
+```
+
+**Returns:** Boolean `true` if t1 > t2.
+
+### `time_between(ts, start, end)`
+
+Check if a timestamp falls within a range:
+
+```datalog
+// Find events within a time window
++in_window(Id, Type) <-
+    events(Id, Type, Ts),
+    window_start(Start),
+    window_end(End),
+    time_between(Ts, Start, End)
+```
+
+**Returns:** Boolean `true` if start <= ts <= end.
+
+### `within_last(ts, now, duration_ms)`
+
+Check if a timestamp is within a duration of a reference time:
+
+```datalog
+// Find events from the last 24 hours
++recent(Id, Type) <-
+    events(Id, Type, Ts),
+    Now = time_now(),
+    within_last(Ts, Now, 86400000)
+
+? recent(Id, Type)
+```
+
+**Returns:** Boolean `true` if `now - duration_ms <= ts <= now`.
+
+---
+
+## Time Decay Functions
+
+Time decay functions weight recent events more heavily than older ones.
+
+### `time_decay(ts, now, half_life_ms)`
+
+Exponential decay based on half-life:
+
+```datalog
+// Score events with exponential decay (half-life = 7 days)
++event_score(Id, Type, time_decay(Ts, Now, 604800000)) <-
+    events(Id, Type, Ts),
+    Now = time_now()
+
+? event_score(Id, Type, Score)
+```
+
+**Returns:** Float in range [0, 1]. Score = 0.5 when age equals half-life.
+
+**Formula:** `score = 2^(-age / half_life)`
+
+| Age | Score |
+|-----|-------|
+| 0 | 1.0 |
+| half_life | 0.5 |
+| 2 * half_life | 0.25 |
+| 3 * half_life | 0.125 |
+
+### `time_decay_linear(ts, now, max_age_ms)`
+
+Linear decay that reaches zero at max_age:
+
+```datalog
+// Score events with linear decay (max age = 30 days)
++event_score(Id, Type, time_decay_linear(Ts, Now, 2592000000)) <-
+    events(Id, Type, Ts),
+    Now = time_now()
+
+? event_score(Id, Type, Score)
+```
+
+**Returns:** Float in range [0, 1]. Score = 0 when age >= max_age.
+
+**Formula:** `score = max(0, 1 - age / max_age)`
+
+| Age | Score |
+|-----|-------|
+| 0 | 1.0 |
+| max_age / 2 | 0.5 |
+| max_age | 0.0 |
+| > max_age | 0.0 |
+
+---
+
+## Interval Functions
+
+Interval functions help with scheduling, calendar analysis, and time-range queries.
+
+### `interval_duration(start, end)`
+
+Calculate the duration of an interval:
+
+```datalog
++meeting(1, "Standup", 1704114000000, 1704115800000)  // 30 min meeting
+
+? meeting(Id, Name, Start, End),
+   Duration = interval_duration(Start, End)
+```
+
+**Returns:** `end - start` in milliseconds.
+
+### `point_in_interval(ts, start, end)`
+
+Check if a timestamp falls within an interval:
+
+```datalog
+// Check if current time is during business hours
++during_business_hours(true) <-
+    Now = time_now(),
+    business_start(Start),
+    business_end(End),
+    point_in_interval(Now, Start, End)
+```
+
+**Returns:** Boolean `true` if start <= ts <= end.
+
+### `intervals_overlap(s1, e1, s2, e2)`
+
+Check if two intervals overlap:
+
+```datalog
+// Find conflicting meetings
++conflict(M1, M2) <-
+    meeting(M1, _, S1, E1),
+    meeting(M2, _, S2, E2),
+    M1 < M2,
+    intervals_overlap(S1, E1, S2, E2)
+
+? conflict(M1, M2)
+```
+
+**Returns:** Boolean `true` if the intervals share any time.
+
+### `interval_contains(s1, e1, s2, e2)`
+
+Check if interval 1 fully contains interval 2:
+
+```datalog
+// Find meetings that fit entirely within a time block
++fits_in_block(MeetingId) <-
+    meeting(MeetingId, _, MStart, MEnd),
+    time_block(BlockStart, BlockEnd),
+    interval_contains(BlockStart, BlockEnd, MStart, MEnd)
+```
+
+**Returns:** Boolean `true` if [s2, e2] is entirely within [s1, e1].
+
+---
+
+## Practical Examples
+
+### Event Stream Analysis
+
+```datalog
+// Store user activity events
++activity[(1, "alice", "view", 1704067200000),
+          (2, "bob", "click", 1704070800000),
+          (3, "alice", "purchase", 1704074400000),
+          (4, "alice", "view", 1704078000000)]
+
+// Count events per user in last hour
++hourly_activity(User, count<Id>) <-
+    activity(Id, User, _, Ts),
+    Now = time_now(),
+    within_last(Ts, Now, 3600000)
+
+? hourly_activity(User, Count)
+```
+
+### Time-Decayed Recommendations
+
+```datalog
+// User interactions with items
++interactions[(101, 1, "view", 1704067200000),
+              (101, 2, "purchase", 1704153600000),
+              (101, 1, "view", 1704240000000)]
+
+// Weight purchases higher than views
++purchase_score(UserId, ItemId, sum<Score>) <-
+    interactions(UserId, ItemId, "purchase", Ts),
+    Now = time_now(),
+    Decay = time_decay(Ts, Now, 604800000),  // 7-day half-life
+    Score = 10.0 * Decay
+
++view_score(UserId, ItemId, sum<Score>) <-
+    interactions(UserId, ItemId, "view", Ts),
+    Now = time_now(),
+    Decay = time_decay(Ts, Now, 604800000),
+    Score = 1.0 * Decay
+
++item_score(UserId, ItemId, sum<S>) <-
+    purchase_score(UserId, ItemId, S)
++item_score(UserId, ItemId, sum<S>) <-
+    view_score(UserId, ItemId, S)
+
+// Get top items for user
++recommendations(UserId, ItemId, top_k<5, Score, desc>) <-
+    item_score(UserId, ItemId, Score)
+
+? recommendations(101, ItemId, Score)
+```
+
+### Session Detection
+
+```datalog
+// Detect sessions (gaps > 30 minutes = new session)
++page_views[(1, "alice", "/home", 1704067200000),
+            (2, "alice", "/products", 1704067500000),
+            (3, "alice", "/cart", 1704069000000),
+            (4, "alice", "/checkout", 1704072600000)]  // 1 hour later
+
++session_boundary(UserId, ViewId) <-
+    page_views(ViewId, UserId, _, Ts),
+    page_views(PrevId, UserId, _, PrevTs),
+    PrevId < ViewId,
+    Diff = time_diff(PrevTs, Ts),
+    Diff > 1800000  // 30 minute gap
+
+? session_boundary(UserId, ViewId)
+```
+
+### Meeting Scheduler
+
+```datalog
+// Existing meetings
++meetings[(1, "Team Sync", 1704114000000, 1704117600000),
+          (2, "1:1", 1704121200000, 1704123000000),
+          (3, "Planning", 1704128400000, 1704135600000)]
+
+// Available time slots (potential meetings)
++slots[(100, 1704106800000, 1704114000000),   // 9am-11am
+       (101, 1704117600000, 1704121200000),   // 12pm-1pm
+       (102, 1704123000000, 1704128400000)]   // 1:30pm-3pm
+
+// Find free slots (no overlap with existing meetings)
++free_slots(SlotId, Start, End) <-
+    slots(SlotId, Start, End),
+    !has_conflict(SlotId)
+
++has_conflict(SlotId) <-
+    slots(SlotId, S1, E1),
+    meetings(_, _, S2, E2),
+    intervals_overlap(S1, E1, S2, E2)
+
+? free_slots(SlotId, Start, End)
+```
+
+---
+
+## Function Reference
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `time_now` | `time_now()` | Current timestamp (ms) |
+| `time_diff` | `time_diff(t1, t2)` | t1 - t2 (ms) |
+| `time_add` | `time_add(ts, duration)` | ts + duration |
+| `time_sub` | `time_sub(ts, duration)` | ts - duration |
+| `time_before` | `time_before(t1, t2)` | t1 < t2 |
+| `time_after` | `time_after(t1, t2)` | t1 > t2 |
+| `time_between` | `time_between(ts, start, end)` | start <= ts <= end |
+| `within_last` | `within_last(ts, now, duration)` | ts within duration of now |
+| `time_decay` | `time_decay(ts, now, half_life)` | Exponential decay [0,1] |
+| `time_decay_linear` | `time_decay_linear(ts, now, max_age)` | Linear decay [0,1] |
+| `interval_duration` | `interval_duration(start, end)` | end - start (ms) |
+| `point_in_interval` | `point_in_interval(ts, start, end)` | ts in [start, end] |
+| `intervals_overlap` | `intervals_overlap(s1, e1, s2, e2)` | Intervals share time |
+| `interval_contains` | `interval_contains(s1, e1, s2, e2)` | [s1,e1] contains [s2,e2] |
+
+---
+
+## Next Steps
+
+- [Vector Search](vectors) - Combine temporal decay with similarity
+- [Configuration](configuration) - Persistence settings for event data

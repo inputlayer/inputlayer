@@ -1,0 +1,202 @@
+# Authentication
+
+InputLayer requires authentication for all connections. The server bootstraps an admin user on first start.
+
+## Bootstrap Admin
+
+On first launch, the server creates a default admin account:
+
+- **Username**: `admin`
+- **Password**: Set via `INPUTLAYER_ADMIN_PASSWORD` environment variable, or auto-generated (printed to stderr) if unset
+
+> **Important**: Always set `INPUTLAYER_ADMIN_PASSWORD` in production deployments.
+
+```bash
+INPUTLAYER_ADMIN_PASSWORD=my-secure-password inputlayer-server
+```
+
+Or in configuration:
+
+```toml
+[http.auth]
+bootstrap_admin_password = "my-secure-password"
+```
+
+## User Management
+
+Manage users via REPL commands (requires admin privileges):
+
+### Create User
+
+```
+.user create alice secretpassword viewer
+```
+
+Roles: `admin`, `editor`, `viewer`
+
+### List Users
+
+```
+.user list
+```
+
+### Delete User
+
+```
+.user drop alice
+```
+
+### Change Password
+
+```
+.user password alice new-secret
+```
+
+### Change Role
+
+```
+.user role alice editor
+```
+
+## Knowledge Graph Access Control
+
+Control which users can access which knowledge graphs.
+
+### Grant Access
+
+```
+.kg acl grant mydb alice viewer
+.kg acl grant mydb alice editor
+.kg acl grant mydb alice owner
+```
+
+### Revoke Access
+
+```
+.kg acl revoke mydb alice
+```
+
+### List ACLs
+
+```
+.kg acl list mydb
+```
+
+### Permission Levels
+
+| Level | Capabilities |
+|-------|-------------|
+| `viewer` | Query data, list relations and rules |
+| `editor` | Insert/delete facts, create/modify rules, manage indexes |
+| `owner` | Drop knowledge graphs, manage ACLs for this KG |
+
+Permissions are cumulative — `editor` includes `viewer`, `owner` includes `editor`.
+
+## WebSocket Authentication
+
+Every WebSocket connection must authenticate before sending queries.
+
+### Auth Handshake
+
+After connecting to `ws://host:port/ws`, the first message must be an auth request:
+
+```json
+{
+  "type": "login",
+  "username": "admin",
+  "password": "admin"
+}
+```
+
+Or with an API key:
+
+```json
+{
+  "type": "authenticate",
+  "api_key": "your-api-key"
+}
+```
+
+The server responds with:
+
+```json
+{
+  "type": "authenticated",
+  "session_id": "a1b2c3d4",
+  "knowledge_graph": "default",
+  "version": "0.1.0",
+  "role": "admin"
+}
+```
+
+Or on failure:
+
+```json
+{
+  "type": "auth_error",
+  "message": "Invalid credentials"
+}
+```
+
+The server allows 30 seconds for authentication. Any non-auth message before authentication results in disconnection.
+
+## REST API Authentication
+
+REST endpoints (except health/live/ready) require a Bearer token:
+
+```bash
+curl -H "Authorization: Bearer your-api-key" http://localhost:8080/metrics
+```
+
+## API Keys
+
+API keys provide machine-to-machine authentication without passwords.
+
+### Create API Key
+
+```
+.apikey create my-service-key
+```
+
+### List API Keys
+
+```
+.apikey list
+```
+
+### Revoke API Key
+
+```
+.apikey revoke my-service-key
+```
+
+You can also set an API key for the CLI client via environment variable:
+
+```bash
+export INPUTLAYER_API_KEY=your-api-key
+inputlayer-client
+```
+
+## Python SDK Authentication
+
+```python
+from inputlayer import InputLayer
+
+# Username/password
+async with InputLayer("ws://localhost:8080/ws", username="admin", password="admin") as il:
+    ...
+
+# API key
+async with InputLayer("ws://localhost:8080/ws", api_key="your-key") as il:
+    ...
+```
+
+## Security Best Practices
+
+1. **Change the default admin password** immediately after deployment
+2. **Use TLS** via a reverse proxy (see [Deployment](deployment)) — credentials are sent in plaintext over WebSocket
+3. **Create per-user accounts** rather than sharing the admin account
+4. **Use API keys** for automated services and CI/CD pipelines
+5. **Grant minimum required permissions** — use `viewer` access for dashboards, `editor` for ETL jobs
+6. **Bind to localhost** when using a reverse proxy: set `host = "127.0.0.1"` in config
+7. **Rotate API keys** periodically and revoke unused ones

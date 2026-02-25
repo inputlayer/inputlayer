@@ -108,6 +108,26 @@ jobs:
       - name: Check documentation
         run: make doc-check
 
+  website:
+    name: Website
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: front/package-lock.json
+
+      - name: Install dependencies
+        working-directory: front
+        run: npm ci
+
+      - name: Build website
+        working-directory: front
+        run: npm run build
+
   msrv:
     name: Minimum Supported Rust Version
     runs-on: blacksmith-4vcpu-ubuntu-2404

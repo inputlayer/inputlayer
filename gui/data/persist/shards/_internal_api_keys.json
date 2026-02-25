@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "name": "_internal:api_keys",
+  "batches": [
+    {
+      "id": "2",
+      "path": "./data/persist/batches/2.parquet",
+      "lower": 2,
+      "upper": 3,
+      "len": 1
+    }
+  ],
+  "since": 0,
+  "upper": 3,
+  "total_updates": 1
+}

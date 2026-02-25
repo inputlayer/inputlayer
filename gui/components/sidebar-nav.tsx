@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { FileCode, Network, Database } from "lucide-react"
+import { FileCode, Network, Database, BookOpen } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 const mainNavItems = [
@@ -12,18 +12,29 @@ const mainNavItems = [
 ]
 
 const bottomNavItems = [
+  { title: "Documentation", href: "/docs", icon: BookOpen },
   { title: "Database", href: "/database", icon: Database },
 ]
 
-export function SidebarNav() {
+interface SidebarNavProps {
+  /** When false, only show Documentation link (hide studio-specific items) */
+  connectedOnly?: boolean
+}
+
+export function SidebarNav({ connectedOnly = true }: SidebarNavProps) {
   const pathname = usePathname()
+
+  const visibleMain = connectedOnly ? mainNavItems : []
+  const visibleBottom = connectedOnly
+    ? bottomNavItems
+    : bottomNavItems.filter((item) => item.href === "/docs")
 
   return (
     <TooltipProvider delayDuration={0}>
       <div className="flex h-full w-14 flex-col border-r border-border/50 bg-muted/30">
         {/* Main navigation */}
         <nav className="flex-1 flex flex-col items-center gap-1 p-2 pt-4">
-          {mainNavItems.map((item) => {
+          {visibleMain.map((item) => {
             const Icon = item.icon
             const isActive = pathname === item.href
 
@@ -52,9 +63,9 @@ export function SidebarNav() {
         </nav>
 
         <div className="border-t border-border/50 p-2 flex flex-col items-center gap-1">
-          {bottomNavItems.map((item) => {
+          {visibleBottom.map((item) => {
             const Icon = item.icon
-            const isActive = pathname === item.href
+            const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`)
             return (
               <Tooltip key={item.href}>
                 <TooltipTrigger asChild>

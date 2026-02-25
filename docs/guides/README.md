@@ -10,7 +10,7 @@ Guides from basics to advanced features.
 |-------|-------------|------|
 | [Quick Start](quickstart.md) | Get InputLayer running and execute your first query | 5 min |
 | [Installation](installation.md) | Detailed installation options | 10 min |
-| [First Program](first-program.md) | Your first Datalog program with facts and rules | 15 min |
+| [First Program](first-program.md) | Your first InputLayer program with facts and rules | 15 min |
 
 ### Core Concepts (30-60 minutes)
 

@@ -397,7 +397,7 @@ Merge with existing definitions.
 
 | Extension | Description |
 |-----------|-------------|
-| `.idl` | Datalog script (statements) |
+| `.idl` | InputLayer script (statements) |
 
 ## System Commands
 

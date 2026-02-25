@@ -1,0 +1,138 @@
+# Quick Start
+
+Get InputLayer running and execute your first query in 5 minutes.
+
+## 1. Install
+
+```bash
+# Clone the repository
+git clone https://github.com/inputlayer/inputlayer.git
+cd inputlayer
+
+# Build (requires Rust 1.88+)
+cargo build --release
+```
+
+## 2. Start the Server and Client
+
+```bash
+# Start the server
+./target/release/inputlayer-server
+
+# In another terminal, start the client
+./target/release/inputlayer-client
+```
+
+You should see:
+```
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+```
+
+## 3. Add Some Data
+
+```datalog
++person[("alice", 30), ("bob", 25), ("charlie", 35)]
+```
+
+Output:
+```
+Inserted 3 fact(s) into 'person'.
+```
+
+## 4. Query the Data
+
+```datalog
+?person(Name, Age)
+```
+
+Output:
+
+| Name | Age |
+|---|---|
+| "alice" | 30 |
+| "bob" | 25 |
+| "charlie" | 35 |
+
+*3 rows*
+
+## 5. Add a Filter
+
+```datalog
+?person(Name, Age), Age > 28
+```
+
+Output:
+
+| Name | Age |
+|---|---|
+| "alice" | 30 |
+| "charlie" | 35 |
+
+*2 rows*
+
+## 6. Create a Rule
+
+```datalog
++senior(Name) <- person(Name, Age), Age >= 30
+```
+
+Output:
+```
+Rule 'senior' registered.
+```
+
+```datalog
+?senior(X)
+```
+
+Output:
+
+| X |
+|---|
+| "alice" |
+| "charlie" |
+
+*2 rows*
+
+## 7. Use Aggregation
+
+```datalog
++average_age(avg<Age>) <- person(_, Age)
+```
+
+Output:
+```
+Rule 'average_age' registered.
+```
+
+```datalog
+?average_age(X)
+```
+
+Output:
+
+| X |
+|---|
+| 30.0 |
+
+*1 rows*
+
+## What's Next?
+
+- [First Program](first-program) - Learn the basics in depth
+- [Core Concepts](core-concepts) - Understand data modeling
+- [REPL Guide](repl) - Master the interactive environment
+
+## Common Commands
+
+| Command | Description |
+|---------|-------------|
+| `.help` | Show all commands |
+| `.rel` | List all relations |
+| `.rule` | List all rules |
+| `.quit` | Exit the REPL |

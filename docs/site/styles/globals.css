@@ -1,0 +1,59 @@
+/* Datalog syntax highlighting colors — matches gui/app/globals.css */
+
+:root {
+  --syn-comment: oklch(0.55 0.02 260);
+  --syn-string: oklch(0.45 0.16 145);
+  --syn-meta: oklch(0.48 0.2 310);
+  --syn-query: oklch(0.48 0.2 195);
+  --syn-arrow: oklch(0.48 0.2 310);
+  --syn-operator: oklch(0.48 0.2 195);
+  --syn-negation: oklch(0.52 0.2 25);
+  --syn-comparison: oklch(0.52 0.18 25);
+  --syn-number: oklch(0.48 0.16 195);
+  --syn-aggregate: oklch(0.52 0.2 80);
+  --syn-builtin: oklch(0.52 0.18 80);
+  --syn-keyword: oklch(0.48 0.2 280);
+  --syn-variable: oklch(0.48 0.16 250);
+  --syn-identifier: oklch(0.2 0.02 260);
+  --syn-body-id: oklch(0.42 0.14 195);
+  --syn-arith: oklch(0.52 0.18 25);
+  --syn-punct: oklch(0.55 0.02 260);
+}
+
+.dark {
+  --syn-comment: oklch(0.55 0.02 260);
+  --syn-string: oklch(0.72 0.16 145);
+  --syn-meta: oklch(0.75 0.18 310);
+  --syn-query: oklch(0.78 0.16 195);
+  --syn-arrow: oklch(0.75 0.18 310);
+  --syn-operator: oklch(0.78 0.16 195);
+  --syn-negation: oklch(0.72 0.2 25);
+  --syn-comparison: oklch(0.68 0.18 25);
+  --syn-number: oklch(0.78 0.14 195);
+  --syn-aggregate: oklch(0.82 0.16 80);
+  --syn-builtin: oklch(0.78 0.14 80);
+  --syn-keyword: oklch(0.72 0.18 280);
+  --syn-variable: oklch(0.78 0.14 250);
+  --syn-identifier: oklch(0.95 0.01 260);
+  --syn-body-id: oklch(0.78 0.14 195);
+  --syn-arith: oklch(0.68 0.18 25);
+  --syn-punct: oklch(0.55 0.02 260);
+}
+
+/* TextMate scope → CSS variable mapping for Datalog code blocks */
+.shiki .comment { color: var(--syn-comment) !important; }
+.shiki .string { color: var(--syn-string) !important; }
+.shiki .keyword.control.command { color: var(--syn-meta) !important; }
+.shiki .keyword.operator.query { color: var(--syn-query) !important; }
+.shiki .keyword.operator.arrow { color: var(--syn-arrow) !important; }
+.shiki .keyword.operator.prefix { color: var(--syn-operator) !important; }
+.shiki .keyword.operator.negation { color: var(--syn-negation) !important; }
+.shiki .keyword.operator.comparison { color: var(--syn-comparison) !important; }
+.shiki .constant.numeric { color: var(--syn-number) !important; }
+.shiki .entity.name.function.aggregate { color: var(--syn-aggregate) !important; }
+.shiki .entity.name.function.builtin { color: var(--syn-builtin) !important; }
+.shiki .keyword.type { color: var(--syn-keyword) !important; }
+.shiki .variable { color: var(--syn-variable) !important; }
+.shiki .entity.name.tag { color: var(--syn-identifier) !important; }
+.shiki .keyword.operator.arithmetic { color: var(--syn-arith) !important; }
+.shiki .punctuation { color: var(--syn-punct) !important; }

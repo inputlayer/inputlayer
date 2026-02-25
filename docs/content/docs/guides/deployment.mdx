@@ -1,0 +1,628 @@
+# Deployment
+
+Run InputLayer in production with Docker, systemd, reverse proxies, and Kubernetes.
+
+## Quick Reference
+
+| Setting | Default | CLI Flag | Env Variable | Config Key |
+|---|---|---|---|---|
+| Host | `127.0.0.1` | `--host` | `INPUTLAYER_HTTP__HOST` | `http.host` |
+| Port | `8080` | `--port` | `INPUTLAYER_HTTP__PORT` | `http.port` |
+| Data directory | `./data` | `--data-dir` | `INPUTLAYER_STORAGE__DATA_DIR` | `storage.data_dir` |
+| Log level | `info` | -- | `IL_TRACE_LEVEL` | `logging.level` |
+| Log format | `text` | -- | `IL_TRACE_JSON=1` | `logging.format` |
+| Admin password | auto-generated | -- | `INPUTLAYER_ADMIN_PASSWORD` | `http.auth.bootstrap_admin_password` |
+| Config file | `config.toml` | `--config` | -- | -- |
+
+## Environment Variables
+
+InputLayer uses the `INPUTLAYER_` prefix with double-underscore separators for nested keys.
+Environment variables override values from config files.
+
+```bash
+# Server binding
+export INPUTLAYER_HTTP__HOST=0.0.0.0
+export INPUTLAYER_HTTP__PORT=8080
+
+# Storage
+export INPUTLAYER_STORAGE__DATA_DIR=/var/lib/inputlayer/data
+export INPUTLAYER_STORAGE__AUTO_CREATE_KNOWLEDGE_GRAPHS=true
+
+# Persistence
+export INPUTLAYER_STORAGE__PERSIST__ENABLED=true
+export INPUTLAYER_STORAGE__PERSIST__DURABILITY_MODE=immediate
+
+# Logging (via tracing)
+export IL_TRACE_LEVEL=info          # trace, debug, info, warn, error
+export IL_TRACE_JSON=1              # JSON structured logging
+export IL_TRACE_FILE=/var/log/inputlayer/server.log  # Log to file instead of stderr
+
+# Authentication
+export INPUTLAYER_ADMIN_PASSWORD=your-secure-password
+
+# Performance
+export INPUTLAYER_STORAGE__PERFORMANCE__NUM_THREADS=4
+export INPUTLAYER_STORAGE__PERFORMANCE__QUERY_TIMEOUT_MS=30000
+```
+
+## Configuration File
+
+Create a `config.toml` for persistent configuration. Pass a custom path with `--config`:
+
+```bash
+inputlayer-server --config /etc/inputlayer/config.toml
+```
+
+Example production configuration:
+
+```toml
+[storage]
+data_dir = "/var/lib/inputlayer/data"
+default_knowledge_graph = "default"
+auto_create_knowledge_graphs = false
+max_knowledge_graphs = 100
+
+[storage.persist]
+enabled = true
+durability_mode = "immediate"
+buffer_size = 10000
+max_wal_size_bytes = 67108864       # 64 MB
+
+[storage.performance]
+num_threads = 0                     # 0 = all available CPU cores
+query_timeout_ms = 30000            # 30 seconds
+max_query_size_bytes = 1048576      # 1 MB
+max_insert_tuples = 10000
+max_result_rows = 100000
+slow_query_log_ms = 5000
+
+[logging]
+level = "info"
+format = "json"
+
+[http]
+host = "0.0.0.0"
+port = 8080
+shutdown_timeout_secs = 30
+
+[http.auth]
+session_timeout_secs = 86400        # 24 hours
+
+[http.rate_limit]
+max_connections = 10000
+max_ws_connections = 5000
+ws_max_messages_per_sec = 1000
+per_ip_max_rps = 100
+
+[http.gui]
+enabled = true
+static_dir = "/var/lib/inputlayer/gui/dist"
+```
+
+## Health Checks
+
+InputLayer exposes three probe endpoints. All bypass authentication.
+
+| Endpoint | Method | Purpose | Healthy Response |
+|---|---|---|---|
+| `/health` | GET | General health check | `200 OK` |
+| `/live` | GET | Kubernetes liveness probe | `200 OK` |
+| `/ready` | GET | Kubernetes readiness probe | `200 OK` (or `503` if storage is unavailable) |
+
+All endpoints are also available under the `/v1/` prefix (e.g., `/v1/health`).
+
+Example health check:
+
+```bash
+curl -sf http://localhost:8080/health
+```
+
+## Docker
+
+InputLayer provides a multi-stage Dockerfile that produces a minimal Debian-based image.
+
+### Build the Image
+
+```bash
+docker build -t inputlayer:latest .
+```
+
+### Run a Container
+
+```bash
+docker run -d \
+  --name inputlayer \
+  -p 8080:8080 \
+  -v inputlayer-data:/var/lib/inputlayer/data \
+  -e INPUTLAYER_ADMIN_PASSWORD=changeme \
+  inputlayer:latest
+```
+
+The image includes a built-in `HEALTHCHECK` that polls `/health` every 10 seconds:
+
+```dockerfile
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -sf http://localhost:8080/health || exit 1
+```
+
+### Image Details
+
+The image runs as a non-root `inputlayer` user with the following defaults:
+
+| Setting | Value |
+|---|---|
+| Binary | `/usr/local/bin/inputlayer-server` |
+| Data volume | `/var/lib/inputlayer/data` |
+| GUI assets | `/var/lib/inputlayer/gui/dist/` |
+| Exposed port | `8080` |
+| User | `inputlayer` (non-root) |
+
+### Custom Configuration in Docker
+
+Mount a config file and pass it via the CLI:
+
+```bash
+docker run -d \
+  --name inputlayer \
+  -p 8080:8080 \
+  -v inputlayer-data:/var/lib/inputlayer/data \
+  -v ./config.toml:/etc/inputlayer/config.toml:ro \
+  inputlayer:latest \
+  --config /etc/inputlayer/config.toml
+```
+
+## Docker Compose
+
+### Basic Setup
+
+```yaml
+version: "3.8"
+
+services:
+  inputlayer:
+    image: inputlayer:latest
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - inputlayer-data:/var/lib/inputlayer/data
+    environment:
+      INPUTLAYER_HTTP__HOST: "0.0.0.0"
+      INPUTLAYER_HTTP__PORT: "8080"
+      INPUTLAYER_STORAGE__DATA_DIR: "/var/lib/inputlayer/data"
+      INPUTLAYER_STORAGE__PERSIST__ENABLED: "true"
+      INPUTLAYER_STORAGE__PERSIST__DURABILITY_MODE: "immediate"
+      INPUTLAYER_ADMIN_PASSWORD: "${INPUTLAYER_ADMIN_PASSWORD}"
+      IL_TRACE_LEVEL: "info"
+      IL_TRACE_JSON: "1"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  inputlayer-data:
+```
+
+### With Traefik Reverse Proxy
+
+```yaml
+version: "3.8"
+
+services:
+  traefik:
+    image: traefik:v3.2
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedByDefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.le.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.le.acme.email=admin@example.com"
+      - "--certificatesresolvers.le.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - letsencrypt:/letsencrypt
+
+  inputlayer:
+    image: inputlayer:latest
+    build: .
+    volumes:
+      - inputlayer-data:/var/lib/inputlayer/data
+    environment:
+      INPUTLAYER_HTTP__HOST: "0.0.0.0"
+      INPUTLAYER_HTTP__PORT: "8080"
+      INPUTLAYER_STORAGE__DATA_DIR: "/var/lib/inputlayer/data"
+      INPUTLAYER_ADMIN_PASSWORD: "${INPUTLAYER_ADMIN_PASSWORD}"
+      IL_TRACE_JSON: "1"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.inputlayer.rule=Host(`inputlayer.example.com`)"
+      - "traefik.http.routers.inputlayer.entrypoints=websecure"
+      - "traefik.http.routers.inputlayer.tls.certresolver=le"
+      - "traefik.http.services.inputlayer.loadbalancer.server.port=8080"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  inputlayer-data:
+  letsencrypt:
+```
+
+## systemd
+
+Create a systemd service for running InputLayer on a bare-metal or VM deployment.
+
+### Create a System User
+
+```bash
+sudo useradd -r -s /bin/false -m -d /var/lib/inputlayer inputlayer
+sudo mkdir -p /var/lib/inputlayer/data
+sudo chown inputlayer:inputlayer /var/lib/inputlayer/data
+```
+
+### Install the Binary
+
+```bash
+sudo cp target/release/inputlayer-server /usr/local/bin/
+sudo chmod 755 /usr/local/bin/inputlayer-server
+```
+
+### Create the Service File
+
+Write the following to `/etc/systemd/system/inputlayer.service`:
+
+```ini
+[Unit]
+Description=InputLayer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=inputlayer
+Group=inputlayer
+ExecStart=/usr/local/bin/inputlayer-server \
+    --host 0.0.0.0 \
+    --port 8080 \
+    --config /etc/inputlayer/config.toml \
+    --data-dir /var/lib/inputlayer/data
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+# Security hardening
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/inputlayer/data
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+# Environment
+Environment=IL_TRACE_LEVEL=info
+Environment=IL_TRACE_JSON=1
+Environment=IL_TRACE_FILE=/var/log/inputlayer/server.log
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Enable and Start
+
+```bash
+sudo mkdir -p /var/log/inputlayer
+sudo chown inputlayer:inputlayer /var/log/inputlayer
+
+sudo systemctl daemon-reload
+sudo systemctl enable inputlayer
+sudo systemctl start inputlayer
+
+# Check status
+sudo systemctl status inputlayer
+sudo journalctl -u inputlayer -f
+```
+
+## TLS and Reverse Proxies
+
+InputLayer does not terminate TLS natively. Use a reverse proxy for TLS termination in production.
+
+### Nginx
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name inputlayer.example.com;
+    ssl_certificate     /etc/ssl/certs/inputlayer.crt;
+    ssl_certificate_key /etc/ssl/private/inputlayer.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+}
+```
+
+The `proxy_read_timeout` and `proxy_send_timeout` values of 300 seconds accommodate long-running WebSocket connections. The `Upgrade` and `Connection` headers are required for WebSocket support.
+
+For HTTP-to-HTTPS redirect, add a companion server block:
+
+```nginx
+server {
+    listen 80;
+    server_name inputlayer.example.com;
+    return 301 https://$host$request_uri;
+}
+```
+
+### Caddy
+
+Caddy automatically provisions and renews TLS certificates via Let's Encrypt:
+
+```caddyfile
+inputlayer.example.com {
+    reverse_proxy 127.0.0.1:8080 {
+        header_up X-Real-IP {remote_host}
+    }
+}
+```
+
+No additional TLS configuration is needed. Caddy handles certificates, HTTPS redirect, and WebSocket upgrades automatically.
+
+## Kubernetes
+
+### Deployment
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inputlayer
+  labels:
+    app: inputlayer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inputlayer
+  template:
+    metadata:
+      labels:
+        app: inputlayer
+    spec:
+      containers:
+        - name: inputlayer
+          image: inputlayer:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: INPUTLAYER_HTTP__HOST
+              value: "0.0.0.0"
+            - name: INPUTLAYER_HTTP__PORT
+              value: "8080"
+            - name: INPUTLAYER_STORAGE__DATA_DIR
+              value: "/var/lib/inputlayer/data"
+            - name: INPUTLAYER_STORAGE__PERSIST__ENABLED
+              value: "true"
+            - name: INPUTLAYER_STORAGE__PERSIST__DURABILITY_MODE
+              value: "immediate"
+            - name: IL_TRACE_LEVEL
+              value: "info"
+            - name: IL_TRACE_JSON
+              value: "1"
+            - name: INPUTLAYER_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: inputlayer-secrets
+                  key: admin-password
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/inputlayer/data
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "4"
+              memory: "4Gi"
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: inputlayer-data
+```
+
+### Service
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: inputlayer
+spec:
+  selector:
+    app: inputlayer
+  ports:
+    - port: 8080
+      targetPort: http
+      name: http
+  type: ClusterIP
+```
+
+### PersistentVolumeClaim
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: inputlayer-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+```
+
+### Secret
+
+```bash
+kubectl create secret generic inputlayer-secrets \
+  --from-literal=admin-password='your-secure-password'
+```
+
+### Ingress
+
+Using the nginx ingress controller with TLS:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: inputlayer
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    # Required for WebSocket support
+    nginx.ingress.kubernetes.io/websocket-services: "inputlayer"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - inputlayer.example.com
+      secretName: inputlayer-tls
+  rules:
+    - host: inputlayer.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: inputlayer
+                port:
+                  number: 8080
+```
+
+## Resource Sizing
+
+### Memory
+
+InputLayer holds the active working set in memory via Differential Dataflow. Memory usage is proportional to the number of facts, rules, and active computations.
+
+| Workload | Facts | Rules | Recommended Memory |
+|---|---|---|---|
+| Development | < 100K | < 50 | 512 MB |
+| Small production | 100K - 1M | 50 - 200 | 2 - 4 GB |
+| Medium production | 1M - 10M | 200 - 1000 | 8 - 16 GB |
+| Large production | 10M+ | 1000+ | 32 GB+ |
+
+### CPU
+
+Differential Dataflow benefits from multiple cores for parallel dataflow computation. The `num_threads` setting (default: `0`, meaning all available cores) controls worker parallelism.
+
+| Workload | Recommended CPU |
+|---|---|
+| Development | 2 cores |
+| Small production | 4 cores |
+| Medium production | 8 cores |
+| Large production | 16+ cores |
+
+### Disk
+
+The data directory stores WAL files and compacted batch files. Disk usage depends on fact volume and the WAL rotation settings.
+
+- WAL files rotate at 64 MB by default (`max_wal_size_bytes`)
+- Batch files are compacted when a shard exceeds 10 files (`auto_compact_threshold`)
+- Plan for 2-3x the raw data size to account for WAL overhead and compaction headroom
+
+Use fast local storage (SSD/NVMe) for the data directory. Network-attached storage works but increases write latency, which impacts durability mode `immediate`.
+
+### File Descriptors
+
+For production deployments with many concurrent WebSocket connections, increase the file descriptor limit:
+
+```bash
+# In systemd service
+LimitNOFILE=65536
+
+# Or system-wide in /etc/security/limits.conf
+inputlayer    soft    nofile    65536
+inputlayer    hard    nofile    65536
+```
+
+## Security Recommendations
+
+### Authentication
+
+InputLayer requires WebSocket authentication for all data operations. On first boot, if no admin password is configured, a random password is generated and printed to stderr. For production:
+
+1. Always set `INPUTLAYER_ADMIN_PASSWORD` explicitly
+2. Use Kubernetes Secrets or Docker secrets for the password
+3. Rotate credentials periodically
+
+### Network
+
+1. Bind the server to `127.0.0.1` when behind a reverse proxy (the default)
+2. Use a reverse proxy for TLS termination -- InputLayer does not terminate TLS natively
+3. Enable rate limiting via `http.rate_limit.per_ip_max_rps` for public-facing deployments
+4. Restrict CORS origins in production (`http.cors_origins` instead of `http.cors_allow_all`)
+
+### Filesystem
+
+1. Run as a dedicated non-root user
+2. Use `ProtectSystem=strict` in systemd to prevent writes outside allowed paths
+3. Set appropriate permissions on the data directory (`750` or stricter)
+4. Back up the data directory regularly -- the WAL and batch files are the source of truth
+
+### Durability
+
+For production, always use `durability_mode = "immediate"`. The server warns on startup if a weaker mode is configured:
+
+```
+WARNING: Durability mode is Batched (not Immediate).
+Recent writes may be lost on crash.
+```
+
+Also ensure `storage.persist.enabled = true`. Without it, all data is lost on restart:
+
+```
+WARNING: DD-native persist layer is DISABLED.
+Data will NOT survive restarts.
+```

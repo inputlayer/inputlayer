@@ -1,6 +1,6 @@
 # InputLayer IDL - VS Code Extension
 
-Syntax highlighting for InputLayer Datalog (`.idl` / `.dl`) files.
+Syntax highlighting for InputLayer (`.idl` / `.dl`) files.
 
 ## Features
 

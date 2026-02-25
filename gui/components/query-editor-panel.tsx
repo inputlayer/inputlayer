@@ -415,7 +415,7 @@ export function QueryEditorPanel({ onExecute, onExplain, onCancel, isExecuting, 
           onSelect={updateCursorInfo}
           onClick={updateCursorInfo}
           spellCheck={false}
-          aria-label="Datalog query editor"
+          aria-label="InputLayer query editor"
           aria-autocomplete="list"
           aria-expanded={showAutocomplete}
           aria-controls={showAutocomplete ? "autocomplete-listbox" : undefined}

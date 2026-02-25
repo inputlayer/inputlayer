@@ -1,6 +1,6 @@
 # Datalog Examples and Snapshot Tests
 
-This directory contains snapshot tests and external benchmark datasets for the InputLayer Datalog engine.
+This directory contains snapshot tests and external benchmark datasets for the InputLayer engine.
 
 ---
 
@@ -263,6 +263,6 @@ python3 generate_sample_data.py tc.dl
 
 ### File Extensions
 
-- `.dl`  - Datalog programs
+- `.dl`  - InputLayer programs
 - `.csv`  - Data files
 - `.facts`  - Alternative fact format (same as CSV)

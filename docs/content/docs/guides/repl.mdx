@@ -1,0 +1,420 @@
+# REPL Guide
+
+The REPL is where you define facts, rules, and queries interactively.
+
+## Starting the Client
+
+```bash
+inputlayer-client
+```
+
+You'll see:
+```
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+```
+
+## Command Categories
+
+### Knowledge Graph Commands (`.kg`)
+
+Manage your knowledge graphs:
+
+| Command | Description |
+|---------|-------------|
+| `.kg` | Show current knowledge graph |
+| `.kg list` | List all knowledge graphs |
+| `.kg create <name>` | Create a new knowledge graph |
+| `.kg use <name>` | Switch to a knowledge graph |
+| `.kg drop <name>` | Delete a knowledge graph (cannot drop current) |
+
+**Examples:**
+```datalog
+.kg create myproject
+.kg use myproject
+.kg list
+.kg
+```
+
+### Relation Commands (`.rel`)
+
+Inspect base facts:
+
+| Command | Description |
+|---------|-------------|
+| `.rel` | List all relations with data |
+| `.rel <name>` | Show schema and sample data for a relation |
+| `.rel drop <name>` | Drop a relation and its data |
+
+**Examples:**
+```datalog
+.rel
+.rel edge
+.rel employee
+```
+
+### Rule Commands (`.rule`)
+
+Manage persistent rules:
+
+| Command | Description |
+|---------|-------------|
+| `.rule` | List all defined rules |
+| `.rule <name>` | Query a rule (show computed results) |
+| `.rule def <name>` | Show the rule definition (clauses) |
+| `.rule drop <name>` | Delete a rule |
+| `.rule remove <name> <n>` | Remove clause #n (1-based) |
+| `.rule clear <name>` | Clear clauses for re-registration |
+| `.rule edit <name> <n> <clause>` | Replace clause #n |
+
+**Examples:**
+```datalog
+.rule                           // List all rules
+.rule path                      // Query the 'path' rule
+.rule def path                  // Show path's definition
+.rule drop path                 // Delete the path rule
+.rule clear path                // Clear for re-definition
+.rule edit path 1 +path(X,Y) <- edge(X,Y)  // Edit clause 1
+```
+
+### Session Commands (`.session`)
+
+Manage transient session rules:
+
+| Command | Description |
+|---------|-------------|
+| `.session` | List session rules |
+| `.session clear` | Clear all session rules |
+| `.session drop <n>` | Remove session rule #n |
+
+**Examples:**
+```datalog
+temp(X) <- edge(1, X)    // Add session rule
+.session                   // List session rules
+.session drop 1            // Remove first rule
+.session clear             // Clear all
+```
+
+### File Commands (`.load`)
+
+Load and execute InputLayer files:
+
+| Command | Description |
+|---------|-------------|
+| `.load <file>` | Execute a .idl file |
+
+**Examples:**
+```datalog
+.load schema.idl
+.load rules.idl
+```
+
+**Note:** The `.load` command reads the file and executes each statement in order. It continues through non-fatal errors so cleanup commands always run.
+
+### Index Commands (`.index` / `.idx`)
+
+Manage HNSW vector indexes:
+
+| Command | Description |
+|---------|-------------|
+| `.index` or `.index list` | List all indexes |
+| `.index create <name> on <rel>(<col>) [options]` | Create an HNSW index |
+| `.index drop <name>` | Drop an index |
+| `.index stats <name>` | Show index statistics |
+| `.index rebuild <name>` | Force rebuild an index |
+
+**Examples:**
+```datalog
+.index create vec_idx on docs(embedding) type hnsw metric cosine m 16 ef_construction 200
+.index stats vec_idx
+.index drop vec_idx
+```
+
+### User Commands (`.user`)
+
+Manage users (requires admin):
+
+| Command | Description |
+|---------|-------------|
+| `.user list` | List all users |
+| `.user create <name> <password> <role>` | Create a user (`admin`, `editor`, `viewer`) |
+| `.user drop <name>` | Delete a user |
+| `.user password <name> <password>` | Change a user's password |
+| `.user role <name> <role>` | Change a user's role |
+
+### API Key Commands (`.apikey`)
+
+Manage API keys for machine-to-machine auth:
+
+| Command | Description |
+|---------|-------------|
+| `.apikey create <label>` | Create a new API key |
+| `.apikey list` | List all API keys |
+| `.apikey revoke <label>` | Revoke an API key |
+
+### Access Control Commands (`.kg acl`)
+
+Manage per-knowledge-graph access:
+
+| Command | Description |
+|---------|-------------|
+| `.kg acl list [<kg>]` | List ACLs for a knowledge graph |
+| `.kg acl grant <kg> <user> <role>` | Grant access (`owner`, `editor`, `viewer`) |
+| `.kg acl revoke <kg> <user>` | Revoke access |
+
+### System Commands
+
+| Command | Description |
+|---------|-------------|
+| `.status` | Show system status |
+| `.compact` | Compact WAL and consolidate storage |
+| `.explain <query>` | Show query plan without executing |
+| `.clear prefix <p>` | Clear all facts from relations matching prefix |
+| `.help` | Show help message |
+| `.quit` or `.exit` | Exit the REPL |
+
+## Statement Types
+
+### Insert Facts (`+`)
+
+```datalog
+// Single fact
++edge(1, 2)
+
+// Bulk insert
++edge[(1, 2), (2, 3), (3, 4)]
+
+// With different types
++person("alice", 30, "engineering")
+```
+
+### Delete Facts (`-`)
+
+```datalog
+// Single fact
+-edge(1, 2)
+
+// Conditional delete (must reference relation in body)
+-edge(X, Y) <- edge(X, Y), X > 10
+
+// Delete all from a relation
+-edge(X, Y) <- edge(X, Y)
+```
+
+### Updates (Delete then Insert)
+
+```datalog
+// First delete old value
+-counter(1, 0)
+// Then insert new value
++counter(1, 5)
+```
+
+### Persistent Rules (`+head <- body`)
+
+```datalog
+// Simple rule
++adult(Name, Age) <- person(Name, Age), Age >= 18
+
+// Recursive rule
++path(X, Y) <- edge(X, Y)
++path(X, Z) <- path(X, Y), edge(Y, Z)
+
+// With aggregation
++dept_count(Dept, count<Id>) <- employee(Id, Dept)
+```
+
+### Session Rules (`head <- body`)
+
+```datalog
+// Transient rule (no + prefix)
+temp_result(X, Y) <- edge(X, Y), X < Y
+```
+
+### Queries (`?`)
+
+```datalog
+// Simple query
+?edge(1, X)
+
+// With constraints
+?person(Name, Age), Age > 25
+
+// Query derived data
+?path(1, X)
+```
+
+### Schema Declarations
+
+```datalog
+// Typed schema
++employee(id: int, name: string, dept: string)
++user(id: int, name: string, email: string)
+```
+
+## Tips and Tricks
+
+### Multi-line Statements
+
+In script files (`.idl`), statements can span multiple lines. In the interactive REPL, each line is sent as a separate statement:
+
+```datalog
+// In a .idl script file:
++complex_rule(X, Y, Z) <-
+  first_condition(X, A),
+  second_condition(A, Y),
+  third_condition(Y, Z),
+  X < Y,
+  Y < Z
+
+// In the interactive REPL, write it as a single line:
++complex_rule(X, Y, Z) <- first_condition(X, A), second_condition(A, Y), third_condition(Y, Z), X < Y, Y < Z
+```
+
+### Comments
+
+```datalog
+// Single line comment
++edge(1, 2)  // Inline comment
+
+/*
+   Multi-line
+   block comment
+*/
+```
+
+### Viewing Results
+
+Query results are displayed as formatted tables:
+
+```
+> ?edge(X, Y)
+```
+
+| X | Y |
+|---|---|
+| 1 | 2 |
+| 2 | 3 |
+| 3 | 4 |
+| 4 | 5 |
+| 5 | 6 |
+
+*5 rows*
+
+### Using Wildcards
+
+Use `_` to ignore columns:
+
+```datalog
+// Get all source nodes (ignore target)
+?edge(X, _)
+
+// Count unique sources
+temp(count<X>) <- edge(X, _)
+```
+
+## Common Workflows
+
+### 1. Exploratory Analysis
+
+```datalog
+.kg create exploration
+.kg use exploration
+.load data.idl
+.rel                          // See what data exists
+?some_relation(X, Y)         // Explore
+temp(X) <- complex_query...  // Session rule for analysis
+.session clear                // Clean up when done
+```
+
+### 2. Building a Schema
+
+```datalog
+.kg create production
+.kg use production
+
+// Define schemas first
++user(id: int, name: string, email: string)
++order(id: int, user_id: int, amount: float)
+
+// Load data
+.load users.idl
+.load orders.idl
+
+// Verify
+.rel user
+.rel order
+```
+
+### 3. Defining Business Rules
+
+```datalog
+// Define persistent rules
++high_value_customer(UserId) <-
+  order(_, UserId, Amount),
+  Amount > 1000
+
+// Aggregate total spend per customer
++customer_spend(UserId, sum<Amount>) <-
+  order(_, UserId, Amount)
+
+// VIPs have high total spend
++vip(UserId, Total) <-
+  high_value_customer(UserId),
+  customer_spend(UserId, Total),
+  Total > 5000
+
+// Query
+?vip(User, Spend)
+```
+
+### 4. Iterating on Rules
+
+```datalog
+// First attempt
++path(X, Y) <- edge(X, Y)
+
+// Check results
+.rule path
+
+// Not right? Clear and redefine
+.rule clear path
++path(X, Y) <- edge(X, Y)
++path(X, Z) <- path(X, Y), edge(Y, Z)
+
+// Verify
+.rule def path
+.rule path
+```
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+C` | Cancel current input |
+| `Ctrl+D` | Exit REPL (same as `.quit`) |
+| `Up` / `Down` | Navigate command history |
+| `Ctrl+R` | Search command history |
+
+## Error Handling
+
+When something goes wrong, InputLayer provides error messages:
+
+```
+> +edge(1, "two")
+Type mismatch in 'edge': column 1 expected int, got string
+```
+
+```
+> ?undefined_relation(X)
+Relation 'undefined_relation' not found.
+```
+
+## Next Steps
+
+- **[Recursion](recursion)** - Recursive query patterns
+- **[Troubleshooting](troubleshooting)** - Common issues and solutions
