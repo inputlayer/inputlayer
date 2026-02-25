@@ -108,22 +108,24 @@ jobs:
       - name: Check documentation
         run: make doc-check
 
-  docs-site:
-    name: Documentation Site
+  website:
+    name: Website
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 22
+          cache: npm
+          cache-dependency-path: front/package-lock.json
 
-      - name: Install docs site dependencies
-        working-directory: docs/site
-        run: npm install
+      - name: Install dependencies
+        working-directory: front
+        run: npm ci
 
-      - name: Build docs site
-        working-directory: docs/site
+      - name: Build website
+        working-directory: front
         run: npm run build
 
   msrv:

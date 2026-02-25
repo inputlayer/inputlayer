@@ -1,10 +1,11 @@
-name: Deploy Documentation
+name: Deploy Website
 
 on:
   push:
     branches: [main]
     paths:
-      - 'docs/**'
+      - 'front/**'
+      - 'docs/content/**'
   workflow_dispatch:
 
 permissions:
@@ -24,22 +25,22 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 22
           cache: npm
-          cache-dependency-path: docs/site/package-lock.json
+          cache-dependency-path: front/package-lock.json
 
       - name: Install dependencies
-        working-directory: docs/site
+        working-directory: front
         run: npm ci
 
-      - name: Build site
-        working-directory: docs/site
+      - name: Build website
+        working-directory: front
         run: npm run build
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs/site/out
+          path: front/dist
 
   deploy:
     environment:

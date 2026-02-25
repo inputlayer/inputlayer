@@ -43,8 +43,6 @@ front/node_modules/
 front/.next/
 front/dist/
 front/out/
-front/package-lock.json
-front/pnpm-lock.yaml
 
 # Front - Auto-generated docs bundle
 front/lib/docs-bundle.ts
