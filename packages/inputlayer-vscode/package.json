@@ -1,7 +1,7 @@
 {
   "name": "inputlayer-idl",
   "displayName": "InputLayer IDL",
-  "description": "Syntax highlighting for InputLayer Datalog (.idl/.dl) files",
+  "description": "Syntax highlighting for InputLayer (.idl/.dl) files",
   "version": "0.1.0",
   "publisher": "inputlayer",
   "license": "MIT",
@@ -16,7 +16,7 @@
       {
         "id": "inputlayer-datalog",
         "aliases": [
-          "InputLayer Datalog",
+          "InputLayer",
           "IDL"
         ],
         "extensions": [

@@ -1,0 +1,239 @@
+# Migrations
+
+The migration system provides Django-style schema versioning for InputLayer. Generate numbered migration files from model diffs, apply them to a server, revert if needed, and track what's deployed.
+
+## Why Migrations?
+
+Without migrations, `define()` and `define_rules()` fire commands blindly:
+
+- **No idempotency** — calling `define_rules()` twice duplicates clauses
+- **No rollback** — can't revert a bad deploy
+- **No state tracking** — no record of what's deployed
+
+Migrations solve all of these by providing a versioned, reversible record of schema changes.
+
+## Quick Start
+
+### 1. Define Models
+
+```python
+from inputlayer import Relation, Derived, Vector, From
+
+class Employee(Relation):
+    id: int
+    name: str
+    department: str
+    salary: float
+
+class Senior(Derived):
+    name: str
+    rules = [
+        From(Employee)
+            .where(lambda e: e.salary > 100000)
+            .select(name=Employee.name),
+    ]
+```
+
+### 2. Generate Migration
+
+```bash
+inputlayer-migrate makemigrations --models myapp.models
+# → creates migrations/0001_initial.py
+```
+
+### 3. Apply
+
+```bash
+inputlayer-migrate migrate --url ws://localhost:8080/ws --kg production
+```
+
+### 4. Iterate
+
+Change your models, then generate and apply again:
+
+```bash
+inputlayer-migrate makemigrations --models myapp.models
+# → creates migrations/0002_auto.py
+
+inputlayer-migrate migrate --url ws://localhost:8080/ws --kg production
+```
+
+### 5. Rollback
+
+If something goes wrong:
+
+```bash
+inputlayer-migrate revert --url ws://localhost:8080/ws --kg production 0001_initial
+```
+
+### 6. Check Status
+
+```bash
+inputlayer-migrate showmigrations --url ws://localhost:8080/ws --kg production
+# [X] 0001_initial
+# [ ] 0002_auto
+```
+
+## CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `makemigrations` | Generate a migration from model diffs |
+| `migrate` | Apply pending migrations |
+| `revert` | Rollback to a specific migration |
+| `showmigrations` | Show applied/pending status |
+
+### Common Options
+
+| Option | Description |
+|--------|-------------|
+| `--url` | WebSocket URL (`ws://host:port/ws`) |
+| `--kg` | Target knowledge graph |
+| `--models` | Python module path containing model definitions |
+| `--migrations-dir` | Directory for migration files (default: `migrations/`) |
+
+## Migration File Anatomy
+
+Each migration is a self-contained Python file:
+
+```python
+# migrations/0001_initial.py
+from inputlayer.migrations import Migration
+from inputlayer.migrations import operations as ops
+
+class M(Migration):
+    dependencies = []
+
+    operations = [
+        ops.CreateRelation(
+            name="employee",
+            columns=[("id", "int"), ("name", "string"), ("salary", "float")],
+        ),
+        ops.CreateRule(
+            name="senior",
+            clauses=["+senior(Name) <- employee(_, Name, Salary), Salary > 100000"],
+        ),
+    ]
+
+    state = {
+        "relations": {
+            "employee": [("id", "int"), ("name", "string"), ("salary", "float")],
+        },
+        "rules": {
+            "senior": ["+senior(Name) <- employee(_, Name, Salary), Salary > 100000"],
+        },
+        "indexes": {},
+    }
+```
+
+### Key Fields
+
+- **`dependencies`**: List of migration names that must be applied first
+- **`operations`**: Ordered list of forward operations
+- **`state`**: Full snapshot of the model state after this migration — used for diffing
+
+## Operations Reference
+
+| Operation | Forward | Backward |
+|-----------|---------|----------|
+| `CreateRelation(name, columns)` | Schema definition | `.rel drop` |
+| `DropRelation(name, columns)` | `.rel drop` | Schema definition |
+| `CreateRule(name, clauses)` | Rule clauses | `.rule drop` |
+| `DropRule(name, clauses)` | `.rule drop` | Rule clauses |
+| `ReplaceRule(name, old, new)` | Drop + new clauses | Drop + old clauses |
+| `CreateIndex(name, ...)` | `.index create` | `.index drop` |
+| `DropIndex(name, ...)` | `.index drop` | `.index create` |
+| `RunDatalog(fwd, bwd)` | Custom commands | Custom commands |
+
+### Custom Operations
+
+Use `RunDatalog` for operations not covered by built-in ops:
+
+```python
+ops.RunDatalog(
+    forward=["+edge[(1,2), (2,3), (3,4)]"],
+    backward=["-edge(X, Y) <- edge(X, Y)"],
+)
+```
+
+## Development Workflow
+
+### Local Development
+
+```bash
+# Start local server
+inputlayer-server
+
+# Generate initial migration
+inputlayer-migrate makemigrations --models myapp.models
+
+# Apply locally
+inputlayer-migrate migrate --url ws://localhost:8080/ws --kg dev
+
+# Make changes to models...
+# Generate diff migration
+inputlayer-migrate makemigrations --models myapp.models
+
+# Apply changes
+inputlayer-migrate migrate --url ws://localhost:8080/ws --kg dev
+```
+
+### Team Workflow
+
+1. Migrations are committed to version control alongside model changes
+2. Each developer runs `migrate` against their local server
+3. In code review, check that migrations match model changes
+4. Never edit or delete an applied migration — always create new ones
+
+## CI/CD Integration
+
+### GitHub Actions Example
+
+```yaml
+- name: Apply migrations
+  run: |
+    inputlayer-migrate migrate \
+      --url ${{ secrets.IL_WS_URL }} \
+      --kg production \
+      --username admin \
+      --password ${{ secrets.IL_ADMIN_PASSWORD }}
+```
+
+### Pre-deploy Validation
+
+Check that migrations are valid before deploying:
+
+```bash
+# Dry run — validates without applying
+inputlayer-migrate migrate --url ws://staging:8080/ws --kg staging --dry-run
+```
+
+## Programmatic Usage
+
+Use the migration system from Python code:
+
+```python
+from inputlayer.migrations.autodetector import detect_changes
+from inputlayer.migrations.state import ModelState
+from inputlayer.migrations.writer import generate_migration
+
+# Build state from current models
+state = ModelState.from_models(
+    relations=[Employee, Department],
+    derived=[Reachable],
+    indexes=[doc_idx],
+)
+
+# Diff against empty → initial migration
+ops = detect_changes(ModelState(), state)
+filename, content = generate_migration(1, ops, state.to_dict(), [])
+```
+
+## Best Practices
+
+1. **One migration per logical change** — don't mix unrelated schema changes
+2. **Never modify applied migrations** — create new ones instead
+3. **Test migrations** against a staging environment before production
+4. **Include backward operations** — always ensure migrations can be reverted
+5. **Commit migrations** alongside the model changes that generated them
+6. **Use descriptive names** — rename auto-generated files to describe the change

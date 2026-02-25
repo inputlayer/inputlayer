@@ -1,6 +1,6 @@
-//! # Datalog REPL
+//! # InputLayer REPL
 //!
-//! A simple Read-Eval-Print Loop for the `InputLayer` Datalog engine.
+//! A simple Read-Eval-Print Loop for the InputLayer engine.
 //!
 //! ## Usage
 //!
@@ -8,20 +8,20 @@
 //! cargo run --bin datalog-repl
 //! ```
 //!
-//! Then enter Datalog programs or commands:
+//! Then enter programs or commands:
 //! - `.facts <relation> <tuples>` - Add facts
-//! - `.query <datalog>` - Execute a query
+//! - `.query <query>` - Execute a query
 //! - `.quit` - Exit
 
 use inputlayer::DatalogEngine;
 use std::io::{self, Write};
 
 fn main() {
-    println!("InputLayer Datalog Engine REPL");
+    println!("InputLayer REPL");
     println!("============================\n");
     println!("Commands:");
     println!("  .facts <relation> - Add facts (comma-separated tuples)");
-    println!("  .query <datalog>  - Execute Datalog query");
+    println!("  .query <query>    - Execute a query");
     println!("  .help             - Show this help");
     println!("  .quit             - Exit\n");
 

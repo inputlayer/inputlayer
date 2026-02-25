@@ -1,0 +1,306 @@
+# HTTP API Guide
+
+InputLayer is a **WebSocket-first** system. All data operations (queries, inserts, rule definitions, meta commands) go through the WebSocket API. The HTTP REST endpoints provide health checks, metrics, and documentation.
+
+For query execution, see the [WebSocket API](websocket-api) guide.
+
+## Starting the Server
+
+```bash
+# Start the HTTP server
+./target/release/inputlayer-server
+
+# With custom port
+./target/release/inputlayer-server --port 9090
+
+# With config file
+./target/release/inputlayer-server --config config.toml
+```
+
+Or enable in configuration:
+
+```toml
+[http]
+enabled = true
+host = "127.0.0.1"
+port = 8080
+```
+
+## Base URL
+
+All endpoints are available at both root and versioned paths:
+
+```
+http://localhost:8080/health
+http://localhost:8080/v1/health
+```
+
+---
+
+## Health & Monitoring Endpoints
+
+### Health Check
+
+```http
+GET /health
+```
+
+Returns server health status. Returns HTTP 200 when healthy, 503 when storage is degraded.
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "status": "healthy",
+    "version": "0.1.0",
+    "uptime_secs": 3600
+  }
+}
+```
+
+**Response (503) - Storage lock contended:**
+```json
+{
+  "success": true,
+  "data": {
+    "status": "degraded",
+    "version": "0.1.0",
+    "uptime_secs": 3600
+  }
+}
+```
+
+### Liveness Probe
+
+```http
+GET /live
+```
+
+Always returns HTTP 200 if the process is alive. Does not check storage. Use for Kubernetes liveness probes.
+
+### Readiness Probe
+
+```http
+GET /ready
+```
+
+Returns HTTP 200 if the server can handle requests (storage accessible). Returns 503 if storage lock is contended. Use for Kubernetes readiness probes.
+
+### Server Statistics
+
+```http
+GET /metrics
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "knowledge_graphs": 3,
+    "relations": 10,
+    "views": 5,
+    "memory_usage_bytes": 262144,
+    "query_count": 15000,
+    "uptime_secs": 3600,
+    "sessions": {
+      "total": 5,
+      "clean": 3,
+      "dirty": 2,
+      "total_ephemeral_facts": 100,
+      "total_ephemeral_rules": 10
+    }
+  }
+}
+```
+
+### Prometheus Metrics
+
+```http
+GET /metrics/prometheus
+```
+
+Returns metrics in Prometheus text exposition format:
+
+```
+# HELP inputlayer_uptime_seconds Server uptime in seconds.
+# TYPE inputlayer_uptime_seconds gauge
+inputlayer_uptime_seconds 3600
+# HELP inputlayer_queries_total Total queries executed.
+# TYPE inputlayer_queries_total counter
+inputlayer_queries_total 15000
+# HELP inputlayer_knowledge_graphs Number of knowledge graphs.
+# TYPE inputlayer_knowledge_graphs gauge
+inputlayer_knowledge_graphs 3
+# HELP inputlayer_relations_total Total base relations.
+# TYPE inputlayer_relations_total gauge
+inputlayer_relations_total 10
+# HELP inputlayer_views_total Total derived views (rules).
+# TYPE inputlayer_views_total gauge
+inputlayer_views_total 5
+# HELP inputlayer_sessions_total Active sessions.
+# TYPE inputlayer_sessions_total gauge
+inputlayer_sessions_total 5
+# HELP inputlayer_sessions_clean Clean (idle) sessions.
+# TYPE inputlayer_sessions_clean gauge
+inputlayer_sessions_clean 3
+# HELP inputlayer_sessions_dirty Dirty (active) sessions.
+# TYPE inputlayer_sessions_dirty gauge
+inputlayer_sessions_dirty 2
+# HELP inputlayer_tuples_total Total stored tuples.
+# TYPE inputlayer_tuples_total gauge
+inputlayer_tuples_total 50000
+# HELP inputlayer_memory_usage_bytes Estimated memory usage.
+# TYPE inputlayer_memory_usage_bytes gauge
+inputlayer_memory_usage_bytes 104857600
+# HELP inputlayer_ephemeral_facts Ephemeral facts across sessions.
+# TYPE inputlayer_ephemeral_facts gauge
+inputlayer_ephemeral_facts 10
+# HELP inputlayer_ephemeral_rules Ephemeral rules across sessions.
+# TYPE inputlayer_ephemeral_rules gauge
+inputlayer_ephemeral_rules 2
+```
+
+---
+
+## WebSocket Endpoints
+
+### Global WebSocket
+
+```http
+GET /ws
+```
+
+Upgrades to a WebSocket connection. Requires authentication as the first message. See [WebSocket API](websocket-api) for the full protocol.
+
+### Session-Scoped WebSocket
+
+```http
+GET /sessions/:id/ws
+```
+
+Connects to an existing session by ID.
+
+---
+
+## Documentation Endpoints
+
+### AsyncAPI Specification
+
+```http
+GET /api/asyncapi.yaml
+```
+
+Returns the AsyncAPI specification describing the WebSocket message protocol.
+
+### OpenAPI Specification
+
+```http
+GET /api/openapi.yaml
+```
+
+Returns the OpenAPI specification describing the REST endpoints.
+
+### WebSocket Documentation
+
+```http
+GET /api/ws-docs
+```
+
+Returns an interactive HTML page for exploring the WebSocket API.
+
+---
+
+## Authentication
+
+REST endpoints (except health/live/ready) require an API key in the Authorization header:
+
+```http
+Authorization: Bearer <api-key>
+```
+
+API keys are managed via meta commands in the WebSocket session:
+
+```datalog
+.apikey create my-service-key
+.apikey list
+.apikey revoke my-service-key
+```
+
+See [Authentication](authentication) for details.
+
+---
+
+## Error Responses
+
+All errors use a consistent format:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Resource not found"
+  }
+}
+```
+
+**Error Codes:**
+
+| Code | HTTP Status | Description |
+|------|-------------|-------------|
+| `NOT_FOUND` | 404 | Resource not found |
+| `BAD_REQUEST` | 400 | Invalid request |
+| `INTERNAL_ERROR` | 500 | Server error |
+| `SERVICE_UNAVAILABLE` | 503 | Server not ready |
+
+---
+
+## Client Examples
+
+### cURL - Health Check
+
+```bash
+# Check server health
+curl http://localhost:8080/health
+
+# Get server stats
+curl http://localhost:8080/metrics
+
+# Get Prometheus metrics
+curl http://localhost:8080/metrics/prometheus
+```
+
+### cURL - With Authentication
+
+```bash
+# Authenticated request
+curl -H "Authorization: Bearer your-api-key" http://localhost:8080/metrics
+```
+
+### Kubernetes Probes
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /live
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 5
+```
+
+---
+
+## Next Steps
+
+- [WebSocket API](websocket-api) - Execute queries and manage data
+- [Configuration](configuration) - Server configuration options
+- [Authentication](authentication) - User and API key management

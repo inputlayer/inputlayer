@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "name": "_internal:users",
+  "batches": [
+    {
+      "id": "1",
+      "path": "./data/persist/batches/1.parquet",
+      "lower": 1,
+      "upper": 2,
+      "len": 1
+    }
+  ],
+  "since": 0,
+  "upper": 2,
+  "total_updates": 1
+}

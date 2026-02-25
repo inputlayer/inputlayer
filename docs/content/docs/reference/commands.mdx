@@ -1,0 +1,580 @@
+# Meta Commands Reference
+
+Meta commands control the InputLayer environment. They start with a `.` prefix.
+
+## Knowledge Graph Commands
+
+### `.kg`
+
+Show current knowledge graph.
+
+```
+.kg
+```
+
+**Output:**
+```
+Current knowledge graph: mykg
+```
+
+### `.kg list`
+
+List all knowledge graphs.
+
+```
+.kg list
+```
+
+**Output:**
+```
+Knowledge graphs:
+  default (current)
+  mykg
+  analytics
+```
+
+### `.kg create <name>`
+
+Create a new knowledge graph.
+
+```
+.kg create analytics
+```
+
+### `.kg use <name>`
+
+Switch to a knowledge graph.
+
+```
+.kg use analytics
+```
+
+**Note:** Switching knowledge graphs clears session rules and transient data.
+
+### `.kg drop <name>`
+
+Delete a knowledge graph and all its data.
+
+```
+.kg drop old_knowledge_graph
+```
+
+**Warning:** This permanently deletes all relations, rules, and data.
+
+## Access Control Commands
+
+### `.kg acl list [kg_name]`
+
+List access control entries for a knowledge graph. If no name is given, lists ACLs for the current KG.
+
+```
+.kg acl list
+.kg acl list analytics
+```
+
+### `.kg acl grant <kg> <user> <role>`
+
+Grant a user access to a knowledge graph with a specific role.
+
+```
+.kg acl grant analytics alice viewer
+.kg acl grant shared_data bob editor
+```
+
+**KG Roles:** `owner`, `editor`, `viewer`
+
+### `.kg acl revoke <kg> <user>`
+
+Revoke a user's access to a knowledge graph.
+
+```
+.kg acl revoke analytics alice
+```
+
+## User Management Commands
+
+### `.user list`
+
+List all users and their roles.
+
+```
+.user list
+```
+
+### `.user create <username> <password> <role>`
+
+Create a new user with the given password and role.
+
+```
+.user create alice s3cret viewer
+.user create bob hunter2 admin
+```
+
+**Roles:** `admin`, `editor`, `viewer`
+
+### `.user drop <username>`
+
+Delete a user.
+
+```
+.user drop alice
+```
+
+### `.user password <username> <new_password>`
+
+Change a user's password.
+
+```
+.user password alice new-s3cret
+```
+
+### `.user role <username> <new_role>`
+
+Change a user's role.
+
+```
+.user role alice admin
+```
+
+---
+
+## Relation Commands
+
+### `.rel`
+
+List all relations with row counts.
+
+```
+.rel
+```
+
+**Output:**
+```
+Relations:
+  edge (arity: 2, columns: [col0: any, col1: any], tuples: 150)
+  person (arity: 3, columns: [id: int, name: string, age: int], tuples: 25)
+  department (arity: 2, columns: [col0: any, col1: any], tuples: 5)
+```
+
+### `.rel drop <name>`
+
+Delete a relation and all its data and schema.
+
+```
+.rel drop old_events
+```
+
+**Warning:** This permanently deletes the relation's tuples, metadata, schema, and persist storage. If a persistent rule exists with the same name as the relation, that rule is also removed. Other rules that reference the dropped relation are **not** automatically deleted — they will fail at query time. A `schema_change` notification is emitted.
+
+### `.rel <name>`
+
+Describe a relation's schema and show sample data.
+
+```
+.rel person
+```
+
+**Output:**
+```
+Relation: person
+```
+
+| A | B | C |
+|---|---|---|
+| 1 | "alice" | 30 |
+| 2 | "bob" | 25 |
+
+*2 of 25 total rows*
+
+## Rule Commands
+
+### `.rule`
+
+List all persistent rules.
+
+```
+.rule
+```
+
+**Output:**
+```
+Rules:
+  reachable (2 clause(s))
+  can_access (3 clause(s))
+```
+
+### `.rule list`
+
+Same as `.rule` - list all persistent rules.
+
+```
+.rule list
+```
+
+### `.rule <name>`
+
+Query a rule and show computed results.
+
+```
+.rule reachable
+```
+
+**Output:**
+
+| X | Y |
+|---|---|
+| 1 | 2 |
+| 1 | 3 |
+| 1 | 4 |
+
+*3 rows*
+
+### `.rule def <name>`
+
+Show the definition of a rule.
+
+```
+.rule def reachable
+```
+
+**Output:**
+```
+Rule: reachable
+Clauses:
+  1. reachable(X, Y) <- edge(X, Y)
+  2. reachable(X, Z) <- reachable(X, Y), edge(Y, Z)
+```
+
+### `.rule drop <name>`
+
+Delete a rule entirely (removes all clauses).
+
+```
+.rule drop reachable
+```
+
+### `.rule drop prefix <prefix>`
+
+Delete all rules whose names start with the given prefix.
+
+```
+.rule drop prefix temp_
+```
+
+**Note:** An empty prefix is rejected to prevent accidentally dropping all rules.
+
+### `.rule remove <name> <index>`
+
+Remove a specific clause from a rule by index (1-based).
+
+```
+.rule remove reachable 2
+```
+
+**Output:**
+```
+Clause 2 removed from rule 'reachable'
+```
+
+**Note:** If the last clause is removed, the entire rule is deleted:
+```
+Clause 1 removed from rule 'simple'. Rule completely deleted (no clauses remaining)
+```
+
+**Errors:**
+- If clause index is out of bounds: `Clause index 5 out of bounds. Rule 'reachable' has 2 clause(s)`
+- If rule doesn't exist: `Rule 'nonexistent' does not exist`
+
+### `.rule clear <name>`
+
+Clear all clauses from a rule for re-registration.
+
+```
+.rule clear reachable
+```
+
+### `.rule edit <name> <index> <clause>`
+
+Edit a specific clause in a rule.
+
+```
+.rule edit reachable 2 +reachable(X, Z) <- edge(X, Y), reachable(Y, Z)
+```
+
+**Note:** Index is 1-based.
+
+## Session Commands
+
+Session rules are transient and not persisted.
+
+### `.session`
+
+List current session rules.
+
+```
+.session
+```
+
+**Output:**
+```
+Session rules (2):
+  1. temp(X) <- edge(X, _)
+  2. filtered(X, Y) <- temp(X), edge(X, Y)
+```
+
+### `.session clear`
+
+Clear all session rules.
+
+```
+.session clear
+```
+
+### `.session drop <n>`
+
+Remove a specific session rule by index.
+
+```
+.session drop 1
+```
+
+**Note:** Index is 1-based.
+
+## Load Command
+
+The `.load` command reads and executes all statements from a `.idl` file sequentially.
+
+### `.load <file>`
+
+Load and execute a file.
+
+```
+.load schema.idl
+```
+
+**Behavior:**
+- Reads the file from disk
+- Parses and executes each statement in order
+- Continues through non-fatal errors (parse errors, server errors) so that cleanup commands (e.g., `.kg drop`) always run
+- Only connection errors abort the script
+
+**Note:** The parser accepts `--replace` and `--merge` flags, but these modes are not yet implemented — all three modes currently execute identically (sequential statement execution).
+
+### Supported File Formats
+
+| Extension | Description |
+|-----------|-------------|
+| `.idl` | InputLayer script (statements) |
+
+## System Commands
+
+### `.status`
+
+Show system status.
+
+```
+.status
+```
+
+**Output:**
+```
+Knowledge graph: mykg
+Relations: 5
+Rules: 3
+Session rules: 2
+Data directory: ./data
+```
+
+### `.clear prefix <prefix>`
+
+Clear all facts from relations whose names start with the given prefix.
+
+```
+.clear prefix temp_
+```
+
+**Note:** An empty prefix is rejected. This clears data only - schemas and rules are preserved.
+
+### `.explain <query>`
+
+Show the query plan for a query without executing it. Displays the logical plan and applied optimizations.
+
+```
+.explain ?edge(X, Y)
+.explain ?path(1, X)
+```
+
+### `.compact`
+
+Compact storage by consolidating WAL and batch files.
+
+```
+.compact
+```
+
+### `.help`
+
+Show help message.
+
+```
+.help
+```
+
+### `.quit` / `.exit` / `.q`
+
+Exit the REPL.
+
+```
+.quit
+```
+
+---
+
+## Index Commands
+
+Commands for managing HNSW (Hierarchical Navigable Small World) indexes for fast vector similarity search.
+
+### `.index` / `.index list`
+
+List all indexes in the current knowledge graph.
+
+```
+.index
+.index list
+```
+
+**Output:**
+```
+Indexes:
+  embeddings_idx on embeddings(vector) [hnsw, cosine]
+  docs_idx on documents(embedding) [hnsw, euclidean]
+```
+
+### `.index create`
+
+Create a new HNSW index on a vector column.
+
+**Syntax:**
+```
+.index create <name> on <relation>(<column>) [type <index_type>] [metric <distance_metric>] [m <max_connections>] [ef_construction <beam_width>] [ef_search <search_beam>]
+```
+
+**Parameters:**
+- `name` - Unique name for the index
+- `relation` - Relation containing the vector column
+- `column` - Column name containing vectors
+- `type` - Index type (default: `hnsw`)
+- `metric` - Distance metric: `cosine`, `euclidean`, `dot_product`, `manhattan` (default: `cosine`)
+- `m` - Max connections per node (default: 16, higher = better recall, more memory)
+- `ef_construction` - Beam width during construction (default: 200, higher = better quality, slower build)
+- `ef_search` - Beam width during search (default: 50, higher = better recall, slower search)
+
+**Examples:**
+
+Basic index with defaults:
+```
+.index create my_idx on embeddings(vector)
+```
+
+Index with cosine distance:
+```
+.index create doc_idx on documents(embedding) metric cosine
+```
+
+Tuned index for high recall:
+```
+.index create high_recall_idx on items(vec) metric euclidean m 32 ef_construction 200 ef_search 100
+```
+
+### `.index drop`
+
+Delete an index.
+
+```
+.index drop <name>
+```
+
+**Example:**
+```
+.index drop embeddings_idx
+```
+
+### `.index stats`
+
+Show statistics for an index including size, build time, and configuration.
+
+```
+.index stats <name>
+```
+
+**Example:**
+```
+.index stats embeddings_idx
+```
+
+**Output:**
+```
+Index: embeddings_idx
+  Relation: embeddings
+  Column: vector
+  Type: hnsw
+  Metric: cosine
+  Vectors: 10,000
+  Dimensions: 384
+  M: 16
+  ef_construction: 200
+  ef_search: 50
+  Memory: 15.2 MB
+```
+
+### `.index rebuild`
+
+Force rebuild an index. Useful after bulk inserts or if index becomes stale.
+
+```
+.index rebuild <name>
+```
+
+**Example:**
+```
+.index rebuild embeddings_idx
+```
+
+**Note:** Rebuilding large indexes may take significant time. The index remains available during rebuild.
+
+---
+
+## Error Handling
+
+### Invalid Command
+
+```
+.foo
+```
+
+**Output:**
+```
+Unknown meta command: .foo
+```
+
+### Missing Arguments
+
+```
+.kg create
+```
+
+**Output:**
+```
+Usage: .kg create <name>
+```
+
+### Rule Not Found
+
+```
+.rule nonexistent
+```
+
+**Output:**
+```
+Rule 'nonexistent' not found
+```

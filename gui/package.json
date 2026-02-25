@@ -3,8 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "next build --webpack",
-    "dev": "next dev --webpack",
+    "prebuild": "node scripts/bundle-docs.mjs",
+    "build": "node scripts/bundle-docs.mjs && next build --webpack",
+    "dev": "node scripts/bundle-docs.mjs && next dev --webpack",
     "lint": "eslint .",
     "start": "next start"
   },
@@ -52,8 +53,10 @@
     "react-day-picker": "9.8.0",
     "react-dom": "19.2.0",
     "react-hook-form": "^7.60.0",
+    "react-markdown": "^9.1.0",
     "react-resizable-panels": "^2.1.7",
     "recharts": "2.15.4",
+    "remark-gfm": "^4.0.1",
     "sonner": "^1.7.4",
     "tailwind-merge": "^3.3.1",
     "tailwindcss-animate": "^1.0.7",

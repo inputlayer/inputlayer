@@ -1,8 +1,8 @@
 # inputlayer
 
-Python Object-Logic Mapper (OLM) for [InputLayer](https://github.com/inputlayer/inputlayer) - the incremental Datalog knowledge graph engine.
+Python Object-Logic Mapper (OLM) for [InputLayer](https://github.com/inputlayer/inputlayer) - the reasoning engine for AI agents.
 
-Write Python. No Datalog. The OLM compiles typed Python classes into Datalog over WebSocket.
+Write Python. No query syntax required. The OLM compiles typed Python classes into InputLayer queries over WebSocket.
 
 ## Installation
 
@@ -62,7 +62,7 @@ asyncio.run(main())
 
 ### Relations
 
-Define typed schemas as Python classes. Each `Relation` subclass maps to a Datalog relation.
+Define typed schemas as Python classes. Each `Relation` subclass maps to an InputLayer relation.
 
 ```python
 from inputlayer import Relation, Vector, Timestamp
@@ -242,7 +242,7 @@ with InputLayerSync("ws://localhost:8080/ws", username="admin", password="admin"
 | `grant_access(username, role)` | Grant per-KG access |
 | `revoke_access(username)` | Revoke per-KG access |
 | `explain(*select, ...)` | Show query plan |
-| `execute(datalog)` | Execute raw Datalog |
+| `execute(datalog)` | Execute raw query |
 
 ### `Session`
 
@@ -284,7 +284,7 @@ with InputLayerSync("ws://localhost:8080/ws", username="admin", password="admin"
 | `ReplaceRule(name, old, new)` | Replace rule clauses |
 | `CreateIndex(name, relation, column, ...)` | Create HNSW index |
 | `DropIndex(name, relation, column, ...)` | Drop HNSW index (reversible) |
-| `RunDatalog(forward, backward)` | Custom Datalog commands |
+| `RunDatalog(forward, backward)` | Custom query commands |
 
 ### Aggregation Functions
 

@@ -599,7 +599,7 @@ fn print_usage() {
     println!();
     println!("OPTIONS:");
     println!("  -k, --api-key <KEY>   API key for authentication (or set INPUTLAYER_API_KEY)");
-    println!("  -s, --script <FILE>   Execute a Datalog script file");
+    println!("  -s, --script <FILE>   Execute an InputLayer script file");
     println!("  -r, --repl            Open REPL after script execution");
     println!("      --server <URL>    Server URL (default: http://127.0.0.1:8080)");
     println!(

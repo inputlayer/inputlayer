@@ -1,6 +1,6 @@
 # @inputlayer/api-client
 
-TypeScript API client for InputLayer Datalog Database with runtime validation.
+TypeScript API client for InputLayer with runtime validation.
 
 ## Installation
 
@@ -31,7 +31,7 @@ const db = await client.databases.create({
   description: 'My database',
 });
 
-// Execute a Datalog query
+// Execute a query
 const result = await client.query.execute({
   query: 'person(X, Y)?',
   database: 'mydb',

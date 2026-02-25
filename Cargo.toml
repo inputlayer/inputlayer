@@ -2,7 +2,7 @@
 name = "inputlayer"
 version = "0.1.0"
 edition = "2021"
-description = "Context graph for AI agents  - a streaming deductive database built on Differential Dataflow"
+description = "A reasoning engine for AI agents — store facts, define rules, derive everything that logically follows"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/inputlayer/inputlayer"
 homepage = "https://inputlayer.ai"

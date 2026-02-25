@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run deny python-test
+.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run deny python-test front-build front-deploy
 
 SHELL := /bin/bash
 
@@ -353,3 +353,26 @@ flush-dev:
 	@echo "Flushing development data..."
 	@rm -rf ./data
 	@echo "Data folder removed. Server will recreate default knowledge graph on next start."
+
+# Frontend Website
+
+# Build the marketing website (static export to front/dist/)
+front-build:
+	cd front && npm ci && npm run build
+	@echo "Frontend built to front/dist/"
+
+# Build and deploy website to gh-pages branch
+front-deploy: front-build
+	@echo "Deploying frontend to gh-pages..."
+	@TMPDIR=$$(mktemp -d); \
+	cp -r front/dist/* "$$TMPDIR/"; \
+	touch "$$TMPDIR/.nojekyll"; \
+	cd "$$TMPDIR" && \
+	git init && \
+	git checkout -b gh-pages && \
+	git add -A && \
+	git commit -m "Deploy website" && \
+	git remote add origin https://github.com/inputlayer/inputlayer.git && \
+	git push -f origin gh-pages && \
+	rm -rf "$$TMPDIR"; \
+	echo "Deployed to https://inputlayer.github.io/inputlayer/"
