@@ -14,6 +14,7 @@ RUN cd packages/api-client && npm run build
 COPY gui/package.json ./gui/
 RUN cd gui && npm install --no-audit --no-fund --silent
 COPY gui/ ./gui/
+COPY docs/content/ ./docs/content/
 RUN cd gui && npm run build
 
 # ---- Rust Builder ----
