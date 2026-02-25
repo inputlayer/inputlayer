@@ -372,7 +372,7 @@ front-deploy: front-build
 	git checkout -b gh-pages && \
 	git add -A && \
 	git commit -m "Deploy website" && \
-	git remote add origin https://github.com/inputlayer/inputlayer.git && \
+	git remote add origin git@github.com:inputlayer/inputlayer.github.io.git && \
 	git push -f origin gh-pages && \
-	rm -rf "$$TMPDIR"; \
-	echo "Deployed to https://inputlayer.github.io/inputlayer/"
+	cd / && rm -rf "$$TMPDIR"; \
+	echo "Deployed to https://inputlayer.github.io/"
