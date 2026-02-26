@@ -4,10 +4,11 @@ import Link from "next/link"
 import { useEffect, useState } from "react"
 import { Logo } from "@/components/logo"
 import { ThemeToggle } from "@/components/theme-toggle"
-import { ExternalLink, Star } from "lucide-react"
+import { ExternalLink, Star, GitFork } from "lucide-react"
 
-function GitHubStars() {
+function GitHubStats() {
   const [stars, setStars] = useState<number | null>(null)
+  const [forks, setForks] = useState<number | null>(null)
 
   useEffect(() => {
     fetch("https://api.github.com/repos/inputlayer/inputlayer")
@@ -16,24 +17,42 @@ function GitHubStars() {
         if (data?.stargazers_count != null) {
           setStars(data.stargazers_count)
         }
+        if (data?.forks_count != null) {
+          setForks(data.forks_count)
+        }
       })
       .catch(() => {})
   }, [])
 
   return (
-    <a
-      href="https://github.com/inputlayer/inputlayer"
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/50 px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground hover:bg-secondary"
-    >
-      <Star className="h-3.5 w-3.5" />
-      {stars !== null ? (
-        <span>{stars >= 1000 ? `${(stars / 1000).toFixed(1)}k` : stars}</span>
-      ) : (
-        <span>Star</span>
-      )}
-    </a>
+    <div className="inline-flex items-center gap-1.5">
+      <a
+        href="https://github.com/inputlayer/inputlayer"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/50 px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground hover:bg-secondary"
+      >
+        <Star className="h-3.5 w-3.5" />
+        {stars !== null ? (
+          <span>{stars >= 1000 ? `${(stars / 1000).toFixed(1)}k` : stars}</span>
+        ) : (
+          <span>Star</span>
+        )}
+      </a>
+      <a
+        href="https://github.com/inputlayer/inputlayer/fork"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/50 px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground hover:bg-secondary"
+      >
+        <GitFork className="h-3.5 w-3.5" />
+        {forks !== null ? (
+          <span>{forks >= 1000 ? `${(forks / 1000).toFixed(1)}k` : forks}</span>
+        ) : (
+          <span>Fork</span>
+        )}
+      </a>
+    </div>
   )
 }
 
@@ -53,18 +72,18 @@ export function SiteHeader() {
             Docs
           </Link>
           <a
-            href="https://github.com/inputlayer/inputlayer"
+            href="https://demo.inputlayer.ai"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 text-muted-foreground transition-colors hover:text-foreground"
           >
-            GitHub
+            Demo
             <ExternalLink className="h-3 w-3" />
           </a>
         </nav>
 
         <div className="ml-auto flex items-center gap-3">
-          <GitHubStars />
+          <GitHubStats />
           <ThemeToggle />
         </div>
       </div>

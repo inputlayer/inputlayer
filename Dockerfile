@@ -47,7 +47,10 @@ RUN apt-get update && \
 RUN useradd -r -s /bin/false -m -d /var/lib/inputlayer inputlayer
 
 COPY --from=builder /build/target/release/inputlayer-server /usr/local/bin/
-COPY --from=gui-builder /build/gui/dist/ /var/lib/inputlayer/gui/dist/
+COPY --chown=inputlayer:inputlayer --from=gui-builder /build/gui/dist/ /var/lib/inputlayer/gui/dist/
+
+RUN mkdir -p /var/lib/inputlayer/data && \
+    chown -R inputlayer:inputlayer /var/lib/inputlayer
 
 ENV INPUTLAYER_HTTP__HOST=0.0.0.0
 ENV INPUTLAYER_HTTP__PORT=8080
@@ -55,7 +58,6 @@ ENV INPUTLAYER_STORAGE__DATA_DIR=/var/lib/inputlayer/data
 ENV INPUTLAYER_STORAGE__AUTO_CREATE_KNOWLEDGE_GRAPHS=true
 ENV INPUTLAYER_LOGGING__LEVEL=info
 
-VOLUME /var/lib/inputlayer/data
 EXPOSE 8080
 USER inputlayer
 WORKDIR /var/lib/inputlayer
