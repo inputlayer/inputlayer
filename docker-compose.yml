@@ -1,0 +1,35 @@
+services:
+  inputlayer:
+    image: ghcr.io/inputlayer/inputlayer:latest
+    restart: unless-stopped
+    volumes:
+      - inputlayer-data:/var/lib/inputlayer/data
+    environment:
+      INPUTLAYER_ADMIN_PASSWORD: ${INPUTLAYER_ADMIN_PASSWORD:-}
+      INPUTLAYER_BOOTSTRAP_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:-}
+      INPUTLAYER_HTTP__HOST: "0.0.0.0"
+      INPUTLAYER_HTTP__PORT: "8080"
+      INPUTLAYER_HTTP__CORS_ALLOW_ALL: "false"
+      INPUTLAYER_LOGGING__LEVEL: ${INPUTLAYER_LOG_LEVEL:-info}
+    # NOT exposed to host - only accessible via Caddy
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    depends_on:
+      - inputlayer
+
+volumes:
+  inputlayer-data:
+  caddy-data:
+  caddy-config:
