@@ -144,12 +144,12 @@ export default function LandingPage() {
                   <ArrowRight className="h-4 w-4" />
                 </Link>
                 <a
-                  href="https://github.com/inputlayer/inputlayer"
+                  href="https://demo.inputlayer.ai"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-5 py-2.5 text-sm font-medium hover:bg-secondary transition-colors"
                 >
-                  GitHub
+                  Try the demo
                   <ExternalLink className="h-3.5 w-3.5" />
                 </a>
               </div>
@@ -442,10 +442,44 @@ export default function LandingPage() {
                 <ArrowRight className="h-4 w-4" />
               </Link>
               <a
-                href="https://github.com/inputlayer/inputlayer"
+                href="https://demo.inputlayer.ai"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-5 py-2.5 text-sm font-medium hover:bg-secondary transition-colors"
+              >
+                Try the demo
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Bottom CTA ───────────────────────────────────────────── */}
+      <section className="border-b border-border/50">
+        <div className="mx-auto max-w-6xl px-6 py-20">
+          <div className="relative rounded-2xl border border-border bg-gradient-to-br from-primary/10 via-transparent to-primary/5 p-12 text-center space-y-6">
+            <h2 className="text-3xl font-bold tracking-tight">
+              See it in action
+            </h2>
+            <p className="text-muted-foreground text-lg max-w-xl mx-auto">
+              Try InputLayer in your browser. Load a knowledge graph, write rules, and query - no installation required.
+            </p>
+            <div className="flex flex-wrap justify-center gap-3 pt-2">
+              <a
+                href="https://demo.inputlayer.ai"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-md bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+              >
+                Launch demo
+                <ArrowRight className="h-4 w-4" />
+              </a>
+              <a
+                href="https://github.com/inputlayer/inputlayer"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-6 py-3 text-sm font-medium hover:bg-secondary transition-colors"
               >
                 View on GitHub
                 <ExternalLink className="h-3.5 w-3.5" />
