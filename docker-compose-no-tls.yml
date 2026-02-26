@@ -1,0 +1,18 @@
+services:
+  inputlayer:
+    image: ghcr.io/inputlayer/inputlayer:latest
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - inputlayer-data:/var/lib/inputlayer/data
+    environment:
+      INPUTLAYER_ADMIN_PASSWORD: ${INPUTLAYER_ADMIN_PASSWORD:-}
+      INPUTLAYER_BOOTSTRAP_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:-}
+      INPUTLAYER_HTTP__HOST: "0.0.0.0"
+      INPUTLAYER_HTTP__PORT: "8080"
+      INPUTLAYER_HTTP__CORS_ALLOW_ALL: "${CORS_ALLOW_ALL:-false}"
+      INPUTLAYER_LOGGING__LEVEL: ${INPUTLAYER_LOG_LEVEL:-info}
+
+volumes:
+  inputlayer-data:
