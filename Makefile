@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run deny python-test front-build front-deploy
+.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test front-build front-deploy
 
 SHELL := /bin/bash
 
@@ -342,6 +342,22 @@ docker:
 # Run Docker container
 docker-run: docker
 	docker run --rm -p 8080:8080 -v inputlayer-data:/var/lib/inputlayer/data inputlayer
+
+# Deploy with TLS (production)
+docker-deploy:
+	docker compose up -d
+
+# Deploy without TLS (development/behind load balancer)
+docker-deploy-no-tls:
+	docker compose -f docker-compose-no-tls.yml up -d
+
+# View logs
+docker-logs:
+	docker compose logs -f
+
+# Stop deployment
+docker-stop:
+	docker compose down
 
 # Supply chain checks (licenses, advisories, banned crates)
 deny:
