@@ -1,0 +1,135 @@
+---
+title: "InputLayer + Your Vector Database: When Similarity Is Not Enough"
+date: "2026-01-20"
+author: "InputLayer Team"
+category: "Architecture"
+excerpt: "Your vector database handles similarity search beautifully. But some queries need reasoning, not just retrieval. Here's how to know when you need both."
+---
+
+# InputLayer + Your Vector Database: When Similarity Is Not Enough
+
+Your vector database is probably doing exactly what you need it to do. Embed documents, search by similarity, feed context to your LLM. For a lot of use cases, that pipeline works beautifully and you shouldn't change it.
+
+But at some point - maybe you've already hit it - you'll encounter queries where the results are *relevant* but not *correct*. The returned documents are genuinely similar to the query. They just don't answer the actual question, because the answer requires connecting dots that no similarity metric can connect.
+
+This post is about recognizing that moment and understanding what to do about it.
+
+## A tale of two questions
+
+Here's the clearest way to see the difference. Consider two questions a financial analyst might ask:
+
+**Question A:** "Show me recent reports about risk management."
+
+This is a similarity question. The answer is a set of documents whose content is semantically close to "risk management." Your vector database handles this perfectly. Embed the query, find nearest neighbors, done.
+
+**Question B:** "Does our client have exposure to any sanctioned entities?"
+
+This is a reasoning question. The answer requires tracing ownership chains through corporate structures - Entity A owns 60% of Entity B, which has a subsidiary C, which is on a sanctions list. No single document contains this answer. The information is spread across entity registrations, ownership records, and sanctions lists.
+
+```flow
+Question A: similarity search [success] -> Relevant documents found
+```
+
+```chain
+Question B: similarity search
+-- finds documents that mention sanctions
+But that's not the same as HAVING exposure [highlight]
+-- needs reasoning instead
+Trace ownership chain through entity relationships
+=> Yes or No answer (from connected facts, not document similarity) [success]
+```
+
+Your vector database will find documents that *mention* sanctions for Question B. It might even find documents about your client. But it can't trace the ownership chain that connects them. That connection is structural, not semantic.
+
+## Three signs you've hit the wall
+
+Over time, we've noticed three patterns that signal teams need reasoning alongside their retrieval.
+
+### 1. You're writing multi-query orchestration code
+
+The first sign is architectural. You find yourself writing application code that makes multiple database calls and stitches the results together. Query the vector database for relevant docs. Query a graph for relationships. Hit an auth service. Reconcile everything in application code.
+
+```
+// This code smell means you need a reasoning layer
+const docs = await vectorDB.search(queryEmbedding, topK=50);
+const userPerms = await authService.getPermissions(userId);
+const filteredDocs = docs.filter(d =>
+  userPerms.departments.includes(d.metadata.department) ||
+  userPerms.teams.includes(d.metadata.team) ||
+  (d.metadata.author && await orgChart.isSubordinate(d.metadata.author, userId))
+);
+// ^ This recursive check is the red flag
+```
+
+The recursive `isSubordinate` check at the end is the tell. You've hit a reasoning problem and you're trying to solve it with imperative code and API calls. It works, but it's fragile, slow, and hard to keep consistent.
+
+### 2. Your metadata filters can't express the access policy
+
+This is the access control version. Your permission model started simple - department-based, maybe role-based. But now it involves hierarchies: managers can see their reports' documents, and their reports' reports, and so on down the chain.
+
+```chain
+Simple access control (works fine)
+-- metadata filter
+Filter: department = "engineering" [success]
+```
+
+```chain
+Complex access control (breaks down)
+-- metadata filter
+Filter: author in ??? [highlight]
+-- you don't know the list
+You need to recursively traverse the org chart first
+=> Can't express "everyone in Alice's reporting chain" as a flat filter
+```
+
+You can't express "everyone in Alice's transitive reporting chain" as a flat metadata filter because you don't know who's in that chain until you recursively traverse the org chart. And that chain changes every time someone joins, leaves, or transfers.
+
+### 3. Stale derived data is accumulating silently
+
+The third sign is the most sneaky because it's invisible at first. Your system has derived some conclusions - cached recommendations, pre-computed access lists, materialized views - and the source data has changed, but the conclusions haven't updated.
+
+A partner relationship ended three months ago. The partnership flag was removed from the CRM. But the integration recommendations, the priority support routing, the shared document access - those derived conclusions are still sitting in various caches and indexes. Nobody cleaned them up because nobody knows all the places they spread to.
+
+```tree
+Fact: Partner relationship ended (March) [highlight]
+  Still in vector index: "Company X gets priority support" (from April doc) [muted]
+  Still in recommendations: "Try Company X's integration" (stale since March) [muted]
+  Still in access list: Company X employees see partner docs (stale since March) [muted]
+```
+
+```note
+type: warning
+In InputLayer, retracting the partnership fact automatically retracts every conclusion derived from it. In a system without proper retraction, these stale conclusions accumulate month after month.
+```
+
+## How the two systems complement each other
+
+The mental model is simple:
+
+```flow
+Your vector database [primary] -> "What content looks most like this query?"
+```
+
+```flow
+InputLayer [primary] -> "What can be concluded from these facts and rules?"
+```
+
+Most real applications need both. A customer support agent needs to find relevant help articles (vector search) and check the customer's subscription tier (reasoning). A research assistant needs to find related papers (vector search) and trace the citation graph to foundational work (graph reasoning). A financial advisor needs to find matching investment products (vector search) and verify regulatory compliance (rule evaluation).
+
+The cleanest pattern is straightforward: use each system for what it's best at. Keep your vector database for similarity queries. Add InputLayer for the reasoning queries. For the cases where you need both at the same time - "find documents similar to X that this user is authorized to see through their reporting chain" - InputLayer handles the combined query in a single pass with its native vector search capabilities.
+
+## When to stick with just your vector database
+
+Not every application needs reasoning. If your queries are straightforward similarity lookups with simple metadata filters, your vector database is the right tool and adding InputLayer would be unnecessary complexity.
+
+The honest assessment: if you don't have any of the three signs above - no multi-query orchestration, no hierarchical access control, no stale derived data - you probably don't need InputLayer yet. And that's fine. Build with what works today and add the reasoning layer when you actually need it.
+
+The trigger is when you find yourself building a reasoning engine inside your application code. When that happens, you're better off using one that's purpose-built.
+
+## Getting started
+
+```bash
+docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer
+```
+
+The [quickstart guide](/docs/guides/quickstart/) takes about 5 minutes. If you're specifically interested in combining vector search with reasoning, the [vectors documentation](/docs/guides/vectors/) covers InputLayer's native vector capabilities.

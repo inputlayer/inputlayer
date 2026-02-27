@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "prebuild": "node scripts/bundle-docs.mjs",
-    "build": "node scripts/bundle-docs.mjs && next build --webpack",
-    "dev": "node scripts/bundle-docs.mjs && next dev --webpack",
+    "prebuild": "node scripts/bundle-docs.mjs && node scripts/bundle-content.mjs",
+    "build": "node scripts/bundle-docs.mjs && node scripts/bundle-content.mjs && next build --webpack",
+    "dev": "node scripts/bundle-docs.mjs && node scripts/bundle-content.mjs && next dev --webpack",
     "start": "next start"
   },
   "dependencies": {

@@ -1,0 +1,77 @@
+---
+title: "InputLayer + Graph Databases"
+competitors:
+  - "Graph Databases"
+---
+
+# InputLayer + Graph Databases
+
+If you're using a graph database, you already understand the value of thinking about data as relationships. Graph databases are excellent at traversing known paths through connected data, and they've built mature ecosystems for visualization, querying, and administration.
+
+InputLayer adds capabilities that graph databases weren't designed to handle: rule-based inference, incremental computation, and correct retraction through recursive derivation chains. Think of it as the reasoning layer that sits alongside your graph database.
+
+## What each system does best
+
+Graph databases shine at traversing explicit relationships. Their query languages make it easy to express things like "find all friends of friends" or "what's the shortest path between these two nodes." They also offer mature tooling - browser-based explorers, administration procedures, clustering capabilities.
+
+InputLayer handles the reasoning side. It evaluates logical rules, computes recursive fixed points, maintains derived conclusions incrementally, and retracts derived data correctly when source facts change. These are capabilities that graph query languages weren't designed to express.
+
+| Capability | Graph Databases | InputLayer |
+|---|---|---|
+| Property graph storage | Native | Facts and relations |
+| Path traversal | Native | Native |
+| Pattern matching | Native | Native |
+| Rule-based inference | Limited | Native |
+| Recursive fixed-point computation | Limited | Native |
+| Incremental maintenance | No | Native |
+| Correct retraction | No | Native |
+| Vector similarity search | Plugin | Native |
+| Visualization tools | Mature | Via API |
+| Clustering | Native | Single-node |
+
+## Where graph databases reach their limits
+
+Graph databases handle path queries well, but they struggle with certain patterns that come up frequently in production.
+
+**Recursive derivation** is the big one. Graph query languages support variable-length path patterns - "find all nodes reachable through MANAGES edges." But this is pattern matching over the stored graph. It's different from deriving new relationships and then reasoning over the derived ones recursively.
+
+```tree
+Authority from two sources [primary]
+  Management chain (recursive)
+    Alice manages Bob, Bob manages Charlie
+    Therefore Alice has authority over Charlie
+  Committee membership
+    Alice sits on committee overseeing Engineering
+    Therefore Alice has authority over everyone in Engineering
+```
+
+In InputLayer, you express both sources of authority as rules, and the engine combines them into a single recursive concept. In a graph query language, you'd need to write multiple queries and stitch the results together in application code.
+
+**Incremental maintenance** is the other gap.
+
+```steps
+A relationship changes in a graph database :: Materialized views and cached results are now stale [highlight]
+Manual invalidation or full recomputation needed :: You decide what to rebuild [highlight]
+A fact changes in InputLayer :: Only affected derivations recompute automatically [success]
+A fact is deleted in InputLayer :: Derived conclusions retract, but only if no alternative path exists [success]
+```
+
+This "correct retraction" property is critical for maintaining consistent state in applications like access control, compliance, and recommendation systems.
+
+## How they work together
+
+The most natural pattern is to use your graph database for interactive exploration and visualization, and InputLayer for the reasoning-heavy queries that graph query languages can't express efficiently.
+
+Your graph database handles questions like "show me the path between these two entities" or "what does this part of the graph look like?" - the kind of queries where visual exploration and interactive querying add real value.
+
+InputLayer handles questions like "given these rules, what can be concluded?" or "if I change this fact, what else changes?" - the kind of queries where you need fixed-point computation, incremental updates, and correct retraction.
+
+Some teams also use InputLayer to compute derived relationships and then sync the results back to their graph database for visualization. This gives them the reasoning power they need with the visualization and exploration tools they already know and love.
+
+## Getting started
+
+```bash
+docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer
+```
+
+The [quickstart guide](/docs/guides/quickstart/) will get you running. If you're coming from a graph database background, the [data modeling guide](/docs/guides/core-concepts/) explains how InputLayer's fact-and-rule model relates to property graphs, and the [recursion documentation](/docs/guides/recursion/) covers the fixed-point computation that makes InputLayer's approach to recursive reasoning different from graph traversal.

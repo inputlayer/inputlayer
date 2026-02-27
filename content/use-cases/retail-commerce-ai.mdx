@@ -1,0 +1,93 @@
+---
+title: "Retail & Commerce AI"
+icon: "ShoppingBag"
+subtitle: "Product recommendations, catalog reasoning, and conversational commerce powered by knowledge graphs."
+---
+
+# Retail & Commerce AI
+
+If you're building AI for retail or e-commerce, you're probably familiar with the gap between what your recommendation engine suggests and what would actually be the right answer. The product that's semantically similar to what a customer bought isn't always the product they should buy next.
+
+InputLayer helps bridge that gap by adding a reasoning layer that understands product relationships, customer behavior patterns, and business rules - things that similarity search alone can't capture.
+
+## The recommendation problem
+
+Traditional recommendation engines rely on similarity - collaborative filtering ("users who bought X bought Y") or content-based filtering ("products that look like X"). Both miss the same thing: logical relationships between products.
+
+```chain
+Customer buys a DSLR camera
+-- similarity-based system recommends
+More cameras (semantically similar) [highlight]
+-- but what they actually need
+Lens, memory card, camera bag (accessories) [success]
+=> The connection is logical, not semantic
+```
+
+InputLayer lets you express these relationships as rules. "When a customer buys a product, recommend its accessories - but only if they haven't already bought them and they're currently in stock."
+
+```tree
+Recommendation signals [primary]
+  Collaborative filtering
+    "users who bought X also bought Y"
+  Category affinity (recursive)
+    "related product categories, at any depth"
+  Semantic similarity
+    "products with similar descriptions"
+  Accessory relationships
+    "this product goes with that one"
+```
+
+The nice thing about expressing recommendations as rules is that they're auditable. When a recommendation shows up, you can trace exactly why. That kind of explainability is hard to get from black-box models.
+
+## Catalog reasoning
+
+Large product catalogs have rich internal structure that's hard to capture in vector embeddings.
+
+```tree
+Sports [primary]
+  Athletic
+    Footwear
+      Running Shoes
+      Trail Shoes
+    Accessories
+      Running Socks
+      Hydration Pack
+    Electronics
+      GPS Watch
+```
+
+A query like "show me all products in the athletic category" requires traversing this hierarchy. A flat metadata filter won't do that. InputLayer's recursive reasoning follows the parent-child chain and returns products from every subcategory, no matter how deep.
+
+Cross-category recommendations also become natural. If customers who buy running shoes frequently also buy running socks (a different category), InputLayer can capture that as a rule and surface it as a cross-sell recommendation.
+
+## Conversational commerce
+
+Chatbots and conversational agents for e-commerce need to reason about products in context. When a customer says "I need something waterproof for hiking under $100," the agent needs to combine attribute filtering (waterproof, hiking-appropriate), price constraints, and inventory availability - potentially across thousands of products.
+
+InputLayer handles this by letting you express all of these constraints in a single query. The engine filters by structured attributes (waterproof, suitable for hiking), applies price constraints, checks inventory status, and can even layer in semantic similarity to capture nuances the structured attributes might miss - all in one pass.
+
+The result is products that match both the explicit requirements and the implicit intent behind the customer's question. And because everything runs through the same reasoning engine, adding a new constraint (like "also factor in the customer's past purchases") is just another rule.
+
+## Keeping recommendations fresh
+
+When a product goes out of stock, gets discontinued, or has a price change, recommendations should reflect that immediately.
+
+```flow
+Traditional ML [highlight] -> Retrain model (hours) -> Rebuild index (minutes) -> Deploy
+```
+
+```flow
+InputLayer [success] -> Retract fact -> Recommendations update (~ms) -> Done
+```
+
+InputLayer's incremental computation handles this naturally. Update a product's stock status, and every recommendation that depended on it being in stock updates automatically. No batch job, no cache invalidation, no delay.
+
+When a new product arrives and you add facts about it, it immediately becomes eligible for recommendation through all existing rules. No model retraining or index rebuilding needed.
+
+## Getting started
+
+The [quickstart guide](/docs/guides/quickstart/) will get you up and running in about 5 minutes. From there, the [data modeling guide](/docs/guides/core-concepts/) covers how to structure your product catalog as a knowledge graph, and the [Python SDK](/docs/guides/python-sdk/) makes it straightforward to integrate with your existing e-commerce platform.
+
+```bash
+docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer
+```

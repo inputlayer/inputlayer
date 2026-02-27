@@ -1,0 +1,121 @@
+---
+title: "Agentic AI"
+icon: "Brain"
+subtitle: "Give your AI agents structured memory, multi-hop reasoning, and policy-aware retrieval."
+---
+
+# Agentic AI
+
+If you're building AI agents, you've probably hit the point where vector search isn't enough. Your agent can recall things that *look* relevant, but it can't actually reason about them. It can't follow a chain of facts, enforce access policies, or keep its memory consistent when things change.
+
+That's the gap InputLayer fills. It gives your agents a structured knowledge graph with deductive reasoning, vector search, and incremental computation - all in a single system that sits alongside your existing tools.
+
+## Where current agent architectures fall short
+
+Most agent frameworks treat memory as a retrieval problem. You embed observations into vectors, store them, and retrieve by similarity when the agent needs context. This works well for simple recall - "What did the user say about their preferences?" - and it's the right tool for that job.
+
+But it breaks down when your agent needs to actually think through a problem.
+
+```chain
+Agent is asked: "Which suppliers are affected by the port closure?"
+-- needs to know
+Which suppliers exist and which ports they use
+-- needs to know
+Which ports are currently closed
+-- needs to connect these facts
+No single document contains this answer [highlight]
+=> The agent must traverse a chain of relationships to get there
+```
+
+**Multi-hop questions** like this are the most common challenge. Three separate pieces of information need to be connected. No single document or embedding contains the answer - the agent needs to follow the chain.
+
+**Policy enforcement** comes up when an agent is asked "Show me all documents I'm allowed to see about Project X." It needs to resolve authorization hierarchies: who reports to whom, which teams have access, what classification levels exist. This is logical reasoning, not similarity matching.
+
+**Consistency** is the sneaky one. When an agent learns that a previous fact was wrong, all conclusions derived from that fact should disappear. With vector stores, stale observations just sit there forever unless you manually clean them up.
+
+```steps
+Agent learns: "Supplier X ships through Shanghai port" :: Stored as a fact
+Agent learns: "Shanghai port is closed" :: Stored as a fact
+Engine derives: "Supplier X is disrupted" :: Automatically connected [success]
+Agent learns: "Shanghai port reopened" :: Fact retracted
+Engine retracts: "Supplier X is disrupted" :: Automatically cleaned up [highlight]
+```
+
+## Agent memory as a knowledge graph
+
+Instead of storing memories as unstructured text chunks, InputLayer lets you represent them as structured facts and rules. The difference is fundamental: your agent can reason about its knowledge, not just search through it.
+
+```tree
+Traditional agent memory [muted]
+  Vector store
+    "Customer Acme is enterprise tier" (text chunk)
+    "Acme contract is $150K" (text chunk)
+    "Acme renewal is March 2026" (text chunk)
+```
+
+```tree
+InputLayer agent memory [primary]
+  Knowledge graph
+    customer(acme, enterprise, $150K)
+    renewal(acme, 2026-03-15)
+    Rule: high-value if enterprise + contract > $100K
+    Rule: churn-risk if high-value + renewal within 90 days
+    Derived: acme is high-value [success]
+    Derived: acme is at churn risk [highlight]
+```
+
+With vector memory, the agent stores text chunks. It can recall them by similarity, but it can't combine them to reach conclusions.
+
+With InputLayer, the agent stores structured facts and defines rules. The engine evaluates those rules automatically. When the agent stores a new fact - say it learns a customer's renewal is coming up - all derived conclusions update. When it retracts a fact - say the customer renews - stale conclusions vanish on their own.
+
+## Tool-use orchestration
+
+Agents that use tools generate chains of observations and actions. InputLayer tracks these chains as structured relationships, which lets the agent reason about what it's learned so far and what it should investigate next.
+
+```chain
+Agent calls search API
+-- learns
+Port closure in Shanghai [highlight]
+-- knowledge graph already knows
+Supplier A ships through Shanghai
+-- engine automatically derives
+Supplier A is disrupted [highlight]
+=> Agent didn't need to manually connect these dots [success]
+```
+
+Each new fact feeds into the existing web of relationships, potentially triggering new derived conclusions without the agent having to explicitly connect the dots. The more tool calls the agent makes, the richer the reasoning becomes.
+
+## Multi-agent coordination
+
+When multiple agents share a knowledge graph, they can coordinate through shared state instead of complex message-passing protocols.
+
+```flow
+Agent A: detects negative sentiment [primary] -> Shared knowledge graph -> Agent B: detects usage decline [primary]
+```
+
+```note
+type: tip
+Neither agent had to tell the other anything. Both contributed facts. A shared rule - "churn risk if negative sentiment AND usage drop > 30%" - derived the conclusion from the combined knowledge. No pub/sub, no event buses, no eventual consistency headaches.
+```
+
+## Policy-aware retrieval
+
+Every query can combine vector similarity with logical access control. This is particularly useful for agents that serve multiple users with different permission levels.
+
+When an agent searches for documents on behalf of a user, InputLayer evaluates the authorization rules as part of the query itself - not as a separate middleware layer. The engine resolves the user's permission chain (following reporting hierarchies, team memberships, classification levels) and combines it with semantic similarity in a single pass. Results come back already filtered for what the user is allowed to see.
+
+This means access control is always consistent and never stale. When someone changes roles, the very next query reflects their new permissions.
+
+## Why teams add InputLayer for their agents
+
+The short version: your vector database handles similarity search well, and you should keep using it for that. InputLayer adds the capabilities it can't provide - multi-hop reasoning, recursive access control, automatic retraction, incremental updates, and structured memory that your agents can actually think with.
+
+Most teams start by using InputLayer for the queries that require reasoning, while keeping their existing vector store for straightforward similarity search. Over time, they often find themselves running more and more of their logic through the knowledge graph as the benefits of structured reasoning become clear.
+
+## Getting started
+
+```bash
+docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer
+```
+
+The [quickstart guide](/docs/guides/quickstart/) will get you running in about 5 minutes. From there, the [Python SDK](/docs/guides/python-sdk/) is the fastest way to integrate with your agent framework, and the [data modeling guide](/docs/guides/core-concepts/) will help you design a knowledge graph schema that fits your use case.

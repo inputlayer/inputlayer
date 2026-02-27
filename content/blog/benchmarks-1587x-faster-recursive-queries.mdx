@@ -1,0 +1,141 @@
+---
+title: "Benchmarks: 1,587x Faster Recursive Queries with Differential Dataflow"
+date: "2026-02-15"
+author: "InputLayer Team"
+category: "Engineering"
+excerpt: "How InputLayer's incremental computation engine delivers sub-millisecond updates on recursive queries over large graphs. The architecture behind the numbers."
+---
+
+# Benchmarks: 1,587x Faster Recursive Queries with Differential Dataflow
+
+When a single fact changes in a knowledge graph with 400,000 derived relationships, how much work should the system do?
+
+The naive answer: recompute all 400,000 relationships from scratch. That's what most systems do. It takes 11 seconds.
+
+The smart answer: figure out which relationships are actually affected by the change and update only those. That takes 6.83 milliseconds.
+
+That's a **1,652x** difference. And it's the difference between "we can check permissions in real time" and "we run a batch job overnight and hope nothing changes before morning."
+
+## The benchmark setup
+
+We wanted to test something that reflects real-world usage, not a synthetic micro-benchmark. So we picked a common pattern: computing transitive authority in an organizational graph. This is the same kind of computation you'd need for access control chains, supply chain risk propagation, or entity resolution across corporate structures.
+
+```flow
+2,000 nodes -> ~6,000 edges -> ~400,000 derived relationships
+```
+
+```note
+type: info
+The test: add one new edge, then measure how long it takes to update all derived relationships.
+```
+
+The 400,000 derived relationships come from the transitive nature of authority. If A manages B and B manages C, then A has authority over C. Follow that logic through 2,000 nodes with an average depth of 8-10 levels, and the number of derived relationships grows fast.
+
+## The results
+
+| Approach | Time | What it does |
+|---|---|---|
+| Full recomputation | 11,280 ms | Throws away all 400,000 derived relationships, re-derives them all |
+| InputLayer (incremental) | 6.83 ms | Identifies affected relationships, updates only those |
+
+Full recomputation doesn't care that you only changed one edge. It treats the entire graph as dirty and rebuilds everything. InputLayer's engine, on the other hand, traces the impact of the change through the derivation graph and touches only what's affected.
+
+To put 6.83ms in perspective: that's fast enough to run inline with an API request. You can check permissions, compute supply chain exposure, or resolve entity relationships at query time rather than pre-computing them in a batch process.
+
+## The scaling story
+
+Here's where it gets really interesting. The incremental advantage doesn't stay constant as your graph grows - it gets *dramatically* better.
+
+| Graph size | Derived relationships | Full recompute | Incremental | Speedup |
+|---|---|---|---|---|
+| 500 nodes | ~25,000 | 420 ms | 1.2 ms | **350x** |
+| 1,000 nodes | ~100,000 | 2,800 ms | 3.1 ms | **903x** |
+| 2,000 nodes | ~400,000 | 11,280 ms | 6.83 ms | **1,652x** |
+
+Look at how the two columns grow. Full recomputation grows roughly quadratically - double the nodes, quadruple the time. But incremental updates grow much slower, because most single-fact changes only ripple through a small portion of the graph.
+
+```steps
+500 nodes: 420ms full vs 1.2ms incremental :: 350x faster
+1,000 nodes: 2,800ms full vs 3.1ms incremental :: 903x faster
+2,000 nodes: 11,280ms full vs 6.83ms incremental :: 1,652x faster [primary]
+```
+
+This scaling behavior is fundamental, not accidental. Full recomputation has to process the entire graph regardless of what changed. Incremental updates process only the "blast radius" of the change, which stays relatively small even as the total graph grows.
+
+At 10,000 nodes, the full recompute would take over a minute. The incremental update would still be in the low tens of milliseconds. That's the difference between a feature that's practical in production and one that isn't.
+
+## Why the numbers work this way
+
+InputLayer is built on [Differential Dataflow](https://github.com/TimelyDataflow/differential-dataflow), a Rust library for incremental computation created by Frank McSherry. The core idea is simple: instead of storing derived results as static data, the engine represents everything as *differences* that can be efficiently passed along.
+
+Here's how a fact change flows through the system:
+
+```chain
+You add an edge: "Diana manages Eve"
+-- who has authority over Diana?
+Engine finds: Alice and Bob (from existing derivations) [primary]
+-- so they must also have authority over Eve
+Engine checks: does Eve manage anyone? Yes - Frank
+-- so Alice and Bob also get authority over Frank
+Engine checks: does Frank manage anyone? No. Done. [success]
+=> Total work: 4 new derived relationships in ~2ms
+```
+
+The engine didn't scan the entire graph. It didn't recompute relationships for nodes that weren't affected. It started from the change, followed the ripple effects, and stopped as soon as the ripple died out.
+
+For recursive reasoning - like transitive authority where conclusions feed back into the computation - the engine runs a loop until it reaches a stable point where no new differences are produced. When something changes later, it re-enters that loop at the point of change and computes only the new differences.
+
+InputLayer also uses a technique called Magic Sets that makes queries demand-driven. When you ask "who does Alice have authority over?", the engine doesn't compute authority for every person in the organization. It starts from Alice and follows only the relevant paths. Query time becomes proportional to Alice's portion of the graph, not the entire organization.
+
+## Correct retraction: the hard part
+
+Adding facts is relatively straightforward to handle incrementally. Removing them is where things get genuinely hard.
+
+Say Alice has authority over Charlie through two independent paths:
+
+```flow
+Alice -> Bob -> Charlie [primary]
+```
+
+```flow
+Alice -> Diana -> Charlie [primary]
+```
+
+If you remove Bob's management of Charlie, Alice should still have authority over Charlie through Diana. But if you remove Diana's management of Charlie too, the authority should disappear entirely.
+
+The engine tracks this through weighted differences. Each derived relationship has a weight based on the number of independent paths that support it. When a path is removed, the weight goes down. Only when it reaches zero does the conclusion go away.
+
+```steps
+Both paths exist: authority(Alice, Charlie) weight is 2 :: via Bob and Diana
+Remove Bob to Charlie: weight drops to 1 :: still exists via Diana [success]
+Remove Diana to Charlie: weight drops to 0 :: retracted [highlight]
+```
+
+On our benchmark graph, retracting a single edge and propagating all downstream changes takes under 10ms. Bulk retractions (removing 100 edges) complete in about a second. Fast enough for real-time applications where facts change frequently.
+
+## What this means in practice
+
+The practical takeaway here is about which architectural patterns become possible.
+
+**Without incremental computation**, you're stuck with batch processing. Pre-compute permissions overnight. Rebuild recommendation indexes hourly. Re-run compliance checks on a schedule. And accept that between runs, your derived data is stale.
+
+**With incremental computation**, you can do these things live:
+
+| Use case | Batch approach | Incremental approach |
+|---|---|---|
+| Access control | Nightly permission rebuild | Live permission check at query time |
+| Supply chain risk | Hourly risk recalculation | Instant risk update when a supplier status changes |
+| Compliance screening | Daily sanctions check | Real-time flag when ownership structure changes |
+| Recommendations | Model retrain every few hours | Instant update when user behavior or inventory changes |
+
+The 1,652x speedup isn't about making a slow thing faster. It's about making batch-only workloads work in real time. That's a qualitative difference in what you can build.
+
+## Try it yourself
+
+InputLayer is open-source:
+
+```bash
+docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer
+```
+
+Start with the [quickstart guide](/docs/guides/quickstart/) to build your first knowledge graph, or dive into the [recursion documentation](/docs/guides/recursion/) to see how recursive reasoning works under the hood.

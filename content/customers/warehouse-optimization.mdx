@@ -1,0 +1,50 @@
+---
+title: "Warehouse Optimization"
+industry: "Manufacturing"
+keyMetric: "<50ms reasoning latency"
+---
+
+# Warehouse Optimization
+
+A European appliance manufacturer needed real-time reasoning for their warehouse operations. Their existing databases handled inventory tracking and order management well, but when it came to making fast, logic-heavy decisions - like optimal pick routing and dynamic re-prioritization - the application layer was doing too much heavy lifting.
+
+They added InputLayer as the reasoning layer on top of their existing infrastructure, and the results were immediate: sub-50ms query latency for decisions that previously took hundreds of milliseconds to assemble from multiple data sources.
+
+## The challenge
+
+The company operates large-scale distribution centers across Europe. Their existing systems were solid for what they were designed to do - track inventory levels, manage orders, store warehouse layouts. The problem wasn't with those systems. It was with the gap between them.
+
+```flow
+Picking robot needs route -> Inventory DB [primary] -> Order priority DB -> Layout DB -> Application code stitches it all together [highlight]
+```
+
+When a picking robot needed to determine the optimal route, the application layer had to pull data from inventory, cross-reference it with order priorities, factor in the physical layout, and compute a path. All of this logic lived in application code, making separate queries to different systems.
+
+This added hundreds of milliseconds to each decision. For a warehouse running thousands of picks per hour, those milliseconds add up fast.
+
+## The solution
+
+InputLayer was added as a dedicated reasoning layer sitting alongside the existing infrastructure. Warehouse layout, inventory positions, and order priorities are ingested as facts. The routing and optimization logic that used to live in scattered application code is now expressed as reasoning rules that the engine evaluates in real time.
+
+Here's what that looks like conceptually. The warehouse layout is represented as a graph - bins connected to aisles, aisles connected to docks. Inventory tells the engine what's in each bin. Order priorities tell it what needs to be picked first. And the routing rules compute optimal paths through this graph, taking all of these factors into account simultaneously.
+
+The key part is that the path computation is recursive - the engine explores routes through the warehouse graph, finding how to get from the dock to each bin that has items needed for high-priority orders. It evaluates this in one pass rather than requiring the application to make separate calls to different systems.
+
+## Results
+
+```steps
+Routing decisions :: Under 50ms (previously hundreds of ms) [success]
+Inventory change propagation :: Only affected routes recompute [primary]
+Stale route elimination :: Automatic - no robots sent to empty bins [success]
+```
+
+The impact was felt almost immediately. Query latency dropped to under 50ms for routing decisions that previously required multiple round-trips between systems.
+
+The incremental computation engine turned out to be especially valuable. When inventory changes (which happens constantly in a busy warehouse), only the affected routes recompute. No need to rebuild the entire routing graph every time someone picks an item. And when an item is fully picked, the correct retraction mechanism ensures that all dependent routing decisions update automatically.
+
+## Key technical insight
+
+```note
+type: tip
+The recursive path computation through the warehouse graph is what makes this practical. InputLayer's incremental computation means adding or removing inventory doesn't require recomputing all paths - only the affected routes update. This is what keeps latency under 50ms even as the warehouse state changes continuously.
+```

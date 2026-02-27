@@ -1,0 +1,164 @@
+---
+title: "Building a Product Recommendation Engine with InputLayer"
+date: "2026-02-05"
+author: "InputLayer Team"
+category: "Tutorial"
+excerpt: "A step-by-step guide to building a recommendation engine that combines collaborative filtering, product relationships, and semantic similarity in a single knowledge graph."
+---
+
+# Building a Product Recommendation Engine with InputLayer
+
+A customer just bought a DSLR camera. Your recommendation engine suggests... more cameras. Three other DSLRs in slightly different price ranges.
+
+The customer doesn't need another camera. They need a lens, a memory card, and a bag to carry it all in. But those items look nothing like a camera in embedding space. The connection between "camera" and "camera bag" is *logical* (one is an accessory for the other), not *semantic* (their product descriptions have little overlap).
+
+This is the gap between similarity-based recommendations and reasoning-based recommendations. In this tutorial, we'll build an engine that handles both - and a few other things that traditional recommenders struggle with.
+
+## What we're building
+
+By the end of this tutorial, you'll have a recommendation engine with four distinct signals:
+
+```tree
+Recommendation Engine [primary]
+  Collaborative Filtering
+    "users who bought X also bought Y"
+  Category Affinity (recursive)
+    "related product categories, at any depth"
+  Semantic Similarity
+    "products with similar descriptions"
+  Accessory Relationships
+    "this product goes with that one"
+```
+
+```note
+type: info
+Results are combined, de-duplicated, and filtered: already purchased items are excluded, out-of-stock items are excluded, and discontinued items are removed automatically.
+```
+
+Each signal is expressed as a simple, readable rule. The engine combines them automatically. And because this runs on a knowledge graph with incremental computation, the recommendations stay fresh without model retraining or index rebuilding.
+
+## Step 1: Model your product catalog
+
+Everything starts with your product data. In InputLayer, this means storing structured facts about products, their categories, and how categories relate to each other.
+
+You store each product with its name and direct category. Then you describe the category hierarchy - running shoes fall under athletic footwear, which falls under footwear, which falls under apparel. This hierarchy is the backbone for one of our recommendation signals.
+
+You also store embedding vectors for each product, generated from product descriptions using a text embedding model. These power the semantic similarity signal.
+
+```tree
+Sports [primary]
+  Athletic
+    Footwear
+      SKU_001 "Running Shoes"
+      SKU_002 "Trail Shoes"
+    Accessories
+      SKU_003 "Running Socks"
+      SKU_004 "Hydration Pack"
+    Electronics
+      SKU_005 "GPS Watch"
+```
+
+## Step 2: Feed in user behavior
+
+Next, purchase history and browsing data. Who bought what, and what have they been looking at recently. In production, you'd ingest this from your transaction database as events happen.
+
+```tree
+Purchase History
+  user_1: Running Shoes, Running Socks
+  user_2: Running Shoes, Hydration Pack
+  user_3: Trail Shoes, GPS Watch
+Browsing Data
+  user_1 viewed: Trail Shoes, GPS Watch [muted]
+```
+
+The important thing: these aren't just rows in a table. They're facts in a knowledge graph that the reasoning engine can combine with other facts through rules. That's the key difference from a traditional recommendation database.
+
+## Step 3: Define recommendation rules
+
+This is where the approach diverges from traditional ML recommendations. Instead of training a model, we express recommendation logic as rules. Each rule captures a different signal, and each rule is readable in plain English.
+
+**Rule 1 - Collaborative filtering:** "If two users bought the same product, the other products each user bought become recommendations for the other." This is the classic "customers who bought X also bought Y" pattern. But it's expressed as a rule, not a matrix factorization - which means you can read it, debug it, and explain exactly why a recommendation appeared.
+
+What this looks like in practice for user_1:
+
+```chain
+user_1 bought Running Shoes
+-- who else bought Running Shoes?
+user_2 also bought Running Shoes [primary]
+-- what else did user_2 buy?
+user_2 also bought Hydration Pack
+=> Recommend Hydration Pack to user_1 [success]
+```
+
+**Rule 2 - Category affinity (recursive):** "If a user bought something in one category, recommend products from related categories." This rule is recursive - it follows the category hierarchy to find related categories at any depth.
+
+```chain
+user_1 bought Running Shoes (in footwear)
+-- walk up the category tree
+Footwear is under Athletic [primary]
+-- what else is under Athletic?
+Accessories and Electronics are also under Athletic
+=> Recommend from related categories: Hydration Pack, GPS Watch [success]
+```
+
+Buying running shoes surfaces recommendations not just from footwear, but from accessories and electronics too, because they share a parent category. And this works no matter how deep or wide your category tree goes.
+
+**Rule 3 - Semantic similarity:** Products with similar descriptions (as measured by their embedding vectors) become recommendations. This catches relationships that the category hierarchy misses - two products from completely different categories that people tend to use together.
+
+**Rule 4 - Accessory relationships:** "When a customer buys a product, recommend its accessories - but only if they haven't already bought them and they're in stock." This is the explicit knowledge that a camera bag goes with a camera, expressed directly rather than inferred statistically.
+
+## Step 4: Combine and query
+
+Now you ask: "What should we recommend to user_1?"
+
+The engine evaluates all four rules, combines their results, filters out products user_1 has already bought, checks stock availability, and returns the final list:
+
+```tree
+Signals for user_1 [primary]
+  Collaborative: Hydration Pack (via user_2)
+  Category: Hydration Pack, GPS Watch, Trail Shoes
+  Semantic: Trail Shoes (0.92 similarity to Running Shoes)
+  Accessory: (none defined in this example) [muted]
+```
+
+```steps
+Trail Shoes - matched by category + semantic similarity :: strongest combined signal [primary]
+Hydration Pack - matched by collaborative + category :: two independent signals [primary]
+GPS Watch - matched by category :: single signal
+```
+
+Each recommendation carries its provenance. You can explain to the user *why* each item was recommended, and you can explain to your product team which signals are driving the most engagement. Try getting that kind of transparency from a neural collaborative filtering model.
+
+## Step 5: Watch it stay fresh
+
+Here's where the knowledge graph approach really shines compared to model-based recommenders.
+
+**A new purchase comes in.** User_1 buys a GPS Watch. You add that fact. All recommendations update instantly - GPS Watch drops out of user_1's recommendations (already purchased), and any collaborative filtering signals that involve GPS Watch recalculate. No model retraining needed.
+
+**A product goes out of stock.** You update the stock status for Trail Shoes. Every recommendation that included Trail Shoes disappears from results automatically. When it's back in stock, the recommendations come back. No index rebuild needed.
+
+**A product is discontinued.** You retract it from the catalog entirely. InputLayer's correct retraction mechanism removes it from every recommendation result, every collaborative filtering signal, every category association - automatically and immediately. No stale suggestions pointing customers to a product page that returns a 404.
+
+```flow
+Traditional ML recommender [highlight] -> Retrain model (hours) -> Rebuild index (minutes) -> Deploy (minutes)
+```
+
+```flow
+InputLayer [success] -> Retract fact -> Recommendations update (~ms) -> Done
+```
+
+## Where to take this next
+
+What we've built is the foundation. Here are the layers you'd add for production:
+
+**Inventory-aware filtering** - only recommend products that are actually in stock and available in the customer's region. This is one more condition on the recommendation rule.
+
+**Time decay** - weight recent purchases more heavily than old ones. A customer who bought running shoes yesterday is more likely to need accessories than a customer who bought them two years ago.
+
+**Price affinity** - recommend products in the customer's typical price range. If they buy premium products, don't recommend budget options.
+
+**Seasonal rules** - boost winter gear in November, swimwear in May. Express seasonality as a rule rather than baking it into a training set.
+
+Each of these is just another rule in the knowledge graph. The engine handles the interactions between all rules automatically - you don't need to worry about how time decay interacts with category affinity, or how inventory filtering affects collaborative signals. Define the rules, and the engine composes them.
+
+Check out the [data modeling guide](/docs/guides/core-concepts/) for patterns that work well at scale, and the [Python SDK](/docs/guides/python-sdk/) for integrating this into your e-commerce platform.

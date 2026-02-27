@@ -1,0 +1,175 @@
+---
+title: "Correct Retraction: Why Delete Should Actually Delete"
+date: "2026-01-15"
+author: "InputLayer Team"
+category: "Engineering"
+excerpt: "When you delete a fact from a knowledge graph, what happens to everything that was derived from it? Most systems get this wrong. Here's why it matters and how InputLayer handles it."
+---
+
+# Correct Retraction: Why Delete Should Actually Delete
+
+Three months after a security incident, the forensics team discovers something troubling. A former employee - let's call him Bob - had his access revoked on the day he left. His account was deactivated. His role was removed from the auth system.
+
+But Bob had authority over a team of six people. Those six people had authored documents. The system had derived that Bob's manager, Alice, could access those documents through Bob. When Bob left, his direct access disappeared. But Alice's transitive access to those documents - the part that was *derived* through Bob's position - was never cleaned up.
+
+For three months, Alice had access to documents she shouldn't have been able to see. Not because anyone made an error, but because the system didn't properly retract derived conclusions when a source fact was removed.
+
+This is the correct retraction problem. And it's one of the most under-appreciated issues in data systems that derive conclusions from connected facts.
+
+## Simple on the surface, hard underneath
+
+At first glance, retraction seems trivial. Delete a fact, delete everything that depended on it. Done.
+
+Let's walk through why it's not that simple.
+
+Alice manages Bob. Bob manages Charlie. The system derives transitive authority:
+
+```tree
+Alice [primary]
+  Bob (direct report)
+    Charlie (Bob's direct report)
+```
+
+```steps
+Alice has authority over Bob :: direct
+Bob has authority over Charlie :: direct
+Alice has authority over Charlie :: transitive: Alice to Bob to Charlie
+```
+
+Bob leaves the company. You remove "Alice manages Bob." What should happen?
+
+```steps
+Alice has authority over Bob :: RETRACT - no longer manages him [highlight]
+Alice has authority over Charlie :: RETRACT - was derived through Bob [highlight]
+Bob has authority over Charlie :: KEEP - this fact is independent of Alice [success]
+```
+
+Alice loses authority over both Bob and Charlie. But Bob keeps authority over Charlie because that relationship doesn't depend on Alice's management of Bob. The retraction needs to be precise - it can't just cascade blindly down the graph.
+
+OK, that's manageable. But now consider the harder case.
+
+## The diamond problem
+
+Alice manages both Bob and Diana. Both Bob and Diana manage Charlie.
+
+```tree
+Alice [primary]
+  Bob
+    Charlie
+  Diana
+    Charlie
+```
+
+Alice has authority over Charlie through *two independent paths*: through Bob and through Diana. The derived fact `authority(Alice, Charlie)` has two reasons to exist.
+
+Now Bob stops managing Charlie:
+
+```tree
+Alice [primary]
+  Bob [muted]
+  Diana
+    Charlie [success]
+```
+
+Should Alice lose authority over Charlie? **No.** The path through Diana still supports it.
+
+Now Diana also stops managing Charlie:
+
+```tree
+Alice [primary]
+  Bob [muted]
+  Diana [muted]
+Charlie (no paths remain) [highlight]
+```
+
+*Now* Alice should lose authority over Charlie. Both supporting paths are gone.
+
+This is the multiple derivation path problem, and it's what makes correct retraction genuinely difficult. A derived conclusion should only disappear when *every* path that supports it has been removed. Not when the first path is removed. Not when most paths are removed. Only when the count reaches zero.
+
+## How most systems get this wrong
+
+There are three common approaches, and each fails in a different way.
+
+**Approach 1: Don't retract derived data at all.** Many systems are append-only for derived conclusions. You can mark a source fact as deleted, but the derived facts remain in whatever cache, index, or materialized view they were written to. This is the "phantom permissions" problem - users retain access that should have been revoked. It's also the "ghost recommendations" problem - discontinued products keep showing up because the derived recommendation was never cleaned up.
+
+**Approach 2: Recompute everything from scratch.** Throw away all derived data and re-derive it all. This is correct but expensive. On a knowledge graph with millions of derived facts, recomputation takes seconds or minutes. You can run it as a batch job, but between batch runs, your data is potentially inconsistent.
+
+**Approach 3: Delete derived facts that "look related."** Walk from the retracted fact and delete anything downstream. This is fast, but it's wrong whenever the diamond problem appears. You'll delete conclusions that should have survived because they had alternative derivation paths.
+
+```tree
+Approaches compared [primary]
+  Append-only (no retraction)
+    Simple retraction: No [highlight]
+    Diamond problem: No [highlight]
+    Performance: N/A [muted]
+  Full recomputation
+    Simple retraction: Yes [success]
+    Diamond problem: Yes [success]
+    Performance: Slow (seconds to minutes) [highlight]
+  Naive cascade deletion
+    Simple retraction: Yes [success]
+    Diamond problem: No (deletes too much) [highlight]
+    Performance: Fast but incorrect [highlight]
+  Weighted differences (InputLayer)
+    Simple retraction: Yes [success]
+    Diamond problem: Yes [success]
+    Performance: Fast and correct [success]
+```
+
+## How InputLayer solves it: weighted differences
+
+InputLayer is built on Differential Dataflow, which represents every derived fact as a weighted record. The weight counts the number of independent derivation paths that support the conclusion.
+
+Here's the diamond example, step by step:
+
+```steps
+Initial state: Alice manages Bob and Diana, both manage Charlie :: authority(Alice, Charlie) has weight 2
+Remove "Bob manages Charlie": -1 via Bob path :: Weight is now 1 - conclusion SURVIVES [success]
+Remove "Diana manages Charlie": -1 via Diana path :: Weight is now 0 - conclusion RETRACTED [highlight]
+```
+
+The engine doesn't need to search for alternative paths or do any special-case reasoning. The weight arithmetic handles it automatically. And this works through any number of recursive levels - if the derivation chain is 10 hops deep with branching paths at every level, the weights still track correctly.
+
+## Retraction through recursive chains
+
+The diamond problem is hard enough with a single level of derivation. With recursion, it gets harder - but the weighted approach still handles it.
+
+Consider a deeper hierarchy:
+
+```flow
+Alice -> Bob -> Charlie -> Diana -> Eve [primary]
+```
+
+The derived fact `authority(Alice, Eve)` goes through 4 hops. If you remove "Charlie manages Diana," the engine needs to retract not just `authority(Charlie, Diana)` but also `authority(Alice, Diana)`, `authority(Bob, Diana)`, `authority(Alice, Eve)`, `authority(Bob, Eve)`, and `authority(Charlie, Eve)` - every derived authority that passed through the Charlie-Diana link.
+
+But if Diana also reports to someone else (say, Frank, who reports to Alice through a different branch), some of those authority relationships might survive through the alternative path.
+
+The engine tracks all of this through differences. Each removal spreads as a -1 difference through the derivation graph. At each node, the difference combines with existing weights. Conclusions retract when and only when their weight reaches zero. No manual reasoning about paths needed.
+
+## Why this matters: three real scenarios
+
+**Access control:** When someone leaves the company, every permission derived through their position needs to disappear. But only the permissions that were *exclusively* derived through their position. If a document was accessible through two independent authorization paths and one is removed, access should continue through the remaining path. Getting this wrong means either phantom permissions (security risk) or over-retraction (broken access for people who should still have it).
+
+**Recommendations:** When a product is discontinued, every recommendation that included it should vanish. If a recommendation was "users who bought X also bought Y," and Y is discontinued, the recommendation disappears. But if Y was also recommended through a different signal (semantic similarity, category affinity), that recommendation should survive through the remaining signal.
+
+**Compliance:** When an entity is removed from a sanctions list, every downstream flag derived from that designation should clear. But if an entity had sanctions exposure through two different ownership paths, removing one designation should correctly preserve the remaining exposure. Your compliance team should not be chasing alerts that are no longer valid. They should also not miss alerts that are still valid because the retraction was too aggressive.
+
+## Performance
+
+Correct retraction is only useful if it's fast enough to happen in real time. If propagating a retraction takes seconds, you're back to batch processing.
+
+| Operation | Time (2,000-node graph) |
+|---|---|
+| Retract 1 edge, propagate all downstream changes | <10ms |
+| Retract 10 edges, propagate all downstream changes | ~100ms |
+| Retract 100 edges, propagate all downstream changes | ~1 second |
+
+These numbers come from our benchmark graph with ~400,000 derived relationships. The incremental approach means each retraction only touches the affected portion of the derivation graph. The total graph size barely matters - what matters is the size of the ripple effect from the specific retraction.
+
+## Getting started
+
+If you want to see correct retraction in action, the [quickstart guide](/docs/guides/quickstart/) walks through a hands-on example. The [recursion documentation](/docs/guides/recursion/) explains how recursive rules interact with retraction. And our [benchmarks post](/blog/benchmarks-1587x-faster-recursive-queries/) covers the performance characteristics in detail.
+
+```bash
+docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer
+```

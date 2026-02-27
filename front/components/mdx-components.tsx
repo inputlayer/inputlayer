@@ -3,9 +3,10 @@
 import type { Components } from "react-markdown"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
-import { createElement } from "react"
+import { createElement, isValidElement } from "react"
 import { highlightToHtml } from "@/lib/syntax-highlight"
 import { highlightGeneric } from "@/lib/generic-highlight"
+import { isDiagramLanguage, DiagramRenderer, type DiagramLanguage } from "@/components/diagrams"
 
 function HeadingWithId({
   level,
@@ -70,11 +71,23 @@ export const MdxComponents: Components = {
     )
   },
 
-  pre: ({ children, ...props }) => (
-    <pre className="rounded-lg bg-[var(--code-bg)] p-4 overflow-x-auto mb-4 text-sm font-mono" {...props}>
-      {children}
-    </pre>
-  ),
+  pre: ({ children, ...props }) => {
+    // If the child code block is a diagram language, render without pre wrapper
+    if (isValidElement(children)) {
+      const child = children as React.ReactElement<{ className?: string; children?: React.ReactNode }>
+      const cls = child.props?.className || ""
+      const langMatch = cls.match(/language-(\w+)/)
+      if (langMatch && isDiagramLanguage(langMatch[1])) {
+        const raw = String(child.props?.children || "").replace(/\n$/, "")
+        return <DiagramRenderer content={raw} type={langMatch[1] as DiagramLanguage} />
+      }
+    }
+    return (
+      <pre className="rounded-lg bg-[var(--code-bg)] p-4 overflow-x-auto mb-4 text-sm font-mono" {...props}>
+        {children}
+      </pre>
+    )
+  },
 
   code: ({ className, children, ...props }) => {
     // Fenced code blocks get a className like "language-datalog"

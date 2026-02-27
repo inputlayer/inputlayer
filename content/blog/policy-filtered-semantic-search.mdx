@@ -1,0 +1,130 @@
+---
+title: "Policy-Filtered Semantic Search: Access Control Meets Vector Similarity"
+date: "2026-02-10"
+author: "InputLayer Team"
+category: "Architecture"
+excerpt: "Most systems handle access control and semantic search as separate concerns. Here's what happens when you combine them into a single query."
+---
+
+# Policy-Filtered Semantic Search: Access Control Meets Vector Similarity
+
+Every enterprise RAG application eventually runs into the same problem. The semantic search works great - it finds relevant documents. But then you need to check whether the user is actually allowed to see those documents. And suddenly you're maintaining two systems, writing glue code between them, and dealing with consistency bugs that only show up in production.
+
+This post is about what happens when you stop treating authorization and retrieval as separate concerns and combine them into a single operation.
+
+## How it usually works (and where it breaks)
+
+The typical architecture looks like this:
+
+```chain
+User sends a query
+-- calls auth service
+Auth service returns permissions (e.g. department: "engineering", level: "L5+")
+-- passes filters to vector database
+Vector database runs query with metadata filters
+-- returns results
+Filtered results [success]
+```
+
+The application calls an auth service to figure out the user's permissions, translates those permissions into metadata filters, and passes those filters to the vector database along with the query. It works. For simple permission models - "engineering can see engineering docs" - it works fine.
+
+But here's where it falls apart. Most real organizations don't have flat permission models. They have hierarchies. And hierarchies are recursive.
+
+## The recursion problem
+
+Consider Sarah, a VP of Engineering at a 500-person company. Her reporting chain looks like this:
+
+```tree
+Sarah (VP Engineering) [primary]
+  Marcus (Dir. Platform)
+    Team Alpha (8 people)
+    Team Beta (6 people)
+  Priya (Dir. AI/ML)
+    Team Gamma (10 people)
+    Team Delta (5 people)
+  James (Dir. DevOps)
+    Team Epsilon (7 people)
+```
+
+Sarah should be able to see documents from everyone in her org - all 36 people across 5 teams. Marcus should see documents from Alpha and Beta (14 people). A team lead in Alpha should see only Alpha's documents (8 people).
+
+How do you express "Sarah can see documents from everyone beneath her in the org chart" as a metadata filter? You can't hardcode the list of 36 people - that becomes stale the moment someone joins, leaves, or transfers. You can't say `department = "engineering"` because that doesn't respect the sub-hierarchies (Marcus shouldn't see Priya's team's confidential documents unless the policy says so).
+
+What you actually need is a recursive walk of the reporting structure, starting from Sarah and going down through every layer. And that walk needs to happen at query time, against the current state of the org chart, every single time.
+
+That's not something a metadata filter can do.
+
+## Combining authorization and search in one pass
+
+In InputLayer, you describe your org structure as facts (who reports to whom) and your access policy as a rule (managers can see documents from their entire reporting chain). The engine handles both the authorization logic and the semantic search in a single query.
+
+Here's what happens when Sarah searches for "deployment best practices":
+
+```steps
+Resolve authorization (recursive): start from Sarah, walk her full reporting chain :: Sarah can see docs from 36 people [primary]
+Find documents: filter to documents authored by those 36 people :: 847 documents in scope
+Rank by similarity: compare each document's embedding to the query :: Top 10 results, all authorized, ranked by relevance [success]
+```
+
+```note
+type: tip
+All three steps happen in one pass. No separate auth service call, no metadata filter translation, no consistency gap.
+```
+
+The authorization is evaluated against the current state of the org chart, right now, as part of the query.
+
+## The consistency problem most teams don't notice
+
+Here's a subtle bug that exists in nearly every two-system auth+search setup.
+
+Monday: Bob reports to Sarah. Sarah can see Bob's documents. The auth service knows this, the metadata filters reflect it.
+
+Tuesday morning: Bob transfers from Engineering to Product. The auth service updates immediately. But the metadata on Bob's documents in the vector database? That gets updated in a batch job that runs at midnight.
+
+Tuesday afternoon: Sarah searches for something. The auth service says she can't see Bob's docs anymore (correct). But what about documents authored by someone who reported to Bob, whose metadata filter was set to `org: "engineering"` and hasn't been updated yet? That depends on how your metadata propagation works. And these edge cases multiply with every layer of hierarchy and every type of permission grant.
+
+```chain
+Bob transfers at 9am
+-- 15-hour consistency gap begins
+Auth says NO, but vector database says YES [highlight]
+-- batch job runs at midnight
+Gap finally closes the next day [success]
+```
+
+With InputLayer, this gap doesn't exist. Authorization is computed from the current facts at query time. Update the reporting structure at 9am, and the 9:01am query reflects the change. No propagation delay, no batch job, no stale permissions.
+
+## It also works in reverse: retraction
+
+When Bob leaves the company entirely, you retract the fact that Bob reports to Sarah.
+
+InputLayer automatically retracts everything that was derived through that relationship. Sarah loses access to Bob's documents. She also loses access to documents from anyone who reported through Bob - if Bob managed a team, that entire branch of Sarah's permission tree disappears.
+
+But here's the important part: if any of those people also report to Sarah through a different path (say, a dotted-line relationship), those permissions survive. The engine tracks how many independent paths support each access grant and only retracts when all paths are gone.
+
+In an append-only system, Bob's documents just sit there in the index until someone manually cleans them up. In InputLayer, the cleanup is automatic and precise.
+
+## Performance: can you actually do this at query time?
+
+Evaluating a recursive org chart walk on every search request sounds expensive. In practice, it's not.
+
+InputLayer's incremental computation engine means the recursive authorization isn't recomputed from scratch on every query. The first time Sarah queries, the engine walks her reporting chain. After that, it maintains the result incrementally. When the org chart changes, only the affected portion recomputes.
+
+| Operation | Time |
+|---|---|
+| Initial authority computation (2,000-node org) | ~200ms |
+| Incremental update after one org change | <7ms |
+| Subsequent queries (cached derivations) | <1ms for auth + vector search time |
+
+InputLayer also evaluates demand-driven. When Sarah queries, it doesn't compute the authorization chain for every person in the organization. It starts from Sarah and follows only her reporting paths. Query time scales with the size of Sarah's org, not the total company size.
+
+For a VP with 100 reports (direct and transitive), the authorization adds negligible overhead to the vector search. For a CEO of a 10,000-person company - the most extreme case - it's still in the low tens of milliseconds.
+
+## Getting started
+
+If you're dealing with authorization that's more complex than flat metadata filters - and most enterprise applications are - this pattern is worth exploring.
+
+```bash
+docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer
+```
+
+The [quickstart guide](/docs/guides/quickstart/) gets you running in about 5 minutes. The [recursion documentation](/docs/guides/recursion/) explains how recursive rules work, which is the foundation for hierarchical authorization.
