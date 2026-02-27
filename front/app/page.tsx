@@ -114,7 +114,7 @@ export default function LandingPage() {
           <div className="grid gap-12 lg:grid-cols-2 lg:gap-16 items-center">
             <div className="space-y-6">
               <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl lg:text-6xl">
-                A reasoning engine
+                A symbolic reasoning engine
                 <br />
                 <span className="text-primary">for AI agents</span>
               </h1>

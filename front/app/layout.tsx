@@ -8,7 +8,7 @@ const geist = Geist({ subsets: ["latin"], variable: "--font-geist-sans" })
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" })
 
 export const metadata: Metadata = {
-  title: "InputLayer - A reasoning engine for AI agents",
+  title: "InputLayer - A symbolic reasoning engine for AI agents",
   description:
     "Store facts, define rules, and derive everything that logically follows. Vector search, graph traversal, and incremental computation in one system.",
   icons: {

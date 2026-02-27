@@ -1,6 +1,6 @@
 # InputLayer Documentation
 
-Welcome to the InputLayer documentation. InputLayer is a reasoning engine for AI agents — a modern database that stores facts, defines rules, and derives everything that logically follows.
+Welcome to the InputLayer documentation. InputLayer is a symbolic reasoning engine for AI agents — a modern database that stores facts, defines rules, and derives everything that logically follows.
 
 ## Documentation Structure
 

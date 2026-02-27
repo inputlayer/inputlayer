@@ -3,7 +3,7 @@
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 
-**A reasoning engine for AI agents.**
+**A symbolic reasoning engine for AI agents.**
 
 Your agent retrieves context by searching for things that *look like* the question. That fails when the answer is connected through a chain of facts — not surface similarity. A shellfish allergy doesn't look like a restaurant query. A drug interaction doesn't look like a prescription request. A sanctions-listed subsidiary doesn't look like a wire transfer.
 

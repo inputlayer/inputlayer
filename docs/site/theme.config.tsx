@@ -34,7 +34,7 @@ const config: DocsThemeConfig = {
         />
         <meta
           property="og:description"
-          content="Documentation for InputLayer — a reasoning engine for AI agents"
+          content="Documentation for InputLayer — a symbolic reasoning engine for AI agents"
         />
       </>
     )
