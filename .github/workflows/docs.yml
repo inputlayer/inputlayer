@@ -6,6 +6,7 @@ on:
     paths:
       - 'front/**'
       - 'docs/content/**'
+      - 'content/**'
   workflow_dispatch:
 
 permissions:
