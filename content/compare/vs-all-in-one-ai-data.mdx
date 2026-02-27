@@ -1,0 +1,80 @@
+---
+title: "InputLayer + All-in-One AI Data Platforms"
+competitors:
+  - "AI Data Platforms"
+---
+
+# InputLayer + All-in-One AI Data Platforms
+
+A growing category of tools aims to be the single data layer for AI applications - combining vector search, filtering, and analytics in one system. These platforms offer fast vector search with rich filtering at competitive pricing.
+
+These platforms solve a real problem: the complexity of running separate systems for different query types. But they focus primarily on retrieval (finding data that matches criteria) rather than reasoning (deriving new conclusions from existing data). InputLayer adds the reasoning capabilities that retrieval-focused platforms don't provide.
+
+## Different problems, different tools
+
+All-in-one AI data platforms are optimized for a specific workflow: ingest vectors and metadata, query by similarity with filters, return results fast. They do this well, and they're a good fit when your queries follow this pattern.
+
+InputLayer solves a different problem: what happens when the answer isn't sitting in your data waiting to be retrieved? What if it needs to be *derived* from a chain of facts using logical rules? That's the gap InputLayer fills.
+
+| Capability | All-in-One AI Data | InputLayer |
+|---|---|---|
+| Vector similarity search | Native, optimized | Native |
+| Metadata filtering | Rich, fast | Via rules and joins |
+| Analytics (aggregation, grouping) | Growing | Via aggregation rules |
+| Rule-based inference | No | Native |
+| Recursive queries | No | Native |
+| Incremental computation | No | Native |
+| Correct retraction | No | Native |
+| Graph traversal | No | Native |
+| Knowledge graph storage | No | Native |
+
+## When retrieval isn't enough
+
+The retrieval model works great when the information you need is explicitly stored somewhere. But many real-world questions require reasoning that goes beyond retrieval.
+
+```chain
+AI agent asked: "Which enterprise customers are at risk of churning?"
+-- needs to combine
+Declining usage metrics (from analytics)
+-- with
+Negative sentiment in support tickets (from CRM)
+-- with
+Upcoming contract renewals (from billing)
+-- with
+Competitive mentions in sales calls (from call transcripts)
+=> No single document contains "churn risk" - it's a derived conclusion [highlight]
+```
+
+You tell InputLayer: "A customer is at churn risk if they're enterprise with usage declining more than 20% and a renewal within 90 days." The engine evaluates this rule across all your customer data and surfaces the ones that match.
+
+No amount of vector search will find "churn risk" as a stored concept. It's a conclusion derived from combining multiple facts through business rules.
+
+## The complementary pattern
+
+The cleanest way to think about these tools is that all-in-one AI data platforms handle the retrieval layer (finding relevant data quickly) and InputLayer handles the reasoning layer (deriving conclusions from connected facts).
+
+Your AI data platform excels at queries like "find the 50 most similar documents with metadata matching these criteria." InputLayer excels at queries like "given these facts and these rules, what can be concluded, and what changes when I update a fact?"
+
+In practice, many teams use both. The AI data platform handles the high-throughput similarity queries where raw retrieval speed matters most. InputLayer handles the reasoning queries where the answer needs to be derived from relationships and rules. Your application routes each query to the right system based on what it needs.
+
+## Incremental reasoning as a differentiator
+
+What happens when your data changes? All-in-one platforms handle updates by re-indexing vectors and metadata. That works for retrieval.
+
+But when you have derived conclusions, updates become more interesting.
+
+```steps
+Customer usage drops below threshold :: Churn risk assessment should update immediately [highlight]
+A fact is retracted :: Everything derived from it should disappear [highlight]
+A rule changes :: All affected conclusions should recompute [highlight]
+```
+
+InputLayer handles this through incremental computation. Updates propagate through the reasoning rules, recomputing only what's affected. Retractions are correct - derived facts only disappear when all supporting derivation paths are removed. This is the kind of consistency guarantee that retrieval systems don't need to provide, but reasoning systems absolutely do.
+
+## Getting started
+
+```bash
+docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer
+```
+
+The [quickstart guide](/docs/guides/quickstart/) gets you running in about 5 minutes. The [data modeling guide](/docs/guides/core-concepts/) explains how to structure your knowledge graph, and the [Python SDK](/docs/guides/python-sdk/) makes integration with your existing data stack straightforward.

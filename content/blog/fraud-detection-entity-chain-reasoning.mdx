@@ -1,0 +1,161 @@
+---
+title: "Fraud Detection Through Entity Chain Reasoning"
+date: "2026-01-25"
+author: "InputLayer Team"
+category: "Use Case"
+excerpt: "How knowledge graph reasoning uncovers fraud that pattern matching misses - by following chains of entity relationships across corporate structures and transaction flows."
+---
+
+# Fraud Detection Through Entity Chain Reasoning
+
+Here's a transaction your screening system flagged as clean: a wire transfer from your client to Alpha Corp for $50,000. Alpha Corp is a registered corporation with a clean record. Nothing suspicious.
+
+Except Alpha Corp is a subsidiary of Beta LLC. Beta LLC is 60% owned by Gamma Holding. And Gamma Holding is 80% controlled by someone on a sanctions list.
+
+```chain
+Your client sends $50K to Alpha Corp
+-- subsidiary of
+Beta LLC
+-- 60% owned by
+Gamma Holding
+-- 80% owned by
+SANCTIONED ENTITY [highlight]
+=> Four hops deep. Each record looks clean in isolation. The violation is only visible through the chain.
+```
+
+Traditional fraud detection systems check the direct counterparty against a list. That catches the obvious cases. It completely misses the layered structures that sophisticated actors actually use.
+
+## Why pattern matching can't solve this
+
+Most fraud detection runs on rules over individual transactions. Flag transactions over $10,000. Flag transactions to high-risk jurisdictions. Flag counterparties that appear on sanctions lists. These rules work on a per-transaction basis, looking at fields on a single record.
+
+The structural fraud problem is fundamentally different. You're not looking for a suspicious field on a single transaction. You're looking for a suspicious *path* through a network of entity relationships - a path that might not exist in any single system.
+
+```tree
+What pattern matching sees [muted]
+  Transaction #TX-001
+    From: Our Client
+    To: Alpha Corp
+    Amount: $50,000
+    Sanctions match: NO
+    PEP match: NO
+    High-risk jurisdiction: NO
+```
+
+```tree
+What chain reasoning sees [highlight]
+  Alpha Corp
+    subsidiary of Beta LLC
+      60% owned by Gamma Holding
+        80% owned by SANCTIONED PERSON
+  Indirect sanctions exposure: YES
+```
+
+The information exists across separate registries - corporate records, ownership filings, sanctions lists. No single database contains the complete picture. You have to follow the chain.
+
+## How InputLayer traces these chains
+
+In InputLayer, you model entity relationships as facts: "Person X owns 80% of Company Y." "Company A is a subsidiary of Company B." These facts come from corporate registries, ownership databases, and KYC records - data you probably already collect.
+
+Then you define the compliance logic as a rule: "An entity has sanctions exposure if it's directly sanctioned, or if it's owned (above a threshold) by an entity that has sanctions exposure."
+
+That second clause is recursive. It says: trace the ownership chain as deep as it goes, and at every level, check whether the owner has sanctions exposure. If the owner does - whether directly or through its own ownership chain - the exposure flows down.
+
+Here's what the engine does when it evaluates this rule against our example:
+
+```steps
+Is Alpha Corp directly sanctioned? No. :: Check direct status
+Who owns Alpha Corp? Beta LLC (subsidiary). :: Walk up one level
+Is Beta LLC directly sanctioned? No. :: Check direct status
+Who owns Beta LLC? Gamma Holding (60%, above 25% threshold). :: Walk up one level
+Is Gamma Holding directly sanctioned? No. :: Check direct status
+Who owns Gamma Holding? Sanctioned Person (80%, above 25% threshold). :: Walk up one level
+Is Sanctioned Person directly sanctioned? YES. :: Match found [highlight]
+```
+
+```chain
+Sanctioned Person is sanctioned
+-- exposure flows down through ownership
+Gamma Holding has indirect sanctions exposure [highlight]
+-- exposure flows down
+Beta LLC has indirect sanctions exposure [highlight]
+-- exposure flows down
+Alpha Corp has indirect sanctions exposure [highlight]
+=> Transaction TX-001 is FLAGGED
+```
+
+The engine didn't just check the direct counterparty. It walked the full ownership and control chain, evaluated the sanctions exposure rule at every level, and passed the result back down. All automatically, from a single rule definition.
+
+And this works for chains of any depth. Five layers of shell companies? No problem. Ten intermediaries? The engine follows the chain until there's nowhere left to go.
+
+## Beneficial ownership: the same pattern, different question
+
+Regulators worldwide are tightening beneficial ownership requirements. The core question is: who are the natural persons that ultimately own or control this entity?
+
+The computation is surprisingly similar to sanctions screening, with one twist: you need to multiply ownership percentages through the layers.
+
+```flow
+Person X (80%) -> Holding A (60%) -> Company B [primary]
+```
+
+Effective beneficial ownership of Person X in Company B: 80% x 60% = 48%. If your regulatory threshold is 25%, Person X is a beneficial owner of Company B even though they don't own it directly.
+
+Add more layers, and the math compounds:
+
+```flow
+Person X (80%) -> Holding A (60%) -> Sub B (70%) -> Company C [primary]
+```
+
+Effective ownership: 80% x 60% x 70% = 33.6%. Still above 25% - Person X is a beneficial owner of Company C.
+
+InputLayer handles the multiplication and propagation through any number of layers. Define a threshold, and the engine identifies every natural person who qualifies as a beneficial owner for every entity in your graph.
+
+## What happens when facts change
+
+This is where the knowledge graph approach becomes especially valuable for compliance. Entity relationships change constantly. Companies are acquired. Ownership stakes are transferred. New sanctions designations are published. Old ones are lifted.
+
+When you add a new sanctions designation - say Gamma Holding's owner gets added to the list - InputLayer propagates the change immediately. It identifies every entity in that person's ownership chain, evaluates whether the ownership thresholds are met, and flags the affected transactions. On a graph with thousands of entities, this takes milliseconds.
+
+```flow
+Before (batch): Sanctions list updated [highlight] -> Full recomputation (seconds to minutes) -> Alerts are stale until done
+```
+
+```flow
+With InputLayer: Sanctions list updated [success] -> Incremental update (milliseconds) -> Alerts are current immediately
+```
+
+The reverse is equally important. When someone is removed from a sanctions list, all the downstream flags that were derived through their ownership chain clear automatically. No manual cleanup, no stale alerts clogging up your compliance team's queue. And if an entity had sanctions exposure through *multiple* paths (e.g., owned by two sanctioned individuals), removing one designation correctly preserves the remaining exposure.
+
+## Structuring detection: connecting related entities
+
+Beyond direct sanctions, compliance teams need to detect structuring - splitting large transactions into smaller ones to avoid reporting thresholds. The standard approach checks individual transactions against the $10,000 threshold. Sophisticated actors split transactions across related entities to stay below it.
+
+```tree
+Sanctioned Person [highlight]
+  Entity A
+  Entity B
+  Entity C
+```
+
+```chain
+Entity A sends $4,000 to Target Company
+-- related entity
+Entity B sends $3,500 to Target Company
+-- related entity
+Entity C sends $3,000 to Target Company
+=> Combined total: $10,500 - above threshold [highlight]
+```
+
+Each individual transaction is below $10,000. But the entities are related through common ownership, and their combined transactions to the same target exceed the threshold.
+
+InputLayer's recursive reasoning identifies these relationships automatically. It determines which entities are connected through any chain of ownership, aggregates their transactions within a time window, and fires an alert when the combined total exceeds the threshold. The "related entity" determination is itself a recursive walk - Entity A and Entity C might be connected through multiple intermediate layers.
+
+## Getting started
+
+If you're working on compliance, sanctions screening, or transaction monitoring, this approach to entity chain reasoning is worth exploring.
+
+```bash
+docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer
+```
+
+The [quickstart guide](/docs/guides/quickstart/) gets you running in about 5 minutes. The [recursion documentation](/docs/guides/recursion/) covers the recursive reasoning that powers entity chain traversal.

@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useEffect, useState } from "react"
 import { Logo } from "@/components/logo"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { MobileNav } from "@/components/mobile-nav"
 import { ExternalLink, Star, GitFork } from "lucide-react"
 
 function GitHubStats() {
@@ -64,12 +65,30 @@ export function SiteHeader() {
           <Logo size="md" />
         </Link>
 
-        <nav className="flex items-center gap-6 text-sm">
+        <nav className="hidden md:flex items-center gap-6 text-sm">
           <Link
             href="/docs/"
             className="text-muted-foreground transition-colors hover:text-foreground"
           >
             Docs
+          </Link>
+          <Link
+            href="/blog/"
+            className="text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Blog
+          </Link>
+          <Link
+            href="/use-cases/"
+            className="text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Use Cases
+          </Link>
+          <Link
+            href="/compare/"
+            className="text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Compare
           </Link>
           <a
             href="https://demo.inputlayer.ai"
@@ -85,6 +104,7 @@ export function SiteHeader() {
         <div className="ml-auto flex items-center gap-3">
           <GitHubStats />
           <ThemeToggle />
+          <MobileNav />
         </div>
       </div>
     </header>

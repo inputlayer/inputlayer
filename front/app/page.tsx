@@ -3,8 +3,10 @@
 import Link from "next/link"
 import { useState } from "react"
 import { SiteHeader } from "@/components/site-header"
-import { Logo } from "@/components/logo"
+import { SiteFooter } from "@/components/site-footer"
+import { BlogCard } from "@/components/blog-card"
 import { highlightToHtml } from "@/lib/syntax-highlight"
+import { blogPosts } from "@/lib/content-bundle"
 import {
   ArrowRight,
   ExternalLink,
@@ -18,6 +20,7 @@ import {
   Minus,
   Copy,
   Check,
+  Star,
 } from "lucide-react"
 
 // ── Syntax-highlighted code blocks ──────────────────────────────────────
@@ -144,6 +147,15 @@ export default function LandingPage() {
                   <ArrowRight className="h-4 w-4" />
                 </Link>
                 <a
+                  href="https://github.com/inputlayer/inputlayer"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-5 py-2.5 text-sm font-medium hover:bg-secondary transition-colors"
+                >
+                  <Star className="h-4 w-4" />
+                  Star on GitHub
+                </a>
+                <a
                   href="https://demo.inputlayer.ai"
                   target="_blank"
                   rel="noopener noreferrer"
@@ -251,8 +263,8 @@ export default function LandingPage() {
                 <li className="flex items-start gap-3">
                   <CheckCircle className="h-5 w-5 text-emerald-500 mt-0.5 shrink-0" />
                   <div>
-                    <p className="font-medium">One query replaces three systems</p>
-                    <p className="text-sm text-muted-foreground">A single query replaces a vector DB call, a graph traversal, and a policy engine.</p>
+                    <p className="font-medium">One query, multiple capabilities</p>
+                    <p className="text-sm text-muted-foreground">A single query combines vector similarity, graph traversal, and policy evaluation - filling the gaps your current stack can&apos;t cover.</p>
                   </div>
                 </li>
               </ul>
@@ -329,10 +341,10 @@ export default function LandingPage() {
           <div className="max-w-2xl mb-12">
             <p className="text-sm font-semibold text-primary uppercase tracking-wider mb-2">Comparison</p>
             <h2 className="text-3xl font-bold tracking-tight mb-4">
-              One system, not four
+              The reasoning layer your stack is missing
             </h2>
             <p className="text-muted-foreground text-lg">
-              Replace the duct-tape architecture where you run a vector DB, a graph DB, a rules engine, and a batch pipeline - and try to keep them in sync.
+              Your vector DB finds similar documents. Your graph DB traverses relationships. InputLayer adds what neither can do: rule-based inference, recursive reasoning, and incremental computation.
             </p>
           </div>
 
@@ -367,6 +379,42 @@ export default function LandingPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Use Cases ─────────────────────────────────────────────── */}
+      <section className="border-b border-border/50">
+        <div className="mx-auto max-w-6xl px-6 py-20">
+          <div className="max-w-2xl mb-12">
+            <p className="text-sm font-semibold text-primary uppercase tracking-wider mb-2">Use cases</p>
+            <h2 className="text-3xl font-bold tracking-tight mb-4">
+              Built for reasoning-intensive applications
+            </h2>
+            <p className="text-muted-foreground text-lg">
+              From agentic AI to financial compliance, InputLayer powers applications where the answer requires following chains of facts.
+            </p>
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-3">
+            {[
+              { title: "Agentic AI", icon: <Brain className="h-8 w-8 text-primary" />, desc: "Structured memory, multi-hop reasoning, and policy-aware retrieval for AI agents.", href: "/use-cases/agentic-ai/" },
+              { title: "Retail & Commerce", icon: <Database className="h-8 w-8 text-primary" />, desc: "Product recommendations, catalog reasoning, and conversational commerce powered by knowledge graphs.", href: "/use-cases/" },
+              { title: "Financial Services", icon: <Shield className="h-8 w-8 text-primary" />, desc: "Sanctions screening, beneficial ownership chains, and transaction monitoring through entity reasoning.", href: "/use-cases/" },
+            ].map((uc) => (
+              <Link
+                key={uc.title}
+                href={uc.href}
+                className="group rounded-xl border border-border bg-card p-6 space-y-4 transition-colors hover:border-primary/30 hover:bg-card/80"
+              >
+                {uc.icon}
+                <h3 className="text-lg font-semibold group-hover:text-primary transition-colors">{uc.title}</h3>
+                <p className="text-sm text-muted-foreground">{uc.desc}</p>
+                <span className="inline-flex items-center gap-1 text-sm text-primary font-medium">
+                  Learn more <ArrowRight className="h-3.5 w-3.5" />
+                </span>
+              </Link>
+            ))}
           </div>
         </div>
       </section>
@@ -412,6 +460,49 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+
+      {/* ── Blog Preview ────────────────────────────────────────────── */}
+      {blogPosts.length > 0 && (
+        <section className="border-b border-border/50">
+          <div className="mx-auto max-w-6xl px-6 py-20">
+            <div className="flex items-center justify-between mb-12">
+              <div>
+                <p className="text-sm font-semibold text-primary uppercase tracking-wider mb-2">From the blog</p>
+                <h2 className="text-3xl font-bold tracking-tight">Latest posts</h2>
+              </div>
+              <Link
+                href="/blog/"
+                className="hidden sm:inline-flex items-center gap-1 text-sm text-primary font-medium hover:underline"
+              >
+                View all <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
+
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+              {blogPosts.slice(0, 3).map((post) => (
+                <BlogCard
+                  key={post.slug}
+                  slug={post.slug}
+                  title={post.title}
+                  date={post.date}
+                  author={post.author}
+                  excerpt={post.excerpt}
+                  category={post.category}
+                />
+              ))}
+            </div>
+
+            <div className="mt-8 text-center sm:hidden">
+              <Link
+                href="/blog/"
+                className="inline-flex items-center gap-1 text-sm text-primary font-medium hover:underline"
+              >
+                View all posts <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* ── Getting Started ────────────────────────────────────────── */}
       <section className="border-b border-border/50">
@@ -489,32 +580,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── Footer ─────────────────────────────────────────────────── */}
-      <footer className="border-t border-border/50 bg-card/50">
-        <div className="mx-auto max-w-6xl px-6 py-10">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <Logo size="sm" />
-              <span className="text-sm text-muted-foreground">
-                AGPL-3.0 License
-              </span>
-            </div>
-            <nav className="flex items-center gap-6 text-sm text-muted-foreground">
-              <Link href="/docs/" className="hover:text-foreground transition-colors">
-                Documentation
-              </Link>
-              <a
-                href="https://github.com/inputlayer/inputlayer"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-foreground transition-colors"
-              >
-                GitHub
-              </a>
-            </nav>
-          </div>
-        </div>
-      </footer>
+      <SiteFooter />
     </div>
   )
 }

@@ -1,0 +1,157 @@
+---
+title: "InputLayer in 10 Minutes: From Docker to Your First Knowledge Graph"
+date: "2026-02-20"
+author: "InputLayer Team"
+category: "Tutorial"
+excerpt: "A hands-on tutorial to get InputLayer running and build your first knowledge graph with rules, recursive queries, and vector search."
+---
+
+# InputLayer in 10 Minutes: From Docker to Your First Knowledge Graph
+
+By the end of this tutorial, you'll have a running knowledge graph that can answer questions no regular database can handle. We'll build it step by step, and I'll explain what's happening at each point.
+
+## Step 1: Start InputLayer
+
+Run this in your terminal:
+
+```bash
+docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer
+```
+
+You'll see InputLayer start up and print a message telling you it's ready. That's it - no config files, no setup.
+
+## Step 2: Open the REPL
+
+Now you need a way to talk to InputLayer. Open your browser and go to:
+
+```
+http://localhost:8080
+```
+
+This opens InputLayer's interactive REPL - a command line where you can type queries and see results immediately. Think of it like a SQL console, but for knowledge graphs.
+
+You can also use the [Python SDK](/docs/guides/python-sdk/) or the [REST API](/docs/guides/configuration/), but the REPL is the fastest way to explore.
+
+## Step 3: Store some facts
+
+Let's model a small organization. In the REPL, you'll store three facts about who manages whom:
+
+```
+Alice manages Bob
+Bob manages Charlie
+Bob manages Diana
+```
+
+Here's what that looks like as a structure:
+
+```tree
+Alice [primary]
+  Bob
+    Charlie
+    Diana
+```
+
+That's the entire org chart. Three facts, four people. InputLayer stores these immediately - no schema to define, no tables to create.
+
+You can already ask simple questions: "Who does Bob manage?" returns Charlie and Diana. "Who manages Bob?" returns Alice. These are direct lookups, nothing special yet.
+
+## Step 4: Define a rule
+
+This is the step where InputLayer becomes fundamentally different from a regular database.
+
+We want to answer: *"Who does Alice have authority over?"* Alice manages Bob directly. But does she have authority over Charlie? She doesn't manage Charlie - Bob does. But intuitively, yes - because she manages the person who manages Charlie.
+
+You express this intuition as a rule:
+
+```note
+type: tip
+If person A manages person B, then A has authority over B.
+And if A has authority over B, and B has authority over C, then A has authority over C too.
+```
+
+That second sentence is the important part - it's recursive. It says: authority flows down through the management chain, no matter how deep it goes.
+
+When you enter this rule, InputLayer immediately starts reasoning. It applies the rule over and over until there are no more conclusions to draw. Here's what it figures out:
+
+```steps
+Alice manages Bob, so Alice has authority over Bob :: Direct - from the fact you stored
+Bob manages Charlie, so Bob has authority over Charlie :: Direct - from the fact you stored
+Bob manages Diana, so Bob has authority over Diana :: Direct - from the fact you stored
+Alice has authority over Bob, and Bob has authority over Charlie... :: Following the chain one more step
+Alice has authority over Charlie :: Derived - the engine figured this out [success]
+Alice has authority over Diana :: Derived - same logic, through Bob [success]
+```
+
+Five authority relationships, derived automatically from three facts and one rule.
+
+## Step 5: Ask a question
+
+Now query: *"Who does Alice have authority over?"*
+
+The answer: **Bob, Charlie, and Diana.**
+
+Alice doesn't manage Charlie or Diana directly. But the engine followed the chain and figured it out. This is something a regular database can't do - it required two hops of reasoning.
+
+## Step 6: Add vector search
+
+InputLayer supports vector embeddings alongside logical reasoning. This is where it gets powerful, because you can combine the two in a single query.
+
+Say each person has authored some documents, and each document has an embedding vector. You can now ask something that would normally require multiple systems:
+
+*"Find documents similar to my query, but only from people that Alice has authority over."*
+
+```steps
+Resolve Alice's authority chain :: The engine figures out: Bob, Charlie, Diana
+Find documents authored by those people :: Filters to their documents only
+Rank by semantic similarity to the query :: Returns the most relevant ones [success]
+```
+
+Reasoning and retrieval, combined in one pass. No separate authorization service, no glue code.
+
+## Step 7: See incremental updates
+
+Add a new fact: Diana now manages a new employee, Frank.
+
+```tree
+Alice [primary]
+  Bob
+    Charlie
+    Diana
+      Frank [success]
+```
+
+Query authority again. Frank shows up in Alice's results immediately - even though you never told the system about Alice's relationship to Frank. The engine derived it: Alice has authority over Diana, Diana manages Frank, therefore Alice has authority over Frank.
+
+The important part: InputLayer didn't recompute everything from scratch. It identified that the new fact only affects a small part of the graph and updated just that. On a 2,000-node graph, this is over **1,600x faster** than recomputing everything.
+
+## Step 8: See correct retraction
+
+Remove the fact that Bob manages Diana.
+
+```tree
+Alice [primary]
+  Bob
+    Charlie
+```
+
+Query authority again. Diana and Frank are gone from Alice's results. But Bob still has authority over Charlie - that relationship doesn't depend on Diana at all.
+
+Here's the subtle part: what if Diana had reported to Alice through *two* paths? Say both Bob and Eve managed Diana. Removing Bob's management of Diana shouldn't remove Alice's authority over Diana if the Eve path still exists. InputLayer tracks this automatically - a conclusion only disappears when *all* paths supporting it are gone.
+
+## What you just built
+
+In about 10 minutes, you've used:
+
+| Capability | What happened |
+|---|---|
+| Knowledge graph | Stored facts about people and relationships |
+| Recursive reasoning | A rule derived authority chains automatically |
+| Vector search | Combined similarity with logical reasoning |
+| Incremental updates | New facts propagated in milliseconds |
+| Correct retraction | Removed facts cleaned up precisely |
+
+These capabilities normally require stitching together multiple systems - a graph database, a vector database, a rules engine, application code. InputLayer handles them all in one place.
+
+## Next steps
+
+The [data modeling guide](/docs/guides/core-concepts/) covers how to design your knowledge graph schema. The [vectors guide](/docs/guides/vectors/) dives deeper into similarity search and HNSW indexes. And the [Python SDK](/docs/guides/python-sdk/) is the fastest way to integrate InputLayer into your applications.

@@ -1,0 +1,107 @@
+---
+title: "Financial Services"
+icon: "Shield"
+subtitle: "Sanctions screening, beneficial ownership chains, and transaction monitoring through entity reasoning."
+---
+
+# Financial Services
+
+Financial compliance is fundamentally a reasoning problem. Whether you're screening transactions against sanctions lists, tracing beneficial ownership through layers of corporate structure, or monitoring for suspicious activity patterns, the answers live in the connections between entities - not in any single document or database record.
+
+InputLayer adds a reasoning layer that follows these entity chains, evaluates compliance rules, and keeps derived assessments up to date as the underlying facts change.
+
+## Sanctions screening
+
+The basic version of sanctions screening is straightforward: check whether a transaction counterparty appears on a sanctions list. Most compliance teams have this covered. The hard part is indirect exposure - when a sanctioned person controls an entity through layers of corporate ownership.
+
+```chain
+Your client sends $50K to Alpha Corp
+-- subsidiary of
+Beta LLC
+-- 60% owned by
+Gamma Holding
+-- 80% owned by
+SANCTIONED ENTITY [highlight]
+=> Each entity looks clean in isolation. The violation is only visible through the chain.
+```
+
+InputLayer handles this with recursive reasoning. You describe the rule: "An entity has sanctions exposure if it's directly sanctioned, or if it's owned above a certain threshold by an entity that has sanctions exposure." The engine follows ownership chains to any depth, checking at every level.
+
+```steps
+New sanctions designation published :: Add the fact to InputLayer
+Engine traces all ownership chains :: Finds every entity connected to the sanctioned person [primary]
+Downstream assessments update automatically :: Affected counterparties flagged in milliseconds [highlight]
+```
+
+On the flip side, when someone is removed from a sanctions list, all the downstream flags clear automatically - no manual cleanup needed.
+
+## Beneficial ownership
+
+Regulators around the world are tightening beneficial ownership requirements. The core question: who are the natural persons that ultimately own or control this entity?
+
+```flow
+Person X (80%) -> Holding A (60%) -> Company B [primary]
+```
+
+```note
+type: info
+Effective beneficial ownership: 80% x 60% = 48%. If your regulatory threshold is 25%, Person X is a beneficial owner of Company B even though they don't own it directly.
+```
+
+InputLayer computes these percentages through any number of corporate layers automatically. The engine handles the multiplication and propagation. Add more layers and the math compounds:
+
+```flow
+Person X (80%) -> Holding A (60%) -> Sub B (70%) -> Company C [primary]
+```
+
+Effective ownership: 80% x 60% x 70% = 33.6%. Still above 25%.
+
+You define a minimum threshold, and InputLayer identifies every natural person who qualifies as a beneficial owner for every entity in your graph. When corporate structures change - new acquisitions, divestitures, ownership transfers - only the affected calculations recompute.
+
+## Transaction monitoring
+
+Beyond sanctions screening, compliance teams need to identify suspicious patterns across transaction flows. Take structuring as an example - splitting a large transaction into smaller ones to avoid reporting thresholds.
+
+```tree
+Sanctioned Person [highlight]
+  Entity A
+  Entity B
+  Entity C
+```
+
+```steps
+Entity A sends $4,000 to Target Company :: Below $10K threshold - looks clean
+Entity B sends $3,500 to Target Company :: Below $10K threshold - looks clean
+Entity C sends $3,000 to Target Company :: Below $10K threshold - looks clean
+Combined total: $10,500 :: Above threshold - ALERT [highlight]
+```
+
+Each individual transaction is below $10,000. But the entities are related through common ownership, and their combined transactions exceed the threshold.
+
+InputLayer's recursive reasoning identifies these relationships automatically. It determines which entities are connected through any chain of ownership - not just direct connections, but indirect ones through any number of intermediaries. Then it aggregates transactions from all related entities within a time window.
+
+The key insight: the "related entity" determination is itself a recursive traversal. Entity A owns B, B owns C, so A and C are related even though there's no direct connection. Traditional transaction monitoring systems that only check direct counterparties would miss this entirely.
+
+## Why incremental computation matters for compliance
+
+Financial data changes constantly. New transactions arrive, entity relationships are updated, sanctions lists are revised.
+
+```flow
+Batch approach: Sanctions list updated [highlight] -> Full recomputation (minutes) -> Alerts stale until done
+```
+
+```flow
+InputLayer: Sanctions list updated [success] -> Incremental update (milliseconds) -> Alerts current immediately
+```
+
+When a new transaction arrives, only the affected monitoring rules recompute. When an ownership structure changes, only the beneficial ownership calculations involving the changed entities update.
+
+The correct retraction property is equally important. When an entity is removed from a sanctions list, all the downstream flags derived from that designation clear automatically. This prevents your compliance team from chasing alerts that are no longer valid.
+
+## Getting started
+
+If you're working on compliance or transaction monitoring, the [quickstart guide](/docs/guides/quickstart/) is the fastest way to start exploring. The [recursion documentation](/docs/guides/recursion/) is particularly relevant since most compliance rules are recursive in nature.
+
+```bash
+docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer
+```
