@@ -1,6 +1,6 @@
 # InputLayer Benchmarks
 
-InputLayer is a reasoning engine for AI agents, built on Differential Dataflow. Its core advantages: Magic Sets for demand-driven recursive queries (up to 1,587x faster than full materialization), correct retraction through recursive fixpoints, and sub-50ms multi-hop deductive queries over knowledge graphs.
+InputLayer is a symbolic reasoning engine for AI agents, built on Differential Dataflow. Its core advantages: Magic Sets for demand-driven recursive queries (up to 1,587x faster than full materialization), correct retraction through recursive fixpoints, and sub-50ms multi-hop deductive queries over knowledge graphs.
 
 All numbers measured on AMD Ryzen 9 9950X (16 cores), 128 GB RAM, Ubuntu 24.04 LTS, Rust 1.91.1, release build with LTO. Criterion.rs, 10 samples, 15s measurement, 5s warmup.
 

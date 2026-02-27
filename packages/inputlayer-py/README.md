@@ -1,6 +1,6 @@
 # inputlayer
 
-Python Object-Logic Mapper (OLM) for [InputLayer](https://github.com/inputlayer/inputlayer) - the reasoning engine for AI agents.
+Python Object-Logic Mapper (OLM) for [InputLayer](https://github.com/inputlayer/inputlayer) - the symbolic reasoning engine for AI agents.
 
 Write Python. No query syntax required. The OLM compiles typed Python classes into InputLayer queries over WebSocket.
 
