@@ -1,4 +1,4 @@
-# inputlayer
+# inputlayer-client-dev
 
 Python Object-Logic Mapper (OLM) for [InputLayer](https://github.com/inputlayer/inputlayer) - the symbolic reasoning engine for AI agents.
 
@@ -7,16 +7,15 @@ Write Python. No query syntax required. The OLM compiles typed Python classes in
 ## Installation
 
 ```bash
-pip install inputlayer
+pip install inputlayer-client-dev
+
+# With pandas DataFrame support
+pip install inputlayer-client-dev[pandas]
 ```
 
-With pandas support:
+Requirements: Python 3.10+ and a running InputLayer server.
 
-```bash
-pip install inputlayer[pandas]
-```
-
-**Requirements**: Python 3.10+, a running InputLayer server.
+This also installs the `il` CLI for managing schema migrations.
 
 ## Quick Start
 
@@ -35,7 +34,7 @@ async def main():
     async with InputLayer("ws://localhost:8080/ws", username="admin", password="admin") as il:
         kg = il.knowledge_graph("demo")
 
-        # Define schema
+        # Define schema (idempotent)
         await kg.define(Employee)
 
         # Insert data
@@ -51,9 +50,7 @@ async def main():
             where=lambda e: (e.department == "eng") & (e.active == True),
         )
         for emp in engineers:
-            print(f"{emp.Name}: ${emp.Salary}")
-
-        await il.drop_knowledge_graph("demo")
+            print(f"{emp.name}: ${emp.salary}")
 
 asyncio.run(main())
 ```
@@ -74,11 +71,11 @@ class Document(Relation):
     created_at: Timestamp
 ```
 
-**Supported types**: `int`, `float`, `str`, `bool`, `Vector[N]`, `VectorInt8[N]`, `Timestamp`
+Supported types: `int`, `float`, `str`, `bool`, `Vector[N]`, `VectorInt8[N]`, `Timestamp`
 
 ### Derived Relations (Rules)
 
-Define computed views using `Derived` and `From(...).where(...).select(...)`:
+Define computed views using `Derived` and the `From(...).where(...).select(...)` builder. InputLayer keeps derived data up to date automatically when the underlying facts change.
 
 ```python
 from typing import ClassVar
@@ -105,7 +102,7 @@ Reachable.rules = [
 
 ### Queries
 
-Filter, join, aggregate, sort - all with Python expressions:
+Filter, join, aggregate, and sort - all with Python expressions:
 
 ```python
 from inputlayer import count, sum_, avg
@@ -113,7 +110,7 @@ from inputlayer import count, sum_, avg
 # Filter
 result = await kg.query(Employee, where=lambda e: e.salary > 100000)
 
-# Aggregation
+# Aggregation by group
 result = await kg.query(
     Employee.department,
     count(Employee.id),
@@ -132,6 +129,15 @@ result = await kg.query(
 ### Vector Search
 
 ```python
+from inputlayer import HnswIndex
+
+await kg.create_index(HnswIndex(
+    name="doc_emb_idx",
+    relation=Document,
+    column="embedding",
+    metric="cosine",
+))
+
 result = await kg.vector_search(
     Document,
     query_vec=[0.1, 0.2, ...],
@@ -174,75 +180,89 @@ def on_update(event):
     print(f"{event.count} new readings")
 ```
 
-## Migrations
-
-Django-style schema versioning for production deployments. Generate numbered migration files, apply to servers, revert when needed.
-
-```bash
-# Generate migration from models
-inputlayer-migrate makemigrations --models myapp.models
-
-# Apply pending migrations
-inputlayer-migrate migrate --url ws://prod:8080/ws --kg production
-
-# Show status
-inputlayer-migrate showmigrations --url ws://prod:8080/ws --kg production
-
-# Rollback
-inputlayer-migrate revert --url ws://prod:8080/ws --kg production 0001_initial
-```
-
-The autodetector diffs your current Python models against the last migration's state and generates the minimal set of operations (create/drop relations, create/drop/replace rules, create/drop indexes). Each migration file is self-contained with a full state snapshot - no need to replay history.
-
-See the [Migrations guide](../../docs/guides/python-sdk.md#migrations) for full details and the `examples/10_migrations.py` example.
-
 ## Sync Client
 
-For non-async code:
+For scripts, notebooks, and non-async contexts:
 
 ```python
 from inputlayer import InputLayerSync
 
 with InputLayerSync("ws://localhost:8080/ws", username="admin", password="admin") as il:
     kg = il.knowledge_graph("demo")
-    await kg.define(Employee)
+    kg.define(Employee)
+    kg.insert(Employee(id=1, name="Alice", department="eng", salary=120000.0, active=True))
+    result = kg.query(Employee)
 ```
+
+## Migrations
+
+The SDK includes a Django-style migration system for production schema management. The `il` CLI is installed with the package.
+
+```bash
+# Generate a migration from your models
+il makemigrations --models myapp.models
+
+# Apply pending migrations
+il migrate --url ws://localhost:8080/ws --kg production
+
+# Check status
+il showmigrations --url ws://localhost:8080/ws --kg production
+
+# Rollback
+il revert --url ws://localhost:8080/ws --kg production 0001_initial
+```
+
+The autodetector diffs your current Python models against the last migration's state and generates the minimal set of operations (create/drop relations, create/drop/replace rules, create/drop indexes). Each migration file is self-contained with a full state snapshot.
 
 ## API Reference
 
-### `InputLayer` (async client)
+### `InputLayer` / `InputLayerSync`
 
 | Method | Description |
 |--------|-------------|
-| `knowledge_graph(name)` | Get a KG handle |
-| `list_knowledge_graphs()` | List all KGs |
-| `drop_knowledge_graph(name)` | Drop a KG |
+| `knowledge_graph(name)` | Get or create a knowledge graph handle |
+| `list_knowledge_graphs()` | List all knowledge graphs |
+| `drop_knowledge_graph(name)` | Drop a knowledge graph |
 | `create_user(username, password, role)` | Create a user |
 | `drop_user(username)` | Drop a user |
+| `set_role(username, role)` | Change a user's role |
+| `set_password(username, password)` | Change a user's password |
 | `list_users()` | List all users |
 | `create_api_key(label)` | Create an API key |
+| `list_api_keys()` | List active API keys |
 | `revoke_api_key(label)` | Revoke an API key |
 | `on(event_type, ...)` | Register notification callback |
+| `notifications()` | Async iterator over events |
 
-### `KnowledgeGraph`
+### `KnowledgeGraph` / `KnowledgeGraphSync`
 
 | Method | Description |
 |--------|-------------|
-| `define(*relations)` | Deploy schema definitions |
-| `insert(facts)` | Insert facts |
-| `delete(facts, where=...)` | Delete facts |
-| `query(*select, join=, where=, order_by=, limit=)` | Query the KG |
-| `vector_search(relation, query_vec, k=, metric=)` | Vector similarity search |
+| `define(*relations)` | Deploy schema definitions (idempotent) |
+| `relations()` | List all relations |
+| `describe(relation)` | Describe a relation's schema |
+| `drop_relation(relation)` | Drop a relation |
+| `insert(facts, data=None)` | Insert facts (objects, dicts, or DataFrame) |
+| `delete(facts, where=None)` | Delete facts |
+| `query(*select, join=, where=, order_by=, limit=, offset=)` | Query the knowledge graph |
+| `vector_search(relation, query_vec, k=, radius=, metric=, where=)` | Vector similarity search |
 | `define_rules(*targets)` | Deploy persistent rules |
 | `list_rules()` | List all rules |
+| `rule_definition(name)` | Get compiled rule clauses |
 | `drop_rule(name)` | Drop a rule |
+| `clear_rule(name)` | Clear materialized rule data |
 | `create_index(HnswIndex(...))` | Create HNSW index |
 | `list_indexes()` | List indexes |
+| `index_stats(name)` | Get index statistics |
 | `drop_index(name)` | Drop an index |
+| `rebuild_index(name)` | Rebuild an index |
 | `grant_access(username, role)` | Grant per-KG access |
 | `revoke_access(username)` | Revoke per-KG access |
-| `explain(*select, ...)` | Show query plan |
-| `execute(datalog)` | Execute raw query |
+| `list_acl()` | List access control entries |
+| `explain(*select, ...)` | Show query plan without executing |
+| `execute(datalog)` | Execute raw Datalog |
+| `status()` | Get server status |
+| `compact()` | Trigger storage compaction |
 
 ### `Session`
 
@@ -250,41 +270,34 @@ with InputLayerSync("ws://localhost:8080/ws", username="admin", password="admin"
 |--------|-------------|
 | `insert(facts)` | Insert session-scoped facts |
 | `define_rules(*targets)` | Define session-scoped rules |
+| `list_rules()` | List session rules |
+| `drop_rule(name)` | Drop a session rule |
 | `clear()` | Clear all session state |
 
 ### `ResultSet`
 
-| Method | Description |
+| Method/Property | Description |
 |--------|-------------|
-| `__iter__` | Iterate typed rows |
+| `__iter__` | Iterate as typed objects |
 | `__len__` | Row count |
 | `first()` | First row or `None` |
-| `scalar()` | Single value from first row |
+| `scalar()` | Single value from 1x1 result |
 | `to_dicts()` | List of dicts |
 | `to_tuples()` | List of tuples |
 | `to_df()` | pandas DataFrame |
+| `row_count` | Number of rows returned |
+| `total_count` | Total count (with limit/offset) |
+| `execution_time_ms` | Query execution time |
+| `truncated` | Whether results were truncated |
 
-### `inputlayer-migrate` CLI
+### `il` CLI
 
 | Command | Description |
 |---------|-------------|
-| `makemigrations --models <module>` | Generate migration from model diff |
-| `migrate --url <ws> --kg <name>` | Apply pending migrations |
-| `revert --url <ws> --kg <name> <target>` | Revert to a target migration |
-| `showmigrations --url <ws> --kg <name>` | Show applied/pending status |
-
-### Migration Operations
-
-| Class | Description |
-|-------|-------------|
-| `CreateRelation(name, columns)` | Create a relation schema |
-| `DropRelation(name, columns)` | Drop a relation (reversible) |
-| `CreateRule(name, clauses)` | Create rule clauses |
-| `DropRule(name, clauses)` | Drop a rule (reversible) |
-| `ReplaceRule(name, old, new)` | Replace rule clauses |
-| `CreateIndex(name, relation, column, ...)` | Create HNSW index |
-| `DropIndex(name, relation, column, ...)` | Drop HNSW index (reversible) |
-| `RunDatalog(forward, backward)` | Custom query commands |
+| `il makemigrations --models <module>` | Generate migration from model diff |
+| `il migrate --url <ws> --kg <name>` | Apply pending migrations |
+| `il revert --url <ws> --kg <name> <target>` | Revert to a target migration |
+| `il showmigrations --url <ws> --kg <name>` | Show applied/pending status |
 
 ### Aggregation Functions
 
@@ -292,18 +305,18 @@ with InputLayerSync("ws://localhost:8080/ws", username="admin", password="admin"
 
 ### Built-in Functions
 
-Access via `from inputlayer import functions`:
+Access via `from inputlayer import functions as fn`:
 
-- **Distance**: `euclidean`, `cosine`, `dot`, `manhattan`
-- **Vector ops**: `normalize`, `vector_add`, `vector_sub`, `vector_scale`
-- **LSH**: `lsh_hash`, `lsh_hamming`, `lsh_bucket`
-- **Quantization**: `quantize_int8`, `dequantize_int8`, `quantize_binary`, `hamming_binary`
-- **Int8 distance**: `euclidean_int8`, `cosine_int8`, `dot_int8`, `manhattan_int8`
-- **Temporal**: `now`, `timestamp_add`, `timestamp_sub`, `timestamp_diff`, `year`, `month`, `day`, `hour`, `minute`, `second`, `day_of_week`, `format_timestamp`, `parse_timestamp`, `timestamp_trunc`
-- **Math**: `abs_`, `ceil`, `floor`, `round_`, `sqrt`, `pow_`, `log`, `log2`, `log10`, `exp`, `sin`, `cos`, `tan`, `min_val`, `max_val`
-- **String**: `length`, `upper`, `lower`, `concat`, `substring`, `trim`, `contains`
-- **Type conversion**: `to_int`, `to_float`
-- **HNSW**: `hnsw_nearest`
+- **Distance**: `fn.cosine`, `fn.euclidean`, `fn.dot`, `fn.manhattan`
+- **Vector ops**: `fn.normalize`, `fn.vec_dim`, `fn.vec_add`, `fn.vec_scale`
+- **Int8 distance**: `fn.cosine_int8`, `fn.euclidean_int8`, `fn.dot_int8`, `fn.manhattan_int8`
+- **Quantization**: `fn.quantize_linear`, `fn.quantize_symmetric`, `fn.dequantize`, `fn.dequantize_scaled`
+- **LSH**: `fn.lsh_bucket`, `fn.lsh_probes`, `fn.lsh_multi_probe`
+- **Temporal**: `fn.time_now`, `fn.time_diff`, `fn.time_add`, `fn.time_sub`, `fn.time_decay`, `fn.time_decay_linear`, `fn.time_before`, `fn.time_after`, `fn.time_between`, `fn.within_last`, `fn.intervals_overlap`, `fn.interval_contains`, `fn.interval_duration`, `fn.point_in_interval`
+- **Math**: `fn.abs_`, `fn.sqrt`, `fn.pow_`, `fn.log`, `fn.exp`, `fn.sin`, `fn.cos`, `fn.tan`, `fn.floor`, `fn.ceil`, `fn.sign`, `fn.min_val`, `fn.max_val`
+- **String**: `fn.len_`, `fn.upper`, `fn.lower`, `fn.trim`, `fn.substr`, `fn.replace`, `fn.concat`
+- **Type conversion**: `fn.to_int`, `fn.to_float`
+- **HNSW**: `fn.hnsw_nearest`
 
 ## Examples
 
