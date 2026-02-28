@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "inputlayer"
+name = "inputlayer-client-dev"
 version = "0.1.0"
 description = "Python Object-Logic Mapper for InputLayer knowledge graph engine"
 readme = "README.md"
@@ -23,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-inputlayer-migrate = "inputlayer.migrations.cli:main"
+il = "inputlayer.migrations.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/inputlayer"]
