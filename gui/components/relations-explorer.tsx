@@ -112,7 +112,7 @@ export function RelationsExplorer({
                       className={cn(
                         "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors",
                         selectedRelationId === relation.id
-                          ? "bg-primary/10 text-primary"
+                          ? "bg-teal-500/10 text-teal-600 dark:text-teal-400"
                           : "text-foreground hover:bg-muted",
                       )}
                     >
@@ -162,7 +162,7 @@ export function RelationsExplorer({
                       onClick={() => onSelectView(view)}
                       className={cn(
                         "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors",
-                        selectedViewId === view.id ? "bg-accent/10 text-accent" : "text-foreground hover:bg-muted",
+                        selectedViewId === view.id ? "bg-teal-500/10 text-teal-600 dark:text-teal-400" : "text-foreground hover:bg-muted",
                       )}
                     >
                       <Eye className="h-3.5 w-3.5 flex-shrink-0 text-chart-2" />

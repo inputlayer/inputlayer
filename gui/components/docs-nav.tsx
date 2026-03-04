@@ -26,7 +26,7 @@ function NavTreeItem({ item, depth = 0 }: { item: NavItem; depth?: number }) {
         className={cn(
           "block py-1.5 px-3 text-sm rounded-md transition-colors",
           isActive
-            ? "bg-primary/10 text-primary font-medium"
+            ? "bg-teal-500/10 text-teal-600 dark:text-teal-400 font-medium"
             : "text-muted-foreground hover:bg-muted hover:text-foreground"
         )}
         style={{ paddingLeft: `${(depth + 1) * 12}px` }}
