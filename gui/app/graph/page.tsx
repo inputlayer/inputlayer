@@ -4,8 +4,9 @@ import { useState, useEffect, useMemo, useCallback } from "react"
 import { AppShell } from "@/components/app-shell"
 import { GraphSidebar } from "@/components/graph-sidebar"
 import { GraphCanvas } from "@/components/graph-canvas"
-import { useDatalogStore } from "@/lib/datalog-store"
+import { useDatalogStore, type Relation } from "@/lib/datalog-store"
 import { buildGraphElements } from "@/lib/graph-utils"
+import { generateVariables } from "@/lib/ws-parsers"
 import { AlertCircle, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -13,17 +14,40 @@ export default function GraphPage() {
   const {
     selectedKnowledgeGraph,
     relations,
+    views,
     isRefreshing,
     refreshCurrentKnowledgeGraph,
     loadRelationData,
+    executeInternalQuery,
   } = useDatalogStore()
 
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set())
   const [loadingRelations, setLoadingRelations] = useState<Set<string>>(new Set())
+  const [viewRelations, setViewRelations] = useState<Map<string, Relation>>(new Map())
+
+  // Merge base relations with view-derived relations for the graph
+  const allRelations = useMemo(() => {
+    const baseRelNames = new Set(relations.map((r) => r.name))
+    // Include views not already in base relations (arity 0 means not yet loaded)
+    const viewEntries: Relation[] = views
+      .filter((v) => (v.arity === 2 || v.arity === 0) && !baseRelNames.has(v.name))
+      .map((v) => viewRelations.get(v.name) ?? {
+        id: `view_${v.name}`,
+        name: v.name,
+        arity: 2,
+        tupleCount: 0,
+        columns: [],
+        columnTypes: [],
+        data: [],
+        isView: true,
+        isSession: v.isSession,
+      })
+    return [...relations, ...viewEntries]
+  }, [relations, views, viewRelations])
 
   const binaryRelations = useMemo(
-    () => relations.filter((r) => r.arity === 2 && !r.isView),
-    [relations]
+    () => allRelations.filter((r) => r.arity === 2),
+    [allRelations]
   )
 
   useEffect(() => {
@@ -32,6 +56,40 @@ export default function GraphPage() {
     }
   }, [selectedKnowledgeGraph?.name])
 
+  const loadViewAsRelation = useCallback(async (name: string) => {
+    setLoadingRelations((prev) => new Set(prev).add(name))
+    try {
+      const view = views.find((v) => v.name === name)
+      // If arity is unknown (0), try with 2 variables (binary)
+      const arity = (view?.arity && view.arity > 0) ? view.arity : 2
+      const vars = generateVariables(arity)
+      const result = await executeInternalQuery(`?${name}(${vars.join(", ")})`)
+      if (result.status === "success") {
+        // Determine actual arity from result columns
+        const actualArity = result.columns.length || arity
+        if (actualArity !== 2) return // Only binary relations for the graph
+        const rel: Relation = {
+          id: `view_${name}`,
+          name,
+          arity: actualArity,
+          tupleCount: result.data.length,
+          columns: result.columns,
+          columnTypes: [],
+          data: result.data,
+          isView: true,
+          isSession: view?.isSession ?? false,
+        }
+        setViewRelations((prev) => new Map(prev).set(name, rel))
+      }
+    } finally {
+      setLoadingRelations((prev) => {
+        const s = new Set(prev)
+        s.delete(name)
+        return s
+      })
+    }
+  }, [views, executeInternalQuery])
+
   const handleToggleRelation = useCallback(async (name: string) => {
     setSelectedNames((prev) => {
       const next = new Set(prev)
@@ -39,22 +97,27 @@ export default function GraphPage() {
         next.delete(name)
       } else {
         next.add(name)
-        // Load data if not yet loaded
-        const rel = relations.find((r) => r.name === name)
+        const rel = allRelations.find((r) => r.name === name)
         if (rel && rel.data.length === 0) {
-          setLoadingRelations((prev) => new Set(prev).add(name))
-          loadRelationData(name).finally(() => {
-            setLoadingRelations((prev) => {
-              const s = new Set(prev)
-              s.delete(name)
-              return s
+          // Check if it's a view-only relation (not in base relations)
+          const isViewOnly = !relations.some((r) => r.name === name)
+          if (isViewOnly) {
+            loadViewAsRelation(name)
+          } else {
+            setLoadingRelations((prev) => new Set(prev).add(name))
+            loadRelationData(name).finally(() => {
+              setLoadingRelations((prev) => {
+                const s = new Set(prev)
+                s.delete(name)
+                return s
+              })
             })
-          })
+          }
         }
       }
       return next
     })
-  }, [relations, loadRelationData])
+  }, [allRelations, relations, loadRelationData, loadViewAsRelation])
 
   const handleSelectAll = useCallback(async () => {
     const names = new Set(binaryRelations.map((r) => r.name))
@@ -62,25 +125,28 @@ export default function GraphPage() {
     const toLoad = binaryRelations.filter((r) => r.data.length === 0)
     if (toLoad.length > 0) {
       setLoadingRelations(new Set(toLoad.map((r) => r.name)))
-      await Promise.all(toLoad.map((r) => loadRelationData(r.name)))
+      const baseNames = new Set(relations.map((r) => r.name))
+      await Promise.all(toLoad.map((r) =>
+        baseNames.has(r.name) ? loadRelationData(r.name) : loadViewAsRelation(r.name)
+      ))
       setLoadingRelations(new Set())
     }
-  }, [binaryRelations, loadRelationData])
+  }, [binaryRelations, relations, loadRelationData, loadViewAsRelation])
 
   const handleDeselectAll = useCallback(() => {
     setSelectedNames(new Set())
   }, [])
 
   const { elements, stats } = useMemo(
-    () => buildGraphElements(relations, selectedNames),
-    [relations, selectedNames]
+    () => buildGraphElements(allRelations, selectedNames),
+    [allRelations, selectedNames]
   )
 
   const activeRelationNames = useMemo(
     () => Array.from(selectedNames).filter((n) =>
-      relations.some((r) => r.name === n && r.data.length > 0)
+      allRelations.some((r) => r.name === n && r.data.length > 0)
     ),
-    [selectedNames, relations]
+    [selectedNames, allRelations]
   )
 
   return (
@@ -117,7 +183,7 @@ export default function GraphPage() {
             </div>
             <div className="flex-1 overflow-hidden">
               <GraphSidebar
-                relations={relations}
+                relations={allRelations}
                 selectedNames={selectedNames}
                 onToggleRelation={handleToggleRelation}
                 onSelectAll={handleSelectAll}

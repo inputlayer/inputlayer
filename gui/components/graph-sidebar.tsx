@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useMemo } from "react"
-import { Search, X, Network, Loader2 } from "lucide-react"
+import { Search, X, Network, Loader2, Eye } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
@@ -34,7 +34,7 @@ export function GraphSidebar({
   const debouncedSearch = useDebounce(search, 150)
 
   const binaryRelations = useMemo(
-    () => relations.filter((r) => r.arity === 2 && !r.isView),
+    () => relations.filter((r) => r.arity === 2),
     [relations]
   )
 
@@ -116,7 +116,11 @@ export function GraphSidebar({
                       onCheckedChange={() => onToggleRelation(rel.name)}
                     />
                   )}
-                  <Network className="h-3.5 w-3.5 flex-shrink-0 text-chart-1" />
+                  {rel.isView ? (
+                    <Eye className="h-3.5 w-3.5 flex-shrink-0 text-fuchsia-500" />
+                  ) : (
+                    <Network className="h-3.5 w-3.5 flex-shrink-0 text-teal-500" />
+                  )}
                   <span className="flex-1 truncate font-mono text-xs">{rel.name}</span>
                   <Badge variant="secondary" className="text-[10px] px-1.5 h-4">
                     {rel.tupleCount}
@@ -128,8 +132,18 @@ export function GraphSidebar({
         )}
       </div>
 
-      {/* Stats footer */}
+      {/* Legend + Stats footer */}
       <div className="border-t border-border/50 p-3">
+        <div className="flex items-center gap-4 mb-2">
+          <div className="flex items-center gap-1.5">
+            <Network className="h-3 w-3 text-teal-500" />
+            <span className="text-[10px] text-muted-foreground">Relation</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Eye className="h-3 w-3 text-fuchsia-500" />
+            <span className="text-[10px] text-muted-foreground">Rule / View</span>
+          </div>
+        </div>
         <div className="flex flex-col gap-1 text-[10px] text-muted-foreground">
           <div className="flex items-center justify-between">
             <span>{binaryRelations.length} binary relations</span>
