@@ -84,5 +84,5 @@ export function ViewDataGraphTab({ view }: ViewDataGraphTabProps) {
     )
   }
 
-  return <QueryResultGraph data={data} columns={columns} />
+  return <QueryResultGraph data={data} columns={columns} name={view.name} />
 }

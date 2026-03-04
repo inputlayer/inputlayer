@@ -450,19 +450,19 @@ export function QueryResultsPanel({ result, explainResult, error, isExecuting, i
       {result.columns.length >= 1 ? (
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "table" | "graph")} className="flex-1 flex flex-col overflow-hidden min-h-0">
           <div className="border-b border-border/50 px-3 flex-shrink-0">
-            <TabsList className="h-8 bg-transparent p-0 gap-3">
+            <TabsList className="h-8 bg-transparent p-0 gap-2">
               <TabsTrigger
                 value="table"
-                className="h-8 px-2 pb-2 pt-1.5 rounded-md border-b-2 border-transparent text-xs text-teal-600 dark:text-teal-400 data-[state=active]:bg-teal-500/10 data-[state=active]:shadow-none data-[state=active]:border-teal-500"
+                className="h-7 gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground data-[state=active]:bg-chart-2/10 data-[state=active]:text-chart-2 data-[state=active]:shadow-none"
               >
-                <Rows3 className="h-3.5 w-3.5 mr-1.5" />
+                <Rows3 className="h-3.5 w-3.5" />
                 Table
               </TabsTrigger>
               <TabsTrigger
                 value="graph"
-                className="h-8 px-2 pb-2 pt-1.5 rounded-md border-b-2 border-transparent text-xs text-teal-600 dark:text-teal-400 data-[state=active]:bg-teal-500/10 data-[state=active]:shadow-none data-[state=active]:border-teal-500"
+                className="h-7 gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground data-[state=active]:bg-chart-2/10 data-[state=active]:text-chart-2 data-[state=active]:shadow-none"
               >
-                <Share2 className="h-3.5 w-3.5 mr-1.5" />
+                <Share2 className="h-3.5 w-3.5" />
                 Graph
               </TabsTrigger>
             </TabsList>
@@ -471,7 +471,7 @@ export function QueryResultsPanel({ result, explainResult, error, isExecuting, i
             <ResultTable result={result} sort={sort} sortedIndices={sortedIndices} page={page} setPage={setPage} handleSort={handleSort} />
           </TabsContent>
           <TabsContent value="graph" className="flex-1 m-0 overflow-hidden">
-            <QueryResultGraph data={result.data} columns={result.columns} />
+            <QueryResultGraph data={result.data} columns={result.columns} name={result.query.match(/\?(\w+)\s*\(/)?.[1]} />
           </TabsContent>
         </Tabs>
       ) : (

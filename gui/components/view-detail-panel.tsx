@@ -204,46 +204,34 @@ export function ViewDetailPanel({ view, relations, onNavigate }: ViewDetailPanel
       {/* Tabs section - fills remaining space */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden min-h-0">
         <div className="border-b border-border/50 px-4 flex-shrink-0">
-          <TabsList className="h-10 bg-transparent p-0 gap-4">
+          <TabsList className="h-10 bg-transparent p-0 gap-2">
             <TabsTrigger
               value="data"
-              className={cn(
-                "h-10 px-2 pb-3 pt-2.5 rounded-md border-b-2 border-transparent text-teal-600 dark:text-teal-400",
-                "data-[state=active]:bg-teal-500/10 data-[state=active]:shadow-none data-[state=active]:border-teal-500",
-              )}
+              className="h-8 gap-1.5 rounded-lg px-3 text-muted-foreground data-[state=active]:bg-chart-2/10 data-[state=active]:text-chart-2 data-[state=active]:shadow-none"
             >
-              <Table className="h-4 w-4 mr-2" />
+              <Table className="h-4 w-4" />
               Data
             </TabsTrigger>
             <TabsTrigger
               value="graph"
-              className={cn(
-                "h-10 px-2 pb-3 pt-2.5 rounded-md border-b-2 border-transparent text-teal-600 dark:text-teal-400",
-                "data-[state=active]:bg-teal-500/10 data-[state=active]:shadow-none data-[state=active]:border-teal-500",
-              )}
+              className="h-8 gap-1.5 rounded-lg px-3 text-muted-foreground data-[state=active]:bg-chart-2/10 data-[state=active]:text-chart-2 data-[state=active]:shadow-none"
             >
-              <GitBranch className="h-4 w-4 mr-2" />
+              <GitBranch className="h-4 w-4" />
               Dependency Graph
             </TabsTrigger>
             <TabsTrigger
               value="data-graph"
               disabled={view.arity < 1}
-              className={cn(
-                "h-10 px-2 pb-3 pt-2.5 rounded-md border-b-2 border-transparent text-teal-600 dark:text-teal-400",
-                "data-[state=active]:bg-teal-500/10 data-[state=active]:shadow-none data-[state=active]:border-teal-500",
-              )}
+              className="h-8 gap-1.5 rounded-lg px-3 text-muted-foreground data-[state=active]:bg-chart-2/10 data-[state=active]:text-chart-2 data-[state=active]:shadow-none"
             >
-              <Share2 className="h-4 w-4 mr-2" />
+              <Share2 className="h-4 w-4" />
               Data Graph
             </TabsTrigger>
             <TabsTrigger
               value="performance"
-              className={cn(
-                "h-10 px-2 pb-3 pt-2.5 rounded-md border-b-2 border-transparent text-teal-600 dark:text-teal-400",
-                "data-[state=active]:bg-teal-500/10 data-[state=active]:shadow-none data-[state=active]:border-teal-500",
-              )}
+              className="h-8 gap-1.5 rounded-lg px-3 text-muted-foreground data-[state=active]:bg-chart-2/10 data-[state=active]:text-chart-2 data-[state=active]:shadow-none"
             >
-              <Gauge className="h-4 w-4 mr-2" />
+              <Gauge className="h-4 w-4" />
               Performance
             </TabsTrigger>
           </TabsList>
