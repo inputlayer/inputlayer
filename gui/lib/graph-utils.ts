@@ -157,6 +157,7 @@ export function buildGraphElements(
 export function buildQueryGraphElements(
   data: (string | number | boolean | null)[][],
   columns: string[],
+  name?: string,
 ): { elements: CytoscapeElement[]; stats: GraphStats; relationNames: string[] } {
   const arity = columns.length
   const nodeMap = new Map<string, { degree: number }>()
@@ -201,7 +202,7 @@ export function buildQueryGraphElements(
           source: sourceId,
           target: targetId,
           label: edgeLabel,
-          relation: edgeLabel || "query",
+          relation: edgeLabel || name || "result",
         },
       })
     }
@@ -222,7 +223,7 @@ export function buildQueryGraphElements(
       id,
       label: id.slice(2),
       degree: entry.degree,
-      relations: ["query"],
+      relations: [name || "result"],
     },
   }))
 
@@ -258,18 +259,18 @@ export const EDGE_COLORS = [
   "#f0abfc", // fuchsia-300
 ]
 
-/** Node colors for relation clustering (distinct, saturated palette) */
+/** Node colors for relation clustering (aquamarine → violet → magenta gradient) */
 export const NODE_COLORS = [
+  "#2dd4bf", // aquamarine / teal
   "#14b8a6", // teal-500
-  "#d946ef", // fuchsia-500
-  "#f59e0b", // amber-500
-  "#3b82f6", // blue-500
-  "#ef4444", // red-500
-  "#22c55e", // green-500
-  "#8b5cf6", // violet-500
-  "#ec4899", // pink-500
-  "#06b6d4", // cyan-500
-  "#f97316", // orange-500
+  "#0d9488", // teal-600
+  "#0891b2", // cyan-600
+  "#6366f1", // indigo
+  "#8b5cf6", // violet
+  "#a855f7", // purple
+  "#c026d3", // fuchsia-600
+  "#d946ef", // magenta / fuchsia
+  "#e879f9", // fuchsia-400
 ]
 
 export function getRelationColor(relationName: string, allNames: string[]): string {

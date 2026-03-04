@@ -8,12 +8,13 @@ import { Share2 } from "lucide-react"
 interface QueryResultGraphProps {
   data: (string | number | boolean | null)[][]
   columns: string[]
+  name?: string
 }
 
-export function QueryResultGraph({ data, columns }: QueryResultGraphProps) {
+export function QueryResultGraph({ data, columns, name }: QueryResultGraphProps) {
   const { elements, stats, relationNames } = useMemo(
-    () => buildQueryGraphElements(data, columns),
-    [data, columns]
+    () => buildQueryGraphElements(data, columns, name),
+    [data, columns, name]
   )
 
   if (data.length === 0 && columns.length !== 1) {
