@@ -1,10 +1,12 @@
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { Network, Rows3, Columns3, Copy, Check, Download, Filter, ArrowUpDown, RefreshCw, Loader2, FileJson, Trash2 } from "lucide-react"
+import { Network, Rows3, Columns3, Copy, Check, Download, Filter, ArrowUpDown, RefreshCw, Loader2, FileJson, Trash2, Share2, Table } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
+import { QueryResultGraph } from "@/components/query-result-graph"
 import { cn } from "@/lib/utils"
 import { downloadBlob } from "@/lib/ui-utils"
 import { toast } from "sonner"
@@ -38,6 +40,7 @@ export function RelationDetailPanel({ relation }: RelationDetailPanelProps) {
   const [currentColumns, setCurrentColumns] = useState<string[]>(relation.columns)
   const [currentTupleCount, setCurrentTupleCount] = useState(relation.tupleCount)
   const [page, setPage] = useState(0)
+  const [activeTab, setActiveTab] = useState("data")
   const pageSize = 100
 
   // Update local state when relation prop changes
@@ -251,129 +254,163 @@ export function RelationDetailPanel({ relation }: RelationDetailPanelProps) {
         </code>
       </div>
 
-      {/* Stats bar */}
-      <div className="flex items-center justify-between border-b border-border/50 bg-background px-4 py-2">
-        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1.5">
-            <Columns3 className="h-3.5 w-3.5" />
-            {currentColumns.length} columns
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Rows3 className="h-3.5 w-3.5" />
-            {currentTupleCount.toLocaleString()} tuples
-          </span>
+      {/* Tabs: Data / Graph */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden min-h-0">
+        <div className="border-b border-border/50 px-4 flex-shrink-0">
+          <TabsList className="h-10 bg-transparent p-0 gap-4">
+            <TabsTrigger
+              value="data"
+              className={cn(
+                "h-10 px-2 pb-3 pt-2.5 rounded-md border-b-2 border-transparent text-teal-600 dark:text-teal-400",
+                "data-[state=active]:bg-teal-500/10 data-[state=active]:shadow-none data-[state=active]:border-teal-500",
+              )}
+            >
+              <Table className="h-4 w-4 mr-2" />
+              Data
+            </TabsTrigger>
+            <TabsTrigger
+              value="graph"
+              className={cn(
+                "h-10 px-2 pb-3 pt-2.5 rounded-md border-b-2 border-transparent text-teal-600 dark:text-teal-400",
+                "data-[state=active]:bg-teal-500/10 data-[state=active]:shadow-none data-[state=active]:border-teal-500",
+              )}
+            >
+              <Share2 className="h-4 w-4 mr-2" />
+              Graph
+            </TabsTrigger>
+          </TabsList>
         </div>
-        <div className="flex items-center gap-2">
-          {filter && (
-            <span className="text-xs text-muted-foreground whitespace-nowrap">
-              {filteredData.length} match{filteredData.length !== 1 ? "es" : ""}
-            </span>
-          )}
-          <div className="relative w-48">
-            <Filter className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Filter data..."
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              className="h-7 pl-8 text-xs"
-              aria-label="Filter relation data"
-            />
-          </div>
-        </div>
-      </div>
 
-      {/* Data table */}
-      <div className="flex-1 overflow-auto scrollbar-thin">
-        <table className="w-full border-collapse text-sm">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-muted/80 backdrop-blur-sm">
-              <th className="w-12 border-b border-r border-border/50 px-3 py-2 text-center text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                #
-              </th>
-              {currentColumns.map((col, index) => (
-                <th
-                  key={`${col}-${index}`}
-                  onClick={() => handleSort(index)}
-                  className="cursor-pointer border-b border-r border-border/50 px-3 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:bg-muted last:border-r-0"
-                >
-                  <div className="flex items-center gap-1">
-                    {col}
-                    <ArrowUpDown className={cn("h-3 w-3", sortColumn === index ? "text-primary" : "opacity-30")} />
-                  </div>
-                  {relation.columnTypes?.[index] && (
-                    <span className="text-[9px] font-normal normal-case tracking-normal text-muted-foreground/50">
-                      {relation.columnTypes[index]}
-                    </span>
-                  )}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {displayData.map((row, rowIndex) => (
-              <tr key={rowIndex} className="group transition-colors hover:bg-muted/50">
-                <td className="border-b border-r border-border/30 px-3 py-2 text-center font-mono text-[10px] text-muted-foreground">
-                  {safePage * pageSize + rowIndex + 1}
-                </td>
-                {row.map((cell, cellIndex) => (
-                  <td
-                    key={cellIndex}
-                    className="border-b border-r border-border/30 px-3 py-2 font-mono text-xs last:border-r-0"
-                  >
-                    {cell === null ? (
-                      <span className="italic text-muted-foreground/50">null</span>
-                    ) : typeof cell === "boolean" ? (
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "text-[10px] font-mono",
-                          cell ? "border-success/50 text-success bg-success/10" : "border-muted-foreground/50",
-                        )}
+        <TabsContent value="data" className="flex-1 m-0 overflow-hidden flex flex-col">
+          {/* Stats bar */}
+          <div className="flex items-center justify-between border-b border-border/50 bg-background px-4 py-2 flex-shrink-0">
+            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <Columns3 className="h-3.5 w-3.5" />
+                {currentColumns.length} columns
+              </span>
+              <span className="flex items-center gap-1.5">
+                <Rows3 className="h-3.5 w-3.5" />
+                {currentTupleCount.toLocaleString()} tuples
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {filter && (
+                <span className="text-xs text-muted-foreground whitespace-nowrap">
+                  {filteredData.length} match{filteredData.length !== 1 ? "es" : ""}
+                </span>
+              )}
+              <div className="relative w-48">
+                <Filter className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Filter data..."
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  className="h-7 pl-8 text-xs"
+                  aria-label="Filter relation data"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Data table */}
+          <div className="flex-1 overflow-auto scrollbar-thin">
+            <table className="w-full border-collapse text-sm">
+              <thead className="sticky top-0 z-10">
+                <tr className="bg-muted/80 backdrop-blur-sm">
+                  <th className="w-12 border-b border-r border-border/50 px-3 py-2 text-center text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                    #
+                  </th>
+                  {currentColumns.map((col, index) => (
+                    <th
+                      key={`${col}-${index}`}
+                      onClick={() => handleSort(index)}
+                      className="cursor-pointer border-b border-r border-border/50 px-3 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:bg-muted last:border-r-0"
+                    >
+                      <div className="flex items-center gap-1">
+                        {col}
+                        <ArrowUpDown className={cn("h-3 w-3", sortColumn === index ? "text-primary" : "opacity-30")} />
+                      </div>
+                      {relation.columnTypes?.[index] && (
+                        <span className="text-[9px] font-normal normal-case tracking-normal text-muted-foreground/50">
+                          {relation.columnTypes[index]}
+                        </span>
+                      )}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {displayData.map((row, rowIndex) => (
+                  <tr key={rowIndex} className="group transition-colors hover:bg-muted/50">
+                    <td className="border-b border-r border-border/30 px-3 py-2 text-center font-mono text-[10px] text-muted-foreground">
+                      {safePage * pageSize + rowIndex + 1}
+                    </td>
+                    {row.map((cell, cellIndex) => (
+                      <td
+                        key={cellIndex}
+                        className="border-b border-r border-border/30 px-3 py-2 font-mono text-xs last:border-r-0"
                       >
-                        {cell.toString()}
-                      </Badge>
-                    ) : typeof cell === "number" ? (
-                      <span className="text-[var(--code-variable)]">{cell}</span>
-                    ) : (
-                      <span>{String(cell)}</span>
-                    )}
-                  </td>
+                        {cell === null ? (
+                          <span className="italic text-muted-foreground/50">null</span>
+                        ) : typeof cell === "boolean" ? (
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[10px] font-mono",
+                              cell ? "border-success/50 text-success bg-success/10" : "border-muted-foreground/50",
+                            )}
+                          >
+                            {cell.toString()}
+                          </Badge>
+                        ) : typeof cell === "number" ? (
+                          <span className="text-[var(--code-variable)]">{cell}</span>
+                        ) : (
+                          <span>{String(cell)}</span>
+                        )}
+                      </td>
+                    ))}
+                  </tr>
                 ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Footer with pagination */}
-      <div className="flex items-center justify-between border-t border-border/50 bg-muted/30 px-4 py-2">
-        <p className="text-[10px] text-muted-foreground">
-          {sortedData.length === 0
-            ? (filter ? "No matching rows" : "No rows")
-            : <>Showing {safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, sortedData.length)} of {sortedData.length} rows
-              {sortedData.length < currentTupleCount && ` (${currentTupleCount.toLocaleString()} total)`}
-              {filter && ` (filtered)`}</>}
-        </p>
-        {totalPages > 1 && (
-          <div className="flex items-center gap-1">
-            <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" disabled={safePage === 0} onClick={() => setPage(0)}>
-              First
-            </Button>
-            <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
-              Prev
-            </Button>
-            <span className="text-[10px] text-muted-foreground px-1">
-              {safePage + 1} / {totalPages}
-            </span>
-            <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" disabled={safePage >= totalPages - 1} onClick={() => setPage(safePage + 1)}>
-              Next
-            </Button>
-            <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" disabled={safePage >= totalPages - 1} onClick={() => setPage(totalPages - 1)}>
-              Last
-            </Button>
+              </tbody>
+            </table>
           </div>
-        )}
-      </div>
+
+          {/* Footer with pagination */}
+          <div className="flex items-center justify-between border-t border-border/50 bg-muted/30 px-4 py-2 flex-shrink-0">
+            <p className="text-[10px] text-muted-foreground">
+              {sortedData.length === 0
+                ? (filter ? "No matching rows" : "No rows")
+                : <>Showing {safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, sortedData.length)} of {sortedData.length} rows
+                  {sortedData.length < currentTupleCount && ` (${currentTupleCount.toLocaleString()} total)`}
+                  {filter && ` (filtered)`}</>}
+            </p>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1">
+                <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" disabled={safePage === 0} onClick={() => setPage(0)}>
+                  First
+                </Button>
+                <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+                  Prev
+                </Button>
+                <span className="text-[10px] text-muted-foreground px-1">
+                  {safePage + 1} / {totalPages}
+                </span>
+                <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" disabled={safePage >= totalPages - 1} onClick={() => setPage(safePage + 1)}>
+                  Next
+                </Button>
+                <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]" disabled={safePage >= totalPages - 1} onClick={() => setPage(totalPages - 1)}>
+                  Last
+                </Button>
+              </div>
+            )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="graph" className="flex-1 m-0 overflow-hidden">
+          <QueryResultGraph data={currentData} columns={currentColumns} />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

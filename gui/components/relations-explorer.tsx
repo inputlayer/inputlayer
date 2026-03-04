@@ -126,14 +126,12 @@ export function RelationsExplorer({
                       <span className="flex-shrink-0 text-[10px] text-muted-foreground">{relation.arity}</span>
                     </button>
                   </ContextMenuTrigger>
-                  {relation.arity === 2 && (
-                    <ContextMenuContent>
-                      <ContextMenuItem onClick={() => router.push(`/graph?select=${relation.name}`)}>
-                        <Share2 className="h-3.5 w-3.5 mr-2" />
-                        Open in KG Graph
-                      </ContextMenuItem>
-                    </ContextMenuContent>
-                  )}
+                  <ContextMenuContent>
+                    <ContextMenuItem onClick={() => router.push(`/graph?select=${relation.name}`)}>
+                      <Share2 className="h-3.5 w-3.5 mr-2" />
+                      Open in KG Graph
+                    </ContextMenuItem>
+                  </ContextMenuContent>
                 </ContextMenu>
               ))}
             </div>
@@ -177,14 +175,12 @@ export function RelationsExplorer({
                       <span className="flex-shrink-0 text-[10px] text-muted-foreground">{view.arity > 0 ? view.arity : ""}</span>
                     </button>
                   </ContextMenuTrigger>
-                  {(view.arity === 2 || view.arity === 0) && (
-                    <ContextMenuContent>
-                      <ContextMenuItem onClick={() => router.push(`/graph?select=${view.name}`)}>
-                        <Share2 className="h-3.5 w-3.5 mr-2" />
-                        Open in KG Graph
-                      </ContextMenuItem>
-                    </ContextMenuContent>
-                  )}
+                  <ContextMenuContent>
+                    <ContextMenuItem onClick={() => router.push(`/graph?select=${view.name}`)}>
+                      <Share2 className="h-3.5 w-3.5 mr-2" />
+                      Open in KG Graph
+                    </ContextMenuItem>
+                  </ContextMenuContent>
                 </ContextMenu>
               ))}
             </div>

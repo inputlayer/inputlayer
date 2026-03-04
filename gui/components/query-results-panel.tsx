@@ -1,8 +1,10 @@
 "use client"
 
-import { Clock, Download, Rows3, AlertCircle, CheckCircle2, Loader2, Copy, Check, Lightbulb, Sparkles, AlertTriangle, CheckSquare, Info, ArrowUp, ArrowDown, ArrowUpDown, FileJson } from "lucide-react"
+import { Clock, Download, Rows3, AlertCircle, CheckCircle2, Loader2, Copy, Check, Lightbulb, Sparkles, AlertTriangle, CheckSquare, Info, ArrowUp, ArrowDown, ArrowUpDown, FileJson, Share2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { QueryResultGraph } from "@/components/query-result-graph"
 import { cn } from "@/lib/utils"
 import { formatTime, downloadBlob } from "@/lib/ui-utils"
 import { toast } from "sonner"
@@ -88,9 +90,10 @@ export function QueryResultsPanel({ result, explainResult, error, isExecuting, i
   const [copied, setCopied] = useState(false)
   const [sort, setSort] = useState<SortState | null>(null)
   const [page, setPage] = useState(0)
+  const [activeTab, setActiveTab] = useState<"table" | "graph">("table")
 
-  // Reset page when result changes
-  useEffect(() => { setPage(0) }, [result])
+  // Reset page and tab when result changes
+  useEffect(() => { setPage(0); setActiveTab("table") }, [result])
 
   const handleSort = (colIndex: number) => {
     setSort((prev) => {
@@ -443,7 +446,54 @@ export function QueryResultsPanel({ result, explainResult, error, isExecuting, i
         </div>
       )}
 
-      {/* Results table */}
+      {/* Content: table + graph tab */}
+      {result.columns.length >= 1 ? (
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "table" | "graph")} className="flex-1 flex flex-col overflow-hidden min-h-0">
+          <div className="border-b border-border/50 px-3 flex-shrink-0">
+            <TabsList className="h-8 bg-transparent p-0 gap-3">
+              <TabsTrigger
+                value="table"
+                className="h-8 px-2 pb-2 pt-1.5 rounded-md border-b-2 border-transparent text-xs text-teal-600 dark:text-teal-400 data-[state=active]:bg-teal-500/10 data-[state=active]:shadow-none data-[state=active]:border-teal-500"
+              >
+                <Rows3 className="h-3.5 w-3.5 mr-1.5" />
+                Table
+              </TabsTrigger>
+              <TabsTrigger
+                value="graph"
+                className="h-8 px-2 pb-2 pt-1.5 rounded-md border-b-2 border-transparent text-xs text-teal-600 dark:text-teal-400 data-[state=active]:bg-teal-500/10 data-[state=active]:shadow-none data-[state=active]:border-teal-500"
+              >
+                <Share2 className="h-3.5 w-3.5 mr-1.5" />
+                Graph
+              </TabsTrigger>
+            </TabsList>
+          </div>
+          <TabsContent value="table" className="flex-1 m-0 overflow-hidden flex flex-col">
+            <ResultTable result={result} sort={sort} sortedIndices={sortedIndices} page={page} setPage={setPage} handleSort={handleSort} />
+          </TabsContent>
+          <TabsContent value="graph" className="flex-1 m-0 overflow-hidden">
+            <QueryResultGraph data={result.data} columns={result.columns} />
+          </TabsContent>
+        </Tabs>
+      ) : (
+        <ResultTable result={result} sort={sort} sortedIndices={sortedIndices} page={page} setPage={setPage} handleSort={handleSort} />
+      )}
+    </div>
+  )
+}
+
+/** Extracted table + pagination to avoid duplication between tabbed and non-tabbed modes */
+function ResultTable({
+  result, sort, sortedIndices, page, setPage, handleSort,
+}: {
+  result: QueryResult
+  sort: SortState | null
+  sortedIndices: number[] | null
+  page: number
+  setPage: (p: number) => void
+  handleSort: (col: number) => void
+}) {
+  return (
+    <>
       <div className="flex-1 overflow-auto scrollbar-thin">
         <table className="w-full border-collapse text-sm">
           <thead className="sticky top-0 z-10">
@@ -552,6 +602,6 @@ export function QueryResultsPanel({ result, explainResult, error, isExecuting, i
           </div>
         )
       })()}
-    </div>
+    </>
   )
 }

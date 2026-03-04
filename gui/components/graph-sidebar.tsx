@@ -33,17 +33,17 @@ export function GraphSidebar({
   const [search, setSearch] = useState("")
   const debouncedSearch = useDebounce(search, 150)
 
-  const binaryRelations = useMemo(
-    () => relations.filter((r) => r.arity === 2),
+  const graphRelations = useMemo(
+    () => relations.filter((r) => r.arity >= 1),
     [relations]
   )
 
   const filtered = useMemo(
     () =>
-      binaryRelations.filter((r) =>
+      graphRelations.filter((r) =>
         r.name.toLowerCase().includes(debouncedSearch.toLowerCase())
       ),
-    [binaryRelations, debouncedSearch]
+    [graphRelations, debouncedSearch]
   )
 
   return (
@@ -87,12 +87,12 @@ export function GraphSidebar({
 
       {/* Relation list */}
       <div className="flex-1 overflow-auto scrollbar-thin p-2">
-        {binaryRelations.length === 0 ? (
+        {graphRelations.length === 0 ? (
           <div className="py-8 text-center">
             <Network className="mx-auto h-8 w-8 text-muted-foreground/50" />
-            <p className="mt-2 text-xs text-muted-foreground">No binary relations</p>
+            <p className="mt-2 text-xs text-muted-foreground">No relations</p>
             <p className="mt-1 text-[10px] text-muted-foreground/70">
-              Binary relations (arity 2) are visualized as edges
+              Relations are visualized as graphs
             </p>
           </div>
         ) : (
@@ -146,7 +146,7 @@ export function GraphSidebar({
         </div>
         <div className="flex flex-col gap-1 text-[10px] text-muted-foreground">
           <div className="flex items-center justify-between">
-            <span>{binaryRelations.length} binary relations</span>
+            <span>{graphRelations.length} relations</span>
             <span>{selectedNames.size} selected</span>
           </div>
           {stats && (

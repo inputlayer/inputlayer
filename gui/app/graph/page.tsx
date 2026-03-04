@@ -33,11 +33,11 @@ function GraphPageInner() {
     const baseRelNames = new Set(relations.map((r) => r.name))
     // Include views not already in base relations (arity 0 means not yet loaded)
     const viewEntries: Relation[] = views
-      .filter((v) => (v.arity === 2 || v.arity === 0) && !baseRelNames.has(v.name))
+      .filter((v) => !baseRelNames.has(v.name))
       .map((v) => viewRelations.get(v.name) ?? {
         id: `view_${v.name}`,
         name: v.name,
-        arity: 2,
+        arity: v.arity || 2,
         tupleCount: 0,
         columns: [],
         columnTypes: [],
@@ -48,8 +48,8 @@ function GraphPageInner() {
     return [...relations, ...viewEntries]
   }, [relations, views, viewRelations])
 
-  const binaryRelations = useMemo(
-    () => allRelations.filter((r) => r.arity === 2),
+  const graphRelations = useMemo(
+    () => allRelations.filter((r) => r.arity >= 1),
     [allRelations]
   )
 
@@ -68,9 +68,7 @@ function GraphPageInner() {
       const vars = generateVariables(arity)
       const result = await executeInternalQuery(`?${name}(${vars.join(", ")})`)
       if (result.status === "success") {
-        // Determine actual arity from result columns
         const actualArity = result.columns.length || arity
-        if (actualArity !== 2) return // Only binary relations for the graph
         const rel: Relation = {
           id: `view_${name}`,
           name,
@@ -123,9 +121,9 @@ function GraphPageInner() {
   }, [allRelations, relations, loadRelationData, loadViewAsRelation])
 
   const handleSelectAll = useCallback(async () => {
-    const names = new Set(binaryRelations.map((r) => r.name))
+    const names = new Set(graphRelations.map((r) => r.name))
     setSelectedNames(names)
-    const toLoad = binaryRelations.filter((r) => r.data.length === 0)
+    const toLoad = graphRelations.filter((r) => r.data.length === 0)
     if (toLoad.length > 0) {
       setLoadingRelations(new Set(toLoad.map((r) => r.name)))
       const baseNames = new Set(relations.map((r) => r.name))
@@ -134,7 +132,7 @@ function GraphPageInner() {
       ))
       setLoadingRelations(new Set())
     }
-  }, [binaryRelations, relations, loadRelationData, loadViewAsRelation])
+  }, [graphRelations, relations, loadRelationData, loadViewAsRelation])
 
   const handleDeselectAll = useCallback(() => {
     setSelectedNames(new Set())
@@ -158,7 +156,7 @@ function GraphPageInner() {
   useEffect(() => {
     const name = searchParams.get("select")
     if (!name || initialSelectHandled.current) return
-    const rel = allRelations.find((r) => r.name === name && r.arity === 2)
+    const rel = allRelations.find((r) => r.name === name && r.arity >= 1)
     if (!rel) return
     initialSelectHandled.current = true
     handleFilterRelation(name)
@@ -201,7 +199,19 @@ function GraphPageInner() {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => refreshCurrentKnowledgeGraph()}
+                onClick={async () => {
+                  await refreshCurrentKnowledgeGraph()
+                  // Reload data for all currently selected relations
+                  if (selectedNames.size > 0) {
+                    const baseNames = new Set(relations.map((r) => r.name))
+                    const toReload = Array.from(selectedNames)
+                    setLoadingRelations(new Set(toReload))
+                    await Promise.all(toReload.map((name) =>
+                      baseNames.has(name) ? loadRelationData(name) : loadViewAsRelation(name)
+                    ))
+                    setLoadingRelations(new Set())
+                  }
+                }}
                 disabled={isRefreshing}
                 className="h-7 px-2"
               >
