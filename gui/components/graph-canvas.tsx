@@ -3,8 +3,9 @@
 import { useRef, useState, useEffect, useCallback, useMemo } from "react"
 import dynamic from "next/dynamic"
 import { useTheme } from "next-themes"
-import { ZoomIn, ZoomOut, Maximize2, LayoutGrid, Share2 } from "lucide-react"
+import { ZoomIn, ZoomOut, Maximize2, LayoutGrid, Share2, Focus } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
@@ -39,8 +40,20 @@ export function GraphCanvas({ elements, stats, relationNames }: GraphCanvasProps
   const [layout, setLayout] = useState<LayoutName>("cola")
   const [selectedNode, setSelectedNode] = useState<NodeDetailData | null>(null)
   const [zoomLabel, setZoomLabel] = useState("100%")
+  const [fadeEnabled, setFadeEnabled] = useState(true)
+  const fadeEnabledRef = useRef(true)
 
   useEffect(() => { setMounted(true) }, [])
+
+  const handleFadeToggle = useCallback((enabled: boolean) => {
+    setFadeEnabled(enabled)
+    fadeEnabledRef.current = enabled
+    if (!enabled && cyRef.current) {
+      cyRef.current.batch(() => {
+        cyRef.current!.elements().removeStyle("opacity")
+      })
+    }
+  }, [])
 
   // Register cola layout plugin (once, client-side only)
   useEffect(() => {
@@ -66,6 +79,10 @@ export function GraphCanvas({ elements, stats, relationNames }: GraphCanvasProps
         "font-family": "ui-monospace, monospace",
         "text-valign": "bottom" as const,
         "text-margin-y": 6,
+        "text-background-color": isDark ? "#1a1a2e" : "#ffffff",
+        "text-background-opacity": 0.85,
+        "text-background-padding": "3px" as unknown as number,
+        "text-background-shape": "roundrectangle" as const,
         width: "mapData(degree, 1, 20, 20, 50)",
         height: "mapData(degree, 1, 20, 20, 50)",
         "border-width": 2,
@@ -99,22 +116,6 @@ export function GraphCanvas({ elements, stats, relationNames }: GraphCanvasProps
         "text-background-opacity": 0.8,
         "text-background-padding": "2px" as unknown as number,
       },
-    },
-    {
-      selector: "node.faded",
-      style: { opacity: 0.15, "transition-duration": "0ms" },
-    },
-    {
-      selector: "edge.faded",
-      style: { opacity: 0.08, "transition-duration": "0ms" },
-    },
-    {
-      selector: "node.highlighted",
-      style: { opacity: 1, "transition-duration": "0ms" },
-    },
-    {
-      selector: "edge.highlighted",
-      style: { opacity: 1, width: 2.5, "transition-duration": "0ms" },
     },
     ...relationNames.map((name, i) => ({
       selector: `edge[relation = "${name}"]`,
@@ -163,18 +164,17 @@ export function GraphCanvas({ elements, stats, relationNames }: GraphCanvasProps
     cy.on("tap", "node", (evt) => {
       const node = evt.target
       const nodeData = node.data()
-      const connectedEdges = node.connectedEdges()
-      const connectedNodes = connectedEdges.connectedNodes()
 
-      // Batch all class changes into a single render pass
-      cy.batch(() => {
-        cy.elements().addClass("faded").removeClass("highlighted")
-        node.removeClass("faded").addClass("highlighted")
-        connectedNodes.removeClass("faded").addClass("highlighted")
-        connectedEdges.removeClass("faded").addClass("highlighted")
-      })
+      // Fade unrelated elements using direct style (faster than classes)
+      if (fadeEnabledRef.current) {
+        const neighborhood = node.closedNeighborhood()
+        cy.batch(() => {
+          cy.elements().not(neighborhood).style("opacity", 0.12)
+          neighborhood.style("opacity", 1)
+        })
+      }
 
-      const neighbors = connectedEdges.map((edge: cytoscape.EdgeSingular) => {
+      const neighbors = node.connectedEdges().map((edge: cytoscape.EdgeSingular) => {
         const edgeData = edge.data()
         const isSource = edgeData.source === nodeData.id
         return {
@@ -197,7 +197,7 @@ export function GraphCanvas({ elements, stats, relationNames }: GraphCanvasProps
     cy.on("tap", (evt) => {
       if (evt.target === cy) {
         cy.batch(() => {
-          cy.elements().removeClass("faded").removeClass("highlighted")
+          cy.elements().removeStyle("opacity")
         })
         setSelectedNode(null)
       }
@@ -249,8 +249,8 @@ export function GraphCanvas({ elements, stats, relationNames }: GraphCanvasProps
 
       <GraphNodeDetail node={selectedNode} onClose={() => setSelectedNode(null)} />
 
-      {/* Layout selector */}
-      <div className="absolute top-4 left-4 z-10">
+      {/* Top controls */}
+      <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
         <Select value={layout} onValueChange={(v) => setLayout(v as LayoutName)}>
           <SelectTrigger size="sm" className="h-8 w-40 bg-background/90 backdrop-blur-sm border-border/50">
             <LayoutGrid className="h-3.5 w-3.5 mr-1.5" />
@@ -262,6 +262,11 @@ export function GraphCanvas({ elements, stats, relationNames }: GraphCanvasProps
             ))}
           </SelectContent>
         </Select>
+        <label className="flex items-center gap-1.5 rounded-lg border border-border/50 bg-background/90 backdrop-blur-sm px-2.5 h-8 cursor-pointer">
+          <Focus className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-[10px] text-muted-foreground">Focus</span>
+          <Switch checked={fadeEnabled} onCheckedChange={handleFadeToggle} className="scale-75" />
+        </label>
       </div>
 
       {/* Zoom controls */}

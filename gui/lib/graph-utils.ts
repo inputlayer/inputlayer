@@ -30,9 +30,9 @@ export interface GraphStats {
 }
 
 /** Maximum nodes before truncating */
-export const MAX_NODES = 500
+export const MAX_NODES = 1000
 /** Maximum edges before truncating */
-export const MAX_EDGES = 2000
+export const MAX_EDGES = 5000
 
 /**
  * Transform loaded binary relations into Cytoscape elements.
