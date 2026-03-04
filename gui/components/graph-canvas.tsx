@@ -102,28 +102,19 @@ export function GraphCanvas({ elements, stats, relationNames }: GraphCanvasProps
     },
     {
       selector: "node.faded",
-      style: {
-        opacity: 0.15,
-      },
+      style: { opacity: 0.15, "transition-duration": "0ms" },
     },
     {
       selector: "edge.faded",
-      style: {
-        opacity: 0.08,
-      },
+      style: { opacity: 0.08, "transition-duration": "0ms" },
     },
     {
       selector: "node.highlighted",
-      style: {
-        opacity: 1,
-      },
+      style: { opacity: 1, "transition-duration": "0ms" },
     },
     {
       selector: "edge.highlighted",
-      style: {
-        opacity: 1,
-        width: 2.5,
-      },
+      style: { opacity: 1, width: 2.5, "transition-duration": "0ms" },
     },
     ...relationNames.map((name, i) => ({
       selector: `edge[relation = "${name}"]`,
@@ -175,11 +166,13 @@ export function GraphCanvas({ elements, stats, relationNames }: GraphCanvasProps
       const connectedEdges = node.connectedEdges()
       const connectedNodes = connectedEdges.connectedNodes()
 
-      // Fade everything, then highlight the selected node and its neighbors
-      cy.elements().addClass("faded").removeClass("highlighted")
-      node.removeClass("faded").addClass("highlighted")
-      connectedNodes.removeClass("faded").addClass("highlighted")
-      connectedEdges.removeClass("faded").addClass("highlighted")
+      // Batch all class changes into a single render pass
+      cy.batch(() => {
+        cy.elements().addClass("faded").removeClass("highlighted")
+        node.removeClass("faded").addClass("highlighted")
+        connectedNodes.removeClass("faded").addClass("highlighted")
+        connectedEdges.removeClass("faded").addClass("highlighted")
+      })
 
       const neighbors = connectedEdges.map((edge: cytoscape.EdgeSingular) => {
         const edgeData = edge.data()
@@ -203,7 +196,9 @@ export function GraphCanvas({ elements, stats, relationNames }: GraphCanvasProps
 
     cy.on("tap", (evt) => {
       if (evt.target === cy) {
-        cy.elements().removeClass("faded").removeClass("highlighted")
+        cy.batch(() => {
+          cy.elements().removeClass("faded").removeClass("highlighted")
+        })
         setSelectedNode(null)
       }
     })
