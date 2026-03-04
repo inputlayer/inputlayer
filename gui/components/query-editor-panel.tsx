@@ -217,14 +217,20 @@ export function QueryEditorPanel({ onExecute, onExplain, onCancel, isExecuting, 
       }
     }
 
-    // Ctrl+Space: open autocomplete manually (or Ctrl+Shift+A when already open to show all)
-    if (e.ctrlKey && (e.key === " " || (e.shiftKey && e.key === "A" && showAutocomplete))) {
+    // Cmd+J (Mac) / Ctrl+Space (other): open autocomplete manually
+    // Cmd+Shift+A (Mac) / Ctrl+Shift+A: show all completions
+    const acTrigger = isMac
+      ? (e.metaKey && e.key === "j")
+      : (e.ctrlKey && e.code === "Space")
+    const acShowAll = isMac
+      ? (e.metaKey && e.shiftKey && e.key === "j")
+      : (e.ctrlKey && e.shiftKey && e.code === "Space")
+    if (acTrigger || acShowAll) {
       e.preventDefault()
       if (textareaRef.current) {
         const cp = textareaRef.current.selectionStart
-        const forceAll = e.key === "A"
-        const { items, startIndex } = getCompletions(query, cp, relations, views, forceAll)
-        const limited = items.slice(0, forceAll ? MAX_COMPLETIONS_FORCED : MAX_COMPLETIONS)
+        const { items, startIndex } = getCompletions(query, cp, relations, views, true)
+        const limited = items.slice(0, acShowAll ? MAX_COMPLETIONS_FORCED : MAX_COMPLETIONS)
         if (limited.length > 0 && editorAreaRef.current) {
           const coords = getCursorCoordinates(textareaRef.current, cp)
           setAutocomplete({

@@ -52,6 +52,7 @@
     "cytoscape-euler": "^1.2.3",
     "cytoscape-fcose": "^2.2.0",
     "cytoscape-spread": "^3.0.0",
+    "cytoscape-svg": "^0.4.0",
     "d3-force": "^3.0.0",
     "date-fns": "4.1.0",
     "elkjs": "^0.11.1",
