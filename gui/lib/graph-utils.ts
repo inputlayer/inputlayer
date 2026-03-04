@@ -126,6 +126,7 @@ export function buildGraphElements(
       label: id.slice(2), // Remove "n_" prefix
       degree: entry.degree,
       relations: Array.from(entry.relations),
+      primaryRelation: Array.from(entry.relations)[0] || "",
     },
   }))
 
@@ -255,6 +256,20 @@ export const EDGE_COLORS = [
   "#a855f7", // violet
   "#99f6e4", // teal-200
   "#f0abfc", // fuchsia-300
+]
+
+/** Node colors for relation clustering (distinct, saturated palette) */
+export const NODE_COLORS = [
+  "#14b8a6", // teal-500
+  "#d946ef", // fuchsia-500
+  "#f59e0b", // amber-500
+  "#3b82f6", // blue-500
+  "#ef4444", // red-500
+  "#22c55e", // green-500
+  "#8b5cf6", // violet-500
+  "#ec4899", // pink-500
+  "#06b6d4", // cyan-500
+  "#f97316", // orange-500
 ]
 
 export function getRelationColor(relationName: string, allNames: string[]): string {

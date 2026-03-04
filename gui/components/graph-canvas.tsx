@@ -3,15 +3,19 @@
 import { useRef, useState, useEffect, useCallback, useMemo } from "react"
 import dynamic from "next/dynamic"
 import { useTheme } from "next-themes"
-import { ZoomIn, ZoomOut, Maximize2, LayoutGrid, Share2, Focus } from "lucide-react"
+import { ZoomIn, ZoomOut, Maximize2, Minimize2, LayoutGrid, Share2, Focus, Search, X, Download, ImageDown, FileCode2, Tag, Tags } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { GraphNodeDetail, type NodeDetailData } from "@/components/graph-node-detail"
 import type { CytoscapeElement, GraphStats } from "@/lib/graph-utils"
-import { EDGE_COLORS } from "@/lib/graph-utils"
+import { EDGE_COLORS, NODE_COLORS } from "@/lib/graph-utils"
 import type cytoscape from "cytoscape"
 
 const CytoscapeComponent = dynamic(() => import("react-cytoscapejs"), { ssr: false })
@@ -51,8 +55,18 @@ export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }
   const [zoomLabel, setZoomLabel] = useState("100%")
   const [fadeEnabled, setFadeEnabled] = useState(true)
   const fadeEnabledRef = useRef(true)
+  const [showEdgeLabels, setShowEdgeLabels] = useState(true)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [searchMatches, setSearchMatches] = useState<number>(0)
+  const [searchIndex, setSearchIndex] = useState(0)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { setMounted(true) }, [])
+
+  const isDark = resolvedTheme === "dark"
 
   const handleFadeToggle = useCallback((enabled: boolean) => {
     setFadeEnabled(enabled)
@@ -63,6 +77,108 @@ export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }
       })
     }
   }, [])
+
+  // Node search
+  const handleSearch = useCallback((query: string) => {
+    setSearchQuery(query)
+    const cy = cyRef.current
+    if (!cy) return
+    cy.elements().removeClass("search-match search-dim")
+    if (!query.trim()) {
+      setSearchMatches(0)
+      setSearchIndex(0)
+      return
+    }
+    const q = query.toLowerCase()
+    const matches = cy.nodes().filter((n) => n.data("label")?.toLowerCase().includes(q))
+    setSearchMatches(matches.length)
+    setSearchIndex(0)
+    if (matches.length > 0) {
+      cy.elements().addClass("search-dim")
+      matches.removeClass("search-dim").addClass("search-match")
+      cy.animate({ fit: { eles: matches, padding: 60 } }, { duration: 400 })
+    }
+  }, [])
+
+  const handleSearchNav = useCallback((direction: 1 | -1) => {
+    const cy = cyRef.current
+    if (!cy || searchMatches === 0) return
+    const matches = cy.nodes(".search-match")
+    const next = (searchIndex + direction + matches.length) % matches.length
+    setSearchIndex(next)
+    const node = matches[next]
+    cy.animate({ center: { eles: node }, zoom: Math.max(cy.zoom(), 1.5) }, { duration: 300 })
+  }, [searchMatches, searchIndex])
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false)
+    setSearchQuery("")
+    setSearchMatches(0)
+    setSearchIndex(0)
+    cyRef.current?.elements().removeClass("search-match search-dim")
+  }, [])
+
+  // Export
+  const handleExportPng = useCallback(() => {
+    const cy = cyRef.current
+    if (!cy) return
+    const png = cy.png({ output: "blob", scale: 2, bg: isDark ? "#0a0a0a" : "#fafafa" })
+    const url = URL.createObjectURL(png as Blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = "graph.png"
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [isDark])
+
+  const handleExportSvg = useCallback(() => {
+    const cy = cyRef.current
+    if (!cy) return
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const svg = (cy as any).svg({ scale: 1, full: true, bg: isDark ? "#0a0a0a" : "#fafafa" })
+    const blob = new Blob([svg], { type: "image/svg+xml" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = "graph.svg"
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [isDark])
+
+  // Fullscreen
+  const toggleFullscreen = useCallback(() => {
+    const el = containerRef.current
+    if (!el) return
+    if (!document.fullscreenElement) {
+      el.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {})
+    } else {
+      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {})
+    }
+  }, [])
+
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement)
+    document.addEventListener("fullscreenchange", handler)
+    return () => document.removeEventListener("fullscreenchange", handler)
+  }, [])
+
+  // Keyboard shortcuts for graph
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Only handle when this component is visible
+      if (!containerRef.current || !containerRef.current.offsetParent) return
+      if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+        e.preventDefault()
+        setSearchOpen(true)
+        setTimeout(() => searchInputRef.current?.focus(), 50)
+      }
+      if (e.key === "Escape" && searchOpen) {
+        closeSearch()
+      }
+    }
+    document.addEventListener("keydown", handler)
+    return () => document.removeEventListener("keydown", handler)
+  }, [searchOpen, closeSearch])
 
   // Register layout plugins (once, client-side only)
   useEffect(() => {
@@ -80,10 +196,9 @@ export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }
       import("cytoscape-spread" as string).then(register)
       import("cytoscape-d3-force" as string).then(register)
       import("cytoscape-avsdf" as string).then(register)
+      import("cytoscape-svg" as string).then(register)
     })
   }, [])
-
-  const isDark = resolvedTheme === "dark"
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const stylesheet: any[] = useMemo(() => [
@@ -126,13 +241,28 @@ export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }
         "target-arrow-shape": "triangle" as const,
         "curve-style": "bezier" as const,
         "arrow-scale": 0.8,
-        label: elements.length < 200 ? "data(label)" : "",
+        label: showEdgeLabels && elements.length < 500 ? "data(label)" : "",
         "font-size": "8px",
         "text-rotation": "autorotate" as const,
         color: isDark ? "#9ca3af" : "#6b7280",
         "text-background-color": isDark ? "#0a0a0a" : "#ffffff",
         "text-background-opacity": 0.8,
         "text-background-padding": "2px" as unknown as number,
+      },
+    },
+    {
+      selector: ".search-match",
+      style: {
+        "background-color": "#facc15",
+        "border-color": "#eab308",
+        "border-width": 3,
+        "z-index": 999,
+      },
+    },
+    {
+      selector: ".search-dim",
+      style: {
+        opacity: 0.15,
       },
     },
     ...relationNames.map((name, i) => ({
@@ -142,7 +272,15 @@ export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }
         "target-arrow-color": EDGE_COLORS[i % EDGE_COLORS.length],
       },
     })),
-  ], [isDark, relationNames, elements.length])
+    // Node clustering: color nodes by primary relation when multiple relations are active
+    ...(relationNames.length > 1 ? relationNames.map((name, i) => ({
+      selector: `node[primaryRelation = "${name}"]`,
+      style: {
+        "background-color": NODE_COLORS[i % NODE_COLORS.length],
+        "border-color": NODE_COLORS[i % NODE_COLORS.length],
+      },
+    })) : []),
+  ], [isDark, relationNames, elements.length, showEdgeLabels])
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const layoutConfig = useMemo((): any => {
@@ -323,7 +461,7 @@ export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }
   }
 
   return (
-    <div className="relative h-full w-full">
+    <div ref={containerRef} className="relative h-full w-full">
       <CytoscapeComponent
         elements={elements as unknown as cytoscape.ElementDefinition[]}
         stylesheet={stylesheet}
@@ -347,7 +485,6 @@ export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }
           const cy = cyRef.current
           if (!cy || !selectedNode) return
           if (!rel) {
-            // Restore the node-selection fade state
             if (fadeEnabledRef.current) {
               const node = cy.getElementById(selectedNode.id)
               const neighborhood = node.closedNeighborhood()
@@ -360,7 +497,6 @@ export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }
             }
             return
           }
-          // Highlight only edges of this relation connected to the selected node
           const node = cy.getElementById(selectedNode.id)
           const relEdges = node.connectedEdges(`[relation = "${rel}"]`)
           const relNodes = relEdges.connectedNodes()
@@ -394,7 +530,82 @@ export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }
           <span className="text-[10px] text-muted-foreground">Focus</span>
           <Switch checked={fadeEnabled} onCheckedChange={handleFadeToggle} className="scale-75" />
         </label>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0 bg-background/90 backdrop-blur-sm border border-border/50 rounded-lg"
+          onClick={() => setShowEdgeLabels((v) => !v)}
+          title={showEdgeLabels ? "Hide edge labels" : "Show edge labels"}
+        >
+          {showEdgeLabels ? <Tag className="h-3.5 w-3.5" /> : <Tags className="h-3.5 w-3.5 text-muted-foreground line-through" />}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0 bg-background/90 backdrop-blur-sm border border-border/50 rounded-lg"
+          onClick={() => { setSearchOpen(true); setTimeout(() => searchInputRef.current?.focus(), 50) }}
+          title="Search nodes (Ctrl+F)"
+        >
+          <Search className="h-3.5 w-3.5" />
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0 bg-background/90 backdrop-blur-sm border border-border/50 rounded-lg"
+              title="Export graph"
+            >
+              <Download className="h-3.5 w-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onClick={handleExportPng}>
+              <ImageDown className="h-3.5 w-3.5 mr-2" />
+              Export as PNG
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleExportSvg}>
+              <FileCode2 className="h-3.5 w-3.5 mr-2" />
+              Export as SVG
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0 bg-background/90 backdrop-blur-sm border border-border/50 rounded-lg"
+          onClick={toggleFullscreen}
+          title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+        >
+          {isFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+        </Button>
       </div>
+
+      {/* Search bar */}
+      {searchOpen && (
+        <div className="absolute top-14 left-4 z-10 flex items-center gap-1.5 rounded-lg border border-border/50 bg-background/90 backdrop-blur-sm px-2 py-1.5">
+          <Search className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+          <Input
+            ref={searchInputRef}
+            value={searchQuery}
+            onChange={(e) => handleSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleSearchNav(e.shiftKey ? -1 : 1)
+              if (e.key === "Escape") closeSearch()
+            }}
+            placeholder="Search nodes..."
+            className="h-6 w-44 border-0 bg-transparent px-1 text-xs focus-visible:ring-0"
+          />
+          {searchQuery && (
+            <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+              {searchMatches > 0 ? `${searchIndex + 1}/${searchMatches}` : "0 found"}
+            </span>
+          )}
+          <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={closeSearch}>
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      )}
 
       {/* Zoom controls */}
       <div className="absolute bottom-4 right-4 flex items-center gap-1 rounded-lg border border-border/50 bg-background/90 backdrop-blur-sm p-1">
