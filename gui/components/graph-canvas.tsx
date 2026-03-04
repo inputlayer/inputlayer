@@ -252,11 +252,11 @@ export function GraphCanvas({ elements, stats, relationNames }: GraphCanvasProps
 
       {/* Legend */}
       {relationNames.length > 0 && (
-        <div className="absolute bottom-4 left-4 flex items-center gap-3 rounded-lg border border-border/50 bg-background/90 backdrop-blur-sm px-3 py-2 max-w-xs overflow-x-auto">
+        <div className="absolute bottom-4 left-4 flex flex-wrap gap-x-3 gap-y-1.5 rounded-lg border border-border/50 bg-background/90 backdrop-blur-sm px-3 py-2 max-w-sm">
           {relationNames.map((name, i) => (
-            <div key={name} className="flex items-center gap-1.5 flex-shrink-0">
+            <div key={name} className="flex items-center gap-1.5">
               <div
-                className="h-2.5 w-2.5 rounded-full"
+                className="h-2.5 w-2.5 rounded-full flex-shrink-0"
                 style={{ backgroundColor: EDGE_COLORS[i % EDGE_COLORS.length] }}
               />
               <span className="text-[10px] text-muted-foreground font-mono">{name}</span>
