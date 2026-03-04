@@ -46,19 +46,43 @@ export function buildGraphElements(
   const edges: GraphEdge[] = []
   let totalEdges = 0
 
-  const binaryRelations = relations.filter(
-    (r) => r.arity === 2 && selectedRelationNames.has(r.name) && r.data.length > 0
+  const graphRelations = relations.filter(
+    (r) => r.arity >= 1 && selectedRelationNames.has(r.name) && r.data.length > 0
   )
 
-  for (const rel of binaryRelations) {
+  for (const rel of graphRelations) {
+    const arity = rel.arity
+
+    if (arity === 1) {
+      // Unary: nodes only
+      for (const row of rel.data) {
+        const val = String(row[0] ?? "null")
+        const id = `n_${val}`
+        if (!nodeMap.has(id)) {
+          nodeMap.set(id, { relations: new Set(), degree: 0 })
+        }
+        nodeMap.get(id)!.relations.add(rel.name)
+      }
+      continue
+    }
+
+    // Arity 2+: source → target with optional edge label
     for (const row of rel.data) {
       totalEdges++
       if (edges.length >= MAX_EDGES) continue
 
       const sourceVal = String(row[0] ?? "null")
-      const targetVal = String(row[1] ?? "null")
+      const targetVal = String(row[arity === 2 ? 1 : arity - 1] ?? "null")
       const sourceId = `n_${sourceVal}`
       const targetId = `n_${targetVal}`
+
+      // Edge label from middle columns for arity 3+
+      let edgeLabel = rel.name
+      if (arity === 3) {
+        edgeLabel = String(row[1] ?? rel.name)
+      } else if (arity > 3) {
+        edgeLabel = row.slice(1, arity - 1).map((v) => String(v ?? "")).join(", ")
+      }
 
       if (!nodeMap.has(sourceId)) {
         nodeMap.set(sourceId, { relations: new Set(), degree: 0 })
@@ -79,8 +103,8 @@ export function buildGraphElements(
           id: `e_${rel.name}_${edges.length}`,
           source: sourceId,
           target: targetId,
-          label: rel.name,
-          relation: rel.name,
+          label: edgeLabel,
+          relation: arity >= 3 ? edgeLabel : rel.name,
         },
       })
     }
@@ -114,10 +138,110 @@ export function buildGraphElements(
     stats: {
       nodeCount: nodes.length,
       edgeCount: keptEdges.length,
-      relationCount: binaryRelations.length,
+      relationCount: graphRelations.length,
       truncated,
       totalEdges,
     },
+  }
+}
+
+/**
+ * Transform query/view result data of any arity into Cytoscape elements.
+ *
+ * - Arity 1: nodes only (set of values)
+ * - Arity 2: col[0] → col[1]
+ * - Arity 3: col[0] → col[2], col[1] as edge label (subject, predicate, object)
+ * - Arity 4+: col[0] → col[last], middle columns joined as edge label
+ */
+export function buildQueryGraphElements(
+  data: (string | number | boolean | null)[][],
+  columns: string[],
+): { elements: CytoscapeElement[]; stats: GraphStats; relationNames: string[] } {
+  const arity = columns.length
+  const nodeMap = new Map<string, { degree: number }>()
+  const edges: GraphEdge[] = []
+  let totalEdges = 0
+
+  if (arity === 1) {
+    // Arity 1: nodes only
+    for (const row of data) {
+      const val = String(row[0] ?? "null")
+      const id = `n_${val}`
+      if (!nodeMap.has(id)) nodeMap.set(id, { degree: 0 })
+    }
+  } else {
+    // Arity 2+: source → target with optional edge label
+    for (const row of data) {
+      totalEdges++
+      if (edges.length >= MAX_EDGES) continue
+
+      const sourceVal = String(row[0] ?? "null")
+      const targetVal = String(row[arity === 2 ? 1 : arity - 1] ?? "null")
+      const sourceId = `n_${sourceVal}`
+      const targetId = `n_${targetVal}`
+
+      // Edge label from middle columns (arity 3+)
+      let edgeLabel = ""
+      if (arity === 3) {
+        edgeLabel = String(row[1] ?? "")
+      } else if (arity > 3) {
+        edgeLabel = row.slice(1, arity - 1).map((v) => String(v ?? "")).join(", ")
+      }
+
+      if (!nodeMap.has(sourceId)) nodeMap.set(sourceId, { degree: 0 })
+      nodeMap.get(sourceId)!.degree++
+
+      if (!nodeMap.has(targetId)) nodeMap.set(targetId, { degree: 0 })
+      nodeMap.get(targetId)!.degree++
+
+      edges.push({
+        data: {
+          id: `e_${edges.length}`,
+          source: sourceId,
+          target: targetId,
+          label: edgeLabel,
+          relation: edgeLabel || "query",
+        },
+      })
+    }
+  }
+
+  const truncated = nodeMap.size > MAX_NODES || totalEdges > MAX_EDGES
+  let nodeEntries = Array.from(nodeMap.entries())
+
+  if (nodeEntries.length > MAX_NODES) {
+    nodeEntries.sort((a, b) => b[1].degree - a[1].degree)
+    nodeEntries = nodeEntries.slice(0, MAX_NODES)
+  }
+
+  const keptNodeIds = new Set(nodeEntries.map(([id]) => id))
+
+  const nodes: GraphNode[] = nodeEntries.map(([id, entry]) => ({
+    data: {
+      id,
+      label: id.slice(2),
+      degree: entry.degree,
+      relations: ["query"],
+    },
+  }))
+
+  const keptEdges = edges.filter(
+    (e) => keptNodeIds.has(e.data.source) && keptNodeIds.has(e.data.target)
+  )
+
+  // Collect unique edge labels for legend (arity 3+)
+  const uniqueRelations = new Set(keptEdges.map((e) => e.data.relation))
+
+  return {
+    elements: [...nodes, ...keptEdges],
+    stats: {
+      nodeCount: nodes.length,
+      edgeCount: keptEdges.length,
+      relationCount: uniqueRelations.size,
+      truncated,
+      totalEdges,
+    },
+    relationNames: arity >= 3 ? Array.from(uniqueRelations) : [],
   }
 }
 

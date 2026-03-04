@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
-import { Eye, Copy, Check, Download, Table, GitBranch, Gauge, Code, RefreshCw, Loader2, Trash2 } from "lucide-react"
+import { Eye, Copy, Check, Download, Table, GitBranch, Gauge, Code, RefreshCw, Loader2, Trash2, Share2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -23,6 +23,7 @@ import { highlightToHtml } from "@/lib/syntax-highlight"
 import { ViewDataTab } from "@/components/view-data-tab"
 import { ViewGraphTab } from "@/components/view-graph-tab"
 import { ViewPerformanceTab } from "@/components/view-performance-tab"
+import { ViewDataGraphTab } from "@/components/view-data-graph-tab"
 
 interface ViewDetailPanelProps {
   view: View
@@ -207,8 +208,8 @@ export function ViewDetailPanel({ view, relations, onNavigate }: ViewDetailPanel
             <TabsTrigger
               value="data"
               className={cn(
-                "h-10 px-0 pb-3 pt-2.5 rounded-none border-b-2 border-transparent",
-                "data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-primary",
+                "h-10 px-2 pb-3 pt-2.5 rounded-md border-b-2 border-transparent text-teal-600 dark:text-teal-400",
+                "data-[state=active]:bg-teal-500/10 data-[state=active]:shadow-none data-[state=active]:border-teal-500",
               )}
             >
               <Table className="h-4 w-4 mr-2" />
@@ -217,18 +218,29 @@ export function ViewDetailPanel({ view, relations, onNavigate }: ViewDetailPanel
             <TabsTrigger
               value="graph"
               className={cn(
-                "h-10 px-0 pb-3 pt-2.5 rounded-none border-b-2 border-transparent",
-                "data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-primary",
+                "h-10 px-2 pb-3 pt-2.5 rounded-md border-b-2 border-transparent text-teal-600 dark:text-teal-400",
+                "data-[state=active]:bg-teal-500/10 data-[state=active]:shadow-none data-[state=active]:border-teal-500",
               )}
             >
               <GitBranch className="h-4 w-4 mr-2" />
               Dependency Graph
             </TabsTrigger>
             <TabsTrigger
+              value="data-graph"
+              disabled={view.arity < 1}
+              className={cn(
+                "h-10 px-2 pb-3 pt-2.5 rounded-md border-b-2 border-transparent text-teal-600 dark:text-teal-400",
+                "data-[state=active]:bg-teal-500/10 data-[state=active]:shadow-none data-[state=active]:border-teal-500",
+              )}
+            >
+              <Share2 className="h-4 w-4 mr-2" />
+              Data Graph
+            </TabsTrigger>
+            <TabsTrigger
               value="performance"
               className={cn(
-                "h-10 px-0 pb-3 pt-2.5 rounded-none border-b-2 border-transparent",
-                "data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-primary",
+                "h-10 px-2 pb-3 pt-2.5 rounded-md border-b-2 border-transparent text-teal-600 dark:text-teal-400",
+                "data-[state=active]:bg-teal-500/10 data-[state=active]:shadow-none data-[state=active]:border-teal-500",
               )}
             >
               <Gauge className="h-4 w-4 mr-2" />
@@ -242,6 +254,9 @@ export function ViewDetailPanel({ view, relations, onNavigate }: ViewDetailPanel
         </TabsContent>
         <TabsContent value="graph" className="flex-1 m-0 overflow-hidden">
           <ViewGraphTab view={view} relations={relations} />
+        </TabsContent>
+        <TabsContent value="data-graph" className="flex-1 m-0 overflow-hidden">
+          <ViewDataGraphTab view={view} />
         </TabsContent>
         <TabsContent value="performance" className="flex-1 m-0 overflow-hidden">
           <ViewPerformanceTab view={view} />
