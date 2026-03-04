@@ -41,6 +41,7 @@ export const MAX_EDGES = 5000
 export function buildGraphElements(
   relations: Relation[],
   selectedRelationNames: Set<string>,
+  grouped = false,
 ): { elements: CytoscapeElement[]; stats: GraphStats } {
   const nodeMap = new Map<string, { relations: Set<string>; degree: number }>()
   const edges: GraphEdge[] = []
@@ -120,6 +121,9 @@ export function buildGraphElements(
 
   const keptNodeIds = new Set(nodeEntries.map(([id]) => id))
 
+  const activeRelNames = Array.from(new Set(graphRelations.map((r) => r.name)))
+  const useGrouping = grouped && activeRelNames.length > 1
+
   const nodes: GraphNode[] = nodeEntries.map(([id, entry]) => ({
     data: {
       id,
@@ -127,15 +131,23 @@ export function buildGraphElements(
       degree: entry.degree,
       relations: Array.from(entry.relations),
       primaryRelation: Array.from(entry.relations)[0] || "",
+      ...(useGrouping ? { parent: `group_${Array.from(entry.relations)[0]}` } : {}),
     },
   }))
+
+  // Create parent (compound) nodes for each relation when grouped
+  const parentNodes: GraphNode[] = useGrouping
+    ? activeRelNames.map((name) => ({
+        data: { id: `group_${name}`, label: name, degree: 0, relations: [name], primaryRelation: name },
+      }))
+    : []
 
   const keptEdges = edges.filter(
     (e) => keptNodeIds.has(e.data.source) && keptNodeIds.has(e.data.target)
   )
 
   return {
-    elements: [...nodes, ...keptEdges],
+    elements: [...parentNodes, ...nodes, ...keptEdges],
     stats: {
       nodeCount: nodes.length,
       edgeCount: keptEdges.length,
