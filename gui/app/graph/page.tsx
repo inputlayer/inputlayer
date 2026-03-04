@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect, useMemo, useCallback } from "react"
+import { Suspense, useState, useEffect, useMemo, useCallback, useRef } from "react"
+import { useSearchParams } from "next/navigation"
 import { AppShell } from "@/components/app-shell"
 import { GraphSidebar } from "@/components/graph-sidebar"
 import { GraphCanvas } from "@/components/graph-canvas"
@@ -10,7 +11,7 @@ import { generateVariables } from "@/lib/ws-parsers"
 import { AlertCircle, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
-export default function GraphPage() {
+function GraphPageInner() {
   const {
     selectedKnowledgeGraph,
     relations,
@@ -21,9 +22,11 @@ export default function GraphPage() {
     executeInternalQuery,
   } = useDatalogStore()
 
+  const searchParams = useSearchParams()
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set())
   const [loadingRelations, setLoadingRelations] = useState<Set<string>>(new Set())
   const [viewRelations, setViewRelations] = useState<Map<string, Relation>>(new Map())
+  const initialSelectHandled = useRef(false)
 
   // Merge base relations with view-derived relations for the graph
   const allRelations = useMemo(() => {
@@ -137,6 +140,30 @@ export default function GraphPage() {
     setSelectedNames(new Set())
   }, [])
 
+  const handleFilterRelation = useCallback((relation: string) => {
+    setSelectedNames(new Set([relation]))
+    // Load data if needed
+    const rel = allRelations.find((r) => r.name === relation)
+    if (rel && rel.data.length === 0) {
+      const isViewOnly = !relations.some((r) => r.name === relation)
+      if (isViewOnly) {
+        loadViewAsRelation(relation)
+      } else {
+        loadRelationData(relation)
+      }
+    }
+  }, [allRelations, relations, loadRelationData, loadViewAsRelation])
+
+  // Auto-select relation from URL search params (e.g. ?select=knows)
+  useEffect(() => {
+    const name = searchParams.get("select")
+    if (!name || initialSelectHandled.current) return
+    const rel = allRelations.find((r) => r.name === name && r.arity === 2)
+    if (!rel) return
+    initialSelectHandled.current = true
+    handleFilterRelation(name)
+  }, [searchParams, allRelations, handleFilterRelation])
+
   const { elements, stats } = useMemo(
     () => buildGraphElements(allRelations, selectedNames),
     [allRelations, selectedNames]
@@ -200,10 +227,19 @@ export default function GraphPage() {
               elements={elements}
               stats={stats}
               relationNames={activeRelationNames}
+              onFilterRelation={handleFilterRelation}
             />
           </div>
         </div>
       )}
     </AppShell>
+  )
+}
+
+export default function GraphPage() {
+  return (
+    <Suspense>
+      <GraphPageInner />
+    </Suspense>
   )
 }

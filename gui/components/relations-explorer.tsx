@@ -1,9 +1,16 @@
 "use client"
 
 import { useState, useMemo } from "react"
-import { Network, Eye, Search, X, ChevronRight, Rows3 } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { Network, Eye, Search, X, ChevronRight, Rows3, Share2 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
 import { EmptyState } from "@/components/empty-state"
 import { useDebounce } from "@/hooks/use-debounce"
@@ -26,6 +33,7 @@ export function RelationsExplorer({
   onSelectRelation,
   onSelectView,
 }: RelationsExplorerProps) {
+  const router = useRouter()
   const [search, setSearch] = useState("")
   const debouncedSearch = useDebounce(search, 150)
   const [expandedSections, setExpandedSections] = useState({
@@ -97,25 +105,36 @@ export function RelationsExplorer({
           {expandedSections.relations && (
             <div className="ml-3 mt-1 space-y-0.5 border-l border-border/50 pl-2">
               {filteredRelations.map((relation) => (
-                <button
-                  key={relation.id}
-                  onClick={() => onSelectRelation(relation)}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors",
-                    selectedRelationId === relation.id
-                      ? "bg-primary/10 text-primary"
-                      : "text-foreground hover:bg-muted",
+                <ContextMenu key={relation.id}>
+                  <ContextMenuTrigger asChild>
+                    <button
+                      onClick={() => onSelectRelation(relation)}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors",
+                        selectedRelationId === relation.id
+                          ? "bg-primary/10 text-primary"
+                          : "text-foreground hover:bg-muted",
+                      )}
+                    >
+                      <Network className="h-3.5 w-3.5 flex-shrink-0 text-chart-1" />
+                      <span className="flex-1 truncate font-mono text-xs">{relation.name}</span>
+                      {relation.isSession && (
+                        <Badge variant="outline" className="h-4 px-1 text-[9px] border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10">
+                          session
+                        </Badge>
+                      )}
+                      <span className="flex-shrink-0 text-[10px] text-muted-foreground">{relation.arity}</span>
+                    </button>
+                  </ContextMenuTrigger>
+                  {relation.arity === 2 && (
+                    <ContextMenuContent>
+                      <ContextMenuItem onClick={() => router.push(`/graph?select=${relation.name}`)}>
+                        <Share2 className="h-3.5 w-3.5 mr-2" />
+                        Open in KG Graph
+                      </ContextMenuItem>
+                    </ContextMenuContent>
                   )}
-                >
-                  <Network className="h-3.5 w-3.5 flex-shrink-0 text-chart-1" />
-                  <span className="flex-1 truncate font-mono text-xs">{relation.name}</span>
-                  {relation.isSession && (
-                    <Badge variant="outline" className="h-4 px-1 text-[9px] border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10">
-                      session
-                    </Badge>
-                  )}
-                  <span className="flex-shrink-0 text-[10px] text-muted-foreground">{relation.arity}</span>
-                </button>
+                </ContextMenu>
               ))}
             </div>
           )}
@@ -139,23 +158,34 @@ export function RelationsExplorer({
           {expandedSections.views && (
             <div className="ml-3 mt-1 space-y-0.5 border-l border-border/50 pl-2">
               {filteredViews.map((view) => (
-                <button
-                  key={view.id}
-                  onClick={() => onSelectView(view)}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors",
-                    selectedViewId === view.id ? "bg-accent/10 text-accent" : "text-foreground hover:bg-muted",
+                <ContextMenu key={view.id}>
+                  <ContextMenuTrigger asChild>
+                    <button
+                      onClick={() => onSelectView(view)}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors",
+                        selectedViewId === view.id ? "bg-accent/10 text-accent" : "text-foreground hover:bg-muted",
+                      )}
+                    >
+                      <Eye className="h-3.5 w-3.5 flex-shrink-0 text-chart-2" />
+                      <span className="flex-1 truncate font-mono text-xs">{view.name}</span>
+                      {view.isSession && (
+                        <Badge variant="outline" className="h-4 px-1 text-[9px] border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10">
+                          session
+                        </Badge>
+                      )}
+                      <span className="flex-shrink-0 text-[10px] text-muted-foreground">{view.arity > 0 ? view.arity : ""}</span>
+                    </button>
+                  </ContextMenuTrigger>
+                  {(view.arity === 2 || view.arity === 0) && (
+                    <ContextMenuContent>
+                      <ContextMenuItem onClick={() => router.push(`/graph?select=${view.name}`)}>
+                        <Share2 className="h-3.5 w-3.5 mr-2" />
+                        Open in KG Graph
+                      </ContextMenuItem>
+                    </ContextMenuContent>
                   )}
-                >
-                  <Eye className="h-3.5 w-3.5 flex-shrink-0 text-chart-2" />
-                  <span className="flex-1 truncate font-mono text-xs">{view.name}</span>
-                  {view.isSession && (
-                    <Badge variant="outline" className="h-4 px-1 text-[9px] border-amber-500/50 text-amber-600 dark:text-amber-400 bg-amber-500/10">
-                      session
-                    </Badge>
-                  )}
-                  <span className="flex-shrink-0 text-[10px] text-muted-foreground">{view.arity > 0 ? view.arity : ""}</span>
-                </button>
+                </ContextMenu>
               ))}
             </div>
           )}

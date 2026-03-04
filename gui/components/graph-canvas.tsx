@@ -31,9 +31,10 @@ interface GraphCanvasProps {
   elements: CytoscapeElement[]
   stats: GraphStats
   relationNames: string[]
+  onFilterRelation?: (relation: string) => void
 }
 
-export function GraphCanvas({ elements, stats, relationNames }: GraphCanvasProps) {
+export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }: GraphCanvasProps) {
   const cyRef = useRef<cytoscape.Core | null>(null)
   const { resolvedTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
@@ -247,7 +248,48 @@ export function GraphCanvas({ elements, stats, relationNames }: GraphCanvasProps
         className={isDark ? "bg-[#0a0a0a]" : "bg-[#fafafa]"}
       />
 
-      <GraphNodeDetail node={selectedNode} onClose={() => setSelectedNode(null)} />
+      <GraphNodeDetail
+        node={selectedNode}
+        onClose={() => {
+          if (cyRef.current) {
+            cyRef.current.batch(() => {
+              cyRef.current!.elements().removeStyle("opacity")
+            })
+          }
+          setSelectedNode(null)
+        }}
+        onHoverRelation={(rel) => {
+          const cy = cyRef.current
+          if (!cy || !selectedNode) return
+          if (!rel) {
+            // Restore the node-selection fade state
+            if (fadeEnabledRef.current) {
+              const node = cy.getElementById(selectedNode.id)
+              const neighborhood = node.closedNeighborhood()
+              cy.batch(() => {
+                cy.elements().not(neighborhood).style("opacity", 0.12)
+                neighborhood.style("opacity", 1)
+              })
+            } else {
+              cy.batch(() => { cy.elements().removeStyle("opacity") })
+            }
+            return
+          }
+          // Highlight only edges of this relation connected to the selected node
+          const node = cy.getElementById(selectedNode.id)
+          const relEdges = node.connectedEdges(`[relation = "${rel}"]`)
+          const relNodes = relEdges.connectedNodes()
+          cy.batch(() => {
+            cy.elements().style("opacity", 0.08)
+            node.style("opacity", 1)
+            relEdges.style("opacity", 1)
+            relNodes.style("opacity", 1)
+          })
+        }}
+        onClickRelation={(rel) => {
+          onFilterRelation?.(rel)
+        }}
+      />
 
       {/* Top controls */}
       <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
