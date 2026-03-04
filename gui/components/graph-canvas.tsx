@@ -3,7 +3,7 @@
 import { useRef, useState, useEffect, useCallback, useMemo } from "react"
 import dynamic from "next/dynamic"
 import { useTheme } from "next-themes"
-import { ZoomIn, ZoomOut, Maximize2, Minimize2, LayoutGrid, Share2, Focus, Search, X, Download, ImageDown, FileCode2, Tag, Tags, Boxes } from "lucide-react"
+import { ZoomIn, ZoomOut, Maximize2, Minimize2, LayoutGrid, Share2, Focus, Search, X, Download, ImageDown, FileCode2, Tag, Tags, Boxes, Map } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
@@ -67,7 +67,12 @@ export function GraphCanvas({ elements, stats, relationNames, grouped = false, o
   const [searchIndex, setSearchIndex] = useState(0)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [showMinimap, setShowMinimap] = useState(false)
+  const [minimapSrc, setMinimapSrc] = useState<string>("")
+  const [minimapViewport, setMinimapViewport] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const minimapContainerRef = useRef<HTMLDivElement>(null)
+  const minimapDragging = useRef(false)
 
   // Auto-switch to compound-compatible layout when grouping is enabled
   useEffect(() => {
@@ -484,6 +489,82 @@ export function GraphCanvas({ elements, stats, relationNames, grouped = false, o
     }
   }, [layoutConfig, elements])
 
+  // Custom minimap: render thumbnail + viewport overlay
+  const updateMinimap = useCallback(() => {
+    const cy = cyRef.current
+    if (!cy || !showMinimap) return
+    try {
+      const png = cy.png({ scale: 0.15, full: true, bg: isDark ? "#0a0a0a" : "#fafafa" })
+      setMinimapSrc(png)
+      // Compute viewport rectangle relative to the full graph bounding box
+      const bb = cy.elements().boundingBox()
+      const containerEl = minimapContainerRef.current
+      if (!containerEl || bb.w === 0 || bb.h === 0) return
+      const panelW = containerEl.clientWidth
+      const panelH = containerEl.clientHeight
+      const scale = Math.min(panelW / bb.w, panelH / bb.h) * (1 / 0.15)
+      const zoom = cy.zoom()
+      const pan = cy.pan()
+      const ext = cy.extent()
+      const vx = ((ext.x1 - bb.x1) / bb.w) * panelW
+      const vy = ((ext.y1 - bb.y1) / bb.h) * panelH
+      const vw = ((ext.x2 - ext.x1) / bb.w) * panelW
+      const vh = ((ext.y2 - ext.y1) / bb.h) * panelH
+      setMinimapViewport({ x: Math.max(0, vx), y: Math.max(0, vy), w: Math.min(vw, panelW), h: Math.min(vh, panelH) })
+    } catch { /* cy not ready */ }
+  }, [showMinimap, isDark])
+
+  // Pan the main graph by clicking/dragging on the minimap
+  const panToMinimapPoint = useCallback((clientX: number, clientY: number) => {
+    const cy = cyRef.current
+    const el = minimapContainerRef.current
+    if (!cy || !el) return
+    const rect = el.getBoundingClientRect()
+    const mx = clientX - rect.left
+    const my = clientY - rect.top
+    const panelW = el.clientWidth
+    const panelH = el.clientHeight
+    const bb = cy.elements().boundingBox()
+    if (bb.w === 0 || bb.h === 0) return
+    // Map minimap coords to graph model coords
+    const graphX = bb.x1 + (mx / panelW) * bb.w
+    const graphY = bb.y1 + (my / panelH) * bb.h
+    // Center the viewport on that point
+    const zoom = cy.zoom()
+    cy.pan({
+      x: cy.width() / 2 - graphX * zoom,
+      y: cy.height() / 2 - graphY * zoom,
+    })
+  }, [])
+
+  const handleMinimapPointerDown = useCallback((e: React.PointerEvent) => {
+    minimapDragging.current = true
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    panToMinimapPoint(e.clientX, e.clientY)
+  }, [panToMinimapPoint])
+
+  const handleMinimapPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!minimapDragging.current) return
+    panToMinimapPoint(e.clientX, e.clientY)
+  }, [panToMinimapPoint])
+
+  const handleMinimapPointerUp = useCallback(() => {
+    minimapDragging.current = false
+  }, [])
+
+  useEffect(() => {
+    const cy = cyRef.current
+    if (!cy || !showMinimap) return
+    // Initial render
+    const timer = setTimeout(updateMinimap, 300)
+    const handler = () => updateMinimap()
+    cy.on("render pan zoom", handler)
+    return () => {
+      clearTimeout(timer)
+      cy.off("render pan zoom", handler)
+    }
+  }, [showMinimap, updateMinimap, elements])
+
   if (!mounted) {
     return (
       <div className="flex h-full items-center justify-center bg-muted/10">
@@ -633,6 +714,15 @@ export function GraphCanvas({ elements, stats, relationNames, grouped = false, o
         <Button
           variant="ghost"
           size="sm"
+          className={`h-8 w-8 p-0 bg-background/90 backdrop-blur-sm border border-border/50 rounded-lg hover:bg-teal-500/10 hover:text-teal-600 dark:hover:text-teal-400 ${showMinimap ? "text-teal-500" : ""}`}
+          onClick={() => setShowMinimap((v) => !v)}
+          title={showMinimap ? "Hide minimap" : "Show minimap"}
+        >
+          <Map className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
           className="h-8 w-8 p-0 bg-background/90 backdrop-blur-sm border border-border/50 rounded-lg hover:bg-teal-500/10 hover:text-teal-600 dark:hover:text-teal-400"
           onClick={toggleFullscreen}
           title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
@@ -683,6 +773,28 @@ export function GraphCanvas({ elements, stats, relationNames, grouped = false, o
           onClick={() => cyRef.current?.fit(undefined, 50)}>
           <Maximize2 className="h-3.5 w-3.5" />
         </Button>
+      </div>
+
+      {/* Minimap */}
+      <div className={`absolute bottom-16 right-4 z-10 transition-all ${showMinimap ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"}`}>
+        <div
+          ref={minimapContainerRef}
+          className="relative w-44 h-32 rounded-lg border border-border/50 bg-background/90 backdrop-blur-sm overflow-hidden cursor-crosshair select-none touch-none"
+          onPointerDown={handleMinimapPointerDown}
+          onPointerMove={handleMinimapPointerMove}
+          onPointerUp={handleMinimapPointerUp}
+          onPointerCancel={handleMinimapPointerUp}
+        >
+          {minimapSrc && (
+            <img src={minimapSrc} alt="Graph minimap" className="absolute inset-0 w-full h-full object-contain pointer-events-none" draggable={false} />
+          )}
+          {minimapViewport && (
+            <div
+              className="absolute border-1.5 border-teal-500/60 bg-teal-500/15 rounded-sm pointer-events-none"
+              style={{ left: minimapViewport.x, top: minimapViewport.y, width: minimapViewport.w, height: minimapViewport.h }}
+            />
+          )}
+        </div>
       </div>
 
       {/* Legend */}
