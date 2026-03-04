@@ -3,7 +3,7 @@
 import { useRef, useState, useEffect, useCallback, useMemo } from "react"
 import dynamic from "next/dynamic"
 import { useTheme } from "next-themes"
-import { ZoomIn, ZoomOut, Maximize2, Minimize2, LayoutGrid, Share2, Focus, Search, X, Download, ImageDown, FileCode2, Tag, Tags } from "lucide-react"
+import { ZoomIn, ZoomOut, Maximize2, Minimize2, LayoutGrid, Share2, Focus, Search, X, Download, ImageDown, FileCode2, Tag, Tags, Boxes } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
@@ -39,14 +39,19 @@ const LAYOUT_OPTIONS: { value: LayoutName; label: string }[] = [
   { value: "grid", label: "Grid" },
 ]
 
+/** Layouts that support Cytoscape compound (parent) nodes */
+const COMPOUND_LAYOUTS: Set<LayoutName> = new Set(["cola", "fcose", "cose-bilkent", "elk", "dagre"])
+
 interface GraphCanvasProps {
   elements: CytoscapeElement[]
   stats: GraphStats
   relationNames: string[]
+  grouped?: boolean
+  onGroupedChange?: (grouped: boolean) => void
   onFilterRelation?: (relation: string) => void
 }
 
-export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }: GraphCanvasProps) {
+export function GraphCanvas({ elements, stats, relationNames, grouped = false, onGroupedChange, onFilterRelation }: GraphCanvasProps) {
   const cyRef = useRef<cytoscape.Core | null>(null)
   const { resolvedTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
@@ -63,6 +68,13 @@ export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
+
+  // Auto-switch to compound-compatible layout when grouping is enabled
+  useEffect(() => {
+    if (grouped && !COMPOUND_LAYOUTS.has(layout)) {
+      setLayout("cola")
+    }
+  }, [grouped, layout])
 
   useEffect(() => { setMounted(true) }, [])
 
@@ -280,7 +292,38 @@ export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }
         "border-color": NODE_COLORS[i % NODE_COLORS.length],
       },
     })) : []),
-  ], [isDark, relationNames, elements.length, showEdgeLabels])
+    // Compound parent nodes (visible when grouped)
+    ...(grouped && relationNames.length > 1 ? [
+      {
+        selector: ":parent",
+        style: {
+          "background-opacity": 0.06,
+          "background-color": isDark ? "#2dd4bf" : "#14b8a6",
+          "border-width": 1.5,
+          "border-style": "dashed" as const,
+          "border-color": isDark ? "#374151" : "#d1d5db",
+          "border-opacity": 0.6,
+          shape: "roundrectangle" as const,
+          "text-valign": "top" as const,
+          "text-halign": "center" as const,
+          "text-margin-y": -4,
+          label: "data(label)",
+          "font-size": "11px",
+          "font-family": "var(--font-mono)",
+          "font-weight": "bold" as const,
+          color: isDark ? "#9ca3af" : "#6b7280",
+          padding: "24px" as unknown as number,
+        },
+      },
+      ...relationNames.map((name, i) => ({
+        selector: `node#group_${name}`,
+        style: {
+          "background-color": NODE_COLORS[i % NODE_COLORS.length],
+          "border-color": NODE_COLORS[i % NODE_COLORS.length],
+        },
+      })),
+    ] : []),
+  ], [isDark, relationNames, elements.length, showEdgeLabels, grouped])
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const layoutConfig = useMemo((): any => {
@@ -389,6 +432,9 @@ export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }
       const node = evt.target
       const nodeData = node.data()
 
+      // Ignore compound parent nodes
+      if (node.isParent()) return
+
       // Fade unrelated elements using direct style (faster than classes)
       if (fadeEnabledRef.current) {
         const neighborhood = node.closedNeighborhood()
@@ -463,6 +509,7 @@ export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }
   return (
     <div ref={containerRef} className="relative h-full w-full">
       <CytoscapeComponent
+        key={`cy-${grouped && relationNames.length > 1}`}
         elements={elements as unknown as cytoscape.ElementDefinition[]}
         stylesheet={stylesheet}
         layout={layoutConfig}
@@ -507,25 +554,27 @@ export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }
             relNodes.style("opacity", 1)
           })
         }}
-        onClickRelation={(rel) => {
-          onFilterRelation?.(rel)
-        }}
+        onClickRelation={onFilterRelation ? (rel) => {
+          onFilterRelation(rel)
+        } : undefined}
       />
 
       {/* Top controls */}
       <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
         <Select value={layout} onValueChange={(v) => setLayout(v as LayoutName)}>
-          <SelectTrigger size="sm" className="h-8 w-40 bg-background/90 backdrop-blur-sm border-border/50">
+          <SelectTrigger size="sm" className="h-8 w-40 bg-background/90 backdrop-blur-sm border-border/50 hover:bg-teal-500/10">
             <LayoutGrid className="h-3.5 w-3.5 mr-1.5" />
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {LAYOUT_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-            ))}
+            {LAYOUT_OPTIONS
+              .filter((opt) => !grouped || COMPOUND_LAYOUTS.has(opt.value))
+              .map((opt) => (
+                <SelectItem key={opt.value} value={opt.value} className="focus:bg-teal-500/10 focus:text-teal-600 dark:focus:text-teal-400">{opt.label}</SelectItem>
+              ))}
           </SelectContent>
         </Select>
-        <label className="flex items-center gap-1.5 rounded-lg border border-border/50 bg-background/90 backdrop-blur-sm px-2.5 h-8 cursor-pointer">
+        <label className="flex items-center gap-1.5 rounded-lg border border-border/50 bg-background/90 backdrop-blur-sm px-2.5 h-8 cursor-pointer hover:bg-teal-500/10">
           <Focus className="h-3.5 w-3.5 text-muted-foreground" />
           <span className="text-[10px] text-muted-foreground">Focus</span>
           <Switch checked={fadeEnabled} onCheckedChange={handleFadeToggle} className="scale-75" />
@@ -533,16 +582,27 @@ export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }
         <Button
           variant="ghost"
           size="sm"
-          className="h-8 w-8 p-0 bg-background/90 backdrop-blur-sm border border-border/50 rounded-lg"
+          className="h-8 w-8 p-0 bg-background/90 backdrop-blur-sm border border-border/50 rounded-lg hover:bg-teal-500/10 hover:text-teal-600 dark:hover:text-teal-400"
           onClick={() => setShowEdgeLabels((v) => !v)}
           title={showEdgeLabels ? "Hide edge labels" : "Show edge labels"}
         >
           {showEdgeLabels ? <Tag className="h-3.5 w-3.5" /> : <Tags className="h-3.5 w-3.5 text-muted-foreground line-through" />}
         </Button>
+        {onGroupedChange && relationNames.length > 1 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`h-8 w-8 p-0 bg-background/90 backdrop-blur-sm border border-border/50 rounded-lg hover:bg-teal-500/10 hover:text-teal-600 dark:hover:text-teal-400 ${grouped ? "text-teal-500" : ""}`}
+            onClick={() => onGroupedChange(!grouped)}
+            title={grouped ? "Ungroup nodes" : "Group nodes by relation"}
+          >
+            <Boxes className="h-3.5 w-3.5" />
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="sm"
-          className="h-8 w-8 p-0 bg-background/90 backdrop-blur-sm border border-border/50 rounded-lg"
+          className="h-8 w-8 p-0 bg-background/90 backdrop-blur-sm border border-border/50 rounded-lg hover:bg-teal-500/10 hover:text-teal-600 dark:hover:text-teal-400"
           onClick={() => { setSearchOpen(true); setTimeout(() => searchInputRef.current?.focus(), 50) }}
           title="Search nodes (Ctrl+F)"
         >
@@ -553,18 +613,18 @@ export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 w-8 p-0 bg-background/90 backdrop-blur-sm border border-border/50 rounded-lg"
+              className="h-8 w-8 p-0 bg-background/90 backdrop-blur-sm border border-border/50 rounded-lg hover:bg-teal-500/10 hover:text-teal-600 dark:hover:text-teal-400"
               title="Export graph"
             >
               <Download className="h-3.5 w-3.5" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
-            <DropdownMenuItem onClick={handleExportPng}>
+            <DropdownMenuItem onClick={handleExportPng} className="focus:bg-teal-500/10 focus:text-teal-600 dark:focus:text-teal-400">
               <ImageDown className="h-3.5 w-3.5 mr-2" />
               Export as PNG
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleExportSvg}>
+            <DropdownMenuItem onClick={handleExportSvg} className="focus:bg-teal-500/10 focus:text-teal-600 dark:focus:text-teal-400">
               <FileCode2 className="h-3.5 w-3.5 mr-2" />
               Export as SVG
             </DropdownMenuItem>
@@ -573,7 +633,7 @@ export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }
         <Button
           variant="ghost"
           size="sm"
-          className="h-8 w-8 p-0 bg-background/90 backdrop-blur-sm border border-border/50 rounded-lg"
+          className="h-8 w-8 p-0 bg-background/90 backdrop-blur-sm border border-border/50 rounded-lg hover:bg-teal-500/10 hover:text-teal-600 dark:hover:text-teal-400"
           onClick={toggleFullscreen}
           title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
         >

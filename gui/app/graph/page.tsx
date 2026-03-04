@@ -26,6 +26,7 @@ function GraphPageInner() {
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set())
   const [loadingRelations, setLoadingRelations] = useState<Set<string>>(new Set())
   const [viewRelations, setViewRelations] = useState<Map<string, Relation>>(new Map())
+  const [grouped, setGrouped] = useState(false)
   const initialSelectHandled = useRef(false)
 
   // Merge base relations with view-derived relations for the graph
@@ -163,8 +164,8 @@ function GraphPageInner() {
   }, [searchParams, allRelations, handleFilterRelation])
 
   const { elements, stats } = useMemo(
-    () => buildGraphElements(allRelations, selectedNames),
-    [allRelations, selectedNames]
+    () => buildGraphElements(allRelations, selectedNames, grouped),
+    [allRelations, selectedNames, grouped]
   )
 
   const activeRelationNames = useMemo(
@@ -237,6 +238,8 @@ function GraphPageInner() {
               elements={elements}
               stats={stats}
               relationNames={activeRelationNames}
+              grouped={grouped}
+              onGroupedChange={setGrouped}
               onFilterRelation={handleFilterRelation}
             />
           </div>

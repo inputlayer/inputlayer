@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { X, Link2, Network, ExternalLink, Filter } from "lucide-react"
+import { X, Link2, Network, ExternalLink, Filter, Share2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -76,11 +76,17 @@ export function GraphNodeDetail({ node, onClose, onHoverRelation, onClickRelatio
                 </Badge>
               </ContextMenuTrigger>
               <ContextMenuContent>
-                <ContextMenuItem onClick={() => onClickRelation?.(rel)}>
-                  <Filter className="h-3.5 w-3.5 mr-2" />
-                  Filter to {rel}
+                <ContextMenuItem onClick={() => router.push(`/graph?select=${rel}`)} className="focus:bg-teal-500/10 focus:text-teal-600 dark:focus:text-teal-400">
+                  <Share2 className="h-3.5 w-3.5 mr-2" />
+                  Open in KG Graph
                 </ContextMenuItem>
-                <ContextMenuItem onClick={() => router.push(`/relations?select=${rel}`)}>
+                {onClickRelation && (
+                  <ContextMenuItem onClick={() => onClickRelation(rel)} className="focus:bg-teal-500/10 focus:text-teal-600 dark:focus:text-teal-400">
+                    <Filter className="h-3.5 w-3.5 mr-2" />
+                    Filter to {rel}
+                  </ContextMenuItem>
+                )}
+                <ContextMenuItem onClick={() => router.push(`/relations?select=${rel}`)} className="focus:bg-teal-500/10 focus:text-teal-600 dark:focus:text-teal-400">
                   <ExternalLink className="h-3.5 w-3.5 mr-2" />
                   Open in Relations
                 </ContextMenuItem>
