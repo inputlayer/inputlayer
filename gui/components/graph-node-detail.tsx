@@ -1,8 +1,15 @@
 "use client"
 
-import { X, Link2, Network } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { X, Link2, Network, ExternalLink, Filter } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 
 export interface NodeDetailData {
   id: string
@@ -15,9 +22,13 @@ export interface NodeDetailData {
 interface GraphNodeDetailProps {
   node: NodeDetailData | null
   onClose: () => void
+  onHoverRelation?: (relation: string | null) => void
+  onClickRelation?: (relation: string) => void
 }
 
-export function GraphNodeDetail({ node, onClose }: GraphNodeDetailProps) {
+export function GraphNodeDetail({ node, onClose, onHoverRelation, onClickRelation }: GraphNodeDetailProps) {
+  const router = useRouter()
+
   if (!node) return null
 
   return (
@@ -52,9 +63,29 @@ export function GraphNodeDetail({ node, onClose }: GraphNodeDetailProps) {
         </h4>
         <div className="flex flex-wrap gap-1">
           {node.relations.map((rel) => (
-            <Badge key={rel} variant="secondary" className="text-[10px] font-mono">
-              {rel}
-            </Badge>
+            <ContextMenu key={rel}>
+              <ContextMenuTrigger>
+                <Badge
+                  variant="secondary"
+                  className="text-[10px] font-mono cursor-pointer hover:bg-primary/20 transition-colors"
+                  onMouseEnter={() => onHoverRelation?.(rel)}
+                  onMouseLeave={() => onHoverRelation?.(null)}
+                  onClick={() => onClickRelation?.(rel)}
+                >
+                  {rel}
+                </Badge>
+              </ContextMenuTrigger>
+              <ContextMenuContent>
+                <ContextMenuItem onClick={() => onClickRelation?.(rel)}>
+                  <Filter className="h-3.5 w-3.5 mr-2" />
+                  Filter to {rel}
+                </ContextMenuItem>
+                <ContextMenuItem onClick={() => router.push(`/relations?select=${rel}`)}>
+                  <ExternalLink className="h-3.5 w-3.5 mr-2" />
+                  Open in Relations
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
           ))}
         </div>
       </div>

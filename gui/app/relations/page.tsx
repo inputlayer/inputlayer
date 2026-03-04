@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { Suspense, useState, useEffect } from "react"
+import { useSearchParams } from "next/navigation"
 import { AppShell } from "@/components/app-shell"
 import { RelationsExplorer } from "@/components/relations-explorer"
 import { RelationDetailPanel } from "@/components/relation-detail-panel"
@@ -9,7 +10,7 @@ import { useDatalogStore, type Relation, type View } from "@/lib/datalog-store"
 import { AlertCircle, Network, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
-export default function RelationsPage() {
+function RelationsPageInner() {
   const {
     selectedKnowledgeGraph,
     relations,
@@ -17,6 +18,7 @@ export default function RelationsPage() {
     isRefreshing,
     refreshCurrentKnowledgeGraph
   } = useDatalogStore()
+  const searchParams = useSearchParams()
   const [selectedRelation, setSelectedRelation] = useState<Relation | null>(null)
   const [selectedView, setSelectedView] = useState<View | null>(null)
 
@@ -26,6 +28,16 @@ export default function RelationsPage() {
       refreshCurrentKnowledgeGraph()
     }
   }, [selectedKnowledgeGraph?.name]) // Only refresh when KG changes, not on every render
+
+  // Auto-select relation/view from URL search params (e.g. ?select=knows)
+  useEffect(() => {
+    const name = searchParams.get("select")
+    if (!name) return
+    const rel = relations.find(r => r.name === name)
+    if (rel) { setSelectedRelation(rel); setSelectedView(null); return }
+    const v = views.find(v => v.name === name)
+    if (v) { setSelectedView(v); setSelectedRelation(null) }
+  }, [searchParams, relations, views])
 
   // Keep selection in sync with store data (e.g., after loadRelationData updates tupleCount/columns)
   useEffect(() => {
@@ -123,5 +135,13 @@ export default function RelationsPage() {
         </div>
       )}
     </AppShell>
+  )
+}
+
+export default function RelationsPage() {
+  return (
+    <Suspense>
+      <RelationsPageInner />
+    </Suspense>
   )
 }
