@@ -46,8 +46,8 @@ export function KeyboardShortcutsDialog() {
         { keys: "Tab", description: "Indent" },
         { keys: "Enter", description: "Auto-indent new line" },
         { keys: `${mod}+A`, description: "Select all" },
-        { keys: "Ctrl+Space", description: "Open autocomplete" },
-        { keys: "Ctrl+Shift+A", description: "Show all completions" },
+        { keys: isMac ? `${mod}+J` : "Ctrl+Space", description: "Open autocomplete" },
+        { keys: isMac ? `${mod}+Shift+J` : "Ctrl+Shift+Space", description: "Show all completions" },
       ],
     },
     {
@@ -56,6 +56,16 @@ export function KeyboardShortcutsDialog() {
         { keys: "\u2191 / \u2193", description: "Navigate items" },
         { keys: "Enter / Tab", description: "Accept completion" },
         { keys: "Escape", description: "Dismiss" },
+      ],
+    },
+    {
+      title: "Graph",
+      shortcuts: [
+        { keys: `${mod}+F`, description: "Search nodes" },
+        { keys: "Enter", description: "Next match" },
+        { keys: "Shift+Enter", description: "Previous match" },
+        { keys: "Escape", description: "Close search" },
+        { keys: "F11", description: "Toggle fullscreen" },
       ],
     },
   ]

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
-import { Eye, Copy, Check, Download, Table, GitBranch, Gauge, Code, RefreshCw, Loader2, Trash2 } from "lucide-react"
+import { Eye, Copy, Check, Download, Table, GitBranch, Gauge, Code, RefreshCw, Loader2, Trash2, Share2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -23,6 +23,7 @@ import { highlightToHtml } from "@/lib/syntax-highlight"
 import { ViewDataTab } from "@/components/view-data-tab"
 import { ViewGraphTab } from "@/components/view-graph-tab"
 import { ViewPerformanceTab } from "@/components/view-performance-tab"
+import { ViewDataGraphTab } from "@/components/view-data-graph-tab"
 
 interface ViewDetailPanelProps {
   view: View
@@ -203,35 +204,34 @@ export function ViewDetailPanel({ view, relations, onNavigate }: ViewDetailPanel
       {/* Tabs section - fills remaining space */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden min-h-0">
         <div className="border-b border-border/50 px-4 flex-shrink-0">
-          <TabsList className="h-10 bg-transparent p-0 gap-4">
+          <TabsList className="h-10 bg-transparent p-0 gap-2">
             <TabsTrigger
               value="data"
-              className={cn(
-                "h-10 px-0 pb-3 pt-2.5 rounded-none border-b-2 border-transparent",
-                "data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-primary",
-              )}
+              className="h-8 gap-1.5 rounded-lg px-3 text-muted-foreground data-[state=active]:bg-chart-2/10 data-[state=active]:text-chart-2 data-[state=active]:shadow-none"
             >
-              <Table className="h-4 w-4 mr-2" />
+              <Table className="h-4 w-4" />
               Data
             </TabsTrigger>
             <TabsTrigger
               value="graph"
-              className={cn(
-                "h-10 px-0 pb-3 pt-2.5 rounded-none border-b-2 border-transparent",
-                "data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-primary",
-              )}
+              className="h-8 gap-1.5 rounded-lg px-3 text-muted-foreground data-[state=active]:bg-chart-2/10 data-[state=active]:text-chart-2 data-[state=active]:shadow-none"
             >
-              <GitBranch className="h-4 w-4 mr-2" />
+              <GitBranch className="h-4 w-4" />
               Dependency Graph
             </TabsTrigger>
             <TabsTrigger
-              value="performance"
-              className={cn(
-                "h-10 px-0 pb-3 pt-2.5 rounded-none border-b-2 border-transparent",
-                "data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-primary",
-              )}
+              value="data-graph"
+              disabled={view.arity < 1}
+              className="h-8 gap-1.5 rounded-lg px-3 text-muted-foreground data-[state=active]:bg-chart-2/10 data-[state=active]:text-chart-2 data-[state=active]:shadow-none"
             >
-              <Gauge className="h-4 w-4 mr-2" />
+              <Share2 className="h-4 w-4" />
+              Data Graph
+            </TabsTrigger>
+            <TabsTrigger
+              value="performance"
+              className="h-8 gap-1.5 rounded-lg px-3 text-muted-foreground data-[state=active]:bg-chart-2/10 data-[state=active]:text-chart-2 data-[state=active]:shadow-none"
+            >
+              <Gauge className="h-4 w-4" />
               Performance
             </TabsTrigger>
           </TabsList>
@@ -242,6 +242,9 @@ export function ViewDetailPanel({ view, relations, onNavigate }: ViewDetailPanel
         </TabsContent>
         <TabsContent value="graph" className="flex-1 m-0 overflow-hidden">
           <ViewGraphTab view={view} relations={relations} />
+        </TabsContent>
+        <TabsContent value="data-graph" className="flex-1 m-0 overflow-hidden">
+          <ViewDataGraphTab view={view} />
         </TabsContent>
         <TabsContent value="performance" className="flex-1 m-0 overflow-hidden">
           <ViewPerformanceTab view={view} />
