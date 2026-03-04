@@ -16,14 +16,22 @@ import type cytoscape from "cytoscape"
 
 const CytoscapeComponent = dynamic(() => import("react-cytoscapejs"), { ssr: false })
 
-type LayoutName = "cola" | "cose" | "circle" | "concentric" | "breadthfirst" | "grid"
+type LayoutName = "cola" | "fcose" | "dagre" | "elk" | "cose" | "cose-bilkent" | "euler" | "spread" | "d3-force" | "avsdf" | "circle" | "concentric" | "breadthfirst" | "grid"
 
 const LAYOUT_OPTIONS: { value: LayoutName; label: string }[] = [
-  { value: "cola", label: "Force-Directed" },
-  { value: "cose", label: "Physics" },
+  { value: "cola", label: "Cola (Force)" },
+  { value: "fcose", label: "fCoSE (Fast)" },
+  { value: "cose-bilkent", label: "CoSE Bilkent" },
+  { value: "euler", label: "Euler (Spring)" },
+  { value: "spread", label: "Spread" },
+  { value: "d3-force", label: "D3 Force" },
+  { value: "dagre", label: "Dagre (Layered)" },
+  { value: "elk", label: "ELK (Hierarchical)" },
+  { value: "cose", label: "CoSE (Physics)" },
+  { value: "avsdf", label: "AVSDF (Circular)" },
   { value: "circle", label: "Circle" },
   { value: "concentric", label: "Concentric" },
-  { value: "breadthfirst", label: "Hierarchical" },
+  { value: "breadthfirst", label: "Breadthfirst" },
   { value: "grid", label: "Grid" },
 ]
 
@@ -56,13 +64,22 @@ export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }
     }
   }, [])
 
-  // Register cola layout plugin (once, client-side only)
+  // Register layout plugins (once, client-side only)
   useEffect(() => {
     if (typeof window === "undefined") return
     import("cytoscape").then((Cytoscape) => {
-      import("cytoscape-cola").then((cola) => {
-        try { Cytoscape.default.use(cola.default) } catch { /* already registered */ }
-      })
+      const register = (plugin: { default: cytoscape.Ext }) => {
+        try { Cytoscape.default.use(plugin.default) } catch { /* already registered */ }
+      }
+      import("cytoscape-cola").then(register)
+      import("cytoscape-fcose" as string).then(register)
+      import("cytoscape-dagre" as string).then(register)
+      import("cytoscape-elk" as string).then(register)
+      import("cytoscape-cose-bilkent" as string).then(register)
+      import("cytoscape-euler" as string).then(register)
+      import("cytoscape-spread" as string).then(register)
+      import("cytoscape-d3-force" as string).then(register)
+      import("cytoscape-avsdf" as string).then(register)
     })
   }, [])
 
@@ -138,6 +155,69 @@ export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }
         edgeLength: 150,
         randomize: true,
       },
+      fcose: {
+        name: "fcose",
+        animate: true,
+        animationDuration: 800,
+        quality: "default",
+        nodeRepulsion: () => 8000,
+        idealEdgeLength: () => 120,
+        nodeSeparation: 75,
+        randomize: true,
+      },
+      dagre: {
+        name: "dagre",
+        animate: true,
+        rankDir: "TB",
+        nodeSep: 50,
+        rankSep: 80,
+        edgeSep: 20,
+      },
+      elk: {
+        name: "elk",
+        animate: true,
+        elk: {
+          algorithm: "layered",
+          "elk.direction": "DOWN",
+          "elk.spacing.nodeNode": "50",
+          "elk.layered.spacing.nodeNodeBetweenLayers": "80",
+        },
+      },
+      "cose-bilkent": {
+        name: "cose-bilkent",
+        animate: "end",
+        animationDuration: 800,
+        nodeRepulsion: 8000,
+        idealEdgeLength: 120,
+        edgeElasticity: 0.45,
+        nestingFactor: 0.1,
+        gravity: 0.25,
+        numIter: 2500,
+        randomize: true,
+      },
+      euler: {
+        name: "euler",
+        animate: true,
+        animationDuration: 1000,
+        springLength: 120,
+        springCoeff: 0.0008,
+        gravity: -1.2,
+        randomize: true,
+      },
+      spread: {
+        name: "spread",
+        animate: true,
+        minDist: 40,
+      },
+      "d3-force": {
+        name: "d3-force",
+        animate: true,
+        fixedAfterDragging: true,
+        linkId: (d: { id: string }) => d.id,
+        linkDistance: 120,
+        manyBodyStrength: -300,
+        randomize: true,
+      },
       cose: {
         name: "cose",
         animate: true,
@@ -145,6 +225,11 @@ export function GraphCanvas({ elements, stats, relationNames, onFilterRelation }
         nodeRepulsion: () => 8000,
         idealEdgeLength: () => 100,
         randomize: true,
+      },
+      avsdf: {
+        name: "avsdf",
+        animate: true,
+        nodeSeparation: 80,
       },
       circle: { name: "circle", animate: true },
       concentric: {
