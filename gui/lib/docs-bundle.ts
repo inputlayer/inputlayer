@@ -70,6 +70,13 @@ export const docsNavigation: NavItem[] = [
         "children": []
       },
       {
+        "key": "web-ui",
+        "label": "Web UI",
+        "slug": "guides/web-ui",
+        "href": "/docs/guides/web-ui",
+        "children": []
+      },
+      {
         "key": "recursion",
         "label": "Recursion",
         "slug": "guides/recursion",
@@ -2763,6 +2770,97 @@ export const docsPages: Record<string, DocPage> = {
         "level": 2,
         "text": "Next Steps",
         "id": "next-steps"
+      }
+    ]
+  },
+  "guides/web-ui": {
+    "title": "Web UI Guide",
+    "content": "# Web UI Guide\n\nInputLayer includes a browser-based GUI for exploring knowledge graphs, writing queries, and visualizing data as interactive graphs.\n\n## Starting the GUI\n\nThe GUI connects to a running InputLayer server via WebSocket:\n\n```bash\n# Start the server\n./target/release/inputlayer-server\n\n# In another terminal, start the GUI (default: http://localhost:3000)\ncd gui\nbun dev\n```\n\nThe GUI auto-connects to `ws://localhost:8080/ws`. Select a knowledge graph from the header dropdown to begin.\n\n---\n\n## Pages Overview\n\n| Page | Description |\n|------|-------------|\n| **Query** | Write and execute Datalog queries with autocomplete |\n| **Relations** | Browse base relations and derived views with data tables and graphs |\n| **KG Graph** | Interactive knowledge graph visualization |\n| **Database** | Server status, knowledge graph management |\n| **Docs** | Built-in documentation browser |\n\n---\n\n## Query Editor\n\nThe query editor supports multi-line Datalog with syntax-aware autocomplete.\n\n### Autocomplete\n\n| Shortcut | Action |\n|----------|--------|\n| `Cmd+J` (Mac) / `Ctrl+Space` | Show completions at cursor |\n| `Cmd+Shift+J` (Mac) / `Ctrl+Shift+Space` | Show all completions (including on empty editor) |\n\nCompletions include relation names, view names, and Datalog keywords.\n\n### Query Results\n\nResults display in a table by default. For queries with 2+ columns, a **Graph** tab renders the result as a node-edge graph:\n\n- **Arity 2**: `col[0]` → `col[1]` (source → target)\n- **Arity 3**: `col[0]` → `col[2]`, with `col[1]` as edge label (subject-predicate-object)\n- **Arity 4+**: `col[0]` → `col[last]`, middle columns joined as edge label\n\n---\n\n## Relations & Views\n\nThe Relations page shows all base relations and derived views in a sidebar tree. Selecting one opens a detail panel with:\n\n- **Data tab** — Paginated data table\n- **Graph tab** — Data visualized as a node-edge graph (arity 2+)\n- **Dependency Graph** (views only) — Shows rule dependencies\n- **Performance** (views only) — Execution statistics\n\nRight-click any relation badge to navigate to KG Graph or the Relations page.\n\n---\n\n## KG Graph\n\nThe KG Graph page provides a full-featured interactive graph visualization for exploring knowledge graph data.\n\n### Selecting Relations\n\nUse the sidebar to select which relations and views to visualize:\n\n- Click individual relations to toggle them on/off\n- **Select All** / **Deselect All** for bulk control\n- Loading indicators show while data is fetched\n- Unary relations (arity 1) appear as standalone nodes\n- Binary+ relations appear as directed edges\n\n### Layout Engines\n\n14 layout algorithms are available from the dropdown:\n\n| Layout | Type | Best For |\n|--------|------|----------|\n| **Cola** | Force-directed | General purpose, default |\n| **fCoSE** | Compound force | Fast, large graphs |\n| **CoSE Bilkent** | Compound force | Clustered data |\n| **Euler** | Spring-electric | Organic layouts |\n| **Spread** | Force-directed | Even spacing |\n| **D3 Force** | Force simulation | Physics-based |\n| **Dagre** | Layered/hierarchical | DAGs, trees |\n| **ELK** | Layered/hierarchical | Complex hierarchies |\n| **CoSE** | Physics | Small-medium graphs |\n| **AVSDF** | Circular | Circular arrangements |\n| **Circle** | Geometric | Simple ring |\n| **Concentric** | Geometric | Degree-based rings |\n| **Breadthfirst** | Tree | Tree structures |\n| **Grid** | Geometric | Uniform placement |\n\nWhen compound grouping is active, only compound-compatible layouts are shown (Cola, fCoSE, CoSE Bilkent, ELK, Dagre).\n\n### Toolbar Controls\n\nThe toolbar at the top-left provides:\n\n| Control | Description |\n|---------|-------------|\n| **Layout dropdown** | Switch between layout algorithms |\n| **Focus toggle** | When on, clicking a node fades unrelated elements |\n| **Edge labels** | Toggle edge label visibility |\n| **Group** | Group nodes by relation into compound boundaries (visible with 2+ relations) |\n| **Search** | Find nodes by label (`Cmd/Ctrl+F`) |\n| **Export** | Download graph as PNG (2x) or SVG |\n| **Minimap** | Toggle bird's-eye overview with draggable viewport |\n| **Fullscreen** | Enter native fullscreen mode |\n\n### Node Interaction\n\n**Click a node** to see its detail panel showing:\n\n- Node label and degree (connection count)\n- Relations it belongs to (as badges)\n- Connected neighbors with direction arrows\n\n**Right-click a relation badge** in the node detail for:\n\n- **Open in KG Graph** — Navigate to KG Graph filtered to that relation\n- **Filter to** — Show only that relation (when on KG Graph page)\n- **Open in Relations** — Navigate to the Relations page\n\n### Compound Nodes (Grouping)\n\nWhen 2+ relations are selected, the **Group** button clusters nodes into compound boundaries by their primary relation:\n\n- Each relation gets a labeled dashed boundary\n- Nodes are colored by relation (aquamarine → violet → magenta gradient)\n- Edges cross boundaries as needed\n- Layout automatically switches to a compound-compatible engine\n\n### Minimap\n\nThe minimap shows a bird's-eye thumbnail of the entire graph:\n\n- **Click** anywhere on the minimap to center the main view on that point\n- **Drag** on the minimap to pan the main view in real-time\n- The teal viewport rectangle shows your current view area\n- Updates live as you pan and zoom\n\n### Color Legend\n\nWhen multiple relations are active, a legend appears at the bottom-left:\n\n- **Node colors** (circles) — Identify which relation a node belongs to\n- **Edge colors** (lines) — Identify edge types\n\n### Keyboard Shortcuts\n\n| Shortcut | Action |\n|----------|--------|\n| `Cmd/Ctrl+F` | Open node search |\n| `Enter` / `Shift+Enter` | Next / previous search match |\n| `Escape` | Close search |\n\n### Graph Limits\n\nFor performance, graphs are capped at:\n\n- **1,000 nodes** — Highest-degree nodes are kept\n- **5,000 edges** — Truncation indicator shown in sidebar stats\n\n---\n\n## Cross-Navigation\n\nThe GUI supports seamless navigation between pages:\n\n- **Relations sidebar** — Right-click any relation or view → \"Open in KG Graph\"\n- **Node detail badges** — Right-click → navigate to KG Graph or Relations\n- **URL parameters** — Direct links with `?select=relation_name` for both KG Graph and Relations pages",
+    "toc": [
+      {
+        "level": 2,
+        "text": "Starting the GUI",
+        "id": "starting-the-gui"
+      },
+      {
+        "level": 2,
+        "text": "Pages Overview",
+        "id": "pages-overview"
+      },
+      {
+        "level": 2,
+        "text": "Query Editor",
+        "id": "query-editor"
+      },
+      {
+        "level": 3,
+        "text": "Autocomplete",
+        "id": "autocomplete"
+      },
+      {
+        "level": 3,
+        "text": "Query Results",
+        "id": "query-results"
+      },
+      {
+        "level": 2,
+        "text": "Relations & Views",
+        "id": "relations-views"
+      },
+      {
+        "level": 2,
+        "text": "KG Graph",
+        "id": "kg-graph"
+      },
+      {
+        "level": 3,
+        "text": "Selecting Relations",
+        "id": "selecting-relations"
+      },
+      {
+        "level": 3,
+        "text": "Layout Engines",
+        "id": "layout-engines"
+      },
+      {
+        "level": 3,
+        "text": "Toolbar Controls",
+        "id": "toolbar-controls"
+      },
+      {
+        "level": 3,
+        "text": "Node Interaction",
+        "id": "node-interaction"
+      },
+      {
+        "level": 3,
+        "text": "Compound Nodes (Grouping)",
+        "id": "compound-nodes-grouping"
+      },
+      {
+        "level": 3,
+        "text": "Minimap",
+        "id": "minimap"
+      },
+      {
+        "level": 3,
+        "text": "Color Legend",
+        "id": "color-legend"
+      },
+      {
+        "level": 3,
+        "text": "Keyboard Shortcuts",
+        "id": "keyboard-shortcuts"
+      },
+      {
+        "level": 3,
+        "text": "Graph Limits",
+        "id": "graph-limits"
+      },
+      {
+        "level": 2,
+        "text": "Cross-Navigation",
+        "id": "cross-navigation"
       }
     ]
   },
