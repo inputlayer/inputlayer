@@ -1,0 +1,184 @@
+# Web UI Guide
+
+InputLayer includes a browser-based GUI for exploring knowledge graphs, writing queries, and visualizing data as interactive graphs.
+
+## Starting the GUI
+
+The GUI connects to a running InputLayer server via WebSocket:
+
+```bash
+# Start the server
+./target/release/inputlayer-server
+
+# In another terminal, start the GUI (default: http://localhost:3000)
+cd gui
+bun dev
+```
+
+The GUI auto-connects to `ws://localhost:8080/ws`. Select a knowledge graph from the header dropdown to begin.
+
+---
+
+## Pages Overview
+
+| Page | Description |
+|------|-------------|
+| **Query** | Write and execute Datalog queries with autocomplete |
+| **Relations** | Browse base relations and derived views with data tables and graphs |
+| **KG Graph** | Interactive knowledge graph visualization |
+| **Database** | Server status, knowledge graph management |
+| **Docs** | Built-in documentation browser |
+
+---
+
+## Query Editor
+
+The query editor supports multi-line Datalog with syntax-aware autocomplete.
+
+### Autocomplete
+
+| Shortcut | Action |
+|----------|--------|
+| `Cmd+J` (Mac) / `Ctrl+Space` | Show completions at cursor |
+| `Cmd+Shift+J` (Mac) / `Ctrl+Shift+Space` | Show all completions (including on empty editor) |
+
+Completions include relation names, view names, and Datalog keywords.
+
+### Query Results
+
+Results display in a table by default. For queries with 2+ columns, a **Graph** tab renders the result as a node-edge graph:
+
+- **Arity 2**: `col[0]` → `col[1]` (source → target)
+- **Arity 3**: `col[0]` → `col[2]`, with `col[1]` as edge label (subject-predicate-object)
+- **Arity 4+**: `col[0]` → `col[last]`, middle columns joined as edge label
+
+---
+
+## Relations & Views
+
+The Relations page shows all base relations and derived views in a sidebar tree. Selecting one opens a detail panel with:
+
+- **Data tab** — Paginated data table
+- **Graph tab** — Data visualized as a node-edge graph (arity 2+)
+- **Dependency Graph** (views only) — Shows rule dependencies
+- **Performance** (views only) — Execution statistics
+
+Right-click any relation badge to navigate to KG Graph or the Relations page.
+
+---
+
+## KG Graph
+
+The KG Graph page provides a full-featured interactive graph visualization for exploring knowledge graph data.
+
+### Selecting Relations
+
+Use the sidebar to select which relations and views to visualize:
+
+- Click individual relations to toggle them on/off
+- **Select All** / **Deselect All** for bulk control
+- Loading indicators show while data is fetched
+- Unary relations (arity 1) appear as standalone nodes
+- Binary+ relations appear as directed edges
+
+### Layout Engines
+
+14 layout algorithms are available from the dropdown:
+
+| Layout | Type | Best For |
+|--------|------|----------|
+| **Cola** | Force-directed | General purpose, default |
+| **fCoSE** | Compound force | Fast, large graphs |
+| **CoSE Bilkent** | Compound force | Clustered data |
+| **Euler** | Spring-electric | Organic layouts |
+| **Spread** | Force-directed | Even spacing |
+| **D3 Force** | Force simulation | Physics-based |
+| **Dagre** | Layered/hierarchical | DAGs, trees |
+| **ELK** | Layered/hierarchical | Complex hierarchies |
+| **CoSE** | Physics | Small-medium graphs |
+| **AVSDF** | Circular | Circular arrangements |
+| **Circle** | Geometric | Simple ring |
+| **Concentric** | Geometric | Degree-based rings |
+| **Breadthfirst** | Tree | Tree structures |
+| **Grid** | Geometric | Uniform placement |
+
+When compound grouping is active, only compound-compatible layouts are shown (Cola, fCoSE, CoSE Bilkent, ELK, Dagre).
+
+### Toolbar Controls
+
+The toolbar at the top-left provides:
+
+| Control | Description |
+|---------|-------------|
+| **Layout dropdown** | Switch between layout algorithms |
+| **Focus toggle** | When on, clicking a node fades unrelated elements |
+| **Edge labels** | Toggle edge label visibility |
+| **Group** | Group nodes by relation into compound boundaries (visible with 2+ relations) |
+| **Search** | Find nodes by label (`Cmd/Ctrl+F`) |
+| **Export** | Download graph as PNG (2x) or SVG |
+| **Minimap** | Toggle bird's-eye overview with draggable viewport |
+| **Fullscreen** | Enter native fullscreen mode |
+
+### Node Interaction
+
+**Click a node** to see its detail panel showing:
+
+- Node label and degree (connection count)
+- Relations it belongs to (as badges)
+- Connected neighbors with direction arrows
+
+**Right-click a relation badge** in the node detail for:
+
+- **Open in KG Graph** — Navigate to KG Graph filtered to that relation
+- **Filter to** — Show only that relation (when on KG Graph page)
+- **Open in Relations** — Navigate to the Relations page
+
+### Compound Nodes (Grouping)
+
+When 2+ relations are selected, the **Group** button clusters nodes into compound boundaries by their primary relation:
+
+- Each relation gets a labeled dashed boundary
+- Nodes are colored by relation (aquamarine → violet → magenta gradient)
+- Edges cross boundaries as needed
+- Layout automatically switches to a compound-compatible engine
+
+### Minimap
+
+The minimap shows a bird's-eye thumbnail of the entire graph:
+
+- **Click** anywhere on the minimap to center the main view on that point
+- **Drag** on the minimap to pan the main view in real-time
+- The teal viewport rectangle shows your current view area
+- Updates live as you pan and zoom
+
+### Color Legend
+
+When multiple relations are active, a legend appears at the bottom-left:
+
+- **Node colors** (circles) — Identify which relation a node belongs to
+- **Edge colors** (lines) — Identify edge types
+
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Cmd/Ctrl+F` | Open node search |
+| `Enter` / `Shift+Enter` | Next / previous search match |
+| `Escape` | Close search |
+
+### Graph Limits
+
+For performance, graphs are capped at:
+
+- **1,000 nodes** — Highest-degree nodes are kept
+- **5,000 edges** — Truncation indicator shown in sidebar stats
+
+---
+
+## Cross-Navigation
+
+The GUI supports seamless navigation between pages:
+
+- **Relations sidebar** — Right-click any relation or view → "Open in KG Graph"
+- **Node detail badges** — Right-click → navigate to KG Graph or Relations
+- **URL parameters** — Direct links with `?select=relation_name` for both KG Graph and Relations pages
