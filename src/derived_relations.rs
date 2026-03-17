@@ -424,6 +424,7 @@ pub struct DerivedRelationsStats {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::value::Value;

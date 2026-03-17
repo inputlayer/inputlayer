@@ -1,6 +1,7 @@
 //! Test arithmetic expressions in rule heads
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use crate::catalog::Catalog;
     use crate::code_generator::CodeGenerator;

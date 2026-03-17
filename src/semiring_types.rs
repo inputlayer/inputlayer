@@ -365,6 +365,7 @@ impl DiffType for MaxDiff {
 
 // Tests
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use differential_dataflow::difference::{Monoid, Semigroup};

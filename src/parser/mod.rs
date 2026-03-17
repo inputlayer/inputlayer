@@ -883,6 +883,7 @@ fn parse_primary(s: &str) -> Result<ArithExpr, String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

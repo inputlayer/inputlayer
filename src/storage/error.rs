@@ -91,6 +91,7 @@ pub enum StorageError {
 pub type StorageResult<T> = Result<T, StorageError>;
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

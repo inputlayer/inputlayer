@@ -134,6 +134,7 @@ pub fn filter_since(updates: &[Update], since: u64) -> Vec<Update> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

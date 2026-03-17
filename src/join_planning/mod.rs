@@ -148,7 +148,8 @@ impl JoinGraph {
                 if Self::find_scan_relation(ir).is_some() && Self::is_filter_scan_chain(ir) =>
             {
                 let schema = ir.output_schema();
-                let relation = Self::find_scan_relation(ir).unwrap();
+                let relation = Self::find_scan_relation(ir)
+                    .expect("find_scan_relation guaranteed Some by guard condition above");
                 scans.push((relation, schema, ir.clone()));
             }
             IRNode::Filter { input, .. } => Self::extract_scans_recursive(input, scans),
@@ -1022,6 +1023,7 @@ impl Default for JoinPlanner {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

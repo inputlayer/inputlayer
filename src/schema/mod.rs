@@ -229,6 +229,7 @@ impl fmt::Display for RelationSchema {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

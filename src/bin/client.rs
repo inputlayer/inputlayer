@@ -1536,6 +1536,7 @@ fn print_help() {
 // ── Unit Tests ──────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

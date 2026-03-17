@@ -516,6 +516,7 @@ impl Default for SipRewriter {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::ast::{Atom, BodyPredicate, ComparisonOp, Program, Rule, Term};

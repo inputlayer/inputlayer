@@ -598,7 +598,13 @@ impl AggregateFunc {
             }
         }
 
-        Some((output_vars, order_var.unwrap(), descending))
+        Some((
+            output_vars,
+            order_var.expect(
+                "order_var is guaranteed Some: either set by annotation or single output_var",
+            ),
+            descending,
+        ))
     }
 
     /// Parse `top_k` with parameters.
@@ -1571,6 +1577,7 @@ impl std::fmt::Display for Rule {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

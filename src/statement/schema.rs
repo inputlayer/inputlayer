@@ -154,6 +154,7 @@ fn parse_rel_columns(content: &str) -> Result<Vec<ColumnDef>, String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

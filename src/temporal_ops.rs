@@ -234,6 +234,7 @@ pub fn point_in_interval(ts: i64, start: i64, end: i64) -> bool {
 
 // Tests
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

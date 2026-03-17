@@ -218,6 +218,7 @@ pub fn load_from_csv(path: &Path) -> StorageResult<Vec<(i32, i32)>> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::value::{DataType as ValueDataType, Value};

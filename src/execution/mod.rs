@@ -27,6 +27,7 @@ pub enum ExecutionError {
 pub type ExecutionResult<T> = Result<T, ExecutionError>;
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

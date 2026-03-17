@@ -198,6 +198,7 @@ impl From<&ShardMeta> for ShardInfo {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

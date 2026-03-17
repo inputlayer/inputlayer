@@ -603,7 +603,10 @@ impl DatalogEngine {
         self.strata = recursion::stratify(&program);
 
         self.program = Some(program);
-        Ok(self.program.as_ref().unwrap())
+        Ok(self
+            .program
+            .as_ref()
+            .expect("program is guaranteed Some: set on the line above"))
     }
 
     /// Apply SIP (Sideways Information Passing) rewriting at the AST level
@@ -789,7 +792,7 @@ impl DatalogEngine {
             }
             processed_predicates.insert(predicate.clone());
 
-            let rules_for_predicate = rules_by_head.get(predicate).unwrap();
+            let rules_for_predicate = rules_by_head.get(predicate).expect("predicate is guaranteed in rules_by_head: populated from same program.rules iteration");
 
             if rules_for_predicate.len() == 1 {
                 // Single rule - build IR directly
@@ -1815,6 +1818,7 @@ impl Default for DatalogEngine {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

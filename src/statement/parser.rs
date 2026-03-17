@@ -620,6 +620,7 @@ pub fn parse_rule_definition(input: &str) -> Result<super::serialize::RuleDef, S
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

@@ -66,7 +66,10 @@ impl PersistWal {
                 })?;
             self.writer = Some(BufWriter::new(file));
         }
-        Ok(self.writer.as_mut().unwrap())
+        Ok(self
+            .writer
+            .as_mut()
+            .expect("writer is guaranteed Some: set on the line above when None"))
     }
 
     /// Append an entry to the WAL with immediate flush (durable)
@@ -347,6 +350,7 @@ impl PersistWal {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::value::Tuple;
