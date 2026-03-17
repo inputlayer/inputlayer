@@ -71,6 +71,7 @@ export function RelationDetailPanel({ relation }: RelationDetailPanelProps) {
     setSortColumn(null)
     setSortDirection("asc")
     setPage(0)
+    setActiveTab("data")
     handleRefresh()
   }, [handleRefresh])
 

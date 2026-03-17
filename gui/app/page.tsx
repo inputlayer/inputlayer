@@ -33,6 +33,6 @@ export default function HomePage() {
     return <SplashScreen status={msg} />
   }
 
-  // Not connected — show login screen at "/"
+  // Not connected - show login screen at "/"
   return <ConnectionScreen />
 }

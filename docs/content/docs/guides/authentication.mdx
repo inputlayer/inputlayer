@@ -90,7 +90,7 @@ Control which users can access which knowledge graphs.
 | `editor` | Insert/delete facts, create/modify rules, manage indexes |
 | `owner` | Drop knowledge graphs, manage ACLs for this KG |
 
-Permissions are cumulative — `editor` includes `viewer`, `owner` includes `editor`.
+Permissions are cumulative - `editor` includes `viewer`, `owner` includes `editor`.
 
 ## WebSocket Authentication
 
@@ -194,9 +194,9 @@ async with InputLayer("ws://localhost:8080/ws", api_key="your-key") as il:
 ## Security Best Practices
 
 1. **Change the default admin password** immediately after deployment
-2. **Use TLS** via a reverse proxy (see [Deployment](deployment)) — credentials are sent in plaintext over WebSocket
+2. **Use TLS** via a reverse proxy (see [Deployment](deployment)) - credentials are sent in plaintext over WebSocket
 3. **Create per-user accounts** rather than sharing the admin account
 4. **Use API keys** for automated services and CI/CD pipelines
-5. **Grant minimum required permissions** — use `viewer` access for dashboards, `editor` for ETL jobs
+5. **Grant minimum required permissions** - use `viewer` access for dashboards, `editor` for ETL jobs
 6. **Bind to localhost** when using a reverse proxy: set `host = "127.0.0.1"` in config
 7. **Rotate API keys** periodically and revoke unused ones

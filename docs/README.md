@@ -1,10 +1,10 @@
 # InputLayer Documentation
 
-Welcome to the InputLayer documentation. InputLayer is a symbolic reasoning engine for AI agents — a modern database that stores facts, defines rules, and derives everything that logically follows.
+Welcome to the InputLayer documentation. InputLayer is a symbolic reasoning engine for AI agents - a modern database that stores facts, defines rules, and derives everything that logically follows.
 
 ## Documentation Structure
 
-All documentation content lives in **`docs/content/`** as MDX files — this is the single source of truth.
+All documentation content lives in **`docs/content/`** as MDX files - this is the single source of truth.
 
 ### Authoring
 
@@ -14,7 +14,7 @@ Edit files in `docs/content/`. Navigation is controlled by `_meta.json` files in
 
 | Method | URL |
 |--------|-----|
-| **GUI (InputLayer Studio)** | Navigate to `/docs` in the GUI — works without a server connection |
+| **GUI (InputLayer Studio)** | Navigate to `/docs` in the GUI - works without a server connection |
 | **GitHub Pages** | Deployed automatically on push to `main` |
 | **Local dev** | `cd docs/site && npm install && npm run dev` |
 
@@ -52,8 +52,8 @@ docs/content/
 
 ### Renderers
 
-- **Nextra site** (`docs/site/`) — Static site for GitHub Pages. Copies content at build time.
-- **GUI docs viewer** (`gui/scripts/bundle-docs.mjs`) — Bundles content into the GUI at build time.
+- **Nextra site** (`docs/site/`) - Static site for GitHub Pages. Copies content at build time.
+- **GUI docs viewer** (`gui/scripts/bundle-docs.mjs`) - Bundles content into the GUI at build time.
 
 ### Syntax Highlighting
 

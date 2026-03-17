@@ -5,9 +5,9 @@
 
 **A symbolic reasoning engine for AI agents.**
 
-Your agent retrieves context by searching for things that *look like* the question. That fails when the answer is connected through a chain of facts — not surface similarity. A shellfish allergy doesn't look like a restaurant query. A drug interaction doesn't look like a prescription request. A sanctions-listed subsidiary doesn't look like a wire transfer.
+Your agent retrieves context by searching for things that *look like* the question. That fails when the answer is connected through a chain of facts - not surface similarity. A shellfish allergy doesn't look like a restaurant query. A drug interaction doesn't look like a prescription request. A sanctions-listed subsidiary doesn't look like a wire transfer.
 
-InputLayer gives your agent a reasoning layer. You store facts, define rules, and the engine derives everything that logically follows — including things you never explicitly stored. When data changes, derived knowledge updates instantly. No batch jobs, no stale caches.
+InputLayer gives your agent a reasoning layer. You store facts, define rules, and the engine derives everything that logically follows - including things you never explicitly stored. When data changes, derived knowledge updates instantly. No batch jobs, no stale caches.
 
 ---
 
@@ -17,9 +17,9 @@ InputLayer is a **modern database for AI agents** built on three key concepts:
 
 - **Knowledge graph**: data is stored as facts and relationships, not flat documents
 - **Deductive**: you define rules, and the system automatically derives everything that logically follows
-- **Streaming**: when facts change, all derived conclusions update instantly — no batch jobs, no stale caches
+- **Streaming**: when facts change, all derived conclusions update instantly - no batch jobs, no stale caches
 
-The query language is declarative — you state *what* you want, not *how* to compute it. Rules compose naturally and support full recursion.
+The query language is declarative - you state *what* you want, not *how* to compute it. Rules compose naturally and support full recursion.
 
 ### A concrete example
 
@@ -37,7 +37,7 @@ The query language is declarative — you state *what* you want, not *how* to co
 ?authority("alice", Person)
 ```
 
-Result: `bob`, `charlie`, `diana` — computed through recursive rule evaluation, not keyword search.
+Result: `bob`, `charlie`, `diana` - computed through recursive rule evaluation, not keyword search.
 
 Now add vector search in the same query:
 
@@ -49,7 +49,7 @@ Now add vector search in the same query:
  Similarity > 0.7
 ```
 
-This is **policy-filtered semantic search** — logical access control and vector similarity in a single query. No other system does this natively.
+This is **policy-filtered semantic search** - logical access control and vector similarity in a single query. No other system does this natively.
 
 ---
 
@@ -57,29 +57,29 @@ This is **policy-filtered semantic search** — logical access control and vecto
 
 AI agents retrieve context with vector search. Vector search finds things that *look like* the answer. Reasoning finds things that *are* the answer.
 
-- You ask for **dinner recommendations**. The agent finds sushi preferences. It misses your **shellfish allergy** — because medical info doesn't look like a restaurant query.
+- You ask for **dinner recommendations**. The agent finds sushi preferences. It misses your **shellfish allergy** - because medical info doesn't look like a restaurant query.
 
-- Your doctor prescribes **new medication**. The health assistant checks for side effects. It misses a **drug interaction** — because "current medications" doesn't look like "is this drug safe?"
+- Your doctor prescribes **new medication**. The health assistant checks for side effects. It misses a **drug interaction** - because "current medications" doesn't look like "is this drug safe?"
 
-- A compliance officer asks about a **wire transfer**. The system finds similar transactions. It misses that the recipient is a **subsidiary of a sanctioned entity** — because that requires graph traversal, not pattern matching.
+- A compliance officer asks about a **wire transfer**. The system finds similar transactions. It misses that the recipient is a **subsidiary of a sanctioned entity** - because that requires graph traversal, not pattern matching.
 
 The critical context is always connected through a **chain of facts**. Finding it requires reasoning.
 
-InputLayer sits between raw memory and the LLM. Instead of hoping the right context lands in top-K results, you define *what counts as relevant* with rules — and get back exactly that.
+InputLayer sits between raw memory and the LLM. Instead of hoping the right context lands in top-K results, you define *what counts as relevant* with rules - and get back exactly that.
 
 ---
 
 ## What it does
 
-**Structured reasoning.** Follow chains of relationships to surface context that search alone misses. Recursive rules derive transitive closure, reachability, authority chains — any logical relationship.
+**Structured reasoning.** Follow chains of relationships to surface context that search alone misses. Recursive rules derive transitive closure, reachability, authority chains - any logical relationship.
 
 **Hybrid retrieval.** Vector similarity, graph traversal, and logical rules in a single query. Policy-filtered semantic search. Access control and relevance in one pass.
 
 **Incremental maintenance.** When facts change, only affected derivations recompute. Insert one edge into a 2,000-node graph, re-query transitive closure: 6.83ms vs 11.3s full recompute. That's [Differential Dataflow](https://github.com/TimelyDataflow/differential-dataflow) under the hood.
 
-**Correct retraction.** Delete a fact and every conclusion derived through it disappears automatically — even through recursive rule chains. No stale permissions, no phantom data.
+**Correct retraction.** Delete a fact and every conclusion derived through it disappears automatically - even through recursive rule chains. No stale permissions, no phantom data.
 
-**Explainable results.** Every derived fact traces back to the rules and base facts that produced it. "The system derived X because rule A applied to facts B and C" — not "the vector was close."
+**Explainable results.** Every derived fact traces back to the rules and base facts that produced it. "The system derived X because rule A applied to facts B and C" - not "the vector was close."
 
 ---
 
@@ -126,7 +126,7 @@ cargo build --release
 ./target/release/inputlayer-server --port 8080
 ```
 
-The query language is intuitive — if you've used SQL, the basics take about 10 minutes.
+The query language is intuitive - if you've used SQL, the basics take about 10 minutes.
 
 ---
 
@@ -147,7 +147,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 This project is dual-licensed:
 
-- **AGPL-3.x** for open-source use — see [LICENSE](LICENSE)
+- **AGPL-3.x** for open-source use - see [LICENSE](LICENSE)
 - **Commercial License** available for organizations that cannot comply with AGPL terms
 
 For commercial licensing inquiries, please [email us](mailto:sam@inputlayer.ai).

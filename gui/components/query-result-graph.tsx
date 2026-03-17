@@ -17,7 +17,7 @@ export function QueryResultGraph({ data, columns, name }: QueryResultGraphProps)
     [data, columns, name]
   )
 
-  if (data.length === 0 && columns.length !== 1) {
+  if (data.length === 0) {
     return (
       <div className="flex h-full items-center justify-center bg-muted/10">
         <div className="text-center">

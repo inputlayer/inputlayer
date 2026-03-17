@@ -177,7 +177,7 @@ if (fs.existsSync(docsIndex) && !pages['index']) {
 }
 
 // Generate TypeScript output
-const output = `// AUTO-GENERATED — do not edit. Run "node scripts/bundle-docs.mjs" to regenerate.
+const output = `// AUTO-GENERATED - do not edit. Run "node scripts/bundle-docs.mjs" to regenerate.
 
 export interface TocEntry {
   level: number

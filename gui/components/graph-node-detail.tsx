@@ -32,7 +32,7 @@ export function GraphNodeDetail({ node, onClose, onHoverRelation, onClickRelatio
   if (!node) return null
 
   return (
-    <div className="absolute top-4 right-4 z-10 w-72 rounded-lg border border-border/50 bg-background/95 backdrop-blur-sm shadow-lg">
+    <div className="absolute top-4 right-4 z-20 w-72 rounded-lg border border-border/50 bg-background/95 backdrop-blur-sm shadow-lg">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
         <div className="flex items-center gap-2 min-w-0">
@@ -104,7 +104,7 @@ export function GraphNodeDetail({ node, onClose, onHoverRelation, onClickRelatio
         </h4>
         <div className="space-y-1">
           {node.neighbors.slice(0, 20).map((neighbor, i) => (
-            <div key={i} className="flex items-center gap-2 text-xs">
+            <div key={`${neighbor.direction}-${neighbor.relation}-${neighbor.label}-${i}`} className="flex items-center gap-2 text-xs">
               <span className={`text-[10px] ${neighbor.direction === "out" ? "text-emerald-500" : "text-blue-500"}`}>
                 {neighbor.direction === "out" ? "\u2192" : "\u2190"}
               </span>

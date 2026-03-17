@@ -164,7 +164,7 @@ Delete a relation and all its data and schema.
 .rel drop old_events
 ```
 
-**Warning:** This permanently deletes the relation's tuples, metadata, schema, and persist storage. If a persistent rule exists with the same name as the relation, that rule is also removed. Other rules that reference the dropped relation are **not** automatically deleted — they will fail at query time. A `schema_change` notification is emitted.
+**Warning:** This permanently deletes the relation's tuples, metadata, schema, and persist storage. If a persistent rule exists with the same name as the relation, that rule is also removed. Other rules that reference the dropped relation are **not** automatically deleted - they will fail at query time. A `schema_change` notification is emitted.
 
 ### `.rel <name>`
 
@@ -358,7 +358,7 @@ Load and execute a file.
 - Continues through non-fatal errors (parse errors, server errors) so that cleanup commands (e.g., `.kg drop`) always run
 - Only connection errors abort the script
 
-**Note:** The parser accepts `--replace` and `--merge` flags, but these modes are not yet implemented — all three modes currently execute identically (sequential statement execution).
+**Note:** The parser accepts `--replace` and `--merge` flags, but these modes are not yet implemented - all three modes currently execute identically (sequential statement execution).
 
 ### Supported File Formats
 

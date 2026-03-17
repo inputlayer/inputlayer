@@ -315,7 +315,7 @@ If the connection drops:
 
 1. Wait with exponential backoff (1s, 2s, 4s, 8s, max 30s)
 2. Reconnect and re-authenticate
-3. Session rules and facts are lost — re-define them after reconnecting
+3. Session rules and facts are lost - re-define them after reconnecting
 4. Persistent data (facts, rules, indexes) is unaffected
 5. Use the `seq` field from notifications to detect missed events
 
@@ -387,7 +387,7 @@ ws.onmessage = (event) => {
   const msg = JSON.parse(event.data);
 
   if (msg.type === "authenticated") {
-    // Authenticated — start querying
+    // Authenticated - start querying
     ws.send(JSON.stringify({
       type: "execute",
       program: "?edge(X, Y)"

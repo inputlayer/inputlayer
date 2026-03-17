@@ -6,6 +6,8 @@ export interface GraphNode {
     label: string
     degree: number
     relations: string[]
+    primaryRelation?: string
+    parent?: string
   }
 }
 
@@ -34,6 +36,14 @@ export const MAX_NODES = 1000
 /** Maximum edges before truncating */
 export const MAX_EDGES = 5000
 
+/** Convert a cell value to a display string. Uses bracketed sentinels for null/empty to avoid ID collisions and invisible labels. */
+function cellToString(value: unknown): string {
+  if (value === null || value === undefined) return "[null]"
+  const s = String(value)
+  if (s === "") return "[empty]"
+  return s
+}
+
 /**
  * Transform loaded binary relations into Cytoscape elements.
  * Each binary relation (arity 2) becomes edges; column values become nodes.
@@ -57,7 +67,7 @@ export function buildGraphElements(
     if (arity === 1) {
       // Unary: nodes only
       for (const row of rel.data) {
-        const val = String(row[0] ?? "null")
+        const val = cellToString(row[0])
         const id = `n_${val}`
         if (!nodeMap.has(id)) {
           nodeMap.set(id, { relations: new Set(), degree: 0 })
@@ -72,8 +82,8 @@ export function buildGraphElements(
       totalEdges++
       if (edges.length >= MAX_EDGES) continue
 
-      const sourceVal = String(row[0] ?? "null")
-      const targetVal = String(row[arity === 2 ? 1 : arity - 1] ?? "null")
+      const sourceVal = cellToString(row[0])
+      const targetVal = cellToString(row[arity === 2 ? 1 : arity - 1])
       const sourceId = `n_${sourceVal}`
       const targetId = `n_${targetVal}`
 
@@ -88,16 +98,12 @@ export function buildGraphElements(
       if (!nodeMap.has(sourceId)) {
         nodeMap.set(sourceId, { relations: new Set(), degree: 0 })
       }
-      const sourceEntry = nodeMap.get(sourceId)!
-      sourceEntry.relations.add(rel.name)
-      sourceEntry.degree++
+      nodeMap.get(sourceId)!.relations.add(rel.name)
 
       if (!nodeMap.has(targetId)) {
         nodeMap.set(targetId, { relations: new Set(), degree: 0 })
       }
-      const targetEntry = nodeMap.get(targetId)!
-      targetEntry.relations.add(rel.name)
-      targetEntry.degree++
+      nodeMap.get(targetId)!.relations.add(rel.name)
 
       edges.push({
         data: {
@@ -146,11 +152,34 @@ export function buildGraphElements(
     (e) => keptNodeIds.has(e.data.source) && keptNodeIds.has(e.data.target)
   )
 
+  // Deduplicate edges: keep one edge per (source, target, relation) tuple
+  const edgeKeySet = new Set<string>()
+  const dedupedEdges: GraphEdge[] = []
+  for (const edge of keptEdges) {
+    const key = `${edge.data.source}|${edge.data.target}|${edge.data.relation}`
+    if (!edgeKeySet.has(key)) {
+      edgeKeySet.add(key)
+      dedupedEdges.push(edge)
+    }
+  }
+
+  // Recompute degree from deduped edges; self-loops count as 1
+  const degreeCounts = new Map<string, number>()
+  for (const edge of dedupedEdges) {
+    degreeCounts.set(edge.data.source, (degreeCounts.get(edge.data.source) || 0) + 1)
+    if (edge.data.source !== edge.data.target) {
+      degreeCounts.set(edge.data.target, (degreeCounts.get(edge.data.target) || 0) + 1)
+    }
+  }
+  for (const node of nodes) {
+    node.data.degree = degreeCounts.get(node.data.id) || 0
+  }
+
   return {
-    elements: [...parentNodes, ...nodes, ...keptEdges],
+    elements: [...parentNodes, ...nodes, ...dedupedEdges],
     stats: {
       nodeCount: nodes.length,
-      edgeCount: keptEdges.length,
+      edgeCount: dedupedEdges.length,
       relationCount: graphRelations.length,
       truncated,
       totalEdges,
@@ -179,7 +208,7 @@ export function buildQueryGraphElements(
   if (arity === 1) {
     // Arity 1: nodes only
     for (const row of data) {
-      const val = String(row[0] ?? "null")
+      const val = cellToString(row[0])
       const id = `n_${val}`
       if (!nodeMap.has(id)) nodeMap.set(id, { degree: 0 })
     }
@@ -189,24 +218,21 @@ export function buildQueryGraphElements(
       totalEdges++
       if (edges.length >= MAX_EDGES) continue
 
-      const sourceVal = String(row[0] ?? "null")
-      const targetVal = String(row[arity === 2 ? 1 : arity - 1] ?? "null")
+      const sourceVal = cellToString(row[0])
+      const targetVal = cellToString(row[arity === 2 ? 1 : arity - 1])
       const sourceId = `n_${sourceVal}`
       const targetId = `n_${targetVal}`
 
       // Edge label from middle columns (arity 3+)
       let edgeLabel = ""
       if (arity === 3) {
-        edgeLabel = String(row[1] ?? "")
+        edgeLabel = String(row[1] ?? name ?? "")
       } else if (arity > 3) {
         edgeLabel = row.slice(1, arity - 1).map((v) => String(v ?? "")).join(", ")
       }
 
       if (!nodeMap.has(sourceId)) nodeMap.set(sourceId, { degree: 0 })
-      nodeMap.get(sourceId)!.degree++
-
       if (!nodeMap.has(targetId)) nodeMap.set(targetId, { degree: 0 })
-      nodeMap.get(targetId)!.degree++
 
       edges.push({
         data: {
@@ -243,14 +269,37 @@ export function buildQueryGraphElements(
     (e) => keptNodeIds.has(e.data.source) && keptNodeIds.has(e.data.target)
   )
 
+  // Deduplicate edges: keep one edge per (source, target, relation) tuple
+  const edgeKeySet = new Set<string>()
+  const dedupedEdges: GraphEdge[] = []
+  for (const edge of keptEdges) {
+    const key = `${edge.data.source}|${edge.data.target}|${edge.data.relation}`
+    if (!edgeKeySet.has(key)) {
+      edgeKeySet.add(key)
+      dedupedEdges.push(edge)
+    }
+  }
+
+  // Recompute degree from deduped edges; self-loops count as 1
+  const degreeCounts = new Map<string, number>()
+  for (const edge of dedupedEdges) {
+    degreeCounts.set(edge.data.source, (degreeCounts.get(edge.data.source) || 0) + 1)
+    if (edge.data.source !== edge.data.target) {
+      degreeCounts.set(edge.data.target, (degreeCounts.get(edge.data.target) || 0) + 1)
+    }
+  }
+  for (const node of nodes) {
+    node.data.degree = degreeCounts.get(node.data.id) || 0
+  }
+
   // Collect unique edge labels for legend (arity 3+)
-  const uniqueRelations = new Set(keptEdges.map((e) => e.data.relation))
+  const uniqueRelations = new Set(dedupedEdges.map((e) => e.data.relation))
 
   return {
-    elements: [...nodes, ...keptEdges],
+    elements: [...nodes, ...dedupedEdges],
     stats: {
       nodeCount: nodes.length,
-      edgeCount: keptEdges.length,
+      edgeCount: dedupedEdges.length,
       relationCount: uniqueRelations.size,
       truncated,
       totalEdges,
