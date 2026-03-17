@@ -299,7 +299,7 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
         .layer(middleware::from_fn(ip_rate_limit_middleware))
         .layer(Extension(ip_limiter));
 
-    // Serve GUI static files if enabled (outside auth middleware — GUI is public)
+    // Serve GUI static files if enabled (outside auth middleware - GUI is public)
     if config.gui.enabled {
         let static_dir = &config.gui.static_dir;
         let index_file = format!("{static_dir}/index.html");

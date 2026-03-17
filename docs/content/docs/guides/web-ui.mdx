@@ -4,18 +4,25 @@ InputLayer includes a browser-based GUI for exploring knowledge graphs, writing 
 
 ## Starting the GUI
 
-The GUI connects to a running InputLayer server via WebSocket:
+The GUI is built as a static export and served directly by the InputLayer server.
 
 ```bash
-# Start the server
-./target/release/inputlayer-server
+# Build the GUI and start the server
+make run
 
-# In another terminal, start the GUI (default: http://localhost:3000)
-cd gui
-bun dev
+# Or build separately:
+make gui-build                     # builds gui/dist/
+cargo run --bin inputlayer-server  # serves GUI at http://localhost:8080/
 ```
 
-The GUI auto-connects to `ws://localhost:8080/ws`. Select a knowledge graph from the header dropdown to begin.
+For development with hot-reload, run the GUI dev server separately:
+
+```bash
+cargo run --bin inputlayer-server  # backend on :8080
+cd gui && npm run dev              # GUI dev server on :3000
+```
+
+Select a knowledge graph from the header dropdown to begin.
 
 ---
 
@@ -56,12 +63,19 @@ Results display in a table by default. For queries with 2+ columns, a **Graph** 
 
 ## Relations & Views
 
-The Relations page shows all base relations and derived views in a sidebar tree. Selecting one opens a detail panel with:
+The Relations page shows all base relations and derived views in a sidebar tree.
 
-- **Data tab** — Paginated data table
-- **Graph tab** — Data visualized as a node-edge graph (arity 2+)
-- **Dependency Graph** (views only) — Shows rule dependencies
-- **Performance** (views only) — Execution statistics
+**Base relations** open a detail panel with:
+
+- **Data tab** - Paginated data table
+- **Graph tab** - Data visualized as a node-edge graph (arity 2+)
+
+**Derived views** open a detail panel with:
+
+- **Data tab** - Paginated data table
+- **Dependency Graph tab** - Shows rule dependencies between views and relations
+- **Data Graph tab** - Data visualized as a node-edge graph (arity 2+)
+- **Performance tab** - Execution statistics
 
 Right-click any relation badge to navigate to KG Graph or the Relations page.
 
@@ -129,9 +143,9 @@ The toolbar at the top-left provides:
 
 **Right-click a relation badge** in the node detail for:
 
-- **Open in KG Graph** — Navigate to KG Graph filtered to that relation
-- **Filter to** — Show only that relation (when on KG Graph page)
-- **Open in Relations** — Navigate to the Relations page
+- **Open in KG Graph** -Navigate to KG Graph filtered to that relation
+- **Filter to** -Show only that relation (when on KG Graph page)
+- **Open in Relations** -Navigate to the Relations page
 
 ### Compound Nodes (Grouping)
 
@@ -155,8 +169,8 @@ The minimap shows a bird's-eye thumbnail of the entire graph:
 
 When multiple relations are active, a legend appears at the bottom-left:
 
-- **Node colors** (circles) — Identify which relation a node belongs to
-- **Edge colors** (lines) — Identify edge types
+- **Node colors** (circles) -Identify which relation a node belongs to
+- **Edge colors** (lines) -Identify edge types
 
 ### Keyboard Shortcuts
 
@@ -170,8 +184,8 @@ When multiple relations are active, a legend appears at the bottom-left:
 
 For performance, graphs are capped at:
 
-- **1,000 nodes** — Highest-degree nodes are kept
-- **5,000 edges** — Truncation indicator shown in sidebar stats
+- **1,000 nodes** -Highest-degree nodes are kept
+- **5,000 edges** -Truncation indicator shown in sidebar stats
 
 ---
 
@@ -179,6 +193,6 @@ For performance, graphs are capped at:
 
 The GUI supports seamless navigation between pages:
 
-- **Relations sidebar** — Right-click any relation or view → "Open in KG Graph"
-- **Node detail badges** — Right-click → navigate to KG Graph or Relations
-- **URL parameters** — Direct links with `?select=relation_name` for both KG Graph and Relations pages
+- **Relations sidebar** -Right-click any relation or view → "Open in KG Graph"
+- **Node detail badges** -Right-click → navigate to KG Graph or Relations
+- **URL parameters** -Direct links with `?select=relation_name` for both KG Graph and Relations pages

@@ -166,12 +166,12 @@ Use the `hnsw_nearest()` predicate in query bodies to perform fast approximate n
 hnsw_nearest("index_name", QueryVec, K, IdVar, DistVar [, EfSearch])
 ```
 
-- `index_name` — String literal naming the HNSW index
-- `QueryVec` — Variable bound to a vector, or a vector literal `[1.0, 2.0]`
-- `K` — Integer: number of nearest neighbors
-- `IdVar` — Variable to bind result tuple IDs
-- `DistVar` — Variable to bind distances
-- `EfSearch` — Optional integer: override ef_search for this query
+- `index_name` - String literal naming the HNSW index
+- `QueryVec` - Variable bound to a vector, or a vector literal `[1.0, 2.0]`
+- `K` - Integer: number of nearest neighbors
+- `IdVar` - Variable to bind result tuple IDs
+- `DistVar` - Variable to bind distances
+- `EfSearch` - Optional integer: override ef_search for this query
 
 ### Examples
 
@@ -186,7 +186,7 @@ hnsw_nearest("index_name", QueryVec, K, IdVar, DistVar [, EfSearch])
 ? hnsw_nearest("doc_emb_idx", [0.11, 0.21, 0.29], 5, Id, Dist, 200)
 ```
 
-**Note:** Indexes are not used automatically — you must explicitly call `hnsw_nearest()` to use an HNSW index.
+**Note:** Indexes are not used automatically - you must explicitly call `hnsw_nearest()` to use an HNSW index.
 
 ---
 

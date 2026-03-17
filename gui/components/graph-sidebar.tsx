@@ -86,7 +86,7 @@ export function GraphSidebar({
       </div>
 
       {/* Relation list */}
-      <div className="flex-1 overflow-auto scrollbar-thin p-2">
+      <div className="flex-1 min-h-0 overflow-auto scrollbar-thin p-2">
         {graphRelations.length === 0 ? (
           <div className="py-8 text-center">
             <Network className="mx-auto h-8 w-8 text-muted-foreground/50" />
@@ -94,6 +94,11 @@ export function GraphSidebar({
             <p className="mt-1 text-[10px] text-muted-foreground/70">
               Relations are visualized as graphs
             </p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="py-8 text-center">
+            <Search className="mx-auto h-6 w-6 text-muted-foreground/30" />
+            <p className="mt-2 text-xs text-muted-foreground">No relations match &quot;{debouncedSearch}&quot;</p>
           </div>
         ) : (
           <div className="space-y-0.5">

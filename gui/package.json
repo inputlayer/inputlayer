@@ -55,7 +55,7 @@
     "cytoscape-svg": "^0.4.0",
     "d3-force": "^3.0.0",
     "date-fns": "4.1.0",
-    "elkjs": "^0.11.1",
+    "elkjs": "^0.9.3",
     "embla-carousel-react": "8.5.1",
     "immer": "11.1.0",
     "input-otp": "1.4.1",

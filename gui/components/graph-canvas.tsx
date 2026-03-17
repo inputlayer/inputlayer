@@ -139,37 +139,45 @@ export function GraphCanvas({ elements, stats, relationNames, grouped = false, o
   const handleExportPng = useCallback(() => {
     const cy = cyRef.current
     if (!cy) return
-    const png = cy.png({ output: "blob", scale: 2, bg: isDark ? "#0a0a0a" : "#fafafa" })
-    const url = URL.createObjectURL(png as Blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = "graph.png"
-    a.click()
-    URL.revokeObjectURL(url)
+    try {
+      const png = cy.png({ output: "blob", scale: 2, bg: isDark ? "#0a0a0a" : "#fafafa" })
+      const url = URL.createObjectURL(png as Blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = "graph.png"
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      console.error("Failed to export PNG")
+    }
   }, [isDark])
 
   const handleExportSvg = useCallback(() => {
     const cy = cyRef.current
     if (!cy) return
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const svg = (cy as any).svg({ scale: 1, full: true, bg: isDark ? "#0a0a0a" : "#fafafa" })
-    const blob = new Blob([svg], { type: "image/svg+xml" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = "graph.svg"
-    a.click()
-    URL.revokeObjectURL(url)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const svg = (cy as any).svg({ scale: 1, full: true, bg: isDark ? "#0a0a0a" : "#fafafa" })
+      const blob = new Blob([svg], { type: "image/svg+xml" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = "graph.svg"
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      console.error("Failed to export SVG")
+    }
   }, [isDark])
 
-  // Fullscreen
+  // Fullscreen (state updated solely via fullscreenchange event listener below)
   const toggleFullscreen = useCallback(() => {
     const el = containerRef.current
     if (!el) return
     if (!document.fullscreenElement) {
-      el.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {})
+      el.requestFullscreen().catch(() => {})
     } else {
-      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {})
+      document.exitFullscreen().catch(() => {})
     }
   }, [])
 
@@ -187,7 +195,7 @@ export function GraphCanvas({ elements, stats, relationNames, grouped = false, o
       if ((e.metaKey || e.ctrlKey) && e.key === "f") {
         e.preventDefault()
         setSearchOpen(true)
-        setTimeout(() => searchInputRef.current?.focus(), 50)
+        requestAnimationFrame(() => searchInputRef.current?.focus())
       }
       if (e.key === "Escape" && searchOpen) {
         closeSearch()
@@ -197,23 +205,26 @@ export function GraphCanvas({ elements, stats, relationNames, grouped = false, o
     return () => document.removeEventListener("keydown", handler)
   }, [searchOpen, closeSearch])
 
-  // Register layout plugins (once, client-side only)
+  // Register layout plugins (once, client-side only) and signal readiness
+  const [layoutsReady, setLayoutsReady] = useState(false)
   useEffect(() => {
     if (typeof window === "undefined") return
     import("cytoscape").then((Cytoscape) => {
       const register = (plugin: { default: cytoscape.Ext }) => {
         try { Cytoscape.default.use(plugin.default) } catch { /* already registered */ }
       }
-      import("cytoscape-cola").then(register)
-      import("cytoscape-fcose" as string).then(register)
-      import("cytoscape-dagre" as string).then(register)
-      import("cytoscape-elk" as string).then(register)
-      import("cytoscape-cose-bilkent" as string).then(register)
-      import("cytoscape-euler" as string).then(register)
-      import("cytoscape-spread" as string).then(register)
-      import("cytoscape-d3-force" as string).then(register)
-      import("cytoscape-avsdf" as string).then(register)
-      import("cytoscape-svg" as string).then(register)
+      Promise.all([
+        import("cytoscape-cola").then(register),
+        import("cytoscape-fcose").then(register),
+        import("cytoscape-dagre").then(register),
+        import("cytoscape-elk").then(register),
+        import("cytoscape-cose-bilkent").then(register),
+        import("cytoscape-euler").then(register),
+        import("cytoscape-spread").then(register),
+        import("cytoscape-d3-force").then(register),
+        import("cytoscape-avsdf").then(register),
+        import("cytoscape-svg").then(register),
+      ]).finally(() => setLayoutsReady(true))
     })
   }, [])
 
@@ -282,21 +293,27 @@ export function GraphCanvas({ elements, stats, relationNames, grouped = false, o
         opacity: 0.15,
       },
     },
-    ...relationNames.map((name, i) => ({
-      selector: `edge[relation = "${name}"]`,
-      style: {
-        "line-color": EDGE_COLORS[i % EDGE_COLORS.length],
-        "target-arrow-color": EDGE_COLORS[i % EDGE_COLORS.length],
-      },
-    })),
+    ...relationNames.map((name, i) => {
+      const escaped = name.replace(/"/g, '\\"')
+      return {
+        selector: `edge[relation = "${escaped}"]`,
+        style: {
+          "line-color": EDGE_COLORS[i % EDGE_COLORS.length],
+          "target-arrow-color": EDGE_COLORS[i % EDGE_COLORS.length],
+        },
+      }
+    }),
     // Node clustering: color nodes by primary relation when multiple relations are active
-    ...(relationNames.length > 1 ? relationNames.map((name, i) => ({
-      selector: `node[primaryRelation = "${name}"]`,
-      style: {
-        "background-color": NODE_COLORS[i % NODE_COLORS.length],
-        "border-color": NODE_COLORS[i % NODE_COLORS.length],
-      },
-    })) : []),
+    ...(relationNames.length > 1 ? relationNames.map((name, i) => {
+      const escaped = name.replace(/"/g, '\\"')
+      return {
+        selector: `node[primaryRelation = "${escaped}"]`,
+        style: {
+          "background-color": NODE_COLORS[i % NODE_COLORS.length],
+          "border-color": NODE_COLORS[i % NODE_COLORS.length],
+        },
+      }
+    }) : []),
     // Compound parent nodes (visible when grouped)
     ...(grouped && relationNames.length > 1 ? [
       {
@@ -328,7 +345,8 @@ export function GraphCanvas({ elements, stats, relationNames, grouped = false, o
         },
       })),
     ] : []),
-  ], [isDark, relationNames, elements.length, showEdgeLabels, grouped])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only recompute when crossing the 500-element threshold
+  ], [isDark, relationNames, elements.length < 500, showEdgeLabels, grouped])
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const layoutConfig = useMemo((): any => {
@@ -430,7 +448,12 @@ export function GraphCanvas({ elements, stats, relationNames, grouped = false, o
     return configs[layout]
   }, [layout])
 
+  // Set up and clean up Cytoscape event listeners
   const handleCy = useCallback((cy: cytoscape.Core) => {
+    // Clean up listeners from any previous instance
+    if (cyRef.current && cyRef.current !== cy) {
+      cyRef.current.removeAllListeners()
+    }
     cyRef.current = cy
 
     cy.on("tap", "node", (evt) => {
@@ -483,11 +506,25 @@ export function GraphCanvas({ elements, stats, relationNames, grouped = false, o
     })
   }, [])
 
+  // Clear selected node if it was removed from the graph
   useEffect(() => {
-    if (cyRef.current && elements.length > 0) {
-      cyRef.current.layout(layoutConfig).run()
+    if (selectedNode && cyRef.current) {
+      const node = cyRef.current.getElementById(selectedNode.id)
+      if (node.empty()) setSelectedNode(null)
     }
-  }, [layoutConfig, elements])
+  }, [elements, selectedNode])
+
+  const activeLayoutRef = useRef<cytoscape.Layouts | null>(null)
+  useEffect(() => {
+    if (!layoutsReady || !cyRef.current || elements.length === 0) return
+    // Cancel any in-progress layout before starting a new one
+    if (activeLayoutRef.current) {
+      try { activeLayoutRef.current.stop() } catch { /* already stopped */ }
+    }
+    const lay = cyRef.current.layout(layoutConfig)
+    activeLayoutRef.current = lay
+    lay.run()
+  }, [layoutConfig, elements, layoutsReady])
 
   // Custom minimap: render thumbnail + viewport overlay
   const updateMinimap = useCallback(() => {
@@ -548,8 +585,9 @@ export function GraphCanvas({ elements, stats, relationNames, grouped = false, o
     panToMinimapPoint(e.clientX, e.clientY)
   }, [panToMinimapPoint])
 
-  const handleMinimapPointerUp = useCallback(() => {
+  const handleMinimapPointerUp = useCallback((e: React.PointerEvent) => {
     minimapDragging.current = false
+    ;(e.target as HTMLElement).releasePointerCapture(e.pointerId)
   }, [])
 
   useEffect(() => {
@@ -557,10 +595,16 @@ export function GraphCanvas({ elements, stats, relationNames, grouped = false, o
     if (!cy || !showMinimap) return
     // Initial render
     const timer = setTimeout(updateMinimap, 300)
-    const handler = () => updateMinimap()
+    // Debounce minimap updates to avoid expensive cy.png() on every pan/zoom frame
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+    const handler = () => {
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(updateMinimap, 200)
+    }
     cy.on("render pan zoom", handler)
     return () => {
       clearTimeout(timer)
+      if (debounceTimer) clearTimeout(debounceTimer)
       cy.off("render pan zoom", handler)
     }
   }, [showMinimap, updateMinimap, elements])
@@ -615,6 +659,7 @@ export function GraphCanvas({ elements, stats, relationNames, grouped = false, o
           if (!rel) {
             if (fadeEnabledRef.current) {
               const node = cy.getElementById(selectedNode.id)
+              if (node.empty()) { cy.batch(() => { cy.elements().removeStyle("opacity") }); return }
               const neighborhood = node.closedNeighborhood()
               cy.batch(() => {
                 cy.elements().not(neighborhood).style("opacity", 0.12)
@@ -626,7 +671,8 @@ export function GraphCanvas({ elements, stats, relationNames, grouped = false, o
             return
           }
           const node = cy.getElementById(selectedNode.id)
-          const relEdges = node.connectedEdges(`[relation = "${rel}"]`)
+          if (node.empty()) return
+          const relEdges = node.connectedEdges(`[relation = "${rel.replace(/"/g, '\\"')}"]`)
           const relNodes = relEdges.connectedNodes()
           cy.batch(() => {
             cy.elements().style("opacity", 0.08)
@@ -684,7 +730,7 @@ export function GraphCanvas({ elements, stats, relationNames, grouped = false, o
           variant="ghost"
           size="sm"
           className="h-8 w-8 p-0 bg-background/90 backdrop-blur-sm border border-border/50 rounded-lg hover:bg-teal-500/10 hover:text-teal-600 dark:hover:text-teal-400"
-          onClick={() => { setSearchOpen(true); setTimeout(() => searchInputRef.current?.focus(), 50) }}
+          onClick={() => { setSearchOpen(true); requestAnimationFrame(() => searchInputRef.current?.focus()) }}
           title="Search nodes (Ctrl+F)"
         >
           <Search className="h-3.5 w-3.5" />
@@ -733,7 +779,7 @@ export function GraphCanvas({ elements, stats, relationNames, grouped = false, o
 
       {/* Search bar */}
       {searchOpen && (
-        <div className="absolute top-14 left-4 z-10 flex items-center gap-1.5 rounded-lg border border-border/50 bg-background/90 backdrop-blur-sm px-2 py-1.5">
+        <div className="absolute top-14 left-4 z-30 flex items-center gap-1.5 rounded-lg border border-border/50 bg-background/90 backdrop-blur-sm px-2 py-1.5">
           <Search className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
           <Input
             ref={searchInputRef}
@@ -790,7 +836,7 @@ export function GraphCanvas({ elements, stats, relationNames, grouped = false, o
           )}
           {minimapViewport && (
             <div
-              className="absolute border-1.5 border-teal-500/60 bg-teal-500/15 rounded-sm pointer-events-none"
+              className="absolute border-[1.5px] border-teal-500/60 bg-teal-500/15 rounded-sm pointer-events-none"
               style={{ left: minimapViewport.x, top: minimapViewport.y, width: minimapViewport.w, height: minimapViewport.h }}
             />
           )}

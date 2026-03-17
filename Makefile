@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test front-build front-deploy
+.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test front-build front-deploy gui-build run run-server
 
 SHELL := /bin/bash
 
@@ -274,12 +274,12 @@ fix: fmt
 
 # Build
 
-# Build the project
-build:
+# Build the project (GUI + Rust)
+build: gui-build
 	cargo build --all-features
 
-# Build in release mode
-build-release:
+# Build in release mode (GUI + Rust)
+build-release: gui-build
 	cargo build --all-features --release
 
 # Run unit tests in release mode
@@ -289,6 +289,7 @@ test-release:
 # Clean build artifacts
 clean:
 	cargo clean
+	rm -rf gui/dist gui/node_modules/.cache
 
 # Documentation
 
@@ -369,6 +370,20 @@ flush-dev:
 	@echo "Flushing development data..."
 	@rm -rf ./data
 	@echo "Data folder removed. Server will recreate default knowledge graph on next start."
+
+# GUI (Web UI)
+
+# Build the GUI dashboard (Next.js static export to gui/dist/)
+gui-build:
+	cd gui && npm ci && npm run build
+
+# Build GUI + run the server (GUI served at http://localhost:8080/)
+run: gui-build
+	cargo run --bin inputlayer-server
+
+# Run the server without rebuilding GUI (assumes gui/dist/ already exists)
+run-server:
+	cargo run --bin inputlayer-server
 
 # Frontend Website
 

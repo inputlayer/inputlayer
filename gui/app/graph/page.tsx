@@ -28,6 +28,8 @@ function GraphPageInner() {
   const [viewRelations, setViewRelations] = useState<Map<string, Relation>>(new Map())
   const [grouped, setGrouped] = useState(false)
   const initialSelectHandled = useRef(false)
+  const loadGenRef = useRef(0)
+  const inFlightLoads = useRef(new Set<string>())
 
   // Merge base relations with view-derived relations for the graph
   const allRelations = useMemo(() => {
@@ -60,6 +62,13 @@ function GraphPageInner() {
     }
   }, [selectedKnowledgeGraph?.name])
 
+  // Guard against concurrent loads of the same relation
+  const deduplicatedLoad = useCallback(async (name: string, loadFn: () => Promise<unknown>) => {
+    if (inFlightLoads.current.has(name)) return
+    inFlightLoads.current.add(name)
+    try { await loadFn() } finally { inFlightLoads.current.delete(name) }
+  }, [])
+
   const loadViewAsRelation = useCallback(async (name: string) => {
     setLoadingRelations((prev) => new Set(prev).add(name))
     try {
@@ -82,7 +91,11 @@ function GraphPageInner() {
           isSession: view?.isSession ?? false,
         }
         setViewRelations((prev) => new Map(prev).set(name, rel))
+      } else {
+        console.warn(`Failed to load view "${name}":`, result.error)
       }
+    } catch (err) {
+      console.warn(`Failed to load view "${name}":`, err)
     } finally {
       setLoadingRelations((prev) => {
         const s = new Set(prev)
@@ -104,10 +117,11 @@ function GraphPageInner() {
           // Check if it's a view-only relation (not in base relations)
           const isViewOnly = !relations.some((r) => r.name === name)
           if (isViewOnly) {
-            loadViewAsRelation(name)
+            setLoadingRelations((prev) => new Set(prev).add(name))
+            deduplicatedLoad(name, () => loadViewAsRelation(name))
           } else {
             setLoadingRelations((prev) => new Set(prev).add(name))
-            loadRelationData(name).finally(() => {
+            deduplicatedLoad(name, () => loadRelationData(name)).finally(() => {
               setLoadingRelations((prev) => {
                 const s = new Set(prev)
                 s.delete(name)
@@ -119,9 +133,10 @@ function GraphPageInner() {
       }
       return next
     })
-  }, [allRelations, relations, loadRelationData, loadViewAsRelation])
+  }, [allRelations, relations, loadRelationData, loadViewAsRelation, deduplicatedLoad])
 
   const handleSelectAll = useCallback(async () => {
+    const gen = ++loadGenRef.current
     const names = new Set(graphRelations.map((r) => r.name))
     setSelectedNames(names)
     const toLoad = graphRelations.filter((r) => r.data.length === 0)
@@ -129,14 +144,19 @@ function GraphPageInner() {
       setLoadingRelations(new Set(toLoad.map((r) => r.name)))
       const baseNames = new Set(relations.map((r) => r.name))
       await Promise.all(toLoad.map((r) =>
-        baseNames.has(r.name) ? loadRelationData(r.name) : loadViewAsRelation(r.name)
+        deduplicatedLoad(r.name, () =>
+          baseNames.has(r.name) ? loadRelationData(r.name) : loadViewAsRelation(r.name)
+        )
       ))
-      setLoadingRelations(new Set())
+      // Only clear loading if this is still the active operation
+      if (gen === loadGenRef.current) setLoadingRelations(new Set())
     }
-  }, [graphRelations, relations, loadRelationData, loadViewAsRelation])
+  }, [graphRelations, relations, loadRelationData, loadViewAsRelation, deduplicatedLoad])
 
   const handleDeselectAll = useCallback(() => {
+    ++loadGenRef.current // invalidate any in-flight select-all
     setSelectedNames(new Set())
+    setLoadingRelations(new Set())
   }, [])
 
   const handleFilterRelation = useCallback((relation: string) => {
@@ -146,12 +166,12 @@ function GraphPageInner() {
     if (rel && rel.data.length === 0) {
       const isViewOnly = !relations.some((r) => r.name === relation)
       if (isViewOnly) {
-        loadViewAsRelation(relation)
+        deduplicatedLoad(relation, () => loadViewAsRelation(relation))
       } else {
-        loadRelationData(relation)
+        deduplicatedLoad(relation, () => loadRelationData(relation))
       }
     }
-  }, [allRelations, relations, loadRelationData, loadViewAsRelation])
+  }, [allRelations, relations, loadRelationData, loadViewAsRelation, deduplicatedLoad])
 
   // Auto-select relation from URL search params (e.g. ?select=knows)
   useEffect(() => {
@@ -201,17 +221,20 @@ function GraphPageInner() {
                 variant="ghost"
                 size="sm"
                 onClick={async () => {
-                  await refreshCurrentKnowledgeGraph()
-                  // Reload data for all currently selected relations
-                  if (selectedNames.size > 0) {
-                    const baseNames = new Set(relations.map((r) => r.name))
-                    const toReload = Array.from(selectedNames)
-                    setLoadingRelations(new Set(toReload))
-                    await Promise.all(toReload.map((name) =>
-                      baseNames.has(name) ? loadRelationData(name) : loadViewAsRelation(name)
-                    ))
-                    setLoadingRelations(new Set())
-                  }
+                  const gen = ++loadGenRef.current
+                  // Refresh metadata and reload selected relation data in parallel
+                  const toReload = Array.from(selectedNames)
+                  if (toReload.length > 0) setLoadingRelations(new Set(toReload))
+                  const baseNames = new Set(relations.map((r) => r.name))
+                  await Promise.all([
+                    refreshCurrentKnowledgeGraph(),
+                    ...toReload.map((name) =>
+                      deduplicatedLoad(name, () =>
+                        baseNames.has(name) ? loadRelationData(name) : loadViewAsRelation(name)
+                      )
+                    ),
+                  ])
+                  if (gen === loadGenRef.current) setLoadingRelations(new Set())
                 }}
                 disabled={isRefreshing}
                 className="h-7 px-2"

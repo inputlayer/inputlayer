@@ -1,6 +1,6 @@
 /**
  * Lightweight syntax highlighting for common languages used in docs.
- * Uses simple regex tokenizers — not a full parser, but good enough
+ * Uses simple regex tokenizers - not a full parser, but good enough
  * for documentation code blocks.
  */
 
