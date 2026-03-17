@@ -775,6 +775,7 @@ fn parse_apikey_command(parts: &[&str]) -> Result<MetaCommand, String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

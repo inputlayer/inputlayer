@@ -309,7 +309,9 @@ fn strongconnect(
     if lowlinks[v] == indices[v] {
         let mut scc = Vec::new();
         loop {
-            let w = stack.pop().unwrap();
+            let w = stack
+                .pop()
+                .expect("stack is non-empty: v was pushed and loop breaks when w == v");
             on_stack.remove(&w);
             scc.push(w.clone());
             if w == v {
@@ -470,7 +472,8 @@ pub fn stratify_with_negation(program: &Program) -> StratificationResult {
             if head_scc_opt.is_none() {
                 continue;
             }
-            let head_scc = *head_scc_opt.unwrap();
+            let head_scc =
+                *head_scc_opt.expect("head_scc_opt guaranteed Some by is_none check above");
 
             // Process positive dependencies
             for pos_atom in rule.positive_body_atoms() {
@@ -601,6 +604,7 @@ fn basic_stratify(program: &Program) -> Vec<Vec<usize>> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::ast::{Atom, Term};

@@ -115,6 +115,7 @@ pub type InputLayerResult<T> = Result<T, InputLayerError>;
 
 // Tests
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

@@ -66,7 +66,9 @@ pub fn tuples_to_record_batch(
     let mut columns: Vec<ArrayRef> = Vec::with_capacity(schema.arity());
 
     for col_idx in 0..schema.arity() {
-        let col_type = schema.field_type(col_idx).unwrap();
+        let col_type = schema
+            .field_type(col_idx)
+            .expect("col_idx is within 0..schema.arity() so field_type is always Some");
         let array = build_column_array(tuples, col_idx, col_type)?;
         columns.push(array);
     }
@@ -406,6 +408,7 @@ pub fn infer_schema_from_tuples(tuples: &[Tuple], column_names: &[String]) -> Tu
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use arrow::datatypes::Schema;

@@ -476,6 +476,7 @@ impl fmt::Display for PipelineTrace {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

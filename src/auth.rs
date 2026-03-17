@@ -446,6 +446,7 @@ fn authorize_viewer_meta(cmd: &MetaCommand) -> Result<(), String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

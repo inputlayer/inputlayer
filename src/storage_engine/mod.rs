@@ -2889,6 +2889,7 @@ fn format_rule(rule: &crate::ast::Rule) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::config::Config;

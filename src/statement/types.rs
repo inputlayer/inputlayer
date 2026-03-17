@@ -479,6 +479,7 @@ pub fn split_respecting_strings(input: &str) -> Vec<String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

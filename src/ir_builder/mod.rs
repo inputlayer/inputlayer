@@ -1617,6 +1617,7 @@ fn func_to_str(func: &crate::ast::AggregateFunc) -> &'static str {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::ast::Atom;

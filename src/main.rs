@@ -34,7 +34,7 @@ fn main() {
 
     loop {
         print!("> ");
-        io::stdout().flush().unwrap();
+        io::stdout().flush().expect("failed to flush stdout");
 
         let mut input = String::new();
         io::stdin()

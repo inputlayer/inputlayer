@@ -15,7 +15,7 @@ fn main() {
     };
     let mut engine = DatalogEngine::with_config(config_none);
     engine.add_fact("edge", edges.clone());
-    let results = engine.execute(base_query).unwrap();
+    let results = engine.execute(base_query).expect("execution failed");
     println!("  Results: {results:?}");
 
     // Test with ONLY join planning
@@ -29,7 +29,7 @@ fn main() {
     };
     let mut engine = DatalogEngine::with_config(config_jp);
     engine.add_fact("edge", edges.clone());
-    let results = engine.execute(base_query).unwrap();
+    let results = engine.execute(base_query).expect("execution failed");
     println!("  Results: {results:?}");
 
     // Test with ONLY SIP
@@ -43,7 +43,7 @@ fn main() {
     };
     let mut engine = DatalogEngine::with_config(config_sip);
     engine.add_fact("edge", edges.clone());
-    let results = engine.execute(base_query).unwrap();
+    let results = engine.execute(base_query).expect("execution failed");
     println!("  Results: {results:?}");
 
     // Test with ONLY subplan sharing
@@ -57,7 +57,7 @@ fn main() {
     };
     let mut engine = DatalogEngine::with_config(config_ss);
     engine.add_fact("edge", edges.clone());
-    let results = engine.execute(base_query).unwrap();
+    let results = engine.execute(base_query).expect("execution failed");
     println!("  Results: {results:?}");
 
     // Test with ONLY boolean specialization
@@ -71,6 +71,6 @@ fn main() {
     };
     let mut engine = DatalogEngine::with_config(config_bs);
     engine.add_fact("edge", edges.clone());
-    let results = engine.execute(base_query).unwrap();
+    let results = engine.execute(base_query).expect("execution failed");
     println!("  Results: {results:?}");
 }

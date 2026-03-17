@@ -302,6 +302,7 @@ fn parse_atom_for_fact(input: &str) -> Result<Atom, String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

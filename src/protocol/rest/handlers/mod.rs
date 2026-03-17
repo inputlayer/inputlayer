@@ -134,6 +134,7 @@ pub fn json_tuples_to_tuples_with_limits(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

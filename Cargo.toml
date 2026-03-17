@@ -196,6 +196,9 @@ struct_field_names = "allow"
 manual_let_else = "allow"
 only_used_in_recursion = "allow"
 wildcard_imports = "allow"
+
+# Restriction lints opted into for safety
+unwrap_used = "warn"
 single_match_else = "allow"
 if_not_else = "allow"
 items_after_statements = "allow"

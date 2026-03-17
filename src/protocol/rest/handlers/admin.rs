@@ -297,6 +297,7 @@ pub async fn prometheus_metrics(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::Config;

@@ -333,6 +333,7 @@ fn escape_csv_field(s: &str, options: &CsvOptions) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use tempfile::TempDir;

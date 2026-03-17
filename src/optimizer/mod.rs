@@ -577,7 +577,10 @@ impl Optimizer {
                 if non_empty.is_empty() {
                     IRNode::Union { inputs: vec![] }
                 } else if non_empty.len() == 1 {
-                    non_empty.into_iter().next().unwrap()
+                    non_empty
+                        .into_iter()
+                        .next()
+                        .expect("non_empty has exactly 1 element as checked by len() == 1")
                 } else {
                     IRNode::Union { inputs: non_empty }
                 }
@@ -1470,6 +1473,7 @@ impl Default for Optimizer {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

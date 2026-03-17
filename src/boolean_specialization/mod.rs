@@ -808,6 +808,7 @@ impl Default for BooleanSpecializer {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

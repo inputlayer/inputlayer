@@ -2,6 +2,12 @@
 //!
 //! Core business logic for Datalog queries and data operations, used by the HTTP/WebSocket API.
 //! Uses `parking_lot::RwLock` (no poisoning) and `AtomicU64` (lock-free counters).
+//!
+//! # Error handling
+//!
+//! Production code in this module avoids `unwrap()` entirely - all fallible operations
+//! use `?`, `map_err()`, `unwrap_or()`, or `unwrap_or_default()` for proper error propagation.
+//! Test code uses `expect()` with descriptive messages for better failure diagnostics.
 
 use crate::ast::Term;
 use crate::index_manager::{DistanceMetric, HnswConfig, IndexStats, IndexType, RegisteredIndex};
@@ -4309,6 +4315,7 @@ fn find_query_source_relation(program: &str) -> Option<String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::ast::Term;
@@ -4317,7 +4324,7 @@ mod tests {
     /// Create a Config with a unique temp directory. Returns TempDir so it stays alive
     /// for the test's duration and auto-cleans on drop.
     fn make_test_config() -> (Config, tempfile::TempDir) {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tempfile::tempdir().expect("failed to create temp dir");
         let mut config = Config::default();
         config.storage.data_dir = tmp.path().to_path_buf();
         (config, tmp)
@@ -4326,13 +4333,19 @@ mod tests {
     /// Convenience: create a Handler with isolated temp storage.
     fn make_test_handler() -> (Handler, tempfile::TempDir) {
         let (config, tmp) = make_test_config();
-        (Handler::from_config(config).unwrap(), tmp)
+        (
+            Handler::from_config(config).expect("handler creation failed"),
+            tmp,
+        )
     }
 
     /// Convenience: create a StorageEngine with isolated temp storage.
     fn make_test_storage() -> (StorageEngine, tempfile::TempDir) {
         let (config, tmp) = make_test_config();
-        (StorageEngine::new(config).unwrap(), tmp)
+        (
+            StorageEngine::new(config).expect("storage creation failed"),
+            tmp,
+        )
     }
 
     // --- term_to_value tests ---
@@ -4340,7 +4353,7 @@ mod tests {
     #[test]
     fn test_term_to_value_int() {
         assert_eq!(
-            term_to_value(&Term::Constant(42)).unwrap(),
+            term_to_value(&Term::Constant(42)).expect("term conversion failed"),
             Value::Int64(42)
         );
     }
@@ -4348,7 +4361,7 @@ mod tests {
     #[test]
     fn test_term_to_value_float() {
         assert_eq!(
-            term_to_value(&Term::FloatConstant(3.14)).unwrap(),
+            term_to_value(&Term::FloatConstant(3.14)).expect("term conversion failed"),
             Value::Float64(3.14)
         );
     }
@@ -4356,7 +4369,8 @@ mod tests {
     #[test]
     fn test_term_to_value_string() {
         assert_eq!(
-            term_to_value(&Term::StringConstant("hello".to_string())).unwrap(),
+            term_to_value(&Term::StringConstant("hello".to_string()))
+                .expect("term conversion failed"),
             Value::string("hello")
         );
     }
@@ -4364,14 +4378,15 @@ mod tests {
     #[test]
     fn test_term_to_value_bool() {
         assert_eq!(
-            term_to_value(&Term::BoolConstant(true)).unwrap(),
+            term_to_value(&Term::BoolConstant(true)).expect("term conversion failed"),
             Value::Bool(true)
         );
     }
 
     #[test]
     fn test_term_to_value_vector() {
-        let result = term_to_value(&Term::VectorLiteral(vec![1.0, 2.0, 3.0])).unwrap();
+        let result = term_to_value(&Term::VectorLiteral(vec![1.0, 2.0, 3.0]))
+            .expect("term conversion failed");
         assert_eq!(result, Value::vector(vec![1.0, 2.0, 3.0]));
     }
 
@@ -4392,14 +4407,17 @@ mod tests {
     #[test]
     fn test_term_to_value_negative_int() {
         assert_eq!(
-            term_to_value(&Term::Constant(-100)).unwrap(),
+            term_to_value(&Term::Constant(-100)).expect("term conversion failed"),
             Value::Int64(-100)
         );
     }
 
     #[test]
     fn test_term_to_value_zero() {
-        assert_eq!(term_to_value(&Term::Constant(0)).unwrap(), Value::Int64(0));
+        assert_eq!(
+            term_to_value(&Term::Constant(0)).expect("term conversion failed"),
+            Value::Int64(0)
+        );
     }
 
     // --- Handler construction tests ---
@@ -4436,20 +4454,24 @@ mod tests {
     fn handler_with_kg(kg_name: &str) -> (Handler, tempfile::TempDir) {
         let (mut config, tmp) = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
-        let handler = Handler::from_config(config).unwrap();
+        let handler = Handler::from_config(config).expect("handler creation failed");
         handler
             .get_storage()
             .ensure_knowledge_graph(kg_name)
-            .unwrap();
+            .expect("knowledge graph creation failed");
         (handler, tmp)
     }
 
     #[test]
     fn test_handler_create_and_close_session() {
         let (handler, _tmp) = handler_with_kg("sess_create_test");
-        let session_id = handler.create_session("sess_create_test").unwrap();
+        let session_id = handler
+            .create_session("sess_create_test")
+            .expect("session creation failed");
         assert!(!session_id.is_empty());
-        handler.close_session(&session_id).unwrap();
+        handler
+            .close_session(&session_id)
+            .expect("session close failed");
     }
 
     #[test]
@@ -4461,24 +4483,28 @@ mod tests {
     #[test]
     fn test_handler_session_insert_ephemeral() {
         let (handler, _tmp) = handler_with_kg("sess_insert_test");
-        let sid = handler.create_session("sess_insert_test").unwrap();
+        let sid = handler
+            .create_session("sess_insert_test")
+            .expect("session creation failed");
         let tuples = vec![Tuple::new(vec![Value::Int64(1), Value::Int64(2)])];
         handler
             .session_insert_ephemeral(&sid, "edge", tuples)
-            .unwrap();
+            .expect("ephemeral insert failed");
     }
 
     #[test]
     fn test_handler_session_retract_ephemeral() {
         let (handler, _tmp) = handler_with_kg("sess_retract_test");
-        let sid = handler.create_session("sess_retract_test").unwrap();
+        let sid = handler
+            .create_session("sess_retract_test")
+            .expect("session creation failed");
         let tuples = vec![Tuple::new(vec![Value::Int64(1)])];
         handler
             .session_insert_ephemeral(&sid, "r", tuples.clone())
-            .unwrap();
+            .expect("ephemeral insert failed");
         let retracted = handler
             .session_retract_ephemeral(&sid, "r", tuples)
-            .unwrap();
+            .expect("ephemeral retract failed");
         assert_eq!(retracted, 1);
     }
 
@@ -4546,9 +4572,9 @@ mod tests {
         handler.notify_persistent_update("kg", "b", "insert", 2);
         handler.notify_kg_change("kg2", "created");
 
-        let n1 = rx.try_recv().unwrap();
-        let n2 = rx.try_recv().unwrap();
-        let n3 = rx.try_recv().unwrap();
+        let n1 = rx.try_recv().expect("notification receive failed");
+        let n2 = rx.try_recv().expect("notification receive failed");
+        let n3 = rx.try_recv().expect("notification receive failed");
         assert_eq!(n1.seq(), 1);
         assert_eq!(n2.seq(), 2);
         assert_eq!(n3.seq(), 3);
@@ -4606,9 +4632,11 @@ mod tests {
                 "+edge[(1,2), (3,4)]".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 1);
-        let actual = result.rows[0].values[0].as_str().unwrap();
+        let actual = result.rows[0].values[0]
+            .as_str()
+            .expect("expected string value");
         assert!(
             actual.contains("Inserted 2"),
             "Expected 'Inserted 2', got: {actual}"
@@ -4621,11 +4649,11 @@ mod tests {
         handler
             .query_program(None, "+data[(1,), (2,), (3,)]".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         let result = handler
             .query_program(None, "?data(X)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 3);
     }
 
@@ -4633,10 +4661,13 @@ mod tests {
     async fn test_query_program_comment_stripping() {
         let (handler, _tmp) = make_test_handler();
         let program = "% this is a comment\n// this too\n+test_data[(1,)]".to_string();
-        let result = handler.query_program(None, program).await.unwrap();
+        let result = handler
+            .query_program(None, program)
+            .await
+            .expect("query execution failed");
         assert!(result.rows[0].values[0]
             .as_str()
-            .unwrap()
+            .expect("operation should succeed")
             .contains("Inserted"));
     }
 
@@ -4644,7 +4675,10 @@ mod tests {
     async fn test_query_program_session_fact() {
         let (handler, _tmp) = make_test_handler();
         let program = "temp(42)\n?temp(X)".to_string();
-        let result = handler.query_program(None, program).await.unwrap();
+        let result = handler
+            .query_program(None, program)
+            .await
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 1);
     }
 
@@ -4654,9 +4688,12 @@ mod tests {
         handler
             .query_program(None, "+base[(1,), (2,), (3,)]".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         let program = "doubled(X, Y) <- base(X), Y = X * 2\n?doubled(X, Y)".to_string();
-        let result = handler.query_program(None, program).await.unwrap();
+        let result = handler
+            .query_program(None, program)
+            .await
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 3);
     }
 
@@ -4666,15 +4703,15 @@ mod tests {
         handler
             .query_program(None, "+nodes[(1,), (2,)]".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         handler
             .query_program(None, "+big(X) <- nodes(X), X > 1".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         let result = handler
             .query_program(None, "?big(X)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 1);
     }
 
@@ -4684,19 +4721,19 @@ mod tests {
         handler
             .query_program(None, "+del_test[(1, 2), (3, 4)]".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         let result = handler
             .query_program(None, "-del_test(1, 2)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert!(result.rows[0].values[0]
             .as_str()
-            .unwrap()
+            .expect("operation should succeed")
             .contains("Deleted"));
         let remaining = handler
             .query_program(None, "?del_test(X, Y)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(remaining.rows.len(), 1);
     }
 
@@ -4709,10 +4746,10 @@ mod tests {
                 "+kgdata[(1,)]".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert!(result.rows[0].values[0]
             .as_str()
-            .unwrap()
+            .expect("operation should succeed")
             .contains("Inserted"));
     }
 
@@ -4722,7 +4759,7 @@ mod tests {
         let result = handler
             .query_program(None, "?empty_relation(X)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 0);
     }
 
@@ -4737,7 +4774,7 @@ mod tests {
             "__q__(X, Y) <- edge(X, Y)".to_string(),
         );
         assert!(result.is_ok(), "explain failed: {:?}", result.err());
-        let (trace, optimizations) = result.unwrap();
+        let (trace, optimizations) = result.expect("operation should succeed");
         assert!(!trace.is_empty());
         assert!(!optimizations.is_empty());
     }
@@ -4759,7 +4796,7 @@ mod tests {
             "__q__(X, Z) <- edge(X, Y), edge(Y, Z)".to_string(),
         );
         assert!(result.is_ok(), "explain join failed: {:?}", result.err());
-        let (trace, _) = result.unwrap();
+        let (trace, _) = result.expect("operation should succeed");
         assert!(!trace.is_empty());
     }
 
@@ -4793,7 +4830,7 @@ mod tests {
                 Some("explain_opt_kg".to_string()),
                 "__q__(X, Y) <- edge(X, Y)".to_string(),
             )
-            .unwrap();
+            .expect("operation should succeed");
         assert!(optimizations.len() >= 4);
         assert!(optimizations.iter().any(|o| o.contains("Join Planning")));
         assert!(optimizations.iter().any(|o| o.contains("SIP")));
@@ -4812,10 +4849,10 @@ mod tests {
                 "+person(name: string, age: int)".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert!(result.rows[0].values[0]
             .as_str()
-            .unwrap()
+            .expect("operation should succeed")
             .contains("Schema"));
     }
 
@@ -4828,17 +4865,17 @@ mod tests {
                 "+bd_rel[(1, 2), (3, 4), (5, 6)]".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         let result = handler
             .query_program(
                 Some("bulk_del_test".to_string()),
                 "-bd_rel[(1, 2), (3, 4)]".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert!(result.rows[0].values[0]
             .as_str()
-            .unwrap()
+            .expect("operation should succeed")
             .contains("Deleted"));
         // Verify only 1 fact remains
         let remaining = handler
@@ -4847,7 +4884,7 @@ mod tests {
                 "?bd_rel(X, Y)".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(remaining.rows.len(), 1);
     }
 
@@ -4860,15 +4897,18 @@ mod tests {
                 "+vals[(1,), (2,), (3,)]".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         let result = handler
             .query_program(
                 Some("persist_rule_test".to_string()),
                 "+doubled(X, Y) <- vals(X), Y = X * 2".to_string(),
             )
             .await
-            .unwrap();
-        assert!(result.rows[0].values[0].as_str().unwrap().contains("Rule"));
+            .expect("query execution failed");
+        assert!(result.rows[0].values[0]
+            .as_str()
+            .expect("expected string value")
+            .contains("Rule"));
     }
 
     #[tokio::test]
@@ -4880,17 +4920,17 @@ mod tests {
                 "+items[(1, 10), (2, 20), (3, 30)]".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         let result = handler
             .query_program(
                 Some("cond_del_test".to_string()),
                 "-items(X, Y) <- Y > 15".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert!(result.rows[0].values[0]
             .as_str()
-            .unwrap()
+            .expect("operation should succeed")
             .contains("delete"));
         // Verify only (1, 10) remains
         let remaining = handler
@@ -4899,7 +4939,7 @@ mod tests {
                 "?items(X, Y)".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(remaining.rows.len(), 1);
     }
 
@@ -4910,7 +4950,7 @@ mod tests {
         let result = handler
             .query_program(Some("empty_prog_test".to_string()), "".to_string())
             .await;
-        assert!(result.is_err() || result.unwrap().rows.len() <= 1);
+        assert!(result.is_err() || result.expect("operation should succeed").rows.len() <= 1);
     }
 
     #[tokio::test]
@@ -4923,7 +4963,7 @@ mod tests {
                 "% just a comment\n// another comment".to_string(),
             )
             .await;
-        assert!(result.is_err() || result.unwrap().rows.len() <= 1);
+        assert!(result.is_err() || result.expect("operation should succeed").rows.len() <= 1);
     }
 
     #[tokio::test]
@@ -4935,7 +4975,7 @@ mod tests {
                 "+alpha[(1,)]\n+beta[(2,)]".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         // When multiple queries exist, only the last query is executed
         let result = handler
             .query_program(
@@ -4943,7 +4983,7 @@ mod tests {
                 "?alpha(X)\n?beta(X)".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         // Last query is ?beta(X), should return 1 row
         assert_eq!(result.rows.len(), 1);
     }
@@ -4959,15 +4999,17 @@ mod tests {
                 "+sdata[(1,), (2,)]".to_string(),
             )
             .await
-            .unwrap();
-        let sid = handler.create_session("sess_clean_q").unwrap();
+            .expect("query execution failed");
+        let sid = handler
+            .create_session("sess_clean_q")
+            .expect("session creation failed");
         // Clean session uses fast path (delegates to query_program)
         let result = handler
             .query_program_with_session(&sid, "?sdata(X)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 2);
-        handler.close_session(&sid).unwrap();
+        handler.close_session(&sid).expect("session close failed");
     }
 
     #[tokio::test]
@@ -4976,18 +5018,20 @@ mod tests {
         handler
             .query_program(Some("sess_eph_q".to_string()), "+data[(1,)]".to_string())
             .await
-            .unwrap();
-        let sid = handler.create_session("sess_eph_q").unwrap();
+            .expect("query execution failed");
+        let sid = handler
+            .create_session("sess_eph_q")
+            .expect("session creation failed");
         handler
             .session_insert_ephemeral(&sid, "data", vec![Tuple::new(vec![Value::Int64(2)])])
-            .unwrap();
+            .expect("ephemeral insert failed");
         // query_program_with_session takes raw Datalog rules, not ?shorthand
         let result = handler
             .query_program_with_session(&sid, "__q__(X) <- data(X)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 2);
-        handler.close_session(&sid).unwrap();
+        handler.close_session(&sid).expect("session close failed");
     }
 
     #[tokio::test]
@@ -5010,21 +5054,23 @@ mod tests {
                 "+base[(1,), (2,), (3,)]".to_string(),
             )
             .await
-            .unwrap();
-        let sid = handler.create_session("sess_rule_q").unwrap();
+            .expect("query execution failed");
+        let sid = handler
+            .create_session("sess_rule_q")
+            .expect("session creation failed");
         // Parse a rule and add it to the session
         let rule_text = "doubled(X, Y) <- base(X), Y = X * 2";
-        let rule = crate::parser::parse_rule(rule_text).unwrap();
+        let rule = crate::parser::parse_rule(rule_text).expect("rule parsing failed");
         handler
             .session_add_rule(&sid, rule, rule_text.to_string())
-            .unwrap();
+            .expect("session add rule failed");
         // query_program_with_session takes raw Datalog rules, not ?shorthand
         let result = handler
             .query_program_with_session(&sid, "__q__(X, Y) <- doubled(X, Y)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 3);
-        handler.close_session(&sid).unwrap();
+        handler.close_session(&sid).expect("session close failed");
     }
 
     // --- validate_tuples_against_schema tests ---
@@ -5049,7 +5095,7 @@ mod tests {
                 "+typed_rel(name: string, value: int)".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         // Valid tuples
         let valid = vec![Tuple::new(vec![Value::string("alice"), Value::Int64(42)])];
         assert!(handler
@@ -5094,12 +5140,12 @@ mod tests {
         handler
             .query_program(Some("counter_test".to_string()), "+stuff[(1,)]".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(handler.total_queries(), 1);
         handler
             .query_program(Some("counter_test".to_string()), "?stuff(X)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(handler.total_queries(), 2);
     }
 
@@ -5113,7 +5159,7 @@ mod tests {
                 "+data[(1,), (2,)]".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(handler.total_inserts(), 2);
     }
 
@@ -5136,7 +5182,7 @@ mod tests {
         handler
             .query_program(Some(kg.to_string()), "+edge[(10, 20)]".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
 
         // 2. Register persistent rule: reachable(X,Y) <- edge(X,Y)
         handler
@@ -5145,11 +5191,11 @@ mod tests {
                 "+reachable(X, Y) <- edge(X, Y)".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
 
         // 3. Create two sessions (two "clients")
-        let client_a = handler.create_session(kg).unwrap();
-        let client_b = handler.create_session(kg).unwrap();
+        let client_a = handler.create_session(kg).expect("session creation failed");
+        let client_b = handler.create_session(kg).expect("session creation failed");
 
         // 4. Client A inserts ephemeral edge(1, 2)
         handler
@@ -5158,7 +5204,7 @@ mod tests {
                 "edge",
                 vec![Tuple::new(vec![Value::Int64(1), Value::Int64(2)])],
             )
-            .unwrap();
+            .expect("ephemeral insert failed");
 
         // 5. Client B inserts ephemeral edge(3, 4)
         handler
@@ -5167,13 +5213,13 @@ mod tests {
                 "edge",
                 vec![Tuple::new(vec![Value::Int64(3), Value::Int64(4)])],
             )
-            .unwrap();
+            .expect("ephemeral insert failed");
 
         // 6. Client A queries reachable → sees persistent (10,20) + ephemeral (1,2)
         let result_a = handler
             .query_program_with_session(&client_a, "__q__(X, Y) <- reachable(X, Y)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(
             result_a.rows.len(),
             2,
@@ -5184,7 +5230,7 @@ mod tests {
         let result_b = handler
             .query_program_with_session(&client_b, "__q__(X, Y) <- reachable(X, Y)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(
             result_b.rows.len(),
             2,
@@ -5195,12 +5241,22 @@ mod tests {
         let a_values: std::collections::HashSet<(i64, i64)> = result_a
             .rows
             .iter()
-            .map(|r| (r.values[0].as_i64().unwrap(), r.values[1].as_i64().unwrap()))
+            .map(|r| {
+                (
+                    r.values[0].as_i64().expect("expected i64 value"),
+                    r.values[1].as_i64().expect("expected i64 value"),
+                )
+            })
             .collect();
         let b_values: std::collections::HashSet<(i64, i64)> = result_b
             .rows
             .iter()
-            .map(|r| (r.values[0].as_i64().unwrap(), r.values[1].as_i64().unwrap()))
+            .map(|r| {
+                (
+                    r.values[0].as_i64().expect("expected i64 value"),
+                    r.values[1].as_i64().expect("expected i64 value"),
+                )
+            })
             .collect();
 
         // Both see the persistent fact (10, 20)
@@ -5217,15 +5273,19 @@ mod tests {
         let result_no_session = handler
             .query_program(Some(kg.to_string()), "?reachable(X, Y)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(
             result_no_session.rows.len(),
             1,
             "Without session, only the persistent edge(10,20) should produce reachable(10,20)"
         );
 
-        handler.close_session(&client_a).unwrap();
-        handler.close_session(&client_b).unwrap();
+        handler
+            .close_session(&client_a)
+            .expect("session close failed");
+        handler
+            .close_session(&client_b)
+            .expect("session close failed");
     }
 
     #[tokio::test]
@@ -5242,10 +5302,10 @@ mod tests {
                 "+path(X, Y) <- link(X, Y)".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
 
-        let client_a = handler.create_session(kg).unwrap();
-        let client_b = handler.create_session(kg).unwrap();
+        let client_a = handler.create_session(kg).expect("session creation failed");
+        let client_b = handler.create_session(kg).expect("session creation failed");
 
         // Client A: link(1,2), link(2,3)
         handler
@@ -5257,7 +5317,7 @@ mod tests {
                     Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
                 ],
             )
-            .unwrap();
+            .expect("ephemeral insert failed");
 
         // Client B: link(100,200) (completely different)
         handler
@@ -5266,31 +5326,35 @@ mod tests {
                 "link",
                 vec![Tuple::new(vec![Value::Int64(100), Value::Int64(200)])],
             )
-            .unwrap();
+            .expect("ephemeral insert failed");
 
         // Client A → 2 path results
         let result_a = handler
             .query_program_with_session(&client_a, "__q__(X, Y) <- path(X, Y)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result_a.rows.len(), 2);
 
         // Client B → 1 path result
         let result_b = handler
             .query_program_with_session(&client_b, "__q__(X, Y) <- path(X, Y)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result_b.rows.len(), 1);
 
         // No session → 0 results (no persistent link facts)
         let result_none = handler
             .query_program(Some(kg.to_string()), "?path(X, Y)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result_none.rows.len(), 0);
 
-        handler.close_session(&client_a).unwrap();
-        handler.close_session(&client_b).unwrap();
+        handler
+            .close_session(&client_a)
+            .expect("session close failed");
+        handler
+            .close_session(&client_b)
+            .expect("session close failed");
     }
 
     #[tokio::test]
@@ -5303,18 +5367,18 @@ mod tests {
         handler
             .query_program(Some(kg.to_string()), "+items[(1,), (2,)]".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
 
-        let sid = handler.create_session(kg).unwrap();
+        let sid = handler.create_session(kg).expect("session creation failed");
         // Ephemeral fact
         handler
             .session_insert_ephemeral(&sid, "items", vec![Tuple::new(vec![Value::Int64(3)])])
-            .unwrap();
+            .expect("ephemeral insert failed");
 
         let result = handler
             .query_program_with_session(&sid, "__q__(X) <- items(X)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 3);
 
         // Count provenance tags
@@ -5333,7 +5397,7 @@ mod tests {
         assert_eq!(persistent_count, 2, "2 tuples from persistent data");
         assert_eq!(ephemeral_count, 1, "1 tuple from ephemeral data");
 
-        handler.close_session(&sid).unwrap();
+        handler.close_session(&sid).expect("session close failed");
     }
 
     #[tokio::test]
@@ -5346,39 +5410,44 @@ mod tests {
         handler
             .query_program(Some(kg.to_string()), "+edge[(1, 2), (2, 3)]".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
 
-        let client_a = handler.create_session(kg).unwrap();
-        let client_b = handler.create_session(kg).unwrap();
+        let client_a = handler.create_session(kg).expect("session creation failed");
+        let client_b = handler.create_session(kg).expect("session creation failed");
 
         // Client A adds an ephemeral rule: path(X,Y) <- edge(X,Y)
-        let rule_a = crate::parser::parse_rule("path(X, Y) <- edge(X, Y)").unwrap();
+        let rule_a =
+            crate::parser::parse_rule("path(X, Y) <- edge(X, Y)").expect("rule parsing failed");
         handler
             .session_add_rule(&client_a, rule_a, "path(X, Y) <- edge(X, Y)".to_string())
-            .unwrap();
+            .expect("session add rule failed");
 
         // Client B inserts a trivial ephemeral fact to make it "dirty"
         // (so it uses the slow path and doesn't delegate to query_program)
         handler
             .session_insert_ephemeral(&client_b, "marker", vec![Tuple::new(vec![Value::Int64(0)])])
-            .unwrap();
+            .expect("ephemeral insert failed");
 
         // Client A queries path → 2 results (from the ephemeral rule on persistent edges)
         let result_a = handler
             .query_program_with_session(&client_a, "__q__(X, Y) <- path(X, Y)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result_a.rows.len(), 2);
 
         // Client B queries path → 0 results (no "path" rule in client B's scope)
         let result_b = handler
             .query_program_with_session(&client_b, "__q__(X, Y) <- path(X, Y)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result_b.rows.len(), 0);
 
-        handler.close_session(&client_a).unwrap();
-        handler.close_session(&client_b).unwrap();
+        handler
+            .close_session(&client_a)
+            .expect("session close failed");
+        handler
+            .close_session(&client_b)
+            .expect("session close failed");
     }
 
     #[tokio::test]
@@ -5393,28 +5462,28 @@ mod tests {
                 "+cleanup_rule(X) <- base(X)".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
 
-        let sid = handler.create_session(kg).unwrap();
+        let sid = handler.create_session(kg).expect("session creation failed");
         handler
             .session_insert_ephemeral(&sid, "base", vec![Tuple::new(vec![Value::Int64(42)])])
-            .unwrap();
+            .expect("ephemeral insert failed");
 
         // Query while session is active → 1 result
         let result = handler
             .query_program_with_session(&sid, "__q__(X) <- cleanup_rule(X)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 1);
 
         // Close session
-        handler.close_session(&sid).unwrap();
+        handler.close_session(&sid).expect("session close failed");
 
         // Query without session → 0 results
         let result = handler
             .query_program(Some(kg.to_string()), "?cleanup_rule(X)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 0);
     }
 
@@ -5428,19 +5497,19 @@ mod tests {
         handler
             .query_program(Some(kg.to_string()), "+doc[(1,), (2,), (3,)]".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         handler
             .query_program(
                 Some(kg.to_string()),
                 "+relevant(X) <- doc(X), query_embedding(X)".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
 
         // Create sessions and insert different query embeddings
         let mut sessions = vec![];
         for i in 0..10i64 {
-            let sid = handler.create_session(kg).unwrap();
+            let sid = handler.create_session(kg).expect("session creation failed");
             // Each session queries for a different doc: session i queries for doc i%3+1
             handler
                 .session_insert_ephemeral(
@@ -5448,7 +5517,7 @@ mod tests {
                     "query_embedding",
                     vec![Tuple::new(vec![Value::Int64(i % 3 + 1)])],
                 )
-                .unwrap();
+                .expect("ephemeral insert failed");
             sessions.push(sid);
         }
 
@@ -5457,7 +5526,7 @@ mod tests {
             let result = handler
                 .query_program_with_session(sid, "__q__(X) <- relevant(X)".to_string())
                 .await
-                .unwrap();
+                .expect("query execution failed");
             assert_eq!(
                 result.rows.len(),
                 1,
@@ -5467,7 +5536,7 @@ mod tests {
 
         // Cleanup
         for sid in &sessions {
-            handler.close_session(sid).unwrap();
+            handler.close_session(sid).expect("session close failed");
         }
     }
 
@@ -5480,9 +5549,9 @@ mod tests {
         handler
             .query_program(Some(kg.to_string()), "+visible(X) <- item(X)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
 
-        let sid = handler.create_session(kg).unwrap();
+        let sid = handler.create_session(kg).expect("session creation failed");
         handler
             .session_insert_ephemeral(
                 &sid,
@@ -5493,28 +5562,28 @@ mod tests {
                     Tuple::new(vec![Value::Int64(3)]),
                 ],
             )
-            .unwrap();
+            .expect("ephemeral insert failed");
 
         // Query → 3 visible
         let result = handler
             .query_program_with_session(&sid, "__q__(X) <- visible(X)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 3);
 
         // Retract item(2)
         handler
             .session_retract_ephemeral(&sid, "item", vec![Tuple::new(vec![Value::Int64(2)])])
-            .unwrap();
+            .expect("ephemeral retract failed");
 
         // Query → 2 visible
         let result = handler
             .query_program_with_session(&sid, "__q__(X) <- visible(X)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 2);
 
-        handler.close_session(&sid).unwrap();
+        handler.close_session(&sid).expect("session close failed");
     }
 
     #[tokio::test]
@@ -5525,28 +5594,28 @@ mod tests {
         handler
             .query_program(Some(kg.to_string()), "+derived(X) <- src(X)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
 
-        let sid = handler.create_session(kg).unwrap();
+        let sid = handler.create_session(kg).expect("session creation failed");
         handler
             .session_insert_ephemeral(&sid, "src", vec![Tuple::new(vec![Value::Int64(1)])])
-            .unwrap();
+            .expect("ephemeral insert failed");
 
         let result = handler
             .query_program_with_session(&sid, "__q__(X) <- derived(X)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
 
         // Result should have metadata about ephemeral participation
         assert!(result.metadata.is_some());
-        let meta = result.metadata.unwrap();
+        let meta = result.metadata.expect("metadata should be present");
         assert!(meta.has_ephemeral);
         assert!(
             meta.ephemeral_sources.contains(&"src".to_string()),
             "metadata should report 'src' as ephemeral source"
         );
 
-        handler.close_session(&sid).unwrap();
+        handler.close_session(&sid).expect("session close failed");
     }
 
     // --- Notifications from mutations ---
@@ -5561,7 +5630,7 @@ mod tests {
                 "+edges[(1, 2), (3, 4)]".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         match rx.try_recv() {
             Ok(PersistentNotification::PersistentUpdate {
                 operation, count, ..
@@ -5582,7 +5651,7 @@ mod tests {
                 "+edges[(1, 2), (3, 4)]".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         let mut rx = handler.subscribe_notifications();
         handler
             .query_program(
@@ -5590,7 +5659,7 @@ mod tests {
                 "-edges(1, 2)".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         match rx.try_recv() {
             Ok(PersistentNotification::PersistentUpdate {
                 operation, count, ..
@@ -5653,7 +5722,9 @@ mod tests {
         let (handler, _tmp) = make_test_handler();
         let storage = handler.get_storage_mut();
         // Should be able to create a new KG
-        storage.create_knowledge_graph("test_mut").unwrap();
+        storage
+            .create_knowledge_graph("test_mut")
+            .expect("knowledge graph creation failed");
         assert!(storage
             .list_knowledge_graphs()
             .contains(&"test_mut".to_string()));
@@ -5702,7 +5773,7 @@ mod tests {
         let result = handler
             .query_program(Some("mixed_comments".to_string()), program.to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 2);
     }
 
@@ -5715,10 +5786,10 @@ mod tests {
         handler
             .query_program(Some(kg.to_string()), "+base[(10,)]".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
 
         // Create session
-        let sid = handler.create_session(kg).unwrap();
+        let sid = handler.create_session(kg).expect("session creation failed");
 
         // Add ephemeral facts
         handler
@@ -5730,28 +5801,28 @@ mod tests {
                     Tuple::new(vec![Value::Int64(30)]),
                 ],
             )
-            .unwrap();
+            .expect("ephemeral insert failed");
 
         // Query with session → 3 results
         let result = handler
             .query_program_with_session(&sid, "__q__(X) <- base(X)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 3);
 
         // Retract one ephemeral fact
         handler
             .session_retract_ephemeral(&sid, "base", vec![Tuple::new(vec![Value::Int64(20)])])
-            .unwrap();
+            .expect("ephemeral retract failed");
 
         // Query again → 2 results
         let result = handler
             .query_program_with_session(&sid, "__q__(X) <- base(X)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 2);
 
-        handler.close_session(&sid).unwrap();
+        handler.close_session(&sid).expect("session close failed");
     }
 
     // === Regression tests for validate_relation_name ===
@@ -5811,12 +5882,14 @@ mod tests {
         let (mut config, _tmp) = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
         config.storage.performance.max_insert_tuples = 3;
-        let handler = Handler::from_config(config).unwrap();
+        let handler = Handler::from_config(config).expect("handler creation failed");
         handler
             .get_storage()
             .ensure_knowledge_graph("test_limit")
-            .unwrap();
-        let sid = handler.create_session("test_limit").unwrap();
+            .expect("knowledge graph creation failed");
+        let sid = handler
+            .create_session("test_limit")
+            .expect("session creation failed");
 
         // 4 tuples should exceed the limit of 3
         let tuples: Vec<Tuple> = (0..4).map(|i| Tuple::new(vec![Value::Int64(i)])).collect();
@@ -5830,12 +5903,14 @@ mod tests {
         let (mut config, _tmp) = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
         config.storage.performance.max_insert_tuples = 2;
-        let handler = Handler::from_config(config).unwrap();
+        let handler = Handler::from_config(config).expect("handler creation failed");
         handler
             .get_storage()
             .ensure_knowledge_graph("test_limit2")
-            .unwrap();
-        let sid = handler.create_session("test_limit2").unwrap();
+            .expect("knowledge graph creation failed");
+        let sid = handler
+            .create_session("test_limit2")
+            .expect("session creation failed");
 
         let tuples: Vec<Tuple> = (0..3).map(|i| Tuple::new(vec![Value::Int64(i)])).collect();
         let result = handler.session_retract_ephemeral(&sid, "rel", tuples);
@@ -5848,12 +5923,14 @@ mod tests {
         let (mut config, _tmp) = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
         config.storage.performance.max_insert_tuples = 10;
-        let handler = Handler::from_config(config).unwrap();
+        let handler = Handler::from_config(config).expect("handler creation failed");
         handler
             .get_storage()
             .ensure_knowledge_graph("test_ok")
-            .unwrap();
-        let sid = handler.create_session("test_ok").unwrap();
+            .expect("knowledge graph creation failed");
+        let sid = handler
+            .create_session("test_ok")
+            .expect("session creation failed");
 
         let tuples: Vec<Tuple> = (0..5).map(|i| Tuple::new(vec![Value::Int64(i)])).collect();
         assert!(handler
@@ -5864,7 +5941,9 @@ mod tests {
     #[test]
     fn test_session_insert_ephemeral_rejects_empty_relation() {
         let (handler, _tmp) = handler_with_kg("rel_name_test");
-        let sid = handler.create_session("rel_name_test").unwrap();
+        let sid = handler
+            .create_session("rel_name_test")
+            .expect("session creation failed");
         let tuples = vec![Tuple::new(vec![Value::Int64(1)])];
         let result = handler.session_insert_ephemeral(&sid, "", tuples);
         assert!(result.is_err());
@@ -5874,7 +5953,9 @@ mod tests {
     #[test]
     fn test_session_insert_ephemeral_rejects_reserved_prefix() {
         let (handler, _tmp) = handler_with_kg("rel_prefix_test");
-        let sid = handler.create_session("rel_prefix_test").unwrap();
+        let sid = handler
+            .create_session("rel_prefix_test")
+            .expect("session creation failed");
         let tuples = vec![Tuple::new(vec![Value::Int64(1)])];
         let result = handler.session_insert_ephemeral(&sid, "__internal", tuples);
         assert!(result.is_err());
@@ -5914,7 +5995,7 @@ mod tests {
             session_id: None,
             seq: 1,
         };
-        let json = serde_json::to_string(&notif).unwrap();
+        let json = serde_json::to_string(&notif).expect("serialization failed");
         assert!(json.contains("persistent_update"));
         assert!(json.contains("\"count\":5"));
         assert!(json.contains("\"timestamp_ms\":1700000000000"));
@@ -6055,11 +6136,11 @@ mod tests {
     async fn test_handler_query_updates_counter() {
         let (mut config, _tmp) = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
-        let handler = Handler::from_config(config).unwrap();
+        let handler = Handler::from_config(config).expect("handler creation failed");
         handler
             .query_program(Some("counter_kg".to_string()), "+data[(1,)]".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert!(handler.total_inserts() > 0 || handler.total_queries() > 0);
     }
 
@@ -6068,7 +6149,9 @@ mod tests {
         let (handler, _tmp) = make_test_handler();
         {
             let storage = handler.get_storage_mut();
-            storage.create_knowledge_graph("explain_h_kg").unwrap();
+            storage
+                .create_knowledge_graph("explain_h_kg")
+                .expect("knowledge graph creation failed");
         }
         let trace = handler.explain_query(
             Some("explain_h_kg".to_string()),
@@ -6089,18 +6172,18 @@ mod tests {
     async fn test_handler_query_select_all_tuples() {
         let (mut config, _tmp) = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
-        let handler = Handler::from_config(config).unwrap();
+        let handler = Handler::from_config(config).expect("handler creation failed");
         handler
             .query_program(
                 Some("sel_kg".to_string()),
                 "+items[(1, 10), (2, 20)]".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         let result = handler
             .query_program(Some("sel_kg".to_string()), "?items(X, Y)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 2);
     }
 
@@ -6108,14 +6191,14 @@ mod tests {
     async fn test_handler_query_with_rule() {
         let (mut config, _tmp) = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
-        let handler = Handler::from_config(config).unwrap();
+        let handler = Handler::from_config(config).expect("handler creation failed");
         handler
             .query_program(
                 Some("rule_q_kg".to_string()),
                 "+edge[(1, 2), (2, 3)]".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         // Define a persistent rule
         handler
             .query_program(
@@ -6123,12 +6206,12 @@ mod tests {
                 "+path(X, Y) <- edge(X, Y)".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         // Query the derived relation
         let result = handler
             .query_program(Some("rule_q_kg".to_string()), "?path(X, Y)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 2);
     }
 
@@ -6143,11 +6226,11 @@ mod tests {
     async fn test_handler_total_queries_after_query() {
         let (mut config, _tmp) = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
-        let handler = Handler::from_config(config).unwrap();
+        let handler = Handler::from_config(config).expect("handler creation failed");
         handler
             .query_program(Some("tq_kg".to_string()), "+data[(1,)]".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert!(handler.total_queries() > 0 || handler.total_inserts() > 0);
     }
 
@@ -6163,7 +6246,9 @@ mod tests {
         let (handler, _tmp) = make_test_handler();
         {
             let storage = handler.get_storage_mut();
-            storage.create_knowledge_graph("val_kg").unwrap();
+            storage
+                .create_knowledge_graph("val_kg")
+                .expect("knowledge graph creation failed");
         }
         // With no schema defined, validation should pass
         let tuples = vec![Tuple::new(vec![Value::Int32(1)])];
@@ -6182,7 +6267,7 @@ mod tests {
     async fn test_handler_query_program_insert_and_query() {
         let (mut config, _tmp) = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
-        let handler = Handler::from_config(config).unwrap();
+        let handler = Handler::from_config(config).expect("handler creation failed");
         // Insert data
         handler
             .query_program(
@@ -6190,12 +6275,12 @@ mod tests {
                 "+scores[(1, 100), (2, 200)]".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         // Query it back
         let result = handler
             .query_program(Some("qp_iq_kg".to_string()), "?scores(X, Y)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 2);
     }
 
@@ -6364,10 +6449,12 @@ mod tests {
                 None,
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
 
         // Create a session
-        let sid = handler.create_session("exec_prog_sr").unwrap();
+        let sid = handler
+            .create_session("exec_prog_sr")
+            .expect("session creation failed");
 
         // Add a session rule
         let result = handler
@@ -6378,21 +6465,24 @@ mod tests {
                 None,
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert!(result.rows[0].values[0]
             .as_str()
-            .unwrap()
+            .expect("operation should succeed")
             .contains("Session rule added"));
 
         // Verify session is now dirty (has rules)
-        let is_clean = handler.session_manager().is_session_clean(&sid).unwrap();
+        let is_clean = handler
+            .session_manager()
+            .is_session_clean(&sid)
+            .expect("session state check failed");
         assert!(!is_clean, "Session should be dirty after adding rule");
 
         // Query using the session rule - should return results
         let result = handler
             .execute_program(Some(&sid), None, "?path(X, Y)".to_string(), None)
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert_eq!(result.rows.len(), 2, "Should have 2 rows from path query");
     }
 
@@ -6400,7 +6490,7 @@ mod tests {
     async fn test_execute_program_touches_session_on_non_query() {
         let (mut config, tmp) = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
-        let storage = StorageEngine::new(config).unwrap();
+        let storage = StorageEngine::new(config).expect("storage creation failed");
         let session_config = SessionConfig {
             idle_timeout_secs: 1,
             ..SessionConfig::default()
@@ -6409,16 +6499,18 @@ mod tests {
         handler
             .get_storage()
             .ensure_knowledge_graph("sess_touch")
-            .unwrap();
+            .expect("knowledge graph creation failed");
 
-        let sid = handler.create_session("sess_touch").unwrap();
+        let sid = handler
+            .create_session("sess_touch")
+            .expect("session creation failed");
 
         tokio::time::sleep(Duration::from_secs(2)).await;
 
         handler
             .execute_program(Some(&sid), None, "+edge[(1,2)]".to_string(), None)
             .await
-            .unwrap();
+            .expect("query execution failed");
 
         let reaped = handler.session_manager().reap_expired();
         assert_eq!(reaped, 0, "Session should remain alive after execute");
@@ -6458,7 +6550,7 @@ mod tests {
         let query_result = handler
             .query_program(Some("no_partial".to_string()), "?edge(X, Y)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         assert!(
             query_result.rows.is_empty(),
             "No data should exist after rejected program"
@@ -6483,8 +6575,11 @@ mod tests {
             .query_program(Some("line_nums".to_string()), program)
             .await;
         let err = result.unwrap_err();
-        let json_str = err.strip_prefix(VALIDATION_ERROR_PREFIX).unwrap();
-        let errors: Vec<ValidationError> = serde_json::from_str(json_str).unwrap();
+        let json_str = err
+            .strip_prefix(VALIDATION_ERROR_PREFIX)
+            .expect("expected validation error prefix");
+        let errors: Vec<ValidationError> =
+            serde_json::from_str(json_str).expect("deserialization failed");
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].line, 2, "Error should be on line 2");
         assert_eq!(
@@ -6501,8 +6596,11 @@ mod tests {
             .query_program(Some("multi_err".to_string()), program)
             .await;
         let err = result.unwrap_err();
-        let json_str = err.strip_prefix(VALIDATION_ERROR_PREFIX).unwrap();
-        let errors: Vec<ValidationError> = serde_json::from_str(json_str).unwrap();
+        let json_str = err
+            .strip_prefix(VALIDATION_ERROR_PREFIX)
+            .expect("expected validation error prefix");
+        let errors: Vec<ValidationError> =
+            serde_json::from_str(json_str).expect("deserialization failed");
         assert_eq!(errors.len(), 2, "Should report both parse errors");
         assert_eq!(errors[0].line, 1);
         assert_eq!(errors[1].line, 3);
@@ -6584,7 +6682,7 @@ mod tests {
             "Multi-line rule program should succeed: {}",
             result.as_ref().unwrap_err()
         );
-        let qr = result.unwrap();
+        let qr = result.expect("operation should succeed");
         assert_eq!(qr.rows.len(), 2, "Should return 2 reachable pairs");
     }
 
@@ -6602,7 +6700,7 @@ mod tests {
             "Multi-line rule with multiple body atoms should succeed: {}",
             result.as_ref().unwrap_err()
         );
-        let qr = result.unwrap();
+        let qr = result.expect("operation should succeed");
         assert_eq!(qr.rows.len(), 1, "Should return path(1,3)");
     }
 
@@ -6632,7 +6730,7 @@ mod tests {
             "try_get_storage should return None when write lock is held"
         );
 
-        lock_thread.join().unwrap();
+        lock_thread.join().expect("thread join failed");
     }
 
     /// P0-6 regression: Session IDs are unique UUIDs, not sequential integers.
@@ -6641,9 +6739,13 @@ mod tests {
     fn test_session_ids_are_unique_uuids() {
         let (mut config, _tmp) = make_test_config();
         config.storage.auto_create_knowledge_graphs = true;
-        let handler = Handler::from_config(config).unwrap();
-        let id1 = handler.create_session("default").unwrap();
-        let id2 = handler.create_session("default").unwrap();
+        let handler = Handler::from_config(config).expect("handler creation failed");
+        let id1 = handler
+            .create_session("default")
+            .expect("session creation failed");
+        let id2 = handler
+            .create_session("default")
+            .expect("session creation failed");
 
         assert_ne!(id1, id2, "Session IDs must be unique");
         // UUID v4 format: 8-4-4-4-12 = 36 chars
@@ -6651,7 +6753,9 @@ mod tests {
         assert_eq!(id2.len(), 36, "Session ID should be UUID format (36 chars)");
         assert!(id1.contains('-'), "Session ID should contain UUID dashes");
         // Ensure not sequential
-        let id3 = handler.create_session("default").unwrap();
+        let id3 = handler
+            .create_session("default")
+            .expect("session creation failed");
         assert_ne!(id2, id3);
         assert_ne!(id1, id3);
     }
@@ -6659,7 +6763,7 @@ mod tests {
     /// Shutdown regression: handler.shutdown() flushes data so it survives restart.
     #[tokio::test]
     async fn test_handler_shutdown_flushes_data() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tempfile::tempdir().expect("failed to create temp dir");
         let data_dir = tmp.path().to_path_buf();
 
         // Phase 1: Create handler, insert data, shutdown
@@ -6667,14 +6771,14 @@ mod tests {
             let mut config = Config::default();
             config.storage.data_dir = data_dir.clone();
             config.storage.auto_create_knowledge_graphs = true;
-            let handler = Handler::from_config(config).unwrap();
+            let handler = Handler::from_config(config).expect("handler creation failed");
             handler
                 .query_program(
                     Some("shutdown_kg".to_string()),
                     "+persist_data[(1, 2), (3, 4)]".to_string(),
                 )
                 .await
-                .unwrap();
+                .expect("query execution failed");
             handler.shutdown();
         }
 
@@ -6682,14 +6786,14 @@ mod tests {
         {
             let mut config = Config::default();
             config.storage.data_dir = data_dir;
-            let handler = Handler::from_config(config).unwrap();
+            let handler = Handler::from_config(config).expect("handler creation failed");
             let result = handler
                 .query_program(
                     Some("shutdown_kg".to_string()),
                     "?persist_data(X, Y)".to_string(),
                 )
                 .await
-                .unwrap();
+                .expect("query execution failed");
             assert_eq!(
                 result.rows.len(),
                 2,
@@ -6784,15 +6888,20 @@ mod tests {
         handler
             .query_program(None, "+edge[(1, 2), (3, 4)]".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         let result = handler
             .query_program(None, ".rel".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         let text = result
             .rows
             .iter()
-            .map(|r| r.values[0].as_str().unwrap().to_string())
+            .map(|r| {
+                r.values[0]
+                    .as_str()
+                    .expect("expected string value")
+                    .to_string()
+            })
             .collect::<Vec<_>>()
             .join("\n");
         assert!(text.contains("edge"), "should list the edge relation");
@@ -6814,19 +6923,24 @@ mod tests {
         handler
             .query_program(None, "+person(id: int, name: string)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         handler
             .query_program(None, "+person[(1, \"alice\")]".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         let result = handler
             .query_program(None, ".rel".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         let text = result
             .rows
             .iter()
-            .map(|r| r.values[0].as_str().unwrap().to_string())
+            .map(|r| {
+                r.values[0]
+                    .as_str()
+                    .expect("expected string value")
+                    .to_string()
+            })
             .collect::<Vec<_>>()
             .join("\n");
         assert!(
@@ -6845,22 +6959,27 @@ mod tests {
         handler
             .query_program(None, "+edge[(1, 2)]".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         handler
             .query_program(
                 None,
                 "+path(X, Y) <- edge(X, Y)\n+path(X, Z) <- edge(X, Y), path(Y, Z)".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         let result = handler
             .query_program(None, ".rule list".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         let text = result
             .rows
             .iter()
-            .map(|r| r.values[0].as_str().unwrap().to_string())
+            .map(|r| {
+                r.values[0]
+                    .as_str()
+                    .expect("expected string value")
+                    .to_string()
+            })
             .collect::<Vec<_>>()
             .join("\n");
         assert!(text.contains("path"), "should list the 'path' rule");
@@ -6876,22 +6995,27 @@ mod tests {
         handler
             .query_program(None, "+edge[(1, 2)]".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         handler
             .query_program(
                 None,
                 "+path(X, Y) <- edge(X, Y)\n+path(X, Z) <- edge(X, Y), path(Y, Z)".to_string(),
             )
             .await
-            .unwrap();
+            .expect("query execution failed");
         let result = handler
             .query_program(None, ".rule def path".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         let text = result
             .rows
             .iter()
-            .map(|r| r.values[0].as_str().unwrap().to_string())
+            .map(|r| {
+                r.values[0]
+                    .as_str()
+                    .expect("expected string value")
+                    .to_string()
+            })
             .collect::<Vec<_>>()
             .join("\n");
         assert!(text.contains("path"), "definition should mention 'path'");
@@ -6908,11 +7032,16 @@ mod tests {
         let result = handler
             .query_program(None, ".kg list".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         let text = result
             .rows
             .iter()
-            .map(|r| r.values[0].as_str().unwrap().to_string())
+            .map(|r| {
+                r.values[0]
+                    .as_str()
+                    .expect("expected string value")
+                    .to_string()
+            })
             .collect::<Vec<_>>()
             .join("\n");
         assert!(
@@ -6927,15 +7056,20 @@ mod tests {
         handler
             .query_program(None, "+edge[(1, 2), (3, 4)]".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         let result = handler
             .query_program(None, ".explain ?edge(X, Y)".to_string())
             .await
-            .unwrap();
+            .expect("query execution failed");
         let text = result
             .rows
             .iter()
-            .map(|r| r.values[0].as_str().unwrap().to_string())
+            .map(|r| {
+                r.values[0]
+                    .as_str()
+                    .expect("expected string value")
+                    .to_string()
+            })
             .collect::<Vec<_>>()
             .join("\n");
         // Explain should produce some plan output

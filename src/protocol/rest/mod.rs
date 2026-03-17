@@ -434,6 +434,7 @@ pub async fn start_http_server(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use axum::body::Body;

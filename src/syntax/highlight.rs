@@ -127,6 +127,7 @@ impl Highlighter for DatalogHelper {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
