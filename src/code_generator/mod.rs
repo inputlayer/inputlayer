@@ -318,9 +318,17 @@ impl CodeGenerator {
         ir: &IRNode,
         recursive_rel: &str,
     ) -> Result<Vec<Tuple>, String> {
+        // Wrap single (non-Union) recursive rules in a Union for uniform handling.
+        // A single-rule recursion like `fib(N,V) <- fib(N1,V1), ...` still needs
+        // fixpoint iteration; falling back to single-pass execute would only compute
+        // one level of derivation.
+        let owned_union;
         let inputs = match ir {
             IRNode::Union { inputs } => inputs,
-            _ => return self.execute(ir),
+            _ => {
+                owned_union = vec![ir.clone()];
+                &owned_union
+            }
         };
 
         // Partition inputs into base cases and recursive cases

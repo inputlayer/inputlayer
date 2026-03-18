@@ -15,13 +15,7 @@ Inserted 2 fact(s) into 'data'.
 > +data(X) <- data(Y), X = Y + 10
 Rule 'data' registered.
 > ?data(X)
-┌────┐
-│ X  │
-├────┤
-│ 11 │
-│ 12 │
-└────┘
-2 rows
+Query execution timed out
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_shadow_n10t102

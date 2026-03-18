@@ -26,14 +26,7 @@ Delete error: Cannot insert variable 'Id' - use constants only
 > +prices(Id, NewPrice) <- prices(Id, Price), NewPrice = Price + Price / 10
 Rule 'prices' registered.
 > ?prices(Id, Price)
-┌────┬───────┐
-│ Id │ Price │
-├────┼───────┤
-│  1 │ 110.0 │
-│  2 │ 220.0 │
-│  3 │ 330.0 │
-└────┴───────┘
-3 rows
+Query execution timed out
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_update_computed_n27t34

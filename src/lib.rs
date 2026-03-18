@@ -1012,26 +1012,20 @@ impl DatalogEngine {
             .enumerate()
             .map(|(i, ir)| {
                 let head_name = rule_heads.get(i).cloned().unwrap_or_default();
-                if let IRNode::Union { inputs } = ir {
-                    let is_recursive = CodeGenerator::references_relation(ir, &head_name);
-                    if debug {
-                        eprintln!(
-                            "DEBUG: IR[{}] head='{}' is Union with {} inputs, recursive={}",
-                            i,
-                            head_name,
-                            inputs.len(),
-                            is_recursive
-                        );
-                    }
-                    if is_recursive {
-                        Some(head_name)
+                let is_recursive = CodeGenerator::references_relation(ir, &head_name);
+                if debug {
+                    let node_type = if matches!(ir, IRNode::Union { .. }) {
+                        "Union"
                     } else {
-                        None
-                    }
+                        "non-Union"
+                    };
+                    eprintln!(
+                        "DEBUG: IR[{i}] head='{head_name}' is {node_type}, recursive={is_recursive}"
+                    );
+                }
+                if is_recursive {
+                    Some(head_name)
                 } else {
-                    if debug {
-                        eprintln!("DEBUG: IR[{i}] head='{head_name}' is not Union");
-                    }
                     None
                 }
             })

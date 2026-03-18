@@ -45,11 +45,38 @@ impl IRBuilder {
         }
 
         // 2. Build join tree from positive atoms
+        //    Before joining, check if arithmetic comparisons can create join keys
+        //    between scans that would otherwise produce a Cartesian product.
+        //    E.g., `data(Id, 1), PrevId = Id - 1, data(PrevId, 0)` should join on PrevId.
         let mut current = scans.remove(0);
         if std::env::var("IL_DEBUG").is_ok() {
             eprintln!("DEBUG IR build: first scan = {:?}", current.output_schema());
         }
         for scan in scans {
+            // Check if an arithmetic comparison bridges the current and next scan.
+            // If so, add a Compute node to the left side to create the join key.
+            let left_schema = current.output_schema();
+            let right_schema = scan.output_schema();
+            let has_shared = left_schema.iter().any(|l| right_schema.contains(l));
+
+            if !has_shared {
+                // No shared variables - check if arithmetic can create a bridge
+                if let Some((compute_name, ir_expr)) =
+                    self.find_arithmetic_join_bridge(rule, &left_schema, &right_schema)
+                {
+                    if std::env::var("IL_DEBUG").is_ok() {
+                        eprintln!(
+                            "DEBUG IR build: adding computed join key '{compute_name}' to left side"
+                        );
+                    }
+                    // Add computed column to left side to create join key
+                    current = IRNode::Compute {
+                        input: Box::new(current),
+                        expressions: vec![(compute_name, ir_expr)],
+                    };
+                }
+            }
+
             if std::env::var("IL_DEBUG").is_ok() {
                 eprintln!(
                     "DEBUG IR build: joining with scan = {:?}",
@@ -63,10 +90,13 @@ impl IRBuilder {
         }
 
         // 3. Apply computed columns (function calls in body)
+        // Save the pre-compute schema so build_comparison_filters can distinguish
+        // variables from scans vs variables added by computed columns.
+        let pre_compute_schema = current.output_schema();
         current = self.build_computed_columns(current, rule)?;
 
         // 4. Apply comparison filters (X = Y, X < 5, etc.)
-        current = self.build_comparison_filters(current, rule)?;
+        current = self.build_comparison_filters(current, rule, &pre_compute_schema)?;
 
         // 5. Apply antijoins for negated predicates
         current = self.build_antijoins(current, rule)?;
@@ -434,10 +464,10 @@ impl IRBuilder {
                     (Term::Arithmetic(a), Term::Variable(v)) => Some((v, a)),
                     _ => None,
                 } {
-                    // If the variable is already bound in the schema (from a body atom scan),
-                    // this is a FILTER, not a computed column assignment.
-                    // Let build_comparison_filters handle it via ColumnCompareArith.
                     if schema.contains(var_name) {
+                        // Variable is already bound (from a body atom scan). This is a
+                        // filter, not a new computed column. Skip it here and let
+                        // build_comparison_filters handle it via ColumnCompareArith.
                         continue;
                     }
 
@@ -445,7 +475,6 @@ impl IRBuilder {
                     let ir_expr = Self::arith_expr_to_ir_expression(arith_expr, &schema)?;
 
                     expressions.push((var_name.clone(), ir_expr));
-
                     // Extend schema with the newly computed column for subsequent expressions
                     schema.push(var_name.clone());
                     continue;
@@ -507,7 +536,6 @@ impl IRBuilder {
         }
 
         if expressions.is_empty() {
-            // No computed column assignments, return input unchanged
             Ok(input)
         } else {
             Ok(IRNode::Compute {
@@ -515,6 +543,49 @@ impl IRBuilder {
                 expressions,
             })
         }
+    }
+
+    /// Check if an arithmetic comparison creates a join bridge between two scans.
+    ///
+    /// Looks for patterns like `PrevId = Id - 1` where `PrevId` is in the right scan
+    /// and `Id` is in the left scan. Returns the computed column name and expression
+    /// to add to the left side, converting a Cartesian product into an equi-join.
+    fn find_arithmetic_join_bridge(
+        &self,
+        rule: &Rule,
+        left_schema: &[String],
+        right_schema: &[String],
+    ) -> Option<(String, IRExpression)> {
+        for pred in &rule.body {
+            if let BodyPredicate::Comparison(left, ComparisonOp::Equal, right) = pred {
+                // Match: Variable = Arithmetic or Arithmetic = Variable
+                let (var_name, arith_expr) = match (left, right) {
+                    (Term::Variable(v), Term::Arithmetic(a)) => (v, a),
+                    (Term::Arithmetic(a), Term::Variable(v)) => (v, a),
+                    _ => continue,
+                };
+
+                // The variable must be in the right scan (the one being joined)
+                if !right_schema.contains(var_name) {
+                    continue;
+                }
+
+                // All variables in the arithmetic expression must be in the left scan
+                let arith_vars = arith_expr.variables();
+                if arith_vars.is_empty() {
+                    continue;
+                }
+                if !arith_vars.iter().all(|v| left_schema.contains(v)) {
+                    continue;
+                }
+
+                // Convert the arithmetic to an IR expression using the left schema
+                if let Ok(ir_expr) = Self::arith_expr_to_ir_expression(arith_expr, left_schema) {
+                    return Some((var_name.clone(), ir_expr));
+                }
+            }
+        }
+        None
     }
 
     /// Convert AST `BuiltinFunc` to IR `BuiltinFunction`
@@ -634,15 +705,26 @@ impl IRBuilder {
     ///
     /// Handles predicates like X = Y, X != 5, X < Y, etc.
     /// Skips function call assignments which are handled by `build_computed_columns`.
-    fn build_comparison_filters(&self, mut input: IRNode, rule: &Rule) -> Result<IRNode, String> {
+    fn build_comparison_filters(
+        &self,
+        mut input: IRNode,
+        rule: &Rule,
+        pre_compute_schema: &[String],
+    ) -> Result<IRNode, String> {
         let schema = input.output_schema();
 
         for pred in &rule.body {
             if let BodyPredicate::Comparison(left, op, right) = pred {
                 // Skip computed column assignments handled by build_computed_columns,
                 // but only if they were ACTUALLY processed (variable was new/unbound).
-                // When the variable is already in the schema, it's a filter, not an assignment.
-                if Self::is_computed_column_assignment_in_schema(left, op, right, &schema) {
+                // Use the pre-compute schema to distinguish: if the variable was already
+                // bound BEFORE computed columns ran, it's a filter, not an assignment.
+                if Self::is_computed_column_assignment_in_schema(
+                    left,
+                    op,
+                    right,
+                    pre_compute_schema,
+                ) {
                     continue;
                 }
 
@@ -676,10 +758,10 @@ impl IRBuilder {
             (Term::Variable(_), Term::FunctionCall(_, _))
             | (Term::FunctionCall(_, _), Term::Variable(_)) => true,
 
-            // Arithmetic assignments: if the target variable is already bound in the
-            // schema, the computed column gets a unique name (_arith_Var) and
-            // build_comparison_filters must emit a ColumnsEq filter. In that case,
-            // return false so the filter is generated.
+            // Arithmetic: if the variable is NOT in the pre-compute schema, it was
+            // added as a computed column - skip the filter. If it IS in the pre-compute
+            // schema, it was already bound from a body atom and build_computed_columns
+            // skipped it, so we need build_comparison_filters to emit a filter.
             (Term::Variable(v), Term::Arithmetic(_)) | (Term::Arithmetic(_), Term::Variable(v)) => {
                 !schema.contains(v)
             }

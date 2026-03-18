@@ -13,10 +13,24 @@ Switched to knowledge graph: test_mixed_num_n11t51
 > +measurements[(1, 10, 2.5), (2, 20, 3.0), (3, 15, 1.5)]
 Inserted 3 fact(s) into 'measurements'.
 > computed(Id, Result) <- measurements(Id, Int, Float), Result = Int * Float
-No results.
+┌───┬──────┐
+│ X │ Y    │
+├───┼──────┤
+│ 1 │ 25.0 │
+│ 2 │ 60.0 │
+│ 3 │ 22.5 │
+└───┴──────┘
+3 rows
 (session: 1 rule(s))
 > ?computed(Id, R)
-No results.
+┌────┬──────┐
+│ Id │ R    │
+├────┼──────┤
+│  1 │ 25.0 │
+│  2 │ 60.0 │
+│  3 │ 22.5 │
+└────┴──────┘
+3 rows
 > .kg use default
 Switched to knowledge graph: default
 (Cleared 1 session rule(s), 0 session fact(s))
