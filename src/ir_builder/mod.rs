@@ -434,6 +434,13 @@ impl IRBuilder {
                     (Term::Arithmetic(a), Term::Variable(v)) => Some((v, a)),
                     _ => None,
                 } {
+                    // If the variable is already bound in the schema (from a body atom scan),
+                    // this is a FILTER, not a computed column assignment.
+                    // Let build_comparison_filters handle it via ColumnCompareArith.
+                    if schema.contains(var_name) {
+                        continue;
+                    }
+
                     // Convert arithmetic expression to IR expression
                     let ir_expr = Self::arith_expr_to_ir_expression(arith_expr, &schema)?;
 
@@ -665,10 +672,17 @@ impl IRBuilder {
             return false;
         }
         match (left, right) {
-            // Function calls and arithmetic are always computed columns
-            // (build_computed_columns handles these regardless of variable binding)
-            (Term::Variable(_), Term::FunctionCall(_, _) | Term::Arithmetic(_))
-            | (Term::FunctionCall(_, _) | Term::Arithmetic(_), Term::Variable(_)) => true,
+            // Function calls are always computed columns
+            (Term::Variable(_), Term::FunctionCall(_, _))
+            | (Term::FunctionCall(_, _), Term::Variable(_)) => true,
+
+            // Arithmetic assignments: if the target variable is already bound in the
+            // schema, the computed column gets a unique name (_arith_Var) and
+            // build_comparison_filters must emit a ColumnsEq filter. In that case,
+            // return false so the filter is generated.
+            (Term::Variable(v), Term::Arithmetic(_)) | (Term::Arithmetic(_), Term::Variable(v)) => {
+                !schema.contains(v)
+            }
 
             // Variable alias: only an assignment if at least one is new (not in schema)
             (Term::Variable(v1), Term::Variable(v2)) => {

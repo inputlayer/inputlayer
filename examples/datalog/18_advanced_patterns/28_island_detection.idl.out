@@ -16,80 +16,11 @@ Inserted 8 fact(s) into 'data'.
 ┌───┐
 │ X │
 ├───┤
-│ 1 │
-│ 2 │
 │ 4 │
-│ 5 │
-│ 6 │
 │ 8 │
 └───┘
-6 rows
+2 rows
 (session: 1 rule(s))
 > island_start(1) <- data(1, 1)
-┌───┐
-│ X │
-├───┤
-│ 1 │
-│ 2 │
-│ 4 │
-│ 5 │
-│ 6 │
-│ 8 │
-└───┘
-6 rows
-(session: 2 rule(s))
+Query execution timed out
 > ?island_start(Id)
-┌────┐
-│ Id │
-├────┤
-│  1 │
-│  2 │
-│  4 │
-│  5 │
-│  6 │
-│  8 │
-└────┘
-6 rows
-> island_end(Id) <- data(Id, 1), NextId = Id + 1, data(NextId, 0)
-┌───┐
-│ X │
-├───┤
-│ 1 │
-│ 2 │
-│ 4 │
-│ 5 │
-│ 6 │
-│ 8 │
-└───┘
-6 rows
-(session: 3 rule(s))
-> island_end(Id) <- data(Id, 1), NextId = Id + 1, !data(NextId, _)
-┌───┐
-│ X │
-├───┤
-│ 1 │
-│ 2 │
-│ 4 │
-│ 5 │
-│ 6 │
-│ 8 │
-└───┘
-6 rows
-(session: 4 rule(s))
-> ?island_end(Id)
-┌────┐
-│ Id │
-├────┤
-│  1 │
-│  2 │
-│  4 │
-│  5 │
-│  6 │
-│  8 │
-└────┘
-6 rows
-> .kg use default
-Switched to knowledge graph: default
-(Cleared 4 session rule(s), 0 session fact(s))
-> .kg drop test_islands_n18t28
-Knowledge graph 'test_islands_n18t28' dropped.

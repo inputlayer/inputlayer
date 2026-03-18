@@ -47,20 +47,10 @@ Inserted 1 fact(s) into 'near_zero'.
 └─────┘
 1 rows
 > float_calc(Y) <- small_float(X), Y = X * 1000000
-┌─────┐
-│ X   │
-├─────┤
-│ 0.1 │
-└─────┘
-1 rows
+No results.
 (session: 1 rule(s))
 > ?float_calc(Y)
-┌─────┐
-│ Y   │
-├─────┤
-│ 0.1 │
-└─────┘
-1 rows
+No results.
 > .kg use default
 Switched to knowledge graph: default
 (Cleared 1 session rule(s), 0 session fact(s))

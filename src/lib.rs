@@ -2995,4 +2995,55 @@ mod tests {
         let results = engine.execute_tuples(program).unwrap();
         assert_eq!(results.len(), 3); // 1→2, 1→3, 1→4
     }
+
+    /// Regression test: multi-clause session rules with self-join + arithmetic must not hang.
+    ///
+    /// Reproduces a bug where combining two clauses for the same head relation into a
+    /// Union causes the DD computation to never complete when one clause contains a
+    /// Cartesian self-join with an arithmetic-derived key.
+    #[test]
+    fn test_union_self_join_with_arithmetic_does_not_hang() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let (tx, rx) = mpsc::channel();
+
+        let handle = std::thread::spawn(move || {
+            let mut engine = DatalogEngine::new();
+            engine.add_tuples(
+                "data",
+                vec![
+                    Tuple::new(vec![Value::Int64(1), Value::Int64(1)]),
+                    Tuple::new(vec![Value::Int64(2), Value::Int64(1)]),
+                    Tuple::new(vec![Value::Int64(3), Value::Int64(0)]),
+                ],
+            );
+
+            // Two clauses for the same head: first has self-join + arithmetic,
+            // second is simple. This combination caused an infinite hang in DD.
+            let program = "\
+                r(Id) <- data(Id, 1), PrevId = Id - 1, data(PrevId, 0)\n\
+                r(Id) <- data(Id, 1)\n\
+                __query__(X) <- r(X)";
+
+            let result = engine.execute_tuples(program);
+            tx.send(result).ok();
+        });
+
+        match rx.recv_timeout(Duration::from_secs(10)) {
+            Ok(Ok(results)) => {
+                let ids: std::collections::HashSet<i64> = results
+                    .iter()
+                    .filter_map(|t| t.get(0).and_then(|v| v.as_i64()))
+                    .collect();
+                assert!(ids.contains(&1), "Should contain Id=1");
+                assert!(ids.contains(&2), "Should contain Id=2");
+            }
+            Ok(Err(e)) => panic!("Query failed: {e}"),
+            Err(_) => {
+                drop(handle);
+                panic!("BUG: Union with self-join + arithmetic hung for >10s");
+            }
+        }
+    }
 }

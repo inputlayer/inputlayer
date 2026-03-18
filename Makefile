@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test front-build front-deploy gui-build run run-server
+.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test front-build front-deploy gui-build run run-server coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -16,9 +16,9 @@ test: check unit-test e2e-test
 	@echo "All tests complete."
 
 # Full verification (CI, pre-merge)
-# Runs everything: lint, build, unit+integration tests, snapshot E2E tests
+# Runs everything: static analysis, build, unit+integration tests, snapshot E2E tests, coverage
 # All tests run in parallel. Zero ignored tests allowed. Cleanup verified.
-test-all: check
+test-all: check static-analysis
 	@FAILURES=0; \
 	STRIP_ANSI='s/\x1b\[[0-9;]*m//g'; \
 	NCPU=$$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4); \
@@ -95,6 +95,27 @@ test-all: check
 		PY_PASSED=0; PY_FAILED=0; \
 	fi; \
 	echo ""; \
+	echo "=== Coverage Report ==="; \
+	if command -v cargo-tarpaulin >/dev/null 2>&1; then \
+		mkdir -p target/coverage; \
+		if cargo tarpaulin --all-features --out html --out json --output-dir target/coverage \
+			--exclude-files "tests/*" --exclude-files "benches/*" --exclude-files "examples/*" \
+			--exclude-files "src/bin/*" --exclude-files "src/main.rs" \
+			--timeout 300 --skip-clean 2>&1; then \
+			COV_STATUS="PASS"; \
+			COV_PCT=$$(python3 -c "import json; d=json.load(open('target/coverage/tarpaulin-report.json')); \
+				tc=sum(f.get('covered',0) for f in d.get('files',[])); \
+				tt=sum(f.get('coverable',0) for f in d.get('files',[])); \
+				print(f'{tc/tt*100:.1f}' if tt>0 else '0.0')" 2>/dev/null || echo "?"); \
+			COV_STATUS="PASS ($${COV_PCT}%)"; \
+		else \
+			COV_STATUS="FAIL"; \
+			FAILURES=$$((FAILURES + 1)); \
+		fi; \
+	else \
+		COV_STATUS="SKIPPED (install: cargo install cargo-tarpaulin)"; \
+	fi; \
+	echo ""; \
 	echo "=== Cleanup Verification ==="; \
 	STALE_DATA=""; \
 	if [ -d "./data" ]; then \
@@ -122,6 +143,7 @@ test-all: check
 	printf "  | %-14s | %-48s |\n" "Cargo Tests" "$$UNIT_PASSED passed, $$UNIT_FAILED failed, $$UNIT_IGNORED ignored"; \
 	printf "  | %-14s | %-48s |\n" "Snapshot Tests" "$${SNAP_PASSED:-0} passed, $${SNAP_FAILED:-0} failed"; \
 	printf "  | %-14s | %-48s |\n" "Python Tests" "$${PY_PASSED:-0} passed, $${PY_FAILED:-0} failed"; \
+	printf "  | %-14s | %-48s |\n" "Coverage" "$${COV_STATUS:-SKIPPED}"; \
 	printf "  | %-14s | %-48s |\n" "TOTAL" "$$TOTAL passed, $$TOTAL_FAILED failed"; \
 	echo ""; \
 	echo "==========================================="; \
@@ -249,6 +271,82 @@ snapshot-test: e2e-test
 # Tier 4: Python SDK tests (inputlayer-py package)
 python-test:
 	cd packages/inputlayer-py && python -m pytest tests/ -v
+
+# Coverage & Static Analysis
+
+# Generate test coverage report (requires cargo-tarpaulin)
+coverage:
+	@command -v cargo-tarpaulin >/dev/null 2>&1 || { echo "Install: cargo install cargo-tarpaulin"; exit 1; }
+	@echo "=== Generating Coverage Report ==="
+	@mkdir -p target/coverage
+	cargo tarpaulin --all-features --out html --out json --output-dir target/coverage \
+		--exclude-files "tests/*" --exclude-files "benches/*" --exclude-files "examples/*" \
+		--exclude-files "src/bin/*" --exclude-files "src/main.rs" \
+		--timeout 300 --skip-clean 2>&1
+	@echo ""
+	@echo "Coverage report: target/coverage/tarpaulin-report.html"
+	@echo "Coverage JSON:   target/coverage/tarpaulin-report.json"
+
+# Analyze coverage report and show untested code paths
+view-coverage:
+	@command -v cargo-tarpaulin >/dev/null 2>&1 || { echo "Install: cargo install cargo-tarpaulin"; exit 1; }
+	@if [ ! -f target/coverage/tarpaulin-report.json ]; then \
+		echo "No coverage data found. Running coverage first..."; \
+		$(MAKE) coverage; \
+	fi
+	@echo ""
+	@echo "=== Coverage Summary ==="
+	@python3 -c " \
+import json, sys; \
+data = json.load(open('target/coverage/tarpaulin-report.json')); \
+files = data.get('files', []); \
+total_covered = sum(f.get('covered', 0) for f in files); \
+total_coverable = sum(f.get('coverable', 0) for f in files); \
+pct = (total_covered / total_coverable * 100) if total_coverable > 0 else 0; \
+print(f'Overall: {total_covered}/{total_coverable} lines ({pct:.1f}%)'); \
+print(); \
+low = [(f['path'], f.get('covered',0), f.get('coverable',0)) for f in files \
+       if f.get('coverable',0) > 10 and (f.get('covered',0)/f.get('coverable',1)*100) < 60]; \
+low.sort(key=lambda x: x[1]/max(x[2],1)); \
+if low: \
+    print('=== Files Below 60% Coverage (need attention) ==='); \
+    for path, cov, total in low[:30]: \
+        print(f'  {cov/max(total,1)*100:5.1f}%  {cov:4d}/{total:4d}  {path}'); \
+else: \
+    print('All files above 60% coverage.'); \
+print(); \
+uncov = [(f['path'], f.get('covered',0), f.get('coverable',0)) for f in files \
+         if f.get('coverable',0) > 0 and f.get('covered',0) == 0]; \
+if uncov: \
+    print('=== Completely Untested Files ==='); \
+    for path, _, total in uncov: \
+        print(f'  {total:4d} lines  {path}'); \
+" 2>/dev/null || echo "Python3 required for coverage analysis. View HTML report: open target/coverage/tarpaulin-report.html"
+
+# Static analysis beyond clippy (supply chain + doc verification)
+static-analysis: lint doc-check
+	@echo ""
+	@echo "=== Static Analysis ==="
+	@FAILURES=0; \
+	echo "Clippy:     PASS (ran via lint target)"; \
+	echo "Doc check:  PASS (ran via doc-check target)"; \
+	if command -v cargo-deny >/dev/null 2>&1; then \
+		if cargo deny check advisories sources licenses bans 2>&1; then \
+			echo "Cargo deny: PASS"; \
+		else \
+			echo "Cargo deny: FAIL"; \
+			FAILURES=$$((FAILURES + 1)); \
+		fi; \
+	else \
+		echo "Cargo deny: SKIPPED (install: cargo install cargo-deny)"; \
+	fi; \
+	if [ $$FAILURES -ne 0 ]; then \
+		echo ""; \
+		echo "Static analysis FAILED"; \
+		exit 1; \
+	fi; \
+	echo ""; \
+	echo "Static analysis PASSED"
 
 # Code Quality
 

@@ -20,12 +20,9 @@ Rule 'fib' registered.
 ┌───┬───┐
 │ N │ V │
 ├───┼───┤
-│ 1 │ 0 │
-│ 1 │ 1 │
 │ 2 │ 1 │
-│ 2 │ 2 │
 └───┴───┘
-4 rows
+1 rows
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_fib_n09t38
