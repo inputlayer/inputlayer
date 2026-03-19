@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test front-build front-deploy gui-build run run-server coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test js-test front-build front-deploy gui-build run run-server coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -95,6 +95,24 @@ test-all: check static-analysis
 		PY_PASSED=0; PY_FAILED=0; \
 	fi; \
 	echo ""; \
+	echo "=== JS/TS SDK Tests ==="; \
+	if command -v node >/dev/null 2>&1 && [ -f packages/inputlayer-js/package.json ]; then \
+		JS_TMPFILE=$$(mktemp); \
+		set -o pipefail; \
+		cd packages/inputlayer-js && npm test 2>&1 | tee "$$JS_TMPFILE"; \
+		JS_EXIT=$${PIPESTATUS[0]}; \
+		cd ../..; \
+		JS_PASSED=$$(grep -oE '[0-9]+ passed' "$$JS_TMPFILE" | awk '{print $$1}'); \
+		JS_FAILED=$$(grep -oE '[0-9]+ failed' "$$JS_TMPFILE" | awk '{print $$1}'); \
+		JS_PASSED=$${JS_PASSED:-0}; \
+		JS_FAILED=$${JS_FAILED:-0}; \
+		rm -f "$$JS_TMPFILE"; \
+		if [ $$JS_EXIT -ne 0 ]; then FAILURES=$$((FAILURES + 1)); fi; \
+	else \
+		echo "SKIPPED: node not available or packages/inputlayer-js not found"; \
+		JS_PASSED=0; JS_FAILED=0; \
+	fi; \
+	echo ""; \
 	echo "=== Coverage Report ==="; \
 	if command -v cargo-tarpaulin >/dev/null 2>&1; then \
 		mkdir -p target/coverage; \
@@ -131,8 +149,8 @@ test-all: check static-analysis
 	fi; \
 	rm -rf ./data 2>/dev/null || true; \
 	echo ""; \
-	TOTAL=$$(($$UNIT_PASSED + $${SNAP_PASSED:-0} + $${PY_PASSED:-0})); \
-	TOTAL_FAILED=$$(($$UNIT_FAILED + $${SNAP_FAILED:-0} + $${PY_FAILED:-0})); \
+	TOTAL=$$(($$UNIT_PASSED + $${SNAP_PASSED:-0} + $${PY_PASSED:-0} + $${JS_PASSED:-0})); \
+	TOTAL_FAILED=$$(($$UNIT_FAILED + $${SNAP_FAILED:-0} + $${PY_FAILED:-0} + $${JS_FAILED:-0})); \
 	echo "==========================================="; \
 	echo "              TEST SUMMARY"; \
 	echo "==========================================="; \
@@ -143,6 +161,7 @@ test-all: check static-analysis
 	printf "  | %-14s | %-48s |\n" "Cargo Tests" "$$UNIT_PASSED passed, $$UNIT_FAILED failed, $$UNIT_IGNORED ignored"; \
 	printf "  | %-14s | %-48s |\n" "Snapshot Tests" "$${SNAP_PASSED:-0} passed, $${SNAP_FAILED:-0} failed"; \
 	printf "  | %-14s | %-48s |\n" "Python Tests" "$${PY_PASSED:-0} passed, $${PY_FAILED:-0} failed"; \
+	printf "  | %-14s | %-48s |\n" "JS/TS Tests" "$${JS_PASSED:-0} passed, $${JS_FAILED:-0} failed"; \
 	printf "  | %-14s | %-48s |\n" "Coverage" "$${COV_STATUS:-SKIPPED}"; \
 	printf "  | %-14s | %-48s |\n" "TOTAL" "$$TOTAL passed, $$TOTAL_FAILED failed"; \
 	echo ""; \
@@ -221,6 +240,24 @@ ci-test-all:
 		PY_PASSED=0; PY_FAILED=0; \
 	fi; \
 	echo ""; \
+	echo "=== JS/TS SDK Tests ==="; \
+	if command -v node >/dev/null 2>&1 && [ -f packages/inputlayer-js/package.json ]; then \
+		JS_TMPFILE=$$(mktemp); \
+		set -o pipefail; \
+		cd packages/inputlayer-js && npm test 2>&1 | tee "$$JS_TMPFILE"; \
+		JS_EXIT=$${PIPESTATUS[0]}; \
+		cd ../..; \
+		JS_PASSED=$$(grep -oE '[0-9]+ passed' "$$JS_TMPFILE" | awk '{print $$1}'); \
+		JS_FAILED=$$(grep -oE '[0-9]+ failed' "$$JS_TMPFILE" | awk '{print $$1}'); \
+		JS_PASSED=$${JS_PASSED:-0}; \
+		JS_FAILED=$${JS_FAILED:-0}; \
+		rm -f "$$JS_TMPFILE"; \
+		if [ $$JS_EXIT -ne 0 ]; then FAILURES=$$((FAILURES + 1)); fi; \
+	else \
+		echo "SKIPPED: node not available or packages/inputlayer-js not found"; \
+		JS_PASSED=0; JS_FAILED=0; \
+	fi; \
+	echo ""; \
 	echo "==========================================="; \
 	echo "           CI TEST SUMMARY"; \
 	echo "==========================================="; \
@@ -231,6 +268,7 @@ ci-test-all:
 	printf "  | %-14s | %-48s |\n" "Unit Tests" "$$UNIT_PASSED passed, $$UNIT_FAILED failed"; \
 	printf "  | %-14s | %-48s |\n" "Snapshot Tests" "$${SNAP_PASSED:-0} passed, $${SNAP_FAILED:-0} failed"; \
 	printf "  | %-14s | %-48s |\n" "Python Tests" "$${PY_PASSED:-0} passed, $${PY_FAILED:-0} failed"; \
+	printf "  | %-14s | %-48s |\n" "JS/TS Tests" "$${JS_PASSED:-0} passed, $${JS_FAILED:-0} failed"; \
 	echo ""; \
 	echo "==========================================="; \
 	if [ $$FAILURES -ne 0 ]; then \
@@ -271,6 +309,10 @@ snapshot-test: e2e-test
 # Tier 4: Python SDK tests (inputlayer-py package)
 python-test:
 	cd packages/inputlayer-py && python -m pytest tests/ -v
+
+# Tier 5: JS/TS SDK tests (inputlayer-js package)
+js-test:
+	cd packages/inputlayer-js && npm test
 
 # Coverage & Static Analysis
 

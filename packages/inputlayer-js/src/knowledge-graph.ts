@@ -96,6 +96,8 @@ export class KnowledgeGraph {
   private readonly conn: Connection;
   private readonly _session: Session;
 
+  private kgActive = false;
+
   constructor(name: string, connection: Connection) {
     this._name = name;
     this.conn = connection;
@@ -110,10 +112,22 @@ export class KnowledgeGraph {
     return this._session;
   }
 
+  /** Ensure the connection is using this knowledge graph. */
+  private async ensureKg(): Promise<void> {
+    if (this.conn.currentKg === this._name) return;
+    // .kg create is idempotent (no-ops if KG exists).
+    await this.conn.execute(`.kg create ${this._name}`);
+    await this.conn.execute(`.kg use ${this._name}`);
+    // Force-update currentKg since the server may not set switched_kg
+    // on .kg use responses.
+    this.conn.setCurrentKg(this._name);
+  }
+
   // ── Schema ──────────────────────────────────────────────────────
 
   /** Deploy schema definitions. Idempotent. */
   async define(...relations: RelationDef[]): Promise<void> {
+    await this.ensureKg();
     for (const rel of relations) {
       const iql = compileSchema(rel);
       await this.conn.execute(iql);
@@ -122,6 +136,7 @@ export class KnowledgeGraph {
 
   /** List all relations in this KG. */
   async relations(): Promise<RelationInfo[]> {
+    await this.ensureKg();
     const result = await this.conn.execute('.rel');
     return result.rows.map((row) => ({
       name: String(row[0]),
@@ -131,6 +146,7 @@ export class KnowledgeGraph {
 
   /** Describe a relation's schema. */
   async describe(relation: RelationDef | string): Promise<RelationDescription> {
+    await this.ensureKg();
     const name = typeof relation === 'string' ? relation : relation.relationName;
     const result = await this.conn.execute(`.rel ${name}`);
     const columns = result.rows.map((row) => ({
@@ -142,6 +158,7 @@ export class KnowledgeGraph {
 
   /** Drop a relation and all its data. */
   async dropRelation(relation: RelationDef | string): Promise<void> {
+    await this.ensureKg();
     const name = typeof relation === 'string' ? relation : relation.relationName;
     await this.conn.execute(`.rel drop ${name}`);
   }
@@ -150,6 +167,7 @@ export class KnowledgeGraph {
 
   /** Insert facts into the knowledge graph. */
   async insert(rel: RelationDef, facts: Fact | Fact[]): Promise<InsertResult> {
+    await this.ensureKg();
     const factList = Array.isArray(facts) ? facts : [facts];
     if (factList.length === 0) return { count: 0 };
 
@@ -173,6 +191,7 @@ export class KnowledgeGraph {
    * @param factsOrCondition - Either specific facts to delete, or a BoolExpr condition
    */
   async delete(rel: RelationDef, factsOrCondition: Fact | Fact[] | BoolExpr): Promise<DeleteResult> {
+    await this.ensureKg();
     // Check if it's a BoolExpr (has _tag property)
     if (
       typeof factsOrCondition === 'object' &&
@@ -216,6 +235,7 @@ export class KnowledgeGraph {
    * });
    */
   async query(opts: QueryOptions): Promise<ResultSet> {
+    await this.ensureKg();
     const iql = compileQuery(opts);
 
     if (Array.isArray(iql)) {
@@ -286,6 +306,7 @@ export class KnowledgeGraph {
     radius?: number;
     metric?: 'cosine' | 'euclidean' | 'manhattan' | 'dot_product';
   }): Promise<ResultSet> {
+    await this.ensureKg();
     const rel = opts.relation;
     const relName = rel.relationName;
     const cols = rel.columns;
@@ -345,6 +366,7 @@ export class KnowledgeGraph {
     headColumns: string[],
     clauses: RuleClause[],
   ): Promise<void> {
+    await this.ensureKg();
     for (const clause of clauses) {
       const iql = compileRule(headName, headColumns, clause, true);
       await this.conn.execute(iql);
@@ -353,6 +375,7 @@ export class KnowledgeGraph {
 
   /** List all rules in this KG. */
   async listRules(): Promise<RuleInfo[]> {
+    await this.ensureKg();
     const result = await this.conn.execute('.rule list');
     return result.rows.map((row) => ({
       name: String(row[0]),
@@ -362,17 +385,20 @@ export class KnowledgeGraph {
 
   /** Get the IQL definition of a rule. */
   async ruleDefinition(name: string): Promise<string[]> {
+    await this.ensureKg();
     const result = await this.conn.execute(`.rule show ${name}`);
     return result.rows.map((row) => String(row[0]));
   }
 
   /** Drop all clauses of a rule. */
   async dropRule(name: string): Promise<void> {
+    await this.ensureKg();
     await this.conn.execute(`.rule drop ${name}`);
   }
 
   /** Remove a specific clause from a rule (1-based index). */
   async dropRuleClause(name: string, index: number): Promise<void> {
+    await this.ensureKg();
     await this.conn.execute(`.rule remove ${name} ${index}`);
   }
 
@@ -390,11 +416,13 @@ export class KnowledgeGraph {
 
   /** Clear a rule's materialized data. */
   async clearRule(name: string): Promise<void> {
+    await this.ensureKg();
     await this.conn.execute(`.rule clear ${name}`);
   }
 
   /** Drop all rules whose names start with prefix. */
   async dropRulesByPrefix(prefix: string): Promise<void> {
+    await this.ensureKg();
     await this.conn.execute(`.rule drop prefix ${prefix}`);
   }
 
@@ -402,11 +430,13 @@ export class KnowledgeGraph {
 
   /** Create an HNSW vector index. */
   async createIndex(index: HnswIndex): Promise<void> {
+    await this.ensureKg();
     await this.conn.execute(index.toIQL());
   }
 
   /** List all indexes. */
   async listIndexes(): Promise<IndexInfo[]> {
+    await this.ensureKg();
     const result = await this.conn.execute('.index list');
     return result.rows.map((row) => ({
       name: String(row[0]),
@@ -419,6 +449,7 @@ export class KnowledgeGraph {
 
   /** Get statistics for an index. */
   async indexStats(name: string): Promise<IndexStats> {
+    await this.ensureKg();
     const result = await this.conn.execute(`.index stats ${name}`);
     const row = result.rows[0] ?? [name, 0, 0, 0];
     return {
@@ -431,11 +462,13 @@ export class KnowledgeGraph {
 
   /** Drop an index. */
   async dropIndex(name: string): Promise<void> {
+    await this.ensureKg();
     await this.conn.execute(`.index drop ${name}`);
   }
 
   /** Rebuild an index. */
   async rebuildIndex(name: string): Promise<void> {
+    await this.ensureKg();
     await this.conn.execute(`.index rebuild ${name}`);
   }
 
@@ -466,6 +499,7 @@ export class KnowledgeGraph {
 
   /** Show the query plan without executing. */
   async explain(opts: QueryOptions): Promise<ExplainResult> {
+    await this.ensureKg();
     let iql = compileQuery(opts);
     if (Array.isArray(iql)) {
       iql = iql[0];
@@ -477,11 +511,13 @@ export class KnowledgeGraph {
 
   /** Trigger storage compaction. */
   async compact(): Promise<void> {
+    await this.ensureKg();
     await this.conn.execute('.compact');
   }
 
   /** Get server status. */
   async status(): Promise<ServerStatus> {
+    await this.ensureKg();
     const result = await this.conn.execute('.status');
     const row = result.rows[0] ?? ['unknown', 'unknown'];
     return {
@@ -492,6 +528,7 @@ export class KnowledgeGraph {
 
   /** Load data from a file on the server. */
   async load(path: string, mode?: string): Promise<void> {
+    await this.ensureKg();
     let cmd = `.load ${path}`;
     if (mode) cmd += ` ${mode}`;
     await this.conn.execute(cmd);
@@ -499,6 +536,7 @@ export class KnowledgeGraph {
 
   /** Clear all relations matching a prefix. */
   async clearPrefix(prefix: string): Promise<ClearResult> {
+    await this.ensureKg();
     const result = await this.conn.execute(`.clear prefix ${prefix}`);
     const details: Array<[string, number]> = result.rows
       .filter((row) => row.length > 1)
@@ -512,6 +550,7 @@ export class KnowledgeGraph {
 
   /** Execute raw IQL. */
   async execute(iql: string): Promise<ResultSet> {
+    await this.ensureKg();
     const result = await this.conn.execute(iql);
     return new ResultSet({
       columns: result.columns,
