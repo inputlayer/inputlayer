@@ -24,8 +24,10 @@ config.local.toml
 tmp/
 *.tmp
 
+# Node.js dependencies (all packages)
+node_modules/
+
 # GUI (Next.js) - Build artifacts and dependencies
-gui/node_modules/
 gui/.next/
 gui/dist/
 gui/out/
@@ -39,7 +41,6 @@ gui/.turbo/
 gui/.vercel/
 
 # Front (marketing site) - Build artifacts and dependencies
-front/node_modules/
 front/.next/
 front/dist/
 front/out/
@@ -48,7 +49,6 @@ front/out/
 front/lib/docs-bundle.ts
 
 # Docs site (legacy Nextra) - Build artifacts
-docs/site/node_modules/
 docs/site/.next/
 docs/site/dist/
 docs/site/out/
