@@ -1,5 +1,5 @@
 {
-  "name": "inputlayer",
+  "name": "inputlayer-js-dev",
   "version": "0.1.0",
   "description": "TypeScript Object-Logic Mapper for InputLayer knowledge graph engine",
   "main": "./dist/index.js",
