@@ -13,18 +13,15 @@
 //! - Arbitrary arity tuples with multiple data types
 //! - Complex joins with multi-column keys
 //! - Generic projections (any column reordering or selection)
-//! - Recursive evaluation via `.iterative()` scopes with `SemigroupVariable`
+//! - Recursive evaluation via `.iterative()` scopes with `Variable`
 //! - Semi-naive evaluation for efficient fixpoint computation
 
 use crate::boolean_specialization::SemiringType;
 use crate::ir::{AggregateFunction, ArithOp, BuiltinFunction, IRExpression, IRNode, Predicate};
 use crate::semiring_types::{BooleanDiff, DiffType};
 use differential_dataflow::lattice::Lattice;
-use differential_dataflow::operators::arrange::ArrangeByKey;
-use differential_dataflow::operators::iterate::SemigroupVariable;
-use differential_dataflow::operators::join::{Join, JoinCore};
-use differential_dataflow::operators::{Reduce, Threshold};
-use differential_dataflow::Collection;
+use differential_dataflow::operators::iterate::Variable;
+use differential_dataflow::collection::vec::Collection;
 use parking_lot::Mutex;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -32,7 +29,8 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use timely::dataflow::operators::{Inspect, Map, Probe, ToStream};
+use timely::dataflow::operators::{Inspect, Probe};
+use timely::dataflow::operators::vec::{Map, ToStream};
 use timely::dataflow::ProbeHandle;
 use timely::dataflow::Scope;
 use timely::order::Product;
@@ -682,7 +680,7 @@ impl CodeGenerator {
     /// Optimized transitive closure using DD's native .`iterative()` scope
     ///
     /// This is O(n) for chain graphs vs O(n²) for naive iteration.
-    /// Uses `SemigroupVariable` for proper semi-naive evaluation.
+    /// Uses `Variable` for proper semi-naive evaluation.
     fn execute_transitive_closure_optimized(
         &self,
         edge_relation: &str,
@@ -734,23 +732,22 @@ impl CodeGenerator {
 
                     // Use iterative scope for efficient semi-naive recursion
                     let tc_result = scope.iterative::<Iter, _, _>(|inner| {
-                        // Create SemigroupVariable for transitive closure
-                        let variable: SemigroupVariable<_, Tuple, R> =
-                            SemigroupVariable::new(inner, Product::new((), 1));
+                        // Create Variable for transitive closure
+                        let (variable, collection) = Variable::new(inner, Product::new((), 1));
 
                         // Enter edge collection into iterative scope
                         let edges_in_scope = edge_collection.enter(inner);
 
                         // Recursive case: tc(x, z) <- tc(x, y), edge(y, z)
                         // Key tc by second column (y) for join with edge(y, z)
-                        let tc_keyed = variable.map(|tuple| {
+                        let tc_keyed = collection.map(|tuple: Tuple| {
                             let x = tuple.get(0).cloned().unwrap_or(Value::Null);
                             let y = tuple.get(1).cloned().unwrap_or(Value::Null);
                             (Tuple::new(vec![y]), x) // Key by y, value is x
                         });
 
                         // Key edges by first column (y) for join
-                        let edges_keyed = edges_in_scope.map(|tuple| {
+                        let edges_keyed = edges_in_scope.clone().map(|tuple| {
                             let y = tuple.get(0).cloned().unwrap_or(Value::Null);
                             let z = tuple.get(1).cloned().unwrap_or(Value::Null);
                             (Tuple::new(vec![y]), z) // Key by y, value is z
@@ -758,14 +755,14 @@ impl CodeGenerator {
 
                         // Join: tc(x, y) JOIN edge(y, z) -> tc(x, z)
                         let recursive = tc_keyed
-                            .join(&edges_keyed)
+                            .join(edges_keyed)
                             .map(|(_y_key, (x, z))| Tuple::new(vec![x, z]));
 
                         // Combine base case and recursive case
-                        let next = edges_in_scope.concat(&recursive).distinct_core::<R>();
+                        let next = edges_in_scope.concat(recursive).distinct_core::<R>();
 
                         // Set variable for next iteration
-                        variable.set(&next);
+                        variable.set(next.clone());
 
                         // Leave scope with final result
                         next.leave()
@@ -907,14 +904,13 @@ impl CodeGenerator {
                     );
 
                     let tc_result = scope.iterative::<Iter, _, _>(|inner| {
-                        let variable: SemigroupVariable<_, Tuple, R> =
-                            SemigroupVariable::new(inner, Product::new((), 1));
+                        let (variable, collection) = Variable::new(inner, Product::new((), 1));
 
                         let seed_edges_in = seed_edge_collection.enter(inner);
                         let all_edges_in = all_edge_collection.enter(inner);
 
                         // Recursive: tc(x, z) <- tc(x, y), ALL_edges(y, z)
-                        let tc_keyed = variable.map(|tuple| {
+                        let tc_keyed = collection.map(|tuple: Tuple| {
                             let x = tuple.get(0).cloned().unwrap_or(Value::Null);
                             let y = tuple.get(1).cloned().unwrap_or(Value::Null);
                             (Tuple::new(vec![y]), x)
@@ -927,13 +923,13 @@ impl CodeGenerator {
                         });
 
                         let recursive = tc_keyed
-                            .join(&edges_keyed)
+                            .join(edges_keyed)
                             .map(|(_y_key, (x, z))| Tuple::new(vec![x, z]));
 
                         // Base = seed edges only (not all edges)
-                        let next = seed_edges_in.concat(&recursive).distinct_core::<R>();
+                        let next = seed_edges_in.concat(recursive).distinct_core::<R>();
 
-                        variable.set(&next);
+                        variable.set(next.clone());
                         next.leave()
                     });
 
@@ -983,7 +979,7 @@ impl CodeGenerator {
 
     /// General recursive execution using DD's `.iterative()` scope
     ///
-    /// Uses DD's native semi-naive evaluation via `SemigroupVariable` for proper
+    /// Uses DD's native semi-naive evaluation via `Variable` for proper
     /// incremental fixpoint computation. This handles arbitrary recursive patterns
     /// (not just transitive closure) by routing the recursive relation through a
     /// live collection in the iterative scope.
@@ -1105,13 +1101,12 @@ impl CodeGenerator {
 
                     // Use DD's iterative scope for proper semi-naive fixpoint evaluation
                     let result = scope.iterative::<Iter, _, _>(|inner| {
-                        // Create SemigroupVariable for the recursive relation
-                        let variable: SemigroupVariable<_, Tuple, R> =
-                            SemigroupVariable::new(inner, Product::new((), 1));
+                        // Create Variable for the recursive relation
+                        let (variable, var_collection) = Variable::new(inner, Product::new((), 1));
 
                         // Build live collections map:
                         // - All base relations entered into the iterative scope
-                        // - The recursive relation backed by the SemigroupVariable
+                        // - The recursive relation backed by the Variable
                         let mut live: HashMap<String, Collection<_, Tuple, R>> = HashMap::new();
                         for (name, tuples) in input_data.iter() {
                             let coll: Collection<_, Tuple, R> = Collection::new(
@@ -1122,11 +1117,11 @@ impl CodeGenerator {
                             );
                             live.insert(name.clone(), coll);
                         }
-                        // Override the recursive relation with the SemigroupVariable
-                        live.insert(rec_rel.clone(), (*variable).clone());
+                        // Override the recursive relation with the Variable's collection
+                        live.insert(rec_rel.clone(), var_collection);
 
                         // Generate recursive body using live collections
-                        // The code generator will use the SemigroupVariable's collection
+                        // The code generator will use the Variable's collection
                         // when scanning the recursive relation.
                         // Pass input_data so antijoin's eager collection can read base relations.
                         let recursive_result = Self::generate_collection_tuples::<_, R>(
@@ -1140,7 +1135,7 @@ impl CodeGenerator {
                         let base_in_scope = base_collection.enter(inner);
 
                         // Combine base + recursive results
-                        let combined = base_in_scope.concat(&recursive_result);
+                        let combined = base_in_scope.concat(recursive_result);
 
                         // Apply deduplication strategy based on aggregation mode
                         let next = if let Some((ref group_by, agg_col, is_min)) = agg_in_loop {
@@ -1182,7 +1177,7 @@ impl CodeGenerator {
                         };
 
                         // Set variable for next iteration
-                        variable.set(&next);
+                        variable.set(next.clone());
 
                         // Leave scope with final result
                         next.leave()
@@ -1528,7 +1523,7 @@ impl CodeGenerator {
 
                 if filter_predicate.is_none() {
                     // No filter: use join_map to fuse join + projection in one operator
-                    left_keyed.join_map(&right_keyed, move |_key, left_tuple, right_tuple| {
+                    left_keyed.join_map(right_keyed, move |_key, left_tuple, right_tuple| {
                         let combined = left_tuple.concat(right_tuple);
                         combined.project(&projection)
                     })
@@ -1541,7 +1536,7 @@ impl CodeGenerator {
                     let left_arranged = left_keyed.arrange_by_key();
                     let right_arranged = right_keyed.arrange_by_key();
                     left_arranged.join_core(
-                        &right_arranged,
+                        right_arranged,
                         move |_key, left_tuple, right_tuple| {
                             let combined = left_tuple.concat(right_tuple);
                             let projected = combined.project(&projection);
@@ -2022,7 +2017,7 @@ impl CodeGenerator {
 
             // For Cartesian product, concatenate ALL columns from both sides
             left_keyed
-                .join(&right_keyed)
+                .join(right_keyed)
                 .map(|(_key, (left_tuple, right_tuple))| left_tuple.concat(&right_tuple))
         } else {
             // Normal join with actual keys
@@ -2044,7 +2039,7 @@ impl CodeGenerator {
             // Join and reconstruct: all of left + non-key columns of right
             let right_keys_for_map = right_keys.clone();
             left_keyed
-                .join(&right_keyed)
+                .join(right_keyed)
                 .map(move |(_key, (left_tuple, right_tuple))| {
                     // Output schema: all columns from left, then non-key columns from right
                     let right_non_keys = right_tuple.excluding_indices(&right_keys_for_map);
@@ -2270,7 +2265,7 @@ impl CodeGenerator {
 
         for input in &inputs[1..] {
             let coll = Self::generate_collection_tuples::<G, R>(scope, input, input_data, live);
-            result = result.concat(&coll);
+            result = result.concat(coll);
         }
 
         result
@@ -3677,20 +3672,20 @@ impl CodeGenerator {
     /// Execute transitive closure using TRUE Differential Dataflow recursion
     ///
     /// This is the production-grade implementation that uses DD's `.iterative()` scope
-    /// with `SemigroupVariable` for proper semi-naive evaluation.
+    /// with `Variable` for proper semi-naive evaluation.
     ///
     /// ## DD Pattern
     ///
     /// ```text
     /// scope.iterative::<Iter, _, _>(|inner| {
-    ///     // Create SemigroupVariable for recursive IDB
-    ///     let variable = SemigroupVariable::new(inner, Product::new((), 1));
+    ///     // Create Variable for recursive IDB
+    ///     let variable = Variable::new(inner, Product::new((), 1));
     ///
     ///     // Enter base case into scope
     ///     let base = edges.enter(inner);
     ///
     ///     // Recursive step: tc(x,z) <- tc(x,y), edge(y,z)
-    ///     let recursive = variable.join(&edges_keyed).map(|(y, (x, z))| (x, z));
+    ///     let recursive = variable.join(edges_keyed).map(|(y, (x, z))| (x, z));
     ///
     ///     // Combine base and recursive, set variable
     ///     let next = base.concat(&recursive).distinct();
@@ -3738,9 +3733,8 @@ impl CodeGenerator {
 
                     // Use iterative scope for recursion
                     let tc_result = scope.iterative::<Iter, _, _>(|inner| {
-                        // Create SemigroupVariable for transitive closure
-                        let variable: SemigroupVariable<_, Tuple, isize> =
-                            SemigroupVariable::new(inner, Product::new((), 1));
+                        // Create Variable for transitive closure
+                        let (variable, collection) = Variable::new(inner, Product::new((), 1));
 
                         // Enter edge collection into iterative scope
                         let edges_in_scope = edge_collection.enter(inner);
@@ -3750,14 +3744,14 @@ impl CodeGenerator {
 
                         // Recursive case: tc(x, z) <- tc(x, y), edge(y, z)
                         // Key tc by second column (y) for join with edge(y, z)
-                        let tc_keyed = variable.map(|tuple| {
+                        let tc_keyed = collection.map(|tuple: Tuple| {
                             let x = tuple.get(0).cloned().unwrap_or(Value::Null);
                             let y = tuple.get(1).cloned().unwrap_or(Value::Null);
                             (Tuple::new(vec![y]), x) // Key by y, value is x
                         });
 
                         // Key edges by first column (y) for join
-                        let edges_keyed = edges_in_scope.map(|tuple| {
+                        let edges_keyed = edges_in_scope.clone().map(|tuple| {
                             let y = tuple.get(0).cloned().unwrap_or(Value::Null);
                             let z = tuple.get(1).cloned().unwrap_or(Value::Null);
                             (Tuple::new(vec![y]), z) // Key by y, value is z
@@ -3765,14 +3759,14 @@ impl CodeGenerator {
 
                         // Join: tc(x, y) JOIN edge(y, z) -> tc(x, z)
                         let recursive = tc_keyed
-                            .join(&edges_keyed)
+                            .join(edges_keyed)
                             .map(|(_y_key, (x, z))| Tuple::new(vec![x, z]));
 
                         // Combine base case and recursive case
-                        let next = edges_in_scope.concat(&recursive).distinct();
+                        let next = edges_in_scope.concat(recursive).distinct();
 
                         // Set variable for next iteration
-                        variable.set(&next);
+                        variable.set(next.clone());
 
                         // Leave scope with final result
                         next.leave()
@@ -3878,9 +3872,8 @@ impl CodeGenerator {
 
                     // Use iterative scope for recursion
                     let reach_result = scope.iterative::<Iter, _, _>(|inner| {
-                        // Create SemigroupVariable for reachable nodes
-                        let variable: SemigroupVariable<_, Tuple, isize> =
-                            SemigroupVariable::new(inner, Product::new((), 1));
+                        // Create Variable for reachable nodes
+                        let (variable, collection) = Variable::new(inner, Product::new((), 1));
 
                         // Enter collections into iterative scope
                         let sources_in_scope = source_collection.enter(inner);
@@ -3891,13 +3884,13 @@ impl CodeGenerator {
 
                         // Recursive case: reach(y) <- reach(x), edge(x, y)
                         // Key reach by its value (x) for join with edge(x, y)
-                        let reach_keyed = variable.map(|tuple| {
+                        let reach_keyed = collection.map(|tuple: Tuple| {
                             let x = tuple.get(0).cloned().unwrap_or(Value::Null);
                             (Tuple::new(vec![x.clone()]), x) // Key and value are both x
                         });
 
                         // Key edges by first column (x) for join
-                        let edges_keyed = edges_in_scope.map(|tuple| {
+                        let edges_keyed = edges_in_scope.clone().map(|tuple| {
                             let x = tuple.get(0).cloned().unwrap_or(Value::Null);
                             let y = tuple.get(1).cloned().unwrap_or(Value::Null);
                             (Tuple::new(vec![x]), y) // Key by x, value is y
@@ -3905,14 +3898,14 @@ impl CodeGenerator {
 
                         // Join: reach(x) JOIN edge(x, y) -> reach(y)
                         let recursive = reach_keyed
-                            .join(&edges_keyed)
+                            .join(edges_keyed)
                             .map(|(_x_key, (_x, y))| Tuple::new(vec![y]));
 
                         // Combine base case and recursive case
-                        let next = sources_in_scope.concat(&recursive).distinct();
+                        let next = sources_in_scope.concat(recursive).distinct();
 
                         // Set variable for next iteration
-                        variable.set(&next);
+                        variable.set(next.clone());
 
                         // Leave scope with final result
                         next.leave()
@@ -4650,7 +4643,7 @@ mod tests {
         assert!(results.contains(&4i64));
     }
 
-    // True DD Recursion Tests (Using SemigroupVariable + .iterative())
+    // True DD Recursion Tests (Using Variable + .iterative())
     #[test]
     fn test_transitive_closure_dd_linear() {
         let mut codegen = CodeGenerator::new();

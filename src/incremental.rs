@@ -170,7 +170,6 @@ impl IncrementalEngine {
         index_manager: Arc<Mutex<IndexManager>>,
     ) {
         use differential_dataflow::input::Input;
-        use differential_dataflow::operators::arrange::ArrangeBySelf;
         use differential_dataflow::trace::cursor::Cursor;
         use differential_dataflow::trace::TraceReader;
         use timely::dataflow::operators::Probe;
@@ -185,7 +184,7 @@ impl IncrementalEngine {
             > = HashMap::new();
 
             type KeyTrace =
-                differential_dataflow::trace::implementations::ord::OrdKeySpine<Tuple, u64, isize>;
+                differential_dataflow::trace::implementations::ord_neu::OrdKeySpine<Tuple, u64, isize>;
             type KeyTraceAgent = differential_dataflow::operators::arrange::TraceAgent<KeyTrace>;
             let mut traces: HashMap<String, KeyTraceAgent> = HashMap::new();
 
@@ -248,7 +247,7 @@ impl IncrementalEngine {
                                     let key = cursor.key(&storage).clone();
                                     let mut total_diff: isize = 0;
                                     cursor.map_times(&storage, |_time, diff| {
-                                        total_diff += diff;
+                                        total_diff += *diff;
                                     });
                                     if total_diff > 0 {
                                         result.push(key);

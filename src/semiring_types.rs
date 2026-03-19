@@ -8,7 +8,7 @@
 //! The `DiffType` trait combines all DD trait requirements (`Semigroup`, `Monoid`, `Abelian`)
 //! with helpers needed by the code generator (`one()`, `to_count()`).
 
-use differential_dataflow::difference::{Monoid, Semigroup};
+use differential_dataflow::difference::{Abelian, IsZero, Monoid, Multiply, Semigroup};
 use std::ops::AddAssign;
 
 /// Supertrait combining all DD requirements for a diff type,
@@ -20,7 +20,7 @@ pub trait DiffType:
     Semigroup
     + Monoid
     + differential_dataflow::difference::Abelian
-    + std::ops::Mul<Self, Output = Self>
+    + Multiply<Self, Output = Self>
     + From<i8>
     + Copy
     + Default
@@ -29,8 +29,9 @@ pub trait DiffType:
     + Send
     + Sync
     + 'static
-    + abomonation::Abomonation
     + Ord
+    + serde::Serialize
+    + for<'a> serde::Deserialize<'a>
 {
     /// The multiplicative identity (1 for counting, BooleanDiff(1) for boolean).
     fn one() -> Self;
@@ -70,7 +71,7 @@ impl DiffType for isize {
 ///
 /// `Present` only implements `Semigroup` (no `Monoid`, `Abelian`, or `Neg`).
 /// Our code uses `distinct()` and `reduce()` which require `Abelian`.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, serde::Serialize, serde::Deserialize)]
 #[repr(transparent)]
 pub struct BooleanDiff(pub i8);
 
@@ -95,6 +96,14 @@ impl std::ops::Mul for BooleanDiff {
     }
 }
 
+impl Multiply for BooleanDiff {
+    type Output = Self;
+    #[inline]
+    fn multiply(self, rhs: &Self) -> Self {
+        BooleanDiff(self.0.saturating_mul(rhs.0))
+    }
+}
+
 impl AddAssign<&Self> for BooleanDiff {
     #[inline]
     fn add_assign(&mut self, rhs: &Self) {
@@ -102,10 +111,17 @@ impl AddAssign<&Self> for BooleanDiff {
     }
 }
 
-impl Semigroup for BooleanDiff {
+impl IsZero for BooleanDiff {
     #[inline]
     fn is_zero(&self) -> bool {
         self.0 == 0
+    }
+}
+
+impl Semigroup for BooleanDiff {
+    #[inline]
+    fn plus_equals(&mut self, rhs: &Self) {
+        self.0 = self.0.saturating_add(rhs.0);
     }
 }
 
@@ -116,34 +132,17 @@ impl Monoid for BooleanDiff {
     }
 }
 
-// Abelian is a blanket impl in DD for types implementing Monoid + Neg<Output=Self>.
-// Since BooleanDiff implements both, the blanket impl applies automatically.
+impl Abelian for BooleanDiff {
+    #[inline]
+    fn negate(&mut self) {
+        self.0 = -self.0;
+    }
+}
 
 impl From<i8> for BooleanDiff {
     #[inline]
     fn from(v: i8) -> Self {
         BooleanDiff(v)
-    }
-}
-
-// Manual Abomonation impl for the 1-byte repr(transparent) newtype.
-// Safety: BooleanDiff is repr(transparent) over i8 which is a single byte
-// with no pointers or heap allocations. The abomonation encode/decode
-// is equivalent to a memcpy of 1 byte.
-impl abomonation::Abomonation for BooleanDiff {
-    unsafe fn entomb<W: std::io::Write>(&self, write: &mut W) -> std::io::Result<()> {
-        write.write_all(&[self.0 as u8])
-    }
-    unsafe fn exhume<'b>(&mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
-        if bytes.is_empty() {
-            None
-        } else {
-            self.0 = bytes[0] as i8;
-            Some(&mut bytes[1..])
-        }
-    }
-    fn extent(&self) -> usize {
-        1
     }
 }
 
@@ -175,7 +174,7 @@ impl DiffType for BooleanDiff {
 /// DD's `Abelian` blanket impl (required by `DiffType` / `distinct_core`).
 /// The code generator MUST NOT call `distinct_core()` on `MinDiff` collections.
 /// Instead, it uses `reduce()` with min-aggregation for deduplication.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub struct MinDiff(pub i64);
 
 impl Default for MinDiff {
@@ -198,9 +197,14 @@ impl std::ops::Mul for MinDiff {
     type Output = Self;
     #[inline]
     fn mul(self, rhs: Self) -> Self {
-        // Tropical semiring: multiplication = addition of distances.
-        // MinDiff(a) * MinDiff(b) = MinDiff(a + b).
-        // Used when DD joins produce combined path costs.
+        MinDiff(self.0.saturating_add(rhs.0))
+    }
+}
+
+impl Multiply for MinDiff {
+    type Output = Self;
+    #[inline]
+    fn multiply(self, rhs: &Self) -> Self {
         MinDiff(self.0.saturating_add(rhs.0))
     }
 }
@@ -212,10 +216,17 @@ impl AddAssign<&Self> for MinDiff {
     }
 }
 
-impl Semigroup for MinDiff {
+impl IsZero for MinDiff {
     #[inline]
     fn is_zero(&self) -> bool {
         self.0 == i64::MAX
+    }
+}
+
+impl Semigroup for MinDiff {
+    #[inline]
+    fn plus_equals(&mut self, rhs: &Self) {
+        self.0 = self.0.min(rhs.0);
     }
 }
 
@@ -226,29 +237,19 @@ impl Monoid for MinDiff {
     }
 }
 
+impl Abelian for MinDiff {
+    #[inline]
+    fn negate(&mut self) {
+        // Min has no mathematical inverse. This exists to satisfy the Abelian
+        // blanket impl. The code generator never calls distinct() on MinDiff.
+        self.0 = self.0.wrapping_neg();
+    }
+}
+
 impl From<i8> for MinDiff {
     #[inline]
     fn from(v: i8) -> Self {
         MinDiff(v as i64)
-    }
-}
-
-// Manual Abomonation impl for 8-byte i64 newtype.
-// Safety: MinDiff is repr(transparent)-equivalent over i64 (no padding, no pointers).
-impl abomonation::Abomonation for MinDiff {
-    unsafe fn entomb<W: std::io::Write>(&self, write: &mut W) -> std::io::Result<()> {
-        write.write_all(&self.0.to_le_bytes())
-    }
-    unsafe fn exhume<'b>(&mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
-        if bytes.len() < 8 {
-            None
-        } else {
-            self.0 = i64::from_le_bytes(bytes[..8].try_into().ok()?);
-            Some(&mut bytes[8..])
-        }
-    }
-    fn extent(&self) -> usize {
-        8
     }
 }
 
@@ -277,7 +278,7 @@ impl DiffType for MinDiff {
 ///
 /// Same caveat as MinDiff: `Neg` exists only for trait compliance.
 /// The code generator MUST NOT call `distinct_core()` on `MaxDiff` collections.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize)]
 pub struct MaxDiff(pub i64);
 
 impl Default for MaxDiff {
@@ -299,7 +300,14 @@ impl std::ops::Mul for MaxDiff {
     type Output = Self;
     #[inline]
     fn mul(self, rhs: Self) -> Self {
-        // Tropical semiring: multiplication = addition of capacities.
+        MaxDiff(self.0.saturating_add(rhs.0))
+    }
+}
+
+impl Multiply for MaxDiff {
+    type Output = Self;
+    #[inline]
+    fn multiply(self, rhs: &Self) -> Self {
         MaxDiff(self.0.saturating_add(rhs.0))
     }
 }
@@ -311,10 +319,17 @@ impl AddAssign<&Self> for MaxDiff {
     }
 }
 
-impl Semigroup for MaxDiff {
+impl IsZero for MaxDiff {
     #[inline]
     fn is_zero(&self) -> bool {
         self.0 == i64::MIN
+    }
+}
+
+impl Semigroup for MaxDiff {
+    #[inline]
+    fn plus_equals(&mut self, rhs: &Self) {
+        self.0 = self.0.max(rhs.0);
     }
 }
 
@@ -325,27 +340,18 @@ impl Monoid for MaxDiff {
     }
 }
 
+impl Abelian for MaxDiff {
+    #[inline]
+    fn negate(&mut self) {
+        // Max has no mathematical inverse. See MinDiff::negate() for rationale.
+        self.0 = self.0.wrapping_neg();
+    }
+}
+
 impl From<i8> for MaxDiff {
     #[inline]
     fn from(v: i8) -> Self {
         MaxDiff(v as i64)
-    }
-}
-
-impl abomonation::Abomonation for MaxDiff {
-    unsafe fn entomb<W: std::io::Write>(&self, write: &mut W) -> std::io::Result<()> {
-        write.write_all(&self.0.to_le_bytes())
-    }
-    unsafe fn exhume<'b>(&mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
-        if bytes.len() < 8 {
-            None
-        } else {
-            self.0 = i64::from_le_bytes(bytes[..8].try_into().ok()?);
-            Some(&mut bytes[8..])
-        }
-    }
-    fn extent(&self) -> usize {
-        8
     }
 }
 
