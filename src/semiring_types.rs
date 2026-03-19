@@ -71,7 +71,19 @@ impl DiffType for isize {
 ///
 /// `Present` only implements `Semigroup` (no `Monoid`, `Abelian`, or `Neg`).
 /// Our code uses `distinct()` and `reduce()` which require `Abelian`.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 #[repr(transparent)]
 pub struct BooleanDiff(pub i8);
 
@@ -174,7 +186,9 @@ impl DiffType for BooleanDiff {
 /// DD's `Abelian` blanket impl (required by `DiffType` / `distinct_core`).
 /// The code generator MUST NOT call `distinct_core()` on `MinDiff` collections.
 /// Instead, it uses `reduce()` with min-aggregation for deduplication.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize,
+)]
 pub struct MinDiff(pub i64);
 
 impl Default for MinDiff {
@@ -278,7 +292,9 @@ impl DiffType for MinDiff {
 ///
 /// Same caveat as MinDiff: `Neg` exists only for trait compliance.
 /// The code generator MUST NOT call `distinct_core()` on `MaxDiff` collections.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize,
+)]
 pub struct MaxDiff(pub i64);
 
 impl Default for MaxDiff {

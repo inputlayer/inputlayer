@@ -1829,5 +1829,4 @@ mod tests {
             DataType::Vector { dim: None }
         );
     }
-
 }

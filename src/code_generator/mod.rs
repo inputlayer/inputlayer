@@ -19,9 +19,9 @@
 use crate::boolean_specialization::SemiringType;
 use crate::ir::{AggregateFunction, ArithOp, BuiltinFunction, IRExpression, IRNode, Predicate};
 use crate::semiring_types::{BooleanDiff, DiffType};
+use differential_dataflow::collection::vec::Collection;
 use differential_dataflow::lattice::Lattice;
 use differential_dataflow::operators::iterate::Variable;
-use differential_dataflow::collection::vec::Collection;
 use parking_lot::Mutex;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -29,8 +29,8 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use timely::dataflow::operators::{Inspect, Probe};
 use timely::dataflow::operators::vec::{Map, ToStream};
+use timely::dataflow::operators::{Inspect, Probe};
 use timely::dataflow::ProbeHandle;
 use timely::dataflow::Scope;
 use timely::order::Product;
@@ -237,7 +237,7 @@ impl CodeGenerator {
         // out-of-bounds) should produce an error, not crash the server.
         catch_unwind(AssertUnwindSafe(|| {
             timely::execute_directly(move |worker| {
-                let mut probe = ProbeHandle::new();
+                let probe = ProbeHandle::new();
                 let mut steps: u64 = 0;
                 let start = Instant::now();
                 let mut last_log = Instant::now();
@@ -264,7 +264,7 @@ impl CodeGenerator {
                                 }
                             }
                         })
-                        .probe_with(&mut probe);
+                        .probe_with(&probe);
                 });
 
                 // Wait for computation to complete
@@ -719,7 +719,7 @@ impl CodeGenerator {
         // Execute DD computation with TRUE recursion using .iterative()
         catch_unwind(AssertUnwindSafe(|| {
             timely::execute_directly(move |worker| {
-                let mut probe = ProbeHandle::new();
+                let probe = ProbeHandle::new();
 
                 worker.dataflow::<(), _, _>(|scope| {
                     // Load edge data as base collection
@@ -780,7 +780,7 @@ impl CodeGenerator {
                                 }
                             }
                         })
-                        .probe_with(&mut probe);
+                        .probe_with(&probe);
                 });
 
                 // Wait for computation to complete
@@ -885,7 +885,7 @@ impl CodeGenerator {
 
         catch_unwind(AssertUnwindSafe(|| {
             timely::execute_directly(move |worker| {
-                let mut probe = ProbeHandle::new();
+                let probe = ProbeHandle::new();
 
                 worker.dataflow::<(), _, _>(|scope| {
                     // Two edge collections: seed-filtered for base, full for recursive
@@ -944,7 +944,7 @@ impl CodeGenerator {
                                 }
                             }
                         })
-                        .probe_with(&mut probe);
+                        .probe_with(&probe);
                 });
 
                 while !probe.done() {
@@ -1088,7 +1088,7 @@ impl CodeGenerator {
 
         catch_unwind(AssertUnwindSafe(|| {
             timely::execute_directly(move |worker| {
-                let mut probe = ProbeHandle::new();
+                let probe = ProbeHandle::new();
 
                 worker.dataflow::<(), _, _>(|scope| {
                     // Generate base case collection from static input data
@@ -1195,7 +1195,7 @@ impl CodeGenerator {
                                 }
                             }
                         })
-                        .probe_with(&mut probe);
+                        .probe_with(&probe);
                 });
 
                 // Wait for computation to complete
@@ -1535,17 +1535,14 @@ impl CodeGenerator {
                         .map(|p| Self::predicate_to_tuple_fn(p));
                     let left_arranged = left_keyed.arrange_by_key();
                     let right_arranged = right_keyed.arrange_by_key();
-                    left_arranged.join_core(
-                        right_arranged,
-                        move |_key, left_tuple, right_tuple| {
-                            let combined = left_tuple.concat(right_tuple);
-                            let projected = combined.project(&projection);
-                            match &pred_fn {
-                                Some(f) if !f(&projected) => None,
-                                _ => Some(projected),
-                            }
-                        },
-                    )
+                    left_arranged.join_core(right_arranged, move |_key, left_tuple, right_tuple| {
+                        let combined = left_tuple.concat(right_tuple);
+                        let projected = combined.project(&projection);
+                        match &pred_fn {
+                            Some(f) if !f(&projected) => None,
+                            _ => Some(projected),
+                        }
+                    })
                 }
             }
         }
@@ -3724,7 +3721,7 @@ impl CodeGenerator {
         // Execute DD computation with TRUE recursion
         catch_unwind(AssertUnwindSafe(|| {
             timely::execute_directly(move |worker| {
-                let mut probe = ProbeHandle::new();
+                let probe = ProbeHandle::new();
 
                 worker.dataflow::<(), _, _>(|scope| {
                     // Load edge data as base collection
@@ -3784,7 +3781,7 @@ impl CodeGenerator {
                                 }
                             }
                         })
-                        .probe_with(&mut probe);
+                        .probe_with(&probe);
                 });
 
                 // Wait for computation to complete
@@ -3861,7 +3858,7 @@ impl CodeGenerator {
         // Execute DD computation with TRUE recursion
         catch_unwind(AssertUnwindSafe(|| {
             timely::execute_directly(move |worker| {
-                let mut probe = ProbeHandle::new();
+                let probe = ProbeHandle::new();
 
                 worker.dataflow::<(), _, _>(|scope| {
                     // Load source and edge collections
@@ -3923,7 +3920,7 @@ impl CodeGenerator {
                                 }
                             }
                         })
-                        .probe_with(&mut probe);
+                        .probe_with(&probe);
                 });
 
                 // Wait for computation to complete

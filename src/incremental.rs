@@ -176,15 +176,18 @@ impl IncrementalEngine {
         use timely::dataflow::ProbeHandle;
 
         timely::execute_directly(move |worker| {
-            let mut probe = ProbeHandle::<u64>::new();
+            let probe = ProbeHandle::<u64>::new();
 
             let mut input_sessions: HashMap<
                 String,
                 differential_dataflow::input::InputSession<u64, Tuple, isize>,
             > = HashMap::new();
 
-            type KeyTrace =
-                differential_dataflow::trace::implementations::ord_neu::OrdKeySpine<Tuple, u64, isize>;
+            type KeyTrace = differential_dataflow::trace::implementations::ord_neu::OrdKeySpine<
+                Tuple,
+                u64,
+                isize,
+            >;
             type KeyTraceAgent = differential_dataflow::operators::arrange::TraceAgent<KeyTrace>;
             let mut traces: HashMap<String, KeyTraceAgent> = HashMap::new();
 
@@ -193,7 +196,7 @@ impl IncrementalEngine {
                     let (session, collection) = scope.new_collection::<Tuple, isize>();
                     input_sessions.insert(relation.clone(), session);
                     let arranged = collection.arrange_by_self();
-                    arranged.stream.probe_with(&mut probe);
+                    arranged.stream.probe_with(&probe);
                     traces.insert(relation.clone(), arranged.trace.clone());
                 }
             });
@@ -265,7 +268,7 @@ impl IncrementalEngine {
                                         scope.new_collection::<Tuple, isize>();
                                     input_sessions.insert(name.clone(), session);
                                     let arranged = collection.arrange_by_self();
-                                    arranged.stream.probe_with(&mut probe);
+                                    arranged.stream.probe_with(&probe);
                                     traces.insert(name.clone(), arranged.trace.clone());
                                 });
                             }
