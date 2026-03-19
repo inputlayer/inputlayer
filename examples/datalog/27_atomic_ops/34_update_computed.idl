@@ -1,4 +1,6 @@
-// Test: Update with computed values
+// Test: Computed values from existing data
+// Note: a rule writing back to its own source relation is recursive
+// and will run fixpoint iteration. Use a separate output relation instead.
 
 .kg create test_update_computed_n27t34
 .kg use test_update_computed_n27t34
@@ -7,11 +9,10 @@
 
 ?prices(Id, Price)
 
-// Apply 10% increase
--prices(Id, Price)
-+prices(Id, NewPrice) <- prices(Id, Price), NewPrice = Price + Price / 10
+// Compute 10% increase into a separate relation (non-recursive)
++updated_prices(Id, NewPrice) <- prices(Id, Price), NewPrice = Price + Price / 10
 
-?prices(Id, Price)
+?updated_prices(Id, NewPrice)
 
 .kg use default
 .kg drop test_update_computed_n27t34

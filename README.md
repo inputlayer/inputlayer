@@ -3,7 +3,9 @@
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 
-**A symbolic reasoning engine for AI agents.**
+**An open-source reasoning engine that gives AI agents structured, live memory** - so they can traverse relationships, evaluate logic, and explain every decision back to its source.
+
+Most agents today retrieve facts. We think the next generation will maintain a model of the world - one that's correct when data changes, auditable when regulators ask, and trustworthy enough to act on in production.
 
 Your agent retrieves context by searching for things that *look like* the question. That fails when the answer is connected through a chain of facts - not surface similarity. A shellfish allergy doesn't look like a restaurant query. A drug interaction doesn't look like a prescription request. A sanctions-listed subsidiary doesn't look like a wire transfer.
 

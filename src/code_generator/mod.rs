@@ -318,9 +318,17 @@ impl CodeGenerator {
         ir: &IRNode,
         recursive_rel: &str,
     ) -> Result<Vec<Tuple>, String> {
+        // Wrap single (non-Union) recursive rules in a Union for uniform handling.
+        // A single-rule recursion like `fib(N,V) <- fib(N1,V1), ...` still needs
+        // fixpoint iteration; falling back to single-pass execute would only compute
+        // one level of derivation.
+        let owned_union;
         let inputs = match ir {
             IRNode::Union { inputs } => inputs,
-            _ => return self.execute(ir),
+            _ => {
+                owned_union = vec![ir.clone()];
+                &owned_union
+            }
         };
 
         // Partition inputs into base cases and recursive cases
@@ -8583,5 +8591,118 @@ mod tests {
         assert_eq!(shared.len(), 1, "Original Arc must not be mutated");
         assert!(shared.contains_key("edge"));
         assert!(!shared.contains_key("node"));
+    }
+
+    /// Regression test: Union with Cartesian-product self-join must not hang.
+    ///
+    /// Reproduces the bug where `island_start(Id) <- data(Id, 1), PrevId = Id - 1, data(PrevId, 0)`
+    /// combined with `island_start(Id) <- data(Id, 1)` as a Union causes DD to never complete.
+    #[test]
+    fn test_union_with_cartesian_self_join_does_not_hang() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let (tx, rx) = mpsc::channel();
+
+        let handle = std::thread::spawn(move || {
+            let mut codegen = CodeGenerator::new();
+            codegen.add_input_tuples(
+                "data".to_string(),
+                vec![
+                    Tuple::new(vec![Value::Int64(1), Value::Int64(1)]),
+                    Tuple::new(vec![Value::Int64(2), Value::Int64(1)]),
+                    Tuple::new(vec![Value::Int64(3), Value::Int64(0)]),
+                ],
+            );
+
+            // Rule 1: r(Id) <- data(Id, 1), PrevId = Id - 1, data(PrevId, 0)
+            // This is a Cartesian self-join (no shared keys) + Compute + Filter + Project
+            let rule1 = IRNode::Map {
+                input: Box::new(IRNode::Filter {
+                    input: Box::new(IRNode::Compute {
+                        input: Box::new(IRNode::Join {
+                            left: Box::new(IRNode::Filter {
+                                input: Box::new(IRNode::Scan {
+                                    relation: "data".to_string(),
+                                    schema: vec!["Id".to_string(), "_c1".to_string()],
+                                }),
+                                predicate: Predicate::ColumnEqConst(1, 1),
+                            }),
+                            right: Box::new(IRNode::Filter {
+                                input: Box::new(IRNode::Scan {
+                                    relation: "data".to_string(),
+                                    schema: vec!["PrevId".to_string(), "_c2".to_string()],
+                                }),
+                                predicate: Predicate::ColumnEqConst(1, 0),
+                            }),
+                            left_keys: vec![],
+                            right_keys: vec![],
+                            output_schema: vec![
+                                "Id".to_string(),
+                                "_c1".to_string(),
+                                "PrevId".to_string(),
+                                "_c2".to_string(),
+                            ],
+                        }),
+                        expressions: vec![(
+                            "computed_prev".to_string(),
+                            crate::ir::IRExpression::Arithmetic {
+                                op: crate::ir::ArithOp::Sub,
+                                left: Box::new(crate::ir::IRExpression::Column(0)),
+                                right: Box::new(crate::ir::IRExpression::IntConstant(1)),
+                            },
+                        )],
+                    }),
+                    predicate: Predicate::ColumnsEq(2, 4), // PrevId == computed_prev
+                }),
+                projection: vec![0], // Project to [Id]
+                output_schema: vec!["Id".to_string()],
+            };
+
+            // Rule 2: r(Id) <- data(Id, 1) - simple scan + filter + project
+            let rule2 = IRNode::Map {
+                input: Box::new(IRNode::Filter {
+                    input: Box::new(IRNode::Scan {
+                        relation: "data".to_string(),
+                        schema: vec!["Id".to_string(), "_c1".to_string()],
+                    }),
+                    predicate: Predicate::ColumnEqConst(1, 1),
+                }),
+                projection: vec![0],
+                output_schema: vec!["Id".to_string()],
+            };
+
+            // Union of both rules
+            let union_ir = IRNode::Union {
+                inputs: vec![rule1, rule2],
+            };
+
+            let result = codegen.execute(&union_ir);
+            tx.send(result).ok();
+        });
+
+        // Wait max 10 seconds - if it hangs, this is the bug
+        match rx.recv_timeout(Duration::from_secs(10)) {
+            Ok(Ok(results)) => {
+                assert!(!results.is_empty(), "Union query should produce results");
+                // Should get: Id=1, Id=2 (from both rules combined)
+                let ids: std::collections::HashSet<i64> = results
+                    .iter()
+                    .filter_map(|t| t.get(0).and_then(|v| v.as_i64()))
+                    .collect();
+                assert!(ids.contains(&1), "Should contain Id=1");
+                assert!(ids.contains(&2), "Should contain Id=2");
+            }
+            Ok(Err(e)) => panic!("Union query failed: {e}"),
+            Err(_) => {
+                // Test timed out - this IS the bug
+                handle.thread().unpark();
+                panic!(
+                    "BUG: Union with Cartesian self-join hung for >10s. \
+                     DD computation never completes when a Union contains a \
+                     Cartesian product self-join branch."
+                );
+            }
+        }
     }
 }

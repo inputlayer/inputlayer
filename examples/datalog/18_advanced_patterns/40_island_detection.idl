@@ -1,4 +1,5 @@
-// Test: Island detection pattern
+// Test: Island detection pattern (string values)
+// Tests arithmetic join keys with string value comparison
 
 .kg create test_islands_n18t40
 .kg use test_islands_n18t40
@@ -6,8 +7,8 @@
 +events[(1, "A"), (2, "A"), (3, "B"), (4, "B"), (5, "B"), (6, "A")]
 
 // Island starts: where value differs from previous
-island_start(T, Val) <- events(T, Val), T1 = T - 1, events(T1, PrevVal), Val != PrevVal
-island_start(T, Val) <- events(T, Val), T = 1
+// Uses arithmetic join key: T1 = T - 1 bridges two events scans
++island_start(T, Val) <- events(T, Val), T1 = T - 1, events(T1, PrevVal), Val != PrevVal
 
 ?island_start(T, Val)
 

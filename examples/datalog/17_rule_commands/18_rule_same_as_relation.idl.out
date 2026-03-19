@@ -27,10 +27,11 @@ Rule 'items' registered.
 ┌────┬─────┐
 │ Id │ Val │
 ├────┼─────┤
+│  1 │  10 │
 │  2 │  20 │
 │  3 │  30 │
 └────┴─────┘
-2 rows
+3 rows
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_name_conflict_n17t18

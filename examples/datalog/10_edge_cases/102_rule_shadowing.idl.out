@@ -12,16 +12,22 @@ Switched to knowledge graph: test_shadow_n10t102
 Switched to knowledge graph: test_shadow_n10t102
 > +data[(1,), (2,)]
 Inserted 2 fact(s) into 'data'.
-> +data(X) <- data(Y), X = Y + 10
+> +data(X) <- data(Y), X = Y + 10, X <= 32
 Rule 'data' registered.
 > ?data(X)
 ┌────┐
 │ X  │
 ├────┤
+│  1 │
+│  2 │
 │ 11 │
 │ 12 │
+│ 21 │
+│ 22 │
+│ 31 │
+│ 32 │
 └────┘
-2 rows
+8 rows
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_shadow_n10t102
