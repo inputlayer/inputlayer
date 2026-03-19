@@ -15,10 +15,8 @@ rust-version = "1.88"
 
 [dependencies]
 # Differential Dataflow - incremental computation engine
-differential-dataflow = "0.12"
-timely = "0.12"
-abomonation = "0.7"
-abomonation_derive = "0.5"
+differential-dataflow = "0.20"
+timely = "0.27"
 
 # Configuration
 figment = { version = "0.10", features = ["toml", "env"] }
@@ -160,8 +158,6 @@ lto = true
 codegen-units = 1
 
 [lints.rust]
-# Note: unsafe_code is not forbidden because the Abomonation trait requires unsafe methods
-# for serialization. The unsafe code is minimal and well-encapsulated in src/value/mod.rs.
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
