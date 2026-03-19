@@ -249,7 +249,11 @@ export function compileSchema(rel: RelationDef): string {
   const name = rel.relationName;
   const cols = rel.columns;
   const colTypes = rel.columnTypes;
-  const parts = cols.map((c) => `${c}: ${colTypes[c]}`);
+  const parts = cols.map((c) => {
+    // Convert type notation: vector[3] -> vector(3), vector_int8[3] -> vector_int8(3)
+    const type = colTypes[c].replace(/\[(\d+)\]/, '($1)');
+    return `${c}: ${type}`;
+  });
   return `+${name}(${parts.join(', ')})`;
 }
 

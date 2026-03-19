@@ -87,6 +87,11 @@ export class Connection {
     return this._currentKg;
   }
 
+  /** Force-set the current KG (used by KnowledgeGraph after .kg use). */
+  setCurrentKg(name: string): void {
+    this._currentKg = name;
+  }
+
   get dispatcher(): NotificationDispatcher {
     return this._dispatcher;
   }
