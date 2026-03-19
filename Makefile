@@ -99,7 +99,7 @@ test-all: check static-analysis
 	if command -v node >/dev/null 2>&1 && [ -f packages/inputlayer-js/package.json ]; then \
 		JS_TMPFILE=$$(mktemp); \
 		set -o pipefail; \
-		cd packages/inputlayer-js && npm test 2>&1 | tee "$$JS_TMPFILE"; \
+		cd packages/inputlayer-js && npm ci --ignore-scripts 2>/dev/null && npm test 2>&1 | tee "$$JS_TMPFILE"; \
 		JS_EXIT=$${PIPESTATUS[0]}; \
 		cd ../..; \
 		JS_PASSED=$$(grep -oE '[0-9]+ passed' "$$JS_TMPFILE" | awk '{print $$1}'); \
@@ -244,7 +244,7 @@ ci-test-all:
 	if command -v node >/dev/null 2>&1 && [ -f packages/inputlayer-js/package.json ]; then \
 		JS_TMPFILE=$$(mktemp); \
 		set -o pipefail; \
-		cd packages/inputlayer-js && npm test 2>&1 | tee "$$JS_TMPFILE"; \
+		cd packages/inputlayer-js && npm ci --ignore-scripts 2>/dev/null && npm test 2>&1 | tee "$$JS_TMPFILE"; \
 		JS_EXIT=$${PIPESTATUS[0]}; \
 		cd ../..; \
 		JS_PASSED=$$(grep -oE '[0-9]+ passed' "$$JS_TMPFILE" | awk '{print $$1}'); \
@@ -312,7 +312,7 @@ python-test:
 
 # Tier 5: JS/TS SDK tests (inputlayer-js package)
 js-test:
-	cd packages/inputlayer-js && npm test
+	cd packages/inputlayer-js && npm ci --ignore-scripts && npm test
 
 # Coverage & Static Analysis
 
