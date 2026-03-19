@@ -13,6 +13,7 @@
   "configuration": "Configuration",
   "rest-api": "REST API",
   "python-sdk": "Python SDK",
+  "js-sdk": "JavaScript / TypeScript SDK",
   "deployment": "Deployment",
   "authentication": "Authentication",
   "websocket-api": "WebSocket API",

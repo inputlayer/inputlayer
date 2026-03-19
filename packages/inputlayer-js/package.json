@@ -1,0 +1,59 @@
+{
+  "name": "inputlayer",
+  "version": "0.1.0",
+  "description": "TypeScript Object-Logic Mapper for InputLayer knowledge graph engine",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./functions": {
+      "types": "./dist/functions.d.ts",
+      "import": "./dist/functions.mjs",
+      "require": "./dist/functions.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts src/functions.ts --format cjs,esm --dts --clean",
+    "dev": "tsup src/index.ts src/functions.ts --format cjs,esm --dts --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.0.0",
+    "vitest": "^3.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/InputLayer/inputlayer.git",
+    "directory": "packages/inputlayer-js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "inputlayer",
+    "knowledge-graph",
+    "datalog",
+    "reasoning",
+    "typescript",
+    "vector-search"
+  ],
+  "license": "AGPL-3.0",
+  "author": "InputLayer Team"
+}

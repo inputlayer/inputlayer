@@ -1,0 +1,761 @@
+# JavaScript / TypeScript SDK
+
+InputLayer's TypeScript SDK is an Object-Logic Mapper (OLM) that lets you work with your knowledge graph using plain TypeScript objects. You define schemas with typed column maps, build queries with method chaining, and the SDK compiles everything into InputLayer's query language behind the scenes. No IQL required.
+
+The SDK connects over WebSocket, so you get persistent connections, real-time notifications, and session-scoped state out of the box. It ships with full TypeScript types and works in both Node.js and any runtime with WebSocket support.
+
+## Installation
+
+```bash
+npm install inputlayer
+
+# or with your preferred package manager
+pnpm add inputlayer
+yarn add inputlayer
+bun add inputlayer
+```
+
+Requirements: Node.js 18+ (or any runtime with WebSocket support) and a running InputLayer server.
+
+## Connecting
+
+The `InputLayer` client manages a WebSocket connection with automatic reconnection. You can authenticate with username/password or API keys.
+
+```typescript
+import { InputLayer } from "inputlayer";
+
+const il = new InputLayer({
+  url: "ws://localhost:8080/ws",
+  username: "admin",
+  password: "admin",
+});
+
+await il.connect();
+console.log(`Connected to InputLayer ${il.serverVersion}`);
+
+// ... use the client ...
+
+await il.close();
+```
+
+If you prefer API key authentication:
+
+```typescript
+const il = new InputLayer({
+  url: "ws://localhost:8080/ws",
+  apiKey: "il_key_abc123",
+});
+```
+
+The client accepts a few optional parameters for connection resilience:
+
+```typescript
+const il = new InputLayer({
+  url: "ws://localhost:8080/ws",
+  username: "admin",
+  password: "admin",
+  autoReconnect: true,          // reconnect on disconnect (default: true)
+  reconnectDelay: 1.0,          // seconds between attempts (default: 1.0)
+  maxReconnectAttempts: 10,     // give up after N failures (default: 10)
+});
+```
+
+Unlike the Python SDK which has separate sync and async clients, the TypeScript SDK is `async/await` throughout - which is the natural pattern for JavaScript.
+
+## Knowledge Graphs
+
+Once connected, you work within a knowledge graph. Think of it as a namespace or database that holds your relations, rules, and indexes.
+
+```typescript
+// Get or create a knowledge graph
+const kg = il.knowledgeGraph("myapp");
+
+// List all knowledge graphs on the server
+const graphs = await il.listKnowledgeGraphs();
+
+// Drop a knowledge graph and all its data
+await il.dropKnowledgeGraph("myapp");
+```
+
+## Defining Schemas
+
+Schemas are defined using the `relation()` function, which takes a name and a column type map. The name is automatically converted from CamelCase to snake_case for the underlying IQL representation.
+
+```typescript
+import { relation, Timestamp } from "inputlayer";
+
+const Employee = relation("Employee", {
+  id: "int",
+  name: "string",
+  department: "string",
+  salary: "float",
+  active: "bool",
+});
+
+const Document = relation("Document", {
+  id: "int",
+  title: "string",
+  content: "string",
+  embedding: "vector[384]",
+  createdAt: "timestamp",
+});
+```
+
+Deploy your schema to the server with `define()`. This is idempotent - calling it multiple times is safe and won't duplicate anything.
+
+```typescript
+const kg = il.knowledgeGraph("myapp");
+await kg.define(Employee, Document);
+```
+
+You can inspect what's been deployed:
+
+```typescript
+// List all relations
+const relations = await kg.relations();
+for (const r of relations) {
+  console.log(`${r.name}: ${r.rowCount} rows`);
+}
+
+// Describe a specific relation's schema
+const desc = await kg.describe(Employee);
+for (const col of desc.columns) {
+  console.log(`  ${col.name}: ${col.type}`);
+}
+```
+
+### Supported Types
+
+| Type String | InputLayer Type | Description |
+|-------------|-----------------|-------------|
+| `"int"` | `int` | 64-bit integer |
+| `"float"` | `float` | 64-bit floating point |
+| `"string"` | `string` | UTF-8 string |
+| `"bool"` | `bool` | Boolean |
+| `"vector[N]"` | `vector(N)` | N-dimensional float32 vector |
+| `"vector_int8[N]"` | `vector_int8(N)` | N-dimensional int8 quantized vector |
+| `"timestamp"` | `timestamp` | Unix epoch milliseconds |
+
+### Custom Relation Names
+
+By default, the SDK converts your relation name from CamelCase to snake_case (e.g., `"SensorReading"` becomes `sensor_reading`). You can override this with the options parameter:
+
+```typescript
+const SensorReading = relation(
+  "SensorReading",
+  { sensorId: "int", value: "float" },
+  { name: "readings" },
+);
+```
+
+## Inserting Data
+
+You pass a relation definition and one or more plain objects. The SDK takes care of serialization.
+
+```typescript
+// A single fact
+await kg.insert(Employee, {
+  id: 1, name: "Alice", department: "eng", salary: 120000.0, active: true,
+});
+
+// A batch of facts
+await kg.insert(Employee, [
+  { id: 2, name: "Bob", department: "hr", salary: 90000.0, active: true },
+  { id: 3, name: "Charlie", department: "eng", salary: 110000.0, active: false },
+]);
+```
+
+The insert method returns an `InsertResult` with a `count` field.
+
+## Deleting Data
+
+Delete specific facts or use a condition to remove matching rows:
+
+```typescript
+// Delete a specific fact (all column values must match)
+await kg.delete(Employee, {
+  id: 1, name: "Alice", department: "eng", salary: 120000.0, active: true,
+});
+
+// Delete by condition
+const result = await kg.delete(Employee, Employee.col("active").eq(false));
+console.log(`Deleted ${result.count} rows`);
+```
+
+## Querying
+
+Queries are built by passing an options object to `kg.query()`. The SDK compiles your column references, conditions, and aggregations into the right query language behind the scenes.
+
+### Basic Queries
+
+```typescript
+// All rows from a relation
+const result = await kg.query({ select: [Employee] });
+for (const emp of result) {
+  console.log(`${emp.name} - ${emp.department}`);
+}
+
+// With a filter
+const engineers = await kg.query({
+  select: [Employee],
+  join: [Employee],
+  where: AND(
+    Employee.col("department").eq("eng"),
+    Employee.col("active").eq(true),
+  ),
+});
+```
+
+Since TypeScript doesn't have operator overloading, conditions use method calls instead of Python's operators. Use `AND()`, `OR()`, and `NOT()` to combine them - these are imported from `"inputlayer"`.
+
+### Selecting Specific Columns
+
+Instead of fetching full rows, you can select just the columns you need:
+
+```typescript
+const result = await kg.query({
+  select: [Employee.col("name").toAst(), Employee.col("salary").toAst()],
+  join: [Employee],
+  where: Employee.col("department").eq("eng"),
+});
+for (const row of result) {
+  console.log(`${row.Name}: $${row.Salary}`);
+}
+```
+
+When selecting individual columns, call `.toAst()` to convert the column proxy to an AST node for the compiler. When selecting a full relation (like `[Employee]`), you don't need this.
+
+### Joins
+
+When your query spans multiple relations, use `join` and `on` to combine them:
+
+```typescript
+const Department = relation("Department", {
+  name: "string",
+  budget: "float",
+});
+
+const result = await kg.query({
+  select: [Employee.col("name").toAst(), Department.col("budget").toAst()],
+  join: [Employee, Department],
+  on: Employee.col("department").eq(Department.col("name")),
+});
+```
+
+### Self-Joins
+
+For queries that need to compare rows within the same relation, use `refs()` to create aliased references:
+
+```typescript
+const [e1, e2] = Employee.refs(2);
+
+const result = await kg.query({
+  select: [e1.col("name").toAst(), e2.col("name").toAst()],
+  join: [e1, e2],
+  on: AND(
+    e1.col("department").eq(e2.col("department")),
+    e1.col("id").ne(e2.col("id")),
+  ),
+});
+```
+
+### Computed Columns
+
+You can define computed values using the `computed` option:
+
+```typescript
+const result = await kg.query({
+  select: [Employee.col("name").toAst()],
+  join: [Employee],
+  computed: {
+    bonus: Employee.col("salary").mul(0.1),
+  },
+});
+```
+
+### Ordering and Pagination
+
+```typescript
+// Top 10 highest paid
+const result = await kg.query({
+  select: [Employee],
+  join: [Employee],
+  orderBy: Employee.col("salary").desc(),
+  limit: 10,
+});
+
+// Second page
+const page2 = await kg.query({
+  select: [Employee],
+  join: [Employee],
+  orderBy: Employee.col("name").asc(),
+  limit: 10,
+  offset: 10,
+});
+```
+
+### Aggregations
+
+The SDK includes standard aggregation functions that you can use in queries:
+
+```typescript
+import { count, countDistinct, sum, avg, min, max } from "inputlayer";
+
+// Group by department with stats
+const result = await kg.query({
+  select: [
+    Employee.col("department").toAst(),
+    count(Employee.col("id")),
+    avg(Employee.col("salary")),
+    max(Employee.col("salary")),
+  ],
+  join: [Employee],
+});
+```
+
+For more specialized aggregation, `topK` lets you find the top entries per group:
+
+```typescript
+import { topK } from "inputlayer";
+
+// Top 3 highest-paid employees per department
+const result = await kg.query({
+  select: [
+    Employee.col("department").toAst(),
+    Employee.col("name").toAst(),
+    Employee.col("salary").toAst(),
+    topK({ k: 3, orderBy: Employee.col("salary"), desc: true }),
+  ],
+  join: [Employee],
+});
+```
+
+### Working with Results
+
+Every query returns a `ResultSet` with several ways to access the data:
+
+```typescript
+const result = await kg.query({ select: [Employee] });
+
+// Iterate as keyed objects
+for (const emp of result) {
+  console.log(emp.name);
+}
+
+// Check result metadata
+console.log(`Rows: ${result.length}, Total: ${result.totalCount}`);
+console.log(`Execution time: ${result.executionTimeMs}ms`);
+
+// Get the first row (or undefined if empty)
+const first = result.first();
+
+// Get a single scalar value
+const total = (await kg.query({
+  select: [count(Employee.col("id"))],
+  join: [Employee],
+})).scalar();
+
+// Convert to different formats
+const dicts = result.toDicts();    // Array<Record<string, unknown>>
+const tuples = result.toTuples();  // Array<any[]>
+```
+
+### Query Plans
+
+To understand how a query will execute without running it, use `explain()`:
+
+```typescript
+const plan = await kg.explain({
+  select: [Employee],
+  join: [Employee],
+  where: Employee.col("department").eq("eng"),
+});
+console.log(plan.iql);      // compiled IQL
+console.log(plan.plan);     // execution plan
+```
+
+### Raw IQL
+
+If you need to drop down to raw IQL for something the OLM doesn't cover:
+
+```typescript
+const result = await kg.execute("?employee(Id, Name, _, Salary, _), Salary > 100000");
+```
+
+## Derived Relations (Rules)
+
+Derived relations are computed views that InputLayer keeps up to date automatically. When the underlying data changes, derived results are recomputed incrementally - you never need to manually refresh them.
+
+Define them using the `from().where().select()` builder:
+
+```typescript
+import { from } from "inputlayer";
+
+const highEarnerRules = [
+  from(Employee)
+    .where((e) => e.col("salary").gt(100000))
+    .select({
+      name: Employee.col("name"),
+      salary: Employee.col("salary"),
+    }),
+];
+
+await kg.defineRules("high_earner", ["name", "salary"], highEarnerRules);
+```
+
+### Recursive Rules
+
+One of InputLayer's most powerful features is native support for recursive logic. You define it naturally - a base case and a recursive case:
+
+```typescript
+const Edge = relation("Edge", { src: "int", dst: "int" });
+const Reachable = relation("Reachable", { src: "int", dst: "int" });
+
+const reachableRules = [
+  // Base case: direct edges are reachable
+  from(Edge).select({ src: Edge.col("src"), dst: Edge.col("dst") }),
+  // Recursive case: if A reaches B and B reaches C, then A reaches C
+  from(Reachable, Edge)
+    .where((r, e) => r.col("dst").eq(e.col("src")))
+    .select({ src: Reachable.col("src"), dst: Edge.col("dst") }),
+];
+```
+
+Deploy and query rules just like regular relations:
+
+```typescript
+// Deploy the rule (persistent - survives restarts)
+await kg.defineRules("reachable", ["src", "dst"], reachableRules);
+
+// Query it
+const result = await kg.query({
+  select: [Reachable],
+  join: [Reachable],
+  where: Reachable.col("src").eq(1),
+});
+for (const row of result) {
+  console.log(`1 can reach ${row.dst}`);
+}
+```
+
+### Managing Rules
+
+```typescript
+// List all deployed rules
+const rules = await kg.listRules();
+for (const r of rules) {
+  console.log(`${r.name}: ${r.clauseCount} clause(s)`);
+}
+
+// View a rule's compiled IQL definition
+const clauses = await kg.ruleDefinition("reachable");
+for (const clause of clauses) {
+  console.log(clause);
+}
+
+// Drop a specific rule
+await kg.dropRule("high_earner");
+
+// Clear a rule's materialized data (rule stays, data recomputes)
+await kg.clearRule("reachable");
+```
+
+## Vector Search
+
+InputLayer supports HNSW indexes for approximate nearest-neighbor search over vector columns.
+
+### Creating an Index
+
+```typescript
+import { HnswIndex } from "inputlayer";
+
+const index = new HnswIndex({
+  name: "doc_emb_idx",
+  relation: Document,
+  column: "embedding",
+  metric: "cosine",         // cosine, euclidean, manhattan, dot_product
+  m: 32,                    // connections per node (higher = more accurate, more memory)
+  efConstruction: 200,      // build-time search width
+  efSearch: 50,             // query-time search width
+});
+await kg.createIndex(index);
+```
+
+### Searching
+
+```typescript
+const queryEmbedding = [0.1, 0.2, /* ... */];  // your query vector
+
+// Top-k nearest neighbors
+const result = await kg.vectorSearch({
+  relation: Document,
+  queryVec: queryEmbedding,
+  k: 10,
+  metric: "cosine",
+});
+
+// Radius-based search (all vectors within distance)
+const nearby = await kg.vectorSearch({
+  relation: Document,
+  queryVec: queryEmbedding,
+  radius: 0.3,
+  metric: "cosine",
+});
+```
+
+### Managing Indexes
+
+```typescript
+// List all indexes
+const indexes = await kg.listIndexes();
+for (const idx of indexes) {
+  console.log(`${idx.name}: ${idx.rowCount} vectors, metric=${idx.metric}`);
+}
+
+// Get detailed stats
+const stats = await kg.indexStats("doc_emb_idx");
+console.log(`Layers: ${stats.layers}, Memory: ${stats.memoryBytes} bytes`);
+
+// Rebuild after large data changes
+await kg.rebuildIndex("doc_emb_idx");
+
+// Drop an index
+await kg.dropIndex("doc_emb_idx");
+```
+
+## Sessions
+
+Sessions let you inject ephemeral facts and rules that exist only for the lifetime of your WebSocket connection. They're useful for user-specific context, A/B testing, or temporary views that shouldn't persist.
+
+```typescript
+// Insert session-scoped facts (only visible to this connection)
+await kg.session.insert(Employee, [
+  { id: 999, name: "Temp", department: "eng", salary: 0.0, active: true },
+]);
+
+// Define session-scoped rules
+await kg.session.defineRules("my_temp_view", ["name", "salary"], tempRules);
+
+// Query as normal - session facts mix with persistent data
+const result = await kg.query({ select: [Employee] });
+
+// List session rules
+const sessionRules = await kg.session.listRules();
+
+// Clean up (or just disconnect - session state is automatically cleared)
+await kg.session.clear();
+```
+
+## Notifications
+
+Subscribe to real-time events as data changes in the knowledge graph. This is useful for building reactive pipelines, dashboards, or audit logs.
+
+```typescript
+// Register a callback for a specific relation
+il.on("persistent_update", (event) => {
+  console.log(`[${event.relation}] ${event.operation}: ${event.count} rows`);
+  console.log(`  sequence: ${event.seq}, timestamp: ${event.timestampMs}`);
+}, { relation: "sensor_reading" });
+
+// Listen for any knowledge graph change
+il.on("kg_change", (event) => {
+  console.log(`KG ${event.knowledgeGraph} changed`);
+});
+
+// You can also iterate over events with an async loop
+for await (const event of il.notifications()) {
+  console.log(`Event: ${event.type} seq=${event.seq}`);
+}
+```
+
+Event types include `persistent_update`, `rule_change`, `kg_change`, and `schema_change`. You can filter by relation or knowledge graph.
+
+## Built-in Functions
+
+The SDK exposes InputLayer's built-in function library for use in queries and rules. Import them from `"inputlayer/functions"`:
+
+```typescript
+import * as fn from "inputlayer/functions";
+```
+
+### Distance Functions
+
+For computing vector similarity outside of index-based search:
+
+```typescript
+const result = await kg.query({
+  select: [Document.col("title").toAst()],
+  join: [Document],
+  computed: {
+    distance: fn.cosine(Document.col("embedding"), queryVec),
+  },
+});
+```
+
+Available: `fn.cosine`, `fn.euclidean`, `fn.manhattan`, `fn.dot`
+
+Int8 variants: `fn.cosineInt8`, `fn.euclideanInt8`, `fn.manhattanInt8`, `fn.dotInt8`
+
+### Vector Operations
+
+`fn.normalize`, `fn.vecDim`, `fn.vecAdd`, `fn.vecScale`
+
+### Temporal Functions
+
+For working with timestamp columns:
+
+```typescript
+import { Timestamp } from "inputlayer";
+import * as fn from "inputlayer/functions";
+
+// Rows from the last hour
+const result = await kg.query({
+  select: [SensorReading],
+  join: [SensorReading],
+  where: fn.withinLast(
+    SensorReading.col("timestamp"),
+    fn.timeNow(),
+    3600000,
+  ),
+});
+
+// Time-decayed scoring
+const scored = await kg.query({
+  select: [Article.col("title").toAst()],
+  join: [Article],
+  computed: {
+    score: fn.timeDecay(Article.col("publishedAt"), fn.timeNow(), 86400000),
+  },
+});
+```
+
+Available: `fn.timeNow`, `fn.timeDiff`, `fn.timeAdd`, `fn.timeSub`, `fn.timeDecay`, `fn.timeDecayLinear`, `fn.timeBefore`, `fn.timeAfter`, `fn.timeBetween`, `fn.withinLast`, `fn.intervalsOverlap`, `fn.intervalContains`, `fn.intervalDuration`, `fn.pointInInterval`
+
+### Math Functions
+
+`fn.abs`, `fn.sqrt`, `fn.pow`, `fn.log`, `fn.exp`, `fn.sin`, `fn.cos`, `fn.tan`, `fn.floor`, `fn.ceil`, `fn.sign`, `fn.minVal`, `fn.maxVal`
+
+### String Functions
+
+`fn.len`, `fn.upper`, `fn.lower`, `fn.trim`, `fn.substr`, `fn.replace`, `fn.concat`
+
+### Type Conversion
+
+`fn.toInt`, `fn.toFloat`
+
+## User and Access Management
+
+The SDK provides methods for managing users, API keys, and per-knowledge-graph access control.
+
+### User Management
+
+```typescript
+// Create a new user
+await il.createUser("alice", "securepassword", "editor");
+
+// List users
+const users = await il.listUsers();
+for (const u of users) {
+  console.log(`${u.username}: ${u.role}`);
+}
+
+// Change a user's role
+await il.setRole("alice", "admin");
+
+// Change a user's password
+await il.setPassword("alice", "newpassword");
+
+// Remove a user
+await il.dropUser("alice");
+```
+
+### API Keys
+
+```typescript
+// Create an API key
+const key = await il.createApiKey("my-service");
+console.log(`Store this key securely: ${key}`);
+
+// List active keys
+const keys = await il.listApiKeys();
+for (const k of keys) {
+  console.log(`${k.label} (created: ${k.createdAt})`);
+}
+
+// Revoke a key
+await il.revokeApiKey("my-service");
+```
+
+### Per-Knowledge-Graph Access Control
+
+```typescript
+// Grant a user access to a specific knowledge graph
+await kg.grantAccess("alice", "editor");
+
+// List access control entries
+const acl = await kg.listAcl();
+for (const entry of acl) {
+  console.log(`${entry.username}: ${entry.role}`);
+}
+
+// Revoke access
+await kg.revokeAccess("alice");
+```
+
+## Error Handling
+
+The SDK uses a hierarchy of typed error classes so you can handle specific failure modes:
+
+```typescript
+import {
+  InputLayerError,              // base class for all errors
+  ConnectionError,              // network/connection issues
+  AuthenticationError,          // bad credentials
+  SchemaConflictError,          // schema mismatch on define()
+  ValidationError,              // invalid data
+  QueryTimeoutError,            // query took too long
+  PermissionError,              // insufficient permissions
+  KnowledgeGraphNotFoundError,
+  KnowledgeGraphExistsError,
+  RelationNotFoundError,
+  RuleNotFoundError,
+  IndexNotFoundError,
+  InternalError,                // unexpected server error
+} from "inputlayer";
+
+try {
+  await kg.define(Employee);
+} catch (e) {
+  if (e instanceof AuthenticationError) {
+    console.log("Check your credentials");
+  } else if (e instanceof SchemaConflictError) {
+    console.log(`Schema conflict: ${e.conflicts}`);
+  } else if (e instanceof InputLayerError) {
+    console.log(`InputLayer error: ${e.message}`);
+  }
+}
+```
+
+## Python SDK Comparison
+
+If you're coming from the Python SDK, here are the key differences to keep in mind:
+
+| Concept | Python | TypeScript |
+|---------|--------|------------|
+| Schema definition | `class Employee(Relation): id: int` | `relation("Employee", { id: "int" })` |
+| Column access | `Employee.name` (metaclass magic) | `Employee.col("name")` |
+| Comparison | `e.salary > 100000` | `e.col("salary").gt(100000)` |
+| Boolean AND | `(a == "x") & (b == True)` | `AND(a.eq("x"), b.eq(true))` |
+| Boolean OR | `(a == "x") \| (a == "y")` | `OR(a.eq("x"), a.eq("y"))` |
+| Negation | `~condition` | `NOT(condition)` |
+| Order by | `Employee.salary.desc()` | `Employee.col("salary").desc()` |
+| Arithmetic | `Employee.salary * 12` | `Employee.col("salary").mul(12)` |
+| Sync client | `InputLayerSync` | N/A (async-only, the natural JS pattern) |
+| DataFrames | `result.to_df()` | N/A (use `result.toDicts()` with your preferred library) |
+
+## Next Steps
+
+- [Python SDK](python-sdk) - If you work across both languages
+- [Vector Search](vectors) - Deep dive into vector indexing and search
+- [Authentication](authentication) - Server-level auth setup
+- [REST API](rest-api) - HTTP interface alongside WebSocket
