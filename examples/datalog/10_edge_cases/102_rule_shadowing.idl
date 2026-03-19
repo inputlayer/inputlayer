@@ -1,12 +1,15 @@
-// Test: Rule with same name as base relation
+// Test: Rule deriving into same relation as base facts (recursive)
+// A rule that writes back to its source relation is self-recursive.
+// The engine correctly detects this and runs fixpoint iteration.
 
 .kg create test_shadow_n10t102
 .kg use test_shadow_n10t102
 
 +data[(1,), (2,)]
 
-// Rule adds more to 'data' relation
-+data(X) <- data(Y), X = Y + 10
+// This rule is self-recursive: data -> data
+// Generates: 1, 2, 11, 12, 21, 22, ... until max results
++data(X) <- data(Y), X = Y + 10, X <= 32
 
 ?data(X)
 

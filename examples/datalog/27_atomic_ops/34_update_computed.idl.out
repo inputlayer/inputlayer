@@ -21,12 +21,17 @@ Inserted 3 fact(s) into 'prices'.
 │  3 │   300 │
 └────┴───────┘
 3 rows
-> -prices(Id, Price)
-Delete error: Cannot insert variable 'Id' - use constants only
-> +prices(Id, NewPrice) <- prices(Id, Price), NewPrice = Price + Price / 10
-Rule 'prices' registered.
-> ?prices(Id, Price)
-Query execution timed out
+> +updated_prices(Id, NewPrice) <- prices(Id, Price), NewPrice = Price + Price / 10
+Rule 'updated_prices' registered.
+> ?updated_prices(Id, NewPrice)
+┌────┬──────────┐
+│ Id │ NewPrice │
+├────┼──────────┤
+│  1 │    110.0 │
+│  2 │    220.0 │
+│  3 │    330.0 │
+└────┴──────────┘
+3 rows
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_update_computed_n27t34
