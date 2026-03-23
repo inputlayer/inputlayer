@@ -24,10 +24,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "zod": "^3.25.0"
+    "zod": ">=3.20.0"
   },
   "devDependencies": {
-    "orval": "^7.3.0",
+    "orval": "^8.5.3",
     "tsup": "^8.3.0",
     "typescript": "^5.0.0"
   },
