@@ -463,13 +463,13 @@ fn default_session_timeout() -> u64 {
     86400
 } // 24 hours
 fn default_max_connections() -> usize {
-    10_000
+    1024
 }
 fn default_max_ws_connections() -> usize {
-    5_000
+    1024
 }
 fn default_ws_max_messages_per_sec() -> u32 {
-    1000
+    100
 }
 fn default_ws_max_lifetime_secs() -> u64 {
     86400
@@ -478,7 +478,7 @@ fn default_notification_buffer_size() -> usize {
     4096
 }
 fn default_per_ip_max_rps() -> u32 {
-    0 // unlimited by default
+    100
 }
 
 impl Default for RateLimitConfig {
@@ -580,6 +580,24 @@ impl Config {
             eprintln!(
                 "WARNING: notification_buffer_size = 0. \
                  Using default of 4096."
+            );
+        }
+        if self.http.rate_limit.max_connections == 0 {
+            eprintln!(
+                "WARNING: max_connections = 0 (unlimited). \
+                 No connection limit is enforced. Set a finite value for production."
+            );
+        }
+        if self.http.rate_limit.ws_max_messages_per_sec == 0 {
+            eprintln!(
+                "WARNING: ws_max_messages_per_sec = 0 (unlimited). \
+                 No WebSocket message rate limit is enforced. Set a finite value for production."
+            );
+        }
+        if self.http.rate_limit.per_ip_max_rps == 0 {
+            eprintln!(
+                "WARNING: per_ip_max_rps = 0 (unlimited). \
+                 No per-IP request rate limit is enforced. Set a finite value for production."
             );
         }
     }
@@ -863,10 +881,11 @@ mod tests {
     #[test]
     fn test_default_rate_limit_config() {
         let rl = RateLimitConfig::default();
-        assert_eq!(rl.max_connections, 10_000);
-        assert_eq!(rl.max_ws_connections, 5_000);
-        assert_eq!(rl.ws_max_messages_per_sec, 1000);
+        assert_eq!(rl.max_connections, 1024);
+        assert_eq!(rl.max_ws_connections, 1024);
+        assert_eq!(rl.ws_max_messages_per_sec, 100);
         assert_eq!(rl.ws_max_lifetime_secs, 86400);
+        assert_eq!(rl.per_ip_max_rps, 100);
     }
 
     #[test]
@@ -889,8 +908,9 @@ mod tests {
     #[test]
     fn test_http_config_has_rate_limit() {
         let config = HttpConfig::default();
-        assert_eq!(config.rate_limit.max_connections, 10_000);
-        assert_eq!(config.rate_limit.ws_max_messages_per_sec, 1000);
+        assert_eq!(config.rate_limit.max_connections, 1024);
+        assert_eq!(config.rate_limit.ws_max_messages_per_sec, 100);
+        assert_eq!(config.rate_limit.per_ip_max_rps, 100);
     }
 
     /// Regression: WS rate limit and lifetime fields must roundtrip through TOML.

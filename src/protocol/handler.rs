@@ -821,19 +821,23 @@ impl Handler {
                 }
             }
 
-            // Print API key (needed for first login) but NOT the password
+            // Print masked API key to stderr to avoid leaking credentials into logs.
+            // Full credentials are available in the credentials file.
+            let masked_key = if api_key.len() > 4 {
+                format!("****{}", &api_key[api_key.len() - 4..])
+            } else {
+                "****".to_string()
+            };
             eprintln!();
-            eprintln!("=== INITIAL API KEY (for CLI access) ===");
-            eprintln!("{api_key}");
-            eprintln!("========================================");
-            eprintln!();
-            eprintln!("Usage:  inputlayer-client --api-key {api_key}");
-            eprintln!("   or:  export INPUTLAYER_API_KEY={api_key}");
+            eprintln!("=== INITIAL ADMIN CREDENTIALS CREATED ===");
+            eprintln!("Admin API key: {masked_key}");
+            eprintln!("==========================================");
             eprintln!();
             eprintln!(
-                "Admin password and API key persisted to: {}",
+                "Full credentials (API key and password) saved to: {}",
                 credentials_path.display()
             );
+            eprintln!("Retrieve them with:  cat {}", credentials_path.display());
             eprintln!("Delete this file to generate new credentials on next boot.");
             eprintln!();
         }

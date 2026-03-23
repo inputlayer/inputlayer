@@ -170,11 +170,17 @@ session_timeout_secs = 86400
 # Rate Limiting
 # -----------------------------------------------------------------------------
 [http.rate_limit]
-# Maximum WebSocket messages per second per connection (0 = unlimited)
-ws_max_messages_per_sec = 1000
+# Maximum concurrent connections (0 = unlimited, not recommended)
+max_connections = 1024
 
-# Maximum HTTP requests per second per IP address (0 = unlimited)
-per_ip_max_rps = 0
+# Maximum concurrent WebSocket connections (0 = unlimited, not recommended)
+max_ws_connections = 1024
+
+# Maximum WebSocket messages per second per connection (0 = unlimited, not recommended)
+ws_max_messages_per_sec = 100
+
+# Maximum HTTP requests per second per IP address (0 = unlimited, not recommended)
+per_ip_max_rps = 100
 
 # Notification ring buffer size for reconnect replay
 notification_buffer_size = 4096
