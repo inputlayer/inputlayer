@@ -22,7 +22,7 @@ Rule 'expensive' registered.
 │ ""                                       │
 │ "  Rule: expensive (clause 0)"           │
 │ "    expensive(Id, Price) <- item(Id, P… │
-│ "    Blocker: Comparison Variable("Pric… │
+│ "    Blocker: Comparison 50 > 100 faile… │
 └──────────────────────────────────────────┘
 5 rows
 > .kg use default
