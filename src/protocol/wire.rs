@@ -319,6 +319,10 @@ pub struct QueryResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub switched_kg: Option<String>,
+    /// Proof trees for why-provenance queries (present only for .why results)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub proof_trees: Option<Vec<crate::provenance::wire::WireProofTree>>,
 }
 
 /// Provenance and audit metadata for a query result
@@ -365,6 +369,7 @@ impl QueryResult {
             execution_time_ms: 0,
             metadata: None,
             switched_kg: None,
+            proof_trees: None,
         }
     }
 
@@ -378,6 +383,7 @@ impl QueryResult {
             execution_time_ms,
             metadata: None,
             switched_kg: None,
+            proof_trees: None,
         }
     }
 
@@ -397,6 +403,7 @@ impl QueryResult {
             execution_time_ms,
             metadata,
             switched_kg: None,
+            proof_trees: None,
         }
     }
 }
@@ -675,6 +682,7 @@ mod tests {
             execution_time_ms: 0,
             metadata: None,
             switched_kg: None,
+            proof_trees: None,
         };
         assert_eq!(result.rows.len(), 0);
         assert_eq!(result.schema.len(), 1);

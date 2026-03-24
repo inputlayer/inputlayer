@@ -1,0 +1,14 @@
+// Test: .why with negation
+// Description: Shows negation proof (no matching danger tuple)
+.kg create test_expltr_n36t05
+.kg use test_expltr_n36t05
+
++node[(1,), (2,), (3,)]
++danger[(2,)]
+
++safe(X) <- node(X), !danger(X)
+
+.why ?safe(X)
+
+.kg use default
+.kg drop test_expltr_n36t05

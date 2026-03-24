@@ -65,6 +65,8 @@ from inputlayer.knowledge_graph import (
     RelationInfo,
     RuleInfo,
     ServerStatus,
+    WhyResult,
+    WhyNotResult,
 )
 
 # Auth
@@ -138,6 +140,8 @@ __all__ = [
     "ClearResult",
     "ExplainResult",
     "ServerStatus",
+    "WhyResult",
+    "WhyNotResult",
     # Auth
     "UserInfo",
     "ApiKeyInfo",

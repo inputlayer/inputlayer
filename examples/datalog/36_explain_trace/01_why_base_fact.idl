@@ -1,0 +1,12 @@
+// Test: .why on base fact query
+// Description: .why shows proof tree for base relation facts
+.kg create test_expltr_n36t01
+.kg use test_expltr_n36t01
+
++edge[(1, 2), (2, 3), (3, 4)]
+
+// Why does edge(1, 2) exist?
+.why ?edge(X, Y)
+
+.kg use default
+.kg drop test_expltr_n36t01

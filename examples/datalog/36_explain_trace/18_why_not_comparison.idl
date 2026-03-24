@@ -1,0 +1,14 @@
+// Test: .why_not when comparison predicate fails
+// Description: Shows comparison failed with actual values
+.kg create test_expltr_n36t18
+.kg use test_expltr_n36t18
+
++item[(1, 50)]
+
++expensive(Id, Price) <- item(Id, Price), Price > 100
+
+// item(1, 50) exists but 50 > 100 is false
+.why_not expensive(1, 50)
+
+.kg use default
+.kg drop test_expltr_n36t18

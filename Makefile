@@ -102,8 +102,8 @@ test-all: check static-analysis
 		cd packages/inputlayer-js && npm ci --ignore-scripts 2>/dev/null && npm test 2>&1 | tee "$$JS_TMPFILE"; \
 		JS_EXIT=$${PIPESTATUS[0]}; \
 		cd ../..; \
-		JS_PASSED=$$(grep -oE '[0-9]+ passed' "$$JS_TMPFILE" | awk '{print $$1}'); \
-		JS_FAILED=$$(grep -oE '[0-9]+ failed' "$$JS_TMPFILE" | awk '{print $$1}'); \
+		JS_PASSED=$$(grep -oE '[0-9]+ passed' "$$JS_TMPFILE" | tail -1 | awk '{print $$1}'); \
+		JS_FAILED=$$(grep -oE '[0-9]+ failed' "$$JS_TMPFILE" | tail -1 | awk '{print $$1}'); \
 		JS_PASSED=$${JS_PASSED:-0}; \
 		JS_FAILED=$${JS_FAILED:-0}; \
 		rm -f "$$JS_TMPFILE"; \
@@ -247,8 +247,8 @@ ci-test-all:
 		cd packages/inputlayer-js && npm ci --ignore-scripts 2>/dev/null && npm test 2>&1 | tee "$$JS_TMPFILE"; \
 		JS_EXIT=$${PIPESTATUS[0]}; \
 		cd ../..; \
-		JS_PASSED=$$(grep -oE '[0-9]+ passed' "$$JS_TMPFILE" | awk '{print $$1}'); \
-		JS_FAILED=$$(grep -oE '[0-9]+ failed' "$$JS_TMPFILE" | awk '{print $$1}'); \
+		JS_PASSED=$$(grep -oE '[0-9]+ passed' "$$JS_TMPFILE" | tail -1 | awk '{print $$1}'); \
+		JS_FAILED=$$(grep -oE '[0-9]+ failed' "$$JS_TMPFILE" | tail -1 | awk '{print $$1}'); \
 		JS_PASSED=$${JS_PASSED:-0}; \
 		JS_FAILED=$${JS_FAILED:-0}; \
 		rm -f "$$JS_TMPFILE"; \

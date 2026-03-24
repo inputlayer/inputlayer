@@ -1,0 +1,13 @@
+// Test: .why_not on join failure
+// Description: Shows which body atom blocked the derivation
+.kg create test_expltr_n36t16
+.kg use test_expltr_n36t16
+
++edge[(1, 2), (3, 4)]
+
++path(X, Z) <- edge(X, Y), edge(Y, Z)
+
+.why_not path(1, 99)
+
+.kg use default
+.kg drop test_expltr_n36t16

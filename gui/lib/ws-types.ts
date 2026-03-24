@@ -45,6 +45,32 @@ export interface WsAuthErrorMessage {
   message: string
 }
 
+export interface WsProofTree {
+  node_type: string
+  relation?: string
+  values?: (string | number | boolean | null)[]
+  rule_name?: string
+  clause_index?: number
+  clause_text?: string
+  bindings?: Array<{ variable: string; value: string | number | boolean | null }>
+  children?: WsProofTree[]
+  pattern?: string
+  index_name?: string
+  metric?: string
+  query_vector?: number[]
+  result_id?: number
+  distance?: number
+  k?: number
+  ef_search?: number
+  aggregate_fn?: string
+  contributing_count?: number
+  sample_inputs?: (string | number | boolean | null)[][]
+  full_inputs?: (string | number | boolean | null)[][] | null
+  iteration?: number
+  inner?: WsProofTree
+  depth_limit?: number
+}
+
 export interface WsResultMessage {
   type: "result"
   columns: string[]
@@ -56,6 +82,7 @@ export interface WsResultMessage {
   row_provenance?: string[]
   metadata?: WsResultMetadata
   switched_kg?: string
+  proof_trees?: WsProofTree[]
 }
 
 export interface WsResultMetadata {
@@ -99,6 +126,7 @@ export interface WsResultStartMessage {
   execution_time_ms: number
   metadata?: WsResultMetadata
   switched_kg?: string
+  proof_trees?: WsProofTree[]
 }
 
 export interface WsResultChunkMessage {

@@ -1,6 +1,7 @@
 "use client"
 
-import { Clock, Download, Rows3, AlertCircle, CheckCircle2, Loader2, Copy, Check, Lightbulb, Sparkles, AlertTriangle, CheckSquare, Info, ArrowUp, ArrowDown, ArrowUpDown, FileJson, Share2 } from "lucide-react"
+import { Clock, Download, Rows3, AlertCircle, CheckCircle2, Loader2, Copy, Check, AlertTriangle, CheckSquare, Info, ArrowUp, ArrowDown, ArrowUpDown, FileJson, Share2, TreePine } from "lucide-react"
+import { ProofTreePanel } from "@/components/proof-tree-panel"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -8,24 +9,27 @@ import { QueryResultGraph } from "@/components/query-result-graph"
 import { cn } from "@/lib/utils"
 import { formatTime, downloadBlob } from "@/lib/ui-utils"
 import { toast } from "sonner"
-import { useState, useMemo, useEffect } from "react"
-import type { QueryResult, ExplainResult, StructuredError } from "@/app/query/page"
+import { useState, useMemo, useEffect, useRef } from "react"
+import type { QueryResult, StructuredError } from "@/app/query/page"
 
 interface QueryResultsPanelProps {
   result: QueryResult | null
-  explainResult?: ExplainResult | null
   error: StructuredError | null
   isExecuting: boolean
-  isExplaining?: boolean
   activeQuery: string
 }
 
 /** Detect if query is purely a mutation (insert/delete/meta, no query lines) */
+/** Meta commands that return query-like results (not mutations). */
+const RESULT_META_COMMANDS = [".why ", ".why_not ", ".explain "]
+
 function isMutationQuery(query: string): boolean {
   const lines = query.split("\n").map((l) => l.trim()).filter((l) => l.length > 0 && !l.startsWith("//"))
   if (lines.length === 0) return false
   // If any line is a query, it's not a pure mutation
   if (lines.some((l) => l.startsWith("?"))) return false
+  // If any line is a result-returning meta command, it's not a mutation
+  if (lines.some((l) => RESULT_META_COMMANDS.some((cmd) => l.startsWith(cmd)))) return false
   // Mutations: +insert/rule, -delete, .meta, ~session-rule, session facts (lowercase with parens but no <-)
   return lines.every((l) =>
     l.startsWith("+") || l.startsWith("-") || l.startsWith(".") || l.startsWith("~") ||
@@ -86,14 +90,27 @@ function compareValues(a: string | number | boolean | null, b: string | number |
 
 const PAGE_SIZE = 200
 
-export function QueryResultsPanel({ result, explainResult, error, isExecuting, isExplaining = false, activeQuery }: QueryResultsPanelProps) {
+export function QueryResultsPanel({ result, error, isExecuting, activeQuery }: QueryResultsPanelProps) {
   const [copied, setCopied] = useState(false)
   const [sort, setSort] = useState<SortState | null>(null)
   const [page, setPage] = useState(0)
-  const [activeTab, setActiveTab] = useState<"table" | "graph">("table")
+  const [activeTab, setActiveTab] = useState<"table" | "graph" | "proof">("table")
+  const hasUserSelectedTab = useRef(false)
+  const prevResultId = useRef<string | null>(null)
 
-  // Reset page and tab when result changes
-  useEffect(() => { setPage(0); setActiveTab("table") }, [result])
+  // Reset page when result changes. Auto-switch to proof tab only on first proof result.
+  useEffect(() => {
+    setPage(0)
+    // Only auto-switch if the result actually changed (new query) and user hasn't manually picked a tab
+    const resultId = result?.id ?? null
+    if (resultId !== prevResultId.current) {
+      prevResultId.current = resultId
+      hasUserSelectedTab.current = false
+    }
+    if (!hasUserSelectedTab.current && result?.proofTrees && result.proofTrees.length > 0) {
+      setActiveTab("proof")
+    }
+  }, [result])
 
   const handleSort = (colIndex: number) => {
     setSort((prev) => {
@@ -162,21 +179,6 @@ export function QueryResultsPanel({ result, explainResult, error, isExecuting, i
     )
   }
 
-  if (isExplaining) {
-    const queryPreview = activeQuery.length > 60 ? activeQuery.slice(0, 60) + "..." : activeQuery
-    return (
-      <div className="flex h-full items-center justify-center bg-background">
-        <div className="text-center">
-          <Lightbulb className="mx-auto h-8 w-8 animate-pulse text-amber-500" />
-          <p className="mt-3 text-sm font-medium">Analyzing query plan...</p>
-          <p className="mt-1 text-xs text-muted-foreground font-mono max-w-md truncate px-4">
-            {queryPreview}
-          </p>
-        </div>
-      </div>
-    )
-  }
-
   if (error) {
     const hasValidationErrors = error.validationErrors && error.validationErrors.length > 0
     return (
@@ -209,62 +211,6 @@ export function QueryResultsPanel({ result, explainResult, error, isExecuting, i
               </div>
             </div>
           </div>
-        </div>
-      </div>
-    )
-  }
-
-  // Show explain results
-  if (explainResult) {
-    return (
-      <div className="flex h-full flex-col bg-background">
-        {/* Explain toolbar */}
-        <div className="flex h-9 items-center justify-between border-b border-border/50 bg-amber-500/5 px-3">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5">
-              <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
-              <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Query Plan</span>
-            </div>
-            {explainResult.optimizations.length > 0 && (
-              <>
-                <div className="h-3 w-px bg-border" />
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Sparkles className="h-3 w-3 text-emerald-500" />
-                  {explainResult.optimizations.length} optimization{explainResult.optimizations.length !== 1 ? "s" : ""}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Explain content */}
-        <div className="flex-1 overflow-auto p-4 space-y-4">
-          {/* Query Plan */}
-          <div className="rounded-lg border border-border/50">
-            <div className="border-b border-border/50 px-4 py-2 bg-muted/30">
-              <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Execution Plan</h3>
-            </div>
-            <pre className="p-4 font-mono text-sm text-foreground overflow-x-auto whitespace-pre-wrap">
-              {explainResult.plan || "No plan available"}
-            </pre>
-          </div>
-
-          {/* Optimizations */}
-          {explainResult.optimizations.length > 0 && (
-            <div className="rounded-lg border border-border/50">
-              <div className="border-b border-border/50 px-4 py-2 bg-muted/30">
-                <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Optimizations Applied</h3>
-              </div>
-              <ul className="p-4 space-y-2">
-                {explainResult.optimizations.map((opt, idx) => (
-                  <li key={idx} className="flex items-start gap-2 text-sm">
-                    <Sparkles className="h-4 w-4 text-emerald-500 flex-shrink-0 mt-0.5" />
-                    <span>{opt}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
         </div>
       </div>
     )
@@ -448,7 +394,7 @@ export function QueryResultsPanel({ result, explainResult, error, isExecuting, i
 
       {/* Content: table + graph tab */}
       {result.columns.length >= 1 ? (
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "table" | "graph")} className="flex-1 flex flex-col overflow-hidden min-h-0">
+        <Tabs value={activeTab} onValueChange={(v) => { hasUserSelectedTab.current = true; setActiveTab(v as "table" | "graph" | "proof") }} className="flex-1 flex flex-col overflow-hidden min-h-0">
           <div className="border-b border-border/50 px-3 flex-shrink-0">
             <TabsList className="h-8 bg-transparent p-0 gap-2">
               <TabsTrigger
@@ -465,6 +411,13 @@ export function QueryResultsPanel({ result, explainResult, error, isExecuting, i
                 <Share2 className="h-3.5 w-3.5" />
                 Graph
               </TabsTrigger>
+              <TabsTrigger
+                value="proof"
+                className="h-7 gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground data-[state=active]:bg-emerald-500/10 data-[state=active]:text-emerald-600 dark:data-[state=active]:text-emerald-400 data-[state=active]:shadow-none"
+              >
+                <TreePine className="h-3.5 w-3.5" />
+                Why?
+              </TabsTrigger>
             </TabsList>
           </div>
           <TabsContent value="table" className="flex-1 m-0 overflow-hidden flex flex-col">
@@ -472,6 +425,9 @@ export function QueryResultsPanel({ result, explainResult, error, isExecuting, i
           </TabsContent>
           <TabsContent value="graph" className="flex-1 m-0 overflow-hidden">
             <QueryResultGraph data={result.data} columns={result.columns} name={result.query.match(/\?(\w+)\s*\(/)?.[1]} />
+          </TabsContent>
+          <TabsContent value="proof" forceMount className={cn("flex-1 m-0 overflow-hidden", activeTab !== "proof" && "hidden")}>
+            <ProofTreePanel query={activeQuery} result={result} />
           </TabsContent>
         </Tabs>
       ) : (

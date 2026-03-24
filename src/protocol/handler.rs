@@ -486,6 +486,182 @@ impl QueryJob {
 
         Ok((trace.format_trace(), optimizations))
     }
+
+    /// Build proof trees explaining why query results were derived.
+    ///
+    /// Returns a QueryResult with both the result rows AND structured proof trees
+    /// in the `proof_trees` field, so clients get typed data not text.
+    fn why_query(
+        &self,
+        knowledge_graph: Option<String>,
+        query: String,
+        full_mode: bool,
+    ) -> Result<QueryResult, String> {
+        use crate::provenance::backward_chaining::{build_proofs, ProofContext};
+        use crate::provenance::wire::WireProofTree;
+        use crate::provenance::ProofConfig;
+
+        let start = std::time::Instant::now();
+        let storage = self.storage.read();
+        let kg_name = if let Some(ref kg) = knowledge_graph {
+            storage
+                .ensure_knowledge_graph(kg)
+                .map_err(|e| format!("Knowledge graph not found: {e}"))?;
+            kg.clone()
+        } else {
+            storage
+                .current_knowledge_graph()
+                .ok_or("No knowledge graph selected")?
+                .to_string()
+        };
+
+        let (mut result_tuples, rules, base_data, index_metrics) = storage
+            .execute_and_get_context(&kg_name, &query)
+            .map_err(|e| format!("{e}"))?;
+
+        if result_tuples.is_empty() {
+            return Ok(QueryResult::empty());
+        }
+
+        result_tuples.sort();
+
+        let relation = extract_query_relation(&query)
+            .ok_or_else(|| "Could not determine query relation name".to_string())?;
+        let config = ProofConfig {
+            full_mode,
+            ..ProofConfig::default()
+        };
+
+        // Build index proof info from metrics
+        let index_info: std::collections::HashMap<
+            String,
+            crate::provenance::backward_chaining::IndexProofInfo,
+        > = index_metrics
+            .into_iter()
+            .map(|(name, metric)| {
+                (
+                    name,
+                    crate::provenance::backward_chaining::IndexProofInfo {
+                        metric,
+                        query_vector: Vec::new(), // Filled from AST during backward chaining
+                    },
+                )
+            })
+            .collect();
+        let ctx = ProofContext::with_index_info(&rules, &base_data, config, index_info);
+
+        // Build wire rows from result tuples
+        let schema = extract_query_schema(&query, &result_tuples);
+        let mut rows = Vec::new();
+        let mut wire_proofs = Vec::new();
+
+        for tuple in &result_tuples {
+            let values: Vec<WireValue> = (0..tuple.arity())
+                .filter_map(|i| tuple.get(i).map(WireValue::from_value))
+                .collect();
+            rows.push(WireTuple::new(values));
+
+            // Build proof tree for this tuple
+            let proof = match build_proofs(&relation, tuple, &ctx) {
+                Ok(proofs) => {
+                    if proofs.len() == 1 {
+                        WireProofTree::from(&proofs[0])
+                    } else {
+                        // Multiple proofs - wrap in a synthetic parent
+                        WireProofTree::from(&crate::provenance::ProofTree::RuleApplication {
+                            rule_name: relation.clone(),
+                            clause_index: 0,
+                            clause_text: format!("{} alternative proofs", proofs.len()),
+                            bindings: vec![],
+                            children: proofs,
+                        })
+                    }
+                }
+                Err(_) => {
+                    WireProofTree::from(&crate::provenance::ProofTree::Truncated { depth_limit: 0 })
+                }
+            };
+            wire_proofs.push(proof);
+        }
+
+        let total_count = rows.len();
+        Ok(QueryResult {
+            rows,
+            schema,
+            total_count,
+            truncated: false,
+            execution_time_ms: start.elapsed().as_millis() as u64,
+            metadata: None,
+            switched_kg: None,
+            proof_trees: Some(wire_proofs),
+        })
+    }
+
+    /// Explain why a specific tuple was NOT derived.
+    ///
+    /// Returns a QueryResult with the explanation serialized as structured JSON
+    /// in a `why_not` column, plus the full WhyNotExplanation in proof_trees metadata.
+    fn why_not_query(
+        &self,
+        knowledge_graph: Option<String>,
+        input: String,
+    ) -> Result<QueryResult, String> {
+        use crate::provenance::backward_chaining::ProofContext;
+        use crate::provenance::why_not::explain_why_not;
+        use crate::provenance::wire::WireWhyNotExplanation;
+        use crate::provenance::ProofConfig;
+
+        let start = std::time::Instant::now();
+        let storage = self.storage.read();
+        let kg_name = if let Some(ref kg) = knowledge_graph {
+            storage
+                .ensure_knowledge_graph(kg)
+                .map_err(|e| format!("Knowledge graph not found: {e}"))?;
+            kg.clone()
+        } else {
+            storage
+                .current_knowledge_graph()
+                .ok_or("No knowledge graph selected")?
+                .to_string()
+        };
+
+        let (relation, tuple) = parse_why_not_target(&input)?;
+        let (rules, base_data) = storage
+            .get_rules_and_data(&kg_name)
+            .map_err(|e| format!("Failed to access knowledge graph: {e}"))?;
+        let ctx = ProofContext::new(&rules, &base_data, ProofConfig::default());
+
+        let explanation = explain_why_not(&relation, &tuple, &ctx);
+        let wire_exp = WireWhyNotExplanation::from(&explanation);
+        let json_str = serde_json::to_string(&wire_exp).unwrap_or_default();
+
+        // Return human-readable text in rows + structured JSON in a second column
+        let formatted = explanation.format_explanation();
+        let rows: Vec<WireTuple> = formatted
+            .lines()
+            .map(|line| WireTuple::new(vec![WireValue::String(line.to_string())]))
+            .collect();
+        let total_count = rows.len();
+
+        Ok(QueryResult {
+            rows,
+            schema: vec![ColumnDef::string("explanation")],
+            total_count,
+            truncated: false,
+            execution_time_ms: start.elapsed().as_millis() as u64,
+            metadata: None,
+            switched_kg: None,
+            // Embed the structured why-not as a single proof tree node
+            proof_trees: Some(vec![crate::provenance::wire::WireProofTree {
+                node_type: "why_not".to_string(),
+                relation: Some(relation),
+                rule_name: None,
+                clause_index: None,
+                clause_text: Some(json_str),
+                ..crate::provenance::wire::WireProofTree::empty_pub()
+            }]),
+        })
+    }
 }
 
 impl Handler {
@@ -1029,6 +1205,7 @@ impl Handler {
             execution_time_ms: 0,
             metadata: None,
             switched_kg: None,
+            proof_trees: None,
         })
     }
 
@@ -1299,6 +1476,7 @@ impl Handler {
             execution_time_ms: 0,
             metadata: None,
             switched_kg: None,
+            proof_trees: None,
         })
     }
 
@@ -1347,6 +1525,7 @@ impl Handler {
             execution_time_ms: 0,
             metadata: None,
             switched_kg: None,
+            proof_trees: None,
         })
     }
 
@@ -2894,6 +3073,45 @@ impl QueryJob {
                                         }
                                     }
 
+                                    // === Why (proof tree) command ===
+                                    MetaCommand::Why(query) => {
+                                        let why_q = match transform_query_shorthand(&query) {
+                                            Ok(t) => t.query,
+                                            Err(_) => query,
+                                        };
+                                        match self.why_query(Some(kg.to_string()), why_q, false) {
+                                            Ok(qr) => {
+                                                drop(storage);
+                                                return Ok(qr);
+                                            }
+                                            Err(e) => messages.push(format!("Why error: {e}")),
+                                        }
+                                    }
+                                    MetaCommand::WhyFull(query) => {
+                                        let why_q = match transform_query_shorthand(&query) {
+                                            Ok(t) => t.query,
+                                            Err(_) => query,
+                                        };
+                                        match self.why_query(Some(kg.to_string()), why_q, true) {
+                                            Ok(qr) => {
+                                                drop(storage);
+                                                return Ok(qr);
+                                            }
+                                            Err(e) => messages.push(format!("Why error: {e}")),
+                                        }
+                                    }
+
+                                    // === Why Not (negative explanation) command ===
+                                    MetaCommand::WhyNot(input) => {
+                                        match self.why_not_query(Some(kg.to_string()), input) {
+                                            Ok(qr) => {
+                                                drop(storage);
+                                                return Ok(qr);
+                                            }
+                                            Err(e) => messages.push(format!("Why-not error: {e}")),
+                                        }
+                                    }
+
                                     // === Index commands ===
                                     MetaCommand::IndexCreate(opts) => {
                                         info!(index = %opts.name, "meta_index_create_start");
@@ -3057,6 +3275,7 @@ impl QueryJob {
                 execution_time_ms: start.elapsed().as_millis() as u64,
                 metadata: None,
                 switched_kg: switched_kg_result,
+                proof_trees: None,
             });
         }
 
@@ -3213,6 +3432,7 @@ impl QueryJob {
             execution_time_ms: start.elapsed().as_millis() as u64,
             metadata: None,
             switched_kg: None,
+            proof_trees: None,
         })
     }
 }
@@ -3504,6 +3724,7 @@ impl Handler {
             execution_time_ms,
             metadata: result_metadata,
             switched_kg: None,
+            proof_trees: None,
         })
     }
 
@@ -3921,6 +4142,7 @@ impl Handler {
             execution_time_ms: 0,
             metadata: None,
             switched_kg: None,
+            proof_trees: None,
         }
     }
 
@@ -3975,6 +4197,7 @@ impl Handler {
             execution_time_ms: 0,
             metadata: None,
             switched_kg: None,
+            proof_trees: None,
         })
     }
 
@@ -7246,5 +7469,375 @@ fn extract_predicate_vars(pred: &crate::ast::BodyPredicate, head_vars: &mut Vec<
             }
             extract_term_vars(query, head_vars);
         }
+    }
+}
+
+/// Extract the query relation name from a Datalog query string.
+///
+/// Handles both `?relation(X, Y)` shorthand and `__query__(X, Y) <- relation(X, Y)` forms.
+fn extract_query_relation(query: &str) -> Option<String> {
+    let trimmed = query.trim();
+
+    // Handle ?shorthand: "?relation(X, Y)" -> "relation"
+    if let Some(rest) = trimmed.strip_prefix('?') {
+        if let Some(paren) = rest.find('(') {
+            return Some(rest[..paren].trim().to_string());
+        }
+        return Some(rest.trim().to_string());
+    }
+
+    // Handle rule form: "name(X, Y) <- body(...)" -> look at body for actual relation
+    // For the .why command, the relation is the head of the query rule
+    if let Some(arrow) = trimmed.find("<-") {
+        let head = trimmed[..arrow].trim();
+        if let Some(paren) = head.find('(') {
+            let name = head[..paren].trim();
+            // Skip internal wrapper names like __query__, __cond_del_query__, etc.
+            if name.starts_with("__") && name.ends_with("__") {
+                // Look at the first body atom instead
+                let body = trimmed[arrow + 2..].trim();
+                if let Some(bp) = body.find('(') {
+                    return Some(body[..bp].trim().to_string());
+                }
+            }
+            return Some(name.to_string());
+        }
+    }
+
+    None
+}
+
+/// Parse a `.why_not` target like `relation(1, 2, "hello")` into a relation name and tuple.
+fn parse_why_not_target(input: &str) -> Result<(String, crate::value::Tuple), String> {
+    let trimmed = input.trim();
+    let paren_start = trimmed
+        .find('(')
+        .ok_or_else(|| format!("Expected format: relation(val1, val2, ...), got: {trimmed}"))?;
+    let paren_end = trimmed
+        .rfind(')')
+        .ok_or_else(|| format!("Missing closing parenthesis in: {trimmed}"))?;
+
+    if paren_end <= paren_start {
+        return Err(format!("Invalid format: {trimmed}"));
+    }
+
+    let relation = trimmed[..paren_start].trim().to_string();
+    let values_str = &trimmed[paren_start + 1..paren_end];
+
+    let mut values = Vec::new();
+    for part in split_respecting_brackets(values_str) {
+        let v = part.trim();
+        if v.is_empty() {
+            continue;
+        }
+        let value = parse_literal_value(v)?;
+        values.push(value);
+    }
+
+    Ok((relation, crate::value::Tuple::new(values)))
+}
+
+/// Split a string by commas, respecting brackets, quotes, and escaped quotes.
+///
+/// Handles `\"` (escaped quote) and `\\` (escaped backslash) inside quoted strings.
+fn split_respecting_brackets(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0;
+    let mut in_quotes = false;
+    let mut escaped = false;
+    let mut start = 0;
+
+    for (i, ch) in s.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' if in_quotes => {
+                escaped = true;
+            }
+            '"' if depth == 0 => in_quotes = !in_quotes,
+            '[' | '(' if !in_quotes => depth += 1,
+            ']' | ')' if !in_quotes => depth -= 1,
+            ',' if depth == 0 && !in_quotes => {
+                parts.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    if start < s.len() {
+        parts.push(&s[start..]);
+    }
+    parts
+}
+
+/// Parse a literal value string into a Value.
+fn parse_literal_value(s: &str) -> Result<crate::value::Value, String> {
+    use crate::value::Value;
+    use std::sync::Arc;
+
+    let s = s.trim();
+
+    // String literal (unescape \" and \\)
+    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
+        let inner = &s[1..s.len() - 1];
+        let mut unescaped = String::with_capacity(inner.len());
+        let mut chars = inner.chars();
+        while let Some(ch) = chars.next() {
+            if ch == '\\' {
+                match chars.next() {
+                    Some('"') => unescaped.push('"'),
+                    Some('\\') => unescaped.push('\\'),
+                    Some(other) => {
+                        unescaped.push('\\');
+                        unescaped.push(other);
+                    }
+                    None => unescaped.push('\\'),
+                }
+            } else {
+                unescaped.push(ch);
+            }
+        }
+        return Ok(Value::String(Arc::from(unescaped.as_str())));
+    }
+
+    // Boolean
+    if s == "true" {
+        return Ok(Value::Bool(true));
+    }
+    if s == "false" {
+        return Ok(Value::Bool(false));
+    }
+
+    // Null
+    if s.eq_ignore_ascii_case("null") {
+        return Ok(Value::Null);
+    }
+
+    // Vector literal: [1.0, 2.0, 3.0]
+    if s.starts_with('[') && s.ends_with(']') {
+        let inner = &s[1..s.len() - 1];
+        let mut vals = Vec::new();
+        for part in inner.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            let f: f32 = part
+                .parse()
+                .map_err(|_| format!("Invalid vector element: {part}"))?;
+            vals.push(f);
+        }
+        return Ok(Value::Vector(Arc::new(vals)));
+    }
+
+    // Float (contains '.' or scientific notation 'e'/'E')
+    if s.contains('.') || s.contains('e') || s.contains('E') {
+        if let Ok(f) = s.parse::<f64>() {
+            return Ok(Value::Float64(f));
+        }
+    }
+
+    // Integer
+    if let Ok(n) = s.parse::<i64>() {
+        if i32::try_from(n).is_ok() {
+            return Ok(Value::Int32(n as i32));
+        }
+        return Ok(Value::Int64(n));
+    }
+
+    Err(format!("Cannot parse value: {s}"))
+}
+
+/// Extract column schema from a query string + result tuples.
+///
+/// Parses variable names from the query head (e.g., `__query__(X, Y) <- ...`
+/// gives columns X, Y). Falls back to col0, col1 if parsing fails.
+fn extract_query_schema(query: &str, tuples: &[crate::value::Tuple]) -> Vec<ColumnDef> {
+    if tuples.is_empty() {
+        return vec![];
+    }
+    let var_names = extract_head_variables(query);
+    let first = &tuples[0];
+    (0..first.arity())
+        .map(|i| {
+            let name = var_names
+                .as_ref()
+                .and_then(|v| v.get(i).cloned())
+                .unwrap_or_else(|| format!("col{i}"));
+            let dt = first.get(i).map_or(WireDataType::String, |v| {
+                WireValue::from_value(v).data_type()
+            });
+            ColumnDef::new(name, dt)
+        })
+        .collect()
+}
+
+/// Extract variable names from a query's head atom.
+fn extract_head_variables(query: &str) -> Option<Vec<String>> {
+    let trimmed = query.trim();
+    let head = if let Some(arrow) = trimmed.find("<-") {
+        &trimmed[..arrow]
+    } else {
+        trimmed.strip_prefix('?').unwrap_or(trimmed)
+    };
+    let open = head.find('(')?;
+    let close = head.rfind(')')?;
+    if close <= open {
+        return None;
+    }
+    let vars: Vec<String> = head[open + 1..close]
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if vars.is_empty() {
+        None
+    } else {
+        Some(vars)
+    }
+}
+
+#[cfg(test)]
+mod parsing_tests {
+    use super::*;
+
+    #[test]
+    fn test_split_respecting_brackets_basic() {
+        let parts = split_respecting_brackets("1, 2, 3");
+        assert_eq!(parts, vec!["1", " 2", " 3"]);
+    }
+
+    #[test]
+    fn test_split_respecting_brackets_quoted_string() {
+        let parts = split_respecting_brackets(r#""hello, world", 1"#);
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0], r#""hello, world""#);
+    }
+
+    #[test]
+    fn test_split_respecting_brackets_escaped_quote() {
+        let parts = split_respecting_brackets(r#""value\"with\"quotes", 1"#);
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0], r#""value\"with\"quotes""#);
+    }
+
+    #[test]
+    fn test_split_respecting_brackets_escaped_backslash_before_quote() {
+        // \\" = escaped backslash + real quote (end of string)
+        let parts = split_respecting_brackets(r#""path\\", 1"#);
+        assert_eq!(parts.len(), 2, "got: {parts:?}");
+        assert_eq!(parts[0], r#""path\\""#);
+        assert_eq!(parts[1].trim(), "1");
+    }
+
+    #[test]
+    fn test_split_respecting_brackets_vector() {
+        let parts = split_respecting_brackets("[1.0, 2.0, 3.0], 42");
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0], "[1.0, 2.0, 3.0]");
+    }
+
+    #[test]
+    fn test_parse_literal_value_vector() {
+        let val = parse_literal_value("[1.0, 2.0, 3.0]").unwrap();
+        match val {
+            crate::value::Value::Vector(v) => {
+                assert_eq!(v.as_ref(), &[1.0f32, 2.0, 3.0]);
+            }
+            other => panic!("Expected Vector, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_literal_value_empty_vector() {
+        let val = parse_literal_value("[]").unwrap();
+        match val {
+            crate::value::Value::Vector(v) => {
+                assert!(v.is_empty());
+            }
+            other => panic!("Expected empty Vector, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_literal_value_scientific_notation() {
+        let val = parse_literal_value("1e10").unwrap();
+        assert!(matches!(val, crate::value::Value::Float64(f) if f == 1e10));
+
+        let val = parse_literal_value("1.5E-3").unwrap();
+        assert!(matches!(val, crate::value::Value::Float64(f) if (f - 1.5e-3).abs() < 1e-15));
+    }
+
+    #[test]
+    fn test_parse_why_not_target_with_escaped_quotes() {
+        let (rel, tuple) = parse_why_not_target(r#"relation("value\"with\"quotes", 1)"#).unwrap();
+        assert_eq!(rel, "relation");
+        assert_eq!(tuple.arity(), 2);
+        // Verify the string was properly unescaped
+        assert_eq!(
+            tuple.get(0).unwrap(),
+            &crate::value::Value::String(std::sync::Arc::from("value\"with\"quotes"))
+        );
+    }
+
+    #[test]
+    fn test_parse_literal_value_unescapes_strings() {
+        use std::sync::Arc;
+        // Simple string
+        let val = parse_literal_value(r#""hello""#).unwrap();
+        assert_eq!(val, crate::value::Value::String(Arc::from("hello")));
+
+        // Escaped quote
+        let val = parse_literal_value(r#""say \"hi\"""#).unwrap();
+        assert_eq!(val, crate::value::Value::String(Arc::from(r#"say "hi""#)));
+
+        // Escaped backslash
+        let val = parse_literal_value(r#""path\\to""#).unwrap();
+        assert_eq!(val, crate::value::Value::String(Arc::from("path\\to")));
+
+        // Escaped backslash before closing quote: "path\\"
+        let val = parse_literal_value(r#""path\\""#).unwrap();
+        assert_eq!(val, crate::value::Value::String(Arc::from("path\\")));
+    }
+
+    #[test]
+    fn test_split_and_parse_escaped_backslash_before_quote() {
+        // Full round-trip: "path\\", 1 -> split -> parse each part
+        let parts = split_respecting_brackets(r#""path\\", 1"#);
+        assert_eq!(parts.len(), 2);
+        let val = parse_literal_value(parts[0].trim()).unwrap();
+        assert_eq!(
+            val,
+            crate::value::Value::String(std::sync::Arc::from("path\\"))
+        );
+    }
+
+    #[test]
+    fn test_extract_query_relation_query_shorthand() {
+        assert_eq!(
+            extract_query_relation("?edge(X, Y)"),
+            Some("edge".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_query_relation_internal_name() {
+        let result = extract_query_relation("__query__(X) <- edge(X, _)");
+        assert_eq!(result, Some("edge".to_string()));
+    }
+
+    #[test]
+    fn test_extract_query_relation_other_internal_names() {
+        let result = extract_query_relation("__cond_del_query__(X) <- edge(X, _)");
+        assert_eq!(result, Some("edge".to_string()));
+    }
+
+    #[test]
+    fn test_extract_query_relation_user_double_underscore() {
+        // User-defined relation with double underscores but not matching __*__ pattern
+        let result = extract_query_relation("__my_rel(X) <- base(X)");
+        assert_eq!(result, Some("__my_rel".to_string()));
     }
 }

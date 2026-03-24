@@ -3,7 +3,7 @@
 import type React from "react"
 
 import { useState, useRef, useCallback, useMemo, useEffect, useSyncExternalStore } from "react"
-import { Play, Copy, Check, Trash2, Lightbulb, Square } from "lucide-react"
+import { Play, Copy, Check, Trash2, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useDatalogStore } from "@/lib/datalog-store"
@@ -15,10 +15,8 @@ import { classifyLines, getStatementLabel, type StatementType } from "@/lib/stat
 
 interface QueryEditorPanelProps {
   onExecute: (query: string) => void
-  onExplain?: (query: string) => void
   onCancel?: () => void
   isExecuting: boolean
-  isExplaining?: boolean
   errorLines?: Set<number>
 }
 
@@ -45,7 +43,7 @@ const STATEMENT_COLORS: Record<NonNullable<StatementType>, string> = {
   "comment": "bg-muted-foreground/30",
 }
 
-export function QueryEditorPanel({ onExecute, onExplain, onCancel, isExecuting, isExplaining = false, errorLines }: QueryEditorPanelProps) {
+export function QueryEditorPanel({ onExecute, onCancel, isExecuting, errorLines }: QueryEditorPanelProps) {
   const isMac = useSyncExternalStore(subscribePlatform, getIsMac, getIsMacServer)
   const { editorContent, setEditorContent, selectedKnowledgeGraph, relations, views } = useDatalogStore()
   const [query, setQuery] = useState(() => editorContent || "")
@@ -114,13 +112,6 @@ export function QueryEditorPanel({ onExecute, onExplain, onCancel, isExecuting, 
     const text = getExecutionText()
     if (text.trim() && !isExecuting) {
       onExecute(text)
-    }
-  }
-
-  const handleExplain = () => {
-    const text = getExecutionText()
-    if (text.trim() && !isExplaining && onExplain) {
-      onExplain(text)
     }
   }
 
@@ -244,13 +235,6 @@ export function QueryEditorPanel({ onExecute, onExplain, onCancel, isExecuting, 
       return
     }
 
-    // Cmd+Shift+Enter explains
-    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "Enter") {
-      e.preventDefault()
-      handleExplain()
-      return
-    }
-
     // Cmd+Enter executes
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
       e.preventDefault()
@@ -334,18 +318,6 @@ export function QueryEditorPanel({ onExecute, onExplain, onCancel, isExecuting, 
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
           <div className="mx-1 h-4 w-px bg-border" />
-          {onExplain && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleExplain}
-              disabled={isExplaining || !query.trim()}
-              className="h-7 gap-1.5 px-3 text-xs"
-            >
-              <Lightbulb className={cn("h-3 w-3", isExplaining && "animate-pulse")} />
-              {isExplaining ? "Explaining..." : "Explain"}
-            </Button>
-          )}
           {isExecuting && onCancel ? (
             <Button
               size="sm"

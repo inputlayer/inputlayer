@@ -1,0 +1,16 @@
+// Test: .why with session (ephemeral) facts
+// Description: Proof tree includes session-scoped data
+.kg create test_expltr_n36t23
+.kg use test_expltr_n36t23
+
++edge[(1, 2), (2, 3)]
+
+// Add session rule
+path(X, Y) <- edge(X, Y)
+
+?path(X, Y)
+
+.why ?path(X, Y)
+
+.kg use default
+.kg drop test_expltr_n36t23

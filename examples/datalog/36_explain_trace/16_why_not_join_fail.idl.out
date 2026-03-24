@@ -1,0 +1,31 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+
+> .kg create test_expltr_n36t16
+Knowledge graph 'test_expltr_n36t16' created.
+Switched to knowledge graph: test_expltr_n36t16
+> .kg use test_expltr_n36t16
+Switched to knowledge graph: test_expltr_n36t16
+> +edge[(1, 2), (3, 4)]
+Inserted 2 fact(s) into 'edge'.
+> +path(X, Z) <- edge(X, Y), edge(Y, Z)
+Rule 'path' registered.
+> .why_not path(1, 99)
+┌──────────────────────────────────────────┐
+│ explanation                              │
+├──────────────────────────────────────────┤
+│ "path(1, 99) was NOT derived:"           │
+│ ""                                       │
+│ "  Rule: path (clause 0)"                │
+│ "    path(X, Z) <- edge(X, Y), edge(Y, … │
+│ "    Blocker: Body predicate 1 (edge(2,… │
+└──────────────────────────────────────────┘
+5 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_expltr_n36t16
+Knowledge graph 'test_expltr_n36t16' dropped.

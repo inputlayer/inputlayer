@@ -1,0 +1,30 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+
+> .kg create test_expltr_n36t07
+Knowledge graph 'test_expltr_n36t07' created.
+Switched to knowledge graph: test_expltr_n36t07
+> .kg use test_expltr_n36t07
+Switched to knowledge graph: test_expltr_n36t07
+> +base[(1,), (2,)]
+Inserted 2 fact(s) into 'base'.
+> +level1(X) <- base(X)
+Rule 'level1' registered.
+> +level2(X) <- level1(X)
+Rule 'level2' registered.
+> .why ?level2(X)
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+└───┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_expltr_n36t07
+Knowledge graph 'test_expltr_n36t07' dropped.

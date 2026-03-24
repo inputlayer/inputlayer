@@ -101,6 +101,23 @@ class ServerStatus:
     knowledge_graph: str
 
 
+@dataclass(frozen=True)
+class WhyResult:
+    """Result of a .why query with structured proof trees."""
+
+    results: "ResultSet"
+    proof_trees: list[dict[str, Any]]
+    result_count: int = 0
+
+
+@dataclass(frozen=True)
+class WhyNotResult:
+    """Explanation of why a fact was NOT derived."""
+
+    text: str
+    explanation: dict[str, Any] | None = None
+
+
 class KnowledgeGraph:
     """Primary workspace for interacting with a knowledge graph."""
 
@@ -546,6 +563,57 @@ class KnowledgeGraph:
         result = await self._conn.execute(f".explain {datalog}")
         plan_text = "\n".join(row[0] for row in result.rows)
         return ExplainResult(datalog=datalog, plan=plan_text)
+
+    async def why(self, *select: Any, full: bool = False, **kwargs: Any) -> WhyResult:
+        """Show proof trees explaining why query results were derived.
+
+        Returns structured proof trees alongside the result data.
+        Each result row has a corresponding proof tree explaining its derivation.
+        """
+        datalog = compile_query(*select, **kwargs)
+        if isinstance(datalog, list):
+            datalog = datalog[0]
+        cmd = f".why full {datalog}" if full else f".why {datalog}"
+        result = await self._conn.execute(cmd)
+        result_set = ResultSet(
+            columns=result.columns,
+            rows=result.rows,
+            row_count=len(result.rows),
+            total_count=result.total_count,
+            execution_time_ms=result.execution_time_ms,
+        )
+        proof_trees = getattr(result, "proof_trees", None) or []
+        return WhyResult(
+            results=result_set,
+            proof_trees=proof_trees,
+            result_count=len(result.rows),
+        )
+
+    async def why_not(self, relation: type, **values: Any) -> WhyNotResult:
+        """Explain why a specific fact was NOT derived.
+
+        Returns a structured explanation with the specific blocker for each rule.
+        """
+        from inputlayer.relation import Relation
+
+        rel_name = Relation._resolve_name(relation)
+        cols = Relation._get_columns(relation)
+        parts = []
+        for col in cols:
+            v = values.get(col)
+            if v is None:
+                parts.append("null")
+            elif isinstance(v, str):
+                escaped = v.replace("\\", "\\\\").replace('"', '\\"')
+                parts.append(f'"{escaped}"')
+            else:
+                parts.append(str(v))
+        vals_str = ", ".join(parts)
+        result = await self._conn.execute(f".why_not {rel_name}({vals_str})")
+        text = "\n".join(str(row[0]) for row in result.rows)
+        proof_trees = getattr(result, "proof_trees", None) or []
+        explanation = proof_trees[0] if proof_trees else None
+        return WhyNotResult(text=text, explanation=explanation)
 
     async def compact(self) -> None:
         """Trigger storage compaction."""

@@ -716,6 +716,80 @@ impl StorageEngine {
             .map_err(|e| StorageError::Other(format!("Query explain failed: {e}")))
     }
 
+    /// Execute a query with rules and return both results and proof context.
+    ///
+    /// Uses a single snapshot for consistency between the query results
+    /// and the rules/data used for proof tree construction.
+    pub fn execute_and_get_context(
+        &self,
+        kg: &str,
+        program: &str,
+    ) -> StorageResult<(
+        Vec<Tuple>,
+        Vec<crate::ast::Rule>,
+        std::collections::HashMap<String, Vec<Tuple>>,
+        std::collections::HashMap<String, String>, // index_name -> metric
+    )> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let (snapshot, index_metrics) = {
+            let db_guard = db.read();
+            let snap = db_guard.snapshot();
+            // Collect index metric info for HNSW proof enrichment
+            let metrics: std::collections::HashMap<String, String> =
+                if let Some(dd) = db_guard.incremental() {
+                    let idx_mgr = dd.index_manager();
+                    let guard = idx_mgr.lock();
+                    guard
+                        .registered_indexes()
+                        .iter()
+                        .map(|(name, idx)| {
+                            let crate::index_manager::IndexType::Hnsw(ref cfg) = idx.index_type;
+                            (name.clone(), format!("{:?}", cfg.metric).to_lowercase())
+                        })
+                        .collect()
+                } else {
+                    std::collections::HashMap::new()
+                };
+            (snap, metrics)
+        };
+
+        let result_tuples = snapshot
+            .execute_with_rules_tuples(program)
+            .map_err(|e| StorageError::Other(format!("Query execution failed: {e}")))?;
+
+        let rules = snapshot.rules.as_ref().clone();
+        let base_data = snapshot.input_tuples.as_ref().clone();
+
+        Ok((result_tuples, rules, base_data, index_metrics))
+    }
+
+    /// Get rules and base data for a knowledge graph (for provenance queries).
+    pub fn get_rules_and_data(
+        &self,
+        kg: &str,
+    ) -> StorageResult<(
+        Vec<crate::ast::Rule>,
+        std::collections::HashMap<String, Vec<crate::value::Tuple>>,
+    )> {
+        let db = self
+            .knowledge_graphs
+            .get(kg)
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+
+        let snapshot = {
+            let db_guard = db.read();
+            db_guard.snapshot()
+        };
+
+        let rules = snapshot.rules.as_ref().clone();
+        let base_data = snapshot.input_tuples.as_ref().clone();
+        Ok((rules, base_data))
+    }
+
     /// Save a specific knowledge graph to disk (flush persist buffers)
     pub fn save_knowledge_graph(&self, name: &str) -> StorageResult<()> {
         // Check knowledge graph exists

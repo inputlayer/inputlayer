@@ -83,6 +83,7 @@ export interface QueryResult {
   rowProvenance?: string[]
   hasEphemeral?: boolean
   ephemeralSources?: string[]
+  proofTrees?: import("./ws-types").WsProofTree[]
 }
 
 interface StoredConnection {
@@ -125,6 +126,8 @@ interface DatalogStore {
   loadRelationData: (relationName: string) => Promise<Relation | null>
   loadViewData: (viewName: string) => Promise<View | null>
   explainQuery: (query: string) => Promise<string>
+  whyQuery: (query: string) => Promise<string>
+  whyNotQuery: (input: string) => Promise<string>
   createKnowledgeGraph: (name: string) => Promise<void>
   deleteKnowledgeGraph: (name: string) => Promise<void>
   deleteRelation: (name: string) => Promise<void>
@@ -665,6 +668,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
         rowProvenance: response.row_provenance,
         hasEphemeral: response.metadata?.has_ephemeral,
         ephemeralSources: response.metadata?.ephemeral_sources,
+        proofTrees: response.proof_trees,
       }
       get().addQueryToHistory(result)
       set({ queryCancelRef: null })
@@ -727,6 +731,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
         rowProvenance: response.row_provenance,
         hasEphemeral: response.metadata?.has_ephemeral,
         ephemeralSources: response.metadata?.ephemeral_sources,
+        proofTrees: response.proof_trees,
       }
     } catch (error) {
       return {
@@ -830,6 +835,18 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
   explainQuery: async (query: string): Promise<string> => {
     if (!wsClient) throw new Error("Not connected")
     const result = await wsClient.execute(`.explain ${query}`)
+    return result.rows.map((row) => String(row[0])).join("\n")
+  },
+
+  whyQuery: async (query: string): Promise<string> => {
+    if (!wsClient) throw new Error("Not connected")
+    const result = await wsClient.execute(`.why ${query}`)
+    return result.rows.map((row) => String(row[0])).join("\n")
+  },
+
+  whyNotQuery: async (input: string): Promise<string> => {
+    if (!wsClient) throw new Error("Not connected")
+    const result = await wsClient.execute(`.why_not ${input}`)
     return result.rows.map((row) => String(row[0])).join("\n")
   },
 

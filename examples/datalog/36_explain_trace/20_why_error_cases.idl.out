@@ -1,0 +1,22 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+
+> .kg create test_expltr_n36t20
+Knowledge graph 'test_expltr_n36t20' created.
+Switched to knowledge graph: test_expltr_n36t20
+> .kg use test_expltr_n36t20
+Switched to knowledge graph: test_expltr_n36t20
+> +edge[(1, 2)]
+Inserted 1 fact(s) into 'edge'.
+> .why
+Parse error: Usage: .why <query>
+> .why_not
+Parse error: Usage: .why_not <relation>(<values>)
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_expltr_n36t20
+Knowledge graph 'test_expltr_n36t20' dropped.
