@@ -291,6 +291,7 @@ export class Connection {
           row_provenance: allProvenance.length > 0 ? allProvenance : undefined,
           metadata: start.metadata,
           switched_kg: start.switched_kg,
+          proof_trees: start.proof_trees,
         };
       }
 

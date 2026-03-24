@@ -1,0 +1,13 @@
+// Test: .why on simple derived relation
+// Description: Shows rule application proof with base fact child
+.kg create test_expltr_n36t02
+.kg use test_expltr_n36t02
+
++node[(1,), (2,), (3,)]
+
++active(X) <- node(X)
+
+.why ?active(X)
+
+.kg use default
+.kg drop test_expltr_n36t02

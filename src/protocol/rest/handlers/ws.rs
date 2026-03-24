@@ -86,6 +86,8 @@ enum WsResponse {
         row_provenance: Vec<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         metadata: Option<SessionQueryMetadataDto>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        proof_trees: Option<Vec<crate::provenance::wire::WireProofTree>>,
     },
     Error {
         message: String,
@@ -520,6 +522,7 @@ async fn handle_ws_query(handler: &Arc<Handler>, session_id: &str, query: String
                 execution_time_ms: start.elapsed().as_millis() as u64,
                 row_provenance,
                 metadata,
+                proof_trees: response.proof_trees,
             }
         }
         Err(e) => WsResponse::Error { message: e },
@@ -681,6 +684,8 @@ enum GlobalWsResponse {
         metadata: Option<SessionQueryMetadataDto>,
         #[serde(skip_serializing_if = "Option::is_none")]
         switched_kg: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        proof_trees: Option<Vec<crate::provenance::wire::WireProofTree>>,
     },
     /// Streaming: header sent before row chunks (large results)
     ResultStart {
@@ -692,6 +697,8 @@ enum GlobalWsResponse {
         metadata: Option<SessionQueryMetadataDto>,
         #[serde(skip_serializing_if = "Option::is_none")]
         switched_kg: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        proof_trees: Option<Vec<crate::provenance::wire::WireProofTree>>,
     },
     /// Streaming: a batch of rows
     ResultChunk {
@@ -1382,6 +1389,7 @@ async fn send_global_execute(
                 row_provenance: row_provenance.clone(),
                 metadata: metadata.clone(),
                 switched_kg: response.switched_kg.clone(),
+                proof_trees: response.proof_trees.clone(),
             };
 
             // Check serialized size to decide: single message vs streaming
@@ -1438,6 +1446,7 @@ async fn send_global_execute(
                     execution_time_ms: response.execution_time_ms,
                     metadata,
                     switched_kg: response.switched_kg,
+                    proof_trees: response.proof_trees,
                 };
                 if !send_global_response(sender, &start_msg, session_id).await {
                     return false;
@@ -1536,6 +1545,7 @@ mod tests {
             execution_time_ms: 5,
             row_provenance: vec!["persistent".to_string()],
             metadata: None,
+            proof_trees: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"type\":\"result\""));
@@ -1641,6 +1651,7 @@ mod tests {
             row_provenance: vec![],
             metadata: None,
             switched_kg: None,
+            proof_trees: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"type\":\"result\""));
@@ -1662,6 +1673,7 @@ mod tests {
             row_provenance: vec![],
             metadata: None,
             switched_kg: Some("new_kg".to_string()),
+            proof_trees: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"switched_kg\":\"new_kg\""));
@@ -1750,6 +1762,7 @@ mod tests {
             execution_time_ms: 42,
             metadata: None,
             switched_kg: None,
+            proof_trees: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"type\":\"result_start\""));
@@ -1758,6 +1771,7 @@ mod tests {
         // Optional fields omitted when None
         assert!(!json.contains("metadata"));
         assert!(!json.contains("switched_kg"));
+        assert!(!json.contains("proof_trees"));
     }
 
     #[test]
@@ -1827,11 +1841,35 @@ mod tests {
                 warnings: vec![],
             }),
             switched_kg: Some("new_kg".to_string()),
+            proof_trees: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"type\":\"result_start\""));
         assert!(json.contains("\"truncated\":true"));
         assert!(json.contains("\"metadata\""));
         assert!(json.contains("\"switched_kg\":\"new_kg\""));
+        assert!(!json.contains("proof_trees"));
+    }
+
+    #[test]
+    fn test_global_ws_response_result_start_with_proof_trees() {
+        let resp = GlobalWsResponse::ResultStart {
+            columns: vec!["x".to_string()],
+            total_count: 1,
+            truncated: false,
+            execution_time_ms: 5,
+            metadata: None,
+            switched_kg: None,
+            proof_trees: Some(vec![crate::provenance::wire::WireProofTree {
+                node_type: "base_fact".to_string(),
+                relation: Some("edge".to_string()),
+                values: Some(vec![serde_json::json!(1), serde_json::json!(2)]),
+                ..crate::provenance::wire::WireProofTree::empty_pub()
+            }]),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"proof_trees\""));
+        assert!(json.contains("\"node_type\":\"base_fact\""));
+        assert!(json.contains("\"relation\":\"edge\""));
     }
 }

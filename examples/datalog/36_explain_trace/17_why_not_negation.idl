@@ -1,0 +1,15 @@
+// Test: .why_not when negation blocks derivation
+// Description: Shows negation succeeded (blocking fact exists)
+.kg create test_expltr_n36t17
+.kg use test_expltr_n36t17
+
++node[(1,), (2,), (3,)]
++danger[(2,)]
+
++safe(X) <- node(X), !danger(X)
+
+// Node 2 is not safe because danger(2) exists
+.why_not safe(2)
+
+.kg use default
+.kg drop test_expltr_n36t17

@@ -59,6 +59,8 @@ export interface ResultResponse {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   metadata?: Record<string, any>;
   switched_kg?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  proof_trees?: any[];
 }
 
 export interface ErrorResponse {
@@ -77,6 +79,8 @@ export interface ResultStartResponse {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   metadata?: Record<string, any>;
   switched_kg?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  proof_trees?: any[];
 }
 
 export interface ResultChunkResponse {

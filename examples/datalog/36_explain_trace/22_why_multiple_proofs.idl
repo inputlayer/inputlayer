@@ -1,0 +1,16 @@
+// Test: .why on tuple derived via multiple clauses
+// Description: Shows both proofs when a tuple can be derived two ways
+.kg create test_expltr_n36t22
+.kg use test_expltr_n36t22
+
++a[(1, 2)]
++b[(1, 2)]
+
++result(X, Y) <- a(X, Y)
++result(X, Y) <- b(X, Y)
+
+// (1, 2) is derivable from both a and b
+.why ?result(X, Y)
+
+.kg use default
+.kg drop test_expltr_n36t22

@@ -1,0 +1,33 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+
+> .kg create test_expltr_n36t17
+Knowledge graph 'test_expltr_n36t17' created.
+Switched to knowledge graph: test_expltr_n36t17
+> .kg use test_expltr_n36t17
+Switched to knowledge graph: test_expltr_n36t17
+> +node[(1,), (2,), (3,)]
+Inserted 3 fact(s) into 'node'.
+> +danger[(2,)]
+Inserted 1 fact(s) into 'danger'.
+> +safe(X) <- node(X), !danger(X)
+Rule 'safe' registered.
+> .why_not safe(2)
+┌─────────────────────────────────────────┐
+│ explanation                             │
+├─────────────────────────────────────────┤
+│ "safe(2) was NOT derived:"              │
+│ ""                                      │
+│ "  Rule: safe (clause 0)"               │
+│ "    safe(X) <- node(X), !danger(X)"    │
+│ "    Blocker: Negated danger(2) exists" │
+└─────────────────────────────────────────┘
+5 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_expltr_n36t17
+Knowledge graph 'test_expltr_n36t17' dropped.

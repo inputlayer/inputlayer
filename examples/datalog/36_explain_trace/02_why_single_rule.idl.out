@@ -1,0 +1,29 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+
+> .kg create test_expltr_n36t02
+Knowledge graph 'test_expltr_n36t02' created.
+Switched to knowledge graph: test_expltr_n36t02
+> .kg use test_expltr_n36t02
+Switched to knowledge graph: test_expltr_n36t02
+> +node[(1,), (2,), (3,)]
+Inserted 3 fact(s) into 'node'.
+> +active(X) <- node(X)
+Rule 'active' registered.
+> .why ?active(X)
+┌───┐
+│ X │
+├───┤
+│ 1 │
+│ 2 │
+│ 3 │
+└───┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_expltr_n36t02
+Knowledge graph 'test_expltr_n36t02' dropped.

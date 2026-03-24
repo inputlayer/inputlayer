@@ -1,0 +1,13 @@
+// Test: .why on join rule
+// Description: Shows proof with two base fact children from a join
+.kg create test_expltr_n36t03
+.kg use test_expltr_n36t03
+
++edge[(1, 2), (2, 3)]
+
++path(X, Z) <- edge(X, Y), edge(Y, Z)
+
+.why ?path(X, Z)
+
+.kg use default
+.kg drop test_expltr_n36t03

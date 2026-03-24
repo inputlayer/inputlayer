@@ -404,6 +404,32 @@ Show the query plan for a query without executing it. Displays the logical plan 
 .explain ?path(1, X)
 ```
 
+### `.why <query>`
+
+Show proof trees explaining why each query result was derived. Traces backward through rules and base facts to build a complete derivation chain.
+
+```
+.why ?edge(X, Y)
+.why ?reachable(1, X)
+```
+
+### `.why full <query>`
+
+Same as `.why` but in full mode - aggregation proofs enumerate all contributing tuples instead of showing a summary with samples.
+
+```
+.why full ?department_count(Dept, Count)
+```
+
+### `.why_not <relation>(<values>)`
+
+Explain why a specific tuple was NOT derived. For each rule that could produce the relation, identifies the exact body predicate that blocked derivation.
+
+```
+.why_not path(1, 99)
+.why_not safe(2)
+```
+
 ### `.compact`
 
 Compact storage by consolidating WAL and batch files.

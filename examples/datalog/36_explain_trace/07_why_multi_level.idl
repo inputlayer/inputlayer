@@ -1,0 +1,14 @@
+// Test: .why on multi-level derived rules (A <- B <- base)
+// Description: Shows three-level proof chain
+.kg create test_expltr_n36t07
+.kg use test_expltr_n36t07
+
++base[(1,), (2,)]
+
++level1(X) <- base(X)
++level2(X) <- level1(X)
+
+.why ?level2(X)
+
+.kg use default
+.kg drop test_expltr_n36t07

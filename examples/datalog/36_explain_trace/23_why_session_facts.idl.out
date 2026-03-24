@@ -1,0 +1,38 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+
+> .kg create test_expltr_n36t23
+Knowledge graph 'test_expltr_n36t23' created.
+Switched to knowledge graph: test_expltr_n36t23
+> .kg use test_expltr_n36t23
+Switched to knowledge graph: test_expltr_n36t23
+> +edge[(1, 2), (2, 3)]
+Inserted 2 fact(s) into 'edge'.
+> path(X, Y) <- edge(X, Y)
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 3 │
+└───┴───┘
+2 rows
+(session: 1 rule(s))
+> ?path(X, Y)
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 2 │ 3 │
+└───┴───┘
+2 rows
+> .why ?path(X, Y)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_expltr_n36t23
+Knowledge graph 'test_expltr_n36t23' dropped.

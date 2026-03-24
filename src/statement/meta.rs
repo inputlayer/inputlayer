@@ -56,6 +56,9 @@ pub enum MetaCommand {
     Compact,
     Status,
     Explain(String), // .explain <query> - show query plan without executing
+    Why(String),     // .why <query> - show proof trees for query results
+    WhyFull(String), // .why full <query> - show full proof trees (all contributors)
+    WhyNot(String),  // .why_not <relation>(<values>) - explain missing derivation
     Help,
     Quit,
 
@@ -159,6 +162,9 @@ fn format_meta_debug(cmd: &MetaCommand) -> String {
         MetaCommand::Compact => "Compact".to_string(),
         MetaCommand::Status => "Status".to_string(),
         MetaCommand::Explain(s) => format!("Explain({s:?})"),
+        MetaCommand::Why(s) => format!("Why({s:?})"),
+        MetaCommand::WhyFull(s) => format!("WhyFull({s:?})"),
+        MetaCommand::WhyNot(s) => format!("WhyNot({s:?})"),
         MetaCommand::Help => "Help".to_string(),
         MetaCommand::Quit => "Quit".to_string(),
         MetaCommand::Load { path, mode } => {
@@ -252,6 +258,33 @@ pub fn parse_meta_command(input: &str) -> Result<MetaCommand, String> {
                 } else {
                     Ok(MetaCommand::Explain(query))
                 }
+            }
+        }
+        "why_not" => {
+            let rest = input
+                .strip_prefix("why_not")
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if rest.is_empty() {
+                Err("Usage: .why_not <relation>(<values>)".to_string())
+            } else {
+                Ok(MetaCommand::WhyNot(rest))
+            }
+        }
+        "why" => {
+            let rest = input.strip_prefix("why").unwrap_or("").trim().to_string();
+            if rest.is_empty() {
+                Err("Usage: .why <query>".to_string())
+            } else if rest.starts_with("full ") || rest.starts_with("full\t") {
+                let query = rest.strip_prefix("full").unwrap_or("").trim().to_string();
+                if query.is_empty() {
+                    Err("Usage: .why full <query>".to_string())
+                } else {
+                    Ok(MetaCommand::WhyFull(query))
+                }
+            } else {
+                Ok(MetaCommand::Why(rest))
             }
         }
         "help" | "?" => Ok(MetaCommand::Help),

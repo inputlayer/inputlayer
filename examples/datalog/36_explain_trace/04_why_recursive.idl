@@ -1,0 +1,14 @@
+// Test: .why on recursive transitive closure
+// Description: Shows recursive proof with multiple depth levels
+.kg create test_expltr_n36t04
+.kg use test_expltr_n36t04
+
++edge[(1, 2), (2, 3), (3, 4)]
+
++reachable(X, Y) <- edge(X, Y)
++reachable(X, Z) <- edge(X, Y), reachable(Y, Z)
+
+.why ?reachable(X, Y)
+
+.kg use default
+.kg drop test_expltr_n36t04

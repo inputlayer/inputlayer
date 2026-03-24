@@ -1,0 +1,15 @@
+// Test: .why on rule with multiple clauses
+// Description: Shows which clause produced each tuple
+.kg create test_expltr_n36t06
+.kg use test_expltr_n36t06
+
++a[(1,), (2,)]
++b[(3,)]
+
++result(X) <- a(X)
++result(X) <- b(X)
+
+.why ?result(X)
+
+.kg use default
+.kg drop test_expltr_n36t06

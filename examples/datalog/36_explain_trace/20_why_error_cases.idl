@@ -1,0 +1,15 @@
+// Test: .why and .why_not error handling
+// Description: Verifies error messages for invalid inputs
+.kg create test_expltr_n36t20
+.kg use test_expltr_n36t20
+
++edge[(1, 2)]
+
+// Missing query
+.why
+
+// Missing target
+.why_not
+
+.kg use default
+.kg drop test_expltr_n36t20

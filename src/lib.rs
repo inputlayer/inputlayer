@@ -204,6 +204,9 @@ pub mod bloom_filter; // Bloom filters for predicate transfer optimization
 pub mod hash_index; // Hash indexes for future cost-based join planning
 pub mod statistics; // Statistics collection for future selectivity estimation
 
+// Explainability
+pub mod provenance; // Why-provenance proof trees and negative explanations
+
 // Utilities
 mod catalog;
 mod pipeline_trace;

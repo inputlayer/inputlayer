@@ -1,0 +1,31 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+
+> .kg create test_expltr_n36t18
+Knowledge graph 'test_expltr_n36t18' created.
+Switched to knowledge graph: test_expltr_n36t18
+> .kg use test_expltr_n36t18
+Switched to knowledge graph: test_expltr_n36t18
+> +item[(1, 50)]
+Inserted 1 fact(s) into 'item'.
+> +expensive(Id, Price) <- item(Id, Price), Price > 100
+Rule 'expensive' registered.
+> .why_not expensive(1, 50)
+┌──────────────────────────────────────────┐
+│ explanation                              │
+├──────────────────────────────────────────┤
+│ "expensive(1, 50) was NOT derived:"      │
+│ ""                                       │
+│ "  Rule: expensive (clause 0)"           │
+│ "    expensive(Id, Price) <- item(Id, P… │
+│ "    Blocker: Comparison 50 > 100 faile… │
+└──────────────────────────────────────────┘
+5 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_expltr_n36t18
+Knowledge graph 'test_expltr_n36t18' dropped.

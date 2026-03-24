@@ -1,0 +1,13 @@
+// Test: .why on rule with comparison predicate
+// Description: Shows proof includes comparison evaluation
+.kg create test_expltr_n36t08
+.kg use test_expltr_n36t08
+
++item[(1, 200), (2, 50), (3, 150)]
+
++expensive(Id, Price) <- item(Id, Price), Price > 100
+
+.why ?expensive(Id, Price)
+
+.kg use default
+.kg drop test_expltr_n36t08

@@ -1,0 +1,156 @@
+---
+title: Explainability
+---
+
+# Explainability
+
+Every fact in InputLayer is traceable. When the engine derives a result, you can ask *why* it was derived and get a complete proof tree showing the chain of rules and base facts that produced it. When an expected result is missing, you can ask *why not* and get a precise explanation of which rule condition failed.
+
+This is one of InputLayer's core differentiators: unlike vector similarity searches that return "the embedding was close," InputLayer tells you "the system derived X because rule A applied to facts B and C."
+
+## Query Plans with `.explain`
+
+Before diving into derivation proofs, you can inspect how a query will execute:
+
+```datalog
+.explain ?reachable(1, X)
+```
+
+This shows the compilation pipeline (AST, IR, optimizations) without running the query. Useful for understanding query performance.
+
+## Derivation Proofs with `.why`
+
+The `.why` command builds a proof tree for every result of a query:
+
+```datalog
+// Define some data and rules
++edge[(1, 2), (2, 3), (3, 4)]
++reachable(X, Y) <- edge(X, Y)
++reachable(X, Z) <- edge(X, Y), reachable(Y, Z)
+
+// Ask: why are these tuples in reachable?
+.why ?reachable(X, Y)
+```
+
+Output shows each result with its complete derivation:
+
+```
+Found 6 result(s) for reachable:
+
+--- Result 1 ---
+[rule] reachable (clause 0)
+  clause: reachable(X, Y) <- edge(X, Y)
+  bindings: X=1, Y=2
+[base] edge(1, 2)
+
+--- Result 2 ---
+[rule] reachable (clause 1)
+  clause: reachable(X, Z) <- edge(X, Y), reachable(Y, Z)
+  bindings: X=1, Y=2, Z=3
+[base] edge(1, 2)
+[rule] reachable (clause 0)
+  clause: reachable(X, Y) <- edge(X, Y)
+  bindings: X=2, Y=3
+[base] edge(2, 3)
+```
+
+Each proof node is one of:
+- **[base]** - a fact that exists directly in a relation
+- **[rule]** - a rule clause that fired, with variable bindings and child proofs
+- **[negation]** - proof that a negated condition holds (no matching tuple exists)
+- **[vector_search]** - an HNSW nearest neighbor search result with metric and distance
+- **[aggregation]** - an aggregation over contributing tuples
+- **[truncated]** - proof exceeded the depth limit (default: 50)
+
+### Full Mode
+
+For aggregations with many contributing tuples, use `.why full` to enumerate all contributors:
+
+```datalog
+.why full ?department_count(Dept, Count)
+```
+
+## Negative Explanations with `.why_not`
+
+When an expected fact is missing, `.why_not` explains which rule condition failed:
+
+```datalog
++edge[(1, 2), (3, 4)]
++path(X, Z) <- edge(X, Y), edge(Y, Z)
+
+.why_not path(1, 99)
+```
+
+Output:
+
+```
+path(1, 99) was NOT derived:
+
+  Rule: path (clause 0)
+    path(X, Z) <- edge(X, Y), edge(Y, Z)
+    Blocker: Body predicate 1 (edge(2, 99)) failed: No matching tuples in edge
+```
+
+The blocker identifies the exact body predicate that prevented derivation:
+- **Body atom failed** - no matching tuples in the referenced relation
+- **Comparison failed** - a filter condition evaluated to false
+- **Negation succeeded** - a tuple exists that should be absent
+- **Head unification failed** - the rule head pattern doesn't match the target
+- **HNSW not in top-k** - the target wasn't in the nearest neighbor results
+
+## SDK Usage
+
+### Python
+
+```python
+from inputlayer import InputLayer
+
+async with InputLayer(url="ws://localhost:8080") as il:
+    kg = il.knowledge_graph("my_kg")
+
+    # Proof trees
+    result = await kg.why(Edge)
+    print(result.text)
+    print(f"Explained {result.result_count} results")
+
+    # Full mode for aggregations
+    result = await kg.why(DeptCount, full=True)
+
+    # Negative explanation
+    result = await kg.why_not(Edge, src=1, dst=99)
+    print(result.text)
+```
+
+### TypeScript
+
+```typescript
+import { InputLayer } from 'inputlayer-js';
+
+const client = new InputLayer({ url: 'ws://localhost:8080' });
+await client.connect();
+const kg = client.knowledgeGraph('my_kg');
+
+// Proof trees
+const result = await kg.why({ select: [Edge] });
+console.log(result.text);
+console.log(`Explained ${result.resultCount} results`);
+
+// Full mode
+const full = await kg.why({ select: [DeptCount], full: true });
+
+// Negative explanation
+const notResult = await kg.whyNot(Edge, { src: 1, dst: 99 });
+console.log(notResult.text);
+```
+
+## Configuration
+
+- **Depth limit**: Proof trees are capped at 50 levels by default to prevent explosion on deeply recursive rules
+- **Multiple proofs**: When a tuple can be derived multiple ways, up to 5 proofs are shown by default
+- **Aggregation samples**: In default mode, aggregation proofs show 10 sample contributors. Use `.why full` for all
+
+## Next Steps
+
+- [Recursion](recursion) - understand recursive rules that produce deep proof trees
+- [Vector Search](vectors) - HNSW proof traces with distance metrics
+- [REPL Guide](repl) - all available meta commands

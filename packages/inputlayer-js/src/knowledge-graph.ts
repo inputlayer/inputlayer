@@ -86,6 +86,64 @@ export interface ServerStatus {
   knowledgeGraph: string;
 }
 
+/** A node in a proof tree explaining why a fact was derived. */
+export interface ProofTree {
+  nodeType: string;
+  relation?: string;
+  values?: unknown[];
+  ruleName?: string;
+  clauseIndex?: number;
+  clauseText?: string;
+  bindings?: Array<[string, unknown]>;
+  children?: ProofTree[];
+  pattern?: string;
+  indexName?: string;
+  metric?: string;
+  queryVector?: number[];
+  resultId?: number;
+  distance?: number;
+  k?: number;
+  efSearch?: number;
+  aggregateFn?: string;
+  contributingCount?: number;
+  sampleInputs?: unknown[][];
+  fullInputs?: unknown[][] | null;
+  iteration?: number;
+  inner?: ProofTree;
+  depthLimit?: number;
+}
+
+/** Result of a .why query with proof trees. */
+export interface WhyResult {
+  /** Result data rows */
+  results: ResultSet;
+  /** Structured proof trees - one per result row */
+  proofTrees: ProofTree[];
+}
+
+/** Explanation of why a fact was NOT derived. */
+export interface WhyNotResult {
+  /** Human-readable explanation */
+  text: string;
+  /** Structured explanation data */
+  explanation: ProofTree | null;
+}
+
+/** Blocker details for why-not explanations. */
+export interface WhyNotBlocker {
+  type: string;
+  reason?: string;
+  predicateIndex?: number;
+  predicateText?: string;
+  comparisonText?: string;
+  lhsValue?: string;
+  rhsValue?: string;
+  relation?: string;
+  matchingTuple?: unknown[];
+  indexName?: string;
+  k?: number;
+}
+
 // ── KnowledgeGraph ──────────────────────────────────────────────────
 
 /**
@@ -509,6 +567,56 @@ export class KnowledgeGraph {
     return { iql, plan: planText };
   }
 
+  /** Show proof trees explaining why query results were derived.
+   *
+   * Returns structured proof trees alongside the result data.
+   * Each result row has a corresponding proof tree explaining its derivation.
+   */
+  async why(opts: QueryOptions & { full?: boolean }): Promise<WhyResult> {
+    await this.ensureKg();
+    let iql = compileQuery(opts);
+    if (Array.isArray(iql)) {
+      iql = iql[0];
+    }
+    const cmd = opts.full ? `.why full ${iql}` : `.why ${iql}`;
+    const result = await this.conn.execute(cmd);
+    const resultSet = new ResultSet({
+      columns: result.columns,
+      rows: result.rows,
+      rowCount: result.row_count,
+      totalCount: result.total_count,
+      truncated: result.truncated,
+      executionTimeMs: result.execution_time_ms,
+      rowProvenance: result.row_provenance,
+    });
+    // Map wire proof trees to SDK ProofTree type (snake_case -> camelCase)
+    const proofTrees: ProofTree[] = (result.proof_trees ?? []).map(mapWireProofTree);
+    return { results: resultSet, proofTrees };
+  }
+
+  /** Explain why a specific fact was NOT derived.
+   *
+   * Returns a structured explanation with the specific blocker for each rule.
+   */
+  async whyNot(relation: RelationDef, fact: Fact): Promise<WhyNotResult> {
+    await this.ensureKg();
+    const relName = relation.relationName;
+    const cols = relation.columns;
+    const vals = cols
+      .map((col) => {
+        const v = fact[col];
+        if (v === null || v === undefined) return 'null';
+        if (typeof v === 'string') return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+
+        return String(v);
+      })
+      .join(', ');
+    const result = await this.conn.execute(`.why_not ${relName}(${vals})`);
+    const text = result.rows.map((row) => String(row[0])).join('\n');
+    const explanation = result.proof_trees?.[0] ? mapWireProofTree(result.proof_trees[0]) : null;
+    return { text, explanation };
+  }
+
   /** Trigger storage compaction. */
   async compact(): Promise<void> {
     await this.ensureKg();
@@ -561,4 +669,40 @@ export class KnowledgeGraph {
       executionTimeMs: result.execution_time_ms,
     });
   }
+}
+
+/** Maximum recursion depth for mapping wire proof trees. */
+const MAX_PROOF_TREE_DEPTH = 100;
+
+/** Map wire-format proof tree (snake_case) to SDK ProofTree (camelCase). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapWireProofTree(wire: any, depth = 0): ProofTree {
+  if (depth >= MAX_PROOF_TREE_DEPTH) {
+    return { nodeType: 'truncated', depthLimit: MAX_PROOF_TREE_DEPTH };
+  }
+  return {
+    nodeType: wire.node_type,
+    relation: wire.relation,
+    values: wire.values,
+    ruleName: wire.rule_name,
+    clauseIndex: wire.clause_index,
+    clauseText: wire.clause_text,
+    bindings: wire.bindings?.map((b: { variable: string; value: unknown }) => [b.variable, b.value] as [string, unknown]),
+    children: wire.children?.map((c: unknown) => mapWireProofTree(c, depth + 1)),
+    pattern: wire.pattern,
+    indexName: wire.index_name,
+    metric: wire.metric,
+    queryVector: wire.query_vector,
+    resultId: wire.result_id,
+    distance: wire.distance,
+    k: wire.k,
+    efSearch: wire.ef_search,
+    aggregateFn: wire.aggregate_fn,
+    contributingCount: wire.contributing_count,
+    sampleInputs: wire.sample_inputs,
+    fullInputs: wire.full_inputs,
+    iteration: wire.iteration,
+    inner: wire.inner ? mapWireProofTree(wire.inner, depth + 1) : undefined,
+    depthLimit: wire.depth_limit,
+  };
 }

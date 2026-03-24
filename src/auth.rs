@@ -323,9 +323,13 @@ fn authorize_editor_meta(cmd: &MetaCommand) -> Result<(), String> {
         MetaCommand::ClearPrefix(_) | MetaCommand::Load { .. } => Ok(()),
 
         // Read-only system commands
-        MetaCommand::Explain(_) | MetaCommand::Status | MetaCommand::Help | MetaCommand::Quit => {
-            Ok(())
-        }
+        MetaCommand::Explain(_)
+        | MetaCommand::Why(_)
+        | MetaCommand::WhyFull(_)
+        | MetaCommand::WhyNot(_)
+        | MetaCommand::Status
+        | MetaCommand::Help
+        | MetaCommand::Quit => Ok(()),
 
         // KG ACL commands - editors can list ACLs but not modify
         MetaCommand::KgAclList(_) => Ok(()),
@@ -420,9 +424,13 @@ fn authorize_viewer_meta(cmd: &MetaCommand) -> Result<(), String> {
         MetaCommand::Load { .. } => Err("Permission denied: viewers cannot load files".to_string()),
 
         // Read-only system commands
-        MetaCommand::Explain(_) | MetaCommand::Status | MetaCommand::Help | MetaCommand::Quit => {
-            Ok(())
-        }
+        MetaCommand::Explain(_)
+        | MetaCommand::Why(_)
+        | MetaCommand::WhyFull(_)
+        | MetaCommand::WhyNot(_)
+        | MetaCommand::Status
+        | MetaCommand::Help
+        | MetaCommand::Quit => Ok(()),
 
         // Admin-only
         MetaCommand::Compact => Err("Permission denied: viewers cannot compact".to_string()),

@@ -1,0 +1,11 @@
+// Test: .why_not on missing base fact
+// Description: Shows that base fact does not exist
+.kg create test_expltr_n36t15
+.kg use test_expltr_n36t15
+
++edge[(1, 2), (2, 3)]
+
+.why_not edge(99, 99)
+
+.kg use default
+.kg drop test_expltr_n36t15

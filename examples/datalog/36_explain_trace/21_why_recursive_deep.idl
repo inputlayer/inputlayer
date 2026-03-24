@@ -1,0 +1,15 @@
+// Test: .why on deep recursive chain
+// Description: Proof tree handles depth > 10 correctly
+.kg create test_expltr_n36t21
+.kg use test_expltr_n36t21
+
++link[(1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8), (8, 9), (9, 10), (10, 11), (11, 12)]
+
++chain(X, Y) <- link(X, Y)
++chain(X, Z) <- link(X, Y), chain(Y, Z)
+
+// chain(1, 12) requires 11 hops
+.why ?chain(1, 12)
+
+.kg use default
+.kg drop test_expltr_n36t21

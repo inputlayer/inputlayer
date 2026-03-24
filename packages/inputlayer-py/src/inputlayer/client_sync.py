@@ -19,6 +19,8 @@ from inputlayer.knowledge_graph import (
     RelationInfo,
     RuleInfo,
     ServerStatus,
+    WhyNotResult,
+    WhyResult,
 )
 from inputlayer.relation import Relation
 from inputlayer.result import ResultSet
@@ -123,6 +125,16 @@ class KnowledgeGraphSync:
 
     def explain(self, *select: Any, **kwargs: Any) -> ExplainResult:
         return self._loop.run_until_complete(self._kg.explain(*select, **kwargs))
+
+    def why(self, *select: Any, full: bool = False, **kwargs: Any) -> "WhyResult":
+        return self._loop.run_until_complete(
+            self._kg.why(*select, full=full, **kwargs)
+        )
+
+    def why_not(self, relation: type, **values: Any) -> "WhyNotResult":
+        return self._loop.run_until_complete(
+            self._kg.why_not(relation, **values)
+        )
 
     def compact(self) -> None:
         self._loop.run_until_complete(self._kg.compact())

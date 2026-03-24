@@ -18,12 +18,6 @@ export interface StructuredError {
   validationErrors?: ValidationError[]
 }
 
-export interface ExplainResult {
-  plan: string
-  optimizations: string[]
-  query: string
-}
-
 function useSidebarOpen() {
   const [open, setOpen] = useState(() => {
     if (typeof window === "undefined") return true
@@ -41,11 +35,9 @@ function useSidebarOpen() {
 }
 
 export default function QueryPage() {
-  const { selectedKnowledgeGraph, executeQuery, explainQuery, setEditorContent, cancelCurrentQuery } = useDatalogStore()
+  const { selectedKnowledgeGraph, executeQuery, setEditorContent, cancelCurrentQuery } = useDatalogStore()
   const [queryResult, setQueryResult] = useState<QueryResult | null>(null)
-  const [explainResult, setExplainResult] = useState<ExplainResult | null>(null)
   const [isExecuting, setIsExecuting] = useState(false)
-  const [isExplaining, setIsExplaining] = useState(false)
   const [error, setError] = useState<StructuredError | null>(null)
   const [activeQuery, setActiveQuery] = useState("")
   const [sidebarOpen, toggleSidebar] = useSidebarOpen()
@@ -55,8 +47,6 @@ export default function QueryPage() {
       setIsExecuting(true)
       setError(null)
       setActiveQuery(query)
-      setExplainResult(null) // Clear explain when executing
-
       try {
         const result = await executeQuery(query)
 
@@ -77,37 +67,6 @@ export default function QueryPage() {
       setIsExecuting(false)
     },
     [executeQuery],
-  )
-
-  const handleExplainQuery = useCallback(
-    async (query: string) => {
-      if (!selectedKnowledgeGraph) {
-        setError({ message: "No knowledge graph selected" })
-        return
-      }
-
-      setIsExplaining(true)
-      setError(null)
-      setActiveQuery(query)
-      setQueryResult(null) // Clear results when explaining
-
-      try {
-        const plan = await explainQuery(query)
-
-        setExplainResult({
-          plan,
-          optimizations: [],
-          query,
-        })
-      } catch (err) {
-        console.error("Explain failed:", err)
-        setError({ message: err instanceof Error ? err.message : "Failed to explain query" })
-        setExplainResult(null)
-      }
-
-      setIsExplaining(false)
-    },
-    [selectedKnowledgeGraph, explainQuery],
   )
 
   const errorLines = useMemo(
@@ -149,10 +108,8 @@ export default function QueryPage() {
             <ResizablePanel defaultSize={38} minSize={15} className="overflow-hidden">
               <QueryEditorPanel
                 onExecute={handleExecuteQuery}
-                onExplain={handleExplainQuery}
                 onCancel={cancelCurrentQuery}
                 isExecuting={isExecuting}
-                isExplaining={isExplaining}
                 errorLines={errorLines}
               />
             </ResizablePanel>
@@ -162,10 +119,8 @@ export default function QueryPage() {
             <ResizablePanel defaultSize={62} minSize={20} className="overflow-hidden">
               <QueryResultsPanel
                 result={queryResult}
-                explainResult={explainResult}
                 error={error}
                 isExecuting={isExecuting}
-                isExplaining={isExplaining}
                 activeQuery={activeQuery}
               />
             </ResizablePanel>

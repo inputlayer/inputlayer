@@ -173,6 +173,9 @@ Manage per-knowledge-graph access:
 | `.status` | Show system status |
 | `.compact` | Compact WAL and consolidate storage |
 | `.explain <query>` | Show query plan without executing |
+| `.why <query>` | Show proof trees for why results were derived |
+| `.why full <query>` | Show full proof trees (all aggregation contributors) |
+| `.why_not <relation>(<values>)` | Explain why a specific fact was not derived |
 | `.clear prefix <p>` | Clear all facts from relations matching prefix |
 | `.help` | Show help message |
 | `.quit` or `.exit` | Exit the REPL |

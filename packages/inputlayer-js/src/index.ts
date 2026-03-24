@@ -82,6 +82,10 @@ export type {
   ClearResult,
   ExplainResult,
   ServerStatus,
+  WhyResult,
+  WhyNotResult,
+  WhyNotBlocker,
+  ProofTree,
 } from './knowledge-graph.js';
 
 // Auth
