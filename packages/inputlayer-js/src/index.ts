@@ -132,6 +132,8 @@ export type {
   ResultEndResponse,
   PongResponse,
   NotificationResponse,
+  TimingBreakdown,
+  RuleTiming,
 } from './protocol.js';
 export { serializeMessage, deserializeMessage } from './protocol.js';
 

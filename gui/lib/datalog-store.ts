@@ -51,6 +51,7 @@ export interface View {
   computationSteps: ComputationStep[]
   explainPlan: string
   isSession: boolean
+  benchmark?: ViewBenchmark
 }
 
 export interface ComputationStep {
@@ -84,6 +85,23 @@ export interface QueryResult {
   hasEphemeral?: boolean
   ephemeralSources?: string[]
   proofTrees?: import("./ws-types").WsProofTree[]
+  timingBreakdown?: import("./ws-types").WsTimingBreakdown
+}
+
+/** Profiling result for a view benchmark */
+export interface ViewBenchmark {
+  executionTimeMs: number
+  timingBreakdown: import("./ws-types").WsTimingBreakdown
+  rowCount: number
+  benchmarkedAt: Date
+}
+
+/** Tracks the most recent mutation for a relation */
+export interface RelationMutationEvent {
+  relation: string
+  operation: "insert" | "delete"
+  count: number
+  timestamp: Date
 }
 
 interface StoredConnection {
@@ -107,6 +125,8 @@ interface DatalogStore {
   isRestoringSession: boolean
   isRefreshing: boolean
   queryCancelRef: (() => void) | null
+  /** Most recent mutation per relation (for performance tab context) */
+  recentMutations: Map<string, RelationMutationEvent>
 
   setEditorContent: (content: string) => void
   setConnection: (connection: DatalogConnection | null) => void
@@ -304,6 +324,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
   isRestoringSession: false,
   isRefreshing: false,
   queryCancelRef: null,
+  recentMutations: new Map(),
 
   setEditorContent: (content) => {
     set({ editorContent: content })
@@ -421,15 +442,26 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
 
       // Subscribe to notifications for auto-refresh
       notificationUnsubscribe = ws.onNotification((notification: WsNotificationMessage) => {
-        // Optimistic tuple count update
+        // Optimistic tuple count update + track mutation events
         if (notification.event === "persistent_update") {
-          set((state) => ({
-            relations: state.relations.map((r) =>
-              r.name === notification.relation
-                ? { ...r, tupleCount: Math.max(0, r.tupleCount + (notification.operation === "insert" ? notification.count : -notification.count)) }
-                : r
-            ),
-          }))
+          const mutationEvent: RelationMutationEvent = {
+            relation: notification.relation,
+            operation: notification.operation as "insert" | "delete",
+            count: notification.count,
+            timestamp: new Date(),
+          }
+          set((state) => {
+            const newMutations = new Map(state.recentMutations)
+            newMutations.set(notification.relation, mutationEvent)
+            return {
+              recentMutations: newMutations,
+              relations: state.relations.map((r) =>
+                r.name === notification.relation
+                  ? { ...r, tupleCount: Math.max(0, r.tupleCount + (notification.operation === "insert" ? notification.count : -notification.count)) }
+                  : r
+              ),
+            }
+          })
         }
         // Debounced full refresh
         if (refreshDebounceTimer) clearTimeout(refreshDebounceTimer)
@@ -588,10 +620,21 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
         isView: viewNames.has(r.name),
         isSession: sessionNames.has(r.name),
       }))
-      const viewsWithFlags = views.map((v) => ({
-        ...v,
-        isSession: sessionNames.has(v.name),
-      }))
+      // Preserve existing benchmark data across refreshes
+      const existingViews = get().views
+      const viewsWithFlags = views.map((v) => {
+        const existing = existingViews.find((ev) => ev.name === v.name)
+        return {
+          ...v,
+          isSession: sessionNames.has(v.name),
+          benchmark: existing?.benchmark,
+          definition: existing?.definition || v.definition,
+          dependencies: existing?.dependencies?.length ? existing.dependencies : v.dependencies,
+          computationSteps: existing?.computationSteps?.length ? existing.computationSteps : v.computationSteps,
+          explainPlan: existing?.explainPlan || v.explainPlan,
+          arity: existing?.arity || v.arity,
+        }
+      })
 
       set({
         knowledgeGraphs,
@@ -669,6 +712,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
         hasEphemeral: response.metadata?.has_ephemeral,
         ephemeralSources: response.metadata?.ephemeral_sources,
         proofTrees: response.proof_trees,
+        timingBreakdown: response.timing_breakdown,
       }
       get().addQueryToHistory(result)
       set({ queryCancelRef: null })
@@ -732,6 +776,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
         hasEphemeral: response.metadata?.has_ephemeral,
         ephemeralSources: response.metadata?.ephemeral_sources,
         proofTrees: response.proof_trees,
+        timingBreakdown: response.timing_breakdown,
       }
     } catch (error) {
       return {
@@ -813,6 +858,23 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
         // explain may fail for views with no data or complex recursive views
       }
 
+      // Auto-benchmark: run the view query to get timing breakdown (best-effort)
+      let benchmark: ViewBenchmark | undefined
+      try {
+        const vars = generateVariables(arity > 0 ? arity : 2)
+        const benchResult = await wsClient.execute(`?${viewName}(${vars.join(", ")})`)
+        if (benchResult.timing_breakdown) {
+          benchmark = {
+            executionTimeMs: benchResult.execution_time_ms,
+            timingBreakdown: benchResult.timing_breakdown,
+            rowCount: benchResult.row_count,
+            benchmarkedAt: new Date(),
+          }
+        }
+      } catch {
+        // benchmark may fail for views with no data or complex recursive views
+      }
+
       const updated: View = {
         ...view,
         definition,
@@ -820,6 +882,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
         computationSteps,
         explainPlan,
         arity,
+        benchmark,
       }
 
       set((state) => ({
@@ -831,6 +894,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
       return null
     }
   },
+
 
   explainQuery: async (query: string): Promise<string> => {
     if (!wsClient) throw new Error("Not connected")

@@ -2,6 +2,8 @@
  * ResultSet - typed, iterable query results.
  */
 
+import type { TimingBreakdown } from './protocol';
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyRow = any[];
 
@@ -16,6 +18,7 @@ export interface ResultSetOptions {
   hasEphemeral?: boolean;
   ephemeralSources?: string[];
   warnings?: string[];
+  timingBreakdown?: TimingBreakdown;
 }
 
 /**
@@ -30,6 +33,7 @@ export class ResultSet implements Iterable<Record<string, unknown>> {
   readonly truncated: boolean;
   readonly executionTimeMs: number;
   readonly rowProvenance?: string[];
+  readonly timingBreakdown?: TimingBreakdown;
   hasEphemeral: boolean;
   ephemeralSources: string[];
   warnings: string[];
@@ -42,6 +46,7 @@ export class ResultSet implements Iterable<Record<string, unknown>> {
     this.truncated = opts.truncated ?? false;
     this.executionTimeMs = opts.executionTimeMs ?? 0;
     this.rowProvenance = opts.rowProvenance;
+    this.timingBreakdown = opts.timingBreakdown;
     this.hasEphemeral = opts.hasEphemeral ?? false;
     this.ephemeralSources = opts.ephemeralSources ?? [];
     this.warnings = opts.warnings ?? [];

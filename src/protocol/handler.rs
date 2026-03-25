@@ -180,6 +180,8 @@ pub struct Handler {
     /// Bounded ring buffer of recent notifications for replay on reconnect (#39).
     notification_buffer:
         Arc<parking_lot::Mutex<std::collections::VecDeque<PersistentNotification>>>,
+    /// Accumulated timing histogram buckets for Prometheus export.
+    timing_histograms: Arc<crate::execution::timing::TimingHistograms>,
 }
 
 /// Current epoch milliseconds.
@@ -213,6 +215,7 @@ struct QueryJob {
     notification_seq: Arc<AtomicU64>,
     notification_buffer:
         Arc<parking_lot::Mutex<std::collections::VecDeque<PersistentNotification>>>,
+    timing_histograms: Arc<crate::execution::timing::TimingHistograms>,
 }
 
 impl QueryJob {
@@ -594,6 +597,7 @@ impl QueryJob {
             metadata: None,
             switched_kg: None,
             proof_trees: Some(wire_proofs),
+            timing_breakdown: None,
         })
     }
 
@@ -660,6 +664,7 @@ impl QueryJob {
                 clause_text: Some(json_str),
                 ..crate::provenance::wire::WireProofTree::empty_pub()
             }]),
+            timing_breakdown: None,
         })
     }
 }
@@ -690,6 +695,7 @@ impl Handler {
             notification_buffer: Arc::new(parking_lot::Mutex::new(
                 std::collections::VecDeque::new(),
             )),
+            timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
         }
     }
 
@@ -725,6 +731,7 @@ impl Handler {
             notification_buffer: Arc::new(parking_lot::Mutex::new(
                 std::collections::VecDeque::new(),
             )),
+            timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
         }
     }
 
@@ -739,6 +746,7 @@ impl Handler {
             start_time: self.start_time,
             notification_seq: Arc::clone(&self.notification_seq),
             notification_buffer: Arc::clone(&self.notification_buffer),
+            timing_histograms: Arc::clone(&self.timing_histograms),
         }
     }
 
@@ -1206,6 +1214,7 @@ impl Handler {
             metadata: None,
             switched_kg: None,
             proof_trees: None,
+            timing_breakdown: None,
         })
     }
 
@@ -1477,6 +1486,7 @@ impl Handler {
             metadata: None,
             switched_kg: None,
             proof_trees: None,
+            timing_breakdown: None,
         })
     }
 
@@ -1526,6 +1536,7 @@ impl Handler {
             metadata: None,
             switched_kg: None,
             proof_trees: None,
+            timing_breakdown: None,
         })
     }
 
@@ -1757,6 +1768,11 @@ impl Handler {
     /// Get total queries executed.
     pub fn total_queries(&self) -> u64 {
         self.query_count.load(Ordering::Relaxed)
+    }
+
+    /// Get reference to the accumulated timing histograms for Prometheus export.
+    pub fn timing_histograms(&self) -> &crate::execution::timing::TimingHistograms {
+        &self.timing_histograms
     }
 
     /// Get total inserts executed.
@@ -3276,6 +3292,7 @@ impl QueryJob {
                 metadata: None,
                 switched_kg: switched_kg_result,
                 proof_trees: None,
+                timing_breakdown: None,
             });
         }
 
@@ -3325,13 +3342,18 @@ impl QueryJob {
         // Session facts are added to an ISOLATED COPY, providing request-scoped isolation.
         let query_exec_start = Instant::now();
         let has_session_facts = !session_fact_tuples.is_empty();
-        let results = if !has_session_facts {
+        let timing_mode = self.config.storage.performance.timing_mode;
+        let (results, timing_breakdown) = if !has_session_facts {
             snapshot
-                .execute_with_rules_tuples(&query_program)
+                .execute_with_rules_tuples_profiled(&query_program, timing_mode)
                 .map_err(|e| format!("Query execution failed: {e}"))?
         } else {
             snapshot
-                .execute_with_session_facts(&query_program, session_fact_tuples)
+                .execute_with_session_facts_profiled(
+                    &query_program,
+                    session_fact_tuples,
+                    timing_mode,
+                )
                 .map_err(|e| format!("Query execution failed: {e}"))?
         };
         let query_exec_ms = query_exec_start.elapsed().as_millis() as u64;
@@ -3424,6 +3446,11 @@ impl QueryJob {
             "query_job_complete"
         );
 
+        // Record timing into Prometheus histograms.
+        if let Some(ref tb) = timing_breakdown {
+            self.timing_histograms.record(tb);
+        }
+
         Ok(QueryResult {
             rows,
             schema,
@@ -3433,6 +3460,7 @@ impl QueryJob {
             metadata: None,
             switched_kg: None,
             proof_trees: None,
+            timing_breakdown,
         })
     }
 }
@@ -3725,6 +3753,7 @@ impl Handler {
             metadata: result_metadata,
             switched_kg: None,
             proof_trees: None,
+            timing_breakdown: None,
         })
     }
 
@@ -4143,6 +4172,7 @@ impl Handler {
             metadata: None,
             switched_kg: None,
             proof_trees: None,
+            timing_breakdown: None,
         }
     }
 
@@ -4198,6 +4228,7 @@ impl Handler {
             metadata: None,
             switched_kg: None,
             proof_trees: None,
+            timing_breakdown: None,
         })
     }
 

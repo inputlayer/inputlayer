@@ -323,6 +323,10 @@ pub struct QueryResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub proof_trees: Option<Vec<crate::provenance::wire::WireProofTree>>,
+    /// Per-stage timing breakdown (present when timing_mode is Summary or Detailed)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub timing_breakdown: Option<crate::execution::TimingBreakdown>,
 }
 
 /// Provenance and audit metadata for a query result
@@ -370,6 +374,7 @@ impl QueryResult {
             metadata: None,
             switched_kg: None,
             proof_trees: None,
+            timing_breakdown: None,
         }
     }
 
@@ -384,6 +389,7 @@ impl QueryResult {
             metadata: None,
             switched_kg: None,
             proof_trees: None,
+            timing_breakdown: None,
         }
     }
 
@@ -404,6 +410,7 @@ impl QueryResult {
             metadata,
             switched_kg: None,
             proof_trees: None,
+            timing_breakdown: None,
         }
     }
 }
@@ -683,6 +690,7 @@ mod tests {
             metadata: None,
             switched_kg: None,
             proof_trees: None,
+            timing_breakdown: None,
         };
         assert_eq!(result.rows.len(), 0);
         assert_eq!(result.schema.len(), 1);
@@ -721,5 +729,38 @@ mod tests {
             let restored: WireValue = serde_json::from_str(&json).unwrap();
             assert_eq!(val, restored);
         }
+    }
+
+    #[test]
+    fn test_query_result_timing_none_omitted() {
+        let result = QueryResult::empty();
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(!json.contains("timing_breakdown"));
+    }
+
+    #[test]
+    fn test_query_result_timing_present() {
+        let mut result = QueryResult::empty();
+        result.timing_breakdown = Some(crate::execution::TimingBreakdown {
+            total_us: 5000,
+            parse_us: 100,
+            sip_us: 50,
+            magic_sets_us: 30,
+            ir_build_us: 200,
+            optimize_us: 150,
+            shared_views_us: 70,
+            rules: vec![],
+        });
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"timing_breakdown\""));
+        assert!(json.contains("\"total_us\":5000"));
+        // rules array should be omitted when empty
+        assert!(!json.contains("\"rules\""));
+
+        // Roundtrip
+        let restored: QueryResult = serde_json::from_str(&json).unwrap();
+        let tb = restored.timing_breakdown.unwrap();
+        assert_eq!(tb.total_us, 5000);
+        assert_eq!(tb.parse_us, 100);
     }
 }

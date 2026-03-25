@@ -46,6 +46,24 @@ export interface AuthErrorResponse {
   message: string;
 }
 
+export interface RuleTiming {
+  rule_head: string;
+  execution_us: number;
+  is_recursive: boolean;
+  workers: number;
+}
+
+export interface TimingBreakdown {
+  total_us: number;
+  parse_us: number;
+  sip_us: number;
+  magic_sets_us: number;
+  ir_build_us: number;
+  optimize_us: number;
+  shared_views_us: number;
+  rules?: RuleTiming[];
+}
+
 export interface ResultResponse {
   type: 'result';
   columns: string[];
@@ -61,6 +79,7 @@ export interface ResultResponse {
   switched_kg?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   proof_trees?: any[];
+  timing_breakdown?: TimingBreakdown;
 }
 
 export interface ErrorResponse {
@@ -81,6 +100,7 @@ export interface ResultStartResponse {
   switched_kg?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   proof_trees?: any[];
+  timing_breakdown?: TimingBreakdown;
 }
 
 export interface ResultChunkResponse {

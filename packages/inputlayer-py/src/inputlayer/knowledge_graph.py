@@ -341,6 +341,7 @@ class KnowledgeGraph:
                 truncated=result.truncated,
                 execution_time_ms=result.execution_time_ms,
                 row_provenance=result.row_provenance,
+                timing_breakdown=result.timing_breakdown,
             )
             if result.metadata:
                 rs.has_ephemeral = result.metadata.get("has_ephemeral", False)
@@ -654,4 +655,5 @@ class KnowledgeGraph:
             total_count=result.total_count,
             truncated=result.truncated,
             execution_time_ms=result.execution_time_ms,
+            timing_breakdown=result.timing_breakdown,
         )

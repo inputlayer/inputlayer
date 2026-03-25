@@ -24,6 +24,7 @@ class ResultSet:
     has_ephemeral: bool = False
     ephemeral_sources: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    timing_breakdown: dict[str, Any] | None = None
 
     # Optional Relation class for typed iteration
     _relation_cls: type | None = field(default=None, repr=False)

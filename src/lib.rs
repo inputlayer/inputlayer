@@ -382,6 +382,9 @@ pub struct DatalogEngine {
                 + Sync,
         >,
     >,
+
+    /// Timing mode for query profiling (default: Summary)
+    timing_mode: execution::TimingMode,
 }
 
 impl DatalogEngine {
@@ -402,6 +405,7 @@ impl DatalogEngine {
             max_query_cost: 0,
             shared_input: None,
             hnsw_search_fn: None,
+            timing_mode: execution::TimingMode::default(),
         }
     }
 
@@ -422,6 +426,7 @@ impl DatalogEngine {
             max_query_cost: 0,
             shared_input: None,
             hnsw_search_fn: None,
+            timing_mode: execution::TimingMode::default(),
         }
     }
 
@@ -433,6 +438,11 @@ impl DatalogEngine {
     /// DD execution for correctness.
     pub fn set_num_workers(&mut self, num_workers: usize) {
         self.num_workers = num_workers.max(1);
+    }
+
+    /// Set the timing/profiling mode for query execution
+    pub fn set_timing_mode(&mut self, mode: execution::TimingMode) {
+        self.timing_mode = mode;
     }
 
     /// Check if the current program has recursive rules
@@ -1436,39 +1446,54 @@ impl DatalogEngine {
     /// Returns results from the LAST rule (typically the query), while computing
     /// all intermediate rules (views) and making them available as input data.
     pub fn execute_tuples(&mut self, source: &str) -> Result<Vec<Tuple>, String> {
+        self.execute_tuples_profiled(source)
+            .map(|(tuples, _)| tuples)
+    }
+
+    /// Execute the full pipeline returning tuples and an optional timing breakdown.
+    ///
+    /// This is the profiled entry point. The timing breakdown is populated
+    /// according to the engine's `timing_mode` setting.
+    pub fn execute_tuples_profiled(
+        &mut self,
+        source: &str,
+    ) -> Result<(Vec<Tuple>, Option<execution::TimingBreakdown>), String> {
         let debug = std::env::var("IL_DEBUG").is_ok();
         if debug {
             eprintln!("DEBUG execute_tuples: starting");
         }
+        let mut collector = execution::TimingCollector::new(self.timing_mode);
         let exec_start = Instant::now();
         let source_len = source.len();
         info!(source_len, "engine_execute_start");
 
         // Parse, apply SIP rewriting, and build IR
-        let parse_start = Instant::now();
-        self.parse(source)?;
-        let parse_ms = parse_start.elapsed().as_millis() as u64;
+        let (parse_result, parse_us) = collector.time(|| self.parse(source));
+        parse_result?;
+        let parse_ms = parse_us / 1000;
         info!(source_len, parse_ms, "engine_parse_complete");
+        collector.breakdown.parse_us = parse_us;
 
-        let sip_start = Instant::now();
-        self.apply_sip_rewriting();
-        let sip_ms = sip_start.elapsed().as_millis() as u64;
+        let ((), sip_us) = collector.time(|| self.apply_sip_rewriting());
+        let sip_ms = sip_us / 1000;
         info!(source_len, sip_ms, "engine_sip_complete");
+        collector.breakdown.sip_us = sip_us;
 
-        let magic_start = Instant::now();
-        self.apply_magic_sets();
-        let magic_ms = magic_start.elapsed().as_millis() as u64;
+        let ((), magic_us) = collector.time(|| self.apply_magic_sets());
+        let magic_ms = magic_us / 1000;
         info!(source_len, magic_ms, "engine_magic_sets_complete");
+        collector.breakdown.magic_sets_us = magic_us;
 
-        let build_start = Instant::now();
-        self.build_ir()?;
-        let build_ms = build_start.elapsed().as_millis() as u64;
+        let (build_result, build_us) = collector.time(|| self.build_ir());
+        build_result?;
+        let build_ms = build_us / 1000;
         info!(
             source_len,
             build_ms,
             ir_nodes = self.ir_nodes.len(),
             "engine_build_ir_complete"
         );
+        collector.breakdown.ir_build_us = build_us;
 
         if debug {
             eprintln!(
@@ -1483,10 +1508,11 @@ impl DatalogEngine {
         let unoptimized_ir_nodes = self.ir_nodes.clone();
 
         // Optimize (for non-recursive nodes)
-        let opt_start = Instant::now();
-        self.optimize_ir()?;
-        let opt_ms = opt_start.elapsed().as_millis() as u64;
+        let (opt_result, opt_us) = collector.time(|| self.optimize_ir());
+        opt_result?;
+        let opt_ms = opt_us / 1000;
         info!(source_len, opt_ms, "engine_optimize_complete");
+        collector.breakdown.optimize_us = opt_us;
 
         if self.ir_nodes.is_empty() {
             return Err("No IR nodes to execute".to_string());
@@ -1521,15 +1547,16 @@ impl DatalogEngine {
         }
 
         // Execute shared views first (from subplan sharing optimization)
-        let shared_start = Instant::now();
-        let mut accumulated_results = self.execute_shared_views()?;
-        let shared_ms = shared_start.elapsed().as_millis() as u64;
+        let (shared_result, shared_us) = collector.time(|| self.execute_shared_views());
+        let mut accumulated_results = shared_result?;
+        let shared_ms = shared_us / 1000;
         info!(
             source_len,
             shared_ms,
             shared_views = self.shared_views.len(),
             "engine_shared_views_complete"
         );
+        collector.breakdown.shared_views_us = shared_us;
 
         // Execute main rules in dependency order (topological sort)
         let execution_order = self.topological_sort_ir_nodes(&rule_heads);
@@ -1537,7 +1564,6 @@ impl DatalogEngine {
 
         for &i in &execution_order {
             let head_name = rule_heads.get(i).cloned().unwrap_or_default();
-            let rule_start = Instant::now();
 
             // Create fresh CodeGenerator for each rule (avoids timely state issues)
             let mut codegen = CodeGenerator::new();
@@ -1552,16 +1578,21 @@ impl DatalogEngine {
             codegen.set_semiring_type(semiring);
             self.load_inputs_into_codegen(&mut codegen, &accumulated_results);
 
+            let is_recursive = recursive_info.get(i).is_some_and(Option::is_some);
+
             // Use unoptimized IR for recursive nodes, optimized for others
-            let result = if let Some(Some(recursive_rel)) = recursive_info.get(i) {
-                codegen.execute_recursive(&unoptimized_ir_nodes[i], recursive_rel)?
-            } else if self.num_workers > 1 {
-                // Use parallel execution when configured for multi-worker
-                let config = code_generator::ExecutionConfig::with_workers(self.num_workers);
-                codegen.execute_with_config(&self.ir_nodes[i], config)?
-            } else {
-                codegen.execute(&self.ir_nodes[i])?
-            };
+            let (exec_result, rule_us) = collector.time(|| {
+                if let Some(Some(recursive_rel)) = recursive_info.get(i) {
+                    codegen.execute_recursive(&unoptimized_ir_nodes[i], recursive_rel)
+                } else if self.num_workers > 1 {
+                    // Use parallel execution when configured for multi-worker
+                    let config = code_generator::ExecutionConfig::with_workers(self.num_workers);
+                    codegen.execute_with_config(&self.ir_nodes[i], config)
+                } else {
+                    codegen.execute(&self.ir_nodes[i])
+                }
+            });
+            let result = exec_result?;
 
             last_result.clone_from(&result);
 
@@ -1570,13 +1601,15 @@ impl DatalogEngine {
                 accumulated_results.insert(head_name.clone(), result);
             }
 
-            let rule_ms = rule_start.elapsed().as_millis() as u64;
+            collector.record_rule(head_name.clone(), rule_us, is_recursive, self.num_workers);
+
+            let rule_ms = rule_us / 1000;
             info!(
                 source_len,
                 rule_idx = i,
                 rule_head = %head_name,
                 rule_ms,
-                recursive = recursive_info.get(i).is_some_and(Option::is_some),
+                recursive = is_recursive,
                 workers = self.num_workers,
                 "engine_rule_complete"
             );
@@ -1587,7 +1620,8 @@ impl DatalogEngine {
             total_ms = exec_start.elapsed().as_millis() as u64,
             "engine_execute_complete"
         );
-        Ok(last_result)
+        let timing = collector.finish();
+        Ok((last_result, timing))
     }
 
     /// Execute all rules in the program

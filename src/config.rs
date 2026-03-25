@@ -252,6 +252,11 @@ pub struct PerformanceConfig {
     /// negation, recursion). 0 = no limit.
     #[serde(default)]
     pub max_query_cost: u64,
+
+    /// Timing profiling mode for query execution.
+    /// "off" = no overhead, "summary" = stage totals (default), "detailed" = per-rule breakdown.
+    #[serde(default)]
+    pub timing_mode: crate::execution::TimingMode,
 }
 
 /// Optimization configuration (re-use existing from lib.rs)
@@ -628,6 +633,7 @@ impl Config {
                     max_result_rows: 100_000,
                     slow_query_log_ms: 5000,
                     max_query_cost: 0,
+                    timing_mode: crate::execution::TimingMode::default(),
                 },
                 max_knowledge_graphs: 1000,
             },
@@ -667,6 +673,7 @@ impl Default for PerformanceConfig {
             max_result_rows: 100_000, // match Config::default()
             slow_query_log_ms: default_slow_query_log_ms(),
             max_query_cost: 0, // 0 = unlimited
+            timing_mode: crate::execution::TimingMode::default(),
         }
     }
 }

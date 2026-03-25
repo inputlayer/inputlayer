@@ -272,6 +272,8 @@ pub async fn prometheus_metrics(
                 session_stats.total_ephemeral_rules
             ));
 
+            out.push_str(&handler.timing_histograms().format_prometheus());
+
             out
         }),
     )

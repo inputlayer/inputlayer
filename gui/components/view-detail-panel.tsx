@@ -217,7 +217,7 @@ export function ViewDetailPanel({ view, relations, onNavigate }: ViewDetailPanel
               className="h-8 gap-1.5 rounded-lg px-3 text-muted-foreground data-[state=active]:bg-chart-2/10 data-[state=active]:text-chart-2 data-[state=active]:shadow-none"
             >
               <GitBranch className="h-4 w-4" />
-              Dependency Graph
+              Rule Graph
             </TabsTrigger>
             <TabsTrigger
               value="data-graph"
