@@ -750,6 +750,7 @@ mod tests {
             optimize_us: 150,
             shared_views_us: 70,
             rules: vec![],
+            ..Default::default()
         });
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"timing_breakdown\""));

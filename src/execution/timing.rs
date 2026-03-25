@@ -41,6 +41,15 @@ pub struct TimingBreakdown {
     /// Per-rule execution timings (only in Detailed mode)
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub rules: Vec<RuleTiming>,
+    /// Detailed optimizer timing (only in Detailed mode)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub optimizer_detail: Option<OptimizerTiming>,
+    /// Detailed IR builder timing (only in Detailed mode)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub ir_builder_detail: Option<IrBuilderTiming>,
+    /// Detailed codegen timing (only in Detailed mode)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub codegen_detail: Option<CodegenTiming>,
 }
 
 /// Timing information for a single rule execution.
@@ -54,6 +63,45 @@ pub struct RuleTiming {
     pub is_recursive: bool,
     /// Number of workers used for execution
     pub workers: usize,
+}
+
+/// Detailed optimizer timing (only in Detailed mode).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OptimizerTiming {
+    /// Number of optimization iterations before fixpoint
+    pub iterations: u32,
+    /// Total time for iterative rule application (us)
+    pub rules_us: u64,
+    /// Time for final logic fusion passes (us)
+    pub fusion_us: u64,
+}
+
+/// Detailed IR builder timing (only in Detailed mode).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct IrBuilderTiming {
+    /// Time building scan nodes (us)
+    pub scans_us: u64,
+    /// Time building join tree (us)
+    pub joins_us: u64,
+    /// Time building computed columns (us)
+    pub computed_us: u64,
+    /// Time building comparison filters (us)
+    pub filters_us: u64,
+    /// Time building antijoins (us)
+    pub antijoins_us: u64,
+    /// Time building projection/aggregation (us)
+    pub projection_us: u64,
+}
+
+/// Detailed code generation timing (only in Detailed mode).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CodegenTiming {
+    /// Time for DD dataflow setup (us)
+    pub setup_us: u64,
+    /// Time for DD computation / fixpoint iteration (us)
+    pub computation_us: u64,
+    /// Time for result collection from DD (us)
+    pub collection_us: u64,
 }
 
 /// Helper for collecting timing measurements during execution.
@@ -353,6 +401,7 @@ mod tests {
                 is_recursive: false,
                 workers: 1,
             }],
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&breakdown).unwrap();
@@ -394,6 +443,7 @@ mod tests {
             optimize_us: 3_000, // 3ms optimize
             shared_views_us: 0,
             rules: vec![],
+            ..Default::default()
         };
         histograms.record(&breakdown);
 

@@ -7,6 +7,7 @@
   "web-ui": "Web UI",
   "recursion": "Recursion",
   "explainability": "Explainability",
+  "query-profiling": "Query Profiling",
   "vectors": "Vector Search",
   "indexing": "Indexing",
   "temporal": "Temporal Reasoning",

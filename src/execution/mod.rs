@@ -7,7 +7,10 @@ mod timeout;
 pub mod timing;
 
 pub use timeout::{CancelHandle, QueryTimeout, TimeoutError};
-pub use timing::{RuleTiming, TimingBreakdown, TimingCollector, TimingHistograms, TimingMode};
+pub use timing::{
+    CodegenTiming, IrBuilderTiming, OptimizerTiming, RuleTiming, TimingBreakdown, TimingCollector,
+    TimingHistograms, TimingMode,
+};
 
 /// Execution error types
 #[derive(Debug, Clone, thiserror::Error)]

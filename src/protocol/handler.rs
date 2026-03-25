@@ -518,9 +518,11 @@ impl QueryJob {
                 .to_string()
         };
 
+        let query_start = std::time::Instant::now();
         let (mut result_tuples, rules, base_data, index_metrics) = storage
             .execute_and_get_context(&kg_name, &query)
             .map_err(|e| format!("{e}"))?;
+        let query_us = query_start.elapsed().as_micros() as u64;
 
         if result_tuples.is_empty() {
             return Ok(QueryResult::empty());
@@ -558,6 +560,7 @@ impl QueryJob {
         let mut rows = Vec::new();
         let mut wire_proofs = Vec::new();
 
+        let proof_start = std::time::Instant::now();
         for tuple in &result_tuples {
             let values: Vec<WireValue> = (0..tuple.arity())
                 .filter_map(|i| tuple.get(i).map(WireValue::from_value))
@@ -586,6 +589,35 @@ impl QueryJob {
             };
             wire_proofs.push(proof);
         }
+        let proof_us = proof_start.elapsed().as_micros() as u64;
+
+        let total_us = start.elapsed().as_micros() as u64;
+        let breakdown = crate::execution::TimingBreakdown {
+            total_us,
+            parse_us: 0,
+            sip_us: 0,
+            magic_sets_us: 0,
+            ir_build_us: 0,
+            optimize_us: 0,
+            shared_views_us: 0,
+            rules: vec![
+                crate::execution::timing::RuleTiming {
+                    rule_head: "query_execution".into(),
+                    execution_us: query_us,
+                    is_recursive: false,
+                    workers: 1,
+                },
+                crate::execution::timing::RuleTiming {
+                    rule_head: "proof_construction".into(),
+                    execution_us: proof_us,
+                    is_recursive: false,
+                    workers: 1,
+                },
+            ],
+            optimizer_detail: None,
+            ir_builder_detail: None,
+            codegen_detail: None,
+        };
 
         let total_count = rows.len();
         Ok(QueryResult {
@@ -597,7 +629,7 @@ impl QueryJob {
             metadata: None,
             switched_kg: None,
             proof_trees: Some(wire_proofs),
-            timing_breakdown: None,
+            timing_breakdown: Some(breakdown),
         })
     }
 
@@ -630,12 +662,17 @@ impl QueryJob {
         };
 
         let (relation, tuple) = parse_why_not_target(&input)?;
+        let query_start = std::time::Instant::now();
         let (rules, base_data) = storage
             .get_rules_and_data(&kg_name)
             .map_err(|e| format!("Failed to access knowledge graph: {e}"))?;
         let ctx = ProofContext::new(&rules, &base_data, ProofConfig::default());
+        let query_us = query_start.elapsed().as_micros() as u64;
 
+        let explain_start = std::time::Instant::now();
         let explanation = explain_why_not(&relation, &tuple, &ctx);
+        let explain_us = explain_start.elapsed().as_micros() as u64;
+
         let wire_exp = WireWhyNotExplanation::from(&explanation);
         let json_str = serde_json::to_string(&wire_exp).unwrap_or_default();
 
@@ -646,6 +683,34 @@ impl QueryJob {
             .map(|line| WireTuple::new(vec![WireValue::String(line.to_string())]))
             .collect();
         let total_count = rows.len();
+
+        let total_us = start.elapsed().as_micros() as u64;
+        let breakdown = crate::execution::TimingBreakdown {
+            total_us,
+            parse_us: 0,
+            sip_us: 0,
+            magic_sets_us: 0,
+            ir_build_us: 0,
+            optimize_us: 0,
+            shared_views_us: 0,
+            rules: vec![
+                crate::execution::timing::RuleTiming {
+                    rule_head: "query_execution".into(),
+                    execution_us: query_us,
+                    is_recursive: false,
+                    workers: 1,
+                },
+                crate::execution::timing::RuleTiming {
+                    rule_head: "explanation".into(),
+                    execution_us: explain_us,
+                    is_recursive: false,
+                    workers: 1,
+                },
+            ],
+            optimizer_detail: None,
+            ir_builder_detail: None,
+            codegen_detail: None,
+        };
 
         Ok(QueryResult {
             rows,
@@ -664,7 +729,7 @@ impl QueryJob {
                 clause_text: Some(json_str),
                 ..crate::provenance::wire::WireProofTree::empty_pub()
             }]),
-            timing_breakdown: None,
+            timing_breakdown: Some(breakdown),
         })
     }
 }
