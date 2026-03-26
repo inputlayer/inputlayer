@@ -1,0 +1,15 @@
+// Test: Query with inline rule definition error
+// Description: A query cannot contain a rule definition (<-).
+// Rules must be registered first with +, then queried with ?.
+
+.kg create _n12t70
+.kg use _n12t70
+
++edge[(1, 2), (2, 3)]
+
+// ERROR: rule definition inside a query
+?result(X, Y) <- edge(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop _n12t70

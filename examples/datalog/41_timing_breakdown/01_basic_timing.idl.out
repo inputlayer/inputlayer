@@ -12,7 +12,9 @@ Switched to knowledge graph: _n41t01
 Switched to knowledge graph: _n41t01
 > +edge[(1, 2), (2, 3), (3, 4)]
 Inserted 3 fact(s) into 'edge'.
-> ?result(X, Y) <- edge(X, Y)
+> +result(X, Y) <- edge(X, Y)
+Rule 'result' registered.
+> ?result(X, Y)
 ┌───┬───┐
 │ X │ Y │
 ├───┼───┤

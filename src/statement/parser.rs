@@ -445,6 +445,16 @@ pub fn term_to_string(term: &Term) -> String {
 pub fn parse_query(input: &str) -> Result<QueryGoal, String> {
     let input = input.trim();
 
+    // Reject rule definitions disguised as queries.
+    // A query like `?result(X, Y) <- edge(X, Y)` is a mistake - the user
+    // should register the rule first (`+result(X, Y) <- edge(X, Y)`) then
+    // query it (`?result(X, Y)`).
+    if input.contains("<-") {
+        return Err("Query cannot contain a rule definition (<-). \
+             Register the rule first with + then query it with ?"
+            .to_string());
+    }
+
     // Extract :asc/:desc annotations from the goal atom arguments
     // before passing to the parser (which doesn't understand them).
     let (cleaned_input, order_by) = strip_sort_annotations(input);

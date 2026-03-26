@@ -7,8 +7,9 @@
 // Insert base data
 +edge[(1, 2), (2, 3), (3, 4)]
 
-// Simple query
-?result(X, Y) <- edge(X, Y)
+// Define and query a view
++result(X, Y) <- edge(X, Y)
+?result(X, Y)
 
 // Cleanup
 .kg use default
