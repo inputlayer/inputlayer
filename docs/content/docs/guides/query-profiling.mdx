@@ -4,64 +4,111 @@ title: Query Profiling
 
 # Query Profiling
 
-InputLayer provides per-stage timing breakdown for every query, letting you identify exactly where time is spent in the execution pipeline. Whether you're optimizing a slow recursive rule or just curious about what the engine is doing under the hood, the profiling data is right there in your query results.
+InputLayer provides per-stage timing breakdowns for queries, letting you see exactly where time is spent in the execution pipeline. The profiling data is embedded in query results - no separate profiling tool needed.
 
 ## Enabling Profiling
 
-By default, InputLayer collects stage-level timing in Summary mode. You can configure this in your server config:
+Profiling is controlled by the `timing_mode` setting in your server config under `[storage.performance]`:
 
 ```toml
-[execution]
-# "summary" - stage-level timing (default)
-# "detailed" - stage-level + per-rule timing
-# "off" - no timing collection
+[storage.performance]
+# "summary" - stage-level timing (default, ~200ns overhead)
+# "detailed" - stage-level + per-rule + optimizer/IR builder sub-timing
+# "off" - no timing collection, zero overhead
 timing_mode = "summary"
 ```
 
-Summary mode is a good default for production. It gives you the full stage breakdown with minimal overhead. Switch to Detailed when you need per-rule granularity, or turn it off entirely if you want zero overhead.
+Summary mode is a good default for production. Switch to Detailed when you need per-rule granularity or optimizer iteration counts. Off mode skips all `Instant::now()` calls entirely.
 
-## Reading the Timing Breakdown
+## Pipeline Stages
 
-Every query result includes a `timing_breakdown` field (when timing is enabled) that breaks execution into these stages:
+When timing is enabled, every query result includes a `timing_breakdown` with these stages (all times in microseconds):
 
-- **Parse** - source code parsing and AST construction
-- **SIP Rewriting** - sideways information passing for recursive queries, enabling semi-join reduction
-- **Magic Sets** - query adornment optimization that restricts computation to relevant tuples
-- **IR Build** - intermediate representation construction from the optimized AST
-- **Optimize** - optimizer passes including identity elimination, filter pushdown, and operator fusion
-- **Shared Views** - common subexpression pre-computation across rules
-- **Execution** - the actual Differential Dataflow computation
+| Field | Stage | What it measures |
+|-------|-------|-----------------|
+| `parse_us` | Parse | Source code parsing and AST construction |
+| `sip_us` | SIP Rewriting | Sideways information passing for recursive queries |
+| `magic_sets_us` | Magic Sets | Demand-driven query adornment |
+| `ir_build_us` | IR Build | Intermediate representation construction |
+| `optimize_us` | Optimize | Optimizer passes (filter pushdown, fusion, identity elimination) |
+| `shared_views_us` | Shared Views | Common subexpression pre-computation |
+| `total_us` | Total | End-to-end engine time |
 
-Each stage reports its time in microseconds, so you can quickly spot whether your query is bottlenecked on parsing, optimization, or execution.
+Per-rule execution timing appears in the `rules` array (Detailed mode only). Each entry includes the rule head name, execution time, whether it ran recursively, and worker count.
 
-In Detailed mode, you also get per-rule timing in the `rules` array. Each entry tells you the rule head, execution time, whether it was evaluated recursively, and how many workers participated. This is particularly useful for recursive programs where a single rule might dominate execution time.
+In Detailed mode, you also get `optimizer_detail` (iteration count, rules vs fusion time) and `ir_builder_detail` (per-phase: scans, joins, computed columns, filters, antijoins, projection).
 
-## Using the GUI
+## Practical Example
 
-The Performance tab in query results shows a waterfall visualization of the timing breakdown. You'll see a stacked bar chart with each stage color-coded, making it easy to spot which phase dominates.
+Here's a typical workflow for identifying a bottleneck. Start by inserting some data and defining a recursive rule:
 
-Below the chart, a stage table lists exact microsecond timings for each phase. When running in Detailed mode, a per-rule breakdown appears underneath, sorted by execution time so the most expensive rules surface first.
+```datalog
++edge[(1, 2), (2, 3), (3, 4), (4, 5)]
++tc(X, Y) <- edge(X, Y)
++tc(X, Y) <- tc(X, Z), edge(Z, Y)
+?tc(X, Y)
+```
 
-For views in the explorer, the Performance tab goes further - it shows timing data alongside the dependency graph with mutation tracking and the optimizer query plan. This gives you a complete picture of how your view is compiled and where time is spent during incremental maintenance.
+With `timing_mode = "detailed"`, the query result includes a breakdown like:
+
+```json
+{
+  "timing_breakdown": {
+    "total_us": 1250,
+    "parse_us": 85,
+    "sip_us": 12,
+    "magic_sets_us": 8,
+    "ir_build_us": 120,
+    "optimize_us": 95,
+    "shared_views_us": 0,
+    "rules": [
+      { "rule_head": "tc", "execution_us": 890, "is_recursive": true, "workers": 1 }
+    ],
+    "optimizer_detail": { "iterations": 2, "rules_us": 78, "fusion_us": 17 },
+    "ir_builder_detail": { "scans_us": 45, "joins_us": 38, "filters_us": 0, ... }
+  }
+}
+```
+
+From this you can see that execution dominates (890us out of 1250us total), the tc rule is recursive, and the optimizer converged in 2 iterations. If the rule were slow, you'd look at whether adding an index or restructuring the join order helps.
+
+## GUI
+
+The **Performance** tab in query results shows a waterfall bar chart with stages color-coded, a table with exact timings, and a collapsible per-rule breakdown (Detailed mode).
+
+In the Explorer, clicking a view and opening the **Performance** tab shows timing sub-tabs:
+
+- **Overview** - evaluation cost summary with a mini waterfall
+- **Timing** - full stage breakdown and per-rule detail
+- **Inputs** - dependency graph showing which base relations feed the view, their fact counts, and recent mutations
+- **Query Plan** - the optimizer pipeline trace
+- **Rule** - the Datalog definition
 
 ## SDK Access
-
-The timing breakdown is available directly on query results in both SDKs.
 
 ### JavaScript / TypeScript
 
 ```typescript
-const client = new InputLayerClient("ws://localhost:4000/ws");
-const rs = await client.query("?reachable(1, X)");
+import { InputLayer } from "inputlayer";
+
+const il = new InputLayer({
+  url: "ws://localhost:8080/ws",
+  username: "admin",
+  password: "admin",
+});
+await il.connect();
+
+const kg = il.knowledgeGraph("default");
+const rs = await kg.execute("?tc(X, Y)");
 
 if (rs.timingBreakdown) {
-  console.log(`Total: ${rs.timingBreakdown.total_us} us`);
-  console.log(`Parse: ${rs.timingBreakdown.parse_us} us`);
-  console.log(`Execute: ${rs.timingBreakdown.shared_views_us + rs.timingBreakdown.optimize_us} us (optimize + shared views)`);
+  console.log(`Engine time: ${rs.timingBreakdown.total_us}us`);
+  console.log(`Parse: ${rs.timingBreakdown.parse_us}us`);
+  console.log(`Optimize: ${rs.timingBreakdown.optimize_us}us`);
 
-  // Per-rule timing (Detailed mode only)
+  // Per-rule timing (Detailed mode)
   for (const rule of rs.timingBreakdown.rules ?? []) {
-    console.log(`  ${rule.rule_head}: ${rule.execution_us} us`);
+    console.log(`  ${rule.rule_head}: ${rule.execution_us}us${rule.is_recursive ? " (recursive)" : ""}`);
   }
 }
 ```
@@ -69,43 +116,61 @@ if (rs.timingBreakdown) {
 ### Python
 
 ```python
-client = InputLayerClient("ws://localhost:4000/ws")
-rs = client.query("?reachable(1, X)")
+from inputlayer import InputLayer
 
-if rs.timing_breakdown:
-    print(f"Total: {rs.timing_breakdown.total_us} us")
-    print(f"Parse: {rs.timing_breakdown.parse_us} us")
+async with InputLayer("ws://localhost:8080/ws", username="admin", password="admin") as il:
+    kg = il.knowledge_graph("default")
+    rs = await kg.execute("?tc(X, Y)")
 
-    # Per-rule timing (Detailed mode only)
-    for rule in rs.timing_breakdown.rules:
-        print(f"  {rule.rule_head}: {rule.execution_us} us")
+    if rs.timing_breakdown:
+        tb = rs.timing_breakdown
+        print(f"Engine time: {tb['total_us']}us")
+        print(f"Parse: {tb['parse_us']}us")
+        print(f"Optimize: {tb['optimize_us']}us")
+
+        # Per-rule timing (Detailed mode)
+        for rule in tb.get("rules", []):
+            rec = " (recursive)" if rule["is_recursive"] else ""
+            print(f"  {rule['rule_head']}: {rule['execution_us']}us{rec}")
 ```
+
+Note: in the Python SDK, `timing_breakdown` is a `dict[str, Any]`, so fields are accessed with bracket notation.
 
 ## Explainability Queries
 
-The `.why` and `.why_not` commands also include timing breakdowns. Since these queries involve additional proof construction or explanation work beyond normal query execution, their breakdowns include rule-level entries that separate the time spent on query execution from proof or explanation building:
+The `.why` and `.why_not` commands also carry timing breakdowns that separate query execution from proof/explanation work:
 
 ```datalog
-.why ?reachable(1, X)
+.why ?tc(1, 3)
 ```
 
-The timing breakdown for `.why` queries includes two rule entries: `query_execution` (time spent running the underlying query and collecting context) and `proof_construction` (time spent building backward-chaining proof trees).
+The breakdown includes two entries in the `rules` array:
+- `query_execution` - time running the underlying query and collecting context
+- `proof_construction` - time building backward-chaining proof trees
 
-For `.why_not` queries, you'll see `query_execution` (time to load rules and base data) and `explanation` (time spent in the why-not analysis).
+For `.why_not`, the entries are `query_execution` and `explanation`.
+
+This timing respects `timing_mode` - when set to `"off"`, no breakdown is produced for `.why`/`.why_not` either.
 
 ## Prometheus Metrics
 
-When profiling is enabled, timing histograms are exported at `/metrics/prometheus`. These are standard Prometheus histogram metrics with pre-defined buckets, ready for Grafana dashboards or any Prometheus-compatible monitoring stack:
+Timing histograms are exported at `/metrics/prometheus` in standard Prometheus text format:
 
-- `inputlayer_query_parse_seconds` - time spent parsing query source
-- `inputlayer_query_optimize_seconds` - time spent optimizing query plan
-- `inputlayer_query_execute_seconds` - time spent executing query (DD computation)
-- `inputlayer_query_total_seconds` - total end-to-end query time
+| Metric | Description |
+|--------|-------------|
+| `inputlayer_query_parse_seconds` | Parse stage duration |
+| `inputlayer_query_optimize_seconds` | Optimization stage duration |
+| `inputlayer_query_execute_seconds` | DD computation duration |
+| `inputlayer_query_total_seconds` | Total query duration |
 
-Each metric includes `_bucket`, `_sum`, and `_count` suffixes following the standard Prometheus histogram convention.
+Bucket boundaries: 1ms, 5ms, 10ms, 50ms, 100ms, 500ms, 1s, 5s, +Inf. Each metric includes `_bucket`, `_sum`, and `_count` suffixes.
 
 ## Performance Impact
 
-Summary mode adds roughly 200-350ns overhead per query. That's seven `Instant::now()` calls at around 30-50ns each - negligible for any real workload. Detailed mode adds per-rule tracking on top of that, which scales with the number of rules in your program. Off mode has zero overhead since no timing calls are made at all.
+| Mode | Overhead | What you get |
+|------|----------|-------------|
+| Off | Zero | Nothing |
+| Summary | ~200-350ns/query | Stage totals |
+| Detailed | ~500ns-1us/query | Stage totals + per-rule + optimizer/IR builder sub-timing |
 
-For most production deployments, Summary mode is the right choice. The overhead is effectively invisible, and having stage-level timing available without restarting the server is invaluable when you need to debug a slow query.
+For production, Summary is the right choice. The overhead is invisible for any real workload, and having timing data available without restarting the server pays for itself the first time you need to debug a slow query.

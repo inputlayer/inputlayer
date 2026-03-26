@@ -91,6 +91,13 @@ export const docsNavigation: NavItem[] = [
         "children": []
       },
       {
+        "key": "query-profiling",
+        "label": "Query Profiling",
+        "slug": "guides/query-profiling",
+        "href": "/docs/guides/query-profiling",
+        "children": []
+      },
+      {
         "key": "vectors",
         "label": "Vector Search",
         "slug": "guides/vectors",
@@ -2064,6 +2071,57 @@ export const docsPages: Record<string, DocPage> = {
         "level": 2,
         "text": "Next Steps",
         "id": "next-steps"
+      }
+    ]
+  },
+  "guides/query-profiling": {
+    "title": "Query Profiling",
+    "content": "\n# Query Profiling\n\nInputLayer provides per-stage timing breakdown for every query, letting you identify exactly where time is spent in the execution pipeline. Whether you're optimizing a slow recursive rule or just curious about what the engine is doing under the hood, the profiling data is right there in your query results.\n\n## Enabling Profiling\n\nBy default, InputLayer collects stage-level timing in Summary mode. You can configure this in your server config:\n\n```toml\n[execution]\n# \"summary\" - stage-level timing (default)\n# \"detailed\" - stage-level + per-rule timing\n# \"off\" - no timing collection\ntiming_mode = \"summary\"\n```\n\nSummary mode is a good default for production. It gives you the full stage breakdown with minimal overhead. Switch to Detailed when you need per-rule granularity, or turn it off entirely if you want zero overhead.\n\n## Reading the Timing Breakdown\n\nEvery query result includes a `timing_breakdown` field (when timing is enabled) that breaks execution into these stages:\n\n- **Parse** - source code parsing and AST construction\n- **SIP Rewriting** - sideways information passing for recursive queries, enabling semi-join reduction\n- **Magic Sets** - query adornment optimization that restricts computation to relevant tuples\n- **IR Build** - intermediate representation construction from the optimized AST\n- **Optimize** - optimizer passes including identity elimination, filter pushdown, and operator fusion\n- **Shared Views** - common subexpression pre-computation across rules\n- **Execution** - the actual Differential Dataflow computation\n\nEach stage reports its time in microseconds, so you can quickly spot whether your query is bottlenecked on parsing, optimization, or execution.\n\nIn Detailed mode, you also get per-rule timing in the `rules` array. Each entry tells you the rule head, execution time, whether it was evaluated recursively, and how many workers participated. This is particularly useful for recursive programs where a single rule might dominate execution time.\n\n## Using the GUI\n\nThe Performance tab in query results shows a waterfall visualization of the timing breakdown. You'll see a stacked bar chart with each stage color-coded, making it easy to spot which phase dominates.\n\nBelow the chart, a stage table lists exact microsecond timings for each phase. When running in Detailed mode, a per-rule breakdown appears underneath, sorted by execution time so the most expensive rules surface first.\n\nFor views in the explorer, the Performance tab goes further - it shows timing data alongside the dependency graph with mutation tracking and the optimizer query plan. This gives you a complete picture of how your view is compiled and where time is spent during incremental maintenance.\n\n## SDK Access\n\nThe timing breakdown is available directly on query results in both SDKs.\n\n### JavaScript / TypeScript\n\n```typescript\nconst client = new InputLayerClient(\"ws://localhost:4000/ws\");\nconst rs = await client.query(\"?reachable(1, X)\");\n\nif (rs.timingBreakdown) {\n  console.log(`Total: ${rs.timingBreakdown.total_us} us`);\n  console.log(`Parse: ${rs.timingBreakdown.parse_us} us`);\n  console.log(`Execute: ${rs.timingBreakdown.shared_views_us + rs.timingBreakdown.optimize_us} us (optimize + shared views)`);\n\n  // Per-rule timing (Detailed mode only)\n  for (const rule of rs.timingBreakdown.rules ?? []) {\n    console.log(`  ${rule.rule_head}: ${rule.execution_us} us`);\n  }\n}\n```\n\n### Python\n\n```python\nclient = InputLayerClient(\"ws://localhost:4000/ws\")\nrs = client.query(\"?reachable(1, X)\")\n\nif rs.timing_breakdown:\n    print(f\"Total: {rs.timing_breakdown.total_us} us\")\n    print(f\"Parse: {rs.timing_breakdown.parse_us} us\")\n\n    # Per-rule timing (Detailed mode only)\n    for rule in rs.timing_breakdown.rules:\n        print(f\"  {rule.rule_head}: {rule.execution_us} us\")\n```\n\n## Explainability Queries\n\nThe `.why` and `.why_not` commands also include timing breakdowns. Since these queries involve additional proof construction or explanation work beyond normal query execution, their breakdowns include rule-level entries that separate the time spent on query execution from proof or explanation building:\n\n```datalog\n.why ?reachable(1, X)\n```\n\nThe timing breakdown for `.why` queries includes two rule entries: `query_execution` (time spent running the underlying query and collecting context) and `proof_construction` (time spent building backward-chaining proof trees).\n\nFor `.why_not` queries, you'll see `query_execution` (time to load rules and base data) and `explanation` (time spent in the why-not analysis).\n\n## Prometheus Metrics\n\nWhen profiling is enabled, timing histograms are exported at `/metrics/prometheus`. These are standard Prometheus histogram metrics with pre-defined buckets, ready for Grafana dashboards or any Prometheus-compatible monitoring stack:\n\n- `inputlayer_query_parse_seconds` - time spent parsing query source\n- `inputlayer_query_optimize_seconds` - time spent optimizing query plan\n- `inputlayer_query_execute_seconds` - time spent executing query (DD computation)\n- `inputlayer_query_total_seconds` - total end-to-end query time\n\nEach metric includes `_bucket`, `_sum`, and `_count` suffixes following the standard Prometheus histogram convention.\n\n## Performance Impact\n\nSummary mode adds roughly 200-350ns overhead per query. That's seven `Instant::now()` calls at around 30-50ns each - negligible for any real workload. Detailed mode adds per-rule tracking on top of that, which scales with the number of rules in your program. Off mode has zero overhead since no timing calls are made at all.\n\nFor most production deployments, Summary mode is the right choice. The overhead is effectively invisible, and having stage-level timing available without restarting the server is invaluable when you need to debug a slow query.",
+    "toc": [
+      {
+        "level": 2,
+        "text": "Enabling Profiling",
+        "id": "enabling-profiling"
+      },
+      {
+        "level": 2,
+        "text": "Reading the Timing Breakdown",
+        "id": "reading-the-timing-breakdown"
+      },
+      {
+        "level": 2,
+        "text": "Using the GUI",
+        "id": "using-the-gui"
+      },
+      {
+        "level": 2,
+        "text": "SDK Access",
+        "id": "sdk-access"
+      },
+      {
+        "level": 3,
+        "text": "JavaScript / TypeScript",
+        "id": "javascript-typescript"
+      },
+      {
+        "level": 3,
+        "text": "Python",
+        "id": "python"
+      },
+      {
+        "level": 2,
+        "text": "Explainability Queries",
+        "id": "explainability-queries"
+      },
+      {
+        "level": 2,
+        "text": "Prometheus Metrics",
+        "id": "prometheus-metrics"
+      },
+      {
+        "level": 2,
+        "text": "Performance Impact",
+        "id": "performance-impact"
       }
     ]
   },
