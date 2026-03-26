@@ -1020,3 +1020,58 @@ async fn test_timing_breakdown_no_codegen_detail_field() {
         "codegen_detail should not exist in the serialized output (removed strawman)"
     );
 }
+
+#[tokio::test]
+async fn test_session_query_carries_timing() {
+    let mut config = Config::default();
+    config.storage.performance.timing_mode = inputlayer::execution::TimingMode::Summary;
+    let (handler, _temp) = create_handler_with_config(config);
+
+    // Create a session
+    let session_id = handler
+        .create_session("default")
+        .expect("should create session");
+
+    // Insert data via global path
+    handler
+        .query_program(None, "+edge[(1, 2), (2, 3)]".to_string())
+        .await
+        .expect("insert should succeed");
+
+    // Query via session path
+    let result = handler
+        .query_program_with_session(&session_id, "?edge(X, Y)".to_string())
+        .await
+        .expect("session query should succeed");
+
+    let tb = result
+        .timing_breakdown
+        .expect("session query should carry timing_breakdown in Summary mode");
+    assert!(tb.total_us > 0, "total_us should be positive");
+}
+
+#[tokio::test]
+async fn test_session_query_no_timing_when_off() {
+    let mut config = Config::default();
+    config.storage.performance.timing_mode = inputlayer::execution::TimingMode::Off;
+    let (handler, _temp) = create_handler_with_config(config);
+
+    let session_id = handler
+        .create_session("default")
+        .expect("should create session");
+
+    handler
+        .query_program(None, "+edge[(1, 2)]".to_string())
+        .await
+        .expect("insert should succeed");
+
+    let result = handler
+        .query_program_with_session(&session_id, "?edge(X, Y)".to_string())
+        .await
+        .expect("session query should succeed");
+
+    assert!(
+        result.timing_breakdown.is_none(),
+        "session query with timing_mode=Off should produce no timing_breakdown"
+    );
+}

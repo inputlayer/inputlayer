@@ -3665,13 +3665,24 @@ impl Handler {
         // Offload CPU-bound DD computation to the blocking thread pool
         let combined_program_clone = combined_program;
         let preprocessed_clone = preprocessed.clone();
+        let timing_mode = self.config.storage.performance.timing_mode;
+        let timing_histograms = Arc::clone(&self.timing_histograms);
         let blocking_task = tokio::task::spawn_blocking(move || {
             crate::code_generator::set_query_cancel_flag(Some(cancel_flag_clone));
 
-            // Run session query on snapshot (lock-free)
-            let results = snapshot
-                .execute_with_session_facts(&combined_program_clone, session_facts)
+            // Run session query on snapshot (lock-free) with profiling
+            let (results, timing_breakdown) = snapshot
+                .execute_with_session_facts_profiled(
+                    &combined_program_clone,
+                    session_facts,
+                    timing_mode,
+                )
                 .map_err(|e| format!("Query execution failed: {e}"))?;
+
+            // Record timing in Prometheus histograms
+            if let Some(ref tb) = timing_breakdown {
+                timing_histograms.record(tb);
+            }
 
             // Per-tuple provenance: run the original query (without ephemeral rules)
             // against persistent-only data to identify ephemeral contributions.
@@ -3689,11 +3700,11 @@ impl Handler {
             crate::code_generator::set_query_cancel_flag(None);
             drop(permit); // Release semaphore slot
 
-            Ok::<_, String>((results, baseline))
+            Ok::<_, String>((results, baseline, timing_breakdown))
         });
 
         // Apply timeout if configured
-        let (results, baseline) = if timeout_ms > 0 {
+        let (results, baseline, timing_breakdown) = if timeout_ms > 0 {
             match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), blocking_task)
                 .await
             {
@@ -3826,7 +3837,7 @@ impl Handler {
             metadata: result_metadata,
             switched_kg: None,
             proof_trees: None,
-            timing_breakdown: None,
+            timing_breakdown,
         })
     }
 
