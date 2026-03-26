@@ -768,7 +768,13 @@ impl DatalogEngine {
     ///
     /// For predicates with multiple rules (like recursive definitions), this creates
     /// a Union node combining all rules for that predicate.
-    pub fn build_ir(&mut self) -> Result<(), String> {
+    ///
+    /// When `collect_timing` is true, uses the timed IR builder path and returns
+    /// `Some(IrBuilderTiming)` with per-stage timing data. Otherwise returns `None`.
+    pub fn build_ir(
+        &mut self,
+        collect_timing: bool,
+    ) -> Result<Option<execution::timing::IrBuilderTiming>, String> {
         use std::collections::HashMap;
 
         let program = self
@@ -795,6 +801,11 @@ impl DatalogEngine {
         // Build IR nodes, combining multiple rules for the same predicate with Union
         let mut ir_nodes = Vec::new();
         let mut processed_predicates = std::collections::HashSet::new();
+        let mut agg_timing = if collect_timing {
+            Some(execution::timing::IrBuilderTiming::default())
+        } else {
+            None
+        };
 
         for rule in &program.rules {
             let predicate = &rule.head.relation;
@@ -808,84 +819,36 @@ impl DatalogEngine {
             let rules_for_predicate = rules_by_head.get(predicate).expect("predicate is guaranteed in rules_by_head: populated from same program.rules iteration");
 
             if rules_for_predicate.len() == 1 {
-                // Single rule - build IR directly
-                let ir = builder.build_ir(rule)?;
-                ir_nodes.push(ir);
+                if let Some(ref mut agg) = agg_timing {
+                    let (ir, t) = builder.build_ir_timed(rule)?;
+                    agg.scans_us += t.scans_us;
+                    agg.joins_us += t.joins_us;
+                    agg.computed_us += t.computed_us;
+                    agg.filters_us += t.filters_us;
+                    agg.antijoins_us += t.antijoins_us;
+                    agg.projection_us += t.projection_us;
+                    ir_nodes.push(ir);
+                } else {
+                    let ir = builder.build_ir(rule)?;
+                    ir_nodes.push(ir);
+                }
             } else {
                 // Multiple rules - build IR for each and combine with Union
                 let mut sub_irs = Vec::new();
                 for r in rules_for_predicate {
-                    let ir = builder.build_ir(r)?;
-                    sub_irs.push(ir);
-                }
-                let union_ir = crate::ir::IRNode::Union { inputs: sub_irs };
-                ir_nodes.push(union_ir);
-            }
-        }
-
-        self.ir_nodes = ir_nodes;
-        Ok(())
-    }
-
-    /// Build IR with detailed timing breakdown (Detailed mode).
-    ///
-    /// Same logic as `build_ir` but accumulates per-stage IR builder timing.
-    fn build_ir_timed(&mut self) -> Result<execution::timing::IrBuilderTiming, String> {
-        use std::collections::HashMap as HM;
-
-        let program = self
-            .program
-            .as_ref()
-            .ok_or("No program parsed yet. Call parse() first.")?
-            .clone();
-
-        self.update_catalog_from_program(&program);
-
-        let builder = ir_builder::IRBuilder::new(self.catalog.clone());
-
-        let mut rules_by_head: HM<String, Vec<&Rule>> = HM::new();
-        for rule in &program.rules {
-            rules_by_head
-                .entry(rule.head.relation.clone())
-                .or_default()
-                .push(rule);
-        }
-
-        let mut ir_nodes = Vec::new();
-        let mut processed_predicates = std::collections::HashSet::new();
-        let mut agg_timing = execution::timing::IrBuilderTiming::default();
-
-        for rule in &program.rules {
-            let predicate = &rule.head.relation;
-            if processed_predicates.contains(predicate) {
-                continue;
-            }
-            processed_predicates.insert(predicate.clone());
-
-            let rules_for_predicate = rules_by_head.get(predicate).expect(
-                "predicate is guaranteed in rules_by_head: populated from same program.rules iteration",
-            );
-
-            if rules_for_predicate.len() == 1 {
-                let (ir, t) = builder.build_ir_timed(rule)?;
-                agg_timing.scans_us += t.scans_us;
-                agg_timing.joins_us += t.joins_us;
-                agg_timing.computed_us += t.computed_us;
-                agg_timing.filters_us += t.filters_us;
-                agg_timing.antijoins_us += t.antijoins_us;
-                agg_timing.projection_us += t.projection_us;
-                ir_nodes.push(ir);
-            } else {
-                let mut sub_irs = Vec::new();
-                for r in rules_for_predicate {
-                    let (ir, t) = builder.build_ir_timed(r)?;
-                    agg_timing.scans_us += t.scans_us;
-                    agg_timing.joins_us += t.joins_us;
-                    agg_timing.computed_us += t.computed_us;
-                    agg_timing.filters_us += t.filters_us;
-                    agg_timing.antijoins_us += t.antijoins_us;
-                    agg_timing.projection_us += t.projection_us;
-                    sub_irs.push(ir);
+                    if let Some(ref mut agg) = agg_timing {
+                        let (ir, t) = builder.build_ir_timed(r)?;
+                        agg.scans_us += t.scans_us;
+                        agg.joins_us += t.joins_us;
+                        agg.computed_us += t.computed_us;
+                        agg.filters_us += t.filters_us;
+                        agg.antijoins_us += t.antijoins_us;
+                        agg.projection_us += t.projection_us;
+                        sub_irs.push(ir);
+                    } else {
+                        let ir = builder.build_ir(r)?;
+                        sub_irs.push(ir);
+                    }
                 }
                 let union_ir = crate::ir::IRNode::Union { inputs: sub_irs };
                 ir_nodes.push(union_ir);
@@ -949,7 +912,13 @@ impl DatalogEngine {
     /// 5. Basic Optimizations: Identity elimination, filter simplification
     ///
     /// Each optimization can be enabled/disabled via `OptimizationConfig`.
-    pub fn optimize_ir(&mut self) -> Result<(), String> {
+    ///
+    /// When `collect_timing` is true, uses the timed optimizer path and returns
+    /// `Some(OptimizerTiming)`. Otherwise returns `None`.
+    pub fn optimize_ir(
+        &mut self,
+        collect_timing: bool,
+    ) -> Result<Option<execution::timing::OptimizerTiming>, String> {
         // Join Planning
         if self.optimization_config.enable_join_planning {
             let join_planner = join_planning::JoinPlanner::new();
@@ -1005,73 +974,28 @@ impl DatalogEngine {
 
         // Basic Optimizations (always applied)
         let optimizer = Optimizer::new();
-        self.ir_nodes = self
-            .ir_nodes
-            .iter()
-            .map(|ir| optimizer.optimize(ir.clone()))
-            .collect();
-
-        Ok(())
-    }
-
-    /// Optimize IR with detailed timing breakdown (Detailed mode).
-    ///
-    /// Same pipeline as `optimize_ir` but uses `optimize_timed` for the
-    /// basic optimizer pass and returns accumulated `OptimizerTiming`.
-    fn optimize_ir_timed(&mut self) -> Result<execution::timing::OptimizerTiming, String> {
-        // Join Planning
-        if self.optimization_config.enable_join_planning {
-            let join_planner = join_planning::JoinPlanner::new();
-            self.ir_nodes = self
-                .ir_nodes
-                .iter()
-                .map(|ir| join_planner.plan_joins(ir.clone()))
-                .collect();
-        }
-
-        // Subplan Sharing
-        if self.optimization_config.enable_subplan_sharing {
-            let subplan_sharer = subplan_sharing::SubplanSharer::new();
-            let derived_relations: std::collections::HashSet<String> =
-                self.get_rule_heads().into_iter().collect();
-            let (optimized_irs, shared_views) =
-                subplan_sharer.share_subplans(self.ir_nodes.clone(), &derived_relations);
-            self.ir_nodes = optimized_irs;
-            self.shared_views = shared_views;
-        }
-
-        // Boolean Specialization
-        if self.optimization_config.enable_boolean_specialization {
-            let mut bool_specializer = boolean_specialization::BooleanSpecializer::new();
-            let mut annotations = Vec::new();
+        if collect_timing {
+            let mut agg_timing = execution::timing::OptimizerTiming::default();
             self.ir_nodes = self
                 .ir_nodes
                 .iter()
                 .map(|ir| {
-                    let (optimized_ir, annotation) = bool_specializer.specialize(ir.clone());
-                    annotations.push(annotation);
-                    optimized_ir
+                    let (optimized, t) = optimizer.optimize_timed(ir.clone());
+                    agg_timing.iterations = agg_timing.iterations.max(t.iterations);
+                    agg_timing.rules_us += t.rules_us;
+                    agg_timing.fusion_us += t.fusion_us;
+                    optimized
                 })
                 .collect();
-            self.semiring_annotations = annotations;
+            Ok(Some(agg_timing))
+        } else {
+            self.ir_nodes = self
+                .ir_nodes
+                .iter()
+                .map(|ir| optimizer.optimize(ir.clone()))
+                .collect();
+            Ok(None)
         }
-
-        // Basic Optimizations with timing
-        let optimizer = Optimizer::new();
-        let mut agg_timing = execution::timing::OptimizerTiming::default();
-        self.ir_nodes = self
-            .ir_nodes
-            .iter()
-            .map(|ir| {
-                let (optimized, t) = optimizer.optimize_timed(ir.clone());
-                agg_timing.iterations = agg_timing.iterations.max(t.iterations);
-                agg_timing.rules_us += t.rules_us;
-                agg_timing.fusion_us += t.fusion_us;
-                optimized
-            })
-            .collect();
-
-        Ok(agg_timing)
     }
 
     /// Generate and execute Differential Dataflow code
@@ -1613,15 +1537,8 @@ impl DatalogEngine {
         info!(source_len, magic_ms, "engine_magic_sets_complete");
         collector.breakdown.magic_sets_us = magic_us;
 
-        let (build_result, build_us) = if collector.is_detailed() {
-            let (res, us) = collector.time(|| self.build_ir_timed());
-            let ir_detail = res?;
-            collector.breakdown.ir_builder_detail = Some(ir_detail);
-            (Ok(()), us)
-        } else {
-            collector.time(|| self.build_ir())
-        };
-        build_result?;
+        let (build_result, build_us) = collector.time(|| self.build_ir(collector.is_detailed()));
+        collector.breakdown.ir_builder_detail = build_result?;
         let build_ms = build_us / 1000;
         info!(
             source_len,
@@ -1644,15 +1561,8 @@ impl DatalogEngine {
         let unoptimized_ir_nodes = self.ir_nodes.clone();
 
         // Optimize (for non-recursive nodes)
-        let (opt_result, opt_us) = if collector.is_detailed() {
-            let (res, us) = collector.time(|| self.optimize_ir_timed());
-            let opt_detail = res?;
-            collector.breakdown.optimizer_detail = Some(opt_detail);
-            (Ok(()), us)
-        } else {
-            collector.time(|| self.optimize_ir())
-        };
-        opt_result?;
+        let (opt_result, opt_us) = collector.time(|| self.optimize_ir(collector.is_detailed()));
+        collector.breakdown.optimizer_detail = opt_result?;
         let opt_ms = opt_us / 1000;
         info!(source_len, opt_ms, "engine_optimize_complete");
         collector.breakdown.optimize_us = opt_us;
@@ -1777,8 +1687,8 @@ impl DatalogEngine {
         // Pipeline
         self.parse(source)?;
         self.apply_sip_rewriting();
-        self.build_ir()?;
-        self.optimize_ir()?;
+        self.build_ir(false)?;
+        self.optimize_ir(false)?;
 
         // Execute rules in dependency order, chaining intermediate results so SIP
         // intermediate rules feed into subsequent rules.
@@ -1845,11 +1755,11 @@ impl DatalogEngine {
         }
 
         // Build IR
-        self.build_ir()?;
+        self.build_ir(false)?;
         trace.record_ir_before(self.ir_nodes.clone());
 
         // Optimize
-        self.optimize_ir()?;
+        self.optimize_ir(false)?;
         trace.record_ir_after(self.ir_nodes.clone());
 
         // Execute
@@ -1883,11 +1793,11 @@ impl DatalogEngine {
         }
 
         // Build IR
-        self.build_ir()?;
+        self.build_ir(false)?;
         trace.record_ir_before(self.ir_nodes.clone());
 
         // Optimize
-        self.optimize_ir()?;
+        self.optimize_ir(false)?;
         trace.record_ir_after(self.ir_nodes.clone());
 
         // Execute all rules
@@ -1921,11 +1831,11 @@ impl DatalogEngine {
         }
 
         // Build IR
-        self.build_ir()?;
+        self.build_ir(false)?;
         trace.record_ir_before(self.ir_nodes.clone());
 
         // Optimize
-        self.optimize_ir()?;
+        self.optimize_ir(false)?;
         trace.record_ir_after(self.ir_nodes.clone());
 
         Ok(trace)
@@ -2451,7 +2361,7 @@ mod tests {
     #[test]
     fn test_build_ir_without_parse_fails() {
         let mut engine = DatalogEngine::new();
-        let result = engine.build_ir();
+        let result = engine.build_ir(false);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("No program parsed"));
     }
@@ -2544,7 +2454,7 @@ mod tests {
         let mut engine = DatalogEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
         engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
-        engine.build_ir().unwrap();
+        engine.build_ir(false).unwrap();
 
         let rule_heads = engine.get_rule_heads();
         let order = engine.topological_sort_ir_nodes(&rule_heads);
@@ -2563,7 +2473,7 @@ mod tests {
         engine
             .parse("mid(X, Y) <- edge(X, Y)\nresult(X, Y) <- mid(X, Y)")
             .unwrap();
-        engine.build_ir().unwrap();
+        engine.build_ir(false).unwrap();
 
         let rule_heads = engine.get_rule_heads();
         let order = engine.topological_sort_ir_nodes(&rule_heads);
@@ -2579,7 +2489,7 @@ mod tests {
         let mut engine = DatalogEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
         engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
-        engine.build_ir().unwrap();
+        engine.build_ir(false).unwrap();
 
         let rule_heads = engine.get_rule_heads();
         let info = engine.detect_recursion_info(&rule_heads);
@@ -2703,7 +2613,7 @@ mod tests {
         let mut engine = DatalogEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
         engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
-        engine.build_ir().unwrap();
+        engine.build_ir(false).unwrap();
 
         let ir_nodes = engine.ir_nodes();
         assert_eq!(ir_nodes.len(), 1);
@@ -2742,7 +2652,7 @@ mod tests {
         let mut engine = DatalogEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
         engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
-        assert!(engine.build_ir().is_ok());
+        assert!(engine.build_ir(false).is_ok());
         assert!(!engine.ir_nodes().is_empty());
     }
 
@@ -2751,15 +2661,15 @@ mod tests {
         let mut engine = DatalogEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
         engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
-        engine.build_ir().unwrap();
-        assert!(engine.optimize_ir().is_ok());
+        engine.build_ir(false).unwrap();
+        assert!(engine.optimize_ir(false).is_ok());
     }
 
     #[test]
     fn test_optimize_ir_empty_noop() {
         // optimize_ir on empty ir_nodes is a no-op (maps over empty vec)
         let mut engine = DatalogEngine::new();
-        let result = engine.optimize_ir();
+        let result = engine.optimize_ir(false);
         assert!(result.is_ok());
     }
 

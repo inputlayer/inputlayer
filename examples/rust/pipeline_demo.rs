@@ -75,7 +75,7 @@ fn main() {
     println!("--------------------");
     println!("Converting AST to Intermediate Representation (IR)...");
 
-    match engine.build_ir() {
+    match engine.build_ir(false) {
         Ok(_) => {
             println!("✓ IR building successful!");
             let ir_nodes = engine.ir_nodes();
@@ -109,7 +109,7 @@ fn main() {
 
     let ir_before = engine.ir_nodes()[0].clone();
 
-    match engine.optimize_ir() {
+    match engine.optimize_ir(false) {
         Ok(_) => {
             println!("✓ Optimization successful!");
 

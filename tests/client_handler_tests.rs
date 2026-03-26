@@ -809,3 +809,214 @@ fn test_drop_knowledge_graph_cleanup_idempotent() {
         "Dropping already-dropped KG should return error"
     );
 }
+
+// ── Timing mode tests ───────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_timing_mode_off_produces_no_breakdown() {
+    let mut config = Config::default();
+    config.storage.performance.timing_mode = inputlayer::execution::TimingMode::Off;
+    let (handler, _temp) = create_handler_with_config(config);
+
+    // Insert data and query
+    handler
+        .query_program(None, "+edge[(1, 2), (2, 3)]".to_string())
+        .await
+        .expect("insert should succeed");
+    let result = handler
+        .query_program(None, "?edge(X, Y)".to_string())
+        .await
+        .expect("query should succeed");
+
+    assert!(
+        result.timing_breakdown.is_none(),
+        "timing_mode=Off should produce no timing_breakdown"
+    );
+}
+
+#[tokio::test]
+async fn test_timing_mode_summary_produces_breakdown() {
+    let mut config = Config::default();
+    config.storage.performance.timing_mode = inputlayer::execution::TimingMode::Summary;
+    let (handler, _temp) = create_handler_with_config(config);
+
+    handler
+        .query_program(None, "+edge[(1, 2), (2, 3)]".to_string())
+        .await
+        .expect("insert should succeed");
+    let result = handler
+        .query_program(None, "?edge(X, Y)".to_string())
+        .await
+        .expect("query should succeed");
+
+    let tb = result
+        .timing_breakdown
+        .expect("timing_mode=Summary should produce timing_breakdown");
+    assert!(tb.total_us > 0, "total_us should be positive");
+    assert!(tb.parse_us > 0, "parse_us should be positive");
+    // Summary mode should NOT have per-rule entries
+    assert!(
+        tb.rules.is_empty(),
+        "Summary mode should not populate per-rule timing"
+    );
+    // Summary mode should NOT have detailed sub-timing
+    assert!(
+        tb.optimizer_detail.is_none(),
+        "Summary mode should not populate optimizer_detail"
+    );
+    assert!(
+        tb.ir_builder_detail.is_none(),
+        "Summary mode should not populate ir_builder_detail"
+    );
+}
+
+#[tokio::test]
+async fn test_timing_mode_detailed_produces_rule_and_sub_timing() {
+    let mut config = Config::default();
+    config.storage.performance.timing_mode = inputlayer::execution::TimingMode::Detailed;
+    let (handler, _temp) = create_handler_with_config(config);
+
+    handler
+        .query_program(None, "+edge[(1, 2), (2, 3)]".to_string())
+        .await
+        .expect("insert should succeed");
+    let result = handler
+        .query_program(None, "?edge(X, Y)".to_string())
+        .await
+        .expect("query should succeed");
+
+    let tb = result
+        .timing_breakdown
+        .expect("timing_mode=Detailed should produce timing_breakdown");
+    assert!(tb.total_us > 0);
+    // Detailed mode SHOULD have per-rule entries
+    assert!(
+        !tb.rules.is_empty(),
+        "Detailed mode should populate per-rule timing"
+    );
+    // Detailed mode SHOULD have optimizer detail
+    assert!(
+        tb.optimizer_detail.is_some(),
+        "Detailed mode should populate optimizer_detail"
+    );
+    // Detailed mode SHOULD have IR builder detail
+    assert!(
+        tb.ir_builder_detail.is_some(),
+        "Detailed mode should populate ir_builder_detail"
+    );
+}
+
+#[tokio::test]
+async fn test_why_timing_mode_off_no_breakdown() {
+    let mut config = Config::default();
+    config.storage.performance.timing_mode = inputlayer::execution::TimingMode::Off;
+    let (handler, _temp) = create_handler_with_config(config);
+
+    handler
+        .query_program(None, "+edge[(1, 2)]".to_string())
+        .await
+        .expect("insert should succeed");
+    let result = handler
+        .query_program(None, ".why ?edge(1, 2)".to_string())
+        .await
+        .expect(".why should succeed");
+
+    assert!(
+        result.timing_breakdown.is_none(),
+        ".why with timing_mode=Off should produce no timing_breakdown"
+    );
+}
+
+#[tokio::test]
+async fn test_why_timing_mode_summary_has_breakdown() {
+    let mut config = Config::default();
+    config.storage.performance.timing_mode = inputlayer::execution::TimingMode::Summary;
+    let (handler, _temp) = create_handler_with_config(config);
+
+    handler
+        .query_program(None, "+edge[(1, 2)]".to_string())
+        .await
+        .expect("insert should succeed");
+    let result = handler
+        .query_program(None, ".why ?edge(1, 2)".to_string())
+        .await
+        .expect(".why should succeed");
+
+    let tb = result
+        .timing_breakdown
+        .expect(".why with timing_mode=Summary should produce timing_breakdown");
+    assert!(tb.total_us > 0);
+    // .why breakdown should have query_execution and proof_construction entries
+    assert!(
+        tb.rules.len() == 2,
+        "Expected 2 rule entries (query_execution + proof_construction), got {}",
+        tb.rules.len()
+    );
+    assert_eq!(tb.rules[0].rule_head, "query_execution");
+    assert_eq!(tb.rules[1].rule_head, "proof_construction");
+}
+
+#[tokio::test]
+async fn test_why_not_timing_mode_off_no_breakdown() {
+    let mut config = Config::default();
+    config.storage.performance.timing_mode = inputlayer::execution::TimingMode::Off;
+    let (handler, _temp) = create_handler_with_config(config);
+
+    handler
+        .query_program(None, "+edge[(1, 2)]".to_string())
+        .await
+        .expect("insert should succeed");
+    let result = handler
+        .query_program(None, ".why_not edge(99, 99)".to_string())
+        .await
+        .expect(".why_not should succeed");
+
+    assert!(
+        result.timing_breakdown.is_none(),
+        ".why_not with timing_mode=Off should produce no timing_breakdown"
+    );
+}
+
+#[tokio::test]
+async fn test_timing_breakdown_not_serialized_when_none() {
+    let mut config = Config::default();
+    config.storage.performance.timing_mode = inputlayer::execution::TimingMode::Off;
+    let (handler, _temp) = create_handler_with_config(config);
+
+    handler
+        .query_program(None, "+edge[(1, 2)]".to_string())
+        .await
+        .expect("insert should succeed");
+    let result = handler
+        .query_program(None, "?edge(X, Y)".to_string())
+        .await
+        .expect("query should succeed");
+
+    let json = serde_json::to_string(&result).expect("should serialize");
+    assert!(
+        !json.contains("timing_breakdown"),
+        "timing_breakdown should be omitted from JSON when None"
+    );
+}
+
+#[tokio::test]
+async fn test_timing_breakdown_no_codegen_detail_field() {
+    let mut config = Config::default();
+    config.storage.performance.timing_mode = inputlayer::execution::TimingMode::Detailed;
+    let (handler, _temp) = create_handler_with_config(config);
+
+    handler
+        .query_program(None, "+edge[(1, 2)]".to_string())
+        .await
+        .expect("insert should succeed");
+    let result = handler
+        .query_program(None, "?edge(X, Y)".to_string())
+        .await
+        .expect("query should succeed");
+
+    let json = serde_json::to_string(&result).expect("should serialize");
+    assert!(
+        !json.contains("codegen_detail"),
+        "codegen_detail should not exist in the serialized output (removed strawman)"
+    );
+}

@@ -327,7 +327,7 @@ fn test_ir_nodes_generated() {
     engine.add_fact("edge", vec![(1, 2)]);
 
     engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
-    engine.build_ir().unwrap();
+    engine.build_ir(false).unwrap();
 
     let ir_nodes = engine.ir_nodes();
     assert_eq!(ir_nodes.len(), 1);

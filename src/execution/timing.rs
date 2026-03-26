@@ -47,9 +47,6 @@ pub struct TimingBreakdown {
     /// Detailed IR builder timing (only in Detailed mode)
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub ir_builder_detail: Option<IrBuilderTiming>,
-    /// Detailed codegen timing (only in Detailed mode)
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub codegen_detail: Option<CodegenTiming>,
 }
 
 /// Timing information for a single rule execution.
@@ -91,17 +88,6 @@ pub struct IrBuilderTiming {
     pub antijoins_us: u64,
     /// Time building projection/aggregation (us)
     pub projection_us: u64,
-}
-
-/// Detailed code generation timing (only in Detailed mode).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct CodegenTiming {
-    /// Time for DD dataflow setup (us)
-    pub setup_us: u64,
-    /// Time for DD computation / fixpoint iteration (us)
-    pub computation_us: u64,
-    /// Time for result collection from DD (us)
-    pub collection_us: u64,
 }
 
 /// Helper for collecting timing measurements during execution.
