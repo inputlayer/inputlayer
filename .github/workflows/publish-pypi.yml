@@ -46,6 +46,19 @@ jobs:
       - name: Install build tools
         run: pip install build twine
 
+      - name: Set dev version
+        run: |
+          SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
+          BASE_VERSION=$(python -c "
+          import re
+          with open('pyproject.toml') as f:
+              m = re.search(r'version\s*=\s*\"(.+?)\"', f.read())
+              print(m.group(1))
+          ")
+          DEV_VERSION="${BASE_VERSION}.dev${SHORT_SHA}"
+          echo "Publishing version: ${DEV_VERSION}"
+          sed -i "s/^version = \".*\"/version = \"${DEV_VERSION}\"/" pyproject.toml
+
       - name: Build package
         run: python -m build
 
