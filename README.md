@@ -1,155 +1,273 @@
 # InputLayer
 
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
-[![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache%202.0%20%2B%20Commons%20Clause-blue.svg)](./LICENSE)
 
-**An open-source reasoning engine that gives AI agents structured, live memory** - so they can traverse relationships, evaluate logic, and explain every decision back to its source.
+**The reasoning data layer for enterprise AI systems.**
 
-Most agents today retrieve facts. We think the next generation will maintain a model of the world - one that's correct when data changes, auditable when regulators ask, and trustworthy enough to act on in production.
+InputLayer sits between your data and your AI. Give it facts and rules - it derives
+everything that follows, keeps those derivations current as facts change, and traces
+every result back to the logic that produced it.
 
-Your agent retrieves context by searching for things that *look like* the question. That fails when the answer is connected through a chain of facts - not surface similarity. A shellfish allergy doesn't look like a restaurant query. A drug interaction doesn't look like a prescription request. A sanctions-listed subsidiary doesn't look like a wire transfer.
-
-InputLayer gives your agent a reasoning layer. You store facts, define rules, and the engine derives everything that logically follows - including things you never explicitly stored. When data changes, derived knowledge updates instantly. No batch jobs, no stale caches.
+Built on [Differential Dataflow](https://github.com/TimelyDataflow/differential-dataflow).
+When a fact changes, only the affected derivations recompute. Not the whole graph.
 
 ---
 
-## What InputLayer is
+## The Problem
 
-InputLayer is a **modern database for AI agents** built on three key concepts:
+Enterprise AI systems fail in a specific, consistent way: they retrieve context
+by similarity, not by consequence.
 
-- **Knowledge graph**: data is stored as facts and relationships, not flat documents
-- **Deductive**: you define rules, and the system automatically derives everything that logically follows
-- **Streaming**: when facts change, all derived conclusions update instantly - no batch jobs, no stale caches
+A supply chain agent asks whether an order can ship by Friday. The relevant facts -
+current inventory, supplier lead times, which carriers are suspended, which
+suppliers are under sanctions review - are not semantically similar to "can this
+order ship by Friday." They are connected through chains of operational
+relationships. Similarity search does not follow chains. It finds what sounds like
+the answer.
 
-The query language is declarative - you state *what* you want, not *how* to compute it. Rules compose naturally and support full recursion.
+The same pattern appears in every domain:
 
-### A concrete example
+**Manufacturing:** An agent asks whether a production line can run tonight.
+The answer depends on maintenance schedules, parts availability, and which
+equipment has an active quality hold. None of those facts are semantically
+close to the question.
 
-```datalog
-// Facts: who manages whom
-+manages("alice", "bob")
-+manages("bob", "charlie")
-+manages("bob", "diana")
+**Financial risk:** Compliance asks whether a transaction is suspicious.
+The answer requires traversing entity ownership chains - Entity A paid Entity B,
+B is a subsidiary of C, C is on a sanctions list. Pattern matching finds similar
+transactions. It does not follow the ownership graph.
 
-// Rule: transitive authority (recursive)
-+authority(X, Y) <- manages(X, Y)
-+authority(X, Z) <- manages(X, Y), authority(Y, Z)
+**Healthcare:** A patient asks what they can eat. The answer requires following:
+prescribed medication -> drug interactions -> ingredient contraindications -> food.
+Medical information lives in a different embedding space from dietary questions.
 
-// Query: who does Alice have authority over?
-?authority("alice", Person)
+These are not retrieval failures. They are reasoning failures. The context
+exists. The system cannot reach it.
+
+---
+
+## What InputLayer Does
+
+InputLayer is a deductive context graph. You define facts and rules. The engine
+derives everything that logically follows and keeps those derivations current as
+your data changes.
+
+```
+facts + rules -> derived facts, updated incrementally
 ```
 
-Result: `bob`, `charlie`, `diana` - computed through recursive rule evaluation, not keyword search.
+Three properties matter for production use:
 
-Now add vector search in the same query:
+**Incremental maintenance.** When a fact changes, only the affected derivations
+recompute. Insert one new edge into a 2,000-node graph and re-query transitive
+closure: 6.83ms. Full recompute: 11.3 seconds. The engine handles the delta -
+you do not.
+
+**Correct retraction.** Delete a fact and every conclusion derived through it
+disappears automatically, including through chains of recursive rules. No phantom
+permissions. No stale cache. No manual invalidation.
+
+**Explainable derivation.** Every result traces back to the base facts and rules
+that produced it. Not "the vector was close" - a full derivation chain you can
+audit, log, and show to a regulator.
+
+---
+
+## How It Works
+
+Here is the supply chain example. The agent needs to know whether an order can
+ship by Friday.
+
+Facts about the current operational state:
 
 ```datalog
-// Find documents that Alice can access AND that are relevant to her question
-?authority("alice", Author),
- document(DocId, Author, Embedding),
- Similarity = cosine(Embedding, [0.9, 0.1, ...]),
- Similarity > 0.7
++supplier[
+    ("sup_01", "status", "active"),
+    ("sup_02", "status", "suspended"),
+    ("sup_03", "status", "active")
+]
+
++required_supplier[("order_2847", "sup_01"), ("order_2847", "sup_02")]
++lead_time[("sup_01", 3), ("sup_03", 2)]
 ```
 
-This is **policy-filtered semantic search** - logical access control and vector similarity in a single query. No other system does this natively.
+Rules that derive fulfillment status from those facts:
+
+```datalog
++order_blocked(OrderId, SupplierId, "supplier_suspended") <-
+    required_supplier(OrderId, SupplierId),
+    supplier(SupplierId, "status", "suspended")
+
++can_ship_by_friday(OrderId) <-
+    required_supplier(OrderId, SupplierId),
+    supplier(SupplierId, "status", "active"),
+    lead_time(SupplierId, Days),
+    Days =< 4,
+    !order_blocked(OrderId, _, _)
+```
+
+Query:
+
+```datalog
+?order_blocked("order_2847", Supplier, Reason)
+```
+
+Result: `order_2847` is blocked because `sup_02` is suspended. When `sup_02`
+is reinstated, the derivation updates automatically. No pipeline re-run.
 
 ---
 
-## Why this matters
+## The Shellfish Problem
 
-AI agents retrieve context with vector search. Vector search finds things that *look like* the answer. Reasoning finds things that *are* the answer.
+This is the clearest illustration of why retrieval alone fails.
 
-- You ask for **dinner recommendations**. The agent finds sushi preferences. It misses your **shellfish allergy** - because medical info doesn't look like a restaurant query.
+A travel agent has hundreds of memories about a user. The user says:
+"Recommend me some restaurants in Tokyo."
 
-- Your doctor prescribes **new medication**. The health assistant checks for side effects. It misses a **drug interaction** - because "current medications" doesn't look like "is this drug safe?"
+The agent retrieves the top 10 memories by vector similarity. It gets memories
+about past trips to Japan, restaurant preferences, favorite cuisines.
 
-- A compliance officer asks about a **wire transfer**. The system finds similar transactions. It misses that the recipient is a **subsidiary of a sanctioned entity** - because that requires graph traversal, not pattern matching.
+The user's shellfish allergy is nowhere in the top 10. It is health information.
+Medical conditions do not live near restaurant queries in embedding space.
 
-The critical context is always connected through a **chain of facts**. Finding it requires reasoning.
+The agent recommends a crab kaiseki restaurant. The user ends up in hospital.
 
-InputLayer sits between raw memory and the LLM. Instead of hoping the right context lands in top-K results, you define *what counts as relevant* with rules - and get back exactly that.
+The allergy was the most important context. The relevance comes through a chain:
+
+```
+Tokyo restaurants -> Japanese cuisine -> shellfish is a staple -> user has shellfish allergy
+```
+
+Here is how InputLayer handles this:
+
+```datalog
++user_memory[
+    ("m1", "loves_sushi", "User loves sushi", [0.91, 0.12, 0.03]),
+    ("m2", "shellfish_allergy", "Severe shellfish allergy", [0.22, 0.05, 0.88]),
+    ("m3", "visited_paris", "Visited Paris last year", [0.45, 0.67, 0.11])
+]
+
++related_to[
+    ("sushi", "japanese_cuisine"),
+    ("shellfish", "japanese_cuisine"),
+    ("japanese_cuisine", "tokyo")
+]
+
++memory_topic[("m1", "sushi"), ("m2", "shellfish"), ("m3", "paris")]
+
++trip_relevant(MemId, Text, "direct") <-
+    user_memory(MemId, _, Text, _),
+    memory_topic(MemId, Topic),
+    related_to(Topic, "tokyo")
+
++trip_relevant(MemId, Text, "inferred") <-
+    user_memory(MemId, _, Text, _),
+    memory_topic(MemId, Topic),
+    related_to(Topic, Bridge),
+    related_to(Bridge, "tokyo")
+```
+
+Query: `?trip_relevant(Id, Text, How)`
+
+| Id | Text | How |
+|---|---|---|
+| m1 | User loves sushi | direct |
+| m2 | Severe shellfish allergy | inferred |
+
+The allergy was never tagged as trip-relevant. The engine followed
+`shellfish -> japanese_cuisine -> tokyo` and derived it from the rules.
 
 ---
 
-## What it does
+## Where InputLayer Fits
 
-**Structured reasoning.** Follow chains of relationships to surface context that search alone misses. Recursive rules derive transitive closure, reachability, authority chains - any logical relationship.
+InputLayer is not a replacement for your existing stack. It is the reasoning
+layer that sits between your data and your AI system.
 
-**Hybrid retrieval.** Vector similarity, graph traversal, and logical rules in a single query. Policy-filtered semantic search. Access control and relevance in one pass.
+```
+[Your data sources] -> [InputLayer: facts + rules + derived context] -> [Your AI]
+```
 
-**Incremental maintenance.** When facts change, only affected derivations recompute. Insert one edge into a 2,000-node graph, re-query transitive closure: 6.83ms vs 11.3s full recompute. That's [Differential Dataflow](https://github.com/TimelyDataflow/differential-dataflow) under the hood.
+- For similarity search: use Pinecone, pgvector, or Weaviate
+- For transactions and relational data: use Postgres
+- For stream ingestion: use Kafka, Flink, or Materialize
+- For orchestration: use your existing AI platform
 
-**Correct retraction.** Delete a fact and every conclusion derived through it disappears automatically - even through recursive rule chains. No stale permissions, no phantom data.
-
-**Explainable results.** Every derived fact traces back to the rules and base facts that produced it. "The system derived X because rule A applied to facts B and C" - not "the vector was close."
+InputLayer handles the reasoning question: given the current state of the world,
+what context is logically relevant to this decision?
 
 ---
 
-## How it compares
+## Capability Comparison
 
-| Capability | Vector DBs | Graph DBs | SQL | **InputLayer** |
+| Capability | Vector DBs | Graph DBs | SQL | InputLayer |
 |---|---|---|---|---|
-| Vector similarity | native | plugin | - | **native** |
-| Graph traversal | - | native | CTEs | **native** |
-| Rule-based inference | - | - | - | **native** |
-| Recursive reasoning | - | Cypher paths | recursive CTEs | **natural recursion** |
-| Incremental updates | - | - | some | **native** |
-| Correct retraction | - | - | - | **native** |
-| Explainable retrieval | - | paths | - | **rule traces** |
+| Vector similarity | native | plugin | - | native |
+| Graph traversal | - | native | CTEs | native |
+| Rule-based inference | - | - | - | native |
+| Recursive reasoning | - | Cypher paths | recursive CTEs | natural |
+| Incremental updates | - | - | some | native |
+| Correct retraction | - | - | - | native |
+| Explainable derivation | - | paths | - | rule traces |
 
 ---
 
-## What's in the box
-
-- 55 built-in functions (vector ops, temporal, math, string, LSH)
-- HNSW vector indexes (cosine, euclidean, dot product, manhattan)
-- Recursive queries with Magic Sets optimization
-- Incremental computation via Differential Dataflow
-- Persistent storage (Parquet + write-ahead log)
-- Multi-tenancy (isolated knowledge graphs)
-- WebSocket API with streaming transport
-- Python SDK with object-logic mapper
-- Single binary. No cluster, no JVM, no dependencies.
-
----
-
-## Getting started
+## Getting Started
 
 ```bash
-# Build from source
+docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer
+
+# Or build from source
 git clone https://github.com/inputlayer/inputlayer.git
 cd inputlayer
 cargo build --release
-
-# Interactive REPL
-./target/release/inputlayer
-
-# WebSocket server
-./target/release/inputlayer-server --port 8080
+./target/release/inputlayer                         # interactive REPL
+./target/release/inputlayer-server --port 8080      # WebSocket server
 ```
 
-The query language is intuitive - if you've used SQL, the basics take about 10 minutes.
+See the [Quick Start Guide](./docs/guides/quickstart.md). If you know SQL, the
+query language takes about 10 minutes to learn.
+
+---
+
+## What's Included
+
+- 55 built-in functions (vector ops, temporal, math, string, LSH bucketing)
+- HNSW vector index (cosine, euclidean, dot product, manhattan)
+- Recursive queries (transitive closure, graph reachability, fixpoint)
+- Incremental computation via Differential Dataflow
+- Persistent storage (Parquet + write-ahead log)
+- Multi-tenancy - isolated knowledge graphs per tenant
+- WebSocket API with AsyncAPI docs
+- Python SDK
+- Provenance API - every result ships with a complete derivation proof
+- Single binary. No cluster, no JVM, no external dependencies.
+
+---
+
+## Roadmap
+
+- [ ] LangChain integration
+- [ ] Hybrid search (BM25 + vector)
+- [ ] Confidence propagation through reasoning chains
 
 ---
 
 ## Documentation
 
-- [Quick Start Guide](docs/guides/quickstart.md)
-- [Core Concepts](docs/guides/core-concepts.md)
-- [Syntax Reference](docs/reference/syntax-cheatsheet.md)
-- [Commands Reference](docs/reference/commands.md)
-- [Built-in Functions](docs/reference/functions.md)
-- [Architecture](docs/internals/architecture.md)
+- [Quick Start Guide](./docs/guides/quickstart.md)
+- [Core Concepts](./docs/guides/core-concepts.md)
+- [Syntax Reference](./docs/reference/syntax-cheatsheet.md)
+- [Commands Reference](./docs/reference/commands.md)
+- [Built-in Functions](./docs/reference/functions.md)
+- [Architecture](./docs/internals/architecture.md)
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING](CONTRIBUTING).
 
 ## License
 
-This project is dual-licensed:
-
-- **AGPL-3.x** for open-source use - see [LICENSE](LICENSE)
-- **Commercial License** available for organizations that cannot comply with AGPL terms
-
-For commercial licensing inquiries, please [email us](mailto:sam@inputlayer.ai).
+Apache 2.0 + Commons Clause for open source and non-commercial use.
+Commercial use requires a separate license - see [COMMERCIAL_LICENSE.md](./COMMERCIAL_LICENSE.md).

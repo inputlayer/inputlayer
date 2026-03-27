@@ -5,12 +5,14 @@ import { PageLayout } from "@/components/page-layout"
 import { ContentHero } from "@/components/content-hero"
 import { CTABanner } from "@/components/cta-banner"
 import type { UseCase } from "@/lib/content-bundle"
-import { Brain, ShoppingBag, Shield, ArrowRight } from "lucide-react"
+import { Brain, ShoppingBag, Shield, Factory, Truck, ArrowRight } from "lucide-react"
 
 const iconMap: Record<string, React.ReactNode> = {
   Brain: <Brain className="h-8 w-8 text-primary" />,
   ShoppingBag: <ShoppingBag className="h-8 w-8 text-primary" />,
   Shield: <Shield className="h-8 w-8 text-primary" />,
+  Factory: <Factory className="h-8 w-8 text-primary" />,
+  Truck: <Truck className="h-8 w-8 text-primary" />,
 }
 
 interface UseCasesIndexClientProps {

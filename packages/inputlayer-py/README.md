@@ -1,6 +1,6 @@
 # inputlayer-client-dev
 
-Python Object-Logic Mapper (OLM) for [InputLayer](https://github.com/inputlayer/inputlayer) - the symbolic reasoning engine for AI agents.
+Python Object-Logic Mapper (OLM) for [InputLayer](https://github.com/inputlayer/inputlayer) - the streaming reasoning layer for AI systems.
 
 Write Python. No query syntax required. The OLM compiles typed Python classes into InputLayer queries over WebSocket.
 
@@ -345,4 +345,4 @@ python -m pytest tests/ -v
 
 ## License
 
-AGPL-3.0
+Apache 2.0 + Commons Clause. See [LICENSE](../../LICENSE).

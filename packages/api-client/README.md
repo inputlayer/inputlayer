@@ -152,4 +152,4 @@ npm run dev
 
 ## License
 
-AGPL-3.0
+Apache 2.0 + Commons Clause. See [LICENSE](../../LICENSE).

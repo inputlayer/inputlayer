@@ -1,0 +1,45 @@
+---
+title: "Financial Risk and Compliance"
+icon: "Shield"
+subtitle: "Auditable entity reasoning for sanctions screening, beneficial ownership traversal, and policy enforcement."
+---
+
+# Auditable entity reasoning for financial compliance
+
+Financial compliance requires traversing ownership chains, applying sanctions rules, and producing auditable derivations for every flag. The challenge is not finding similar transactions - it is reaching sanctions hits that are multiple hops away through entity relationships that no similarity score can bridge.
+
+InputLayer evaluates compliance rules over live entity graphs and produces a complete derivation proof for every result - linking each flag to the specific relationships and rules that triggered it.
+
+---
+
+## Example: Beneficial ownership and sanctions traversal
+
+This recursive rule traverses the ownership graph to find sanctions exposure at any depth, not just direct relationships.
+
+```datalog
++owns[("entity_b", "entity_c"), ("entity_a", "entity_b")]
++sanctions_list[("entity_c")]
+
++sanctions_exposure(Entity, Sanctioned, 1) <-
+    owns(Entity, Sanctioned),
+    sanctions_list(Sanctioned)
+
++sanctions_exposure(Entity, Sanctioned, Hops) <-
+    owns(Entity, Intermediate),
+    sanctions_exposure(Intermediate, Sanctioned, PrevHops),
+    Hops = PrevHops + 1
+
+?sanctions_exposure("entity_a", Sanctioned, Hops)
+// Returns: entity_a exposed to entity_c at 2 hops via entity_b
+// Full derivation proof available via Provenance API
+```
+
+Every flag has a complete derivation: which ownership relationship, which sanctions entry, which rule evaluation produced it. When a regulator asks, the answer is a structured artifact, not a description.
+
+---
+
+## When ownership changes
+
+When entity_b is acquired and its ownership relationship changes, every exposure derived through that relationship recomputes automatically. Flags that were valid through entity_b may retract. New exposures through the updated ownership chain appear immediately.
+
+This is the operational difference between a nightly batch sanctions run and a live reasoning layer.

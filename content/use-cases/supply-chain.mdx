@@ -1,0 +1,42 @@
+---
+title: "Supply Chain"
+icon: "Truck"
+subtitle: "Supplier risk propagation, sanctions screening, and order fulfillment reasoning over live entity graphs."
+---
+
+# Entity reasoning for supply chain AI
+
+Supply chain AI needs to follow chains of consequence: supplier status affects order fulfillment, which affects inventory planning, which affects production scheduling. Similarity search cannot follow these chains. SQL can query them, but not incrementally - every status change requires a fresh query across the full dataset.
+
+InputLayer propagates status changes through dependent derivations automatically. Sanctions hits, supplier suspensions, and transport disruptions update every affected order in real time.
+
+---
+
+## Example: Order fulfillment under supplier suspension
+
+These facts represent current supplier status. The rule derives which orders are blocked and why.
+
+```datalog
++supplier[
+    ("sup_01", "status", "active"),
+    ("sup_02", "status", "suspended")
+]
++required_for_order[("order_2847", "sup_01"), ("order_2847", "sup_02")]
+
++order_blocked(OrderId, SupplierId, "supplier_suspended") <-
+    required_for_order(OrderId, SupplierId),
+    supplier(SupplierId, "status", "suspended")
+
+?order_blocked("order_2847", Supplier, Reason)
+// Returns: order_2847 blocked - sup_02 suspended
+```
+
+When `sup_02` is reinstated, the block retracts automatically. Propagation: ~8ms. No pipeline re-run. No manual flag update.
+
+---
+
+## What this replaces
+
+The standard approach: a nightly job that re-evaluates order status against the current supplier table. Between runs, a suspended supplier's orders remain marked as fulfillable. A procurement agent working in the morning acts on last night's state.
+
+InputLayer maintains derived order status as a live fact. The suspension propagates the moment it is recorded.

@@ -1,0 +1,113 @@
+---
+title: "Conversational Commerce"
+icon: "ShoppingBag"
+subtitle: "Compatible product recommendations from purchase history and live inventory, in one query."
+---
+
+# Reasoning-aware product discovery for conversational commerce
+
+A shopper types: "I need ink for my printer."
+
+They do not say which printer. Eight months ago they bought a Canon PIXMA MG3620. The correct cartridges are the Canon PG-245 and CL-246. There are 847 ink cartridges in the catalogue.
+
+A vector search for "printer ink" returns cartridges ranked by semantic similarity. The problem: every ink cartridge is semantically similar to "printer ink." A Canon PG-245, an Epson 202, and a Brother LC3013 are essentially identical in embedding space. Similarity search has no mechanism to distinguish them.
+
+The correct answer requires closing a chain across three completely separate fact domains:
+
+```
+shopper owns Canon PIXMA MG3620       (purchase history)
+  -> MG3620 uses PG-245 and CL-246    (compatibility matrix)
+  -> PG-245 in stock, 2-pack, $34.99  (live inventory)
+  -> recommend this specific SKU
+```
+
+None of those connections are semantic. Compatibility is a structured logical relationship - a printer takes specific cartridge models, period. There is no text similarity between "Canon PIXMA MG3620" and "PG-245." The connection exists only as a fact in a compatibility table.
+
+---
+
+## The standard workaround - and why it fails
+
+```python
+# Step 1: query purchase history for device models
+printers = db.query(
+    "SELECT product_id FROM orders WHERE user=? AND category='printer'"
+)
+
+# Step 2: for each device, hit compatibility API
+cartridges = []
+for printer in printers:
+    # brittle: model names rarely match exactly between systems
+    compatible = compatibility_api.get(printer.model_name)
+    cartridges.extend(compatible)
+
+# Step 3: filter by inventory - point-in-time snapshot
+in_stock = inventory_api.filter(cartridges)
+
+# Step 4: re-rank by relevance
+results = vector_db.search(
+    "ink for my printer",
+    filter={"id": {"$in": in_stock}}
+)
+```
+
+Four systems. Four round trips. Model name variations between the purchase history and the compatibility database cause silent misses. The inventory check is a snapshot: if a cartridge sells out between step 3 and the shopper clicking buy, they see a false in-stock result. And if the shopper asks a follow-up question, all four steps run again from scratch.
+
+InputLayer replaces all four steps with two rules and one query.
+
+---
+
+## Example: Compatible product recommendation in one query
+
+### The rules
+
+```datalog
+// A consumable is relevant to a shopper if they own a compatible device
++compatible_with_shopper(Shopper, ProductId) <-
+    owns(Shopper, DeviceId, _),
+    compatible(DeviceId, ProductId)
+
+// A product is recommendable if it is compatible and currently in stock
++recommendable(Shopper, ProductId) <-
+    compatible_with_shopper(Shopper, ProductId),
+    in_stock(ProductId, Qty), Qty > 0
+```
+
+### The query
+
+```datalog
+?recommendable("shopper_42", ProductId),
+ product(ProductId, Description, Price, Embedding),
+ Similarity = cosine(Embedding, query_vector("ink for my printer")),
+ Similarity > 0.6
+```
+
+### Output
+
+```
+canon-pg-245xl   Canon PG-245XL High Yield Black         $22.99   Similarity: 0.83
+canon-pg-245     Canon PG-245 Black Ink Cartridge        $14.99   Similarity: 0.81
+canon-cl-246     Canon CL-246 Color Ink Cartridge        $16.99   Similarity: 0.79
+```
+
+`epson-202-black` - semantically identical to the Canon cartridges in embedding space - does not appear. It is compatible with Epson printers, not Canon. The rule excluded it. No post-filtering. No second pass.
+
+---
+
+## When facts change
+
+When the three remaining PG-245XL units sell, `recommendable("shopper_42", "canon-pg-245xl")` retracts instantly. The shopper is never shown an out-of-stock item.
+
+When the shopper buys a new Epson printer and that fact is recorded, compatible Epson consumables appear in the next query automatically. No reindex. No batch job.
+
+---
+
+## Beyond ink cartridges
+
+The pattern applies to any catalogue where compatibility is structural rather than semantic: replacement parts and filters (appliances, HVAC, automotive), cables and adapters (electronics, peripherals), blades and accessories (power tools, kitchen equipment), lenses and batteries (cameras, medical devices). In every case, the shopper knows what they own, not what they need. The connection requires a rules engine, not a similarity score.
+
+| What changes | Glue code approach | InputLayer |
+|---|---|---|
+| Item sells out | Stale until inventory poll | Retracts in milliseconds |
+| New device purchased | Invisible until next reindex | Compatible products available immediately |
+| Compatibility data updated | Requires cache clear and reindex | Propagates through affected derivations only |
+| Shopper asks follow-up | Four round trips again from scratch | Incremental update on the changed fact only |

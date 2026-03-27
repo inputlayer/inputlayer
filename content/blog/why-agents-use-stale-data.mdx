@@ -1,0 +1,61 @@
+---
+title: "Why Your AI Agent Is Making Decisions With Yesterday's Data"
+date: "2026-03-26"
+author: "InputLayer Team"
+category: "Architecture"
+excerpt: "If your AI agent keeps acting on information that is no longer true, the fix is not a faster refresh cycle. It is an incremental computation layer."
+---
+
+# Why Your AI Agent Is Making Decisions With Yesterday's Data
+
+You have deployed an AI agent in production. It is connected to your data warehouse. Queries are returning results. But the agent keeps acting on information that is no longer true.
+
+A supplier was reinstated three days ago. The agent still treats them as suspended. An equipment hold was lifted Monday. The agent still routes around that line.
+
+This is not a model problem. It is an architecture problem.
+
+## How Most Agent Architectures Handle Context
+
+The standard pattern: at query time, retrieve relevant context from a vector database or data warehouse, inject it into the prompt, let the model reason from there.
+
+This works when your data changes slowly. It breaks when your data changes faster than your retrieval pipeline refreshes.
+
+The usual fix is to refresh more frequently - hourly instead of nightly. But frequent refreshes introduce a different problem: for any given query, you cannot know whether the context you retrieved is current or one cycle stale.
+
+More importantly, frequent full refreshes are expensive. A 2,000-node entity graph takes 11.3 seconds to recompute transitive closure from scratch. At hourly refresh intervals, that is 271 seconds per day spent on recomputation - for one graph, one query type.
+
+## The Incremental Alternative
+
+The correct fix is not "refresh more frequently." It is "only recompute what changed."
+
+When a supplier status changes from suspended to active, the only derivations that need to update are the ones that depended on that supplier's status. Not the entire graph.
+
+This is what incremental computation engines do. They maintain a dependency graph between facts and derived conclusions. When a fact changes, they propagate the delta through only the affected paths.
+
+InputLayer is built on Differential Dataflow for exactly this property. The same 2,000-node transitive closure query that takes 11.3 seconds to recompute from scratch takes 6.83ms when a single edge is inserted - because only the paths affected by that edge are re-evaluated.
+
+## What This Means by Domain
+
+**Manufacturing:** When an equipment hold is lifted, every production plan blocked by that hold updates automatically. Your planning agent sees current reality, not Monday's snapshot.
+
+**Supply chain:** When a supplier comes off a sanctions watch list, the orders blocked by that flag are immediately unblocked. No manual reconciliation, no stale flags in the next batch job.
+
+**Financial risk:** When a beneficial ownership relationship changes, the affected transaction flags update in real time. Compliance sees the current ownership graph, not last week's.
+
+## The Implementation Pattern
+
+Your data pipeline writes facts to InputLayer as they change:
+
+```datalog
++supplier("sup_02", "status", "active")  // previously suspended
+```
+
+InputLayer propagates the delta. Derivations that depended on `sup_02` being suspended are retracted. New derivations based on the active status are computed. Your agent queries against current state, not a snapshot.
+
+The key property is correct retraction: when a fact is deleted or updated, every conclusion derived through it disappears automatically. Differential Dataflow handles this natively.
+
+## Summary
+
+If your AI agent is making decisions on stale data, the fix is not a faster refresh cycle. It is an incremental computation layer that maintains derived context as your underlying facts change.
+
+The operational benefit is not just correctness. It is auditability: every decision your agent makes can be traced to the specific facts and rules in effect at the time it made it.

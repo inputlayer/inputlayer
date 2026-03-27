@@ -45,6 +45,104 @@ export interface CustomerStory {
 
 export const blogPosts: BlogPost[] = [
   {
+    "slug": "explainable-ai-data-layer",
+    "title": "What Explainable AI Actually Requires at the Data Layer",
+    "date": "2026-03-27",
+    "author": "InputLayer Team",
+    "category": "Governance",
+    "excerpt": "Most conversations about explainable AI focus on the model. The harder question - the one that actually comes up in audits - is why the system had that information in the first place.",
+    "content": "\n# What Explainable AI Actually Requires at the Data Layer\n\nMost conversations about explainable AI focus on the model: which features influenced the prediction, how attention weights distributed, what a SHAP explanation looks like.\n\nThis is the wrong level of the stack.\n\nIn enterprise AI systems, model explainability is necessary but not sufficient. The harder question - the one that actually comes up in audits, compliance reviews, and incident investigations - is this:\n\n**Why did the system have that information in the first place?**\n\n## The Two Explainability Problems\n\nThere are two distinct explainability problems in enterprise AI. Most organizations are solving only one of them.\n\n**Problem 1: Model explainability.** Why did the model produce this output given this input? This is where most tooling focuses - interpretability frameworks, attention visualization, counterfactual explanations.\n\n**Problem 2: Context explainability.** Why was this context included in the prompt? Why did the system surface this fact as relevant? Why did this user have access to this document?\n\nProblem 2 is where enterprise AI systems actually fail audits.\n\nA financial services firm deploys an AI system that flags transactions for review. A compliance audit asks: \"Why was transaction #8472 flagged?\" The team can answer the model question - the model scored it high based on certain features. They cannot answer the context question - which entity relationships, which ownership chains, which sanctions data led the system to retrieve the context that produced those features.\n\nThe audit fails. Not because the model was wrong. Because the context retrieval was a black box.\n\n## Why Vector Search Creates a Context Audit Gap\n\nThe dominant context retrieval architecture - embed the query, search by similarity, inject top-k results into the prompt - is inherently unexplainable at the context level.\n\n\"The vector was close\" is not an audit trail.\n\nYou cannot tell a regulator that document X was included in the prompt because its embedding was 0.73 cosine-similar to the query embedding. You cannot reconstruct, after the fact, exactly which similarity threshold, which embedding model version, and which document state produced the context that drove the decision.\n\nMore critically, you cannot prove that the access control and relevance logic applied at query time was consistent with your stated policies.\n\n## What the Data Layer Needs to Provide\n\nFor enterprise AI to be genuinely explainable, the context retrieval layer needs to provide three things:\n\n**1. Derivation traces.** For every piece of context surfaced to the model, a complete trace showing which facts and rules produced it. Not just \"this document was retrieved\" but \"this document was retrieved because rule R fired on facts F1 and F2.\"\n\n**2. Point-in-time reproducibility.** The ability to reconstruct, for any past decision, exactly what state the knowledge graph was in at the moment the context was retrieved. This requires that the data layer maintain a history of fact changes, not just current state.\n\n**3. Policy-as-logic.** Access control, relevance rules, and business policies expressed as formal logic that can be inspected, versioned, and audited - not as middleware code that may diverge from stated policy.\n\n## The Architecture That Makes This Possible\n\nA deductive context graph addresses all three requirements directly.\n\nFacts are explicit and stored. Rules are explicit and versioned. Every derived context is the product of named rules applied to named facts - producing a derivation trace that satisfies the audit question at the context level.\n\nCorrect retraction means the system never serves context derived from facts that are no longer true. Incremental maintenance means the current state is always current - not a snapshot from the last batch job.\n\nThe result is an AI system where you can answer the audit question with a complete data trail: this output was produced by this model, operating on this context, which was derived by these rules from these facts, which were current as of this timestamp.\n\nThat is what enterprise explainability actually requires.",
+    "toc": [
+      {
+        "level": 2,
+        "text": "The Two Explainability Problems",
+        "id": "the-two-explainability-problems"
+      },
+      {
+        "level": 2,
+        "text": "Why Vector Search Creates a Context Audit Gap",
+        "id": "why-vector-search-creates-a-context-audit-gap"
+      },
+      {
+        "level": 2,
+        "text": "What the Data Layer Needs to Provide",
+        "id": "what-the-data-layer-needs-to-provide"
+      },
+      {
+        "level": 2,
+        "text": "The Architecture That Makes This Possible",
+        "id": "the-architecture-that-makes-this-possible"
+      }
+    ]
+  },
+  {
+    "slug": "why-agents-use-stale-data",
+    "title": "Why Your AI Agent Is Making Decisions With Yesterday's Data",
+    "date": "2026-03-26",
+    "author": "InputLayer Team",
+    "category": "Architecture",
+    "excerpt": "If your AI agent keeps acting on information that is no longer true, the fix is not a faster refresh cycle. It is an incremental computation layer.",
+    "content": "\n# Why Your AI Agent Is Making Decisions With Yesterday's Data\n\nYou have deployed an AI agent in production. It is connected to your data warehouse. Queries are returning results. But the agent keeps acting on information that is no longer true.\n\nA supplier was reinstated three days ago. The agent still treats them as suspended. An equipment hold was lifted Monday. The agent still routes around that line.\n\nThis is not a model problem. It is an architecture problem.\n\n## How Most Agent Architectures Handle Context\n\nThe standard pattern: at query time, retrieve relevant context from a vector database or data warehouse, inject it into the prompt, let the model reason from there.\n\nThis works when your data changes slowly. It breaks when your data changes faster than your retrieval pipeline refreshes.\n\nThe usual fix is to refresh more frequently - hourly instead of nightly. But frequent refreshes introduce a different problem: for any given query, you cannot know whether the context you retrieved is current or one cycle stale.\n\nMore importantly, frequent full refreshes are expensive. A 2,000-node entity graph takes 11.3 seconds to recompute transitive closure from scratch. At hourly refresh intervals, that is 271 seconds per day spent on recomputation - for one graph, one query type.\n\n## The Incremental Alternative\n\nThe correct fix is not \"refresh more frequently.\" It is \"only recompute what changed.\"\n\nWhen a supplier status changes from suspended to active, the only derivations that need to update are the ones that depended on that supplier's status. Not the entire graph.\n\nThis is what incremental computation engines do. They maintain a dependency graph between facts and derived conclusions. When a fact changes, they propagate the delta through only the affected paths.\n\nInputLayer is built on Differential Dataflow for exactly this property. The same 2,000-node transitive closure query that takes 11.3 seconds to recompute from scratch takes 6.83ms when a single edge is inserted - because only the paths affected by that edge are re-evaluated.\n\n## What This Means by Domain\n\n**Manufacturing:** When an equipment hold is lifted, every production plan blocked by that hold updates automatically. Your planning agent sees current reality, not Monday's snapshot.\n\n**Supply chain:** When a supplier comes off a sanctions watch list, the orders blocked by that flag are immediately unblocked. No manual reconciliation, no stale flags in the next batch job.\n\n**Financial risk:** When a beneficial ownership relationship changes, the affected transaction flags update in real time. Compliance sees the current ownership graph, not last week's.\n\n## The Implementation Pattern\n\nYour data pipeline writes facts to InputLayer as they change:\n\n```datalog\n+supplier(\"sup_02\", \"status\", \"active\")  // previously suspended\n```\n\nInputLayer propagates the delta. Derivations that depended on `sup_02` being suspended are retracted. New derivations based on the active status are computed. Your agent queries against current state, not a snapshot.\n\nThe key property is correct retraction: when a fact is deleted or updated, every conclusion derived through it disappears automatically. Differential Dataflow handles this natively.\n\n## Summary\n\nIf your AI agent is making decisions on stale data, the fix is not a faster refresh cycle. It is an incremental computation layer that maintains derived context as your underlying facts change.\n\nThe operational benefit is not just correctness. It is auditability: every decision your agent makes can be traced to the specific facts and rules in effect at the time it made it.",
+    "toc": [
+      {
+        "level": 2,
+        "text": "How Most Agent Architectures Handle Context",
+        "id": "how-most-agent-architectures-handle-context"
+      },
+      {
+        "level": 2,
+        "text": "The Incremental Alternative",
+        "id": "the-incremental-alternative"
+      },
+      {
+        "level": 2,
+        "text": "What This Means by Domain",
+        "id": "what-this-means-by-domain"
+      },
+      {
+        "level": 2,
+        "text": "The Implementation Pattern",
+        "id": "the-implementation-pattern"
+      },
+      {
+        "level": 2,
+        "text": "Summary",
+        "id": "summary"
+      }
+    ]
+  },
+  {
+    "slug": "access-control-as-a-rule",
+    "title": "Access Control Should Be a Rule, Not a Filter",
+    "date": "2026-03-25",
+    "author": "InputLayer Team",
+    "category": "Governance",
+    "excerpt": "The standard approach to access control in AI systems is post-retrieval filtering. It is expensive, fragile, and not auditable. There is a better way.",
+    "content": "\n# Access Control Should Be a Rule, Not a Filter\n\nThe standard approach to access control in AI systems is post-retrieval filtering: retrieve a broad set of results, then filter out what the user is not allowed to see.\n\nThis has three problems. It is expensive - you retrieve more than you need. It is fragile - the filter is middleware that can disagree with your permissions system. And it is not auditable - you cannot trace which rule determined that a user could not see a document.\n\nThere is a better approach: write the access policy as a rule, and evaluate it as part of the retrieval itself.\n\n## The Problem With Post-Retrieval Filtering\n\nConsider a standard enterprise RAG setup. An employee asks a question. Your system retrieves the top 40 documents by similarity, then applies a permissions check to filter results the user is not allowed to see.\n\nThe permissions check is typically a separate system - a call to your IAM layer, a JOIN against your access control tables, a middleware component that evaluates role-based permissions.\n\nTwo problems emerge in practice.\n\nFirst, the permissions system and the retrieval system have no shared state. If a permission was revoked 20 minutes ago, your cache may still show the old state. The filter may pass documents the user is no longer authorized to see.\n\nSecond, you cannot answer: \"Why was this document returned to this user?\" The filter either passed or it did not. There is no derivation trace showing which role assignment, which policy, which organizational hierarchy led to the access decision. In regulated industries, that trace is not optional.\n\n## Access Control as a Rule\n\nWrite the access policy as a logical rule and evaluate it in the same pass as retrieval.\n\nThe organizational facts:\n\n```datalog\n+employee[\n    (\"alice\", \"department\", \"risk_management\"),\n    (\"bob\", \"department\", \"marketing\")\n]\n\n+doc_classification[\n    (\"report_q3_risk\", \"confidential\", \"risk_management\"),\n    (\"campaign_brief_07\", \"internal\", \"all\")\n]\n```\n\nThe access rule:\n\n```datalog\n+has_access(User, Doc) <-\n    employee(User, \"department\", _),\n    doc_classification(Doc, \"internal\", \"all\")\n\n+has_access(User, Doc) <-\n    employee(User, \"department\", Dept),\n    doc_classification(Doc, \"confidential\", Dept)\n```\n\nPolicy-filtered vector search in a single query:\n\n```datalog\n?has_access(\"alice\", Doc),\n document(Doc, Embedding),\n Similarity = cosine(Embedding, QueryVec),\n Similarity > 0.7\n```\n\nThis returns only documents Alice has access to, ranked by relevance - in one pass. The access decision and the retrieval are part of the same computation.\n\n## Why This Matters for Audits\n\nEvery document returned has a complete derivation trace:\n\n- Alice has access to `report_q3_risk` because...\n- `doc_classification(\"report_q3_risk\", \"confidential\", \"risk_management\")` is true, and...\n- `employee(\"alice\", \"department\", \"risk_management\")` is true, and...\n- these match the `has_access` rule for confidential documents\n\nWhen an auditor asks why this employee saw this document, the answer is a complete chain linking the access decision to the organizational data that produced it.\n\n## When Permissions Change\n\nWhen Alice moves from risk management to marketing, one fact changes:\n\n```datalog\n-employee(\"alice\", \"department\", \"risk_management\")\n+employee(\"alice\", \"department\", \"marketing\")\n```\n\nEvery access derivation that depended on Alice being in risk management is automatically retracted. The change propagates without a manual cache flush or a delayed sync.\n\nThe access policy is the rule. The data is the state. The engine maintains consistency between them.",
+    "toc": [
+      {
+        "level": 2,
+        "text": "The Problem With Post-Retrieval Filtering",
+        "id": "the-problem-with-post-retrieval-filtering"
+      },
+      {
+        "level": 2,
+        "text": "Access Control as a Rule",
+        "id": "access-control-as-a-rule"
+      },
+      {
+        "level": 2,
+        "text": "Why This Matters for Audits",
+        "id": "why-this-matters-for-audits"
+      },
+      {
+        "level": 2,
+        "text": "When Permissions Change",
+        "id": "when-permissions-change"
+      }
+    ]
+  },
+  {
     "slug": "why-vector-search-alone-fails",
     "title": "Why Vector Search Alone Fails Your AI Agent",
     "date": "2026-02-25",
@@ -521,70 +619,103 @@ export const useCases: UseCase[] = [
     ]
   },
   {
-    "slug": "financial-services",
-    "title": "Financial Services",
-    "icon": "Shield",
-    "subtitle": "Sanctions screening, beneficial ownership chains, and transaction monitoring through entity reasoning.",
-    "content": "\n# Financial Services\n\nFinancial compliance is fundamentally a reasoning problem. Whether you're screening transactions against sanctions lists, tracing beneficial ownership through layers of corporate structure, or monitoring for suspicious activity patterns, the answers live in the connections between entities - not in any single document or database record.\n\nInputLayer adds a reasoning layer that follows these entity chains, evaluates compliance rules, and keeps derived assessments up to date as the underlying facts change.\n\n## Sanctions screening\n\nThe basic version of sanctions screening is straightforward: check whether a transaction counterparty appears on a sanctions list. Most compliance teams have this covered. The hard part is indirect exposure - when a sanctioned person controls an entity through layers of corporate ownership.\n\n```chain\nYour client sends $50K to Alpha Corp\n-- subsidiary of\nBeta LLC\n-- 60% owned by\nGamma Holding\n-- 80% owned by\nSANCTIONED ENTITY [highlight]\n=> Each entity looks clean in isolation. The violation is only visible through the chain.\n```\n\nInputLayer handles this with recursive reasoning. You describe the rule: \"An entity has sanctions exposure if it's directly sanctioned, or if it's owned above a certain threshold by an entity that has sanctions exposure.\" The engine follows ownership chains to any depth, checking at every level.\n\n```steps\nNew sanctions designation published :: Add the fact to InputLayer\nEngine traces all ownership chains :: Finds every entity connected to the sanctioned person [primary]\nDownstream assessments update automatically :: Affected counterparties flagged in milliseconds [highlight]\n```\n\nOn the flip side, when someone is removed from a sanctions list, all the downstream flags clear automatically - no manual cleanup needed.\n\n## Beneficial ownership\n\nRegulators around the world are tightening beneficial ownership requirements. The core question: who are the natural persons that ultimately own or control this entity?\n\n```flow\nPerson X (80%) -> Holding A (60%) -> Company B [primary]\n```\n\n```note\ntype: info\nEffective beneficial ownership: 80% x 60% = 48%. If your regulatory threshold is 25%, Person X is a beneficial owner of Company B even though they don't own it directly.\n```\n\nInputLayer computes these percentages through any number of corporate layers automatically. The engine handles the multiplication and propagation. Add more layers and the math compounds:\n\n```flow\nPerson X (80%) -> Holding A (60%) -> Sub B (70%) -> Company C [primary]\n```\n\nEffective ownership: 80% x 60% x 70% = 33.6%. Still above 25%.\n\nYou define a minimum threshold, and InputLayer identifies every natural person who qualifies as a beneficial owner for every entity in your graph. When corporate structures change - new acquisitions, divestitures, ownership transfers - only the affected calculations recompute.\n\n## Transaction monitoring\n\nBeyond sanctions screening, compliance teams need to identify suspicious patterns across transaction flows. Take structuring as an example - splitting a large transaction into smaller ones to avoid reporting thresholds.\n\n```tree\nSanctioned Person [highlight]\n  Entity A\n  Entity B\n  Entity C\n```\n\n```steps\nEntity A sends $4,000 to Target Company :: Below $10K threshold - looks clean\nEntity B sends $3,500 to Target Company :: Below $10K threshold - looks clean\nEntity C sends $3,000 to Target Company :: Below $10K threshold - looks clean\nCombined total: $10,500 :: Above threshold - ALERT [highlight]\n```\n\nEach individual transaction is below $10,000. But the entities are related through common ownership, and their combined transactions exceed the threshold.\n\nInputLayer's recursive reasoning identifies these relationships automatically. It determines which entities are connected through any chain of ownership - not just direct connections, but indirect ones through any number of intermediaries. Then it aggregates transactions from all related entities within a time window.\n\nThe key insight: the \"related entity\" determination is itself a recursive traversal. Entity A owns B, B owns C, so A and C are related even though there's no direct connection. Traditional transaction monitoring systems that only check direct counterparties would miss this entirely.\n\n## Why incremental computation matters for compliance\n\nFinancial data changes constantly. New transactions arrive, entity relationships are updated, sanctions lists are revised.\n\n```flow\nBatch approach: Sanctions list updated [highlight] -> Full recomputation (minutes) -> Alerts stale until done\n```\n\n```flow\nInputLayer: Sanctions list updated [success] -> Incremental update (milliseconds) -> Alerts current immediately\n```\n\nWhen a new transaction arrives, only the affected monitoring rules recompute. When an ownership structure changes, only the beneficial ownership calculations involving the changed entities update.\n\nThe correct retraction property is equally important. When an entity is removed from a sanctions list, all the downstream flags derived from that designation clear automatically. This prevents your compliance team from chasing alerts that are no longer valid.\n\n## Getting started\n\nIf you're working on compliance or transaction monitoring, the [quickstart guide](/docs/guides/quickstart/) is the fastest way to start exploring. The [recursion documentation](/docs/guides/recursion/) is particularly relevant since most compliance rules are recursive in nature.\n\n```bash\ndocker run -p 8080:8080 ghcr.io/inputlayer/inputlayer\n```",
+    "slug": "commerce",
+    "title": "Conversational Commerce",
+    "icon": "ShoppingBag",
+    "subtitle": "Compatible product recommendations from purchase history and live inventory, in one query.",
+    "content": "\n# Reasoning-aware product discovery for conversational commerce\n\nA shopper types: \"I need ink for my printer.\"\n\nThey do not say which printer. Eight months ago they bought a Canon PIXMA MG3620. The correct cartridges are the Canon PG-245 and CL-246. There are 847 ink cartridges in the catalogue.\n\nA vector search for \"printer ink\" returns cartridges ranked by semantic similarity. The problem: every ink cartridge is semantically similar to \"printer ink.\" A Canon PG-245, an Epson 202, and a Brother LC3013 are essentially identical in embedding space. Similarity search has no mechanism to distinguish them.\n\nThe correct answer requires closing a chain across three completely separate fact domains:\n\n```\nshopper owns Canon PIXMA MG3620       (purchase history)\n  -> MG3620 uses PG-245 and CL-246    (compatibility matrix)\n  -> PG-245 in stock, 2-pack, $34.99  (live inventory)\n  -> recommend this specific SKU\n```\n\nNone of those connections are semantic. Compatibility is a structured logical relationship - a printer takes specific cartridge models, period. There is no text similarity between \"Canon PIXMA MG3620\" and \"PG-245.\" The connection exists only as a fact in a compatibility table.\n\n---\n\n## The standard workaround - and why it fails\n\n```python\n# Step 1: query purchase history for device models\nprinters = db.query(\n    \"SELECT product_id FROM orders WHERE user=? AND category='printer'\"\n)\n\n# Step 2: for each device, hit compatibility API\ncartridges = []\nfor printer in printers:\n    # brittle: model names rarely match exactly between systems\n    compatible = compatibility_api.get(printer.model_name)\n    cartridges.extend(compatible)\n\n# Step 3: filter by inventory - point-in-time snapshot\nin_stock = inventory_api.filter(cartridges)\n\n# Step 4: re-rank by relevance\nresults = vector_db.search(\n    \"ink for my printer\",\n    filter={\"id\": {\"$in\": in_stock}}\n)\n```\n\nFour systems. Four round trips. Model name variations between the purchase history and the compatibility database cause silent misses. The inventory check is a snapshot: if a cartridge sells out between step 3 and the shopper clicking buy, they see a false in-stock result. And if the shopper asks a follow-up question, all four steps run again from scratch.\n\nInputLayer replaces all four steps with two rules and one query.\n\n---\n\n## Example: Compatible product recommendation in one query\n\n### The rules\n\n```datalog\n// A consumable is relevant to a shopper if they own a compatible device\n+compatible_with_shopper(Shopper, ProductId) <-\n    owns(Shopper, DeviceId, _),\n    compatible(DeviceId, ProductId)\n\n// A product is recommendable if it is compatible and currently in stock\n+recommendable(Shopper, ProductId) <-\n    compatible_with_shopper(Shopper, ProductId),\n    in_stock(ProductId, Qty), Qty > 0\n```\n\n### The query\n\n```datalog\n?recommendable(\"shopper_42\", ProductId),\n product(ProductId, Description, Price, Embedding),\n Similarity = cosine(Embedding, query_vector(\"ink for my printer\")),\n Similarity > 0.6\n```\n\n### Output\n\n```\ncanon-pg-245xl   Canon PG-245XL High Yield Black         $22.99   Similarity: 0.83\ncanon-pg-245     Canon PG-245 Black Ink Cartridge        $14.99   Similarity: 0.81\ncanon-cl-246     Canon CL-246 Color Ink Cartridge        $16.99   Similarity: 0.79\n```\n\n`epson-202-black` - semantically identical to the Canon cartridges in embedding space - does not appear. It is compatible with Epson printers, not Canon. The rule excluded it. No post-filtering. No second pass.\n\n---\n\n## When facts change\n\nWhen the three remaining PG-245XL units sell, `recommendable(\"shopper_42\", \"canon-pg-245xl\")` retracts instantly. The shopper is never shown an out-of-stock item.\n\nWhen the shopper buys a new Epson printer and that fact is recorded, compatible Epson consumables appear in the next query automatically. No reindex. No batch job.\n\n---\n\n## Beyond ink cartridges\n\nThe pattern applies to any catalogue where compatibility is structural rather than semantic: replacement parts and filters (appliances, HVAC, automotive), cables and adapters (electronics, peripherals), blades and accessories (power tools, kitchen equipment), lenses and batteries (cameras, medical devices). In every case, the shopper knows what they own, not what they need. The connection requires a rules engine, not a similarity score.\n\n| What changes | Glue code approach | InputLayer |\n|---|---|---|\n| Item sells out | Stale until inventory poll | Retracts in milliseconds |\n| New device purchased | Invisible until next reindex | Compatible products available immediately |\n| Compatibility data updated | Requires cache clear and reindex | Propagates through affected derivations only |\n| Shopper asks follow-up | Four round trips again from scratch | Incremental update on the changed fact only |",
     "toc": [
       {
         "level": 2,
-        "text": "Sanctions screening",
-        "id": "sanctions-screening"
+        "text": "The standard workaround - and why it fails",
+        "id": "the-standard-workaround-and-why-it-fails"
       },
       {
         "level": 2,
-        "text": "Beneficial ownership",
-        "id": "beneficial-ownership"
+        "text": "Example: Compatible product recommendation in one query",
+        "id": "example-compatible-product-recommendation-in-one-query"
+      },
+      {
+        "level": 3,
+        "text": "The rules",
+        "id": "the-rules"
+      },
+      {
+        "level": 3,
+        "text": "The query",
+        "id": "the-query"
+      },
+      {
+        "level": 3,
+        "text": "Output",
+        "id": "output"
       },
       {
         "level": 2,
-        "text": "Transaction monitoring",
-        "id": "transaction-monitoring"
+        "text": "When facts change",
+        "id": "when-facts-change"
       },
       {
         "level": 2,
-        "text": "Why incremental computation matters for compliance",
-        "id": "why-incremental-computation-matters-for-compliance"
-      },
-      {
-        "level": 2,
-        "text": "Getting started",
-        "id": "getting-started"
+        "text": "Beyond ink cartridges",
+        "id": "beyond-ink-cartridges"
       }
     ]
   },
   {
-    "slug": "retail-commerce-ai",
-    "title": "Retail & Commerce AI",
-    "icon": "ShoppingBag",
-    "subtitle": "Product recommendations, catalog reasoning, and conversational commerce powered by knowledge graphs.",
-    "content": "\n# Retail & Commerce AI\n\nIf you're building AI for retail or e-commerce, you're probably familiar with the gap between what your recommendation engine suggests and what would actually be the right answer. The product that's semantically similar to what a customer bought isn't always the product they should buy next.\n\nInputLayer helps bridge that gap by adding a reasoning layer that understands product relationships, customer behavior patterns, and business rules - things that similarity search alone can't capture.\n\n## The recommendation problem\n\nTraditional recommendation engines rely on similarity - collaborative filtering (\"users who bought X bought Y\") or content-based filtering (\"products that look like X\"). Both miss the same thing: logical relationships between products.\n\n```chain\nCustomer buys a DSLR camera\n-- similarity-based system recommends\nMore cameras (semantically similar) [highlight]\n-- but what they actually need\nLens, memory card, camera bag (accessories) [success]\n=> The connection is logical, not semantic\n```\n\nInputLayer lets you express these relationships as rules. \"When a customer buys a product, recommend its accessories - but only if they haven't already bought them and they're currently in stock.\"\n\n```tree\nRecommendation signals [primary]\n  Collaborative filtering\n    \"users who bought X also bought Y\"\n  Category affinity (recursive)\n    \"related product categories, at any depth\"\n  Semantic similarity\n    \"products with similar descriptions\"\n  Accessory relationships\n    \"this product goes with that one\"\n```\n\nThe nice thing about expressing recommendations as rules is that they're auditable. When a recommendation shows up, you can trace exactly why. That kind of explainability is hard to get from black-box models.\n\n## Catalog reasoning\n\nLarge product catalogs have rich internal structure that's hard to capture in vector embeddings.\n\n```tree\nSports [primary]\n  Athletic\n    Footwear\n      Running Shoes\n      Trail Shoes\n    Accessories\n      Running Socks\n      Hydration Pack\n    Electronics\n      GPS Watch\n```\n\nA query like \"show me all products in the athletic category\" requires traversing this hierarchy. A flat metadata filter won't do that. InputLayer's recursive reasoning follows the parent-child chain and returns products from every subcategory, no matter how deep.\n\nCross-category recommendations also become natural. If customers who buy running shoes frequently also buy running socks (a different category), InputLayer can capture that as a rule and surface it as a cross-sell recommendation.\n\n## Conversational commerce\n\nChatbots and conversational agents for e-commerce need to reason about products in context. When a customer says \"I need something waterproof for hiking under $100,\" the agent needs to combine attribute filtering (waterproof, hiking-appropriate), price constraints, and inventory availability - potentially across thousands of products.\n\nInputLayer handles this by letting you express all of these constraints in a single query. The engine filters by structured attributes (waterproof, suitable for hiking), applies price constraints, checks inventory status, and can even layer in semantic similarity to capture nuances the structured attributes might miss - all in one pass.\n\nThe result is products that match both the explicit requirements and the implicit intent behind the customer's question. And because everything runs through the same reasoning engine, adding a new constraint (like \"also factor in the customer's past purchases\") is just another rule.\n\n## Keeping recommendations fresh\n\nWhen a product goes out of stock, gets discontinued, or has a price change, recommendations should reflect that immediately.\n\n```flow\nTraditional ML [highlight] -> Retrain model (hours) -> Rebuild index (minutes) -> Deploy\n```\n\n```flow\nInputLayer [success] -> Retract fact -> Recommendations update (~ms) -> Done\n```\n\nInputLayer's incremental computation handles this naturally. Update a product's stock status, and every recommendation that depended on it being in stock updates automatically. No batch job, no cache invalidation, no delay.\n\nWhen a new product arrives and you add facts about it, it immediately becomes eligible for recommendation through all existing rules. No model retraining or index rebuilding needed.\n\n## Getting started\n\nThe [quickstart guide](/docs/guides/quickstart/) will get you up and running in about 5 minutes. From there, the [data modeling guide](/docs/guides/core-concepts/) covers how to structure your product catalog as a knowledge graph, and the [Python SDK](/docs/guides/python-sdk/) makes it straightforward to integrate with your existing e-commerce platform.\n\n```bash\ndocker run -p 8080:8080 ghcr.io/inputlayer/inputlayer\n```",
+    "slug": "financial-risk",
+    "title": "Financial Risk and Compliance",
+    "icon": "Shield",
+    "subtitle": "Auditable entity reasoning for sanctions screening, beneficial ownership traversal, and policy enforcement.",
+    "content": "\n# Auditable entity reasoning for financial compliance\n\nFinancial compliance requires traversing ownership chains, applying sanctions rules, and producing auditable derivations for every flag. The challenge is not finding similar transactions - it is reaching sanctions hits that are multiple hops away through entity relationships that no similarity score can bridge.\n\nInputLayer evaluates compliance rules over live entity graphs and produces a complete derivation proof for every result - linking each flag to the specific relationships and rules that triggered it.\n\n---\n\n## Example: Beneficial ownership and sanctions traversal\n\nThis recursive rule traverses the ownership graph to find sanctions exposure at any depth, not just direct relationships.\n\n```datalog\n+owns[(\"entity_b\", \"entity_c\"), (\"entity_a\", \"entity_b\")]\n+sanctions_list[(\"entity_c\")]\n\n+sanctions_exposure(Entity, Sanctioned, 1) <-\n    owns(Entity, Sanctioned),\n    sanctions_list(Sanctioned)\n\n+sanctions_exposure(Entity, Sanctioned, Hops) <-\n    owns(Entity, Intermediate),\n    sanctions_exposure(Intermediate, Sanctioned, PrevHops),\n    Hops = PrevHops + 1\n\n?sanctions_exposure(\"entity_a\", Sanctioned, Hops)\n// Returns: entity_a exposed to entity_c at 2 hops via entity_b\n// Full derivation proof available via Provenance API\n```\n\nEvery flag has a complete derivation: which ownership relationship, which sanctions entry, which rule evaluation produced it. When a regulator asks, the answer is a structured artifact, not a description.\n\n---\n\n## When ownership changes\n\nWhen entity_b is acquired and its ownership relationship changes, every exposure derived through that relationship recomputes automatically. Flags that were valid through entity_b may retract. New exposures through the updated ownership chain appear immediately.\n\nThis is the operational difference between a nightly batch sanctions run and a live reasoning layer.",
     "toc": [
       {
         "level": 2,
-        "text": "The recommendation problem",
-        "id": "the-recommendation-problem"
+        "text": "Example: Beneficial ownership and sanctions traversal",
+        "id": "example-beneficial-ownership-and-sanctions-traversal"
       },
       {
         "level": 2,
-        "text": "Catalog reasoning",
-        "id": "catalog-reasoning"
+        "text": "When ownership changes",
+        "id": "when-ownership-changes"
+      }
+    ]
+  },
+  {
+    "slug": "manufacturing",
+    "title": "Manufacturing Operations",
+    "icon": "Factory",
+    "subtitle": "Live operational reasoning for production planning, equipment availability, and job spec fulfillment.",
+    "content": "\n# Live operational reasoning for manufacturing AI\n\nManufacturing AI systems fail when they reason on stale operational data. Equipment holds, maintenance windows, job spec requirements, and parts availability change continuously. A planning agent working from a nightly snapshot makes decisions on yesterday's factory floor.\n\nInputLayer maintains a live knowledge graph of your operational state. Rules derive production readiness, equipment availability, and job fulfillment status from current facts. When an equipment hold is lifted, every dependent derivation updates in milliseconds - no batch job, no manual reconciliation.\n\nThe Provenance API returns a complete derivation trace for every decision: which hold, which rule, which fact produced this output. Production AI in regulated manufacturing environments requires exactly this.\n\n---\n\n## Example: Production line availability\n\nThese facts represent current equipment and operator state. The rule derives which lines are available to run right now.\n\n```datalog\n+equipment[(\"line_4\", \"status\", \"hold\"), (\"line_5\", \"status\", \"active\")]\n+hold_reason[(\"line_4\", \"quality_inspection\", \"2026-03-25\")]\n+certified_operator[(\"op_12\", \"line_4\"), (\"op_12\", \"line_5\")]\n\n+line_available(Line) <-\n    equipment(Line, \"status\", \"active\"),\n    !equipment(Line, \"status\", \"hold\")\n\n?line_available(L)\n// Returns: line_5\n// line_4 excluded because hold fact is true\n```\n\nWhen the hold on line_4 is lifted, `line_available(\"line_4\")` is derived automatically. No query change. No cache flush. The rule fires on the updated fact.\n\n---\n\n## What this replaces\n\nThe standard approach is a scheduled query that re-runs every N minutes against your MES or ERP. Between runs, the agent reasons on data that may already be wrong. A hold lifted at 6:03am is invisible until the 6:15am refresh. A shift plan built at 6:04am is built on a ghost.\n\nInputLayer propagates the fact change in milliseconds. The next agent query sees current state.",
+    "toc": [
+      {
+        "level": 2,
+        "text": "Example: Production line availability",
+        "id": "example-production-line-availability"
       },
       {
         "level": 2,
-        "text": "Conversational commerce",
-        "id": "conversational-commerce"
+        "text": "What this replaces",
+        "id": "what-this-replaces"
+      }
+    ]
+  },
+  {
+    "slug": "supply-chain",
+    "title": "Supply Chain",
+    "icon": "Truck",
+    "subtitle": "Supplier risk propagation, sanctions screening, and order fulfillment reasoning over live entity graphs.",
+    "content": "\n# Entity reasoning for supply chain AI\n\nSupply chain AI needs to follow chains of consequence: supplier status affects order fulfillment, which affects inventory planning, which affects production scheduling. Similarity search cannot follow these chains. SQL can query them, but not incrementally - every status change requires a fresh query across the full dataset.\n\nInputLayer propagates status changes through dependent derivations automatically. Sanctions hits, supplier suspensions, and transport disruptions update every affected order in real time.\n\n---\n\n## Example: Order fulfillment under supplier suspension\n\nThese facts represent current supplier status. The rule derives which orders are blocked and why.\n\n```datalog\n+supplier[\n    (\"sup_01\", \"status\", \"active\"),\n    (\"sup_02\", \"status\", \"suspended\")\n]\n+required_for_order[(\"order_2847\", \"sup_01\"), (\"order_2847\", \"sup_02\")]\n\n+order_blocked(OrderId, SupplierId, \"supplier_suspended\") <-\n    required_for_order(OrderId, SupplierId),\n    supplier(SupplierId, \"status\", \"suspended\")\n\n?order_blocked(\"order_2847\", Supplier, Reason)\n// Returns: order_2847 blocked - sup_02 suspended\n```\n\nWhen `sup_02` is reinstated, the block retracts automatically. Propagation: ~8ms. No pipeline re-run. No manual flag update.\n\n---\n\n## What this replaces\n\nThe standard approach: a nightly job that re-evaluates order status against the current supplier table. Between runs, a suspended supplier's orders remain marked as fulfillable. A procurement agent working in the morning acts on last night's state.\n\nInputLayer maintains derived order status as a live fact. The suspension propagates the moment it is recorded.",
+    "toc": [
+      {
+        "level": 2,
+        "text": "Example: Order fulfillment under supplier suspension",
+        "id": "example-order-fulfillment-under-supplier-suspension"
       },
       {
         "level": 2,
-        "text": "Keeping recommendations fresh",
-        "id": "keeping-recommendations-fresh"
-      },
-      {
-        "level": 2,
-        "text": "Getting started",
-        "id": "getting-started"
+        "text": "What this replaces",
+        "id": "what-this-replaces"
       }
     ]
   }

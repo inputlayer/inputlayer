@@ -1,0 +1,43 @@
+---
+title: "Manufacturing Operations"
+icon: "Factory"
+subtitle: "Live operational reasoning for production planning, equipment availability, and job spec fulfillment."
+---
+
+# Live operational reasoning for manufacturing AI
+
+Manufacturing AI systems fail when they reason on stale operational data. Equipment holds, maintenance windows, job spec requirements, and parts availability change continuously. A planning agent working from a nightly snapshot makes decisions on yesterday's factory floor.
+
+InputLayer maintains a live knowledge graph of your operational state. Rules derive production readiness, equipment availability, and job fulfillment status from current facts. When an equipment hold is lifted, every dependent derivation updates in milliseconds - no batch job, no manual reconciliation.
+
+The Provenance API returns a complete derivation trace for every decision: which hold, which rule, which fact produced this output. Production AI in regulated manufacturing environments requires exactly this.
+
+---
+
+## Example: Production line availability
+
+These facts represent current equipment and operator state. The rule derives which lines are available to run right now.
+
+```datalog
++equipment[("line_4", "status", "hold"), ("line_5", "status", "active")]
++hold_reason[("line_4", "quality_inspection", "2026-03-25")]
++certified_operator[("op_12", "line_4"), ("op_12", "line_5")]
+
++line_available(Line) <-
+    equipment(Line, "status", "active"),
+    !equipment(Line, "status", "hold")
+
+?line_available(L)
+// Returns: line_5
+// line_4 excluded because hold fact is true
+```
+
+When the hold on line_4 is lifted, `line_available("line_4")` is derived automatically. No query change. No cache flush. The rule fires on the updated fact.
+
+---
+
+## What this replaces
+
+The standard approach is a scheduled query that re-runs every N minutes against your MES or ERP. Between runs, the agent reasons on data that may already be wrong. A hold lifted at 6:03am is invisible until the 6:15am refresh. A shift plan built at 6:04am is built on a ghost.
+
+InputLayer propagates the fact change in milliseconds. The next agent query sees current state.
