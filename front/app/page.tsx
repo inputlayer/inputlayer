@@ -13,8 +13,10 @@ import {
   Zap,
   Shield,
   Brain,
-  Database,
+  Factory,
+  Truck,
   GitBranch,
+  ShoppingBag,
   CheckCircle,
   XCircle,
   Minus,
@@ -25,23 +27,23 @@ import {
 
 // ── Syntax-highlighted code blocks ──────────────────────────────────────
 
-const heroCode = `// Facts: who manages whom
-+manages("alice", "bob")
-+manages("bob", "charlie")
-+manages("bob", "diana")
+const heroCode = `// Facts: current supplier status
++supplier("sup_01", "status", "active")
++supplier("sup_02", "status", "suspended")
 
-// Rule: transitive authority (recursive)
-+authority(X, Y) <- manages(X, Y)
-+authority(X, Z) <- manages(X, Y), authority(Y, Z)
+// Rule: order is blocked if any supplier is suspended
++order_blocked(Order, Sup, "suspended") <-
+    required_supplier(Order, Sup),
+    supplier(Sup, "status", "suspended")
 
-// Query: who does Alice have authority over?
-?authority("alice", Person)`
+// Query: why can't order 2847 ship?
+?order_blocked("order_2847", Supplier, Reason)`
 
-const policySearchCode = `// Policy-filtered semantic search - one query
-?authority("alice", Author),
- document(DocId, Author, Embedding),
+const policySearchCode = `// Compatibility rules + vector search in one pass
+?recommendable("shopper_42", ProductId),
+ product(ProductId, Desc, Price, Embedding),
  Similarity = cosine(Embedding, QueryVec),
- Similarity > 0.7`
+ Similarity > 0.6`
 
 const dockerCommand = "docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer"
 
@@ -117,27 +119,13 @@ export default function LandingPage() {
           <div className="grid gap-12 lg:grid-cols-2 lg:gap-16 items-center">
             <div className="space-y-6">
               <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl lg:text-6xl">
-                A symbolic reasoning engine
+                Streaming reasoning layer
                 <br />
-                <span className="text-primary">for AI agents</span>
+                <span className="text-primary">for AI systems</span>
               </h1>
               <p className="text-lg text-muted-foreground max-w-lg">
-                InputLayer is a modern open-source database built on three key concepts:
+                Incremental rules engine with vector search, graph traversal, and explainable derivation traces. Sits between your data and your AI - keeping context live, correct, and auditable as facts change.
               </p>
-              <ul className="space-y-2 text-muted-foreground">
-                <li className="flex items-start gap-3">
-                  <Database className="h-5 w-5 text-primary mt-0.5 shrink-0" />
-                  <span><strong className="text-foreground">Knowledge graph</strong> - data is stored as facts and relationships, not flat documents</span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <Brain className="h-5 w-5 text-primary mt-0.5 shrink-0" />
-                  <span><strong className="text-foreground">Deductive</strong> - you define rules, and the system derives everything that logically follows</span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <Zap className="h-5 w-5 text-primary mt-0.5 shrink-0" />
-                  <span><strong className="text-foreground">Streaming</strong> - when facts change, all derived conclusions update instantly</span>
-                </li>
-              </ul>
               <div className="flex flex-wrap gap-3 pt-2">
                 <Link
                   href="/docs/"
@@ -155,15 +143,13 @@ export default function LandingPage() {
                   <Star className="h-4 w-4" />
                   Star on GitHub
                 </a>
-                <a
-                  href="https://demo.inputlayer.ai"
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <Link
+                  href="/use-cases/"
                   className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-5 py-2.5 text-sm font-medium hover:bg-secondary transition-colors"
                 >
-                  Try the demo
-                  <ExternalLink className="h-3.5 w-3.5" />
-                </a>
+                  See use cases
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
               </div>
             </div>
             <div>
@@ -189,40 +175,40 @@ export default function LandingPage() {
           <div className="grid gap-6 md:grid-cols-3">
             <div className="rounded-xl border border-border bg-card p-6 space-y-3">
               <div className="flex items-center gap-2 text-destructive">
-                <Shield className="h-5 w-5" />
-                <span className="font-semibold">Healthcare</span>
+                <Factory className="h-5 w-5" />
+                <span className="font-semibold">Manufacturing Operations</span>
               </div>
               <p className="text-sm text-muted-foreground">
-                Patient asks <em>&ldquo;Can I eat shrimp tonight?&rdquo;</em> System finds recipes. Misses the allergy record three hops away: patient takes Drug X &rarr; interacts with iodine &rarr; shrimp is high in iodine.
+                A production planning agent asks: <em>&ldquo;Can Line 4 run the night shift?&rdquo;</em> The answer depends on active equipment holds, maintenance schedules, parts availability, and which operators are certified for the current job spec.
               </p>
               <p className="text-xs text-muted-foreground/70">
-                Drug &rarr; interaction &rarr; ingredient &rarr; food has zero vector similarity to &ldquo;shrimp dinner.&rdquo;
+                The connection - job spec &rarr; required parts &rarr; parts on hold &rarr; hold reason &rarr; expected release date - does not exist in embedding space. It exists as a chain of operational facts.
               </p>
             </div>
 
             <div className="rounded-xl border border-border bg-card p-6 space-y-3">
               <div className="flex items-center gap-2 text-warning-foreground">
-                <Database className="h-5 w-5" />
-                <span className="font-semibold">Enterprise</span>
+                <Truck className="h-5 w-5" />
+                <span className="font-semibold">Supply Chain</span>
               </div>
               <p className="text-sm text-muted-foreground">
-                Employee asks for Q3 revenue reports. Vector DB returns 40 matching documents. Cannot check whether this employee, in this role, in this department, has permission to see any of them.
+                An AI system is asked: <em>&ldquo;Can order #2847 ship by Friday?&rdquo;</em> The answer requires knowing current supplier status, active suspensions, lead times, and whether any required supplier is under sanctions review.
               </p>
               <p className="text-xs text-muted-foreground/70">
-                Access control is a logical question, not a similarity question.
+                None of those facts are semantically similar to &ldquo;can this order ship by Friday.&rdquo; They are connected through operational relationships. A rules engine follows them. Vector search cannot.
               </p>
             </div>
 
             <div className="rounded-xl border border-border bg-card p-6 space-y-3">
               <div className="flex items-center gap-2 text-accent">
                 <GitBranch className="h-5 w-5" />
-                <span className="font-semibold">Financial Services</span>
+                <span className="font-semibold">Financial Risk</span>
               </div>
               <p className="text-sm text-muted-foreground">
-                Compliance asks <em>&ldquo;Is this transaction suspicious?&rdquo;</em> System finds similar transactions. Misses: Entity A paid Entity B, B is a subsidiary of C, C is on a sanctions list.
+                Compliance asks: <em>&ldquo;Is this transaction suspicious?&rdquo;</em> Entity A paid Entity B. B is a subsidiary of C. C is on a sanctions list.
               </p>
               <p className="text-xs text-muted-foreground/70">
-                Graph traversal + rule evaluation - not pattern matching.
+                Pattern matching finds similar transactions. It does not traverse the ownership graph to reach the sanctions hit three hops away. Graph traversal plus rule evaluation does.
               </p>
             </div>
           </div>
@@ -243,31 +229,14 @@ export default function LandingPage() {
             {/* Left: benefits */}
             <div className="space-y-6">
               <p className="text-muted-foreground text-lg">
-                <span className="text-primary font-semibold">InputLayer&apos;s query language</span> combines graph traversal, logical rules, and vector search in a single query.
+                InputLayer adds an incremental rules engine to your AI stack. You define the relationships and policies that matter - compatibility rules, ownership chains, operational constraints. The engine derives what follows and keeps those derivations live as your data changes.
               </p>
-              <ul className="space-y-4">
-                <li className="flex items-start gap-3">
-                  <CheckCircle className="h-5 w-5 text-emerald-500 mt-0.5 shrink-0" />
-                  <div>
-                    <p className="font-medium">Recursive rule evaluation</p>
-                    <p className="text-sm text-muted-foreground">Define rules like transitive authority. The engine recursively derives all conclusions - including things you never explicitly stored.</p>
-                  </div>
-                </li>
-                <li className="flex items-start gap-3">
-                  <CheckCircle className="h-5 w-5 text-emerald-500 mt-0.5 shrink-0" />
-                  <div>
-                    <p className="font-medium">Policy-filtered search</p>
-                    <p className="text-sm text-muted-foreground">Logical access control and vector similarity in one pass. Permission-checked and semantically ranked results without glue code.</p>
-                  </div>
-                </li>
-                <li className="flex items-start gap-3">
-                  <CheckCircle className="h-5 w-5 text-emerald-500 mt-0.5 shrink-0" />
-                  <div>
-                    <p className="font-medium">One query, multiple capabilities</p>
-                    <p className="text-sm text-muted-foreground">A single query combines vector similarity, graph traversal, and policy evaluation - filling the gaps your current stack can&apos;t cover.</p>
-                  </div>
-                </li>
-              </ul>
+              <p className="text-muted-foreground">
+                Every result is traceable. The Provenance API returns a complete derivation proof per result - the exact chain of rules and facts that produced it. When a regulator, auditor, or downstream system asks why the AI made that decision, the answer is a structured artifact, not a log.
+              </p>
+              <p className="text-muted-foreground">
+                This is not a replacement for your orchestration platform, your data warehouse, or your vector database. It is the reasoning layer that makes them work for decisions that require following consequence, not matching surface similarity.
+              </p>
             </div>
 
             {/* Right: example */}
@@ -275,7 +244,7 @@ export default function LandingPage() {
               <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Example</p>
               <CodeBlock code={policySearchCode} />
               <p className="text-sm text-muted-foreground">
-                This query resolves the <code className="bg-muted rounded px-1.5 py-0.5 text-xs font-mono">authority</code> rule recursively, runs vector search in the same pass, and returns only documents that Alice has permission to see and that are semantically relevant to her question.
+                This query evaluates compatibility rules against purchase history, joins with live inventory and product embeddings, and ranks results by semantic similarity - all in a single pass. No glue code, no separate round trips.
               </p>
             </div>
           </div>
@@ -300,7 +269,7 @@ export default function LandingPage() {
               <Zap className="h-8 w-8 text-primary" />
               <h3 className="text-lg font-semibold">Incremental maintenance</h3>
               <p className="text-sm text-muted-foreground">
-                When a fact changes, only the affected derivations recompute. Insert one new edge into a 2,000-node graph and re-query transitive closure: 6.83ms instead of 11.3 seconds.
+                When a fact changes, only the affected derivations recompute. Insert one new edge into a 2,000-node graph: 6.83ms to re-derive transitive closure. Full recompute: 11.3 seconds. Production AI systems cannot wait for full recomputes.
               </p>
               <div className="text-center pt-2">
                 <span className="text-5xl font-extrabold text-primary">1,652x</span>
@@ -312,7 +281,7 @@ export default function LandingPage() {
               <Brain className="h-8 w-8 text-primary" />
               <h3 className="text-lg font-semibold">Explainable results</h3>
               <p className="text-sm text-muted-foreground">
-                Every derived fact traces back to the rules and base facts that produced it. Not &ldquo;the vector was close&rdquo; - a full derivation chain you can audit and explain.
+                Every derived fact traces back to the rules and base facts that produced it. Not &ldquo;the vector was close&rdquo; - a complete derivation chain exposed via the Provenance API. Auditable, storable, and regulatorily defensible.
               </p>
               <div className="text-center pt-2">
                 <span className="text-5xl font-extrabold text-primary">100%</span>
@@ -324,7 +293,7 @@ export default function LandingPage() {
               <Shield className="h-8 w-8 text-primary" />
               <h3 className="text-lg font-semibold">Correct retraction</h3>
               <p className="text-sm text-muted-foreground">
-                Delete a fact and every conclusion derived through it disappears automatically - even through chains of recursive rules. No phantom permissions, no manual cache invalidation.
+                Delete a fact and every conclusion that depended on it disappears automatically - but only if no other derivation path still supports it. No phantom flags. No stale recommendations. No manual cache invalidation.
               </p>
               <div className="text-center pt-2">
                 <span className="text-5xl font-extrabold text-primary">0</span>
@@ -344,7 +313,7 @@ export default function LandingPage() {
               The reasoning layer your stack is missing
             </h2>
             <p className="text-muted-foreground text-lg">
-              Your vector DB finds similar documents. Your graph DB traverses relationships. InputLayer adds what neither can do: rule-based inference, recursive reasoning, and incremental computation.
+              InputLayer is not a replacement for your data stack or your AI platform. It is the streaming reasoning layer that sits between them - filling the gap that neither vector search nor graph traversal can cover alone.
             </p>
           </div>
 
@@ -392,15 +361,16 @@ export default function LandingPage() {
               Built for reasoning-intensive applications
             </h2>
             <p className="text-muted-foreground text-lg">
-              From agentic AI to financial compliance, InputLayer powers applications where the answer requires following chains of facts.
+              From manufacturing operations to financial compliance, InputLayer powers applications where the answer requires following chains of facts - not just matching surface similarity.
             </p>
           </div>
 
-          <div className="grid gap-6 md:grid-cols-3">
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
             {[
-              { title: "Agentic AI", icon: <Brain className="h-8 w-8 text-primary" />, desc: "Structured memory, multi-hop reasoning, and policy-aware retrieval for AI agents.", href: "/use-cases/agentic-ai/" },
-              { title: "Retail & Commerce", icon: <Database className="h-8 w-8 text-primary" />, desc: "Product recommendations, catalog reasoning, and conversational commerce powered by knowledge graphs.", href: "/use-cases/" },
-              { title: "Financial Services", icon: <Shield className="h-8 w-8 text-primary" />, desc: "Sanctions screening, beneficial ownership chains, and transaction monitoring through entity reasoning.", href: "/use-cases/" },
+              { title: "Manufacturing Operations", icon: <Factory className="h-8 w-8 text-primary" />, desc: "Live reasoning over equipment holds, job specs, parts availability, and operator certifications. When a hold is lifted, every dependent production plan updates in milliseconds.", href: "/use-cases/manufacturing/" },
+              { title: "Supply Chain", icon: <Truck className="h-8 w-8 text-primary" />, desc: "Supplier status, sanctions exposure, and order fulfillment reasoning over live entity graphs. One supplier status change propagates through every affected order automatically.", href: "/use-cases/supply-chain/" },
+              { title: "Financial Risk and Compliance", icon: <Shield className="h-8 w-8 text-primary" />, desc: "Beneficial ownership traversal, sanctions screening, and policy enforcement through entity relationship chains. Auditable derivation proof for every flag.", href: "/use-cases/financial-risk/" },
+              { title: "Conversational Commerce", icon: <ShoppingBag className="h-8 w-8 text-primary" />, desc: "Compatible product recommendations from purchase history and live inventory, in one query. No glue code. No stale results.", href: "/use-cases/commerce/" },
             ].map((uc) => (
               <Link
                 key={uc.title}

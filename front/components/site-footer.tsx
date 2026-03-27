@@ -24,6 +24,7 @@ const footerLinks: Record<string, FooterLink[]> = {
   Company: [
     { label: "GitHub", href: "https://github.com/inputlayer/inputlayer", external: true },
     { label: "License", href: "https://github.com/inputlayer/inputlayer/blob/main/LICENSE", external: true },
+    { label: "Commercial Use", href: "/commercial" },
   ],
   Community: [
     { label: "Star on GitHub", href: "https://github.com/inputlayer/inputlayer", external: true },
@@ -69,10 +70,10 @@ export function SiteFooter() {
         <div className="mt-10 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-border/50 pt-8">
           <div className="flex items-center gap-4">
             <Logo size="sm" />
-            <span className="text-sm text-muted-foreground">AGPL-3.0 License</span>
+            <span className="text-sm text-muted-foreground">Apache 2.0 + Commons Clause</span>
           </div>
           <p className="text-xs text-muted-foreground">
-            A symbolic reasoning engine for AI agents.
+            Streaming reasoning layer for AI systems.
           </p>
         </div>
       </div>
