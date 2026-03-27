@@ -16,9 +16,9 @@ fn main() {
     let mut engine = DatalogEngine::with_config(config);
     engine.add_fact("edge", edges.clone());
     engine.parse(query).expect("failed to parse query");
-    engine.build_ir().expect("failed to build IR");
+    engine.build_ir(false).expect("failed to build IR");
     println!("IR before optimize: {:#?}", engine.ir_nodes());
-    engine.optimize_ir().expect("failed to optimize IR");
+    engine.optimize_ir(false).expect("failed to optimize IR");
     println!("IR after optimize: {:#?}", engine.ir_nodes());
 
     // Test with ONLY join planning - show IR
@@ -33,8 +33,8 @@ fn main() {
     let mut engine2 = DatalogEngine::with_config(config);
     engine2.add_fact("edge", edges.clone());
     engine2.parse(query).expect("failed to parse query");
-    engine2.build_ir().expect("failed to build IR");
+    engine2.build_ir(false).expect("failed to build IR");
     println!("IR before optimize: {:#?}", engine2.ir_nodes());
-    engine2.optimize_ir().expect("failed to optimize IR");
+    engine2.optimize_ir(false).expect("failed to optimize IR");
     println!("IR after optimize: {:#?}", engine2.ir_nodes());
 }

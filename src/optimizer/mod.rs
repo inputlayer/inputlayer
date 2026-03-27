@@ -12,6 +12,7 @@
 //! IRNode (from IR Builder) -> [Optimizer] -> Optimized IRNode -> Code Gen
 //! ```
 
+use crate::execution::timing::OptimizerTiming;
 use crate::ir::{IRNode, Predicate};
 
 /// IR Optimizer with fixpoint iteration
@@ -57,6 +58,31 @@ impl Optimizer {
         // Applied once after fixpoint since fused nodes are terminal forms
         let current = self.fuse_to_flatmap(current);
         self.fuse_to_join_flatmap(current)
+    }
+
+    /// Optimize with detailed timing (returns the optimized IR and timing breakdown).
+    pub fn optimize_timed(&self, ir: IRNode) -> (IRNode, OptimizerTiming) {
+        let mut timing = OptimizerTiming::default();
+        let mut current = ir;
+
+        let rules_start = std::time::Instant::now();
+        for iteration in 0..self.max_iterations {
+            let optimized = self.apply_all_rules(current.clone());
+            if Self::ir_equals(&optimized, &current) {
+                timing.iterations = iteration as u32;
+                break;
+            }
+            current = optimized;
+            timing.iterations = (iteration + 1) as u32;
+        }
+        timing.rules_us = rules_start.elapsed().as_micros() as u64;
+
+        let fusion_start = std::time::Instant::now();
+        let current = self.fuse_to_flatmap(current);
+        let current = self.fuse_to_join_flatmap(current);
+        timing.fusion_us = fusion_start.elapsed().as_micros() as u64;
+
+        (current, timing)
     }
 
     /// Apply all optimization rules once

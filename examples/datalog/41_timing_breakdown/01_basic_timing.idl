@@ -1,0 +1,16 @@
+// Test: Basic Timing Breakdown
+// Description: Tests that timing breakdown is produced for a simple query
+
+.kg create _n41t01
+.kg use _n41t01
+
+// Insert base data
++edge[(1, 2), (2, 3), (3, 4)]
+
+// Define and query a view
++result(X, Y) <- edge(X, Y)
+?result(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop _n41t01

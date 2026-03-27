@@ -4,8 +4,13 @@
 //! - Timeout enforcement via cooperative cancellation
 
 mod timeout;
+pub mod timing;
 
 pub use timeout::{CancelHandle, QueryTimeout, TimeoutError};
+pub use timing::{
+    IrBuilderTiming, OptimizerTiming, RuleTiming, TimingBreakdown, TimingCollector,
+    TimingHistograms, TimingMode,
+};
 
 /// Execution error types
 #[derive(Debug, Clone, thiserror::Error)]

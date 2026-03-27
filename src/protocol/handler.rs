@@ -180,6 +180,8 @@ pub struct Handler {
     /// Bounded ring buffer of recent notifications for replay on reconnect (#39).
     notification_buffer:
         Arc<parking_lot::Mutex<std::collections::VecDeque<PersistentNotification>>>,
+    /// Accumulated timing histogram buckets for Prometheus export.
+    timing_histograms: Arc<crate::execution::timing::TimingHistograms>,
 }
 
 /// Current epoch milliseconds.
@@ -213,6 +215,7 @@ struct QueryJob {
     notification_seq: Arc<AtomicU64>,
     notification_buffer:
         Arc<parking_lot::Mutex<std::collections::VecDeque<PersistentNotification>>>,
+    timing_histograms: Arc<crate::execution::timing::TimingHistograms>,
 }
 
 impl QueryJob {
@@ -515,9 +518,11 @@ impl QueryJob {
                 .to_string()
         };
 
+        let query_start = std::time::Instant::now();
         let (mut result_tuples, rules, base_data, index_metrics) = storage
             .execute_and_get_context(&kg_name, &query)
             .map_err(|e| format!("{e}"))?;
+        let query_us = query_start.elapsed().as_micros() as u64;
 
         if result_tuples.is_empty() {
             return Ok(QueryResult::empty());
@@ -555,6 +560,7 @@ impl QueryJob {
         let mut rows = Vec::new();
         let mut wire_proofs = Vec::new();
 
+        let proof_start = std::time::Instant::now();
         for tuple in &result_tuples {
             let values: Vec<WireValue> = (0..tuple.arity())
                 .filter_map(|i| tuple.get(i).map(WireValue::from_value))
@@ -583,6 +589,39 @@ impl QueryJob {
             };
             wire_proofs.push(proof);
         }
+        let proof_us = proof_start.elapsed().as_micros() as u64;
+
+        let timing_breakdown =
+            if self.config.storage.performance.timing_mode == crate::execution::TimingMode::Off {
+                None
+            } else {
+                let total_us = start.elapsed().as_micros() as u64;
+                Some(crate::execution::TimingBreakdown {
+                    total_us,
+                    parse_us: 0,
+                    sip_us: 0,
+                    magic_sets_us: 0,
+                    ir_build_us: 0,
+                    optimize_us: 0,
+                    shared_views_us: 0,
+                    rules: vec![
+                        crate::execution::timing::RuleTiming {
+                            rule_head: "query_execution".into(),
+                            execution_us: query_us,
+                            is_recursive: false,
+                            workers: 1,
+                        },
+                        crate::execution::timing::RuleTiming {
+                            rule_head: "proof_construction".into(),
+                            execution_us: proof_us,
+                            is_recursive: false,
+                            workers: 1,
+                        },
+                    ],
+                    optimizer_detail: None,
+                    ir_builder_detail: None,
+                })
+            };
 
         let total_count = rows.len();
         Ok(QueryResult {
@@ -594,6 +633,7 @@ impl QueryJob {
             metadata: None,
             switched_kg: None,
             proof_trees: Some(wire_proofs),
+            timing_breakdown,
         })
     }
 
@@ -626,12 +666,17 @@ impl QueryJob {
         };
 
         let (relation, tuple) = parse_why_not_target(&input)?;
+        let query_start = std::time::Instant::now();
         let (rules, base_data) = storage
             .get_rules_and_data(&kg_name)
             .map_err(|e| format!("Failed to access knowledge graph: {e}"))?;
         let ctx = ProofContext::new(&rules, &base_data, ProofConfig::default());
+        let query_us = query_start.elapsed().as_micros() as u64;
 
+        let explain_start = std::time::Instant::now();
         let explanation = explain_why_not(&relation, &tuple, &ctx);
+        let explain_us = explain_start.elapsed().as_micros() as u64;
+
         let wire_exp = WireWhyNotExplanation::from(&explanation);
         let json_str = serde_json::to_string(&wire_exp).unwrap_or_default();
 
@@ -642,6 +687,38 @@ impl QueryJob {
             .map(|line| WireTuple::new(vec![WireValue::String(line.to_string())]))
             .collect();
         let total_count = rows.len();
+
+        let timing_breakdown =
+            if self.config.storage.performance.timing_mode == crate::execution::TimingMode::Off {
+                None
+            } else {
+                let total_us = start.elapsed().as_micros() as u64;
+                Some(crate::execution::TimingBreakdown {
+                    total_us,
+                    parse_us: 0,
+                    sip_us: 0,
+                    magic_sets_us: 0,
+                    ir_build_us: 0,
+                    optimize_us: 0,
+                    shared_views_us: 0,
+                    rules: vec![
+                        crate::execution::timing::RuleTiming {
+                            rule_head: "query_execution".into(),
+                            execution_us: query_us,
+                            is_recursive: false,
+                            workers: 1,
+                        },
+                        crate::execution::timing::RuleTiming {
+                            rule_head: "explanation".into(),
+                            execution_us: explain_us,
+                            is_recursive: false,
+                            workers: 1,
+                        },
+                    ],
+                    optimizer_detail: None,
+                    ir_builder_detail: None,
+                })
+            };
 
         Ok(QueryResult {
             rows,
@@ -660,6 +737,7 @@ impl QueryJob {
                 clause_text: Some(json_str),
                 ..crate::provenance::wire::WireProofTree::empty_pub()
             }]),
+            timing_breakdown,
         })
     }
 }
@@ -690,6 +768,7 @@ impl Handler {
             notification_buffer: Arc::new(parking_lot::Mutex::new(
                 std::collections::VecDeque::new(),
             )),
+            timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
         }
     }
 
@@ -725,6 +804,7 @@ impl Handler {
             notification_buffer: Arc::new(parking_lot::Mutex::new(
                 std::collections::VecDeque::new(),
             )),
+            timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
         }
     }
 
@@ -739,6 +819,7 @@ impl Handler {
             start_time: self.start_time,
             notification_seq: Arc::clone(&self.notification_seq),
             notification_buffer: Arc::clone(&self.notification_buffer),
+            timing_histograms: Arc::clone(&self.timing_histograms),
         }
     }
 
@@ -1206,6 +1287,7 @@ impl Handler {
             metadata: None,
             switched_kg: None,
             proof_trees: None,
+            timing_breakdown: None,
         })
     }
 
@@ -1477,6 +1559,7 @@ impl Handler {
             metadata: None,
             switched_kg: None,
             proof_trees: None,
+            timing_breakdown: None,
         })
     }
 
@@ -1526,6 +1609,7 @@ impl Handler {
             metadata: None,
             switched_kg: None,
             proof_trees: None,
+            timing_breakdown: None,
         })
     }
 
@@ -1757,6 +1841,11 @@ impl Handler {
     /// Get total queries executed.
     pub fn total_queries(&self) -> u64 {
         self.query_count.load(Ordering::Relaxed)
+    }
+
+    /// Get reference to the accumulated timing histograms for Prometheus export.
+    pub fn timing_histograms(&self) -> &crate::execution::timing::TimingHistograms {
+        &self.timing_histograms
     }
 
     /// Get total inserts executed.
@@ -3276,6 +3365,7 @@ impl QueryJob {
                 metadata: None,
                 switched_kg: switched_kg_result,
                 proof_trees: None,
+                timing_breakdown: None,
             });
         }
 
@@ -3325,13 +3415,18 @@ impl QueryJob {
         // Session facts are added to an ISOLATED COPY, providing request-scoped isolation.
         let query_exec_start = Instant::now();
         let has_session_facts = !session_fact_tuples.is_empty();
-        let results = if !has_session_facts {
+        let timing_mode = self.config.storage.performance.timing_mode;
+        let (results, timing_breakdown) = if !has_session_facts {
             snapshot
-                .execute_with_rules_tuples(&query_program)
+                .execute_with_rules_tuples_profiled(&query_program, timing_mode)
                 .map_err(|e| format!("Query execution failed: {e}"))?
         } else {
             snapshot
-                .execute_with_session_facts(&query_program, session_fact_tuples)
+                .execute_with_session_facts_profiled(
+                    &query_program,
+                    session_fact_tuples,
+                    timing_mode,
+                )
                 .map_err(|e| format!("Query execution failed: {e}"))?
         };
         let query_exec_ms = query_exec_start.elapsed().as_millis() as u64;
@@ -3424,6 +3519,11 @@ impl QueryJob {
             "query_job_complete"
         );
 
+        // Record timing into Prometheus histograms.
+        if let Some(ref tb) = timing_breakdown {
+            self.timing_histograms.record(tb);
+        }
+
         Ok(QueryResult {
             rows,
             schema,
@@ -3433,6 +3533,7 @@ impl QueryJob {
             metadata: None,
             switched_kg: None,
             proof_trees: None,
+            timing_breakdown,
         })
     }
 }
@@ -3564,13 +3665,24 @@ impl Handler {
         // Offload CPU-bound DD computation to the blocking thread pool
         let combined_program_clone = combined_program;
         let preprocessed_clone = preprocessed.clone();
+        let timing_mode = self.config.storage.performance.timing_mode;
+        let timing_histograms = Arc::clone(&self.timing_histograms);
         let blocking_task = tokio::task::spawn_blocking(move || {
             crate::code_generator::set_query_cancel_flag(Some(cancel_flag_clone));
 
-            // Run session query on snapshot (lock-free)
-            let results = snapshot
-                .execute_with_session_facts(&combined_program_clone, session_facts)
+            // Run session query on snapshot (lock-free) with profiling
+            let (results, timing_breakdown) = snapshot
+                .execute_with_session_facts_profiled(
+                    &combined_program_clone,
+                    session_facts,
+                    timing_mode,
+                )
                 .map_err(|e| format!("Query execution failed: {e}"))?;
+
+            // Record timing in Prometheus histograms
+            if let Some(ref tb) = timing_breakdown {
+                timing_histograms.record(tb);
+            }
 
             // Per-tuple provenance: run the original query (without ephemeral rules)
             // against persistent-only data to identify ephemeral contributions.
@@ -3588,11 +3700,11 @@ impl Handler {
             crate::code_generator::set_query_cancel_flag(None);
             drop(permit); // Release semaphore slot
 
-            Ok::<_, String>((results, baseline))
+            Ok::<_, String>((results, baseline, timing_breakdown))
         });
 
         // Apply timeout if configured
-        let (results, baseline) = if timeout_ms > 0 {
+        let (results, baseline, timing_breakdown) = if timeout_ms > 0 {
             match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), blocking_task)
                 .await
             {
@@ -3725,6 +3837,7 @@ impl Handler {
             metadata: result_metadata,
             switched_kg: None,
             proof_trees: None,
+            timing_breakdown,
         })
     }
 
@@ -4143,6 +4256,7 @@ impl Handler {
             metadata: None,
             switched_kg: None,
             proof_trees: None,
+            timing_breakdown: None,
         }
     }
 
@@ -4198,6 +4312,7 @@ impl Handler {
             metadata: None,
             switched_kg: None,
             proof_trees: None,
+            timing_breakdown: None,
         })
     }
 

@@ -1,0 +1,19 @@
+// Test: Recursive Query Timing
+// Description: Tests timing breakdown for recursive transitive closure query
+
+.kg create _n41t02
+.kg use _n41t02
+
+// Insert base edges
++edge[(1, 2), (2, 3), (3, 4), (4, 5)]
+
+// Transitive closure rule
++tc(X, Y) <- edge(X, Y)
++tc(X, Y) <- tc(X, Z), edge(Z, Y)
+
+// Query transitive closure
+?tc(X, Y)
+
+// Cleanup
+.kg use default
+.kg drop _n41t02

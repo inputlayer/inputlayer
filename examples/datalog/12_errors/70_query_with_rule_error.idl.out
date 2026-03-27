@@ -1,0 +1,20 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+
+> .kg create _n12t70
+Knowledge graph '_n12t70' created.
+Switched to knowledge graph: _n12t70
+> .kg use _n12t70
+Switched to knowledge graph: _n12t70
+> +edge[(1, 2), (2, 3)]
+Inserted 2 fact(s) into 'edge'.
+> ?result(X, Y) <- edge(X, Y)
+Parse error: Query cannot contain a rule definition (<-). Register the rule first with + then query it with ?
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop _n12t70
+Knowledge graph '_n12t70' dropped.

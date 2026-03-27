@@ -19,6 +19,7 @@
 //! suitable for optimization and code generation.
 
 use crate::ast::{Atom, BodyPredicate, BuiltinFunc, ComparisonOp, Rule, Term};
+use crate::execution::timing::IrBuilderTiming;
 use crate::ir::{BuiltinFunction, IRExpression, IRNode, Predicate};
 use std::collections::HashSet;
 
@@ -105,6 +106,79 @@ impl IRBuilder {
         current = self.build_projection(current, rule)?;
 
         Ok(current)
+    }
+
+    /// Build IR with detailed timing breakdown.
+    pub fn build_ir_timed(&self, rule: &Rule) -> Result<(IRNode, IrBuilderTiming), String> {
+        let mut timing = IrBuilderTiming::default();
+
+        let start = std::time::Instant::now();
+        let mut scans = self.build_scans(rule)?;
+        timing.scans_us = start.elapsed().as_micros() as u64;
+
+        if scans.is_empty() {
+            return Err("Rule has no positive body atoms".to_string());
+        }
+
+        // Build join tree (same logic as build_ir)
+        let start = std::time::Instant::now();
+        let mut current = scans.remove(0);
+        if std::env::var("IL_DEBUG").is_ok() {
+            eprintln!("DEBUG IR build: first scan = {:?}", current.output_schema());
+        }
+        for scan in scans {
+            let left_schema = current.output_schema();
+            let right_schema = scan.output_schema();
+            let has_shared = left_schema.iter().any(|l| right_schema.contains(l));
+
+            if !has_shared {
+                if let Some((compute_name, ir_expr)) =
+                    self.find_arithmetic_join_bridge(rule, &left_schema, &right_schema)
+                {
+                    if std::env::var("IL_DEBUG").is_ok() {
+                        eprintln!(
+                            "DEBUG IR build: adding computed join key '{compute_name}' to left side"
+                        );
+                    }
+                    current = IRNode::Compute {
+                        input: Box::new(current),
+                        expressions: vec![(compute_name, ir_expr)],
+                    };
+                }
+            }
+
+            if std::env::var("IL_DEBUG").is_ok() {
+                eprintln!(
+                    "DEBUG IR build: joining with scan = {:?}",
+                    scan.output_schema()
+                );
+            }
+            current = self.build_join(current, scan)?;
+            if std::env::var("IL_DEBUG").is_ok() {
+                eprintln!("DEBUG IR build: after join = {:?}", current.output_schema());
+            }
+        }
+        timing.joins_us = start.elapsed().as_micros() as u64;
+
+        let pre_compute_schema = current.output_schema();
+
+        let start = std::time::Instant::now();
+        current = self.build_computed_columns(current, rule)?;
+        timing.computed_us = start.elapsed().as_micros() as u64;
+
+        let start = std::time::Instant::now();
+        current = self.build_comparison_filters(current, rule, &pre_compute_schema)?;
+        timing.filters_us = start.elapsed().as_micros() as u64;
+
+        let start = std::time::Instant::now();
+        current = self.build_antijoins(current, rule)?;
+        timing.antijoins_us = start.elapsed().as_micros() as u64;
+
+        let start = std::time::Instant::now();
+        current = self.build_projection(current, rule)?;
+        timing.projection_us = start.elapsed().as_micros() as u64;
+
+        Ok((current, timing))
     }
 
     /// Build scan nodes for all positive body atoms

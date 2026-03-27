@@ -1,7 +1,8 @@
 "use client"
 
-import { Clock, Download, Rows3, AlertCircle, CheckCircle2, Loader2, Copy, Check, AlertTriangle, CheckSquare, Info, ArrowUp, ArrowDown, ArrowUpDown, FileJson, Share2, TreePine } from "lucide-react"
+import { Clock, Download, Rows3, AlertCircle, CheckCircle2, Loader2, Copy, Check, AlertTriangle, CheckSquare, Info, ArrowUp, ArrowDown, ArrowUpDown, FileJson, Share2, TreePine, Zap } from "lucide-react"
 import { ProofTreePanel } from "@/components/proof-tree-panel"
+import { TimingDisplay, formatUs, formatTimingSummary } from "@/components/timing-display"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -94,7 +95,7 @@ export function QueryResultsPanel({ result, error, isExecuting, activeQuery }: Q
   const [copied, setCopied] = useState(false)
   const [sort, setSort] = useState<SortState | null>(null)
   const [page, setPage] = useState(0)
-  const [activeTab, setActiveTab] = useState<"table" | "graph" | "proof">("table")
+  const [activeTab, setActiveTab] = useState<"table" | "graph" | "proof" | "perf">("table")
   const hasUserSelectedTab = useRef(false)
   const prevResultId = useRef<string | null>(null)
 
@@ -317,9 +318,14 @@ export function QueryResultsPanel({ result, error, isExecuting, activeQuery }: Q
                 </span>
               )}
             </span>
-            <span className="flex items-center gap-1">
+            <span className="flex items-center gap-1" title={result.timingBreakdown ? formatTimingSummary(result.timingBreakdown) : undefined}>
               <Clock className="h-3 w-3" />
               {formatTime(result.executionTime)}
+              {result.timingBreakdown && (
+                <span className="text-muted-foreground/60 ml-0.5">
+                  ({formatTimingSummary(result.timingBreakdown)})
+                </span>
+              )}
             </span>
             {result.hasEphemeral && (
               <>
@@ -394,7 +400,7 @@ export function QueryResultsPanel({ result, error, isExecuting, activeQuery }: Q
 
       {/* Content: table + graph tab */}
       {result.columns.length >= 1 ? (
-        <Tabs value={activeTab} onValueChange={(v) => { hasUserSelectedTab.current = true; setActiveTab(v as "table" | "graph" | "proof") }} className="flex-1 flex flex-col overflow-hidden min-h-0">
+        <Tabs value={activeTab} onValueChange={(v) => { hasUserSelectedTab.current = true; setActiveTab(v as "table" | "graph" | "proof" | "perf") }} className="flex-1 flex flex-col overflow-hidden min-h-0">
           <div className="border-b border-border/50 px-3 flex-shrink-0">
             <TabsList className="h-8 bg-transparent p-0 gap-2">
               <TabsTrigger
@@ -418,6 +424,15 @@ export function QueryResultsPanel({ result, error, isExecuting, activeQuery }: Q
                 <TreePine className="h-3.5 w-3.5" />
                 Why?
               </TabsTrigger>
+              {result.timingBreakdown && (
+                <TabsTrigger
+                  value="perf"
+                  className="h-7 gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground data-[state=active]:bg-orange-500/10 data-[state=active]:text-orange-600 dark:data-[state=active]:text-orange-400 data-[state=active]:shadow-none"
+                >
+                  <Zap className="h-3.5 w-3.5" />
+                  Performance
+                </TabsTrigger>
+              )}
             </TabsList>
           </div>
           <TabsContent value="table" className="flex-1 m-0 overflow-hidden flex flex-col">
@@ -429,6 +444,13 @@ export function QueryResultsPanel({ result, error, isExecuting, activeQuery }: Q
           <TabsContent value="proof" forceMount className={cn("flex-1 m-0 overflow-hidden", activeTab !== "proof" && "hidden")}>
             <ProofTreePanel query={activeQuery} result={result} />
           </TabsContent>
+          {result.timingBreakdown && (
+            <TabsContent value="perf" className="flex-1 m-0 overflow-hidden flex flex-col">
+              <div className="flex-1 overflow-auto p-4">
+                <TimingDisplay tb={result.timingBreakdown} executionTimeMs={result.executionTime} rowCount={result.data.length} />
+              </div>
+            </TabsContent>
+          )}
         </Tabs>
       ) : (
         <ResultTable result={result} sort={sort} sortedIndices={sortedIndices} page={page} setPage={setPage} handleSort={handleSort} />

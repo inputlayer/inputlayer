@@ -233,6 +233,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_query_with_rule_definition_rejected() {
+        let result = parse_statement("?result(X, Y) <- edge(X, Y)");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("rule definition"),
+            "Error should mention rule definition, got: {err}"
+        );
+        assert!(
+            err.contains("<-"),
+            "Error should mention <- operator, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_query_with_rule_definition_recursive_rejected() {
+        let result = parse_statement("?tc(X, Y) <- tc(X, Z), edge(Z, Y)");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("rule definition"));
+    }
+
     // Session rule tests
     #[test]
     fn test_parse_session_rule() {

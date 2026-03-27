@@ -218,6 +218,40 @@ impl KnowledgeGraphSnapshot {
         result
     }
 
+    /// Execute a query with rules, returning tuples and optional timing breakdown.
+    pub fn execute_with_rules_tuples_profiled(
+        &self,
+        program: &str,
+        timing_mode: crate::execution::TimingMode,
+    ) -> Result<(Vec<Tuple>, Option<crate::execution::TimingBreakdown>), String> {
+        let start = Instant::now();
+        let combined = if self.rule_prefix.is_empty() {
+            program.to_string()
+        } else {
+            format!("{}{}", self.rule_prefix, program)
+        };
+
+        let mut engine = DatalogEngine::new();
+        engine.set_num_workers(self.num_workers);
+        engine.set_max_result_rows(self.max_result_rows);
+        engine.set_max_query_cost(self.max_query_cost);
+        engine.set_timing_mode(timing_mode);
+        self.configure_hnsw(&mut engine);
+
+        // Use shared input for zero-copy
+        engine.input_tuples.clone_from(&self.input_tuples);
+        engine.set_shared_input(Arc::clone(&self.input_tuples));
+
+        let result = engine.execute_tuples_profiled(&combined);
+        info!(
+            program_len = program.len(),
+            combined_len = combined.len(),
+            elapsed_ms = start.elapsed().as_millis() as u64,
+            "snapshot_execute_with_rules_profiled"
+        );
+        result
+    }
+
     /// Execute a query with temporary session facts that don't affect the shared store
     ///
     /// This provides request-scoped isolation: session facts are added to a CLONE
@@ -295,6 +329,59 @@ impl KnowledgeGraphSnapshot {
             session_facts = session_fact_count,
             elapsed_ms = start.elapsed().as_millis() as u64,
             "snapshot_execute_with_session_facts"
+        );
+        result
+    }
+
+    /// Execute a query with session facts, returning tuples and optional timing breakdown.
+    pub fn execute_with_session_facts_profiled(
+        &self,
+        program: &str,
+        session_facts: Vec<(String, Tuple)>,
+        timing_mode: crate::execution::TimingMode,
+    ) -> Result<(Vec<Tuple>, Option<crate::execution::TimingBreakdown>), String> {
+        let start = Instant::now();
+        let session_fact_count = session_facts.len();
+        let mut engine = DatalogEngine::new();
+        engine.set_num_workers(self.num_workers);
+        engine.set_max_result_rows(self.max_result_rows);
+        engine.set_max_query_cost(self.max_query_cost);
+        engine.set_timing_mode(timing_mode);
+        self.configure_hnsw(&mut engine);
+
+        // Copy-on-write: only clone relation vectors that receive session facts.
+        let mut needs_mutation: HashMap<String, Vec<Tuple>> = HashMap::new();
+        for (relation, tuple) in session_facts {
+            needs_mutation.entry(relation).or_default().push(tuple);
+        }
+
+        let mut isolated_tuples: HashMap<String, Vec<Tuple>> =
+            HashMap::with_capacity(self.input_tuples.len() + needs_mutation.len());
+        for (rel, tuples) in self.input_tuples.as_ref() {
+            if let Some(extra) = needs_mutation.remove(rel) {
+                let mut cloned = tuples.clone();
+                cloned.extend(extra);
+                isolated_tuples.insert(rel.clone(), cloned);
+            } else {
+                isolated_tuples.insert(rel.clone(), tuples.clone());
+            }
+        }
+        for (rel, tuples) in needs_mutation {
+            isolated_tuples.insert(rel, tuples);
+        }
+
+        let shared = Arc::new(isolated_tuples);
+        engine.input_tuples.clone_from(&shared);
+        engine.set_shared_input(shared);
+
+        let combined = format!("{}{}", self.rule_prefix, program);
+        let result = engine.execute_tuples_profiled(&combined);
+        info!(
+            program_len = program.len(),
+            combined_len = combined.len(),
+            session_facts = session_fact_count,
+            elapsed_ms = start.elapsed().as_millis() as u64,
+            "snapshot_execute_with_session_facts_profiled"
         );
         result
     }
@@ -882,5 +969,73 @@ mod tests {
             .execute_with_session_facts("result(X, Y) <- edge(X, Y)", vec![])
             .unwrap();
         assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_snapshot_execute_profiled_summary() {
+        use crate::execution::TimingMode;
+
+        let mut input_tuples = HashMap::new();
+        input_tuples.insert(
+            "edge".to_string(),
+            vec![
+                Tuple::from_pair(1, 2),
+                Tuple::from_pair(2, 3),
+                Tuple::from_pair(3, 4),
+            ],
+        );
+
+        let snapshot = KnowledgeGraphSnapshot::new(input_tuples, Vec::new());
+        let (results, timing) = snapshot
+            .execute_with_rules_tuples_profiled("result(X, Y) <- edge(X, Y)", TimingMode::Summary)
+            .unwrap();
+        assert_eq!(results.len(), 3);
+
+        // Summary mode should produce timing breakdown
+        let tb = timing.expect("Summary mode should produce timing breakdown");
+        assert!(tb.total_us > 0, "total_us should be > 0");
+        // Rules array should be empty in Summary mode
+        assert!(tb.rules.is_empty());
+    }
+
+    #[test]
+    fn test_snapshot_execute_profiled_detailed() {
+        use crate::execution::TimingMode;
+
+        let mut input_tuples = HashMap::new();
+        input_tuples.insert(
+            "edge".to_string(),
+            vec![Tuple::from_pair(1, 2), Tuple::from_pair(2, 3)],
+        );
+
+        let snapshot = KnowledgeGraphSnapshot::new(input_tuples, Vec::new());
+        let (results, timing) = snapshot
+            .execute_with_rules_tuples_profiled("result(X, Y) <- edge(X, Y)", TimingMode::Detailed)
+            .unwrap();
+        assert_eq!(results.len(), 2);
+
+        let tb = timing.expect("Detailed mode should produce timing breakdown");
+        assert!(tb.total_us > 0);
+        // Detailed mode should have per-rule entries
+        assert!(
+            !tb.rules.is_empty(),
+            "Detailed mode should have rule timings"
+        );
+        assert_eq!(tb.rules[0].rule_head, "result");
+    }
+
+    #[test]
+    fn test_snapshot_execute_profiled_off() {
+        use crate::execution::TimingMode;
+
+        let mut input_tuples = HashMap::new();
+        input_tuples.insert("edge".to_string(), vec![Tuple::from_pair(1, 2)]);
+
+        let snapshot = KnowledgeGraphSnapshot::new(input_tuples, Vec::new());
+        let (results, timing) = snapshot
+            .execute_with_rules_tuples_profiled("result(X, Y) <- edge(X, Y)", TimingMode::Off)
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(timing.is_none(), "Off mode should produce no timing");
     }
 }

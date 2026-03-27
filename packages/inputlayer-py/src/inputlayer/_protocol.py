@@ -80,6 +80,7 @@ class ResultResponse:
     metadata: dict[str, Any] | None = None
     switched_kg: str | None = None
     proof_trees: list[dict[str, Any]] | None = None
+    timing_breakdown: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,7 @@ class ResultStartResponse:
     metadata: dict[str, Any] | None = None
     switched_kg: str | None = None
     proof_trees: list[dict[str, Any]] | None = None
+    timing_breakdown: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -184,6 +186,7 @@ def deserialize_message(data: str | bytes) -> ServerMessage:
             metadata=obj.get("metadata"),
             switched_kg=obj.get("switched_kg"),
             proof_trees=obj.get("proof_trees"),
+            timing_breakdown=obj.get("timing_breakdown"),
         )
     if msg_type == "error":
         return ErrorResponse(
@@ -199,6 +202,7 @@ def deserialize_message(data: str | bytes) -> ServerMessage:
             metadata=obj.get("metadata"),
             switched_kg=obj.get("switched_kg"),
             proof_trees=obj.get("proof_trees"),
+            timing_breakdown=obj.get("timing_breakdown"),
         )
     if msg_type == "result_chunk":
         return ResultChunkResponse(

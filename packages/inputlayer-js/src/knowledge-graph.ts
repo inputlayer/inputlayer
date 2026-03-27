@@ -320,6 +320,7 @@ export class KnowledgeGraph {
       truncated: result.truncated,
       executionTimeMs: result.execution_time_ms,
       rowProvenance: result.row_provenance,
+      timingBreakdown: result.timing_breakdown,
     });
     if (result.metadata) {
       rs.hasEphemeral = result.metadata.has_ephemeral ?? false;
@@ -413,6 +414,7 @@ export class KnowledgeGraph {
       totalCount: result.total_count,
       truncated: result.truncated,
       executionTimeMs: result.execution_time_ms,
+      timingBreakdown: result.timing_breakdown,
     });
   }
 
@@ -588,6 +590,7 @@ export class KnowledgeGraph {
       truncated: result.truncated,
       executionTimeMs: result.execution_time_ms,
       rowProvenance: result.row_provenance,
+      timingBreakdown: result.timing_breakdown,
     });
     // Map wire proof trees to SDK ProofTree type (snake_case -> camelCase)
     const proofTrees: ProofTree[] = (result.proof_trees ?? []).map(mapWireProofTree);
@@ -667,6 +670,7 @@ export class KnowledgeGraph {
       totalCount: result.total_count,
       truncated: result.truncated,
       executionTimeMs: result.execution_time_ms,
+      timingBreakdown: result.timing_breakdown,
     });
   }
 }

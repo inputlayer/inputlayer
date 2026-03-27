@@ -382,6 +382,9 @@ pub struct DatalogEngine {
                 + Sync,
         >,
     >,
+
+    /// Timing mode for query profiling (default: Summary)
+    timing_mode: execution::TimingMode,
 }
 
 impl DatalogEngine {
@@ -402,6 +405,7 @@ impl DatalogEngine {
             max_query_cost: 0,
             shared_input: None,
             hnsw_search_fn: None,
+            timing_mode: execution::TimingMode::default(),
         }
     }
 
@@ -422,6 +426,7 @@ impl DatalogEngine {
             max_query_cost: 0,
             shared_input: None,
             hnsw_search_fn: None,
+            timing_mode: execution::TimingMode::default(),
         }
     }
 
@@ -433,6 +438,11 @@ impl DatalogEngine {
     /// DD execution for correctness.
     pub fn set_num_workers(&mut self, num_workers: usize) {
         self.num_workers = num_workers.max(1);
+    }
+
+    /// Set the timing/profiling mode for query execution
+    pub fn set_timing_mode(&mut self, mode: execution::TimingMode) {
+        self.timing_mode = mode;
     }
 
     /// Check if the current program has recursive rules
@@ -758,7 +768,13 @@ impl DatalogEngine {
     ///
     /// For predicates with multiple rules (like recursive definitions), this creates
     /// a Union node combining all rules for that predicate.
-    pub fn build_ir(&mut self) -> Result<(), String> {
+    ///
+    /// When `collect_timing` is true, uses the timed IR builder path and returns
+    /// `Some(IrBuilderTiming)` with per-stage timing data. Otherwise returns `None`.
+    pub fn build_ir(
+        &mut self,
+        collect_timing: bool,
+    ) -> Result<Option<execution::timing::IrBuilderTiming>, String> {
         use std::collections::HashMap;
 
         let program = self
@@ -785,6 +801,11 @@ impl DatalogEngine {
         // Build IR nodes, combining multiple rules for the same predicate with Union
         let mut ir_nodes = Vec::new();
         let mut processed_predicates = std::collections::HashSet::new();
+        let mut agg_timing = if collect_timing {
+            Some(execution::timing::IrBuilderTiming::default())
+        } else {
+            None
+        };
 
         for rule in &program.rules {
             let predicate = &rule.head.relation;
@@ -798,15 +819,36 @@ impl DatalogEngine {
             let rules_for_predicate = rules_by_head.get(predicate).expect("predicate is guaranteed in rules_by_head: populated from same program.rules iteration");
 
             if rules_for_predicate.len() == 1 {
-                // Single rule - build IR directly
-                let ir = builder.build_ir(rule)?;
-                ir_nodes.push(ir);
+                if let Some(ref mut agg) = agg_timing {
+                    let (ir, t) = builder.build_ir_timed(rule)?;
+                    agg.scans_us += t.scans_us;
+                    agg.joins_us += t.joins_us;
+                    agg.computed_us += t.computed_us;
+                    agg.filters_us += t.filters_us;
+                    agg.antijoins_us += t.antijoins_us;
+                    agg.projection_us += t.projection_us;
+                    ir_nodes.push(ir);
+                } else {
+                    let ir = builder.build_ir(rule)?;
+                    ir_nodes.push(ir);
+                }
             } else {
                 // Multiple rules - build IR for each and combine with Union
                 let mut sub_irs = Vec::new();
                 for r in rules_for_predicate {
-                    let ir = builder.build_ir(r)?;
-                    sub_irs.push(ir);
+                    if let Some(ref mut agg) = agg_timing {
+                        let (ir, t) = builder.build_ir_timed(r)?;
+                        agg.scans_us += t.scans_us;
+                        agg.joins_us += t.joins_us;
+                        agg.computed_us += t.computed_us;
+                        agg.filters_us += t.filters_us;
+                        agg.antijoins_us += t.antijoins_us;
+                        agg.projection_us += t.projection_us;
+                        sub_irs.push(ir);
+                    } else {
+                        let ir = builder.build_ir(r)?;
+                        sub_irs.push(ir);
+                    }
                 }
                 let union_ir = crate::ir::IRNode::Union { inputs: sub_irs };
                 ir_nodes.push(union_ir);
@@ -814,7 +856,7 @@ impl DatalogEngine {
         }
 
         self.ir_nodes = ir_nodes;
-        Ok(())
+        Ok(agg_timing)
     }
 
     /// Update catalog with schemas inferred from program
@@ -870,7 +912,13 @@ impl DatalogEngine {
     /// 5. Basic Optimizations: Identity elimination, filter simplification
     ///
     /// Each optimization can be enabled/disabled via `OptimizationConfig`.
-    pub fn optimize_ir(&mut self) -> Result<(), String> {
+    ///
+    /// When `collect_timing` is true, uses the timed optimizer path and returns
+    /// `Some(OptimizerTiming)`. Otherwise returns `None`.
+    pub fn optimize_ir(
+        &mut self,
+        collect_timing: bool,
+    ) -> Result<Option<execution::timing::OptimizerTiming>, String> {
         // Join Planning
         if self.optimization_config.enable_join_planning {
             let join_planner = join_planning::JoinPlanner::new();
@@ -926,13 +974,28 @@ impl DatalogEngine {
 
         // Basic Optimizations (always applied)
         let optimizer = Optimizer::new();
-        self.ir_nodes = self
-            .ir_nodes
-            .iter()
-            .map(|ir| optimizer.optimize(ir.clone()))
-            .collect();
-
-        Ok(())
+        if collect_timing {
+            let mut agg_timing = execution::timing::OptimizerTiming::default();
+            self.ir_nodes = self
+                .ir_nodes
+                .iter()
+                .map(|ir| {
+                    let (optimized, t) = optimizer.optimize_timed(ir.clone());
+                    agg_timing.iterations = agg_timing.iterations.max(t.iterations);
+                    agg_timing.rules_us += t.rules_us;
+                    agg_timing.fusion_us += t.fusion_us;
+                    optimized
+                })
+                .collect();
+            Ok(Some(agg_timing))
+        } else {
+            self.ir_nodes = self
+                .ir_nodes
+                .iter()
+                .map(|ir| optimizer.optimize(ir.clone()))
+                .collect();
+            Ok(None)
+        }
     }
 
     /// Generate and execute Differential Dataflow code
@@ -1436,39 +1499,54 @@ impl DatalogEngine {
     /// Returns results from the LAST rule (typically the query), while computing
     /// all intermediate rules (views) and making them available as input data.
     pub fn execute_tuples(&mut self, source: &str) -> Result<Vec<Tuple>, String> {
+        self.execute_tuples_profiled(source)
+            .map(|(tuples, _)| tuples)
+    }
+
+    /// Execute the full pipeline returning tuples and an optional timing breakdown.
+    ///
+    /// This is the profiled entry point. The timing breakdown is populated
+    /// according to the engine's `timing_mode` setting.
+    pub fn execute_tuples_profiled(
+        &mut self,
+        source: &str,
+    ) -> Result<(Vec<Tuple>, Option<execution::TimingBreakdown>), String> {
         let debug = std::env::var("IL_DEBUG").is_ok();
         if debug {
             eprintln!("DEBUG execute_tuples: starting");
         }
+        let mut collector = execution::TimingCollector::new(self.timing_mode);
         let exec_start = Instant::now();
         let source_len = source.len();
         info!(source_len, "engine_execute_start");
 
         // Parse, apply SIP rewriting, and build IR
-        let parse_start = Instant::now();
-        self.parse(source)?;
-        let parse_ms = parse_start.elapsed().as_millis() as u64;
+        let (parse_result, parse_us) = collector.time(|| self.parse(source));
+        parse_result?;
+        let parse_ms = parse_us / 1000;
         info!(source_len, parse_ms, "engine_parse_complete");
+        collector.breakdown.parse_us = parse_us;
 
-        let sip_start = Instant::now();
-        self.apply_sip_rewriting();
-        let sip_ms = sip_start.elapsed().as_millis() as u64;
+        let ((), sip_us) = collector.time(|| self.apply_sip_rewriting());
+        let sip_ms = sip_us / 1000;
         info!(source_len, sip_ms, "engine_sip_complete");
+        collector.breakdown.sip_us = sip_us;
 
-        let magic_start = Instant::now();
-        self.apply_magic_sets();
-        let magic_ms = magic_start.elapsed().as_millis() as u64;
+        let ((), magic_us) = collector.time(|| self.apply_magic_sets());
+        let magic_ms = magic_us / 1000;
         info!(source_len, magic_ms, "engine_magic_sets_complete");
+        collector.breakdown.magic_sets_us = magic_us;
 
-        let build_start = Instant::now();
-        self.build_ir()?;
-        let build_ms = build_start.elapsed().as_millis() as u64;
+        let (build_result, build_us) = collector.time(|| self.build_ir(collector.is_detailed()));
+        collector.breakdown.ir_builder_detail = build_result?;
+        let build_ms = build_us / 1000;
         info!(
             source_len,
             build_ms,
             ir_nodes = self.ir_nodes.len(),
             "engine_build_ir_complete"
         );
+        collector.breakdown.ir_build_us = build_us;
 
         if debug {
             eprintln!(
@@ -1483,10 +1561,11 @@ impl DatalogEngine {
         let unoptimized_ir_nodes = self.ir_nodes.clone();
 
         // Optimize (for non-recursive nodes)
-        let opt_start = Instant::now();
-        self.optimize_ir()?;
-        let opt_ms = opt_start.elapsed().as_millis() as u64;
+        let (opt_result, opt_us) = collector.time(|| self.optimize_ir(collector.is_detailed()));
+        collector.breakdown.optimizer_detail = opt_result?;
+        let opt_ms = opt_us / 1000;
         info!(source_len, opt_ms, "engine_optimize_complete");
+        collector.breakdown.optimize_us = opt_us;
 
         if self.ir_nodes.is_empty() {
             return Err("No IR nodes to execute".to_string());
@@ -1521,15 +1600,16 @@ impl DatalogEngine {
         }
 
         // Execute shared views first (from subplan sharing optimization)
-        let shared_start = Instant::now();
-        let mut accumulated_results = self.execute_shared_views()?;
-        let shared_ms = shared_start.elapsed().as_millis() as u64;
+        let (shared_result, shared_us) = collector.time(|| self.execute_shared_views());
+        let mut accumulated_results = shared_result?;
+        let shared_ms = shared_us / 1000;
         info!(
             source_len,
             shared_ms,
             shared_views = self.shared_views.len(),
             "engine_shared_views_complete"
         );
+        collector.breakdown.shared_views_us = shared_us;
 
         // Execute main rules in dependency order (topological sort)
         let execution_order = self.topological_sort_ir_nodes(&rule_heads);
@@ -1537,7 +1617,6 @@ impl DatalogEngine {
 
         for &i in &execution_order {
             let head_name = rule_heads.get(i).cloned().unwrap_or_default();
-            let rule_start = Instant::now();
 
             // Create fresh CodeGenerator for each rule (avoids timely state issues)
             let mut codegen = CodeGenerator::new();
@@ -1552,16 +1631,21 @@ impl DatalogEngine {
             codegen.set_semiring_type(semiring);
             self.load_inputs_into_codegen(&mut codegen, &accumulated_results);
 
+            let is_recursive = recursive_info.get(i).is_some_and(Option::is_some);
+
             // Use unoptimized IR for recursive nodes, optimized for others
-            let result = if let Some(Some(recursive_rel)) = recursive_info.get(i) {
-                codegen.execute_recursive(&unoptimized_ir_nodes[i], recursive_rel)?
-            } else if self.num_workers > 1 {
-                // Use parallel execution when configured for multi-worker
-                let config = code_generator::ExecutionConfig::with_workers(self.num_workers);
-                codegen.execute_with_config(&self.ir_nodes[i], config)?
-            } else {
-                codegen.execute(&self.ir_nodes[i])?
-            };
+            let (exec_result, rule_us) = collector.time(|| {
+                if let Some(Some(recursive_rel)) = recursive_info.get(i) {
+                    codegen.execute_recursive(&unoptimized_ir_nodes[i], recursive_rel)
+                } else if self.num_workers > 1 {
+                    // Use parallel execution when configured for multi-worker
+                    let config = code_generator::ExecutionConfig::with_workers(self.num_workers);
+                    codegen.execute_with_config(&self.ir_nodes[i], config)
+                } else {
+                    codegen.execute(&self.ir_nodes[i])
+                }
+            });
+            let result = exec_result?;
 
             last_result.clone_from(&result);
 
@@ -1570,13 +1654,15 @@ impl DatalogEngine {
                 accumulated_results.insert(head_name.clone(), result);
             }
 
-            let rule_ms = rule_start.elapsed().as_millis() as u64;
+            collector.record_rule(head_name.clone(), rule_us, is_recursive, self.num_workers);
+
+            let rule_ms = rule_us / 1000;
             info!(
                 source_len,
                 rule_idx = i,
                 rule_head = %head_name,
                 rule_ms,
-                recursive = recursive_info.get(i).is_some_and(Option::is_some),
+                recursive = is_recursive,
                 workers = self.num_workers,
                 "engine_rule_complete"
             );
@@ -1587,7 +1673,8 @@ impl DatalogEngine {
             total_ms = exec_start.elapsed().as_millis() as u64,
             "engine_execute_complete"
         );
-        Ok(last_result)
+        let timing = collector.finish();
+        Ok((last_result, timing))
     }
 
     /// Execute all rules in the program
@@ -1600,8 +1687,8 @@ impl DatalogEngine {
         // Pipeline
         self.parse(source)?;
         self.apply_sip_rewriting();
-        self.build_ir()?;
-        self.optimize_ir()?;
+        self.build_ir(false)?;
+        self.optimize_ir(false)?;
 
         // Execute rules in dependency order, chaining intermediate results so SIP
         // intermediate rules feed into subsequent rules.
@@ -1668,11 +1755,11 @@ impl DatalogEngine {
         }
 
         // Build IR
-        self.build_ir()?;
+        self.build_ir(false)?;
         trace.record_ir_before(self.ir_nodes.clone());
 
         // Optimize
-        self.optimize_ir()?;
+        self.optimize_ir(false)?;
         trace.record_ir_after(self.ir_nodes.clone());
 
         // Execute
@@ -1706,11 +1793,11 @@ impl DatalogEngine {
         }
 
         // Build IR
-        self.build_ir()?;
+        self.build_ir(false)?;
         trace.record_ir_before(self.ir_nodes.clone());
 
         // Optimize
-        self.optimize_ir()?;
+        self.optimize_ir(false)?;
         trace.record_ir_after(self.ir_nodes.clone());
 
         // Execute all rules
@@ -1744,11 +1831,11 @@ impl DatalogEngine {
         }
 
         // Build IR
-        self.build_ir()?;
+        self.build_ir(false)?;
         trace.record_ir_before(self.ir_nodes.clone());
 
         // Optimize
-        self.optimize_ir()?;
+        self.optimize_ir(false)?;
         trace.record_ir_after(self.ir_nodes.clone());
 
         Ok(trace)
@@ -2274,7 +2361,7 @@ mod tests {
     #[test]
     fn test_build_ir_without_parse_fails() {
         let mut engine = DatalogEngine::new();
-        let result = engine.build_ir();
+        let result = engine.build_ir(false);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("No program parsed"));
     }
@@ -2367,7 +2454,7 @@ mod tests {
         let mut engine = DatalogEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
         engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
-        engine.build_ir().unwrap();
+        engine.build_ir(false).unwrap();
 
         let rule_heads = engine.get_rule_heads();
         let order = engine.topological_sort_ir_nodes(&rule_heads);
@@ -2386,7 +2473,7 @@ mod tests {
         engine
             .parse("mid(X, Y) <- edge(X, Y)\nresult(X, Y) <- mid(X, Y)")
             .unwrap();
-        engine.build_ir().unwrap();
+        engine.build_ir(false).unwrap();
 
         let rule_heads = engine.get_rule_heads();
         let order = engine.topological_sort_ir_nodes(&rule_heads);
@@ -2402,7 +2489,7 @@ mod tests {
         let mut engine = DatalogEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
         engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
-        engine.build_ir().unwrap();
+        engine.build_ir(false).unwrap();
 
         let rule_heads = engine.get_rule_heads();
         let info = engine.detect_recursion_info(&rule_heads);
@@ -2526,7 +2613,7 @@ mod tests {
         let mut engine = DatalogEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
         engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
-        engine.build_ir().unwrap();
+        engine.build_ir(false).unwrap();
 
         let ir_nodes = engine.ir_nodes();
         assert_eq!(ir_nodes.len(), 1);
@@ -2565,7 +2652,7 @@ mod tests {
         let mut engine = DatalogEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
         engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
-        assert!(engine.build_ir().is_ok());
+        assert!(engine.build_ir(false).is_ok());
         assert!(!engine.ir_nodes().is_empty());
     }
 
@@ -2574,15 +2661,15 @@ mod tests {
         let mut engine = DatalogEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
         engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
-        engine.build_ir().unwrap();
-        assert!(engine.optimize_ir().is_ok());
+        engine.build_ir(false).unwrap();
+        assert!(engine.optimize_ir(false).is_ok());
     }
 
     #[test]
     fn test_optimize_ir_empty_noop() {
         // optimize_ir on empty ir_nodes is a no-op (maps over empty vec)
         let mut engine = DatalogEngine::new();
-        let result = engine.optimize_ir();
+        let result = engine.optimize_ir(false);
         assert!(result.is_ok());
     }
 

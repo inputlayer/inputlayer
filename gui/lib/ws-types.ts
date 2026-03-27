@@ -71,6 +71,22 @@ export interface WsProofTree {
   depth_limit?: number
 }
 
+export interface WsTimingBreakdown {
+  total_us: number
+  parse_us: number
+  sip_us: number
+  magic_sets_us: number
+  ir_build_us: number
+  optimize_us: number
+  shared_views_us: number
+  rules?: Array<{
+    rule_head: string
+    execution_us: number
+    is_recursive: boolean
+    workers: number
+  }>
+}
+
 export interface WsResultMessage {
   type: "result"
   columns: string[]
@@ -83,6 +99,7 @@ export interface WsResultMessage {
   metadata?: WsResultMetadata
   switched_kg?: string
   proof_trees?: WsProofTree[]
+  timing_breakdown?: WsTimingBreakdown
 }
 
 export interface WsResultMetadata {
@@ -127,6 +144,7 @@ export interface WsResultStartMessage {
   metadata?: WsResultMetadata
   switched_kg?: string
   proof_trees?: WsProofTree[]
+  timing_breakdown?: WsTimingBreakdown
 }
 
 export interface WsResultChunkMessage {

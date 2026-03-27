@@ -198,10 +198,10 @@ fn test_optimization_removes_identity_projection() {
     let program = "result(X, Y) <- edge(X, Y)";
 
     engine.parse(program).unwrap();
-    engine.build_ir().unwrap();
+    engine.build_ir(false).unwrap();
 
     // After optimization, identity maps should be removed
-    engine.optimize_ir().unwrap();
+    engine.optimize_ir(false).unwrap();
 
     let ir_after = &engine.ir_nodes()[0];
 
