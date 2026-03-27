@@ -3,7 +3,7 @@
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0%20%2B%20Commons%20Clause-blue.svg)](./LICENSE)
 
-**The reasoning data layer for enterprise AI systems.**
+**Streaming reasoning layer for AI. Incremental rules engine with vector search, graph traversal, and explainable derivation traces.**
 
 InputLayer sits between your data and your AI. Give it facts and rules - it derives
 everything that follows, keeps those derivations current as facts change, and traces
@@ -16,174 +16,285 @@ When a fact changes, only the affected derivations recompute. Not the whole grap
 
 ## The Problem
 
-Enterprise AI systems fail in a specific, consistent way: they retrieve context
-by similarity, not by consequence.
+A shopper types: *"I need ink for my printer."*
 
-A supply chain agent asks whether an order can ship by Friday. The relevant facts -
-current inventory, supplier lead times, which carriers are suspended, which
-suppliers are under sanctions review - are not semantically similar to "can this
-order ship by Friday." They are connected through chains of operational
-relationships. Similarity search does not follow chains. It finds what sounds like
-the answer.
+They do not say which printer. Eight months ago they bought a Canon PIXMA MG3620.
+The correct cartridges are the Canon PG-245 and CL-246. There are 847 ink
+cartridges in the catalogue.
 
-The same pattern appears in every domain:
+A vector search for "printer ink" returns cartridges ranked by semantic similarity.
+The problem: every ink cartridge is semantically similar to "printer ink." In
+embedding space, a Canon PG-245, an Epson 202, and a Brother LC3013 are
+essentially identical. Similarity search has no mechanism to distinguish them.
 
-**Manufacturing:** An agent asks whether a production line can run tonight.
-The answer depends on maintenance schedules, parts availability, and which
-equipment has an active quality hold. None of those facts are semantically
-close to the question.
-
-**Financial risk:** Compliance asks whether a transaction is suspicious.
-The answer requires traversing entity ownership chains - Entity A paid Entity B,
-B is a subsidiary of C, C is on a sanctions list. Pattern matching finds similar
-transactions. It does not follow the ownership graph.
-
-**Healthcare:** A patient asks what they can eat. The answer requires following:
-prescribed medication -> drug interactions -> ingredient contraindications -> food.
-Medical information lives in a different embedding space from dietary questions.
-
-These are not retrieval failures. They are reasoning failures. The context
-exists. The system cannot reach it.
-
----
-
-## What InputLayer Does
-
-InputLayer is a deductive context graph. You define facts and rules. The engine
-derives everything that logically follows and keeps those derivations current as
-your data changes.
+The correct answer requires closing a chain across three completely separate fact
+domains:
 
 ```
-facts + rules -> derived facts, updated incrementally
+shopper owns Canon PIXMA MG3620       (purchase history)
+  -> MG3620 uses PG-245 and CL-246    (compatibility matrix)
+  -> PG-245 in stock, 2-pack, $34.99  (live inventory)
+  -> recommend this specific SKU
 ```
 
-Three properties matter for production use:
+None of those connections are semantic. Compatibility is a structured logical
+relationship - a printer takes specific cartridge models, period. There is no
+text similarity between "Canon PIXMA MG3620" and "PG-245." The connection exists
+only as a fact in a compatibility table.
 
-**Incremental maintenance.** When a fact changes, only the affected derivations
-recompute. Insert one new edge into a 2,000-node graph and re-query transitive
-closure: 6.83ms. Full recompute: 11.3 seconds. The engine handles the delta -
-you do not.
+The shopper does not know their cartridge model. That is why they asked the agent
+instead of searching directly. The agent has everything it needs to answer - the
+purchase history, the compatibility data, the inventory - in three separate systems
+that nothing connects at query time.
 
-**Correct retraction.** Delete a fact and every conclusion derived through it
-disappears automatically, including through chains of recursive rules. No phantom
-permissions. No stale cache. No manual invalidation.
+**The standard workaround is glue code:** query purchase history, extract the
+printer model, hit a compatibility API, cross-reference with inventory, filter
+results, re-rank. Four round trips across separate systems. Brittle to model name
+variations. No live inventory awareness. Nothing recomputes when stock changes.
+And if the shopper asks a follow-up question, you run all of it again.
 
-**Explainable derivation.** Every result traces back to the base facts and rules
-that produced it. Not "the vector was close" - a full derivation chain you can
-audit, log, and show to a regulator.
+InputLayer closes the chain in one query, keeps it current as inventory changes,
+and produces a derivation proof for every result.
 
 ---
 
 ## How It Works
 
-Here is the supply chain example. The agent needs to know whether an order can
-ship by Friday.
+InputLayer is a streaming reasoning layer. You define facts and rules. The engine
+derives everything that logically follows, keeps those derivations current as data
+changes incrementally, and traces every result back to the rules that produced it.
 
-Facts about the current operational state:
-
-```datalog
-+supplier[
-    ("sup_01", "status", "active"),
-    ("sup_02", "status", "suspended"),
-    ("sup_03", "status", "active")
-]
-
-+required_supplier[("order_2847", "sup_01"), ("order_2847", "sup_02")]
-+lead_time[("sup_01", 3), ("sup_03", 2)]
+```
+facts + rules -> derived facts, updated incrementally
 ```
 
-Rules that derive fulfillment status from those facts:
+Five properties matter for production use:
 
-```datalog
-+order_blocked(OrderId, SupplierId, "supplier_suspended") <-
-    required_supplier(OrderId, SupplierId),
-    supplier(SupplierId, "status", "suspended")
+**Recursive rule evaluation.** Rules can reference themselves. Define product
+compatibility hierarchies, category trees, or transitive access policies - the
+engine follows the chain to its conclusion without you specifying the depth.
 
-+can_ship_by_friday(OrderId) <-
-    required_supplier(OrderId, SupplierId),
-    supplier(SupplierId, "status", "active"),
-    lead_time(SupplierId, Days),
-    Days =< 4,
-    !order_blocked(OrderId, _, _)
-```
+**Vector search and graph in one query.** Run a vector similarity search and a
+rule-based graph traversal in the same query. No glue code, no separate round
+trips, no two systems that may disagree.
 
-Query:
+**Incremental maintenance.** When a fact changes, only the affected derivations
+recompute. Insert one new edge into a 2,000-node graph: 6.83ms to re-derive
+transitive closure. Full recompute: 11.3 seconds. The engine handles the delta.
 
-```datalog
-?order_blocked("order_2847", Supplier, Reason)
-```
+**Correct retraction.** Delete a fact and every conclusion derived through it
+disappears automatically - but only if no other derivation path supports it. No
+stale recommendations. No phantom in-stock items. No manual cache invalidation.
 
-Result: `order_2847` is blocked because `sup_02` is suspended. When `sup_02`
-is reinstated, the derivation updates automatically. No pipeline re-run.
+**Derivation proofs.** Every result ships with a complete, machine-readable proof -
+the full chain of rules and base facts that produced it. Exposed via the
+Provenance API, per result.
 
 ---
 
-## The Shellfish Problem
+## The Demo
 
-This is the clearest illustration of why retrieval alone fails.
+The printer ink scenario, in code.
 
-A travel agent has hundreds of memories about a user. The user says:
-"Recommend me some restaurants in Tokyo."
-
-The agent retrieves the top 10 memories by vector similarity. It gets memories
-about past trips to Japan, restaurant preferences, favorite cuisines.
-
-The user's shellfish allergy is nowhere in the top 10. It is health information.
-Medical conditions do not live near restaurant queries in embedding space.
-
-The agent recommends a crab kaiseki restaurant. The user ends up in hospital.
-
-The allergy was the most important context. The relevance comes through a chain:
-
-```
-Tokyo restaurants -> Japanese cuisine -> shellfish is a staple -> user has shellfish allergy
-```
-
-Here is how InputLayer handles this:
+### The data
 
 ```datalog
-+user_memory[
-    ("m1", "loves_sushi", "User loves sushi", [0.91, 0.12, 0.03]),
-    ("m2", "shellfish_allergy", "Severe shellfish allergy", [0.22, 0.05, 0.88]),
-    ("m3", "visited_paris", "Visited Paris last year", [0.45, 0.67, 0.11])
-]
+// Purchase history - what the shopper owns
++owns("shopper_42", "canon-pixma-mg3620", "2025-07-14")
++owns("shopper_42", "hp-envy-6055e",      "2024-02-03")
 
-+related_to[
-    ("sushi", "japanese_cuisine"),
-    ("shellfish", "japanese_cuisine"),
-    ("japanese_cuisine", "tokyo")
-]
+// Compatibility matrix - which cartridges work with which printers
+// This is structured product data, not text. There is no semantic path
+// from a printer model name to a cartridge model name.
++compatible("canon-pixma-mg3620", "canon-pg-245")
++compatible("canon-pixma-mg3620", "canon-cl-246")
++compatible("canon-pixma-mg3620", "canon-pg-245xl")
++compatible("canon-pixma-mg3620", "canon-cl-246xl")
++compatible("hp-envy-6055e",      "hp-67-black")
++compatible("hp-envy-6055e",      "hp-67-tricolor")
++compatible("hp-envy-6055e",      "hp-67xl-black")
+// ... thousands of printer-cartridge relationships
 
-+memory_topic[("m1", "sushi"), ("m2", "shellfish"), ("m3", "paris")]
+// Live inventory with embeddings for the product descriptions
++product("canon-pg-245",    "Canon PG-245 Black Ink Cartridge",       14.99, [0.81, 0.44, ...])
++product("canon-cl-246",    "Canon CL-246 Color Ink Cartridge",       16.99, [0.79, 0.41, ...])
++product("canon-pg-245xl",  "Canon PG-245XL High Yield Black",        22.99, [0.83, 0.46, ...])
++product("epson-202-black", "Epson 202 Black Ink Cartridge",          13.99, [0.82, 0.43, ...])
++product("hp-67-black",     "HP 67 Black Original Ink Cartridge",     16.99, [0.80, 0.42, ...])
+// ... 847 total cartridges
 
-+trip_relevant(MemId, Text, "direct") <-
-    user_memory(MemId, _, Text, _),
-    memory_topic(MemId, Topic),
-    related_to(Topic, "tokyo")
-
-+trip_relevant(MemId, Text, "inferred") <-
-    user_memory(MemId, _, Text, _),
-    memory_topic(MemId, Topic),
-    related_to(Topic, Bridge),
-    related_to(Bridge, "tokyo")
++in_stock("canon-pg-245",   42)
++in_stock("canon-cl-246",   18)
++in_stock("canon-pg-245xl",  3)
++in_stock("epson-202-black", 67)
++in_stock("hp-67-black",    29)
 ```
 
-Query: `?trip_relevant(Id, Text, How)`
+### The rules
 
-| Id | Text | How |
+```datalog
+// A cartridge is relevant to a shopper if they own a compatible printer
++compatible_with_shopper(Shopper, CartridgeId) <-
+    owns(Shopper, PrinterId, _),
+    compatible(PrinterId, CartridgeId)
+
+// A cartridge is recommendable if it is compatible and in stock
++recommendable(Shopper, CartridgeId) <-
+    compatible_with_shopper(Shopper, CartridgeId),
+    in_stock(CartridgeId, Qty), Qty > 0
+```
+
+### The query - compatibility rules and semantic search in one pass
+
+The shopper typed "ink for my printer." No model name. No cartridge number.
+This single query closes the chain from owned device to correct in-stock SKU,
+ranked by cosine distance to the query embedding (lower = more relevant).
+
+```datalog
+?recommendable("shopper_42", CartridgeId),
+ product(CartridgeId, Description, Price, Embedding),
+ query_vec(Q),
+ Distance = cosine(Embedding, Q),
+ Distance < 0.05
+```
+
+**Actual engine output:**
+
+```
+┌──────────────┬──────────────────┬──────────────────────────────────────────┬───────┬──────────┐
+│ shopper_42   │ CartridgeId      │ Description                              │ Price │ Distance │
+├──────────────┼──────────────────┼──────────────────────────────────────────┼───────┼──────────┤
+│ "shopper_42" │ "canon-pg-245"   │ "Canon PG-245 Black Ink Cartridge"       │ 14.99 │   0.0000 │
+│ "shopper_42" │ "hp-67-black"    │ "HP 67 Black Original Ink Cartridge"     │ 16.99 │   0.0002 │
+│ "shopper_42" │ "hp-67xl-black"  │ "HP 67XL Black High Yield Ink Cartridge" │ 25.99 │   0.0007 │
+│ "shopper_42" │ "canon-pg-245xl" │ "Canon PG-245XL High Yield Black"        │ 22.99 │   0.0010 │
+│ "shopper_42" │ "canon-cl-246"   │ "Canon CL-246 Color Ink Cartridge"       │ 16.99 │   0.0091 │
+│ "shopper_42" │ "hp-67-tricolor" │ "HP 67 Tri-color Original Ink Cartridge" │ 17.99 │   0.0189 │
+└──────────────┴──────────────────┴──────────────────────────────────────────┴───────┴──────────┘
+6 rows
+```
+
+`epson-202-black` and `brother-lc3013` - semantically identical to the Canon and
+HP cartridges in embedding space - do not appear. They are compatible with other
+printers, not the ones this shopper owns. The rules excluded them.
+
+`canon-cl-246xl` is compatible but has 0 stock, so the `Qty > 0` condition in
+the `recommendable` rule excluded it.
+
+**Derivation proof for `canon-pg-245` (via proof query):**
+
+```
+┌──────────────┬──────────────────────┬──────────────┬─────┐
+│ shopper_42   │ PrinterId            │ _            │ Qty │
+├──────────────┼──────────────────────┼──────────────┼─────┤
+│ "shopper_42" │ "canon-pixma-mg3620" │ "2025-07-14" │  42 │
+└──────────────┴──────────────────────┴──────────────┴─────┘
+```
+
+The chain: shopper owns `canon-pixma-mg3620` (purchased 2025-07-14), which is
+compatible with `canon-pg-245`, which has 42 units in stock. Any of these facts
+can be audited, corrected, or updated independently.
+
+---
+
+## When Facts Change
+
+### Stock runs out mid-session
+
+The three remaining PG-245XL units sell while the shopper is browsing.
+
+```datalog
+-in_stock("canon-pg-245xl", 3)
++in_stock("canon-pg-245xl", 0)
+```
+
+Re-running the same query now returns 5 rows instead of 6 - `canon-pg-245xl`
+is gone:
+
+```
+┌──────────────┬──────────────────┬──────────────────────────────────────────┬───────┬──────────┐
+│ shopper_42   │ CartridgeId      │ Description                              │ Price │ Distance │
+├──────────────┼──────────────────┼──────────────────────────────────────────┼───────┼──────────┤
+│ "shopper_42" │ "canon-pg-245"   │ "Canon PG-245 Black Ink Cartridge"       │ 14.99 │   0.0000 │
+│ "shopper_42" │ "hp-67-black"    │ "HP 67 Black Original Ink Cartridge"     │ 16.99 │   0.0002 │
+│ "shopper_42" │ "hp-67xl-black"  │ "HP 67XL Black High Yield Ink Cartridge" │ 25.99 │   0.0007 │
+│ "shopper_42" │ "canon-cl-246"   │ "Canon CL-246 Color Ink Cartridge"       │ 16.99 │   0.0091 │
+│ "shopper_42" │ "hp-67-tricolor" │ "HP 67 Tri-color Original Ink Cartridge" │ 17.99 │   0.0189 │
+└──────────────┴──────────────────┴──────────────────────────────────────────┴───────┴──────────┘
+5 rows
+```
+
+No cache flush. No re-run. The retraction propagated through the rule chain automatically.
+
+### Shopper buys a new printer
+
+```datalog
++owns("shopper_42", "epson-ecotank-et-2800", "2026-03-27")
++compatible[("epson-ecotank-et-2800", "epson-522-black"), ("epson-ecotank-et-2800", "epson-522-cyan")]
+```
+
+The same query now returns 7 rows - Epson 522 products appear automatically:
+
+```
+┌──────────────┬───────────────────┬──────────────────────────────────────────┬───────┬──────────┐
+│ shopper_42   │ CartridgeId       │ Description                              │ Price │ Distance │
+├──────────────┼───────────────────┼──────────────────────────────────────────┼───────┼──────────┤
+│ "shopper_42" │ "canon-pg-245"    │ "Canon PG-245 Black Ink Cartridge"       │ 14.99 │   0.0000 │
+│ "shopper_42" │ "hp-67-black"     │ "HP 67 Black Original Ink Cartridge"     │ 16.99 │   0.0002 │
+│ "shopper_42" │ "epson-522-black" │ "Epson 522 Black Ink Bottle"             │  7.99 │   0.0006 │
+│ "shopper_42" │ "hp-67xl-black"   │ "HP 67XL Black High Yield Ink Cartridge" │ 25.99 │   0.0007 │
+│ "shopper_42" │ "canon-cl-246"    │ "Canon CL-246 Color Ink Cartridge"       │ 16.99 │   0.0091 │
+│ "shopper_42" │ "hp-67-tricolor"  │ "HP 67 Tri-color Original Ink Cartridge" │ 17.99 │   0.0189 │
+│ "shopper_42" │ "epson-522-cyan"  │ "Epson 522 Cyan Ink Bottle"              │  7.99 │   0.0224 │
+└──────────────┴───────────────────┴──────────────────────────────────────────┴───────┴──────────┘
+7 rows
+```
+
+No reindex. No batch job. The new printer's compatible cartridges appeared
+because the rules derived them from the new facts.
+
+### The standard alternative - and why it breaks
+
+Without InputLayer, the typical implementation is:
+
+```python
+# Step 1: query purchase history for printer models
+printers = db.query("SELECT product_id FROM orders WHERE user=? AND category='printer'")
+
+# Step 2: for each printer, hit compatibility API
+cartridges = []
+for printer in printers:
+    compatible = compatibility_api.get(printer.model_name)  # brittle to name variations
+    cartridges.extend(compatible)
+
+# Step 3: filter by inventory
+in_stock = inventory_api.filter(cartridges)
+
+# Step 4: re-rank by relevance
+results = vector_db.search("ink for my printer", filter={"id": {"$in": in_stock}})
+```
+
+Four systems. Four round trips. The inventory check is a snapshot - if something
+sells out between step 3 and the shopper clicking buy, they see a false result.
+Model name variations between the purchase history and the compatibility database
+cause silent misses. And none of this recomputes when anything changes - it runs
+from scratch on every query.
+
+InputLayer replaces all four steps with two rules and one query. The derivation
+is live, correct, and auditable.
+
+| What changes | Glue code approach | InputLayer |
 |---|---|---|
-| m1 | User loves sushi | direct |
-| m2 | Severe shellfish allergy | inferred |
-
-The allergy was never tagged as trip-relevant. The engine followed
-`shellfish -> japanese_cuisine -> tokyo` and derived it from the rules.
+| Item sells out | Stale until next inventory poll | Retracts in milliseconds |
+| New printer purchased | Excluded until next reindex | Compatible cartridges available immediately |
+| Compatibility data updated | Requires reindex + cache clear | Propagates through affected derivations only |
 
 ---
 
 ## Where InputLayer Fits
 
-InputLayer is not a replacement for your existing stack. It is the reasoning
-layer that sits between your data and your AI system.
+InputLayer is not a replacement for your existing stack. It is the streaming
+reasoning layer that sits between your data and your AI system.
 
 ```
 [Your data sources] -> [InputLayer: facts + rules + derived context] -> [Your AI]
@@ -195,7 +306,7 @@ layer that sits between your data and your AI system.
 - For orchestration: use your existing AI platform
 
 InputLayer handles the reasoning question: given the current state of the world,
-what context is logically relevant to this decision?
+what context is logically relevant to this decision - and why?
 
 ---
 
@@ -226,8 +337,20 @@ cargo build --release
 ./target/release/inputlayer-server --port 8080      # WebSocket server
 ```
 
-See the [Quick Start Guide](./docs/guides/quickstart.md). If you know SQL, the
-query language takes about 10 minutes to learn.
+See the [Quick Start Guide](./docs/guides/quickstart.md). If you know SQL, the query
+language takes about 10 minutes to learn. If you know Prolog, you already know it.
+
+To run the printer ink demo from this README:
+
+```bash
+# Start the server
+./target/release/inputlayer-server --port 8080
+
+# Run the demo (in another terminal)
+./target/release/inputlayer-client --script examples/retail/printer-ink.idl
+```
+
+See [examples/retail/](./examples/retail/) for the full runnable script.
 
 ---
 
@@ -241,7 +364,8 @@ query language takes about 10 minutes to learn.
 - Multi-tenancy - isolated knowledge graphs per tenant
 - WebSocket API with AsyncAPI docs
 - Python SDK
-- Provenance API - every result ships with a complete derivation proof
+- Provenance API - every result ships with a complete derivation proof, tracing
+  the full chain of rules and base facts that produced it
 - Single binary. No cluster, no JVM, no external dependencies.
 
 ---

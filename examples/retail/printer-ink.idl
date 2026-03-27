@@ -1,0 +1,130 @@
+// =============================================================================
+// Printer Ink Recommendation Demo
+// =============================================================================
+//
+// A shopper types: "I need ink for my printer."
+//
+// They don't say which printer. Eight months ago they bought a Canon PIXMA
+// MG3620. The correct cartridges are the Canon PG-245 and CL-246. There are
+// 847 ink cartridges in the catalogue (we show a representative subset here).
+//
+// Vector search for "printer ink" returns every cartridge - they're all
+// semantically identical in embedding space. The correct answer requires
+// closing a chain across three separate fact domains: purchase history,
+// compatibility matrix, and live inventory.
+//
+// InputLayer closes the chain in one query with two rules.
+//
+// Run:
+//   1. Start the server:  cargo run --release --bin inputlayer-server
+//   2. Run this script:   cargo run --bin inputlayer-client -- --script examples/retail/printer-ink.idl
+//
+// =============================================================================
+
+.kg create retail_demo
+.kg use retail_demo
+
+// ─── Purchase history ───────────────────────────────────────────────────────
+// What the shopper owns: (shopper_id, product_id, purchase_date)
+
++owns[("shopper_42", "canon-pixma-mg3620", "2025-07-14"), ("shopper_42", "hp-envy-6055e", "2024-02-03")]
+
+// ─── Compatibility matrix ───────────────────────────────────────────────────
+// Which cartridges work with which printers. Structured product data, not text.
+
++compatible[("canon-pixma-mg3620", "canon-pg-245"), ("canon-pixma-mg3620", "canon-cl-246"), ("canon-pixma-mg3620", "canon-pg-245xl"), ("canon-pixma-mg3620", "canon-cl-246xl"), ("hp-envy-6055e", "hp-67-black"), ("hp-envy-6055e", "hp-67-tricolor"), ("hp-envy-6055e", "hp-67xl-black")]
+
+// ─── Product catalogue with embeddings ──────────────────────────────────────
+// Each product: (id, description, price, embedding_vector)
+// Embeddings are simplified 4D vectors. In production these would be 768+ dims.
+
++product[("canon-pg-245", "Canon PG-245 Black Ink Cartridge", 14.99, [0.90, 0.30, 0.15, 0.20]), ("canon-cl-246", "Canon CL-246 Color Ink Cartridge", 16.99, [0.85, 0.35, 0.25, 0.15]), ("canon-pg-245xl", "Canon PG-245XL High Yield Black", 22.99, [0.92, 0.28, 0.12, 0.22]), ("canon-cl-246xl", "Canon CL-246XL High Yield Color", 26.99, [0.83, 0.37, 0.27, 0.13]), ("epson-202-black", "Epson 202 Black Ink Cartridge", 13.99, [0.88, 0.32, 0.18, 0.19]), ("epson-202-cyan", "Epson 202 Cyan Ink Cartridge", 11.99, [0.80, 0.40, 0.30, 0.10]), ("hp-67-black", "HP 67 Black Original Ink Cartridge", 16.99, [0.89, 0.31, 0.16, 0.21]), ("hp-67-tricolor", "HP 67 Tri-color Original Ink Cartridge", 17.99, [0.82, 0.38, 0.28, 0.12]), ("hp-67xl-black", "HP 67XL Black High Yield Ink Cartridge", 25.99, [0.91, 0.29, 0.13, 0.23]), ("brother-lc3013", "Brother LC3013 Black Ink Cartridge", 15.99, [0.87, 0.33, 0.20, 0.18])]
+
+// ─── Live inventory ─────────────────────────────────────────────────────────
+
++in_stock[("canon-pg-245", 42), ("canon-cl-246", 18), ("canon-pg-245xl", 3), ("canon-cl-246xl", 0), ("epson-202-black", 67), ("epson-202-cyan", 45), ("hp-67-black", 29), ("hp-67-tricolor", 14), ("hp-67xl-black", 8), ("brother-lc3013", 53)]
+
+// ─── Query vector ───────────────────────────────────────────────────────────
+// The embedding for "ink for my printer" - close to ALL ink cartridges
+// (cosine() returns distance: 0 = identical, 1 = orthogonal)
+
++query_vec[([0.90, 0.30, 0.15, 0.20])]
+
+
+// =============================================================================
+// RULES
+// =============================================================================
+
+// Rule 1: A cartridge is relevant to a shopper if they own a compatible printer
++compatible_with_shopper(Shopper, CartridgeId) <- owns(Shopper, PrinterId, _), compatible(PrinterId, CartridgeId)
+
+// Rule 2: A cartridge is recommendable if it is compatible AND in stock
++recommendable(Shopper, CartridgeId) <- compatible_with_shopper(Shopper, CartridgeId), in_stock(CartridgeId, Qty), Qty > 0
+
+
+// =============================================================================
+// QUERY 1: What is compatible with this shopper?
+// Shows all cartridges for all printers the shopper owns.
+// =============================================================================
+
+?compatible_with_shopper("shopper_42", CartridgeId)
+
+
+// =============================================================================
+// QUERY 2: What is recommendable (compatible + in stock)?
+// canon-cl-246xl drops out - it has 0 stock.
+// =============================================================================
+
+?recommendable("shopper_42", CartridgeId)
+
+
+// =============================================================================
+// QUERY 3: Full recommendation with product details + similarity ranking
+// =============================================================================
+// Compatibility rules + vector search in one pass.
+// cosine() returns distance (lower = more similar).
+// Only Canon and HP cartridges appear - Epson and Brother are excluded by rules
+// despite having nearly identical embeddings.
+
+?recommendable("shopper_42", CartridgeId), product(CartridgeId, Description, Price, Embedding), query_vec(Q), Distance = cosine(Embedding, Q), Distance < 0.05
+
+
+// =============================================================================
+// SCENARIO: Stock runs out mid-session
+// =============================================================================
+// The 3 remaining PG-245XL units sell while the shopper is browsing.
+
+-in_stock("canon-pg-245xl", 3)
++in_stock("canon-pg-245xl", 0)
+
+// Re-query: PG-245XL should no longer appear
+?recommendable("shopper_42", CartridgeId), product(CartridgeId, Description, Price, Embedding), query_vec(Q), Distance = cosine(Embedding, Q), Distance < 0.05
+
+
+// =============================================================================
+// SCENARIO: Shopper buys a new printer
+// =============================================================================
+
++owns("shopper_42", "epson-ecotank-et-2800", "2026-03-27")
++compatible[("epson-ecotank-et-2800", "epson-522-black"), ("epson-ecotank-et-2800", "epson-522-cyan")]
++product[("epson-522-black", "Epson 522 Black Ink Bottle", 7.99, [0.88, 0.32, 0.17, 0.19]), ("epson-522-cyan", "Epson 522 Cyan Ink Bottle", 7.99, [0.80, 0.39, 0.28, 0.11])]
++in_stock[("epson-522-black", 120), ("epson-522-cyan", 95)]
+
+// Re-query: Epson 522 products now appear alongside Canon and HP ones
+?recommendable("shopper_42", CartridgeId), product(CartridgeId, Description, Price, Embedding), query_vec(Q), Distance = cosine(Embedding, Q), Distance < 0.05
+
+
+// =============================================================================
+// PROOF: Why was canon-pg-245 recommended?
+// =============================================================================
+// Trace the full derivation chain for a specific result.
+
+?owns("shopper_42", PrinterId, _), compatible(PrinterId, "canon-pg-245"), in_stock("canon-pg-245", Qty), Qty > 0
+
+
+// =============================================================================
+// Cleanup
+// =============================================================================
+
+.kg use default
+.kg drop retail_demo
