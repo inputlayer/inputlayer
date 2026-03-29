@@ -6,6 +6,7 @@ import { SiteHeader } from "@/components/site-header"
 import { SiteFooter } from "@/components/site-footer"
 import { EmbeddingDiagram, DiamondDiagram, WaterfallDiagram, ProvenanceTreeDiagram, VisualCodeTabs, HeroVisualization } from "@/components/landing-diagrams"
 import { RotatingHero } from "@/components/rotating-hero"
+import { ComparisonTable } from "@/components/comparison-table"
 import {
   ArrowRight,
   ExternalLink,
@@ -305,6 +306,35 @@ export default function LandingPage() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* ── Comparison ──────────────────────────────────────────────── */}
+      <section className="border-b border-border/50">
+        <div className="mx-auto max-w-6xl px-6 py-20">
+          <div className="space-y-6 mb-12">
+            <p className="text-sm font-semibold text-primary uppercase tracking-wider">Comparison</p>
+            <h2 className="text-3xl font-bold tracking-tight">
+              The reasoning layer your stack is missing
+            </h2>
+            <p className="text-muted-foreground max-w-2xl">
+              InputLayer is not a replacement for your data stack or your AI platform. It is the streaming reasoning layer that sits between them - filling the gap that neither vector search nor graph traversal can cover alone.
+            </p>
+          </div>
+
+          <ComparisonTable
+            columns={["Vector DBs", "Graph DBs", "SQL", "InputLayer"]}
+            highlightColumn="InputLayer"
+            rows={[
+              { capability: "Vector similarity", values: { "Vector DBs": "native", "Graph DBs": "plugin", "SQL": "none", "InputLayer": "native" } },
+              { capability: "Graph traversal", values: { "Vector DBs": "none", "Graph DBs": "native", "SQL": "partial", "InputLayer": "native" } },
+              { capability: "Rule-based inference", values: { "Vector DBs": "none", "Graph DBs": "none", "SQL": "none", "InputLayer": "native" } },
+              { capability: "Recursive reasoning", values: { "Vector DBs": "none", "Graph DBs": "partial", "SQL": "partial", "InputLayer": "native" } },
+              { capability: "Incremental updates", values: { "Vector DBs": "none", "Graph DBs": "none", "SQL": "partial", "InputLayer": "native" } },
+              { capability: "Correct retraction", values: { "Vector DBs": "none", "Graph DBs": "none", "SQL": "none", "InputLayer": "native" } },
+              { capability: "Explainable retrieval", values: { "Vector DBs": "none", "Graph DBs": "partial", "SQL": "none", "InputLayer": "native" } },
+            ]}
+          />
         </div>
       </section>
 
