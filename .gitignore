@@ -26,6 +26,7 @@ tmp/
 
 # Node.js dependencies (all packages)
 node_modules/
+.next/
 
 # GUI (Next.js) - Build artifacts and dependencies
 gui/.next/

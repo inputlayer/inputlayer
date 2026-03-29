@@ -26,19 +26,11 @@ export function BlogCard({ slug, title, date, author, excerpt, category }: BlogC
       {excerpt && (
         <p className="text-sm text-muted-foreground line-clamp-3">{excerpt}</p>
       )}
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        {date && (
-          <time dateTime={date}>
-            {new Date(date).toLocaleDateString("en-US", {
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            })}
-          </time>
-        )}
-        {date && author && <span>·</span>}
-        {author && <span>{author}</span>}
-      </div>
+      {author && (
+        <div className="text-xs text-muted-foreground">
+          {author}
+        </div>
+      )}
     </Link>
   )
 }

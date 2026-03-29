@@ -1,0 +1,41 @@
+// Use case: Agentic AI - Agent Memory as Knowledge Graph
+// Agent accumulates observations, rules derive conclusions, .why explains them
+
+.kg create landing_agent_memory
+.kg use landing_agent_memory
+
+// Agent observations as structured facts
++customer[("acme", "enterprise", 150000)]
++usage_trend[("acme", "declining")]
++renewal[("acme", "2026-04-15")]
+
++customer[("globex", "startup", 25000)]
++usage_trend[("globex", "growing")]
++renewal[("globex", "2026-09-01")]
+
+// Rules: derive churn risk
++high_value(C) <- customer(C, "enterprise", Amt), Amt > 100000
++engagement_drop(C) <- usage_trend(C, "declining")
++renewal_soon(C) <- renewal(C, Date), Date < "2026-06-01"
+
++churn_risk(C) <- high_value(C), engagement_drop(C), renewal_soon(C)
+
+// Query: who is at churn risk?
+?churn_risk(C)
+
+// Why is acme at churn risk?
+.why ?churn_risk("acme")
+
+// Why is globex NOT at churn risk?
+.why_not churn_risk("globex")
+
+// Agent intervention: usage trend improves
+-usage_trend("acme", "declining")
++usage_trend[("acme", "stable")]
+
+// Query again: churn risk should retract
+?churn_risk(C)
+
+// Cleanup
+.kg use default
+.kg drop landing_agent_memory

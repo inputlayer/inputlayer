@@ -2,42 +2,135 @@
 title: "Manufacturing Operations"
 icon: "Factory"
 subtitle: "Live operational reasoning for production planning, equipment availability, and job spec fulfillment."
+order: 3
 ---
 
-# Live operational reasoning for manufacturing AI
+# Production planning through dependency chains
 
-Manufacturing AI systems fail when they reason on stale operational data. Equipment holds, maintenance windows, job spec requirements, and parts availability change continuously. A planning agent working from a nightly snapshot makes decisions on yesterday's factory floor.
+A planning agent says Line 4 can run the night shift. It checked the equipment status, the parts inventory, the maintenance schedule. Everything looked good at 6:00am. But at 6:03am, an operator's safety certification expired because her training lapsed. Nobody told the planning agent. The shift runs. An auditor finds the uncertified operator three weeks later.
 
-InputLayer maintains a live knowledge graph of your operational state. Rules derive production readiness, equipment availability, and job fulfillment status from current facts. When an equipment hold is lifted, every dependent derivation updates in milliseconds - no batch job, no manual reconciliation.
-
-The Provenance API returns a complete derivation trace for every decision: which hold, which rule, which fact produced this output. Production AI in regulated manufacturing environments requires exactly this.
+The problem isn't the data - it was there. The problem is that the answer to "can this line run?" depends on a chain of facts that goes several levels deep: a production line depends on a qualified operator, the operator's qualification depends on a current certification, and the certification depends on completed training. When any link in that chain breaks, every conclusion built on it should update immediately. Not at the next refresh. Not when someone checks manually. Immediately.
 
 ---
 
-## Example: Production line availability
+## The setup
 
-These facts represent current equipment and operator state. The rule derives which lines are available to run right now.
+Line 4 needs Operator Kim. Line 5 needs Operator Lee. Both are qualified through a shared safety certification. That certification is backed by training Kim completed in January.
 
 ```datalog
-+equipment[("line_4", "status", "hold"), ("line_5", "status", "active")]
-+hold_reason[("line_4", "quality_inspection", "2026-03-25")]
-+certified_operator[("op_12", "line_4"), ("op_12", "line_5")]
+// Which lines need which operators
++requires[("line_4", "operator_kim"), ("line_5", "operator_lee")]
 
-+line_available(Line) <-
-    equipment(Line, "status", "active"),
-    !equipment(Line, "status", "hold")
+// Which operators hold which certifications
++qualified_by[("operator_kim", "cert_safety"), ("operator_lee", "cert_safety")]
 
-?line_available(L)
-// Returns: line_5
-// line_4 excluded because hold fact is true
+// Which training backs the certification
++valid_certification[("cert_safety", "training_jan_2026")]
+
+// The training record
++training_completed[("training_jan_2026")]
 ```
 
-When the hold on line_4 is lifted, `line_available("line_4")` is derived automatically. No query change. No cache flush. The rule fires on the updated fact.
+A four-level dependency chain: line depends on operator, operator depends on certification, certification depends on training.
 
 ---
 
-## What this replaces
+## The rules
 
-The standard approach is a scheduled query that re-runs every N minutes against your MES or ERP. Between runs, the agent reasons on data that may already be wrong. A hold lifted at 6:03am is invisible until the 6:15am refresh. A shift plan built at 6:04am is built on a ghost.
+Something is available if everything it depends on is also available. This is recursive - it follows the chain from training up to production line, at any depth.
 
-InputLayer propagates the fact change in milliseconds. The next agent query sees current state.
+```datalog
++available(X) <- training_completed(X)
++available(X) <- valid_certification(X, Dep), available(Dep)
++available(X) <- qualified_by(X, Dep), available(Dep)
++available(X) <- requires(X, Dep), available(Dep)
+```
+
+Training completion is the base case. Everything else is available if its dependency is available. The engine chains these together automatically.
+
+---
+
+## Everything is available
+
+```datalog
+?available(X)
+```
+
+```
+┌─────────────────────┐
+│ X                   │
+├─────────────────────┤
+│ "cert_safety"       │
+│ "line_4"            │
+│ "line_5"            │
+│ "operator_kim"      │
+│ "operator_lee"      │
+│ "training_jan_2026" │
+└─────────────────────┘
+6 rows
+```
+
+Six things are available. The engine traced the full chain: training exists, so the certification is valid, so the operators are qualified, so the lines can run.
+
+---
+
+## Training expires
+
+One fact removed. Kim's January training expires.
+
+```datalog
+-training_completed("training_jan_2026")
+```
+
+```datalog
+?available(X)
+```
+
+```
+No results.
+```
+
+Everything collapsed. Training gone, certification invalid, both operators unqualified, both lines unavailable. Four levels of retraction from a single fact change, propagated in milliseconds. This is the moment - in a traditional system, that expired training would sit in one database while the planning system in another database still shows Kim as qualified. The planning agent builds a shift plan on stale state. With InputLayer, the planning agent's next query sees current reality.
+
+---
+
+## Recovery
+
+Kim completes new safety training in March.
+
+```datalog
++training_completed[("training_mar_2026")]
++valid_certification[("cert_safety", "training_mar_2026")]
+```
+
+```datalog
+?available(X)
+```
+
+```
+┌─────────────────────┐
+│ X                   │
+├─────────────────────┤
+│ "cert_safety"       │
+│ "line_4"            │
+│ "line_5"            │
+│ "operator_kim"      │
+│ "operator_lee"      │
+│ "training_mar_2026" │
+└─────────────────────┘
+6 rows
+```
+
+Both lines are back. The new training fact propagated up through the entire dependency chain. No manual reconciliation between systems.
+
+---
+
+## The proof trail
+
+```datalog
+.why ?available("line_4")
+```
+
+The proof tree shows: line_4 is available because it requires operator_kim, and operator_kim is available because she's qualified by cert_safety, and cert_safety is available because training_mar_2026 is completed. When an auditor asks why Line 4 was allowed to run, the answer traces through four levels of dependencies to the specific training record.
+
+Every code block on this page runs against a live InputLayer instance. Paste them into the [demo](https://demo.inputlayer.ai) to see the results yourself.

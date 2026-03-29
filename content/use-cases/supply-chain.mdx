@@ -2,41 +2,156 @@
 title: "Supply Chain"
 icon: "Truck"
 subtitle: "Supplier risk propagation, sanctions screening, and order fulfillment reasoning over live entity graphs."
+order: 4
 ---
 
-# Entity reasoning for supply chain AI
+# Disruption cascades across supply chains
 
-Supply chain AI needs to follow chains of consequence: supplier status affects order fulfillment, which affects inventory planning, which affects production scheduling. Similarity search cannot follow these chains. SQL can query them, but not incrementally - every status change requires a fresh query across the full dataset.
+In March 2021, a container ship blocked the Suez Canal for six days. The disruption cascaded through global supply chains for months - but many companies didn't know which of their orders were affected until days after the blockage began. The information was there (which suppliers used which shipping routes, which orders depended on which suppliers), but connecting the dots across systems took time. By then, the window to reroute had passed.
 
-InputLayer propagates status changes through dependent derivations automatically. Sanctions hits, supplier suspensions, and transport disruptions update every affected order in real time.
+The challenge isn't knowing that a port is closed. It's knowing, within milliseconds, which of your suppliers ship through that port, which orders depend on those suppliers, which of those orders have SLA penalty clauses, and which customers are about to be impacted. That's a chain of reasoning across your entire supply graph, and it needs to update every time a fact changes - a port closes, a supplier reroutes, a new order is placed.
 
 ---
 
-## Example: Order fulfillment under supplier suspension
+## The setup
 
-These facts represent current supplier status. The rule derives which orders are blocked and why.
+Three suppliers. Supplier A and B ship through Shanghai. Supplier C ships through Busan. They feed four orders. Two of those orders have SLA penalty clauses.
 
 ```datalog
-+supplier[
-    ("sup_01", "status", "active"),
-    ("sup_02", "status", "suspended")
+// Suppliers and their shipping ports
++ships_via[("supplier_a", "shanghai"), ("supplier_b", "shanghai"), ("supplier_c", "busan")]
+
+// Which suppliers feed which orders
++supplies[
+    ("supplier_a", "order_101"), ("supplier_a", "order_102"),
+    ("supplier_b", "order_103"), ("supplier_c", "order_104")
 ]
-+required_for_order[("order_2847", "sup_01"), ("order_2847", "sup_02")]
 
-+order_blocked(OrderId, SupplierId, "supplier_suspended") <-
-    required_for_order(OrderId, SupplierId),
-    supplier(SupplierId, "status", "suspended")
+// SLA penalty clauses
++has_sla[("order_101", "globex_corp", "penalty_5pct"), ("order_103", "initech", "penalty_10pct")]
 
-?order_blocked("order_2847", Supplier, Reason)
-// Returns: order_2847 blocked - sup_02 suspended
+// Port status
++port_status[("shanghai", "open"), ("busan", "open")]
 ```
-
-When `sup_02` is reinstated, the block retracts automatically. Propagation: ~8ms. No pipeline re-run. No manual flag update.
 
 ---
 
-## What this replaces
+## The rules
 
-The standard approach: a nightly job that re-evaluates order status against the current supplier table. Between runs, a suspended supplier's orders remain marked as fulfillable. A procurement agent working in the morning acts on last night's state.
+Three rules, each one step in the cascade. A supplier is disrupted if its port is closed. An order is at risk if its supplier is disrupted. An SLA is triggered if an at-risk order has a penalty clause.
 
-InputLayer maintains derived order status as a live fact. The suspension propagates the moment it is recorded.
+```datalog
++supplier_disrupted(Sup) <- ships_via(Sup, Port), port_status(Port, "closed")
++order_at_risk(Order) <- supplies(Sup, Order), supplier_disrupted(Sup)
++sla_triggered(Order, Customer, Penalty) <- order_at_risk(Order), has_sla(Order, Customer, Penalty)
+```
+
+---
+
+## Everything is fine
+
+```datalog
+?supplier_disrupted(X)
+```
+
+```
+No results.
+```
+
+No disruptions. All ports are open. All orders are on track.
+
+---
+
+## Shanghai closes
+
+One fact changes.
+
+```datalog
+-port_status("shanghai", "open")
++port_status[("shanghai", "closed")]
+```
+
+The cascade propagates through the entire graph:
+
+```datalog
+?supplier_disrupted(X)
+```
+
+```
+┌──────────────┐
+│ X            │
+├──────────────┤
+│ "supplier_a" │
+│ "supplier_b" │
+└──────────────┘
+2 rows
+```
+
+```datalog
+?order_at_risk(X)
+```
+
+```
+┌─────────────┐
+│ X           │
+├─────────────┤
+│ "order_101" │
+│ "order_102" │
+│ "order_103" │
+└─────────────┘
+3 rows
+```
+
+```datalog
+?sla_triggered(Order, Customer, Penalty)
+```
+
+```
+┌─────────────┬───────────────┬─────────────────┐
+│ Order       │ Customer      │ Penalty         │
+├─────────────┼───────────────┼─────────────────┤
+│ "order_101" │ "globex_corp" │ "penalty_5pct"  │
+│ "order_103" │ "initech"     │ "penalty_10pct" │
+└─────────────┴───────────────┴─────────────────┘
+2 rows
+```
+
+One fact change. Two suppliers disrupted, three orders at risk, two SLA penalties triggered - identified across three levels of the supply graph. Supplier C and order 104 are unaffected (Busan is still open). This is the kind of fan-out that takes hours to trace manually and seconds in a dashboard query - but with InputLayer, the derived state is already current by the time you ask.
+
+---
+
+## Partial recovery
+
+Supplier A reroutes to Busan.
+
+```datalog
+-ships_via("supplier_a", "shanghai")
++ships_via[("supplier_a", "busan")]
+```
+
+```datalog
+?sla_triggered(Order, Customer, Penalty)
+```
+
+```
+┌─────────────┬───────────┬─────────────────┐
+│ Order       │ Customer  │ Penalty         │
+├─────────────┼───────────┼─────────────────┤
+│ "order_103" │ "initech" │ "penalty_10pct" │
+└─────────────┴───────────┴─────────────────┘
+1 rows
+```
+
+Supplier A recovered. Orders 101 and 102 are no longer at risk. Globex's SLA penalty retracted. But Supplier B is still disrupted (still shipping through Shanghai), so order 103 and Initech's penalty remain. Partial recovery, correctly tracked - each path is independent.
+
+---
+
+## The proof trail
+
+```datalog
+.why ?order_at_risk("order_103")
+```
+
+The proof shows: order_103 is at risk because it's supplied by supplier_b, and supplier_b is disrupted because it ships via Shanghai, and Shanghai is closed. Three facts, three rules, one chain. When a procurement team needs to explain to Initech why their order is delayed, the answer is a structured trace, not a phone call to someone who might know.
+
+Every code block on this page runs against a live InputLayer instance. Paste them into the [demo](https://demo.inputlayer.ai) to see the results yourself.

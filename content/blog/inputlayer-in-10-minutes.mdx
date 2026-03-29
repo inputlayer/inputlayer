@@ -1,14 +1,15 @@
 ---
 title: "InputLayer in 10 Minutes: From Docker to Your First Knowledge Graph"
 date: "2026-02-20"
-author: "InputLayer Team"
 category: "Tutorial"
 excerpt: "A hands-on tutorial to get InputLayer running and build your first knowledge graph with rules, recursive queries, and vector search."
 ---
 
 # InputLayer in 10 Minutes: From Docker to Your First Knowledge Graph
 
-By the end of this tutorial, you'll have a running knowledge graph that can answer questions no regular database can handle. We'll build it step by step, and I'll explain what's happening at each point.
+Someone changes a role in your org chart. Now you need to figure out which permissions changed, which documents need re-filtering, and which downstream reports are stale. In most systems, that's a ticket, a script, and a prayer that you caught everything.
+
+In 10 minutes, you'll build a knowledge graph that derives conclusions automatically, updates them incrementally when facts change, and explains every result with a proof tree. Not a toy demo - the same mechanics that handle access control hierarchies, compliance chains, and recommendation graphs in production. Let's build it.
 
 ## Step 1: Start InputLayer
 
@@ -65,8 +66,8 @@ You express this intuition as a rule:
 
 ```note
 type: tip
-If person A manages person B, then A has authority over B.
-And if A has authority over B, and B has authority over C, then A has authority over C too.
+If A manages B, then A has authority over B.
+If A has authority over B, and B has authority over C, then A has authority over C too.
 ```
 
 That second sentence is the important part - it's recursive. It says: authority flows down through the management chain, no matter how deep it goes.
@@ -74,12 +75,10 @@ That second sentence is the important part - it's recursive. It says: authority 
 When you enter this rule, InputLayer immediately starts reasoning. It applies the rule over and over until there are no more conclusions to draw. Here's what it figures out:
 
 ```steps
-Alice manages Bob, so Alice has authority over Bob :: Direct - from the fact you stored
-Bob manages Charlie, so Bob has authority over Charlie :: Direct - from the fact you stored
-Bob manages Diana, so Bob has authority over Diana :: Direct - from the fact you stored
-Alice has authority over Bob, and Bob has authority over Charlie... :: Following the chain one more step
-Alice has authority over Charlie :: Derived - the engine figured this out [success]
-Alice has authority over Diana :: Derived - same logic, through Bob [success]
+Alice -> Bob :: Direct [primary]
+Bob -> Charlie, Diana :: Direct [primary]
+Alice -> Charlie :: Derived through Bob [success]
+Alice -> Diana :: Derived through Bob [success]
 ```
 
 Five authority relationships, derived automatically from three facts and one rule.
@@ -94,16 +93,16 @@ Alice doesn't manage Charlie or Diana directly. But the engine followed the chai
 
 ## Step 6: Add vector search
 
-InputLayer supports vector embeddings alongside logical reasoning. This is where it gets powerful, because you can combine the two in a single query.
+InputLayer supports vector embeddings alongside logical reasoning. You can combine both in a single query.
 
 Say each person has authored some documents, and each document has an embedding vector. You can now ask something that would normally require multiple systems:
 
 *"Find documents similar to my query, but only from people that Alice has authority over."*
 
 ```steps
-Resolve Alice's authority chain :: The engine figures out: Bob, Charlie, Diana
-Find documents authored by those people :: Filters to their documents only
-Rank by semantic similarity to the query :: Returns the most relevant ones [success]
+Resolve authority :: Bob, Charlie, Diana
+Filter documents :: By those authors
+Rank by similarity :: Most relevant first [success]
 ```
 
 Reasoning and retrieval, combined in one pass. No separate authorization service, no glue code.

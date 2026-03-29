@@ -6,9 +6,9 @@ keyMetric: "Millions of images indexed"
 
 # Semantic Image Knowledge Graph
 
-A European photo company manages one of the largest stock photo libraries on the continent. With millions of images in their collection, they needed a way to go beyond simple keyword tagging and let customers discover images through the *relationships* between them - not just surface-level similarity.
+A European photo company manages one of the largest stock photo libraries on the continent - millions of images. They wanted customers to discover images through the *relationships* between what's in them, not just visual similarity or keyword tags.
 
-They added InputLayer as the reasoning layer for their image discovery system, combining vector similarity (finding visually similar images) with structural queries (understanding what's *in* the images and how those things relate to each other).
+They added InputLayer to combine vector similarity (finding visually similar images) with structural queries (understanding what's *in* the images and how those things relate to each other) in a single search.
 
 ## The challenge
 
@@ -25,7 +25,7 @@ The company had already implemented vector search using image embeddings, which 
 
 InputLayer was added alongside their existing image processing pipeline. The pipeline extracts structured information from images using computer vision models - detected objects, scenes, colors, compositions, people attributes. These structured outputs are stored as facts in InputLayer's knowledge graph.
 
-So for each image, InputLayer knows things like: "this image contains a person and a laptop and a coffee cup," "the scene is an office," "there's a woman in her 30s who appears to be typing." Each of these is a structured fact, not a free-text tag. And because they're structured, the reasoning engine can query across them in powerful ways.
+So for each image, InputLayer knows things like: "this image contains a person and a laptop and a coffee cup," "the scene is an office," "there's a woman in her 30s who appears to be typing." Each of these is a structured fact, not a free-text tag. Because they're structured, the engine can query across them - not just "find images with a laptop" but "find images where multiple people are interacting with a shared object in an office setting."
 
 ## Combining vector search with structural queries
 
@@ -60,5 +60,5 @@ The incremental computation engine keeps the knowledge graph current as new imag
 
 ```note
 type: tip
-The key design decision was treating image understanding as a knowledge graph problem, not a pure embedding problem. Vector embeddings capture visual similarity well, but they compress away the structured information about what's in the image. By extracting that structure and storing it as facts, the company made it queryable through logical reasoning - and the combination turned out to be much more powerful than either approach alone.
+The key design decision was treating image understanding as a knowledge graph problem. Vector embeddings capture visual similarity well, but they compress away the structured information about what's in the image - who's doing what, how objects relate to each other. By extracting that structure and storing it as facts, the company made it queryable through rules. A customer searching for "collaborative work" gets images where multiple people are interacting with a shared object - a relationship that pure vector search can't express.
 ```

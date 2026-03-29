@@ -1,83 +1,63 @@
 ---
 title: "Why Vector Search Alone Fails Your AI Agent"
 date: "2026-02-25"
-author: "InputLayer Team"
 category: "Architecture"
-excerpt: "Vector similarity finds things that look like the answer. But when the answer requires connecting facts across different sources, similarity search hits a wall."
+excerpt: "When the answer lives across three separate facts in three separate systems, similarity search can't get there. Here's what does."
 ---
 
 # Why Vector Search Alone Fails Your AI Agent
 
-Imagine you're building a healthcare AI agent. A patient asks: *"Can I eat shrimp tonight?"*
+A patient asks your healthcare AI agent: "Can I eat shrimp tonight?" The system returns shrimp recipes, nutritional info, some allergy FAQs. Helpful content, high similarity scores, completely confident. Also potentially dangerous - because this patient takes Amiodarone, a cardiac medication that interacts with iodine, and shrimp is high in iodine. The correct answer could keep them out of the hospital, and it's nowhere in the search results.
 
-Your agent does what it's supposed to do - it embeds the question and runs a similarity search. Back come the results: shrimp recipes, nutritional info, some allergy FAQs. All genuinely relevant to the words "eat shrimp."
-
-All completely wrong for this patient.
+The answer lives across three facts in three separate systems: the patient's medication list, a drug interaction database, and a nutritional profile. No single document contains the connection. The phrase "shrimp dinner" shares zero embedding similarity with "medication contraindication." This isn't a relevance problem - the system returned exactly what was most similar. It's a reasoning problem, and similarity search doesn't reason.
 
 ## What went wrong
 
 The correct answer is "No, and it could be dangerous." But that answer doesn't live in any single document. It lives across three separate pieces of information:
 
-```chain
-Sarah takes Amiodarone
--- interacts with
-Iodine
--- found in
-Shrimp
-=> Shrimp is risky for Sarah
+```graph
+Sarah --takes-> Amiodarone --interacts-> Iodine --found in-> Shrimp [highlight]
 ```
 
 The patient takes a specific medication. That medication interacts with iodine. Shrimp is high in iodine. Each fact sits in a different database. And the phrase "shrimp dinner" has zero similarity to "medication contraindications" - they share no words, no concepts, no embedding overlap.
 
-This is the core problem: **the connection between these facts is logical, not semantic.** You can't find it by looking for similar text. You have to follow a chain of relationships from one fact to the next.
+**The connection between these facts is logical, not semantic.** You can't find it by looking for similar text. You have to follow a chain of relationships from one fact to the next. That's what InputLayer does.
 
 ## This shows up everywhere
 
 The healthcare example is vivid, but this same pattern appears in every domain where answers require connecting multiple facts.
 
 ```steps
-A compliance analyst asks: "Is this transaction suspicious?" :: The vector DB finds similar transactions. It misses that Entity A is owned by Entity B, which is on a sanctions list.
-An employee searches for Q3 revenue reports :: The vector DB returns 40 matches. It can't check whether this employee has permission to see any of them through the org hierarchy.
-A supply chain manager asks about disruptions :: The vector DB finds news about port closures. It can't trace which of your suppliers use that port, and which products are affected.
+"Is this transaction suspicious?" :: Trace ownership to sanctions list
+"Can I see Q3 revenue reports?" :: Resolve access via org hierarchy
+"Which products are disrupted?" :: Connect port closures to suppliers to products
 ```
 
-In every case, the answer requires **following a chain of connected facts** - not finding a similar document. The information exists, but it's spread across different sources, and the connections between them are structural, not textual.
+In every case, the answer requires **following a chain of connected facts**. The information exists, but it's spread across different sources, and the connections between them are structural, not textual.
 
-## Why more RAG tricks won't help
-
-When teams hit this problem, the first instinct is to optimize the retrieval pipeline. Better chunking. Better embeddings. Hybrid search. Re-ranking.
-
-None of these help, because the problem isn't retrieval quality. The retrieval is working perfectly - it's finding the most similar content. The problem is that similarity is the wrong tool for the job.
-
-```flow
-User question -> Embed -> Similarity search -> Similar documents
-```
-
-This pipeline answers: *"What text looks most like my question?"* That's great when the answer exists in a single document. It fails when the answer must be **derived** by connecting facts from different places.
-
-## What teams end up building
+## What teams end up building without a reasoning layer
 
 To work around this, teams start adding systems. A graph database for relationships. A rules engine for business logic. An authorization service for access control. Application code to stitch it all together.
 
 ```flow
-User question -> Vector DB [primary] -> Graph DB -> Rules engine -> Auth service -> Reconcile in app code
+Question -> Vector DB -> Graph DB -> Rules -> Auth -> App code [primary]
 ```
 
-The reasoning logic ends up scattered across services. When a fact changes, you have to propagate the change across all of them. It works, but it's fragile, and each new capability makes it more fragile.
+Each boundary between systems is a place where state can diverge - a permission revoked in one system but not yet propagated to another, a fact updated in the source but stale in the cache. The reasoning logic ends up scattered across services. When a fact changes, you have to propagate the change across all of them. It works, but it's fragile, and each new capability makes it more fragile.
 
-## What it looks like with a reasoning layer
+## What it looks like with InputLayer
 
-InputLayer sits alongside your vector database and handles the part that similarity search can't: following chains of logic and deriving conclusions.
+InputLayer handles the chains of logic and derived conclusions in one place.
 
 ```flow
-User question -> Your vector DB -> Similar documents
+Question -> Vector DB -> Similar documents
 ```
 
 ```flow
-User question -> InputLayer [primary] -> Derived conclusions
+Question -> InputLayer [primary] -> Derived conclusions
 ```
 
-You keep your vector database for what it's good at - finding similar content. You add InputLayer for questions that require reasoning: traversing relationships, evaluating rules, checking permissions through hierarchies.
+Your vector database finds similar content. InputLayer follows chains of facts and derives conclusions.
 
 When the patient's medication list changes, InputLayer automatically updates every downstream risk assessment. When an employee changes departments, their permissions recalculate through the org hierarchy. When a corporate ownership structure shifts, the compliance analysis adjusts. All of this happens incrementally - only the affected conclusions recompute, not the entire knowledge base.
 

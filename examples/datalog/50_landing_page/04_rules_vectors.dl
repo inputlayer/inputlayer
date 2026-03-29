@@ -1,0 +1,32 @@
+// Landing page example: Rules + Vectors
+// Compatibility rules combined with vector similarity search.
+
+.kg create landing_vectors
+.kg use landing_vectors
+
+// Facts: products with 4-dimensional embeddings
++product[
+    ("pg245", "Canon PG-245 Black Ink", 14.99, [0.82, 0.15, 0.91, 0.44]),
+    ("cl246", "Canon CL-246 Color Ink", 16.99, [0.79, 0.18, 0.88, 0.41]),
+    ("ep202", "Epson 202 Black Ink", 12.99, [0.83, 0.14, 0.90, 0.43])
+]
+
+// Facts: printer compatibility (ep202 is NOT compatible with Canon)
++compatible[("canon_mg3620", "pg245"), ("canon_mg3620", "cl246")]
+
+// Facts: shopper owns a Canon printer, items in stock
++owns[("shopper_42", "canon_mg3620")]
++in_stock[("pg245"), ("cl246"), ("ep202")]
+
+// Rule: recommendable if compatible and in stock
++recommendable(S, P) <- owns(S, Dev), compatible(Dev, P), in_stock(P)
+
+// Query: what is recommendable for shopper_42?
+?recommendable("shopper_42", Pid)
+
+// Combined query: rules filter, cosine distance ranks (lower = more similar)
+?recommendable("shopper_42", Pid), product(Pid, Desc, Price, Emb), Dist = cosine(Emb, [0.81, 0.16, 0.89, 0.42]), Dist < 0.05
+
+// Cleanup
+.kg use default
+.kg drop landing_vectors

@@ -160,9 +160,12 @@ const useCases = readContentDir(useCasesDir).map(item => ({
   title: item.title,
   icon: item.icon || '',
   subtitle: item.subtitle || '',
+  order: parseInt(item.order, 10) || 99,
   content: item.content,
   toc: item.toc,
 }))
+// Sort by order ascending
+useCases.sort((a, b) => a.order - b.order)
 
 // Comparison pages
 const compareDir = path.join(CONTENT_DIR, 'compare')
@@ -210,6 +213,7 @@ export interface UseCase {
   title: string
   icon: string
   subtitle: string
+  order: number
   content: string
   toc: TocEntry[]
 }

@@ -12,7 +12,13 @@ export const metadata: Metadata = {
   description:
     "Store facts, define rules, and derive everything that logically follows. Vector search, graph traversal, and incremental computation in one system.",
   icons: {
-    icon: "/icon.svg",
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon_32.png", sizes: "32x32", type: "image/png" },
+    ],
+    apple: [
+      { url: "/favicon_180.png", sizes: "180x180", type: "image/png" },
+    ],
   },
 }
 

@@ -1,18 +1,17 @@
 ---
 title: "Building a Product Recommendation Engine with InputLayer"
 date: "2026-02-05"
-author: "InputLayer Team"
 category: "Tutorial"
 excerpt: "A step-by-step guide to building a recommendation engine that combines collaborative filtering, product relationships, and semantic similarity in a single knowledge graph."
 ---
 
 # Building a Product Recommendation Engine with InputLayer
 
-A customer just bought a DSLR camera. Your recommendation engine suggests... more cameras. Three other DSLRs in slightly different price ranges.
+A customer buys a Canon EOS R5 camera. Your recommendation engine suggests a Nikon lens, a Sony memory card holder, and a generic phone case. The customer clicks through, orders the Nikon lens, discovers it doesn't fit, returns it, and writes a one-star review about how your site "doesn't even know what goes with what." Meanwhile, the Canon-compatible lens was in stock the whole time - your model just couldn't see the logical relationship between a camera and its compatible accessories, because those items look nothing alike in embedding space.
 
-The customer doesn't need another camera. They need a lens, a memory card, and a bag to carry it all in. But those items look nothing like a camera in embedding space. The connection between "camera" and "camera bag" is *logical* (one is an accessory for the other), not *semantic* (their product descriptions have little overlap).
+This is the gap between semantic similarity and actual product logic. A camera and a camera bag aren't similar - one is an electronic device and the other is a fabric container. But one is an accessory for the other, and your customers expect you to know that. The same gap shows up when inventory changes faster than your model retrains: recommending out-of-stock items, suggesting products in categories the customer has never shown interest in, or missing the obvious cross-sell because the connection is structural, not textual.
 
-This is the gap between similarity-based recommendations and reasoning-based recommendations. In this tutorial, we'll build an engine that handles both - and a few other things that traditional recommenders struggle with.
+In this tutorial, we'll build a recommendation engine that combines four signals: collaborative filtering, category affinity, semantic similarity, and explicit accessory relationships. Each signal is a readable rule. The engine combines them automatically and keeps recommendations fresh as inventory and purchase history change - no model retraining, no index rebuilding.
 
 ## What we're building
 
@@ -21,13 +20,9 @@ By the end of this tutorial, you'll have a recommendation engine with four disti
 ```tree
 Recommendation Engine [primary]
   Collaborative Filtering
-    "users who bought X also bought Y"
   Category Affinity (recursive)
-    "related product categories, at any depth"
   Semantic Similarity
-    "products with similar descriptions"
   Accessory Relationships
-    "this product goes with that one"
 ```
 
 ```note
@@ -48,14 +43,9 @@ You also store embedding vectors for each product, generated from product descri
 ```tree
 Sports [primary]
   Athletic
-    Footwear
-      SKU_001 "Running Shoes"
-      SKU_002 "Trail Shoes"
-    Accessories
-      SKU_003 "Running Socks"
-      SKU_004 "Hydration Pack"
-    Electronics
-      SKU_005 "GPS Watch"
+    Footwear: Running Shoes, Trail Shoes
+    Accessories: Socks, Hydration Pack
+    Electronics: GPS Watch
 ```
 
 ## Step 2: Feed in user behavior
@@ -63,12 +53,12 @@ Sports [primary]
 Next, purchase history and browsing data. Who bought what, and what have they been looking at recently. In production, you'd ingest this from your transaction database as events happen.
 
 ```tree
-Purchase History
-  user_1: Running Shoes, Running Socks
+Purchases
+  user_1: Running Shoes, Socks
   user_2: Running Shoes, Hydration Pack
   user_3: Trail Shoes, GPS Watch
-Browsing Data
-  user_1 viewed: Trail Shoes, GPS Watch [muted]
+Browsing
+  user_1: Trail Shoes, GPS Watch [muted]
 ```
 
 The important thing: these aren't just rows in a table. They're facts in a knowledge graph that the reasoning engine can combine with other facts through rules. That's the key difference from a traditional recommendation database.
@@ -77,28 +67,22 @@ The important thing: these aren't just rows in a table. They're facts in a knowl
 
 This is where the approach diverges from traditional ML recommendations. Instead of training a model, we express recommendation logic as rules. Each rule captures a different signal, and each rule is readable in plain English.
 
-**Rule 1 - Collaborative filtering:** "If two users bought the same product, the other products each user bought become recommendations for the other." This is the classic "customers who bought X also bought Y" pattern. But it's expressed as a rule, not a matrix factorization - which means you can read it, debug it, and explain exactly why a recommendation appeared.
+**Rule 1 - Collaborative filtering:** "If two users bought the same product, the other products each user bought become recommendations for the other." This is the classic "customers who bought X also bought Y" pattern. But it's expressed as a rule, not a matrix factorization - which means you can read it, debug it, and explain exactly why a recommendation appeared. When a customer asks "why was I shown this?", the answer traces back to specific purchases by specific users - not a black-box embedding.
 
 What this looks like in practice for user_1:
 
-```chain
-user_1 bought Running Shoes
--- who else bought Running Shoes?
-user_2 also bought Running Shoes [primary]
--- what else did user_2 buy?
-user_2 also bought Hydration Pack
-=> Recommend Hydration Pack to user_1 [success]
+```graph
+user_1 --bought-> Running Shoes
+user_2 --bought-> Running Shoes [primary]
+user_2 --bought-> Hydration Pack [success]
 ```
 
 **Rule 2 - Category affinity (recursive):** "If a user bought something in one category, recommend products from related categories." This rule is recursive - it follows the category hierarchy to find related categories at any depth.
 
-```chain
-user_1 bought Running Shoes (in footwear)
--- walk up the category tree
-Footwear is under Athletic [primary]
--- what else is under Athletic?
-Accessories and Electronics are also under Athletic
-=> Recommend from related categories: Hydration Pack, GPS Watch [success]
+```graph
+Running Shoes --in-> Footwear --under-> Athletic [primary]
+Athletic --contains-> Accessories [success]
+Athletic --contains-> Electronics [success]
 ```
 
 Buying running shoes surfaces recommendations not just from footwear, but from accessories and electronics too, because they share a parent category. And this works no matter how deep or wide your category tree goes.
@@ -115,16 +99,16 @@ The engine evaluates all four rules, combines their results, filters out product
 
 ```tree
 Signals for user_1 [primary]
-  Collaborative: Hydration Pack (via user_2)
+  Collaborative: Hydration Pack
   Category: Hydration Pack, GPS Watch, Trail Shoes
-  Semantic: Trail Shoes (0.92 similarity to Running Shoes)
-  Accessory: (none defined in this example) [muted]
+  Semantic: Trail Shoes (0.92)
+  Accessory: none [muted]
 ```
 
 ```steps
-Trail Shoes - matched by category + semantic similarity :: strongest combined signal [primary]
-Hydration Pack - matched by collaborative + category :: two independent signals [primary]
-GPS Watch - matched by category :: single signal
+Trail Shoes: category + semantic :: strongest signal [primary]
+Hydration Pack: collaborative + category :: two signals [primary]
+GPS Watch: category only :: single signal
 ```
 
 Each recommendation carries its provenance. You can explain to the user *why* each item was recommended, and you can explain to your product team which signals are driving the most engagement. Try getting that kind of transparency from a neural collaborative filtering model.
@@ -140,11 +124,11 @@ Here's where the knowledge graph approach really shines compared to model-based 
 **A product is discontinued.** You retract it from the catalog entirely. InputLayer's correct retraction mechanism removes it from every recommendation result, every collaborative filtering signal, every category association - automatically and immediately. No stale suggestions pointing customers to a product page that returns a 404.
 
 ```flow
-Traditional ML recommender [highlight] -> Retrain model (hours) -> Rebuild index (minutes) -> Deploy (minutes)
+ML recommender [highlight] -> Retrain (hours) -> Rebuild index -> Deploy
 ```
 
 ```flow
-InputLayer [success] -> Retract fact -> Recommendations update (~ms) -> Done
+InputLayer [success] -> Retract fact -> Updated (ms)
 ```
 
 ## Where to take this next

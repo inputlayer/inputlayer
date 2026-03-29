@@ -1,5 +1,6 @@
 "use client"
 
+import { useId } from "react"
 import { cn } from "@/lib/utils"
 
 /* ------------------------------------------------------------------ */
@@ -339,6 +340,179 @@ function NoteDiagram({ content }: { content: string }) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Graph Diagram – entity-relationship knowledge graph                */
+/*                                                                     */
+/*  Format:                                                            */
+/*    NodeA --label-> NodeB [tag]                                      */
+/*    NodeA -> NodeB                                                   */
+/*    NodeA [tag]                                                      */
+/* ------------------------------------------------------------------ */
+
+interface GNode {
+  id: string
+  label: string
+  tag: NodeTag
+}
+
+interface GEdge {
+  from: string
+  to: string
+  label: string
+}
+
+function parseGraph(src: string): { nodes: GNode[]; edges: GEdge[] } {
+  const nodeMap = new Map<string, GNode>()
+  const edges: GEdge[] = []
+
+  function ensure(raw: string): string {
+    const { text, tag } = parseTag(raw)
+    if (!nodeMap.has(text)) nodeMap.set(text, { id: text, label: text, tag })
+    else if (tag) nodeMap.get(text)!.tag = tag
+    return text
+  }
+
+  for (const raw of src.split("\n")) {
+    const line = raw.trim()
+    if (!line) continue
+    // Edge: "A --label-> B" or "A -> B"
+    const m = line.match(/^(.+?)\s*-(?:-(.+?))?\s*->\s*(.+)$/)
+    if (m) {
+      const from = ensure(m[1].trim())
+      const to = ensure(m[3].trim())
+      edges.push({ from, to, label: m[2]?.trim() || "" })
+    } else {
+      ensure(line)
+    }
+  }
+  return { nodes: Array.from(nodeMap.values()), edges }
+}
+
+const G = { charW: 7.6, padX: 28, nodeH: 34, layerGap: 56, rowGap: 44, rx: 8 }
+
+function graphLayout(nodes: GNode[], edges: GEdge[]) {
+  if (!nodes.length) return { pos: new Map<string, { x: number; y: number; w: number }>(), w: 0, h: 0 }
+
+  // Adjacency
+  const inDeg = new Map<string, number>()
+  const succ = new Map<string, string[]>()
+  for (const n of nodes) { inDeg.set(n.id, 0); succ.set(n.id, []) }
+  for (const e of edges) {
+    inDeg.set(e.to, (inDeg.get(e.to) || 0) + 1)
+    succ.get(e.from)?.push(e.to)
+  }
+
+  // BFS layers
+  const layer = new Map<string, number>()
+  const q: string[] = []
+  for (const n of nodes) if (!inDeg.get(n.id)) { q.push(n.id); layer.set(n.id, 0) }
+  if (!q.length) { q.push(nodes[0].id); layer.set(nodes[0].id, 0) }
+
+  let qi = 0
+  while (qi < q.length) {
+    const cur = q[qi++]
+    for (const next of succ.get(cur) || []) {
+      const nl = (layer.get(cur) || 0) + 1
+      if (!layer.has(next) || layer.get(next)! < nl) layer.set(next, nl)
+      if (!q.includes(next)) q.push(next)
+    }
+  }
+  for (const n of nodes) if (!layer.has(n.id)) layer.set(n.id, 0)
+
+  // Group by layer
+  const groups = new Map<number, GNode[]>()
+  for (const n of nodes) {
+    const l = layer.get(n.id) || 0
+    if (!groups.has(l)) groups.set(l, [])
+    groups.get(l)!.push(n)
+  }
+
+  const numLayers = Math.max(0, ...groups.keys()) + 1
+  const pos = new Map<string, { x: number; y: number; w: number }>()
+
+  let xOff = 0
+  for (let l = 0; l < numLayers; l++) {
+    const group = groups.get(l) || []
+    let maxW = 0
+    for (const n of group) maxW = Math.max(maxW, Math.max(n.label.length * G.charW + G.padX, 64))
+
+    const totalH = group.length * (G.nodeH + G.rowGap) - G.rowGap
+    for (let i = 0; i < group.length; i++) {
+      const n = group[i]
+      const w = Math.max(n.label.length * G.charW + G.padX, 64)
+      pos.set(n.id, { x: xOff + (maxW - w) / 2, y: i * (G.nodeH + G.rowGap), w })
+    }
+    xOff += maxW + G.layerGap
+  }
+
+  let mxW = 0, mxH = 0
+  for (const p of pos.values()) { mxW = Math.max(mxW, p.x + p.w); mxH = Math.max(mxH, p.y + G.nodeH) }
+  return { pos, w: mxW, h: mxH }
+}
+
+function GraphDiagram({ content }: { content: string }) {
+  const markerId = useId()
+  const { nodes, edges } = parseGraph(content)
+  const { pos, w, h } = graphLayout(nodes, edges)
+  if (!nodes.length) return null
+
+  return (
+    <div className="my-8 overflow-x-auto py-2">
+      <div className="relative mx-auto" style={{ width: w, height: h, minWidth: w }}>
+        {/* Edges (SVG) */}
+        <svg className="absolute inset-0 pointer-events-none" width={w} height={h} aria-hidden="true">
+          <defs>
+            <marker id={markerId} viewBox="0 0 10 10" refX="10" refY="5"
+              markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+              <path d="M0,1 L10,5 L0,9z" style={{ fill: "var(--muted-foreground)", opacity: 0.45 }} />
+            </marker>
+          </defs>
+          {edges.map((edge, i) => {
+            const fp = pos.get(edge.from)
+            const tp = pos.get(edge.to)
+            if (!fp || !tp) return null
+            const x1 = fp.x + fp.w + 1
+            const y1 = fp.y + G.nodeH / 2
+            const x2 = tp.x - 1
+            const y2 = tp.y + G.nodeH / 2
+            const mx = (x1 + x2) / 2
+            const my = (y1 + y2) / 2
+            return (
+              <g key={i}>
+                <line x1={x1} y1={y1} x2={x2} y2={y2}
+                  style={{ stroke: "var(--border)" }} strokeWidth={1.5} markerEnd={`url(#${markerId})`} />
+                {edge.label && (
+                  <text x={mx} y={my - 8} textAnchor="middle" dominantBaseline="auto"
+                    style={{ fill: "var(--muted-foreground)", fontSize: 10, fontFamily: "inherit" }}>
+                    {edge.label}
+                  </text>
+                )}
+              </g>
+            )
+          })}
+        </svg>
+
+        {/* Nodes (HTML for Tailwind styling) */}
+        {nodes.map((node) => {
+          const p = pos.get(node.id)
+          if (!p) return null
+          return (
+            <div key={node.id}
+              className={cn(
+                "absolute rounded-lg border px-3 text-xs font-medium flex items-center justify-center whitespace-nowrap shadow-sm",
+                nodeStyles(node.tag),
+              )}
+              style={{ left: p.x, top: p.y, width: p.w, height: G.nodeH }}
+            >
+              {node.label}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
 /*  Public API                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -348,6 +522,7 @@ export const DIAGRAM_LANGUAGES = [
   "flow",
   "steps",
   "note",
+  "graph",
 ] as const
 
 export type DiagramLanguage = (typeof DIAGRAM_LANGUAGES)[number]
@@ -374,5 +549,7 @@ export function DiagramRenderer({
       return <StepsDiagram content={content} />
     case "note":
       return <NoteDiagram content={content} />
+    case "graph":
+      return <GraphDiagram content={content} />
   }
 }

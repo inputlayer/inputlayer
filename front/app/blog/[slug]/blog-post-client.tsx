@@ -33,7 +33,7 @@ export function BlogPostClient({ post, slug }: BlogPostClientProps) {
     <PageLayout>
       <ContentHero
         heading={post.title}
-        subtitle={`${post.date ? new Date(post.date).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }) : ""}${post.author ? ` · ${post.author}` : ""}`}
+        subtitle={post.author || ""}
         breadcrumbs={[
           { label: "Blog", href: "/blog/" },
         ]}

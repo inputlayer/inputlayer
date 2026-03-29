@@ -12,7 +12,6 @@ const footerLinks: Record<string, FooterLink[]> = {
   Product: [
     { label: "Features", href: "/#features" },
     { label: "Use Cases", href: "/use-cases/" },
-    { label: "Compare", href: "/compare/" },
     { label: "Demo", href: "https://demo.inputlayer.ai", external: true },
   ],
   Resources: [
@@ -20,6 +19,7 @@ const footerLinks: Record<string, FooterLink[]> = {
     { label: "Blog", href: "/blog/" },
     { label: "Quickstart", href: "/docs/guides/quickstart/" },
     { label: "Python SDK", href: "/docs/guides/python-sdk/" },
+    { label: "TypeScript SDK", href: "/docs/guides/js-sdk/" },
   ],
   Company: [
     { label: "GitHub", href: "https://github.com/inputlayer/inputlayer", external: true },

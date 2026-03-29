@@ -84,12 +84,6 @@ export function SiteHeader() {
           >
             Use Cases
           </Link>
-          <Link
-            href="/compare/"
-            className="text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Compare
-          </Link>
           <a
             href="https://demo.inputlayer.ai"
             target="_blank"

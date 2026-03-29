@@ -1,121 +1,138 @@
 ---
 title: "Agentic AI"
 icon: "Brain"
-subtitle: "Give your AI agents structured memory, multi-hop reasoning, and policy-aware retrieval."
+subtitle: "Structured memory, multi-hop reasoning, and policy-aware retrieval for AI agents."
+order: 5
 ---
 
-# Agentic AI
+# Agent memory that can explain itself
 
-If you're building AI agents, you've probably hit the point where vector search isn't enough. Your agent can recall things that *look* relevant, but it can't actually reason about them. It can't follow a chain of facts, enforce access policies, or keep its memory consistent when things change.
+A customer success agent flags Acme Corp as a churn risk. The VP of Customer Success asks: "Why?" The agent says "based on the available data." That's not an answer. Which data? Which logic? What would need to change for Acme to not be at risk? If the agent can't show its work, the VP can't trust the flag, can't prioritize it, and can't act on it.
 
-That's the gap InputLayer fills. It gives your agents a structured knowledge graph with deductive reasoning, vector search, and incremental computation - all in a single system that sits alongside your existing tools.
+This is the fundamental problem with agent memory stored as text chunks in a vector database. The agent retrieves relevant passages, generates a conclusion, and the reasoning is whatever happened inside the model. There's no trace to inspect, no rule to audit, no way to ask "what would need to change for this conclusion to be different?"
 
-## Where current agent architectures fall short
+When agents store observations as structured facts and derive conclusions through explicit rules, every conclusion has a proof tree. You can ask why. You can ask why not. And when the underlying facts change, the conclusions update automatically - no stale beliefs lingering in a context window.
 
-Most agent frameworks treat memory as a retrieval problem. You embed observations into vectors, store them, and retrieve by similarity when the agent needs context. This works well for simple recall - "What did the user say about their preferences?" - and it's the right tool for that job.
+---
 
-But it breaks down when your agent needs to actually think through a problem.
+## The setup
 
-```chain
-Agent is asked: "Which suppliers are affected by the port closure?"
--- needs to know
-Which suppliers exist and which ports they use
--- needs to know
-Which ports are currently closed
--- needs to connect these facts
-No single document contains this answer [highlight]
-=> The agent must traverse a chain of relationships to get there
+A customer success agent monitors two accounts. It has stored three observations about each.
+
+```datalog
+// Acme: enterprise customer, $150K contract, declining usage, renewal in April
++customer[("acme", "enterprise", 150000)]
++usage_trend[("acme", "declining")]
++renewal[("acme", "2026-04-15")]
+
+// Globex: startup, $25K contract, growing usage, renewal in September
++customer[("globex", "startup", 25000)]
++usage_trend[("globex", "growing")]
++renewal[("globex", "2026-09-01")]
 ```
 
-**Multi-hop questions** like this are the most common challenge. Three separate pieces of information need to be connected. No single document or embedding contains the answer - the agent needs to follow the chain.
+Six facts. Each one is a specific, testable observation - not a text passage that might or might not be retrieved in the right context window.
 
-**Policy enforcement** comes up when an agent is asked "Show me all documents I'm allowed to see about Project X." It needs to resolve authorization hierarchies: who reports to whom, which teams have access, what classification levels exist. This is logical reasoning, not similarity matching.
+---
 
-**Consistency** is the sneaky one. When an agent learns that a previous fact was wrong, all conclusions derived from that fact should disappear. With vector stores, stale observations just sit there forever unless you manually clean them up.
+## The rules
 
-```steps
-Agent learns: "Supplier X ships through Shanghai port" :: Stored as a fact
-Agent learns: "Shanghai port is closed" :: Stored as a fact
-Engine derives: "Supplier X is disrupted" :: Automatically connected [success]
-Agent learns: "Shanghai port reopened" :: Fact retracted
-Engine retracts: "Supplier X is disrupted" :: Automatically cleaned up [highlight]
+Churn risk requires three conditions: the customer is high-value, their usage is dropping, and their renewal is imminent. Each condition is its own rule with clear criteria.
+
+```datalog
+// High-value: enterprise tier with contract over $100K
++high_value(C) <- customer(C, "enterprise", Amt), Amt > 100000
+
+// Engagement dropping
++engagement_drop(C) <- usage_trend(C, "declining")
+
+// Renewal within the next few months
++renewal_soon(C) <- renewal(C, Date), Date < "2026-06-01"
+
+// Churn risk requires all three
++churn_risk(C) <- high_value(C), engagement_drop(C), renewal_soon(C)
 ```
 
-## Agent memory as a knowledge graph
+These rules are readable, auditable, and versionable. When the definition of "high-value" changes (say the threshold moves from $100K to $75K), you change one rule and every derivation updates.
 
-Instead of storing memories as unstructured text chunks, InputLayer lets you represent them as structured facts and rules. The difference is fundamental: your agent can reason about its knowledge, not just search through it.
+---
 
-```tree
-Traditional agent memory [muted]
-  Vector store
-    "Customer Acme is enterprise tier" (text chunk)
-    "Acme contract is $150K" (text chunk)
-    "Acme renewal is March 2026" (text chunk)
+## Who is at risk?
+
+```datalog
+?churn_risk(C)
 ```
 
-```tree
-InputLayer agent memory [primary]
-  Knowledge graph
-    customer(acme, enterprise, $150K)
-    renewal(acme, 2026-03-15)
-    Rule: high-value if enterprise + contract > $100K
-    Rule: churn-risk if high-value + renewal within 90 days
-    Derived: acme is high-value [success]
-    Derived: acme is at churn risk [highlight]
+```
+┌────────┐
+│ C      │
+├────────┤
+│ "acme" │
+└────────┘
+1 rows
 ```
 
-With vector memory, the agent stores text chunks. It can recall them by similarity, but it can't combine them to reach conclusions.
+Acme is flagged. Globex is not.
 
-With InputLayer, the agent stores structured facts and defines rules. The engine evaluates those rules automatically. When the agent stores a new fact - say it learns a customer's renewal is coming up - all derived conclusions update. When it retracts a fact - say the customer renews - stale conclusions vanish on their own.
+---
 
-## Tool-use orchestration
+## Why is Acme flagged?
 
-Agents that use tools generate chains of observations and actions. InputLayer tracks these chains as structured relationships, which lets the agent reason about what it's learned so far and what it should investigate next.
+This is the point of the entire page. The `.why` command returns the proof tree - the exact chain of facts and rules that produced the conclusion.
 
-```chain
-Agent calls search API
--- learns
-Port closure in Shanghai [highlight]
--- knowledge graph already knows
-Supplier A ships through Shanghai
--- engine automatically derives
-Supplier A is disrupted [highlight]
-=> Agent didn't need to manually connect these dots [success]
+```datalog
+.why ?churn_risk("acme")
 ```
 
-Each new fact feeds into the existing web of relationships, potentially triggering new derived conclusions without the agent having to explicitly connect the dots. The more tool calls the agent makes, the richer the reasoning becomes.
+The proof tree shows three branches: Acme is high-value because it's an enterprise customer with a $150K contract (which exceeds the $100K threshold). Acme has an engagement drop because its usage trend is "declining." Acme's renewal is soon because April 15th is before June 1st. All three conditions met, so the churn_risk rule fired.
 
-## Multi-agent coordination
+This isn't a model's interpretation. It's a deterministic chain you can inspect, challenge, and reproduce. The VP sees exactly which conditions triggered the flag, and can decide which intervention addresses which condition.
 
-When multiple agents share a knowledge graph, they can coordinate through shared state instead of complex message-passing protocols.
+---
 
-```flow
-Agent A: detects negative sentiment [primary] -> Shared knowledge graph -> Agent B: detects usage decline [primary]
+## Why is Globex NOT flagged?
+
+Equally important: understanding why a conclusion was not reached.
+
+```datalog
+.why_not churn_risk("globex")
 ```
 
-```note
-type: tip
-Neither agent had to tell the other anything. Both contributed facts. A shared rule - "churn risk if negative sentiment AND usage drop > 30%" - derived the conclusion from the combined knowledge. No pub/sub, no event buses, no eventual consistency headaches.
+```
+churn_risk("globex") was NOT derived:
+
+  Rule: churn_risk (clause 0)
+    churn_risk(C) <- high_value(C), engagement_drop(C), renewal_soon(C)
+    Blocker: high_value("globex") - No matching tuples
 ```
 
-## Policy-aware retrieval
+Globex is not at churn risk because it's not high-value. It's a startup with a $25K contract, which doesn't meet the enterprise + >$100K threshold. The blocker is specific: the first condition in the rule failed, and here's why. No ambiguity.
 
-Every query can combine vector similarity with logical access control. This is particularly useful for agents that serve multiple users with different permission levels.
+---
 
-When an agent searches for documents on behalf of a user, InputLayer evaluates the authorization rules as part of the query itself - not as a separate middleware layer. The engine resolves the user's permission chain (following reporting hierarchies, team memberships, classification levels) and combines it with semantic similarity in a single pass. Results come back already filtered for what the user is allowed to see.
+## The situation changes
 
-This means access control is always consistent and never stale. When someone changes roles, the very next query reflects their new permissions.
+The customer success team runs an intervention. Acme's usage stabilizes.
 
-## Why teams add InputLayer for their agents
-
-The short version: your vector database handles similarity search well, and you should keep using it for that. InputLayer adds the capabilities it can't provide - multi-hop reasoning, recursive access control, automatic retraction, incremental updates, and structured memory that your agents can actually think with.
-
-Most teams start by using InputLayer for the queries that require reasoning, while keeping their existing vector store for straightforward similarity search. Over time, they often find themselves running more and more of their logic through the knowledge graph as the benefits of structured reasoning become clear.
-
-## Getting started
-
-```bash
-docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer
+```datalog
+-usage_trend("acme", "declining")
++usage_trend[("acme", "stable")]
 ```
 
-The [quickstart guide](/docs/guides/quickstart/) will get you running in about 5 minutes. From there, the [Python SDK](/docs/guides/python-sdk/) is the fastest way to integrate with your agent framework, and the [data modeling guide](/docs/guides/core-concepts/) will help you design a knowledge graph schema that fits your use case.
+```datalog
+?churn_risk(C)
+```
+
+```
+No results.
+```
+
+The churn risk retracted. The engagement_drop condition no longer holds, so the conclusion disappeared automatically. No cleanup logic, no manual flag removal, no stale belief sitting in the agent's memory. The agent's next answer reflects the current state of the world.
+
+---
+
+## Why this matters
+
+Three properties work together here. The rules guarantee that every conclusion follows from specific, inspectable conditions - not from whatever a model generates in a particular context window. The proof tree (`.why` and `.why_not`) makes the reasoning transparent and auditable. And correct retraction means that when facts change, conclusions update - the agent never acts on a belief that's no longer supported by the evidence.
+
+Every code block on this page runs against a live InputLayer instance. Paste them into the [demo](https://demo.inputlayer.ai) to see the results yourself.

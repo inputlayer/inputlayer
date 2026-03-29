@@ -6,67 +6,26 @@ competitors:
 
 # InputLayer + Vector Databases
 
-If you're already using a vector database, you've probably noticed that some questions can't be answered by similarity search alone. The moment your query needs to follow a chain of relationships, enforce access policies, or derive new conclusions from existing facts, you need something more.
+Your vector database finds content that looks like your query. InputLayer follows chains of facts to derive conclusions. Most real applications need both.
 
-That's where InputLayer comes in. It's not a replacement for your vector database - it's the reasoning layer that handles the things similarity search wasn't designed for.
+A shopper asks "ink for my printer." Every cartridge in the catalog is semantically similar to "printer ink" - a Canon PG-245 and an Epson 202 are nearly identical in embedding space. But only one fits the printer the shopper bought eight months ago. That connection - purchase history to compatibility matrix to live inventory - is a chain of structured facts, not a similarity match.
 
-## What each system does best
+InputLayer traces that chain in a single query and keeps the answer current as inventory changes.
 
-Your vector database excels at finding the k nearest neighbors to a query vector. It's purpose-built for that, and it does it really well. InputLayer adds a different set of capabilities on top: logical reasoning, recursive graph traversal, and incremental computation.
+## What each system does
 
 | Capability | Vector DBs | InputLayer | Together |
 |---|---|---|---|
-| Vector similarity search | Native | Native | Use either or both |
-| HNSW indexes at billion-scale | Optimized | Supported | Vector DB for scale, InputLayer for reasoning |
-| Graph traversal | No | Native | InputLayer adds this |
-| Recursive queries | No | Native | InputLayer adds this |
-| Rule-based inference | No | Native | InputLayer adds this |
-| Incremental computation | No | Native | InputLayer adds this |
-| Correct retraction | No | Native | InputLayer adds this |
-| Access control in queries | Metadata filter | Recursive logic | InputLayer handles complex policies |
+| Find similar content | Native, optimized at scale | Native | Use either or both |
+| Follow chains of relationships | No | Native | InputLayer handles this |
+| Evaluate rules recursively | No | Native | InputLayer handles this |
+| Update conclusions when facts change | No | Native (6.83ms per change) | InputLayer handles this |
+| Retract stale conclusions automatically | No | Native | InputLayer handles this |
+| Enforce access policies in the query | Metadata filters only | Recursive logic | InputLayer handles hierarchies |
 
-## Your vector database is great - here's what to add
+## Three things InputLayer handles that vector databases weren't built for
 
-Keep using your vector DB for similarity search. It's the right tool for "find documents that look like X." InputLayer adds the reasoning layer for the cases where looking similar isn't enough.
-
-**Multi-hop reasoning** is the most common gap. When the answer requires following chains of relationships - not just finding similar documents - similarity search can't get there. Think about tracing supply chain dependencies or connecting a patient's medication to a food interaction through an intermediate substance. These are chains of logical connections, and InputLayer follows them automatically.
-
-**Policy-aware retrieval** matters when access control is more complex than a flat metadata filter. If your permissions involve role hierarchies, transitive authorization, or organizational structures, that's a logical problem that InputLayer handles natively. It evaluates recursive permission chains as part of the search itself, so results come back already filtered for what the user is allowed to see.
-
-**Derived conclusions** become important when facts change. If someone's role changes, their permissions need to update everywhere instantly. If a fact is retracted, everything derived from it should disappear. InputLayer's incremental computation handles this automatically, so you never have stale results.
-
-**Structured memory for AI agents** fills the gap between "recall similar things" and "actually reason about what you know." When your agents need to follow chains of logic and maintain consistent state, that's what InputLayer adds.
-
-## How they work together architecturally
-
-Your vector database treats retrieval as a single operation - you give it a query vector, it returns the nearest neighbors. This is exactly the right model for "find documents similar to X."
-
-InputLayer treats retrieval as a reasoning problem. A single query can traverse graphs, evaluate recursive rules, apply vector similarity, and enforce access policies. You reach for it when the answer isn't sitting in a single document but needs to be derived from connected facts.
-
-## Simple similarity - use your vector DB
-
-```flow
-User query -> Embed -> Vector DB -> Top-k similar documents [success]
-```
-
-For straightforward similarity lookups, your vector database is the right tool. No need to change anything.
-
-## Policy-filtered retrieval - add InputLayer
-
-```chain
-VP of Engineering searches for "deployment best practices"
--- InputLayer resolves authorization
-Walk org hierarchy: 36 people in reporting chain [primary]
--- filter documents
-847 documents from authorized authors
--- rank by similarity
-Top 10 results, all authorized [success]
-=> One query, one pass. No separate auth service.
-```
-
-Your vector DB can filter on flat metadata, but it can't resolve "does this person have transitive authority over this document's author?" InputLayer resolves the authorization chain recursively and combines it with vector search in one query.
-
-## Multi-hop reasoning - add InputLayer
+**Following multi-hop chains.** When the answer requires tracing relationships across separate data sources - supply chain dependencies, corporate ownership structures, medication interactions - InputLayer follows the chain automatically. You define the relationships as rules. The engine walks them to any depth.
 
 ```chain
 Port disruption reported
@@ -76,24 +35,35 @@ Supplier A, Supplier C [primary]
 Component X, Component Y
 -- which products use those components?
 Product Alpha, Product Beta [highlight]
-=> Supply chain risk identified through the chain of facts
+=> InputLayer traced the chain from disruption to affected products
 ```
 
-Your vector database finds similar documents. InputLayer follows the chain of facts and derives the conclusion.
+**Evaluating access policies at query time.** When permissions involve hierarchies - managers see their reports' documents, and their reports' reports, and so on - InputLayer resolves the full chain as part of the search. Results come back already filtered for what the user is allowed to see.
 
-## Performance
+```chain
+VP of Engineering searches for "deployment best practices"
+-- InputLayer resolves authorization
+Walk org hierarchy: 36 people in reporting chain [primary]
+-- filter documents
+847 documents from authorized authors
+-- rank by similarity
+Top 10 results, all authorized [success]
+=> One query, one pass. Authorization and search together.
+```
 
-For pure vector similarity at massive scale (billions of vectors), dedicated vector databases are purpose-built and optimized. Keep using them for that workload.
-
-InputLayer adds capabilities they don't have. When facts change, only affected derivations recompute - that's 1,652x faster than full recomputation on a 2,000-node graph. When you delete a fact, all derived conclusions update automatically. And when you need reasoning plus retrieval, everything runs in a single pass without round-trips between systems.
+**Keeping conclusions current.** When someone changes roles, their permissions update in the next query. When a supplier is reinstated, blocked orders unblock automatically. When a product goes out of stock, recommendations retract in milliseconds. InputLayer tracks which conclusions depend on which facts and updates only what's affected.
 
 ## How teams use them together
 
-The most common pattern is to keep your vector DB for straightforward similarity search and add InputLayer for the reasoning-heavy queries. Your vector database handles "find similar documents." InputLayer handles "follow this chain of facts, check these access permissions, and derive this conclusion."
+The most common pattern: your vector database handles straightforward similarity search, and InputLayer handles queries that need reasoning. "Find similar documents" goes to the vector DB. "Find documents similar to X that this user is authorized to see through their reporting chain" goes to InputLayer, which combines the authorization logic with vector search in a single pass.
 
-Some teams also take advantage of InputLayer's native vector search for queries that need to combine reasoning with similarity. Instead of making separate calls to a vector DB and then running logic in application code, they run a single query that does both. This is especially useful for policy-filtered retrieval, where you want authorization and similarity in one pass.
+Some teams use both in parallel. Others move their reasoning-heavy queries entirely to InputLayer and keep the vector DB for high-throughput similarity at scale.
 
-The key insight is that these tools solve different problems. Your vector database is great at what it does, and InputLayer fills in the capabilities it wasn't built to handle.
+## Performance
+
+InputLayer's incremental computation means that when facts change, only affected conclusions recompute. On a 2,000-node graph with 400,000 derived relationships, a single fact change takes 6.83ms - not the 11.3 seconds a full recompute would take. That's 1,652x faster.
+
+For pure vector similarity at massive scale (billions of vectors), dedicated vector databases are purpose-built and optimized for that specific workload.
 
 ## Getting started
 

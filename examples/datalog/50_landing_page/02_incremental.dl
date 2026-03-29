@@ -1,0 +1,25 @@
+// Landing page example: Incremental Updates
+// Authority chain that updates incrementally when a new edge is added.
+
+.kg create landing_incremental
+.kg use landing_incremental
+
+// Facts: management chain
++manages[("alice", "bob"), ("bob", "charlie")]
+
+// Rules: transitive authority
++authority(X, Y) <- manages(X, Y)
++authority(X, Z) <- authority(X, Y), manages(Y, Z)
+
+// Query: who does alice have authority over?
+?authority("alice", Who)
+
+// Add one new edge
++manages("charlie", "diana")
+
+// Query again: diana should appear without full recompute
+?authority("alice", Who)
+
+// Cleanup
+.kg use default
+.kg drop landing_incremental

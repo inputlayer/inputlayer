@@ -1,0 +1,26 @@
+// Landing page example: Provenance (.why and .why_not)
+// Shows proof trees for derived facts and negative explanations.
+
+.kg create landing_provenance
+.kg use landing_provenance
+
+// Facts: ownership chain
++owns[("alpha", "beta"), ("beta", "gamma")]
++sanctions_list[("gamma")]
+
+// Rules: recursive exposure
++exposed(E, S) <- owns(E, S), sanctions_list(S)
++exposed(E, S) <- owns(E, Mid), exposed(Mid, S)
+
+// Query
+?exposed("alpha", Who)
+
+// Why is alpha exposed to gamma?
+.why ?exposed("alpha", Who)
+
+// Why is delta NOT exposed to gamma?
+.why_not exposed("delta", "gamma")
+
+// Cleanup
+.kg use default
+.kg drop landing_provenance

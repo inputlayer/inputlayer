@@ -1,0 +1,33 @@
+// Landing page example: Correct Retraction (Diamond Problem)
+// Two ownership paths to the same sanctioned entity.
+// Removing one path keeps the exposure. Removing both retracts it.
+
+.kg create landing_retraction
+.kg use landing_retraction
+
+// Facts: ownership chain with two paths to gamma
++owns[("alpha", "beta"), ("alpha", "delta"), ("beta", "gamma"), ("delta", "gamma")]
++sanctions_list[("gamma")]
+
+// Rules: recursive sanctions exposure
++exposed(E, S) <- owns(E, S), sanctions_list(S)
++exposed(E, S) <- owns(E, Mid), exposed(Mid, S)
+
+// Query: who is alpha exposed to?
+?exposed("alpha", Who)
+
+// Remove one path (beta -> gamma)
+-owns("beta", "gamma")
+
+// Query again: alpha should STILL be exposed via delta
+?exposed("alpha", Who)
+
+// Remove second path (delta -> gamma)
+-owns("delta", "gamma")
+
+// Query again: exposure should retract completely
+?exposed("alpha", Who)
+
+// Cleanup
+.kg use default
+.kg drop landing_retraction

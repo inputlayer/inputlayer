@@ -1,16 +1,15 @@
 ---
 title: "Why We Built InputLayer on Differential Dataflow"
 date: "2026-01-30"
-author: "InputLayer Team"
 category: "Engineering"
-excerpt: "The story behind our choice of Timely and Differential Dataflow as the computation engine, and what that means for the kinds of problems InputLayer can solve."
+excerpt: "One fact changes. Two million derived conclusions exist. How many need to update? Usually a few hundred. Differential Dataflow finds exactly those - in milliseconds."
 ---
 
 # Why We Built InputLayer on Differential Dataflow
 
-Every engineering team has that one decision that shaped everything that came after. For us, it was choosing [Differential Dataflow](https://github.com/TimelyDataflow/differential-dataflow) as the computation engine underneath InputLayer. It determined what we could build, what performance we could offer, and which problems we could solve that other systems can't.
+We needed an engine where deleting one fact from a graph with two million derived conclusions would correctly retract exactly the right subset - in milliseconds, not minutes. Getting this wrong means phantom permissions that should have been revoked, stale compliance flags that miss a sanctions hit, or recommendations pointing to discontinued products. These aren't edge cases. They're the normal state of any system where facts change and derived conclusions don't keep up.
 
-This is the story of why we made that choice and what it means for the people building on InputLayer today.
+The choice of computation engine determines whether these bugs are even possible. We chose Differential Dataflow because it makes an entire category of consistency failures structurally impossible - not caught by tests, not handled by cleanup jobs, but eliminated at the engine level. Here's the story behind that choice.
 
 ## The problem that started everything
 
@@ -20,61 +19,26 @@ That sounds straightforward until you think about scale. Imagine a knowledge gra
 
 But then a single fact changes. One employee transfers departments. One entity gets added to a sanctions list. One product goes out of stock.
 
-```chain
-100,000 source facts feed into 50 rules
--- initial computation
-2,000,000 derived facts [primary]
--- then one fact changes
-How many of those 2M derived facts are affected? [highlight]
-=> Usually just a few hundred. But the naive approach recomputes all 2 million.
+```flow
+100K facts + 50 rules -> 2M derived facts [primary] -> 1 fact changes -> ~100 affected [highlight]
 ```
 
 With a naive approach, you throw away all 2 million derived facts and recompute them from scratch. For small graphs, that's fast enough. For production workloads, it doesn't work. At 11 seconds per recomputation on a 2,000-node graph, you're locked into batch processing. Real-time permission checks, live compliance screening, instant recommendation updates - none of that is practical.
 
 We needed an engine that could update just the affected derivations, correctly, in milliseconds.
 
-## What we evaluated
-
-We spent months evaluating different approaches. Each one taught us something about what we needed.
-
-**Batch-oriented engines** are the gold standard for one-time rule evaluation. They compile rules into extremely efficient programs that process an entire dataset in one pass. Some even generate low-level code that runs blazingly fast for batch workloads.
-
-The limitation: there's no concept of "update." If you add a fact, you rerun the entire program. For a knowledge graph that changes frequently - which is most production use cases - that means paying the full computation cost every time anything changes.
-
-**Graph databases** offer incremental capabilities for simple path queries. But their query languages weren't designed for recursive derivation. They can traverse stored edges, but they can't derive *new* edges based on rules and then recursively reason over those derived edges. And they don't maintain results incrementally when the graph changes.
-
-**Building from scratch** was tempting. We could design an incremental engine perfectly suited to our needs. But correct incremental maintenance through recursive fixpoints is one of the hardest problems in database research. Tracking which derived facts should retract when a source fact is removed - especially when derived facts might have multiple supporting paths - is notoriously subtle. Teams that have tried typically spend years before reaching production quality.
-
-```tree
-What we needed [primary]
-  Fast batch computation
-  Incremental updates (not full recompute)
-  Recursive derivation (rules that reference themselves)
-  Correct retraction (delete actually deletes)
-  Reasonable time to production
-```
-
-```note
-type: warning
-No single existing approach gave us everything we needed. Batch engines lacked incremental updates. Graph databases lacked recursive derivation. Building from scratch would take years.
-```
-
 ## Finding Differential Dataflow
 
-Then we found Frank McSherry's work on [Differential Dataflow](https://github.com/TimelyDataflow/differential-dataflow), built on top of [Timely Dataflow](https://github.com/TimelyDataflow/timely-dataflow). Both are Rust libraries. The performance was a bonus. The computational model was the real discovery.
+We found it in Frank McSherry's work on [Differential Dataflow](https://github.com/TimelyDataflow/differential-dataflow), built on top of [Timely Dataflow](https://github.com/TimelyDataflow/timely-dataflow). Both are Rust libraries. The performance was a bonus. The computational model was the real discovery.
 
 The core idea is simple enough to explain in a paragraph: instead of storing derived data as static results, the engine represents everything as *weighted differences*. Adding a fact is a +1 difference. Removing a fact is a -1 difference. Every computation in the system processes differences in and produces differences out. This means every operation is naturally incremental - it never looks at the whole dataset, only at what changed.
 
 ```flow
-Traditional: Input facts -> Compute ALL -> Static results
+Traditional: Changed fact -> Recompute ALL [highlight] -> Rebuilt results
 ```
 
 ```flow
-After change (traditional): Changed fact -> Compute ALL again [highlight] -> Rebuilt results
-```
-
-```flow
-Differential: Changed fact -> Compute DIFFERENCE only [success] -> Only changed derivations
+Differential: Changed fact -> Compute diff only [success] -> Updated derivations
 ```
 
 ## How it handles the hard part: recursive retraction
@@ -83,12 +47,9 @@ The real test of an incremental system isn't additions - it's deletions. And spe
 
 Here's the scenario that breaks naive incremental systems. Alice has authority over Charlie through two independent paths:
 
-```flow
-Path 1: Alice -> Bob -> Charlie [primary]
-```
-
-```flow
-Path 2: Alice -> Diana -> Charlie [primary]
+```graph
+Alice --manages-> Bob --manages-> Charlie [primary]
+Alice --manages-> Diana --manages-> Charlie [primary]
 ```
 
 Remove Bob's management of Charlie. Does Alice lose authority over Charlie? *No* - the path through Diana still supports it. Now remove Diana's management of Charlie too. Does Alice lose authority over Charlie? *Yes* - there are no remaining paths.
@@ -96,9 +57,9 @@ Remove Bob's management of Charlie. Does Alice lose authority over Charlie? *No*
 Differential Dataflow handles this through its weight-based model. Each derived fact carries a weight representing the number of independent derivation paths. Removing a path decreases the weight. The fact only retracts when the weight hits zero.
 
 ```steps
-Both paths exist: authority(Alice, Charlie) weight is 2 :: Alive
-Remove Bob's path: weight drops to 1 :: Still alive - Diana's path remains [success]
-Remove Diana's path: weight drops to 0 :: Retracted [highlight]
+Both paths: weight = 2 :: via Bob + Diana
+Remove Bob path: weight = 1 :: survives [success]
+Remove Diana path: weight = 0 :: retracted [highlight]
 ```
 
 This sounds simple in theory. In practice, getting it right through multiple levels of recursive derivation, where intermediate conclusions can also have multiple support paths, is extraordinarily difficult. Differential Dataflow solves it at the engine level, which means we didn't have to.

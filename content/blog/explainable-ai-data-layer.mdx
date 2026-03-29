@@ -1,18 +1,17 @@
 ---
 title: "What Explainable AI Actually Requires at the Data Layer"
 date: "2026-03-27"
-author: "InputLayer Team"
 category: "Governance"
-excerpt: "Most conversations about explainable AI focus on the model. The harder question - the one that actually comes up in audits - is why the system had that information in the first place."
+excerpt: "A compliance audit asks 'why was transaction #8472 flagged?' You can explain the model. Can you explain which facts and rules produced the context the model used?"
 ---
 
 # What Explainable AI Actually Requires at the Data Layer
 
-Most conversations about explainable AI focus on the model: which features influenced the prediction, how attention weights distributed, what a SHAP explanation looks like.
+A compliance audit asks: "Why was transaction #8472 flagged?" Your team can explain the model - it scored high based on certain features. They can show attention weights, feature importance, confidence scores. The auditor nods, then asks the next question: "But why did the system have that information in the first place? Which entity relationships, which ownership chains, which sanctions data led it to retrieve the context it used?" Silence. The context retrieval pipeline is a black box - embeddings in, documents out, no trace of the reasoning in between.
 
-This is the wrong level of the stack.
+The audit fails. The consequence isn't a note in a report. It's a formal finding, a remediation plan with a 90-day deadline, and the real possibility of restricted AI deployment until the gap is closed. For regulated industries - financial services, healthcare, defense - a failed explainability audit can mean suspended product launches, mandatory process reversions to manual review, and in severe cases, regulatory action that makes the news.
 
-In enterprise AI systems, model explainability is necessary but not sufficient. The harder question - the one that actually comes up in audits, compliance reviews, and incident investigations - is this:
+Most teams focus on model explainability because that's where the tooling is. But the harder question - the one that actually determines whether you pass the audit - is this:
 
 **Why did the system have that information in the first place?**
 
@@ -24,40 +23,30 @@ There are two distinct explainability problems in enterprise AI. Most organizati
 
 **Problem 2: Context explainability.** Why was this context included in the prompt? Why did the system surface this fact as relevant? Why did this user have access to this document?
 
-Problem 2 is where enterprise AI systems actually fail audits.
+Problem 2 is where enterprise AI systems actually fail audits. The model explanation satisfies the first round of questions. The context explanation - or lack of it - is where the finding gets written.
 
-A financial services firm deploys an AI system that flags transactions for review. A compliance audit asks: "Why was transaction #8472 flagged?" The team can answer the model question - the model scored it high based on certain features. They cannot answer the context question - which entity relationships, which ownership chains, which sanctions data led the system to retrieve the context that produced those features.
+## The context audit gap
 
-The audit fails. Not because the model was wrong. Because the context retrieval was a black box.
+When your retrieval pipeline is "embed the query, find nearest neighbors, inject top-k into the prompt," the audit trail is thin. "This document was included because its embedding was 0.73 cosine-similar to the query" doesn't satisfy a regulator.
 
-## Why Vector Search Creates a Context Audit Gap
-
-The dominant context retrieval architecture - embed the query, search by similarity, inject top-k results into the prompt - is inherently unexplainable at the context level.
-
-"The vector was close" is not an audit trail.
-
-You cannot tell a regulator that document X was included in the prompt because its embedding was 0.73 cosine-similar to the query embedding. You cannot reconstruct, after the fact, exactly which similarity threshold, which embedding model version, and which document state produced the context that drove the decision.
-
-More critically, you cannot prove that the access control and relevance logic applied at query time was consistent with your stated policies.
+You need to be able to reconstruct, after the fact, exactly which facts, which rules, and which state produced the context that drove the decision. And you need to prove that the access control and relevance logic applied at query time was consistent with your stated policies.
 
 ## What the Data Layer Needs to Provide
 
 For enterprise AI to be genuinely explainable, the context retrieval layer needs to provide three things:
 
-**1. Derivation traces.** For every piece of context surfaced to the model, a complete trace showing which facts and rules produced it. Not just "this document was retrieved" but "this document was retrieved because rule R fired on facts F1 and F2."
+**1. Derivation traces.** For every piece of context surfaced to the model, a complete trace showing which facts and rules produced it. Not just "this document was retrieved" but "this document was retrieved because rule R fired on facts F1 and F2." Without this, your audit response is "the system retrieved documents that seemed relevant" - which satisfies no regulator.
 
-**2. Point-in-time reproducibility.** The ability to reconstruct, for any past decision, exactly what state the knowledge graph was in at the moment the context was retrieved. This requires that the data layer maintain a history of fact changes, not just current state.
+**2. Point-in-time reproducibility.** The ability to reconstruct, for any past decision, exactly what state the knowledge graph was in at the moment the context was retrieved. This requires that the data layer maintain a history of fact changes, not just current state. Without this, you can describe what the system does today but not what it did on the day the decision was made. Regulators care about the latter.
 
-**3. Policy-as-logic.** Access control, relevance rules, and business policies expressed as formal logic that can be inspected, versioned, and audited - not as middleware code that may diverge from stated policy.
+**3. Policy-as-logic.** Access control, relevance rules, and business policies expressed as formal logic that can be inspected, versioned, and audited - not as middleware code that may diverge from stated policy. Without this, your stated access policy and your actual access behavior can diverge silently. The gap is invisible until an audit finds a document that was served to someone who shouldn't have seen it.
 
-## The Architecture That Makes This Possible
+## How InputLayer provides this
 
-A deductive context graph addresses all three requirements directly.
+InputLayer stores facts explicitly and expresses rules as versioned logic. Every derived conclusion traces back to the named rules and named facts that produced it. The `.why` command returns the complete proof tree for any result.
 
-Facts are explicit and stored. Rules are explicit and versioned. Every derived context is the product of named rules applied to named facts - producing a derivation trace that satisfies the audit question at the context level.
+When a fact is deleted, every conclusion derived from it disappears automatically - the system never serves context based on outdated data. When a fact changes, only the affected conclusions recompute.
 
-Correct retraction means the system never serves context derived from facts that are no longer true. Incremental maintenance means the current state is always current - not a snapshot from the last batch job.
+The result: for any past decision, you can reconstruct the complete chain. This output was produced by this model, operating on this context, which was derived by these rules from these facts, which were current as of this timestamp.
 
-The result is an AI system where you can answer the audit question with a complete data trail: this output was produced by this model, operating on this context, which was derived by these rules from these facts, which were current as of this timestamp.
-
-That is what enterprise explainability actually requires.
+That's what enterprise explainability actually requires at the data layer.

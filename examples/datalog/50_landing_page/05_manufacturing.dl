@@ -1,0 +1,46 @@
+// Use case: Manufacturing Operations
+// Multi-hop dependency chain: line -> operator -> certification -> training
+// When training expires, the entire chain retracts incrementally.
+
+.kg create landing_manufacturing
+.kg use landing_manufacturing
+
+// Facts: dependency chain
++requires[("line_4", "operator_kim"), ("line_5", "operator_lee")]
++qualified_by[("operator_kim", "cert_safety"), ("operator_lee", "cert_safety")]
++valid_certification[("cert_safety", "training_jan_2026")]
++training_completed[("training_jan_2026")]
+
+// Rules: transitive availability
++available(X) <- training_completed(X)
++available(X) <- valid_certification(X, Dep), available(Dep)
++available(X) <- qualified_by(X, Dep), available(Dep)
++available(X) <- requires(X, Dep), available(Dep)
+
+// Query: is line_4 available?
+?available("line_4")
+
+// Query: what is available?
+?available(X)
+
+// Training expires - remove the fact
+-training_completed("training_jan_2026")
+
+// Query again: line_4 should be unavailable now
+?available("line_4")
+?available(X)
+
+// Kim completes new training
++training_completed[("training_mar_2026")]
++valid_certification[("cert_safety", "training_mar_2026")]
+
+// Query again: line_4 should recover
+?available("line_4")
+?available(X)
+
+// Why is line_4 available?
+.why ?available("line_4")
+
+// Cleanup
+.kg use default
+.kg drop landing_manufacturing

@@ -62,10 +62,13 @@ async fn auth_middleware(
     req: Request<Body>,
     next: Next,
 ) -> Response {
-    // Health/liveness probes are always public (both root and /v1/ prefixed)
+    // Health/liveness probes and API docs are always public (both root and /v1/ prefixed)
     let path = req.uri().path();
     let effective_path = path.strip_prefix("/v1").unwrap_or(path);
     if effective_path == "/health" || effective_path == "/live" || effective_path == "/ready" {
+        return next.run(req).await;
+    }
+    if effective_path.starts_with("/api/") {
         return next.run(req).await;
     }
 

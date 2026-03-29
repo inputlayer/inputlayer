@@ -1,0 +1,52 @@
+// Use case: Supply Chain
+// Fan-out propagation: port closure cascades to suppliers, orders, SLA penalties
+
+.kg create landing_supply_chain
+.kg use landing_supply_chain
+
+// Facts: which suppliers ship through which ports
++ships_via[("supplier_a", "shanghai"), ("supplier_b", "shanghai"), ("supplier_c", "busan")]
+
+// Facts: which suppliers feed which orders
++supplies[("supplier_a", "order_101"), ("supplier_a", "order_102"), ("supplier_b", "order_103"), ("supplier_c", "order_104")]
+
+// Facts: which orders have SLA penalties
++has_sla[("order_101", "globex_corp", "penalty_5pct"), ("order_103", "initech", "penalty_10pct")]
+
+// Facts: port status
++port_status[("shanghai", "open"), ("busan", "open")]
+
+// Rules: disruption cascade
++supplier_disrupted(Sup) <- ships_via(Sup, Port), port_status(Port, "closed")
++order_at_risk(Order) <- supplies(Sup, Order), supplier_disrupted(Sup)
++sla_triggered(Order, Customer, Penalty) <- order_at_risk(Order), has_sla(Order, Customer, Penalty)
+
+// Query: any disruptions right now?
+?supplier_disrupted(X)
+?order_at_risk(X)
+?sla_triggered(Order, Customer, Penalty)
+
+// Shanghai port closes
+-port_status("shanghai", "open")
++port_status[("shanghai", "closed")]
+
+// Query: what is disrupted now?
+?supplier_disrupted(X)
+?order_at_risk(X)
+?sla_triggered(Order, Customer, Penalty)
+
+// Supplier A reroutes to Busan
+-ships_via("supplier_a", "shanghai")
++ships_via[("supplier_a", "busan")]
+
+// Query: supplier_a orders recover, supplier_b still disrupted
+?supplier_disrupted(X)
+?order_at_risk(X)
+?sla_triggered(Order, Customer, Penalty)
+
+// Why is order_103 at risk?
+.why ?order_at_risk("order_103")
+
+// Cleanup
+.kg use default
+.kg drop landing_supply_chain

@@ -8,7 +8,6 @@ const navLinks = [
   { label: "Docs", href: "/docs/" },
   { label: "Blog", href: "/blog/" },
   { label: "Use Cases", href: "/use-cases/" },
-  { label: "Compare", href: "/compare/" },
   { label: "Demo", href: "https://demo.inputlayer.ai", external: true },
 ]
 

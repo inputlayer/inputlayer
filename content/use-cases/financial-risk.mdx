@@ -2,44 +2,145 @@
 title: "Financial Risk and Compliance"
 icon: "Shield"
 subtitle: "Auditable entity reasoning for sanctions screening, beneficial ownership traversal, and policy enforcement."
+order: 1
 ---
 
-# Auditable entity reasoning for financial compliance
+# Sanctions screening through ownership chains
 
-Financial compliance requires traversing ownership chains, applying sanctions rules, and producing auditable derivations for every flag. The challenge is not finding similar transactions - it is reaching sanctions hits that are multiple hops away through entity relationships that no similarity score can bridge.
+In 2014, a major European bank paid $8.9 billion for processing transactions with sanctioned entities. The transactions themselves looked clean. The exposure was buried multiple levels deep in ownership chains that nobody traced in time.
 
-InputLayer evaluates compliance rules over live entity graphs and produces a complete derivation proof for every result - linking each flag to the specific relationships and rules that triggered it.
+This is the core challenge of sanctions compliance: the entity you're transacting with might be perfectly legitimate, but if you follow the ownership chain upward - through holding companies, subsidiaries, and partial stakes - you might find a sanctioned person or organization at the top. Miss that chain, and you're liable. Finding it requires recursive reasoning through corporate structures that can be dozens of layers deep, with multiple paths to the same entity.
+
+There's a subtlety that makes this genuinely hard. When an entity gets cleared from a sanctions list, every flag that was derived through that entity needs to retract. But only the flags that depended exclusively on that entity - if there's a second, independent ownership path that still connects to a sanctioned entity, the flag needs to stay. This is called the diamond problem, and getting it wrong means either phantom flags that waste your compliance team's time, or missed exposures that create regulatory risk.
 
 ---
 
-## Example: Beneficial ownership and sanctions traversal
+## The setup
 
-This recursive rule traverses the ownership graph to find sanctions exposure at any depth, not just direct relationships.
+Alpha owns two subsidiaries: Beta and Delta. Both Beta and Delta own stakes in Gamma. Gamma is on a sanctions list.
 
-```datalog
-+owns[("entity_b", "entity_c"), ("entity_a", "entity_b")]
-+sanctions_list[("entity_c")]
-
-+sanctions_exposure(Entity, Sanctioned, 1) <-
-    owns(Entity, Sanctioned),
-    sanctions_list(Sanctioned)
-
-+sanctions_exposure(Entity, Sanctioned, Hops) <-
-    owns(Entity, Intermediate),
-    sanctions_exposure(Intermediate, Sanctioned, PrevHops),
-    Hops = PrevHops + 1
-
-?sanctions_exposure("entity_a", Sanctioned, Hops)
-// Returns: entity_a exposed to entity_c at 2 hops via entity_b
-// Full derivation proof available via Provenance API
+```graph
+Alpha --owns-> Beta
+Alpha --owns-> Delta
+Beta --owns-> Gamma [highlight]
+Delta --owns-> Gamma [highlight]
 ```
 
-Every flag has a complete derivation: which ownership relationship, which sanctions entry, which rule evaluation produced it. When a regulator asks, the answer is a structured artifact, not a description.
+Two independent paths from Alpha to the sanctioned entity. Let's trace what happens.
 
 ---
 
-## When ownership changes
+## Loading facts and defining the rule
 
-When entity_b is acquired and its ownership relationship changes, every exposure derived through that relationship recomputes automatically. Flags that were valid through entity_b may retract. New exposures through the updated ownership chain appear immediately.
+```datalog
+// The ownership structure
++owns[("alpha", "beta"), ("alpha", "delta"), ("beta", "gamma"), ("delta", "gamma")]
 
-This is the operational difference between a nightly batch sanctions run and a live reasoning layer.
+// Gamma is sanctioned
++sanctions_list[("gamma")]
+```
+
+The rule says: an entity is exposed if it owns a sanctioned entity, or if it owns something that is itself exposed. That second clause is recursive - it follows the chain to any depth, whether it's 2 hops or 20.
+
+```datalog
++exposed(E, S) <- owns(E, S), sanctions_list(S)
++exposed(E, S) <- owns(E, Mid), exposed(Mid, S)
+```
+
+---
+
+## Query: is Alpha exposed?
+
+```datalog
+?exposed("alpha", Who)
+```
+
+```
+┌─────────┬─────────┐
+│ alpha   │ Who     │
+├─────────┼─────────┤
+│ "alpha" │ "gamma" │
+└─────────┴─────────┘
+1 rows
+```
+
+Yes. Alpha is exposed to Gamma through two independent ownership paths.
+
+---
+
+## The diamond problem in action
+
+Beta divests its stake in Gamma.
+
+```datalog
+-owns("beta", "gamma")
+```
+
+```datalog
+?exposed("alpha", Who)
+```
+
+```
+┌─────────┬─────────┐
+│ alpha   │ Who     │
+├─────────┼─────────┤
+│ "alpha" │ "gamma" │
+└─────────┴─────────┘
+1 rows
+```
+
+Alpha is still exposed. The path through Delta still supports the flag. If this retracted prematurely, a compliance team would look at Alpha, see no flag, and approve a transaction that should have been held. InputLayer tracks both paths independently - the conclusion only retracts when every supporting path is gone.
+
+Now Delta also divests.
+
+```datalog
+-owns("delta", "gamma")
+```
+
+```datalog
+?exposed("alpha", Who)
+```
+
+```
+No results.
+```
+
+Both paths are gone. The exposure retracts cleanly. No phantom flag lingering in a queue for someone to investigate. No manual cleanup.
+
+---
+
+## Showing the work
+
+When a flag is active, `.why` returns the exact chain of ownership and rules that produced it:
+
+```datalog
+.why ?exposed("alpha", Who)
+```
+
+The proof tree shows: Alpha is exposed to Gamma because Alpha owns Delta, Delta owns Gamma, and Gamma is on the sanctions list. Each link in the chain traces to a specific fact and a specific rule. This is what goes in the case file. This is what the regulator sees.
+
+When a flag is missing and shouldn't be, `.why_not` identifies exactly which condition failed:
+
+```datalog
+.why_not exposed("delta", "gamma")
+```
+
+```
+exposed("delta", "gamma") was NOT derived:
+
+  Rule: exposed (clause 0)
+    exposed(E, S) <- owns(E, S), sanctions_list(S)
+    Blocker: owns("delta", "gamma") - No matching tuples
+
+  Rule: exposed (clause 1)
+    exposed(E, S) <- owns(E, Mid), exposed(Mid, S)
+    Blocker: owns("delta", _) - No matching tuples
+```
+
+Delta is not exposed because it no longer owns anything. The blocker is specific and auditable.
+
+---
+
+## Try it
+
+Every code block on this page runs against a live InputLayer instance. Paste them into the [demo](https://demo.inputlayer.ai) to see the results yourself.
