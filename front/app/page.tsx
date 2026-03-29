@@ -4,9 +4,8 @@ import Link from "next/link"
 import { useState } from "react"
 import { SiteHeader } from "@/components/site-header"
 import { SiteFooter } from "@/components/site-footer"
-import { BlogCard } from "@/components/blog-card"
 import { EmbeddingDiagram, DiamondDiagram, WaterfallDiagram, ProvenanceTreeDiagram, VisualCodeTabs, HeroVisualization } from "@/components/landing-diagrams"
-import { blogPosts } from "@/lib/content-bundle"
+import { RotatingHero } from "@/components/rotating-hero"
 import {
   ArrowRight,
   ExternalLink,
@@ -19,6 +18,10 @@ import {
   ShoppingBag,
   Copy,
   Check,
+  Terminal,
+  BookOpen,
+  Server,
+  FileText,
 } from "lucide-react"
 
 // ── Syntax-highlighted code blocks ──────────────────────────────────────
@@ -151,15 +154,8 @@ export default function LandingPage() {
         <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent" />
         <div className="relative mx-auto max-w-6xl px-6 py-24 lg:py-32">
           <div className="grid gap-12 lg:grid-cols-2 lg:gap-16 items-center">
-            <div className="space-y-6">
-              <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl lg:text-6xl">
-                Streaming reasoning layer
-                <br />
-                <span className="text-primary">for AI systems</span>
-              </h1>
-              <p className="text-lg text-muted-foreground max-w-lg">
-                Store facts. Define rules. InputLayer derives the conclusions, keeps them current as data changes, and explains every result with a proof tree. Combine recursive reasoning with vector search in a single query. Open source.
-              </p>
+            <div className="space-y-8">
+              <RotatingHero />
               <div className="flex flex-wrap gap-3 pt-2">
                 <a
                   href="https://demo.inputlayer.ai"
@@ -199,7 +195,7 @@ export default function LandingPage() {
                 A shopper asks for printer ink. Vector search returns every ink cartridge with a high similarity score - Canon, Epson, Brother, all nearly identical in embedding space. But only one brand fits their printer. Recommending the wrong one means a return, a support ticket, and a customer who doesn't come back.
               </p>
               <p className="text-muted-foreground">
-                InputLayer evaluates compatibility rules and ranks by vector similarity in a single query. The rule filters to what actually fits. The vector search ranks what's left by relevance.
+                InputLayer evaluates compatibility rules and ranks by vector similarity in a single query. The rule filters to what actually fits. The vector search ranks what's left by relevance. Recursive reasoning meets vector search.
               </p>
             </div>
             <VisualCodeTabs visual={<EmbeddingDiagram />} code={rulesVectorsCode} />
@@ -282,6 +278,36 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ── Who Builds With InputLayer ─────────────────────────────── */}
+      <section className="border-b border-border/50">
+        <div className="mx-auto max-w-6xl px-6 py-20">
+          <div className="max-w-2xl mb-12">
+            <p className="text-sm font-semibold text-primary uppercase tracking-wider mb-2">Who builds with InputLayer</p>
+            <h2 className="text-3xl font-bold tracking-tight">
+              If your system needs to be right, not just fast
+            </h2>
+          </div>
+
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+            {[
+              { icon: <Brain className="h-6 w-6 text-primary" />, title: "AI agent developers", desc: "Add deterministic reasoning to agents that today rely on prompt chains and hope." },
+              { icon: <Zap className="h-6 w-6 text-primary" />, title: "RAG pipeline builders", desc: "Go beyond similarity search. Filter by rules, rank by vectors, explain every result." },
+              { icon: <Shield className="h-6 w-6 text-primary" />, title: "Compliance teams", desc: "Audit trails that trace every conclusion back to the facts and rules that produced it." },
+              { icon: <GitBranch className="h-6 w-6 text-primary" />, title: "Platform engineers", desc: "Build decision-automation systems with incremental updates and correct retraction built in." },
+            ].map((persona) => (
+              <div
+                key={persona.title}
+                className="rounded-xl border border-border bg-card p-6 space-y-3"
+              >
+                {persona.icon}
+                <h3 className="text-sm font-semibold">{persona.title}</h3>
+                <p className="text-sm text-muted-foreground">{persona.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* ── Use Cases ─────────────────────────────────────────────── */}
       <section className="border-b border-border/50">
         <div className="mx-auto max-w-6xl px-6 py-20">
@@ -297,10 +323,10 @@ export default function LandingPage() {
 
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
             {[
-              { title: "Financial Risk", icon: <Shield className="h-8 w-8 text-primary" />, desc: "Trace ownership chains to any depth. When an entity is cleared from a sanctions list, downstream flags retract - but only if no second path still supports them.", href: "/use-cases/financial-risk/", tags: ["Correct conclusion retraction", "Provenance"] },
-              { title: "Commerce", icon: <ShoppingBag className="h-8 w-8 text-primary" />, desc: "Every ink cartridge looks the same in embedding space. Compatibility rules filter to what actually fits the shopper's printer, then vectors rank by relevance.", href: "/use-cases/commerce/", tags: ["Rules + vectors", "Incremental"] },
-              { title: "Manufacturing", icon: <Factory className="h-8 w-8 text-primary" />, desc: "An operator's training expires. The certification, qualification, and production line availability retract through a four-level dependency chain - in milliseconds.", href: "/use-cases/manufacturing/", tags: ["Incremental", "Provenance"] },
-              { title: "Supply Chain", icon: <Truck className="h-8 w-8 text-primary" />, desc: "A port closes. Within milliseconds, every affected supplier, order, and SLA penalty is identified across the entire supply graph.", href: "/use-cases/supply-chain/", tags: ["Incremental"] },
+              { title: "Financial Risk", icon: <Shield className="h-8 w-8 text-primary" />, stat: "3 ownership layers", desc: "Flag sanctions violations across nested ownership chains in 6.83ms. When one path clears, the flag stays if a second path still holds.", href: "/use-cases/financial-risk/", tags: ["Retraction", "Provenance"] },
+              { title: "Commerce", icon: <ShoppingBag className="h-8 w-8 text-primary" />, stat: "10,000 SKUs filtered", desc: "Compatibility rules eliminate what doesn't fit the printer. Vector search ranks what's left. One query, zero wrong recommendations.", href: "/use-cases/commerce/", tags: ["Rules + vectors", "Incremental"] },
+              { title: "Manufacturing", icon: <Factory className="h-8 w-8 text-primary" />, stat: "4-level dependency chain", desc: "One expired certification retracts the operator's qualification, line assignment, and shift schedule - propagated in milliseconds, not batch jobs.", href: "/use-cases/manufacturing/", tags: ["Incremental", "Provenance"] },
+              { title: "Supply Chain", icon: <Truck className="h-8 w-8 text-primary" />, stat: "1 port closure, 200 impacts", desc: "A single disruption ripples across suppliers, orders, and SLA penalties. InputLayer traces every affected node across the full supply graph.", href: "/use-cases/supply-chain/", tags: ["Incremental", "Recursive"] },
             ].map((uc) => (
               <Link
                 key={uc.title}
@@ -309,6 +335,7 @@ export default function LandingPage() {
               >
                 {uc.icon}
                 <h3 className="text-lg font-semibold group-hover:text-primary transition-colors">{uc.title}</h3>
+                <p className="text-sm font-semibold text-primary">{uc.stat}</p>
                 <p className="text-sm text-muted-foreground">{uc.desc}</p>
                 <div className="flex flex-wrap gap-1.5">
                   {uc.tags.map((tag) => (
@@ -326,59 +353,134 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── Blog Preview ────────────────────────────────────────────── */}
-      {blogPosts.length > 0 && (
-        <section className="border-b border-border/50">
-          <div className="mx-auto max-w-6xl px-6 py-20">
-            <div className="flex items-center justify-between mb-12">
-              <div>
-                <p className="text-sm font-semibold text-primary uppercase tracking-wider mb-2">From the blog</p>
-                <h2 className="text-3xl font-bold tracking-tight">Latest posts</h2>
-              </div>
-              <Link
-                href="/blog/"
-                className="hidden sm:inline-flex items-center gap-1 text-sm text-primary font-medium hover:underline"
-              >
-                View all <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
+      {/* ── Deep Dives ─────────────────────────────────────────────── */}
+      <section className="border-b border-border/50">
+        <div className="mx-auto max-w-6xl px-6 py-20">
+          <div className="flex items-center justify-between mb-12">
+            <div>
+              <p className="text-sm font-semibold text-primary uppercase tracking-wider mb-2">Go deeper</p>
+              <h2 className="text-3xl font-bold tracking-tight">The problems behind the features</h2>
             </div>
-
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-              {blogPosts.slice(0, 3).map((post) => (
-                <BlogCard
-                  key={post.slug}
-                  slug={post.slug}
-                  title={post.title}
-                  date={post.date}
-                  author={post.author}
-                  excerpt={post.excerpt}
-                  category={post.category}
-                />
-              ))}
-            </div>
-
-            <div className="mt-8 text-center sm:hidden">
-              <Link
-                href="/blog/"
-                className="inline-flex items-center gap-1 text-sm text-primary font-medium hover:underline"
-              >
-                View all posts <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </div>
+            <Link
+              href="/blog/"
+              className="hidden sm:inline-flex items-center gap-1 text-sm text-primary font-medium hover:underline"
+            >
+              All posts <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
           </div>
-        </section>
-      )}
+
+          <div className="grid gap-6 md:grid-cols-2">
+            {[
+              {
+                slug: "why-vector-search-alone-fails",
+                context: "Extends: Rules + vector search",
+                title: "Why Vector Search Alone Fails Your AI Agent",
+                desc: "Similarity scores can't encode business rules. This post walks through the ink cartridge problem and shows how rules and vectors work together in a single query.",
+              },
+              {
+                slug: "correct-retraction-why-delete-should-actually-delete",
+                context: "Extends: Correct conclusion retraction",
+                title: "Correct Retraction: Why Delete Should Actually Delete",
+                desc: "When an entity is cleared from a sanctions list, which flags should retract? The diamond problem is subtle, and most systems get it wrong.",
+              },
+            ].map((post) => (
+              <Link
+                key={post.slug}
+                href={`/blog/${post.slug}/`}
+                className="group rounded-xl border border-border bg-card p-8 space-y-3 transition-colors hover:border-primary/30 hover:bg-card/80"
+              >
+                <span className="text-[10px] font-semibold text-primary uppercase tracking-wider">{post.context}</span>
+                <h3 className="text-xl font-semibold group-hover:text-primary transition-colors">{post.title}</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">{post.desc}</p>
+                <span className="inline-flex items-center gap-1 text-sm text-primary font-medium pt-1">
+                  Read the deep dive <ArrowRight className="h-3.5 w-3.5" />
+                </span>
+              </Link>
+            ))}
+          </div>
+
+          <div className="mt-8 text-center sm:hidden">
+            <Link
+              href="/blog/"
+              className="inline-flex items-center gap-1 text-sm text-primary font-medium hover:underline"
+            >
+              All posts <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+        </div>
+      </section>
 
       {/* ── Get Started ───────────────────────────────────────────── */}
       <section className="border-b border-border/50">
         <div className="mx-auto max-w-6xl px-6 py-20">
-          <div className="relative rounded-2xl border border-border bg-gradient-to-br from-primary/10 via-transparent to-primary/5 p-12 text-center space-y-6">
-            <h2 className="text-3xl font-bold tracking-tight">
-              Open source. Run it yourself.
-            </h2>
-            <p className="text-muted-foreground text-lg max-w-xl mx-auto">
-              One Docker command. No account, no API key, no vendor lock-in. Try it in your browser or pull the image and run locally.
-            </p>
+          <div className="relative rounded-2xl border border-border bg-gradient-to-br from-primary/10 via-transparent to-primary/5 p-12 space-y-10">
+            <div className="text-center space-y-3">
+              <h2 className="text-3xl font-bold tracking-tight">
+                Open source. Run it yourself.
+              </h2>
+              <p className="text-muted-foreground text-lg max-w-xl mx-auto">
+                No account, no API key, no vendor lock-in. From first query to production in four steps.
+              </p>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {[
+                {
+                  step: "1",
+                  icon: <Terminal className="h-5 w-5 text-primary" />,
+                  title: "Try it in 30 seconds",
+                  desc: "One Docker command, instant local instance.",
+                  href: "https://demo.inputlayer.ai",
+                  external: true,
+                  label: "Launch demo",
+                },
+                {
+                  step: "2",
+                  icon: <BookOpen className="h-5 w-5 text-primary" />,
+                  title: "Learn the syntax",
+                  desc: "Datalog rules, facts, queries - the full language reference.",
+                  href: "/docs/",
+                  external: false,
+                  label: "Read the docs",
+                },
+                {
+                  step: "3",
+                  icon: <Server className="h-5 w-5 text-primary" />,
+                  title: "Deploy with your stack",
+                  desc: "Self-hosted Docker or Kubernetes. Your infra, your data.",
+                  href: "/docs/guides/configuration/",
+                  external: false,
+                  label: "Deployment guide",
+                },
+                {
+                  step: "4",
+                  icon: <FileText className="h-5 w-5 text-primary" />,
+                  title: "Go to production",
+                  desc: "Apache 2.0 + Commons Clause. Commercial license when you need it.",
+                  href: "/commercial/",
+                  external: false,
+                  label: "View license",
+                },
+              ].map((s) => (
+                <div key={s.step} className="relative rounded-xl border border-border bg-background/50 p-5 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary/10 text-xs font-bold text-primary">{s.step}</span>
+                    {s.icon}
+                  </div>
+                  <h3 className="text-sm font-semibold">{s.title}</h3>
+                  <p className="text-xs text-muted-foreground leading-relaxed">{s.desc}</p>
+                  {s.external ? (
+                    <a href={s.href} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-primary font-medium hover:underline">
+                      {s.label} <ExternalLink className="h-3 w-3" />
+                    </a>
+                  ) : (
+                    <Link href={s.href} className="inline-flex items-center gap-1 text-xs text-primary font-medium hover:underline">
+                      {s.label} <ArrowRight className="h-3 w-3" />
+                    </Link>
+                  )}
+                </div>
+              ))}
+            </div>
 
             <div className="mx-auto max-w-lg">
               <div className="relative">
@@ -389,34 +491,6 @@ export default function LandingPage() {
                 </pre>
                 <CopyButton text={dockerCommand} />
               </div>
-            </div>
-
-            <div className="flex flex-wrap justify-center gap-3 pt-2">
-              <a
-                href="https://demo.inputlayer.ai"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-md bg-primary px-6 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-              >
-                Try the demo
-                <ArrowRight className="h-4 w-4" />
-              </a>
-              <Link
-                href="/docs/"
-                className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-6 py-3 text-sm font-medium hover:bg-secondary transition-colors"
-              >
-                Read the docs
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-              <a
-                href="https://github.com/inputlayer/inputlayer"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-6 py-3 text-sm font-medium hover:bg-secondary transition-colors"
-              >
-                View on GitHub
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
             </div>
           </div>
         </div>

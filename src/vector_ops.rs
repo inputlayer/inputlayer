@@ -1839,10 +1839,12 @@ mod tests {
             );
         }
 
-        // Performance assertion: should complete in < 50ms
-        // O(n log n) sort-based approach would be noticeably slower
+        // Performance assertion: should complete in < 50ms in a normal build.
+        // Coverage-instrumented builds (tarpaulin) are significantly slower,
+        // so we use a generous 500ms threshold to avoid CI flakiness.
+        let threshold_ms = if cfg!(tarpaulin) { 500 } else { 50 };
         assert!(
-            elapsed.as_millis() < 50,
+            elapsed.as_millis() < threshold_ms,
             "top_k too slow for O(n log k): {:?}ms for n={}, k={}. \
              This suggests O(n log n) complexity instead of O(n log k).",
             elapsed.as_millis(),

@@ -583,7 +583,7 @@ export function HeroVisualization() {
       <div>
         <div className="flex items-center gap-2 mb-2">
           <span className="w-2 h-2 rounded-full" style={{ background: "var(--primary)", boxShadow: "0 0 8px var(--primary)" }} />
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-primary">Derived state</span>
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-primary">Derived conclusions</span>
           <div className="h-px flex-1 bg-primary/20" />
         </div>
         <div className="space-y-1.5">
@@ -615,14 +615,19 @@ export function HeroVisualization() {
         </div>
       </div>
 
-      {/* Properties strip */}
-      <div className="flex gap-2 pt-1" style={{ opacity: visible ? 1 : 0, transition: "opacity 0.5s 2.6s" }}>
-        {["Incremental", "Correct retraction", "Provenance"].map((p) => (
-          <span key={p} className="text-[9px] font-medium px-2 py-0.5 rounded-full border border-primary/20 bg-primary/5 text-primary">
-            {p}
+      {/* Badge strip */}
+      <div className="flex justify-center pt-1" style={{ opacity: visible ? 1 : 0, transition: "opacity 0.5s 2.6s" }}>
+        <div className="inline-flex items-center gap-2 border border-primary/20 rounded-full px-3.5 py-1.5">
+          <div className="w-[5px] h-[5px] rounded-full bg-primary animate-pulse flex-shrink-0" />
+          <span className="font-mono text-[11px] text-primary uppercase tracking-[0.09em]">
+            Open Source · Streaming · Traceable · Verifiable
           </span>
-        ))}
+        </div>
       </div>
+
+      <p className="text-sm text-muted-foreground leading-relaxed pt-1" style={{ opacity: visible ? 1 : 0, transition: "opacity 0.5s 2.8s" }}>
+        Store facts. Define rules. InputLayer derives the conclusions, keeps them current as data changes, and explains every result with a proof tree.
+      </p>
     </div>
   )
 }
