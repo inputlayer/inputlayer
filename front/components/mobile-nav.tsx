@@ -7,7 +7,6 @@ import { Menu, X, ExternalLink } from "lucide-react"
 const navLinks = [
   { label: "Docs", href: "/docs/" },
   { label: "Blog", href: "/blog/" },
-  { label: "Use Cases", href: "/use-cases/" },
   { label: "Demo", href: "https://demo.inputlayer.ai", external: true },
 ]
 

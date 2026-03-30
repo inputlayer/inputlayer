@@ -159,10 +159,9 @@ export function DiamondDiagram() {
   const w = 480, h = 300
 
   const nodes = [
-    { id: "Alpha", x: 240, y: 45 },
-    { id: "Beta", x: 110, y: 145 },
-    { id: "Delta", x: 370, y: 145 },
-    { id: "Gamma", x: 240, y: 245 },
+    { id: "Customer", x: 240, y: 45 },
+    { id: "Unpaid Bill", x: 110, y: 165 },
+    { id: "Unverified Card", x: 370, y: 165 },
   ]
 
   return (
@@ -171,9 +170,6 @@ export function DiamondDiagram() {
         <defs>
           <marker id="dia-arrow" viewBox="0 0 10 8" refX="10" refY="4" markerWidth="8" markerHeight="6" orient="auto">
             <path d="M0,0 L10,4 L0,8z" style={{ fill: "var(--border)" }} />
-          </marker>
-          <marker id="dia-arrow-dim" viewBox="0 0 10 8" refX="10" refY="4" markerWidth="8" markerHeight="6" orient="auto">
-            <path d="M0,0 L10,4 L0,8z" style={{ fill: "var(--border)", opacity: 0.15 }} />
           </marker>
           <radialGradient id="dia-glow" cx="50%" cy="50%" r="50%">
             <stop offset="0%" stopColor="oklch(0.7 0.18 25)" stopOpacity="0.25" />
@@ -195,7 +191,7 @@ export function DiamondDiagram() {
             60%, 85% { opacity: 0.12; }
             90%, 100% { opacity: 0.12; }
           }
-          @keyframes dia-exposed {
+          @keyframes dia-blocked {
             0%, 25% { opacity: 1; }
             30%, 55% { opacity: 1; }
             60%, 85% { opacity: 0; }
@@ -206,70 +202,50 @@ export function DiamondDiagram() {
             30%, 55% { opacity: 1; }
             60%, 100% { opacity: 0; }
           }
-          @keyframes dia-label2 {
-            0%, 55% { opacity: 0; }
-            60%, 85% { opacity: 1; }
-            90%, 100% { opacity: 0; }
-          }
-          @keyframes dia-retracted {
+          @keyframes dia-unblocked {
             0%, 55% { opacity: 0; }
             65%, 85% { opacity: 1; }
             90%, 100% { opacity: 0; }
           }
         `}</style>
 
-        {/* Edge: Alpha -> Beta */}
-        <line x1={210} y1={60} x2={140} y2={125} style={{ stroke: "var(--border)", strokeWidth: 1.5 }} markerEnd="url(#dia-arrow)" />
-        {/* Edge: Alpha -> Delta */}
-        <line x1={270} y1={60} x2={340} y2={125} style={{ stroke: "var(--border)", strokeWidth: 1.5 }} markerEnd="url(#dia-arrow)" />
-
-        {/* Edge: Beta -> Gamma (path 1 - removes first) */}
+        {/* Edge: Customer -> Unpaid Bill (path 1 - resolves first) */}
         <g style={{ animation: visible ? "dia-phase 10s ease-in-out 1s infinite" : "none" }}>
-          <line x1={140} y1={168} x2={210} y2={228} style={{ stroke: "var(--border)", strokeWidth: 1.5 }} markerEnd="url(#dia-arrow)" />
-          <text x={155} y={205} textAnchor="middle" style={{ fill: "var(--muted-foreground)", fontSize: 9, opacity: 0.5 }}>owns</text>
+          <line x1={205} y1={62} x2={140} y2={142} style={{ stroke: "var(--border)", strokeWidth: 1.5 }} markerEnd="url(#dia-arrow)" />
+          <text x={150} y={100} textAnchor="middle" style={{ fill: "var(--muted-foreground)", fontSize: 9, opacity: 0.5 }}>blocks</text>
         </g>
 
-        {/* Edge: Delta -> Gamma (path 2 - removes second) */}
+        {/* Edge: Customer -> Unverified Card (path 2 - resolves second) */}
         <g style={{ animation: visible ? "dia-phase2 10s ease-in-out 1s infinite" : "none" }}>
-          <line x1={340} y1={168} x2={270} y2={228} style={{ stroke: "var(--border)", strokeWidth: 1.5 }} markerEnd="url(#dia-arrow)" />
-          <text x={325} y={205} textAnchor="middle" style={{ fill: "var(--muted-foreground)", fontSize: 9, opacity: 0.5 }}>owns</text>
+          <line x1={275} y1={62} x2={340} y2={142} style={{ stroke: "var(--border)", strokeWidth: 1.5 }} markerEnd="url(#dia-arrow)" />
+          <text x={330} y={100} textAnchor="middle" style={{ fill: "var(--muted-foreground)", fontSize: 9, opacity: 0.5 }}>blocks</text>
         </g>
-
-        {/* Static edge labels */}
-        <text x={160} y={85} textAnchor="middle" style={{ fill: "var(--muted-foreground)", fontSize: 9, opacity: 0.5 }}>owns</text>
-        <text x={320} y={85} textAnchor="middle" style={{ fill: "var(--muted-foreground)", fontSize: 9, opacity: 0.5 }}>owns</text>
 
         {/* Nodes */}
         {nodes.map((n, i) => (
-          <g key={n.id} style={{ opacity: visible ? 1 : 0, transition: `opacity 0.5s ${0.2 + i * 0.1}s`, transform: visible ? "scale(1)" : "scale(0.8)", transformOrigin: `${n.x}px ${n.y}px`, transitionProperty: "opacity, transform", transitionDuration: "0.5s, 0.5s", transitionDelay: `${0.2 + i * 0.1}s` }}>
-            <rect x={n.x - 40} y={n.y - 18} width={80} height={36} rx={8} filter="url(#dia-shadow)"
+          <g key={n.id} style={{ opacity: visible ? 1 : 0, transition: `opacity 0.5s ${0.2 + i * 0.15}s`, transform: visible ? "scale(1)" : "scale(0.8)", transformOrigin: `${n.x}px ${n.y}px`, transitionProperty: "opacity, transform", transitionDuration: "0.5s, 0.5s", transitionDelay: `${0.2 + i * 0.15}s` }}>
+            <rect x={n.x - 55} y={n.y - 18} width={110} height={36} rx={8} filter="url(#dia-shadow)"
               style={{ fill: "var(--card)", stroke: "var(--border)", strokeWidth: 1 }} />
             <text x={n.x} y={n.y + 5} textAnchor="middle"
-              style={{ fill: "var(--foreground)", fontSize: 13, fontWeight: 600, fontFamily: "inherit" }}>
+              style={{ fill: "var(--foreground)", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>
               {n.id}
             </text>
           </g>
         ))}
 
-        {/* Sanctioned badge on Gamma */}
-        <g style={{ opacity: visible ? 1 : 0, transition: "opacity 0.5s 0.8s" }}>
-          <rect x={282} y={237} width={72} height={18} rx={9} style={{ fill: "oklch(0.5 0.15 25 / 0.3)", stroke: "oklch(0.65 0.15 25 / 0.4)", strokeWidth: 0.5 }} />
-          <text x={318} y={249} textAnchor="middle" style={{ fill: "oklch(0.8 0.15 25)", fontSize: 8, fontWeight: 600, letterSpacing: "0.04em" }}>SANCTIONED</text>
-        </g>
-
-        {/* Exposed glow + badge on Alpha */}
-        <g style={{ animation: visible ? "dia-exposed 10s ease-in-out 1s infinite" : "none" }}>
-          <circle cx={240} cy={45} r={50} fill="url(#dia-glow)" />
-          <rect x={283} y={30} width={62} height={20} rx={10} style={{ fill: "oklch(0.6 0.18 25 / 0.25)", stroke: "oklch(0.7 0.18 25 / 0.6)", strokeWidth: 0.5 }} />
-          <text x={314} y={43} textAnchor="middle" style={{ fill: "oklch(0.85 0.15 25)", fontSize: 8, fontWeight: 700, letterSpacing: "0.06em" }}>EXPOSED</text>
+        {/* BLOCKED badge on Customer */}
+        <g style={{ animation: visible ? "dia-blocked 10s ease-in-out 1s infinite" : "none" }}>
+          <circle cx={240} cy={45} r={55} fill="url(#dia-glow)" />
+          <rect x={298} y={30} width={62} height={20} rx={10} style={{ fill: "oklch(0.6 0.18 25 / 0.25)", stroke: "oklch(0.7 0.18 25 / 0.6)", strokeWidth: 0.5 }} />
+          <text x={329} y={43} textAnchor="middle" style={{ fill: "oklch(0.85 0.15 25)", fontSize: 8, fontWeight: 700, letterSpacing: "0.06em" }}>BLOCKED</text>
         </g>
 
         {/* Phase labels */}
-        <text x={240} y={290} textAnchor="middle" style={{ fill: "oklch(0.7 0.15 25)", fontSize: 10, fontWeight: 500, animation: visible ? "dia-label1 10s ease-in-out 1s infinite" : "none" }}>
-          one path removed - flag stays
+        <text x={240} y={225} textAnchor="middle" style={{ fill: "oklch(0.7 0.15 25)", fontSize: 10, fontWeight: 500, animation: visible ? "dia-label1 10s ease-in-out 1s infinite" : "none" }}>
+          bill paid - still blocked (card unverified)
         </text>
-        <text x={240} y={290} textAnchor="middle" style={{ fill: "oklch(0.7 0.18 160)", fontSize: 10, fontWeight: 500, animation: visible ? "dia-retracted 10s ease-in-out 1s infinite" : "none" }}>
-          both paths removed - flag retracts
+        <text x={240} y={225} textAnchor="middle" style={{ fill: "oklch(0.7 0.18 160)", fontSize: 10, fontWeight: 500, animation: visible ? "dia-unblocked 10s ease-in-out 1s infinite" : "none" }}>
+          both resolved - customer unblocked
         </text>
       </svg>
     </div>
@@ -351,27 +327,19 @@ interface PNode {
 }
 
 const proofData: PNode = {
-  label: "rule_application",
+  label: 'purchase_ok("team_a", "acme_supplies", 3200)',
   type: "conclusion",
   children: [
     {
-      label: "exposed(E,S) <- owns(E,Mid), exposed(Mid,S)",
+      label: "purchase_ok(T,V,Amt) <- order(T,V,Amt), approved_vendor(V), budget_remaining(T,B), Amt <= B",
       type: "rule",
       children: [
-        { label: 'base_fact: owns("alpha", "beta")', type: "fact" },
+        { label: 'base_fact: order("team_a", "acme_supplies", 3200)', type: "fact" },
+        { label: 'base_fact: approved_vendor("acme_supplies")', type: "fact" },
+        { label: 'base_fact: budget_remaining("team_a", 5000)', type: "fact" },
         {
-          label: "rule_application",
+          label: "eval: 3200 <= 5000 -> true",
           type: "derived",
-          children: [
-            {
-              label: "exposed(E,S) <- owns(E,S), sanctions_list(S)",
-              type: "rule",
-              children: [
-                { label: 'base_fact: owns("beta", "gamma")', type: "fact" },
-                { label: 'base_fact: sanctions_list("gamma")', type: "fact" },
-              ],
-            },
-          ],
         },
       ],
     },
@@ -626,7 +594,7 @@ export function HeroVisualization() {
       </div>
 
       <p className="text-sm text-muted-foreground leading-relaxed pt-1" style={{ opacity: visible ? 1 : 0, transition: "opacity 0.5s 2.8s" }}>
-        Store facts. Define rules. InputLayer derives the conclusions, keeps them current as data changes, and explains every result with a proof tree.
+        Store facts. Define rules. InputLayer makes conclusions, keeps them current as data changes, and explains every result with a proof tree.
       </p>
     </div>
   )

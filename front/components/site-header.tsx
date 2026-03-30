@@ -78,12 +78,6 @@ export function SiteHeader() {
           >
             Blog
           </Link>
-          <Link
-            href="/use-cases/"
-            className="text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Use Cases
-          </Link>
           <a
             href="https://demo.inputlayer.ai"
             target="_blank"

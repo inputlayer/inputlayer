@@ -13,10 +13,7 @@ import {
   Zap,
   Shield,
   Brain,
-  Factory,
-  Truck,
   GitBranch,
-  ShoppingBag,
   Copy,
   Check,
   Terminal,
@@ -51,25 +48,26 @@ const rulesVectorsCode = `// Facts: products with embeddings
 // -> cl246  "Canon CL-246 Color Ink"  $16.99  Dist: 0.0002
 // ep202 excluded by rule: similar vectors, incompatible printer`
 
-const retractionCode = `// Two paths to the same conclusion
-+owns[("alpha","beta"), ("alpha","delta"), ("beta","gamma"), ("delta","gamma")]
-+sanctions_list[("gamma")]
+const retractionCode = `// Two reasons to block a customer
++unpaid_bill[("customer_42")]
++unverified_card[("customer_42")]
 
-+exposed(E, S) <- owns(E, S), sanctions_list(S)
-+exposed(E, S) <- owns(E, Mid), exposed(Mid, S)
+// Either reason blocks purchasing
++blocked(C) <- unpaid_bill(C)
++blocked(C) <- unverified_card(C)
 
-?exposed("alpha", Who)
-// -> "alpha" | "gamma"    (1 row)
+?blocked("customer_42")
+// -> "customer_42"         (blocked)
 
-// Remove one path:
--owns("beta", "gamma")
-?exposed("alpha", Who)
-// -> "alpha" | "gamma"    (still exposed via delta)
+// Customer pays the bill:
+-unpaid_bill("customer_42")
+?blocked("customer_42")
+// -> "customer_42"         (still blocked - card unverified)
 
-// Remove second path:
--owns("delta", "gamma")
-?exposed("alpha", Who)
-// -> No results.           (correctly retracted)`
+// Customer verifies their card:
+-unverified_card("customer_42")
+?blocked("customer_42")
+// -> No results.           (correctly unblocked)`
 
 const incrementalCode = `+manages[("alice", "bob"), ("bob", "charlie")]
 
@@ -88,30 +86,27 @@ const incrementalCode = `+manages[("alice", "bob"), ("bob", "charlie")]
 // -> "alice" | "charlie"
 // -> "alice" | "diana"      (3 rows, only diana recomputed)`
 
-const provenanceCode = `+owns[("alpha", "beta"), ("beta", "gamma")]
-+sanctions_list[("gamma")]
+const provenanceCode = `// Agent decided to purchase from Acme Supplies
++budget_remaining[("team_a", 5000)]
++approved_vendor[("acme_supplies")]
++order[("team_a", "acme_supplies", 3200)]
 
-+exposed(E, S) <- owns(E, S), sanctions_list(S)
-+exposed(E, S) <- owns(E, Mid), exposed(Mid, S)
++purchase_ok(T, V, Amt) <- order(T, V, Amt),
+  approved_vendor(V), budget_remaining(T, B), Amt <= B
 
-// Why is alpha exposed?
-.why ?exposed("alpha", Who)
-// [rule] exposed (clause 1)
-//   exposed(E, S) <- owns(E, Mid), exposed(Mid, S)
-//   bindings: E="alpha", Mid="beta", S="gamma"
-//   [base] owns("alpha", "beta")
-//   [rule] exposed (clause 0)
-//     exposed(E, S) <- owns(E, S), sanctions_list(S)
-//     bindings: E="beta", S="gamma"
-//     [base] owns("beta", "gamma")
-//     [base] sanctions_list("gamma")
+// Why was this purchase approved?
+.why ?purchase_ok("team_a", "acme_supplies", 3200)
+// [rule] purchase_ok (clause 0)
+//   bindings: T="team_a", V="acme_supplies", Amt=3200
+//   [base] order("team_a", "acme_supplies", 3200)
+//   [base] approved_vendor("acme_supplies")
+//   [base] budget_remaining("team_a", 5000)
+//   [eval] 3200 <= 5000 -> true
 
-// Why is delta NOT exposed?
-.why_not exposed("delta", "gamma")
-// Rule: exposed (clause 0)
-//   Blocker: owns("delta", _) - No matching tuples
-// Rule: exposed (clause 1)
-//   Blocker: owns("delta", _) - No matching tuples`
+// Why wasn't Globex Corp approved?
+.why_not purchase_ok("team_a", "globex_corp", 1500)
+// Rule: purchase_ok (clause 0)
+//   Blocker: approved_vendor("globex_corp") - No matching tuples`
 
 const dockerCommand = "docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer"
 
@@ -190,13 +185,14 @@ export default function LandingPage() {
             <div className="space-y-6">
               <p className="text-sm font-semibold text-primary uppercase tracking-wider">Rules + vector search</p>
               <h2 className="text-3xl font-bold tracking-tight">
-                Similarity search finds things that look right. Rules find things that are right.
+                Vector search was never built for logic.
               </h2>
               <p className="text-muted-foreground">
-                A shopper asks for printer ink. Vector search returns every ink cartridge with a high similarity score - Canon, Epson, Brother, all nearly identical in embedding space. But only one brand fits their printer. Recommending the wrong one means a return, a support ticket, and a customer who doesn't come back.
+                Example: You are buying printer ink. AI with vector search suggests you every ink cartridge with a high similarity score - Canon, Epson, Brother. But in reality only one brand fits your printer. The wrong ink results in a return, expensive and a hassle. With InputLayer this can't happen.
               </p>
+              <p className="text-sm font-semibold text-primary uppercase tracking-wider pt-2">Best of both worlds</p>
               <p className="text-muted-foreground">
-                InputLayer evaluates compatibility rules and ranks by vector similarity in a single query. The rule filters to what actually fits. The vector search ranks what's left by relevance. Recursive reasoning meets vector search.
+                InputLayer evaluates hard facts (rules) and ranks by vector similarity, all in a single query. Rules find hard facts, like which ink brand you need. Vector search ranks what's left by relevance. It's the best of both worlds, vector search powered with reasoning.
               </p>
             </div>
             <VisualCodeTabs visual={<EmbeddingDiagram />} code={rulesVectorsCode} />
@@ -209,15 +205,15 @@ export default function LandingPage() {
         <div className="mx-auto max-w-6xl px-6 py-20">
           <div className="grid gap-12 lg:grid-cols-2 items-start">
             <div className="space-y-6">
-              <p className="text-sm font-semibold text-primary uppercase tracking-wider">Correct conclusion retraction</p>
+              <p className="text-sm font-semibold text-primary uppercase tracking-wider">Correct retraction</p>
               <h2 className="text-3xl font-bold tracking-tight">
-                When a fact is deleted, every conclusion built on it needs to update. Correctly.
+                Multiple reasons, one conclusion. Remove one - does the conclusion hold?
               </h2>
               <p className="text-muted-foreground">
-                An entity is cleared from a sanctions list. The compliance flags derived through it need to retract. But what if the same entity is also flagged through a second, independent ownership path? Retract too aggressively and you miss real exposure. Don't retract at all and your team drowns in phantom alerts.
+                Your customer didn't pay a bill and gets temporarily blocked from buying anything. Once that bill is paid, they should be unblocked - an easy problem to solve. But what if there are multiple facts that concluded the ban? Imagine, they also failed to confirm their credit card information. Multiple retraction paths, a harder problem to solve.
               </p>
               <p className="text-muted-foreground">
-                InputLayer tracks every derivation path independently. A conclusion only retracts when every path supporting it is gone. This is the diamond problem - and getting it wrong has real consequences.
+                With InputLayer, conclusions only retract when every path is cleared. The customer stays blocked until the bill is paid and the card is verified. No premature unblocking, no manual checks.
               </p>
             </div>
             <VisualCodeTabs visual={<DiamondDiagram />} code={retractionCode} />
@@ -232,10 +228,10 @@ export default function LandingPage() {
             <div className="space-y-6">
               <p className="text-sm font-semibold text-primary uppercase tracking-wider">Incremental updates</p>
               <h2 className="text-3xl font-bold tracking-tight">
-                An operator's certification expires. How long until the planning agent knows?
+                Computing conclusions in record time and at any scale.
               </h2>
               <p className="text-muted-foreground">
-                In a 2,000-node dependency graph, one fact changes at the edge - a training record expires, a supplier is suspended, an ownership stake is sold. Every derived conclusion built on that fact needs to update. Recomputing everything takes 11.3 seconds. InputLayer traces the impact forward and updates only what's affected.
+                Imagine a 2,000-node dependency graph, common for business applications. If one fact changes (a record expires, a supplier is suspended, ownership changes etc.) every conclusion built on that fact needs to be updated. Without InputLayer, recomputing everything takes 11.3 seconds. InputLayer traces the impact forward and updates only what's affected, making it record-fast at any scale.
               </p>
               <div className="flex gap-8 pt-2">
                 <div>
@@ -264,14 +260,20 @@ export default function LandingPage() {
             <div className="space-y-6">
               <p className="text-sm font-semibold text-primary uppercase tracking-wider">Provenance</p>
               <h2 className="text-3xl font-bold tracking-tight">
-                Your agent flags a customer as churn risk. Can it show its work?
+                Always know "why" a decision was made by AI
               </h2>
               <p className="text-muted-foreground">
-                A VP asks "why was this flagged?" and the answer is "the model predicted it" - that's not auditable, not actionable, and not trustworthy. Run <code className="text-xs bg-muted/50 px-1.5 py-0.5 rounded">.why</code> on any InputLayer result and get a structured proof tree: which facts, which rules, which chain of reasoning produced the conclusion. Run <code className="text-xs bg-muted/50 px-1.5 py-0.5 rounded">.why_not</code> to see exactly which condition blocked a derivation.
+                Your AI agent decides to purchase supplies and makes a mistake. Understanding the "why" becomes crucial for fixing the issue. A simple "the model predicted this decision" is not auditable, actionable or trustworthy. With InputLayer you can simply run <code className="text-xs bg-muted/50 px-1.5 py-0.5 rounded">.why</code> and get a structured proof tree: facts, rules, and the chain of reasoning that produced the decision. Or run <code className="text-xs bg-muted/50 px-1.5 py-0.5 rounded">.why_not</code> to see exactly which condition blocked something.
               </p>
-              <div className="text-center pt-2">
-                <span className="text-5xl font-extrabold text-primary">100%</span>
-                <p className="text-xs text-muted-foreground mt-1">of results fully traceable</p>
+              <div className="flex justify-center gap-8 pt-2">
+                <div className="text-center">
+                  <span className="text-5xl font-extrabold text-primary">100%</span>
+                  <p className="text-xs text-muted-foreground mt-1">of results fully traceable</p>
+                </div>
+                <div className="text-center">
+                  <span className="text-5xl font-extrabold text-primary">100%</span>
+                  <p className="text-xs text-muted-foreground mt-1">of results fully verifiable</p>
+                </div>
               </div>
             </div>
             <VisualCodeTabs visual={<ProvenanceTreeDiagram />} code={provenanceCode} />
@@ -283,18 +285,21 @@ export default function LandingPage() {
       <section className="border-b border-border/50">
         <div className="mx-auto max-w-6xl px-6 py-20">
           <div className="max-w-2xl mb-12">
-            <p className="text-sm font-semibold text-primary uppercase tracking-wider mb-2">Who builds with InputLayer</p>
+            <p className="text-sm font-semibold text-primary uppercase tracking-wider mb-2">The reasoning layer for AI agents</p>
             <h2 className="text-3xl font-bold tracking-tight">
-              If your system needs to be right, not just fast
+              Derive what's true from what's stored, before the LLM ever sees it
             </h2>
+            <p className="text-muted-foreground mt-4">
+              InputLayer is the reasoning layer for AI agents. It derives conclusions from facts and rules so your agent works with what's actually true - not what a model approximates.
+            </p>
           </div>
 
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
             {[
-              { icon: <Brain className="h-6 w-6 text-primary" />, title: "AI agent developers", desc: "Add deterministic reasoning to agents that today rely on prompt chains and hope." },
-              { icon: <Zap className="h-6 w-6 text-primary" />, title: "RAG pipeline builders", desc: "Go beyond similarity search. Filter by rules, rank by vectors, explain every result." },
-              { icon: <Shield className="h-6 w-6 text-primary" />, title: "Compliance teams", desc: "Audit trails that trace every conclusion back to the facts and rules that produced it." },
-              { icon: <GitBranch className="h-6 w-6 text-primary" />, title: "Platform engineers", desc: "Build decision-automation systems with incremental updates and correct retraction built in." },
+              { icon: <Brain className="h-6 w-6 text-primary" />, title: "Agent memory that reasons", desc: "Your agent stores facts. InputLayer derives what follows - before the LLM prompt is built." },
+              { icon: <Zap className="h-6 w-6 text-primary" />, title: "Beyond vector retrieval", desc: "Similarity search finds context. Rules filter to what's actually true. One query, both." },
+              { icon: <Shield className="h-6 w-6 text-primary" />, title: "Auditable decisions", desc: "Every conclusion traces back to the facts and rules that produced it. Ask .why on any result." },
+              { icon: <GitBranch className="h-6 w-6 text-primary" />, title: "Memory that stays current", desc: "One fact changes, derived conclusions update in milliseconds. No stale context, no recomputation." },
             ].map((persona) => (
               <div
                 key={persona.title}
@@ -335,51 +340,6 @@ export default function LandingPage() {
               { capability: "Explainable retrieval", values: { "Vector DBs": "none", "Graph DBs": "partial", "SQL": "none", "InputLayer": "native" } },
             ]}
           />
-        </div>
-      </section>
-
-      {/* ── Use Cases ─────────────────────────────────────────────── */}
-      <section className="border-b border-border/50">
-        <div className="mx-auto max-w-6xl px-6 py-20">
-          <div className="max-w-2xl mb-12">
-            <p className="text-sm font-semibold text-primary uppercase tracking-wider mb-2">Use cases</p>
-            <h2 className="text-3xl font-bold tracking-tight mb-4">
-              Built for reasoning-intensive applications
-            </h2>
-            <p className="text-muted-foreground text-lg">
-              From financial compliance to conversational commerce, InputLayer powers applications where answers require following chains of connected facts.
-            </p>
-          </div>
-
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-            {[
-              { title: "Financial Risk", icon: <Shield className="h-8 w-8 text-primary" />, stat: "3 ownership layers", desc: "Flag sanctions violations across nested ownership chains in 6.83ms. When one path clears, the flag stays if a second path still holds.", href: "/use-cases/financial-risk/", tags: ["Retraction", "Provenance"] },
-              { title: "Commerce", icon: <ShoppingBag className="h-8 w-8 text-primary" />, stat: "10,000 SKUs filtered", desc: "Compatibility rules eliminate what doesn't fit the printer. Vector search ranks what's left. One query, zero wrong recommendations.", href: "/use-cases/commerce/", tags: ["Rules + vectors", "Incremental"] },
-              { title: "Manufacturing", icon: <Factory className="h-8 w-8 text-primary" />, stat: "4-level dependency chain", desc: "One expired certification retracts the operator's qualification, line assignment, and shift schedule - propagated in milliseconds, not batch jobs.", href: "/use-cases/manufacturing/", tags: ["Incremental", "Provenance"] },
-              { title: "Supply Chain", icon: <Truck className="h-8 w-8 text-primary" />, stat: "1 port closure, 200 impacts", desc: "A single disruption ripples across suppliers, orders, and SLA penalties. InputLayer traces every affected node across the full supply graph.", href: "/use-cases/supply-chain/", tags: ["Incremental", "Recursive"] },
-            ].map((uc) => (
-              <Link
-                key={uc.title}
-                href={uc.href}
-                className="group rounded-xl border border-border bg-card p-6 space-y-4 transition-colors hover:border-primary/30 hover:bg-card/80"
-              >
-                {uc.icon}
-                <h3 className="text-lg font-semibold group-hover:text-primary transition-colors">{uc.title}</h3>
-                <p className="text-sm font-semibold text-primary">{uc.stat}</p>
-                <p className="text-sm text-muted-foreground">{uc.desc}</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {uc.tags.map((tag) => (
-                    <span key={tag} className="inline-flex items-center rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[10px] text-primary">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-                <span className="inline-flex items-center gap-1 text-sm text-primary font-medium">
-                  Learn more <ArrowRight className="h-3.5 w-3.5" />
-                </span>
-              </Link>
-            ))}
-          </div>
         </div>
       </section>
 

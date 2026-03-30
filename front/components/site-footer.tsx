@@ -11,7 +11,6 @@ interface FooterLink {
 const footerLinks: Record<string, FooterLink[]> = {
   Product: [
     { label: "Features", href: "/#features" },
-    { label: "Use Cases", href: "/use-cases/" },
     { label: "Demo", href: "https://demo.inputlayer.ai", external: true },
   ],
   Resources: [
