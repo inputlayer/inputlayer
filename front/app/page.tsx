@@ -24,29 +24,26 @@ import {
 
 // ── Syntax-highlighted code blocks ──────────────────────────────────────
 
-const rulesVectorsCode = `// Facts: products with embeddings
-+product[
-  ("pg245", "Canon PG-245 Black Ink", 14.99, [0.82, 0.15, 0.91, 0.44]),
-  ("cl246", "Canon CL-246 Color Ink", 16.99, [0.79, 0.18, 0.88, 0.41]),
-  ("ep202", "Epson 202 Black Ink",    12.99, [0.83, 0.14, 0.90, 0.43])
-]
+const rulesVectorsCode = `// Multi-hop: payment -> account standing -> eligibility
++paid_invoice[("cust_1", "inv_99")]
++dispute_resolved[("cust_1", "d_42")]
++product[("pro_a", "Widget Pro", [0.82, 0.44]),
+         ("pro_b", "Widget Lite", [0.79, 0.41])]
 
-// Compatibility facts (ep202 is NOT compatible with Canon)
-+compatible[("canon_mg3620", "pg245"), ("canon_mg3620", "cl246")]
-+owns[("shopper_42", "canon_mg3620")]
-+in_stock[("pg245"), ("cl246"), ("ep202")]
+// Hop 1: account in good standing if paid AND disputes resolved
++good_standing(C) <- paid_invoice(C, _), dispute_resolved(C, _)
 
-// Rule: recommendable if compatible and in stock
-+recommendable(S, P) <- owns(S, Dev), compatible(Dev, P), in_stock(P)
+// Hop 2: eligible to buy if in good standing
++eligible(C, P) <- good_standing(C), product(P, _, _)
 
-// Query: rules filter, cosine distance ranks (lower = more similar)
-?recommendable("shopper_42", Pid),
- product(Pid, Desc, Price, Emb),
- Dist = cosine(Emb, [0.81, 0.16, 0.89, 0.42]),
- Dist < 0.05
-// -> pg245  "Canon PG-245 Black Ink"  $14.99  Dist: 0.0001
-// -> cl246  "Canon CL-246 Color Ink"  $16.99  Dist: 0.0002
-// ep202 excluded by rule: similar vectors, incompatible printer`
+// Query: rules derive eligibility, vectors rank by relevance
+?eligible("cust_1", Pid),
+ product(Pid, Name, Emb),
+ Dist = cosine(Emb, [0.80, 0.43]),
+ Dist < 0.1
+// -> pro_a  "Widget Pro"   Dist: 0.001
+// -> pro_b  "Widget Lite"  Dist: 0.003
+// 3 hops of reasoning, then vector ranking - one query`
 
 const retractionCode = `// Two reasons to block a customer
 +unpaid_bill[("customer_42")]
@@ -188,11 +185,11 @@ export default function LandingPage() {
                 Vector search was never built for logic.
               </h2>
               <p className="text-muted-foreground">
-                Example: You are buying printer ink. AI with vector search suggests you every ink cartridge with a high similarity score - Canon, Epson, Brother. But in reality only one brand fits your printer. The wrong ink results in a return, expensive and a hassle. With InputLayer this can't happen.
+                Example: A customer asks "what can I buy?" Simple filtering won't cut it - their eligibility depends on account status, which depends on payment history, which depends on dispute resolutions. That's three hops of reasoning before you even get to ranking products. A vector store can filter on metadata it already has. It can't derive new facts from chains of rules.
               </p>
               <p className="text-sm font-semibold text-primary uppercase tracking-wider pt-2">Best of both worlds</p>
               <p className="text-muted-foreground">
-                InputLayer evaluates hard facts (rules) and ranks by vector similarity, all in a single query. Rules find hard facts, like which ink brand you need. Vector search ranks what's left by relevance. It's the best of both worlds, vector search powered with reasoning.
+                InputLayer evaluates rules and ranks by vector similarity, all in a <strong>single query</strong>. Rules derive conclusions through multi-hop reasoning - like whether a customer is eligible based on a chain of conditions. Vector search ranks what's left by relevance. It's the best of both worlds, vector search powered with reasoning.
               </p>
             </div>
             <VisualCodeTabs visual={<EmbeddingDiagram />} code={rulesVectorsCode} />
