@@ -1,0 +1,29 @@
+{
+  "name": "@inputlayer/demo-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "hono": "^4.7.4",
+    "http-proxy": "^1.18.1",
+    "nodemailer": "^6.9.16",
+    "ws": "^8.18.0"
+  },
+  "optionalDependencies": {
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/http-proxy": "^1.17.15",
+    "@types/nodemailer": "^6.4.17",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.0"
+  }
+}

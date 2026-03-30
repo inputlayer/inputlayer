@@ -20,7 +20,10 @@ import {
   BookOpen,
   Server,
   FileText,
+  Play,
 } from "lucide-react"
+
+const DEMO_BASE_URL = "https://demo.inputlayer.ai"
 
 // ── Syntax-highlighted code blocks ──────────────────────────────────────
 
@@ -151,7 +154,7 @@ export default function LandingPage() {
               <RotatingHero />
               <div className="flex flex-wrap gap-3 pt-2">
                 <a
-                  href="https://demo.inputlayer.ai"
+                  href={`${DEMO_BASE_URL}/demo/request-access?kg=flights`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
@@ -168,8 +171,19 @@ export default function LandingPage() {
                 </Link>
               </div>
             </div>
-            <div>
+            <div className="space-y-4">
               <HeroVisualization />
+              <div className="flex justify-center">
+                <a
+                  href={`${DEMO_BASE_URL}/demo/request-access?kg=flights`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 text-sm text-primary font-medium hover:underline"
+                >
+                  <Play className="h-3.5 w-3.5" />
+                  Open in Studio
+                </a>
+              </div>
             </div>
           </div>
         </div>
@@ -191,6 +205,15 @@ export default function LandingPage() {
               <p className="text-muted-foreground">
                 InputLayer evaluates rules and ranks by vector similarity, all in a <strong>single query</strong>. Rules derive conclusions through multi-hop reasoning - like whether a customer is eligible based on a chain of conditions. Vector search ranks what's left by relevance. It's the best of both worlds, vector search powered with reasoning.
               </p>
+              <a
+                href={`${DEMO_BASE_URL}/demo/request-access?kg=rules_vectors`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm text-primary font-medium hover:underline pt-2"
+              >
+                <Play className="h-3.5 w-3.5" />
+                Open in Studio
+              </a>
             </div>
             <VisualCodeTabs visual={<EmbeddingDiagram />} code={rulesVectorsCode} />
           </div>
@@ -212,6 +235,15 @@ export default function LandingPage() {
               <p className="text-muted-foreground">
                 With InputLayer, conclusions only retract when every path is cleared. The customer stays blocked until the bill is paid and the card is verified. No premature unblocking, no manual checks.
               </p>
+              <a
+                href={`${DEMO_BASE_URL}/demo/request-access?kg=retraction`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm text-primary font-medium hover:underline pt-2"
+              >
+                <Play className="h-3.5 w-3.5" />
+                Open in Studio
+              </a>
             </div>
             <VisualCodeTabs visual={<DiamondDiagram />} code={retractionCode} />
           </div>
@@ -244,6 +276,15 @@ export default function LandingPage() {
                   <p className="text-xs text-muted-foreground mt-1">faster</p>
                 </div>
               </div>
+              <a
+                href={`${DEMO_BASE_URL}/demo/request-access?kg=incremental`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm text-primary font-medium hover:underline pt-2"
+              >
+                <Play className="h-3.5 w-3.5" />
+                Open in Studio
+              </a>
             </div>
             <VisualCodeTabs visual={<WaterfallDiagram />} code={incrementalCode} />
           </div>
@@ -272,6 +313,15 @@ export default function LandingPage() {
                   <p className="text-xs text-muted-foreground mt-1">of results fully verifiable</p>
                 </div>
               </div>
+              <a
+                href={`${DEMO_BASE_URL}/demo/request-access?kg=provenance`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm text-primary font-medium hover:underline pt-2"
+              >
+                <Play className="h-3.5 w-3.5" />
+                Open in Studio
+              </a>
             </div>
             <VisualCodeTabs visual={<ProvenanceTreeDiagram />} code={provenanceCode} />
           </div>

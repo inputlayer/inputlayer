@@ -1,0 +1,76 @@
+services:
+  inputlayer:
+    image: ghcr.io/inputlayer/inputlayer:latest
+    restart: unless-stopped
+    volumes:
+      - inputlayer-data:/var/lib/inputlayer/data
+    environment:
+      INPUTLAYER_ADMIN_PASSWORD: ${INPUTLAYER_ADMIN_PASSWORD:?Set INPUTLAYER_ADMIN_PASSWORD in .env}
+      INPUTLAYER_BOOTSTRAP_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:-}
+      INPUTLAYER_HTTP__HOST: "0.0.0.0"
+      INPUTLAYER_HTTP__PORT: "8080"
+      INPUTLAYER_HTTP__CORS_ALLOW_ALL: "false"
+      INPUTLAYER_LOGGING__LEVEL: ${INPUTLAYER_LOG_LEVEL:-info}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    # NOT exposed to host - only accessible via demo-gateway
+
+  demo-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - demo-data:/app/data
+    environment:
+      DEMO_PORT: "3000"
+      DEMO_BASE_URL: https://${DOMAIN:-localhost}
+      INPUTLAYER_HOST: inputlayer
+      INPUTLAYER_PORT: "8080"
+      INPUTLAYER_ADMIN_USER: admin
+      INPUTLAYER_ADMIN_PASSWORD: ${INPUTLAYER_ADMIN_PASSWORD:?Set INPUTLAYER_ADMIN_PASSWORD in .env}
+      DEMO_INVITE_EXPIRY_HOURS: "${DEMO_INVITE_EXPIRY_HOURS:-168}"
+      DEMO_DEFAULT_KG: ${DEMO_DEFAULT_KG:-default}
+      DEMO_DB_PATH: /app/data/demo.db
+      SMTP_TRANSPORT: ${SMTP_TRANSPORT:-console}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-InputLayer Demo <demo@inputlayer.ai>}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/demo/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+    depends_on:
+      inputlayer:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:${HTTPS_PORT:-443}/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    depends_on:
+      demo-gateway:
+        condition: service_healthy
+
+volumes:
+  inputlayer-data:
+  demo-data:
+  caddy-data:
+  caddy-config:

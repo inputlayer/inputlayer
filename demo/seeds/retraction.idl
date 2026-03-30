@@ -1,0 +1,60 @@
+// ── Correct Retraction Demo ─────────────────────────────────────────────
+// Multiple reasons can lead to the same conclusion. Removing one reason
+// should NOT remove the conclusion if other reasons still hold.
+// Demonstrates: the diamond problem in truth maintenance.
+
+// ── Customer blocking scenario ─────────────────────────────────────────
+// A customer can be blocked for multiple independent reasons.
+// Only when ALL reasons are cleared should they be unblocked.
+
++customer[("customer_42", "Jane Doe", "jane@example.com"),
+          ("customer_17", "Bob Smith", "bob@example.com"),
+          ("customer_88", "Alice Chen", "alice@example.com")]
+
+// Blocking conditions - multiple independent reasons
++unpaid_bill[("customer_42", "inv_301", 450.00),
+             ("customer_17", "inv_220", 125.50)]
+
++unverified_card[("customer_42", "card_9x"),
+                 ("customer_88", "card_3z")]
+
++failed_kyc[("customer_88", "2025-01-15")]
+
+// ── Blocking rules ─────────────────────────────────────────────────────
+// Each condition independently blocks the customer
+
++blocked(C) <- unpaid_bill(C, _, _)
++blocked(C) <- unverified_card(C, _)
++blocked(C) <- failed_kyc(C, _)
+
+// Derived: customers who can purchase (not blocked)
++can_purchase(C, Name) <- customer(C, Name, _), !blocked(C)
+
+// Count blocking reasons per customer
++block_reason(C, "unpaid_bill") <- unpaid_bill(C, _, _)
++block_reason(C, "unverified_card") <- unverified_card(C, _)
++block_reason(C, "failed_kyc") <- failed_kyc(C, _)
++block_count(C, count<R>) <- block_reason(C, R)
+
+// ── Try these queries ──────────────────────────────────────────────────
+//
+// Who is blocked?
+// ?blocked(C)
+//
+// Who can purchase?
+// ?can_purchase(C, Name)
+//
+// How many reasons block each customer?
+// ?block_count(C, N)
+//
+// Why is customer_42 blocked?
+// .why ?blocked("customer_42")
+//
+// Now try retracting one reason and re-checking:
+// -unpaid_bill("customer_42", "inv_301", 450.00)
+// ?blocked("customer_42")
+// (still blocked - card unverified)
+//
+// -unverified_card("customer_42", "card_9x")
+// ?blocked("customer_42")
+// (now unblocked - all reasons cleared)

@@ -1,0 +1,81 @@
+// ── Provenance Demo ─────────────────────────────────────────────────────
+// Every conclusion traces back to the facts and rules that produced it.
+// Demonstrates: .why and .why_not for auditing AI agent decisions.
+
+// ── Procurement approval scenario ──────────────────────────────────────
+// An AI agent decides whether to approve purchase orders.
+// Every decision must be auditable and explainable.
+
++team[("team_alpha", "Alpha Team", "Engineering"),
+      ("team_beta",  "Beta Team",  "Marketing"),
+      ("team_gamma", "Gamma Team", "Research")]
+
++budget_remaining[("team_alpha", 15000),
+                  ("team_beta",  3000),
+                  ("team_gamma", 50000)]
+
++approved_vendor[("acme_supplies",    "Acme Industrial Supplies"),
+                 ("techmart",         "TechMart Electronics"),
+                 ("office_depot",     "Office Depot")]
+
+// Vendor risk scores (lower is better)
++vendor_risk[("acme_supplies", 0.12),
+             ("techmart", 0.35),
+             ("office_depot", 0.08)]
+
++order[("team_alpha", "acme_supplies", 3200,  "Server rack"),
+       ("team_alpha", "techmart",      8500,  "GPU cluster"),
+       ("team_beta",  "office_depot",  450,   "Office supplies"),
+       ("team_beta",  "acme_supplies", 5000,  "Standing desks"),
+       ("team_gamma", "techmart",      12000, "Lab equipment"),
+       ("team_gamma", "globex_corp",   1500,  "Chemicals")]
+
+// ── Approval rules ─────────────────────────────────────────────────────
+
+// Basic approval: vendor is approved, within budget
++purchase_ok(T, V, Amt, Item) <-
+  order(T, V, Amt, Item),
+  approved_vendor(V, _),
+  budget_remaining(T, B),
+  Amt <= B
+
+// High-risk flag: approved but vendor risk is elevated
++high_risk_purchase(T, V, Amt, Risk) <-
+  purchase_ok(T, V, Amt, _),
+  vendor_risk(V, Risk),
+  Risk > 0.2
+
+// Budget utilization per team
++total_approved(T, sum<Amt>) <- purchase_ok(T, _, Amt, _)
++budget_utilization(T, Total, Budget, Pct) <-
+  total_approved(T, Total),
+  budget_remaining(T, Budget),
+  Pct = Total * 100 / Budget
+
+// Orders that were NOT approved (for audit)
++order_exists(T, V) <- order(T, V, _, _)
++order_approved(T, V) <- purchase_ok(T, V, _, _)
++order_denied(T, V) <- order_exists(T, V), !order_approved(T, V)
+
+// ── Try these queries ──────────────────────────────────────────────────
+//
+// Which orders are approved?
+// ?purchase_ok(T, V, Amt, Item)
+//
+// Which are high risk?
+// ?high_risk_purchase(T, V, Amt, Risk)
+//
+// Which orders were denied?
+// ?order_denied(T, V)
+//
+// Budget utilization:
+// ?budget_utilization(T, Total, Budget, Pct)
+//
+// WHY was team_alpha's acme order approved?
+// .why ?purchase_ok("team_alpha", "acme_supplies", 3200, "Server rack")
+//
+// WHY was beta's acme order denied (over budget)?
+// .why_not purchase_ok("team_beta", "acme_supplies", 5000, "Standing desks")
+//
+// WHY was gamma's globex order denied (unapproved vendor)?
+// .why_not purchase_ok("team_gamma", "globex_corp", 1500, "Chemicals")

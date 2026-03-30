@@ -1,0 +1,3 @@
+{$DOMAIN:localhost} {
+	reverse_proxy demo-gateway:3000
+}

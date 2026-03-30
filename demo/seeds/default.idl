@@ -1,0 +1,96 @@
+// ── InputLayer Demo ─────────────────────────────────────────────────────
+// Welcome to InputLayer. This knowledge graph demonstrates the core
+// capabilities: facts, rules, recursive reasoning, and provenance.
+//
+// The data models a simple e-commerce domain: customers, products,
+// orders, and business rules that govern who can buy what.
+
+// ── Base facts ─────────────────────────────────────────────────────────
+
++customer[("c1", "Alice",   "alice@example.com",   "premium"),
+          ("c2", "Bob",     "bob@example.com",     "standard"),
+          ("c3", "Charlie", "charlie@example.com", "premium"),
+          ("c4", "Diana",   "diana@example.com",   "suspended")]
+
++product[("p1", "Widget Pro",     49.99,  "electronics"),
+         ("p2", "Widget Lite",    29.99,  "electronics"),
+         ("p3", "Gadget Max",     149.99, "electronics"),
+         ("p4", "Basic Toolkit",  19.99,  "tools"),
+         ("p5", "Premium Toolkit", 89.99, "tools")]
+
++inventory[("p1", 150), ("p2", 500), ("p3", 0), ("p4", 200), ("p5", 75)]
+
++order[("o1", "c1", "p1", 2),
+       ("o2", "c1", "p3", 1),
+       ("o3", "c2", "p2", 3),
+       ("o4", "c3", "p5", 1),
+       ("o5", "c4", "p1", 1)]
+
+// ── Business rules ─────────────────────────────────────────────────────
+
+// Active customers are those not suspended
++active_customer(Id, Name) <- customer(Id, Name, _, Tier), Tier != "suspended"
+
+// In stock if quantity > 0
++in_stock(Pid, Name) <- product(Pid, Name, _, _), inventory(Pid, Qty), Qty > 0
+
+// Premium-only products (price > $100)
++premium_only(Pid) <- product(Pid, _, Price, _), Price > 100.0
+
+// Customer can view product if active
++can_view(Cid, Pid) <- active_customer(Cid, _), product(Pid, _, _, _)
+
+// Customer can purchase if: active, product in stock, and tier allows it
++can_purchase(Cid, Pid, Name, Price) <-
+  active_customer(Cid, _),
+  in_stock(Pid, Name),
+  product(Pid, Name, Price, _),
+  customer(Cid, _, _, Tier),
+  !premium_only(Pid)
+
++can_purchase(Cid, Pid, Name, Price) <-
+  active_customer(Cid, _),
+  in_stock(Pid, Name),
+  product(Pid, Name, Price, _),
+  customer(Cid, _, _, "premium"),
+  premium_only(Pid)
+
+// Order is fulfillable if customer can purchase and product is in stock
++fulfillable_order(Oid, Cname, Pname, Qty) <-
+  order(Oid, Cid, Pid, Qty),
+  can_purchase(Cid, Pid, Pname, _),
+  customer(Cid, Cname, _, _),
+  inventory(Pid, Stock),
+  Qty <= Stock
+
+// Revenue per fulfillable order
++order_revenue(Oid, Qty * Price) <-
+  fulfillable_order(Oid, _, _, Qty),
+  order(Oid, _, Pid, _),
+  product(Pid, _, Price, _)
+
+// Total revenue
++total_revenue(sum<Rev>) <- order_revenue(_, Rev)
+
+// ── Try these queries ──────────────────────────────────────────────────
+//
+// Who are the active customers?
+// ?active_customer(Id, Name)
+//
+// What's in stock?
+// ?in_stock(Pid, Name)
+//
+// What can Alice (c1) purchase?
+// ?can_purchase("c1", Pid, Name, Price)
+//
+// Which orders can be fulfilled?
+// ?fulfillable_order(Oid, Cname, Pname, Qty)
+//
+// Why can't Diana's order be fulfilled?
+// .why_not fulfillable_order("o5", _, _, _)
+//
+// Why can't anyone buy Gadget Max?
+// .why_not can_purchase("c1", "p3", _, _)
+//
+// Total projected revenue:
+// ?total_revenue(R)
