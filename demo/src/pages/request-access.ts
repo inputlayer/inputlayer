@@ -166,7 +166,7 @@ export function requestAccessPage(defaultKg: string): string {
 </head>
 <body>
   <div class="container">
-    <div class="logo">InputLayer</div>
+    <div class="logo"><img src="/inputlayer_logo_long_dark.png" alt="InputLayer" height="32" style="height:32px;width:auto"></div>
     <p class="subtitle">Get access to the interactive demo</p>
 
     <div class="card">
@@ -190,7 +190,7 @@ export function requestAccessPage(defaultKg: string): string {
             <input type="email" id="email" name="email" placeholder="you@company.com" required autofocus>
           </div>
           <input type="hidden" id="kg" name="kg" value="${defaultKg}">
-          <button type="submit" class="btn" id="submit-btn">Get Demo Access</button>
+          <button type="submit" class="btn" id="submit-btn">Get Access</button>
         </form>
       </div>
 
@@ -247,7 +247,7 @@ export function requestAccessPage(defaultKg: string): string {
             errorEl.textContent = data.error;
             errorEl.style.display = 'block';
             btn.disabled = false;
-            btn.textContent = 'Get Demo Access';
+            btn.textContent = 'Get Access';
             return;
           }
           // Show success
@@ -259,7 +259,7 @@ export function requestAccessPage(defaultKg: string): string {
           errorEl.textContent = 'Something went wrong. Please try again.';
           errorEl.style.display = 'block';
           btn.disabled = false;
-          btn.textContent = 'Get Demo Access';
+          btn.textContent = 'Get Access';
         });
 
       return false;

@@ -39,6 +39,21 @@ pub fn prove_body(
 
                     // First try base data (includes materialized views)
                     let mut matches = find_matching_tuples(&atom.relation, &bound, ctx.base_data);
+                    if matches.is_empty() && ctx.base_data.contains_key(&atom.relation) {
+                        // Debug: show bound pattern and first tuple to compare
+                        let bound_dbg: Vec<String> = bound.iter().map(|b| format!("{b:?}")).collect();
+                        let first_tuple = ctx.base_data.get(&atom.relation).and_then(|t| t.first());
+                        let tuple_dbg = first_tuple.map(|t| {
+                            (0..t.arity()).filter_map(|i| t.get(i).map(|v| format!("{v:?}"))).collect::<Vec<_>>().join(", ")
+                        });
+                        tracing::debug!(
+                            relation = %atom.relation,
+                            bound = ?bound_dbg,
+                            first_tuple = ?tuple_dbg,
+                            base_count = ctx.base_data.get(&atom.relation).map_or(0, |t| t.len()),
+                            "prove_body: 0 matches despite data present"
+                        );
+                    }
 
                     // For derived relations with no base matches, enumerate
                     // candidates by trying all rules that produce this relation

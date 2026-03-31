@@ -209,6 +209,11 @@ export class AdminClient {
    * Create a demo viewer user and grant access to a knowledge graph.
    * Returns { username, password } on success.
    */
+  /** All demo knowledge graphs that users should be able to access */
+  private static readonly DEMO_KGS = [
+    "default", "flights", "rules_vectors", "retraction", "incremental", "provenance",
+  ]
+
   async createDemoUser(
     username: string,
     password: string,
@@ -217,10 +222,16 @@ export class AdminClient {
     // Create user with viewer role
     await this.execute(`.user create ${username} ${password} viewer`)
 
-    // Grant access to the specific KG
-    await this.execute(`.kg acl grant ${kg} ${username} viewer`)
+    // Grant viewer access to all demo KGs so users can switch between them
+    for (const kgName of AdminClient.DEMO_KGS) {
+      try {
+        await this.execute(`.kg acl grant ${kgName} ${username} viewer`)
+      } catch {
+        // KG may not exist yet - ignore
+      }
+    }
 
-    console.log(`[admin-client] created demo user ${username} with viewer access to ${kg}`)
+    console.log(`[admin-client] created demo user ${username} with viewer access to all demo KGs`)
     return { username, password }
   }
 

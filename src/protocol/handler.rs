@@ -553,7 +553,7 @@ impl QueryJob {
                 )
             })
             .collect();
-        let ctx = ProofContext::with_index_info(&rules, &base_data, config, index_info);
+        let ctx = ProofContext::with_index_info(&rules, &base_data, config.clone(), index_info);
 
         // Build wire rows from result tuples
         let schema = extract_query_schema(&query, &result_tuples);
@@ -583,8 +583,9 @@ impl QueryJob {
                         })
                     }
                 }
-                Err(_) => {
-                    WireProofTree::from(&crate::provenance::ProofTree::Truncated { depth_limit: 0 })
+                Err(err) => {
+                    tracing::warn!(relation = %relation, error = %err, "build_proofs failed");
+                    WireProofTree::from(&crate::provenance::ProofTree::Truncated { depth_limit: config.max_depth })
                 }
             };
             wire_proofs.push(proof);

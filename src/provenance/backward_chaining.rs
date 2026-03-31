@@ -154,6 +154,7 @@ pub fn build_proofs_inner(
 
     // Try each rule clause
     let rules = ctx.rules_for(relation);
+    tracing::debug!(relation, num_rules = rules.len(), depth, in_base = tuple_exists_in(relation, tuple, ctx.base_data), "build_proofs_inner: trying rules");
     for (clause_idx, rule) in rules.iter().enumerate() {
         if proofs.len() >= ctx.config.max_proofs_per_tuple {
             break;
@@ -162,8 +163,12 @@ pub fn build_proofs_inner(
         // Try to unify the target tuple with the rule head
         let bindings = match unify_head(tuple, &rule.head) {
             Some(b) => b,
-            None => continue,
+            None => {
+                tracing::debug!(relation, clause_idx, "unify_head failed");
+                continue;
+            }
         };
+        tracing::debug!(relation, clause_idx, ?bindings, "unify_head succeeded, proving body");
 
         // Try to satisfy all body predicates with these bindings
         match super::prove_body::prove_body(&rule.body, bindings, ctx, visited, depth + 1) {
@@ -173,7 +178,9 @@ pub fn build_proofs_inner(
                         break;
                     }
                     let mut binding_pairs: Vec<(String, Value)> =
-                        final_bindings.into_iter().collect();
+                        final_bindings.into_iter()
+                        .filter(|(name, _)| !name.starts_with("_placeholder_"))
+                        .collect();
                     binding_pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
                     proofs.push(ProofTree::RuleApplication {
                         rule_name: rule.head.relation.clone(),

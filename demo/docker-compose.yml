@@ -1,7 +1,8 @@
 services:
   inputlayer:
-    image: ghcr.io/inputlayer/inputlayer:latest
+    image: inputlayer-local
     restart: unless-stopped
+    command: ["--host", "0.0.0.0"]
     volumes:
       - inputlayer-data:/var/lib/inputlayer/data
     environment:
@@ -12,7 +13,7 @@ services:
       INPUTLAYER_HTTP__CORS_ALLOW_ALL: "false"
       INPUTLAYER_LOGGING__LEVEL: ${INPUTLAYER_LOG_LEVEL:-info}
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
       interval: 5s
       timeout: 3s
       retries: 10
