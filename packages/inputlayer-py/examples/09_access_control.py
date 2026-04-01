@@ -1,12 +1,17 @@
 """Access control: user/ACL management."""
 
 import asyncio
+import os
 
 from inputlayer import InputLayer
 
 
 async def main():
-    async with InputLayer("ws://localhost:8080/ws", username="admin", password="admin") as il:
+    async with InputLayer(
+        os.environ.get("INPUTLAYER_URL", "ws://localhost:8080/ws"),
+        username=os.environ.get("INPUTLAYER_USER", "admin"),
+        password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
+    ) as il:
         # List users
         users = await il.list_users()
         print("Current users:")

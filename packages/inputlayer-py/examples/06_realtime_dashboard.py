@@ -1,6 +1,7 @@
 """Realtime dashboard: notifications + aggregation."""
 
 import asyncio
+import os
 
 from inputlayer import InputLayer, Relation, count, sum_
 
@@ -12,7 +13,11 @@ class SensorReading(Relation):
 
 
 async def main():
-    async with InputLayer("ws://localhost:8080/ws", username="admin", password="admin") as il:
+    async with InputLayer(
+        os.environ.get("INPUTLAYER_URL", "ws://localhost:8080/ws"),
+        username=os.environ.get("INPUTLAYER_USER", "admin"),
+        password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
+    ) as il:
         kg = il.knowledge_graph("dashboard")
 
         # Register notification handler

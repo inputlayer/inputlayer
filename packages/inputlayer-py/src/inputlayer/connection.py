@@ -124,9 +124,6 @@ class Connection:
         await self._authenticate()
         self._connected = True
 
-        # Start background receiver for notifications
-        self._recv_task = asyncio.create_task(self._receive_loop())
-
     async def close(self) -> None:
         """Close the connection gracefully."""
         self._connected = False

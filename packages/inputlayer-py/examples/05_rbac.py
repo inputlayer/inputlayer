@@ -1,6 +1,7 @@
 """RBAC: transitive role inheritance."""
 
 import asyncio
+import os
 from typing import ClassVar
 
 from inputlayer import Derived, From, InputLayer, Relation
@@ -34,7 +35,11 @@ EffectiveRole.rules = [
 
 
 async def main():
-    async with InputLayer("ws://localhost:8080/ws", username="admin", password="admin") as il:
+    async with InputLayer(
+        os.environ.get("INPUTLAYER_URL", "ws://localhost:8080/ws"),
+        username=os.environ.get("INPUTLAYER_USER", "admin"),
+        password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
+    ) as il:
         kg = il.knowledge_graph("rbac")
 
         await kg.define(RoleHierarchy, UserRole)
