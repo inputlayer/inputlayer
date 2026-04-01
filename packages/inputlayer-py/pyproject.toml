@@ -16,10 +16,15 @@ dependencies = [
 
 [project.optional-dependencies]
 pandas = ["pandas>=1.5"]
+langchain = ["langchain-core>=0.3"]
+all = [
+    "inputlayer-client-dev[pandas,langchain]",
+]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
     "pandas>=1.5",
+    "langchain-core>=0.3",
     "ruff>=0.8",
     "mypy>=1.13",
 ]
