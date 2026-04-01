@@ -20,6 +20,8 @@ dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
     "pandas>=1.5",
+    "ruff>=0.8",
+    "mypy>=1.13",
 ]
 
 [project.scripts]
@@ -31,3 +33,19 @@ packages = ["src/inputlayer"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+packages = ["inputlayer"]
+mypy_path = "src"
