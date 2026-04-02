@@ -24,7 +24,7 @@ interface QueryResultsPanelProps {
 
 /** Detect if query is purely a mutation (insert/delete/meta, no query lines) */
 /** Meta commands that return query-like results (not mutations). */
-const RESULT_META_COMMANDS = [".why ", ".why_not ", ".debug "]
+const RESULT_META_COMMANDS = [".why ", ".why_not ", ".debug ", ".rel", ".rule", ".status", ".session"]
 
 function isMutationQuery(query: string): boolean {
   const lines = query.split("\n").map((l) => l.trim()).filter((l) => l.length > 0 && !l.startsWith("//"))
@@ -109,7 +109,7 @@ export function QueryResultsPanel({ result, error, isExecuting, activeQuery, sid
       prevResultId.current = resultId
       hasUserSelectedTab.current = false
     }
-    const hasProof = result?.derivationGraphs && result.derivationGraphs.length > 0
+    const hasProof = result?.proofTrees && result.proofTrees.length > 0
     if (!hasUserSelectedTab.current) {
       if (hasProof) {
         setActiveTab("proof")

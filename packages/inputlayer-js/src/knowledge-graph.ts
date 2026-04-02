@@ -86,8 +86,8 @@ export interface ServerStatus {
   knowledgeGraph: string;
 }
 
-/** A node in a derivation graph explaining why a fact was derived. */
-export interface DerivationNode {
+/** A node in a proof tree explaining why a fact was derived. */
+export interface ProofNode {
   kind: 'fact' | 'rule' | 'negation' | 'vector_search' | 'aggregate' | 'truncated' | 'why_not';
   conclusion: { pred: string; args: unknown[] };
   rule_id?: string;
@@ -120,27 +120,27 @@ export interface DerivationNode {
   children: string[];
 }
 
-/** A derivation graph - a DAG of derivation nodes. */
-export interface DerivationGraph {
+/** A proof tree - a DAG of proof nodes. */
+export interface ProofTree {
   version: number;
   roots: string[];
-  nodes: Record<string, DerivationNode>;
+  nodes: Record<string, ProofNode>;
 }
 
-/** Result of a .why query with derivation graphs. */
+/** Result of a .why query with proof trees. */
 export interface WhyResult {
   /** Result data rows */
   results: ResultSet;
-  /** Structured derivation graphs - one per result row */
-  derivationGraphs: DerivationGraph[];
+  /** Structured proof trees - one per result row */
+  proofTrees: ProofTree[];
 }
 
 /** Explanation of why a fact was NOT derived. */
 export interface WhyNotResult {
   /** Human-readable explanation */
   text: string;
-  /** Structured explanation as derivation graph */
-  explanation: DerivationGraph | null;
+  /** Structured explanation as proof tree */
+  explanation: ProofTree | null;
 }
 
 /** Blocker details for why-not explanations. */
@@ -606,8 +606,8 @@ export class KnowledgeGraph {
       rowProvenance: result.row_provenance,
       timingBreakdown: result.timing_breakdown,
     });
-    const derivationGraphs: DerivationGraph[] = (result.derivation_graphs ?? []) as DerivationGraph[];
-    return { results: resultSet, derivationGraphs };
+    const proofTrees: ProofTree[] = (result.proof_trees ?? []) as ProofTree[];
+    return { results: resultSet, proofTrees };
   }
 
   /** Explain why a specific fact was NOT derived.
@@ -629,7 +629,7 @@ export class KnowledgeGraph {
       .join(', ');
     const result = await this.conn.execute(`.why_not ${relName}(${vals})`);
     const text = result.rows.map((row) => String(row[0])).join('\n');
-    const explanation = (result.derivation_graphs?.[0] ?? null) as DerivationGraph | null;
+    const explanation = (result.proof_trees?.[0] ?? null) as ProofTree | null;
     return { text, explanation };
   }
 

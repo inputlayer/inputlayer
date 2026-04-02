@@ -1,4 +1,4 @@
-//! Derivation Graph - a DAG representing how derived facts were computed.
+//! Proof Tree - a DAG representing how derived facts were computed.
 //!
 //! Each node represents a single derivation step (base fact, rule application,
 //! aggregate computation, etc.) and points to its premise nodes. Shared
@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 // --- Custom serialization for Value as plain JSON ---
 // Value's default serde is a tagged enum ({"type":"String","value":"x"}).
-// For the derivation graph wire format, we want plain JSON values ("x", 5, true, null).
+// For the proof tree wire format, we want plain JSON values ("x", 5, true, null).
 
 fn value_to_json(v: &Value) -> serde_json::Value {
     match v {
@@ -153,12 +153,12 @@ fn deserialize_opt_values_2d<'de, D: serde::Deserializer<'de>>(
     }))
 }
 
-/// A unique identifier for a derivation node.
+/// A unique identifier for a proof node.
 pub type NodeId = String;
 
-/// The complete derivation graph: a flat, deduplicated DAG.
+/// The complete proof tree: a flat, deduplicated DAG.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DerivationGraph {
+pub struct ProofTree {
     /// Wire format version.
     pub version: u32,
     /// The query that produced this graph (for self-documenting exports).
@@ -167,10 +167,10 @@ pub struct DerivationGraph {
     /// Root node IDs (entry points - one per queried result tuple).
     pub roots: Vec<NodeId>,
     /// All nodes keyed by their unique ID.
-    pub nodes: HashMap<NodeId, DerivationNode>,
+    pub nodes: HashMap<NodeId, ProofNode>,
 }
 
-impl DerivationGraph {
+impl ProofTree {
     /// Create an empty graph.
     pub fn new() -> Self {
         Self {
@@ -347,19 +347,19 @@ impl DerivationGraph {
     }
 }
 
-impl Default for DerivationGraph {
+impl Default for ProofTree {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl std::fmt::Display for DerivationGraph {
+impl std::fmt::Display for ProofTree {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.format_tree())
     }
 }
 
-/// What kind of derivation step this node represents.
+/// What kind of proof step this node represents.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeKind {
@@ -389,20 +389,20 @@ pub enum FactSource {
     Derived,
 }
 
-/// A single node in the derivation graph.
+/// A single node in the proof tree.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DerivationNode {
-    /// What kind of derivation step.
+pub struct ProofNode {
+    /// What kind of proof step.
     pub kind: NodeKind,
     /// The concluded tuple: predicate name + argument values.
     pub conclusion: Conclusion,
     /// For Fact nodes: whether this is base data (edb) or engine-derived.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<FactSource>,
-    /// The rule clause text that produced this derivation.
+    /// The rule clause text that produced this proof step.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rule_id: Option<String>,
-    /// Variable bindings used in this derivation step.
+    /// Variable bindings used in this proof step.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(
         default,
@@ -430,7 +430,7 @@ pub struct DerivationNode {
     pub children: Vec<NodeId>,
 }
 
-/// The concluded tuple of a derivation step.
+/// The concluded tuple of a proof step.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Conclusion {
     /// Relation/predicate name.
@@ -443,7 +443,7 @@ pub struct Conclusion {
     pub args: Vec<Value>,
 }
 
-/// Metadata for aggregate derivation nodes.
+/// Metadata for aggregate proof nodes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AggregateInfo {
     /// Aggregate function name (count, sum, min, max, avg).
@@ -510,19 +510,19 @@ pub struct WhyNotInfo {
     pub rule_name: String,
     pub clause_index: usize,
     pub clause_text: String,
-    /// The specific blocker that prevented derivation.
+    /// The specific blocker that prevented proof.
     pub blocker: super::Blocker,
 }
 
-/// Accumulates nodes during graph construction, deduplicating by (relation, values).
-pub struct GraphBuilder {
-    nodes: HashMap<NodeId, DerivationNode>,
+/// Accumulates nodes during proof tree construction, deduplicating by (relation, values).
+pub struct ProofTreeBuilder {
+    nodes: HashMap<NodeId, ProofNode>,
     /// Dedup key: (relation, values) -> existing node ID
     seen: HashMap<(String, Vec<Value>), NodeId>,
     next_id: usize,
 }
 
-impl GraphBuilder {
+impl ProofTreeBuilder {
     /// Create a new empty builder.
     pub fn new() -> Self {
         Self {
@@ -546,7 +546,7 @@ impl GraphBuilder {
 
     /// Insert a node. If a dedup key (pred, args) is provided and a node with
     /// the same key already exists, return the existing ID.
-    pub fn insert(&mut self, node: DerivationNode) -> NodeId {
+    pub fn insert(&mut self, node: ProofNode) -> NodeId {
         let dedup_key = (node.conclusion.pred.clone(), node.conclusion.args.clone());
 
         // For fact nodes, deduplicate by conclusion
@@ -563,15 +563,15 @@ impl GraphBuilder {
     }
 
     /// Insert a node without deduplication (for why-not, truncated, etc.).
-    pub fn insert_unique(&mut self, node: DerivationNode) -> NodeId {
+    pub fn insert_unique(&mut self, node: ProofNode) -> NodeId {
         let id = self.fresh_id();
         self.nodes.insert(id.clone(), node);
         id
     }
 
-    /// Finalize into a DerivationGraph with the given root IDs.
-    pub fn finish(self, roots: Vec<NodeId>) -> DerivationGraph {
-        DerivationGraph {
+    /// Finalize into a proof tree with the given root IDs.
+    pub fn finish(self, roots: Vec<NodeId>) -> ProofTree {
+        ProofTree {
             version: 1,
             query: None,
             roots,
@@ -580,7 +580,7 @@ impl GraphBuilder {
     }
 }
 
-impl Default for GraphBuilder {
+impl Default for ProofTreeBuilder {
     fn default() -> Self {
         Self::new()
     }
@@ -601,7 +601,7 @@ mod tests {
 
     #[test]
     fn test_empty_graph() {
-        let g = DerivationGraph::new();
+        let g = ProofTree::new();
         assert_eq!(g.version, 1);
         assert!(g.roots.is_empty());
         assert_eq!(g.node_count(), 0);
@@ -610,8 +610,8 @@ mod tests {
 
     #[test]
     fn test_single_fact_node() {
-        let mut builder = GraphBuilder::new();
-        let id = builder.insert(DerivationNode {
+        let mut builder = ProofTreeBuilder::new();
+        let id = builder.insert(ProofNode {
             kind: NodeKind::Fact,
             conclusion: Conclusion {
                 pred: "edge".into(),
@@ -637,8 +637,8 @@ mod tests {
 
     #[test]
     fn test_fact_deduplication() {
-        let mut builder = GraphBuilder::new();
-        let id1 = builder.insert(DerivationNode {
+        let mut builder = ProofTreeBuilder::new();
+        let id1 = builder.insert(ProofNode {
             kind: NodeKind::Fact,
             conclusion: Conclusion {
                 pred: "edge".into(),
@@ -654,7 +654,7 @@ mod tests {
             source: None,
             children: vec![],
         });
-        let id2 = builder.insert(DerivationNode {
+        let id2 = builder.insert(ProofNode {
             kind: NodeKind::Fact,
             conclusion: Conclusion {
                 pred: "edge".into(),
@@ -677,8 +677,8 @@ mod tests {
 
     #[test]
     fn test_rule_with_children() {
-        let mut builder = GraphBuilder::new();
-        let fact_id = builder.insert(DerivationNode {
+        let mut builder = ProofTreeBuilder::new();
+        let fact_id = builder.insert(ProofNode {
             kind: NodeKind::Fact,
             conclusion: Conclusion {
                 pred: "edge".into(),
@@ -694,7 +694,7 @@ mod tests {
             source: None,
             children: vec![],
         });
-        let rule_id = builder.insert(DerivationNode {
+        let rule_id = builder.insert(ProofNode {
             kind: NodeKind::Rule,
             conclusion: Conclusion {
                 pred: "path".into(),
@@ -725,8 +725,8 @@ mod tests {
     fn test_diamond_deduplication() {
         // A depends on B and C, both B and C depend on D
         // D should only appear once in the graph
-        let mut builder = GraphBuilder::new();
-        let d = builder.insert(DerivationNode {
+        let mut builder = ProofTreeBuilder::new();
+        let d = builder.insert(ProofNode {
             kind: NodeKind::Fact,
             conclusion: Conclusion {
                 pred: "base".into(),
@@ -742,7 +742,7 @@ mod tests {
             source: None,
             children: vec![],
         });
-        let b = builder.insert(DerivationNode {
+        let b = builder.insert(ProofNode {
             kind: NodeKind::Rule,
             conclusion: Conclusion {
                 pred: "mid_b".into(),
@@ -759,7 +759,7 @@ mod tests {
             children: vec![d.clone()],
         });
         // Insert D again - should return same ID
-        let d2 = builder.insert(DerivationNode {
+        let d2 = builder.insert(ProofNode {
             kind: NodeKind::Fact,
             conclusion: Conclusion {
                 pred: "base".into(),
@@ -776,7 +776,7 @@ mod tests {
             children: vec![],
         });
         assert_eq!(d, d2, "D should be deduplicated");
-        let c = builder.insert(DerivationNode {
+        let c = builder.insert(ProofNode {
             kind: NodeKind::Rule,
             conclusion: Conclusion {
                 pred: "mid_c".into(),
@@ -792,7 +792,7 @@ mod tests {
             source: None,
             children: vec![d2],
         });
-        let a = builder.insert(DerivationNode {
+        let a = builder.insert(ProofNode {
             kind: NodeKind::Rule,
             conclusion: Conclusion {
                 pred: "top".into(),
@@ -816,8 +816,8 @@ mod tests {
 
     #[test]
     fn test_aggregate_node() {
-        let mut builder = GraphBuilder::new();
-        let child1 = builder.insert(DerivationNode {
+        let mut builder = ProofTreeBuilder::new();
+        let child1 = builder.insert(ProofNode {
             kind: NodeKind::Fact,
             conclusion: Conclusion {
                 pred: "can_reach".into(),
@@ -833,7 +833,7 @@ mod tests {
             source: None,
             children: vec![],
         });
-        let child2 = builder.insert(DerivationNode {
+        let child2 = builder.insert(ProofNode {
             kind: NodeKind::Fact,
             conclusion: Conclusion {
                 pred: "can_reach".into(),
@@ -849,7 +849,7 @@ mod tests {
             source: None,
             children: vec![],
         });
-        let agg = builder.insert(DerivationNode {
+        let agg = builder.insert(ProofNode {
             kind: NodeKind::Aggregate,
             conclusion: Conclusion {
                 pred: "reachable_count".into(),
@@ -882,8 +882,8 @@ mod tests {
 
     #[test]
     fn test_json_roundtrip() {
-        let mut builder = GraphBuilder::new();
-        let fact = builder.insert(DerivationNode {
+        let mut builder = ProofTreeBuilder::new();
+        let fact = builder.insert(ProofNode {
             kind: NodeKind::Fact,
             conclusion: Conclusion {
                 pred: "edge".into(),
@@ -907,15 +907,15 @@ mod tests {
 
         // Roundtrip
         let json_str = serde_json::to_string(&graph).expect("serialize string");
-        let restored: DerivationGraph = serde_json::from_str(&json_str).expect("deserialize");
+        let restored: ProofTree = serde_json::from_str(&json_str).expect("deserialize");
         assert_eq!(restored.node_count(), graph.node_count());
         assert_eq!(restored.roots.len(), graph.roots.len());
     }
 
     #[test]
     fn test_json_shape_matches_spec() {
-        let mut builder = GraphBuilder::new();
-        let fact = builder.insert(DerivationNode {
+        let mut builder = ProofTreeBuilder::new();
+        let fact = builder.insert(ProofNode {
             kind: NodeKind::Fact,
             conclusion: Conclusion {
                 pred: "flight".into(),
@@ -936,7 +936,7 @@ mod tests {
             source: None,
             children: vec![],
         });
-        let rule = builder.insert(DerivationNode {
+        let rule = builder.insert(ProofNode {
             kind: NodeKind::Rule,
             conclusion: Conclusion {
                 pred: "can_reach".into(),
@@ -981,8 +981,8 @@ mod tests {
 
     #[test]
     fn test_format_tree_output() {
-        let mut builder = GraphBuilder::new();
-        let fact = builder.insert(DerivationNode {
+        let mut builder = ProofTreeBuilder::new();
+        let fact = builder.insert(ProofNode {
             kind: NodeKind::Fact,
             conclusion: Conclusion {
                 pred: "edge".into(),
@@ -998,7 +998,7 @@ mod tests {
             source: None,
             children: vec![],
         });
-        let rule = builder.insert(DerivationNode {
+        let rule = builder.insert(ProofNode {
             kind: NodeKind::Rule,
             conclusion: Conclusion {
                 pred: "path".into(),
@@ -1023,8 +1023,8 @@ mod tests {
     #[test]
     fn test_why_not_node() {
         use super::super::Blocker;
-        let mut builder = GraphBuilder::new();
-        let id = builder.insert_unique(DerivationNode {
+        let mut builder = ProofTreeBuilder::new();
+        let id = builder.insert_unique(ProofNode {
             kind: NodeKind::WhyNot,
             conclusion: Conclusion {
                 pred: "path".into(),
@@ -1058,8 +1058,8 @@ mod tests {
 
     #[test]
     fn test_truncated_node() {
-        let mut builder = GraphBuilder::new();
-        let id = builder.insert_unique(DerivationNode {
+        let mut builder = ProofTreeBuilder::new();
+        let id = builder.insert_unique(ProofNode {
             kind: NodeKind::Truncated,
             conclusion: Conclusion {
                 pred: "chain".into(),

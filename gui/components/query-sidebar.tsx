@@ -18,6 +18,7 @@ const TEACHING_EXAMPLES = [
   { id: "incremental", name: "Company Access Control", category: "Incremental Updates", difficulty: "intermediate" as const, description: "Build access control. Watch how one new hire automatically gets the right permissions." },
   { id: "rules_vectors", name: "Smart Product Recommendations", category: "Hybrid Reasoning", difficulty: "advanced" as const, description: "A customer asks for printer ink. Vector search recommends the wrong brand. Rules fix it." },
   { id: "agentic_ai", name: "Customer Churn Detection", category: "Agentic AI", difficulty: "advanced" as const, description: "Build a churn risk system. When the VP asks 'why?', show the proof." },
+  { id: "schemas", name: "Schemas & Column Types", category: "Data Modeling", difficulty: "beginner" as const, description: "Why schemas matter. Typed columns, self-documenting data, and cleaner query results." },
 ]
 
 const DIFFICULTY_COLORS = {

@@ -1,12 +1,12 @@
-//! Body predicate proving and candidate enumeration for derivation graphs.
+//! Body predicate proving and candidate enumeration for proof trees.
 //!
 //! Contains `prove_body` (left-to-right body predicate proving) and
 //! `enumerate_derived_candidates` (forward candidate generation for derived relations).
 
 use crate::ast::BodyPredicate;
 use crate::provenance::backward_chaining::{build_node, ProofContext};
-use crate::provenance::derivation_graph::{
-    Conclusion, DerivationNode, GraphBuilder, NegationInfo, NodeId, NodeKind, VectorSearchInfo,
+use crate::provenance::proof_tree::{
+    Conclusion, NegationInfo, NodeId, NodeKind, ProofNode, ProofTreeBuilder, VectorSearchInfo,
 };
 use crate::provenance::unification::{
     evaluate_comparison, find_matching_tuples, format_bound_terms, substitute_atom, Bindings,
@@ -26,7 +26,7 @@ pub fn prove_body(
     body: &[BodyPredicate],
     initial_bindings: Bindings,
     ctx: &ProofContext<'_>,
-    builder: &mut GraphBuilder,
+    builder: &mut ProofTreeBuilder,
     visited: &mut HashSet<(String, Vec<Value>)>,
     depth: usize,
 ) -> Result<Vec<(Bindings, Vec<NodeId>)>, String> {
@@ -86,7 +86,7 @@ pub fn prove_body(
                     let matches = find_matching_tuples(&atom.relation, &bound, ctx.base_data);
                     if matches.is_empty() {
                         let pattern_str = format_bound_terms(&bound);
-                        let node_id = builder.insert_unique(DerivationNode {
+                        let node_id = builder.insert_unique(ProofNode {
                             kind: NodeKind::Negation,
                             conclusion: Conclusion {
                                 pred: atom.relation.clone(),
@@ -165,7 +165,7 @@ pub fn prove_body(
                             })
                             .unwrap_or_default();
 
-                        let node_id = builder.insert_unique(DerivationNode {
+                        let node_id = builder.insert_unique(ProofNode {
                             kind: NodeKind::VectorSearch,
                             conclusion: Conclusion {
                                 pred: index_name.clone(),
@@ -236,7 +236,7 @@ fn enumerate_derived_candidates(
     let rules = ctx.rules_for(relation);
     let mut candidates = Vec::new();
     // Need a temporary builder for enumeration (nodes are discarded)
-    let mut temp_builder = GraphBuilder::new();
+    let mut temp_builder = ProofTreeBuilder::new();
 
     for rule in &rules {
         if candidates.len() >= MAX_DERIVED_CANDIDATES {
@@ -327,7 +327,7 @@ mod tests {
     use super::*;
     use crate::ast::{Atom, ComparisonOp, Term};
     use crate::provenance::backward_chaining::ProofContext;
-    use crate::provenance::derivation_graph::NodeKind;
+    use crate::provenance::proof_tree::NodeKind;
     use crate::provenance::ProofConfig;
     use crate::value::{Tuple, Value};
     use std::collections::HashMap;
@@ -367,7 +367,7 @@ mod tests {
     fn test_positive_base_match() {
         let data = base_data(vec![("edge", vec![vec![int(1), int(2)]])]);
         let ctx = ProofContext::new(&[], &data, ProofConfig::default());
-        let mut builder = GraphBuilder::new();
+        let mut builder = ProofTreeBuilder::new();
         let mut visited = HashSet::new();
         let mut bindings = Bindings::new();
         bindings.insert("X".into(), int(1));
@@ -397,7 +397,7 @@ mod tests {
         }];
         let ctx =
             ProofContext::new(&rules, &data, ProofConfig::default()).with_derived_data(&derived);
-        let mut builder = GraphBuilder::new();
+        let mut builder = ProofTreeBuilder::new();
         let mut visited = HashSet::new();
         let bindings = Bindings::new();
 
@@ -411,7 +411,7 @@ mod tests {
     fn test_negation_succeeds() {
         let data = base_data(vec![("node", vec![vec![int(1)]])]);
         let ctx = ProofContext::new(&[], &data, ProofConfig::default());
-        let mut builder = GraphBuilder::new();
+        let mut builder = ProofTreeBuilder::new();
         let mut visited = HashSet::new();
         let mut bindings = Bindings::new();
         bindings.insert("X".into(), int(1));
@@ -432,7 +432,7 @@ mod tests {
     fn test_negation_fails() {
         let data = base_data(vec![("danger", vec![vec![int(1)]])]);
         let ctx = ProofContext::new(&[], &data, ProofConfig::default());
-        let mut builder = GraphBuilder::new();
+        let mut builder = ProofTreeBuilder::new();
         let mut visited = HashSet::new();
         let mut bindings = Bindings::new();
         bindings.insert("X".into(), int(1));
@@ -447,7 +447,7 @@ mod tests {
     fn test_comparison_passes() {
         let data = base_data(vec![("item", vec![vec![int(1), int(200)]])]);
         let ctx = ProofContext::new(&[], &data, ProofConfig::default());
-        let mut builder = GraphBuilder::new();
+        let mut builder = ProofTreeBuilder::new();
         let mut visited = HashSet::new();
         let bindings = Bindings::new();
 
@@ -468,7 +468,7 @@ mod tests {
     fn test_comparison_fails_filters() {
         let data = base_data(vec![("item", vec![vec![int(1), int(50)]])]);
         let ctx = ProofContext::new(&[], &data, ProofConfig::default());
-        let mut builder = GraphBuilder::new();
+        let mut builder = ProofTreeBuilder::new();
         let mut visited = HashSet::new();
         let bindings = Bindings::new();
 
@@ -491,7 +491,7 @@ mod tests {
             vec![vec![int(1), int(2)], vec![int(2), int(3)]],
         )]);
         let ctx = ProofContext::new(&[], &data, ProofConfig::default());
-        let mut builder = GraphBuilder::new();
+        let mut builder = ProofTreeBuilder::new();
         let mut visited = HashSet::new();
         let bindings = Bindings::new();
 
@@ -510,7 +510,7 @@ mod tests {
     fn test_empty_states_error() {
         let data = base_data(vec![]);
         let ctx = ProofContext::new(&[], &data, ProofConfig::default());
-        let mut builder = GraphBuilder::new();
+        let mut builder = ProofTreeBuilder::new();
         let mut visited = HashSet::new();
         let bindings = Bindings::new();
 

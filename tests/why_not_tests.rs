@@ -1,8 +1,8 @@
-//! Integration tests for why-not (negative explanation) using derivation graphs.
+//! Integration tests for why-not (negative explanation) using proof trees.
 
 use inputlayer::ast::{Atom, BodyPredicate, ComparisonOp, Rule, Term};
 use inputlayer::provenance::backward_chaining::ProofContext;
-use inputlayer::provenance::derivation_graph::NodeKind;
+use inputlayer::provenance::proof_tree::NodeKind;
 use inputlayer::provenance::why_not::{explain_why_not, format_why_not_text};
 use inputlayer::provenance::{Blocker, ProofConfig};
 use inputlayer::value::{Tuple, Value};

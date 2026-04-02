@@ -6,8 +6,8 @@
 
 use crate::ast::BodyPredicate;
 use crate::provenance::backward_chaining::ProofContext;
-use crate::provenance::derivation_graph::{
-    Conclusion, DerivationGraph, DerivationNode, FactSource, GraphBuilder, NodeKind, WhyNotInfo,
+use crate::provenance::proof_tree::{
+    Conclusion, FactSource, NodeKind, ProofNode, ProofTree, ProofTreeBuilder, WhyNotInfo,
 };
 use crate::provenance::unification::{
     evaluate_comparison, find_matching_tuples, format_bound_terms, resolve_term_pub,
@@ -18,11 +18,11 @@ use crate::value::{Tuple, Value};
 
 /// Explain why a specific tuple was NOT derived.
 ///
-/// Returns a `DerivationGraph` with `WhyNot` nodes showing:
+/// Returns a proof tree with `WhyNot` nodes showing:
 /// - A root node for the target tuple
 /// - Per-clause children showing which body atoms succeeded (Fact nodes)
 ///   and which one failed (WhyNot node with blocker)
-pub fn explain_why_not(relation: &str, target: &Tuple, ctx: &ProofContext<'_>) -> DerivationGraph {
+pub fn explain_why_not(relation: &str, target: &Tuple, ctx: &ProofContext<'_>) -> ProofTree {
     let target_values: Vec<Value> = (0..target.arity())
         .filter_map(|i| target.get(i).cloned())
         .collect();
@@ -31,12 +31,12 @@ pub fn explain_why_not(relation: &str, target: &Tuple, ctx: &ProofContext<'_>) -
         args: target_values.clone(),
     };
 
-    let mut builder = GraphBuilder::new();
+    let mut builder = ProofTreeBuilder::new();
     let mut clause_children = Vec::new();
 
     if !ctx.derived_relations.contains(relation) {
         // Base-only relation - no rules produce it
-        let id = builder.insert_unique(DerivationNode {
+        let id = builder.insert_unique(ProofNode {
             kind: NodeKind::WhyNot,
             conclusion: conclusion.clone(),
             source: None,
@@ -67,7 +67,7 @@ pub fn explain_why_not(relation: &str, target: &Tuple, ctx: &ProofContext<'_>) -
             let bindings = match unify_head(target, &rule.head) {
                 Some(b) => b,
                 None => {
-                    let id = builder.insert_unique(DerivationNode {
+                    let id = builder.insert_unique(ProofNode {
                         kind: NodeKind::WhyNot,
                         conclusion: conclusion.clone(),
                         source: None,
@@ -116,7 +116,7 @@ pub fn explain_why_not(relation: &str, target: &Tuple, ctx: &ProofContext<'_>) -
                             if derived_matches.is_empty() {
                                 // This body atom FAILED - record as WhyNot
                                 let pattern_str = format_bound_terms(&bound);
-                                let id = builder.insert_unique(DerivationNode {
+                                let id = builder.insert_unique(ProofNode {
                                     kind: NodeKind::WhyNot,
                                     conclusion: Conclusion {
                                         pred: atom.relation.clone(),
@@ -164,7 +164,7 @@ pub fn explain_why_not(relation: &str, target: &Tuple, ctx: &ProofContext<'_>) -
                             let matched_vals: Vec<Value> = (0..arity)
                                 .filter_map(|i| derived_matches[0].0.get(i).cloned())
                                 .collect();
-                            let id = builder.insert_unique(DerivationNode {
+                            let id = builder.insert_unique(ProofNode {
                                 kind: NodeKind::Fact,
                                 conclusion: Conclusion {
                                     pred: atom.relation.clone(),
@@ -188,7 +188,7 @@ pub fn explain_why_not(relation: &str, target: &Tuple, ctx: &ProofContext<'_>) -
                             let matched_vals: Vec<Value> = (0..matched_tuple.arity())
                                 .filter_map(|i| matched_tuple.get(i).cloned())
                                 .collect();
-                            let id = builder.insert_unique(DerivationNode {
+                            let id = builder.insert_unique(ProofNode {
                                 kind: NodeKind::Fact,
                                 conclusion: Conclusion {
                                     pred: atom.relation.clone(),
@@ -217,7 +217,7 @@ pub fn explain_why_not(relation: &str, target: &Tuple, ctx: &ProofContext<'_>) -
                             let matched_vals: Vec<Value> = (0..matched_tuple.arity())
                                 .filter_map(|i| matched_tuple.get(i).cloned())
                                 .collect();
-                            let id = builder.insert_unique(DerivationNode {
+                            let id = builder.insert_unique(ProofNode {
                                 kind: NodeKind::WhyNot,
                                 conclusion: Conclusion {
                                     pred: atom.relation.clone(),
@@ -260,7 +260,7 @@ pub fn explain_why_not(relation: &str, target: &Tuple, ctx: &ProofContext<'_>) -
                                     crate::ast::ComparisonOp::GreaterThan => ">",
                                     crate::ast::ComparisonOp::GreaterOrEqual => ">=",
                                 };
-                                let id = builder.insert_unique(DerivationNode {
+                                let id = builder.insert_unique(ProofNode {
                                     kind: NodeKind::WhyNot,
                                     conclusion: conclusion.clone(),
                                     source: None,
@@ -290,7 +290,7 @@ pub fn explain_why_not(relation: &str, target: &Tuple, ctx: &ProofContext<'_>) -
                                 break;
                             }
                             Err(e) => {
-                                let id = builder.insert_unique(DerivationNode {
+                                let id = builder.insert_unique(ProofNode {
                                     kind: NodeKind::WhyNot,
                                     conclusion: conclusion.clone(),
                                     source: None,
@@ -320,7 +320,7 @@ pub fn explain_why_not(relation: &str, target: &Tuple, ctx: &ProofContext<'_>) -
                     BodyPredicate::HnswNearest {
                         ref index_name, k, ..
                     } => {
-                        let id = builder.insert_unique(DerivationNode {
+                        let id = builder.insert_unique(ProofNode {
                             kind: NodeKind::WhyNot,
                             conclusion: conclusion.clone(),
                             source: None,
@@ -353,7 +353,7 @@ pub fn explain_why_not(relation: &str, target: &Tuple, ctx: &ProofContext<'_>) -
                 .into_iter()
                 .filter(|(name, _)| !name.starts_with("_placeholder_"))
                 .collect();
-            let id = builder.insert_unique(DerivationNode {
+            let id = builder.insert_unique(ProofNode {
                 kind: NodeKind::WhyNot,
                 conclusion: conclusion.clone(),
                 source: None,
@@ -375,7 +375,7 @@ pub fn explain_why_not(relation: &str, target: &Tuple, ctx: &ProofContext<'_>) -
     }
 
     // Root node
-    let root_id = builder.insert_unique(DerivationNode {
+    let root_id = builder.insert_unique(ProofNode {
         kind: NodeKind::WhyNot,
         conclusion,
         source: None,
@@ -407,10 +407,10 @@ pub fn explain_why_not(relation: &str, target: &Tuple, ctx: &ProofContext<'_>) -
     builder.finish(vec![root_id])
 }
 
-/// Format a why-not derivation graph as human-readable text for CLI output.
+/// Format a why-not proof tree as human-readable text for CLI output.
 ///
-/// Derives text directly from the graph structure - no duplicated logic.
-pub fn format_why_not_text(graph: &DerivationGraph) -> String {
+/// Derives text directly from the tree structure - no duplicated logic.
+pub fn format_why_not_text(graph: &ProofTree) -> String {
     let root = match graph.roots.first().and_then(|id| graph.nodes.get(id)) {
         Some(r) => r,
         None => return "No explanation available.\n".to_string(),
@@ -477,7 +477,7 @@ pub fn format_why_not_text(graph: &DerivationGraph) -> String {
 mod tests {
     use super::*;
     use crate::ast::{Atom, ComparisonOp, Term};
-    use crate::provenance::derivation_graph::NodeKind;
+    use crate::provenance::proof_tree::NodeKind;
     use crate::provenance::ProofConfig;
     use std::collections::HashMap;
 

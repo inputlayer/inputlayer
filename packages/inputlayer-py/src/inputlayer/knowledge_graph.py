@@ -110,8 +110,8 @@ class Conclusion:
 
 
 @dataclass(frozen=True)
-class DerivationNode:
-    """A single node in a derivation graph (fact, rule, aggregate, etc.)."""
+class ProofNode:
+    """A single node in a proof tree (fact, rule, aggregate, etc.)."""
 
     kind: str
     conclusion: Conclusion
@@ -126,7 +126,7 @@ class DerivationNode:
     why_not: dict[str, Any] | None = None
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "DerivationNode":
+    def from_dict(cls, d: dict[str, Any]) -> "ProofNode":
         """Parse a node from the wire JSON format."""
         conc = d.get("conclusion", {})
         return cls(
@@ -145,18 +145,18 @@ class DerivationNode:
 
 
 @dataclass(frozen=True)
-class DerivationGraph:
-    """A derivation DAG explaining how/why a fact was derived (or not)."""
+class ProofTree:
+    """A proof tree explaining how/why a fact was derived (or not)."""
 
     version: int
     roots: list[str]
-    nodes: dict[str, DerivationNode]
+    nodes: dict[str, ProofNode]
     query: str | None = None
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "DerivationGraph":
-        """Parse a graph from the wire JSON format."""
-        nodes = {k: DerivationNode.from_dict(v) for k, v in d.get("nodes", {}).items()}
+    def from_dict(cls, d: dict[str, Any]) -> "ProofTree":
+        """Parse a proof tree from the wire JSON format."""
+        nodes = {k: ProofNode.from_dict(v) for k, v in d.get("nodes", {}).items()}
         return cls(
             version=d.get("version", 1),
             roots=d.get("roots", []),
@@ -167,10 +167,10 @@ class DerivationGraph:
 
 @dataclass(frozen=True)
 class WhyResult:
-    """Result of a .why query with structured derivation graphs."""
+    """Result of a .why query with structured proof trees."""
 
     results: "ResultSet"
-    derivation_graphs: list[DerivationGraph]
+    proof_trees: list[ProofTree]
     result_count: int = 0
 
 
@@ -179,7 +179,7 @@ class WhyNotResult:
     """Explanation of why a fact was NOT derived."""
 
     text: str
-    explanation: DerivationGraph | None = None
+    explanation: ProofTree | None = None
 
 
 class KnowledgeGraph:
@@ -647,11 +647,11 @@ class KnowledgeGraph:
             total_count=result.total_count,
             execution_time_ms=result.execution_time_ms,
         )
-        raw_graphs = getattr(result, "derivation_graphs", None) or []
-        graphs = [DerivationGraph.from_dict(g) if isinstance(g, dict) else g for g in raw_graphs]
+        raw_graphs = getattr(result, "proof_trees", None) or []
+        graphs = [ProofTree.from_dict(g) if isinstance(g, dict) else g for g in raw_graphs]
         return WhyResult(
             results=result_set,
-            derivation_graphs=graphs,
+            proof_trees=graphs,
             result_count=len(result.rows),
         )
 
@@ -677,8 +677,8 @@ class KnowledgeGraph:
         vals_str = ", ".join(parts)
         result = await self._conn.execute(f".why_not {rel_name}({vals_str})")
         text = "\n".join(str(row[0]) for row in result.rows)
-        raw_graphs = getattr(result, "derivation_graphs", None) or []
-        explanation = DerivationGraph.from_dict(raw_graphs[0]) if raw_graphs and isinstance(raw_graphs[0], dict) else (raw_graphs[0] if raw_graphs else None)
+        raw_graphs = getattr(result, "proof_trees", None) or []
+        explanation = ProofTree.from_dict(raw_graphs[0]) if raw_graphs and isinstance(raw_graphs[0], dict) else (raw_graphs[0] if raw_graphs else None)
         return WhyNotResult(text=text, explanation=explanation)
 
     async def compact(self) -> None:

@@ -84,7 +84,7 @@ export interface QueryResult {
   rowProvenance?: string[]
   hasEphemeral?: boolean
   ephemeralSources?: string[]
-  derivationGraphs?: import("./ws-types").WsDerivationGraph[]
+  proofTrees?: import("./ws-types").WsProofTree[]
   timingBreakdown?: import("./ws-types").WsTimingBreakdown
 }
 
@@ -763,7 +763,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
         rowProvenance: response.row_provenance,
         hasEphemeral: response.metadata?.has_ephemeral,
         ephemeralSources: response.metadata?.ephemeral_sources,
-        derivationGraphs: response.derivation_graphs,
+        proofTrees: response.proof_trees,
         timingBreakdown: response.timing_breakdown,
       }
       get().addQueryToHistory(result)
@@ -827,7 +827,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
         rowProvenance: response.row_provenance,
         hasEphemeral: response.metadata?.has_ephemeral,
         ephemeralSources: response.metadata?.ephemeral_sources,
-        derivationGraphs: response.derivation_graphs,
+        proofTrees: response.proof_trees,
         timingBreakdown: response.timing_breakdown,
       }
     } catch (error) {

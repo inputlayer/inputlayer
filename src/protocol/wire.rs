@@ -319,10 +319,10 @@ pub struct QueryResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub switched_kg: Option<String>,
-    /// Derivation graphs for why-provenance queries (present only for .why results)
+    /// Proof trees for why-provenance queries (present only for .why results)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    pub derivation_graphs: Option<Vec<crate::provenance::derivation_graph::DerivationGraph>>,
+    pub proof_trees: Option<Vec<crate::provenance::proof_tree::ProofTree>>,
     /// Per-stage timing breakdown (present when timing_mode is Summary or Detailed)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
@@ -373,7 +373,7 @@ impl QueryResult {
             execution_time_ms: 0,
             metadata: None,
             switched_kg: None,
-            derivation_graphs: None,
+            proof_trees: None,
             timing_breakdown: None,
         }
     }
@@ -388,7 +388,7 @@ impl QueryResult {
             execution_time_ms,
             metadata: None,
             switched_kg: None,
-            derivation_graphs: None,
+            proof_trees: None,
             timing_breakdown: None,
         }
     }
@@ -409,7 +409,7 @@ impl QueryResult {
             execution_time_ms,
             metadata,
             switched_kg: None,
-            derivation_graphs: None,
+            proof_trees: None,
             timing_breakdown: None,
         }
     }
@@ -689,7 +689,7 @@ mod tests {
             execution_time_ms: 0,
             metadata: None,
             switched_kg: None,
-            derivation_graphs: None,
+            proof_trees: None,
             timing_breakdown: None,
         };
         assert_eq!(result.rows.len(), 0);

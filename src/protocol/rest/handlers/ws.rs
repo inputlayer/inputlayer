@@ -87,7 +87,7 @@ enum WsResponse {
         #[serde(skip_serializing_if = "Option::is_none")]
         metadata: Option<SessionQueryMetadataDto>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        derivation_graphs: Option<Vec<crate::provenance::derivation_graph::DerivationGraph>>,
+        proof_trees: Option<Vec<crate::provenance::proof_tree::ProofTree>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         timing_breakdown: Option<crate::execution::TimingBreakdown>,
     },
@@ -524,7 +524,7 @@ async fn handle_ws_query(handler: &Arc<Handler>, session_id: &str, query: String
                 execution_time_ms: start.elapsed().as_millis() as u64,
                 row_provenance,
                 metadata,
-                derivation_graphs: response.derivation_graphs,
+                proof_trees: response.proof_trees,
                 timing_breakdown: response.timing_breakdown,
             }
         }
@@ -688,7 +688,7 @@ enum GlobalWsResponse {
         #[serde(skip_serializing_if = "Option::is_none")]
         switched_kg: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        derivation_graphs: Option<Vec<crate::provenance::derivation_graph::DerivationGraph>>,
+        proof_trees: Option<Vec<crate::provenance::proof_tree::ProofTree>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         timing_breakdown: Option<crate::execution::TimingBreakdown>,
     },
@@ -703,7 +703,7 @@ enum GlobalWsResponse {
         #[serde(skip_serializing_if = "Option::is_none")]
         switched_kg: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        derivation_graphs: Option<Vec<crate::provenance::derivation_graph::DerivationGraph>>,
+        proof_trees: Option<Vec<crate::provenance::proof_tree::ProofTree>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         timing_breakdown: Option<crate::execution::TimingBreakdown>,
     },
@@ -1396,7 +1396,7 @@ async fn send_global_execute(
                 row_provenance: row_provenance.clone(),
                 metadata: metadata.clone(),
                 switched_kg: response.switched_kg.clone(),
-                derivation_graphs: response.derivation_graphs.clone(),
+                proof_trees: response.proof_trees.clone(),
                 timing_breakdown: response.timing_breakdown.clone(),
             };
 
@@ -1454,7 +1454,7 @@ async fn send_global_execute(
                     execution_time_ms: response.execution_time_ms,
                     metadata,
                     switched_kg: response.switched_kg,
-                    derivation_graphs: response.derivation_graphs,
+                    proof_trees: response.proof_trees,
                     timing_breakdown: response.timing_breakdown,
                 };
                 if !send_global_response(sender, &start_msg, session_id).await {
@@ -1554,7 +1554,7 @@ mod tests {
             execution_time_ms: 5,
             row_provenance: vec!["persistent".to_string()],
             metadata: None,
-            derivation_graphs: None,
+            proof_trees: None,
             timing_breakdown: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
@@ -1661,7 +1661,7 @@ mod tests {
             row_provenance: vec![],
             metadata: None,
             switched_kg: None,
-            derivation_graphs: None,
+            proof_trees: None,
             timing_breakdown: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
@@ -1684,7 +1684,7 @@ mod tests {
             row_provenance: vec![],
             metadata: None,
             switched_kg: Some("new_kg".to_string()),
-            derivation_graphs: None,
+            proof_trees: None,
             timing_breakdown: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
@@ -1774,7 +1774,7 @@ mod tests {
             execution_time_ms: 42,
             metadata: None,
             switched_kg: None,
-            derivation_graphs: None,
+            proof_trees: None,
             timing_breakdown: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
@@ -1784,7 +1784,7 @@ mod tests {
         // Optional fields omitted when None
         assert!(!json.contains("metadata"));
         assert!(!json.contains("switched_kg"));
-        assert!(!json.contains("derivation_graphs"));
+        assert!(!json.contains("proof_trees"));
     }
 
     #[test]
@@ -1854,7 +1854,7 @@ mod tests {
                 warnings: vec![],
             }),
             switched_kg: Some("new_kg".to_string()),
-            derivation_graphs: None,
+            proof_trees: None,
             timing_breakdown: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
@@ -1862,14 +1862,14 @@ mod tests {
         assert!(json.contains("\"truncated\":true"));
         assert!(json.contains("\"metadata\""));
         assert!(json.contains("\"switched_kg\":\"new_kg\""));
-        assert!(!json.contains("derivation_graphs"));
+        assert!(!json.contains("proof_trees"));
     }
 
     #[test]
-    fn test_global_ws_response_result_start_with_derivation_graphs() {
-        use crate::provenance::derivation_graph::*;
-        let mut builder = GraphBuilder::new();
-        let fact_id = builder.insert(DerivationNode {
+    fn test_global_ws_response_result_start_with_proof_trees() {
+        use crate::provenance::proof_tree::*;
+        let mut builder = ProofTreeBuilder::new();
+        let fact_id = builder.insert(ProofNode {
             kind: NodeKind::Fact,
             conclusion: Conclusion {
                 pred: "edge".into(),
@@ -1894,11 +1894,11 @@ mod tests {
             execution_time_ms: 5,
             metadata: None,
             switched_kg: None,
-            derivation_graphs: Some(vec![graph]),
+            proof_trees: Some(vec![graph]),
             timing_breakdown: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
-        assert!(json.contains("\"derivation_graphs\""));
+        assert!(json.contains("\"proof_trees\""));
         assert!(json.contains("\"kind\":\"fact\""));
         assert!(json.contains("\"pred\":\"edge\""));
     }

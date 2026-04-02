@@ -388,7 +388,7 @@ mod tests {
     #[test]
     fn test_all_examples_have_steps() {
         let examples = examples::all_examples();
-        assert!(examples.len() >= 6, "should have at least 6 examples");
+        assert!(examples.len() >= 7, "should have at least 7 examples");
         for ex in examples {
             assert!(!ex.steps.is_empty(), "{}: has no steps", ex.id);
             assert!(
@@ -418,6 +418,7 @@ mod tests {
         assert!(examples::get_example("incremental").is_some());
         assert!(examples::get_example("rules_vectors").is_some());
         assert!(examples::get_example("agentic_ai").is_some());
+        assert!(examples::get_example("schemas").is_some());
         assert!(examples::get_example("nonexistent").is_none());
     }
 

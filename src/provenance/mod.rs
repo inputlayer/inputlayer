@@ -1,11 +1,11 @@
-//! # Provenance - Derivation Graphs and Explanations
+//! # Provenance - Proof Trees and Explanations
 //!
-//! Explains why derived facts exist (derivation graphs) and why expected facts
+//! Explains why derived facts exist (proof trees) and why expected facts
 //! are absent (negative explanations). Core data model for explainable
 //! derivations in the Datalog engine.
 
 pub mod backward_chaining;
-pub mod derivation_graph;
+pub mod proof_tree;
 pub mod prove_body;
 pub mod unification;
 pub mod why_not;
@@ -14,7 +14,7 @@ use crate::value::Value;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Configuration for derivation graph construction.
+/// Configuration for proof tree construction.
 #[derive(Debug, Clone)]
 pub struct ProofConfig {
     /// Maximum backward-chaining depth before truncation (default: 50)

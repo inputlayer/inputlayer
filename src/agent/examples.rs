@@ -443,5 +443,77 @@ static EXAMPLES: std::sync::LazyLock<Vec<TeachingExample>> = std::sync::LazyLock
             ],
             system_prompt: "You are teaching AI agent explainability through a customer churn detection scenario. The user is building the system step by step. Answer questions briefly.",
         },
+
+        // ── Schemas: Schemaless vs Schema-Defined Relations ──────────
+        TeachingExample {
+            id: "schemas",
+            name: "Schemas & Column Types",
+            description: "Why schemas matter. See how typed columns change query results, catch errors early, and make your data self-documenting.",
+            category: "Data Modeling",
+            difficulty: "beginner",
+            steps: vec![
+                TeachingStep {
+                    message: "Let's explore one of the most practical features in InputLayer: **schemas**.\n\nWhen you insert facts without declaring a schema, InputLayer treats the relation as schemaless - it accepts anything. Let's start there.",
+                    iql: "+sensor(\"temp_01\", 22.5, \"celsius\")\n+sensor(\"temp_02\", 71.0, \"fahrenheit\")",
+                },
+                TeachingStep {
+                    message: "Now query it. Notice the column headers - since we didn't define a schema, InputLayer uses the variable names from your query.",
+                    iql: "?sensor(Id, Reading, Unit)",
+                },
+                TeachingStep {
+                    message: "Those headers (`Id`, `Reading`, `Unit`) came from your query, not the data. If you query with different variable names, the headers change. Try it.",
+                    iql: "?sensor(X, Y, Z)",
+                },
+                TeachingStep {
+                    message: "See? Now it says `X`, `Y`, `Z`. That's confusing for anyone reading the results. Schemaless relations are flexible but ambiguous.\n\nNow let's do it properly. We'll declare a **typed schema** first, then insert data.",
+                    iql: "+device(device_id: string, reading: float, unit: string, location: string)",
+                },
+                TeachingStep {
+                    message: "The schema is registered. It defines the column names AND their types. Now insert some data.",
+                    iql: "+device[(\"thermo_01\", 22.5, \"celsius\", \"warehouse_a\"), (\"thermo_02\", 85.3, \"fahrenheit\", \"warehouse_b\"), (\"humidity_01\", 65.0, \"percent\", \"warehouse_a\")]",
+                },
+                TeachingStep {
+                    message: "Now query with any variable names you want - the headers will ALWAYS show the schema column names.",
+                    iql: "?device(A, B, C, D)",
+                },
+                TeachingStep {
+                    message: "Even though you used `A, B, C, D`, the headers say `device_id`, `reading`, `unit`, `location`. The schema is the single source of truth for what each column means.\n\nNow let's see type safety in action. The schema says `reading` is a float. Let's filter for readings above 50.",
+                    iql: "?device(Id, Reading, Unit, Loc), Reading > 50.0",
+                },
+                TeachingStep {
+                    message: "That worked because `reading` is typed as `float`, so numeric comparison works correctly.\n\nNow let's build a rule on top of the schema-defined relation. Schemas flow through to derived relations too.",
+                    iql: "+hot_device(Id, Reading) <- device(Id, Reading, _, _), Reading > 60.0",
+                },
+                TeachingStep {
+                    message: "Query the derived relation. Notice that `hot_device` doesn't have its own schema, so it falls back to using your query variable names.",
+                    iql: "?hot_device(DeviceId, Temperature)",
+                },
+                TeachingStep {
+                    message: "Now let's compare. The `.rel` command lists all relations with their schemas, types, and row counts. You'll see the difference between the typed `device` relation and the schemaless `sensor`.",
+                    iql: ".rel",
+                },
+                TeachingStep {
+                    message: "The `device` relation shows typed columns (`device_id: string`, `reading: float`, etc.) while `sensor` shows generic columns (`col0: any`, `col1: any`, etc.).\n\nLet's add a schema to a new relation and use it in a join with the existing data.",
+                    iql: "+alert_threshold(unit: string, max_reading: float)\n+alert_threshold[(\"celsius\", 30.0), (\"fahrenheit\", 80.0), (\"percent\", 90.0)]",
+                },
+                TeachingStep {
+                    message: "Now a rule that joins `device` with `alert_threshold` to find devices exceeding their threshold. Both relations have schemas, so the join is self-documenting.",
+                    iql: "+alert(Id, Reading, Unit, MaxAllowed) <- device(Id, Reading, Unit, _), alert_threshold(Unit, MaxAllowed), Reading > MaxAllowed",
+                },
+                TeachingStep {
+                    message: "Check for alerts. Which devices exceed their thresholds? The warehouse_b thermometer reads 85.3F against an 80.0F threshold.",
+                    iql: "?alert(DeviceId, CurrentReading, Unit, Threshold)",
+                },
+                TeachingStep {
+                    message: "One alert: `thermo_02` at 85.3 exceeds the 80.0 fahrenheit threshold. The other two are within limits.\n\nNow let's see provenance. The `.why` command traces through the schema-defined relations, showing exactly which facts contributed.",
+                    iql: ".why ?alert(Id, Reading, Unit, Max)",
+                },
+                TeachingStep {
+                    message: "The proof tree shows: `thermo_02` has reading 85.3, the fahrenheit threshold is 80.0, and 85.3 > 80.0. Every step traces through typed, named columns.\n\n**Summary**: Schemaless relations are quick for exploration. Schema-defined relations give you named columns, type safety, and self-documenting data. Use schemas for anything that persists or gets shared.\n\nTry your own queries!",
+                    iql: "?device(Id, Reading, Unit, Location)",
+                },
+            ],
+            system_prompt: "You are teaching schemas and typed relations in InputLayer. The user is learning the difference between schemaless (flexible but ambiguous) and schema-defined (typed, self-documenting) relations. Answer questions briefly.",
+        },
     ]
 });

@@ -21,7 +21,7 @@ import { Badge } from "@/components/ui/badge"
 import { useDatalogStore } from "@/lib/datalog-store"
 import { cn } from "@/lib/utils"
 import type { QueryResult } from "@/lib/datalog-store"
-import type { WsDerivationGraph, WsDerivationNode, JsonValue } from "@/lib/ws-types"
+import type { WsProofTree, WsProofNode, JsonValue } from "@/lib/ws-types"
 
 // ── Error Boundary ────────────────────────────────────────────────
 
@@ -53,7 +53,7 @@ class ProofTreeErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundary
     if (this.state.hasError) {
       return this.props.fallback ?? (
         <div className="p-4 text-sm text-red-500">
-          Error rendering derivation graph: {this.state.error?.message}
+          Error rendering proof tree: {this.state.error?.message}
         </div>
       )
     }
@@ -97,16 +97,16 @@ const kindConfig: Record<string, { icon: typeof Database; label: string; color: 
   why_not: { icon: ShieldOff, label: "not derived", color: "rose" },
 }
 
-// ── Derivation Node Renderer ────────────────────────────────────
+// ── Proof Node Renderer ────────────────────────────────────
 
-function DerivationNodeView({
+function ProofNodeView({
   nodeId,
   graph,
   defaultOpen = true,
   depth = 0,
 }: {
   nodeId: string
-  graph: WsDerivationGraph
+  graph: WsProofTree
   defaultOpen?: boolean
   depth?: number
 }) {
@@ -204,7 +204,7 @@ function DerivationNodeView({
       {open && hasChildren && (
         <div className="ml-[18px] mt-0.5 space-y-0.5 border-l border-border/30 pl-2">
           {node.children.map((childId, i) => (
-            <DerivationNodeView key={i} nodeId={childId} graph={graph} defaultOpen={true} depth={depth + 1} />
+            <ProofNodeView key={i} nodeId={childId} graph={graph} defaultOpen={true} depth={depth + 1} />
           ))}
         </div>
       )}
@@ -212,7 +212,7 @@ function DerivationNodeView({
   )
 }
 
-// --- Result tuple card with inline derivation ---
+// --- Result tuple card with inline proof tree ---
 
 function ResultTupleCard({
   index,
@@ -223,7 +223,7 @@ function ResultTupleCard({
   index: number
   columns: string[]
   row: (string | number | boolean | null)[]
-  graph: WsDerivationGraph | null
+  graph: WsProofTree | null
 }) {
   return (
     <div className="rounded-lg border bg-card">
@@ -241,12 +241,12 @@ function ResultTupleCard({
       {graph && (
         <div className="p-2 space-y-0.5">
           {graph.roots.map((rootId, i) => (
-            <DerivationNodeView key={i} nodeId={rootId} graph={graph} defaultOpen={true} depth={0} />
+            <ProofNodeView key={i} nodeId={rootId} graph={graph} defaultOpen={true} depth={0} />
           ))}
         </div>
       )}
       {!graph && (
-        <div className="p-2 text-xs text-muted-foreground">No derivation available</div>
+        <div className="p-2 text-xs text-muted-foreground">No proof tree available</div>
       )}
     </div>
   )
@@ -275,9 +275,9 @@ function ProofTreePanelInner({ query, result }: ProofTreePanelProps) {
   const [viewMode, setViewMode] = useState<"tree" | "json">("tree")
 
   // Use graphs from the result if it was a .why query, otherwise use separately fetched
-  const hasInlineGraphs = result?.derivationGraphs && result.derivationGraphs.length > 0
+  const hasInlineGraphs = result?.proofTrees && result.proofTrees.length > 0
   const activeResult = hasInlineGraphs ? result : whyResult
-  const graphs = activeResult?.derivationGraphs ?? null
+  const graphs = activeResult?.proofTrees ?? null
 
   const loadProof = useCallback(async () => {
     if (!query) return
@@ -292,7 +292,7 @@ function ProofTreePanelInner({ query, result }: ProofTreePanelProps) {
       }
       const response = await (useDatalogStore.getState().executeInternalQuery(`.why ${queryLine}`))
       if (response.status === "error") {
-        setError(response.error ?? "Failed to compute derivation graph")
+        setError(response.error ?? "Failed to compute proof tree")
       } else {
         setWhyResult(response)
         cachedRef.current = { query, result: response }
@@ -314,16 +314,16 @@ function ProofTreePanelInner({ query, result }: ProofTreePanelProps) {
     const queryLine = extractQueryLine(query)
     if (!queryLine) return
 
-    // Export uses .why full for complete, verifiable derivation graphs
+    // Export uses .why full for complete, verifiable proof trees
     try {
       const fullResponse = await useDatalogStore.getState().executeInternalQuery(`.why full ${queryLine}`)
-      const exportGraphs = fullResponse?.derivationGraphs ?? graphs
+      const exportGraphs = fullResponse?.proofTrees ?? graphs
       if (!exportGraphs) return
       const blob = new Blob([JSON.stringify(exportGraphs, null, 2)], { type: "application/json" })
       const url = URL.createObjectURL(blob)
       const a = document.createElement("a")
       a.href = url
-      a.download = "derivation-graphs.json"
+      a.download = "proof-trees.json"
       a.click()
       URL.revokeObjectURL(url)
     } catch {
@@ -332,7 +332,7 @@ function ProofTreePanelInner({ query, result }: ProofTreePanelProps) {
       const url = URL.createObjectURL(blob)
       const a = document.createElement("a")
       a.href = url
-      a.download = "derivation-graphs.json"
+      a.download = "proof-trees.json"
       a.click()
       URL.revokeObjectURL(url)
     }
@@ -359,7 +359,7 @@ function ProofTreePanelInner({ query, result }: ProofTreePanelProps) {
             <p className="text-sm">Run a query, then click below to see how the results were derived.</p>
             <Button variant="outline" size="sm" onClick={loadProof} disabled={loading || !query}>
               {loading ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <TreePine className="mr-2 h-3 w-3" />}
-              Compute Derivation Graph
+              Compute Proof Tree
             </Button>
           </>
         )}
@@ -371,7 +371,7 @@ function ProofTreePanelInner({ query, result }: ProofTreePanelProps) {
     <div className="flex flex-col gap-2 p-2 h-full overflow-auto">
       <div className="flex items-center justify-between flex-shrink-0">
         <span className="text-xs font-medium text-muted-foreground">
-          {rows.length} result{rows.length !== 1 ? "s" : ""} with derivation graphs
+          {rows.length} result{rows.length !== 1 ? "s" : ""} with proof trees
         </span>
         <div className="flex gap-1">
           <Button

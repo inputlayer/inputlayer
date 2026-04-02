@@ -1,12 +1,12 @@
-//! Backward chaining derivation graph construction.
+//! Backward chaining proof tree construction.
 //!
 //! Given a derived tuple, traces backward through rules and base facts
-//! to build a derivation DAG explaining why the tuple was derived.
+//! to build a proof tree DAG explaining why the tuple was derived.
 
 use crate::ast::{Rule, Term};
-use crate::provenance::derivation_graph::{
-    AggregateInfo, Conclusion, DerivationGraph, DerivationNode, FactSource, GraphBuilder, NodeId,
-    NodeKind, TruncatedInfo,
+use crate::provenance::proof_tree::{
+    AggregateInfo, Conclusion, FactSource, NodeId, NodeKind, ProofNode, ProofTree,
+    ProofTreeBuilder, TruncatedInfo,
 };
 use crate::provenance::unification::unify_head;
 use crate::provenance::ProofConfig;
@@ -96,15 +96,15 @@ impl<'a> ProofContext<'a> {
     }
 }
 
-/// Build a derivation graph explaining why a tuple was derived.
+/// Build a proof tree explaining why a tuple was derived.
 ///
-/// Returns a `DerivationGraph` with a single root node for the given tuple,
-/// containing the full derivation DAG with shared sub-proofs.
-pub fn build_derivation_graph(
+/// Returns a `ProofTree` with a single root node for the given tuple,
+/// containing the full proof tree DAG with shared sub-proofs.
+pub fn build_proof_tree(
     relation: &str,
     tuple: &Tuple,
     ctx: &ProofContext<'_>,
-) -> Result<DerivationGraph, String> {
+) -> Result<ProofTree, String> {
     // Determine expected arity from rule heads for this relation.
     // The engine may return wider tuples (e.g., 4-arity for a 2-arity relation
     // when the rule body references a wider relation). Truncate to correct arity.
@@ -121,7 +121,7 @@ pub fn build_derivation_graph(
         tuple.clone()
     };
 
-    let mut builder = GraphBuilder::new();
+    let mut builder = ProofTreeBuilder::new();
     let mut visited = HashSet::new();
 
     let node_ids = build_node(relation, &tuple, ctx, &mut builder, &mut visited, 0)?;
@@ -137,15 +137,15 @@ pub fn build_derivation_graph(
     Ok(builder.finish(vec![node_ids.into_iter().next().unwrap_or_default()]))
 }
 
-/// Recursively build derivation nodes, returning node IDs for this tuple.
+/// Recursively build proof nodes, returning node IDs for this tuple.
 ///
-/// May return multiple IDs if there are alternative derivation paths
+/// May return multiple IDs if there are alternative proof paths
 /// (capped by `max_proofs_per_tuple`).
 pub(crate) fn build_node(
     relation: &str,
     tuple: &Tuple,
     ctx: &ProofContext<'_>,
-    builder: &mut GraphBuilder,
+    builder: &mut ProofTreeBuilder,
     visited: &mut HashSet<(String, Vec<Value>)>,
     depth: usize,
 ) -> Result<Vec<NodeId>, String> {
@@ -153,7 +153,7 @@ pub(crate) fn build_node(
 
     // Depth limit
     if depth >= ctx.config.max_depth {
-        let id = builder.insert_unique(DerivationNode {
+        let id = builder.insert_unique(ProofNode {
             kind: NodeKind::Truncated,
             conclusion: Conclusion {
                 pred: relation.to_string(),
@@ -196,7 +196,7 @@ pub(crate) fn build_node(
 
     if !ctx.is_derived(relation) {
         if in_base || in_derived {
-            let id = builder.insert(DerivationNode {
+            let id = builder.insert(ProofNode {
                 kind: NodeKind::Fact,
                 conclusion: Conclusion {
                     pred: relation.to_string(),
@@ -220,7 +220,7 @@ pub(crate) fn build_node(
 
     // If it exists as a base fact (not just derived), record it
     if in_base {
-        let id = builder.insert(DerivationNode {
+        let id = builder.insert(ProofNode {
             kind: NodeKind::Fact,
             conclusion: Conclusion {
                 pred: relation.to_string(),
@@ -284,7 +284,7 @@ pub(crate) fn build_node(
                         .filter(|(name, _)| !name.starts_with("_placeholder_"))
                         .collect();
 
-                    let id = builder.insert(DerivationNode {
+                    let id = builder.insert(ProofNode {
                         kind: NodeKind::Rule,
                         conclusion: Conclusion {
                             pred: relation.to_string(),
@@ -311,10 +311,10 @@ pub(crate) fn build_node(
         }
     }
 
-    // Fallback: if no rule derivation found but tuple exists in derived_data,
+    // Fallback: if no rule proof found but tuple exists in derived_data,
     // record it as a fact (the engine materialized it but we can't trace further)
     if result_ids.is_empty() && in_derived {
-        let id = builder.insert(DerivationNode {
+        let id = builder.insert(ProofNode {
             kind: NodeKind::Fact,
             conclusion: Conclusion {
                 pred: relation.to_string(),
@@ -337,7 +337,7 @@ pub(crate) fn build_node(
     Ok(result_ids)
 }
 
-/// Build an aggregate derivation node.
+/// Build an aggregate proof node.
 ///
 /// For rules like `reachable_count(City, count<Dest>) <- can_reach(City, Dest)`,
 /// creates an Aggregate node with children pointing to the contributing tuples.
@@ -348,7 +348,7 @@ fn build_aggregate_node(
     rule: &Rule,
     _clause_idx: usize,
     ctx: &ProofContext<'_>,
-    builder: &mut GraphBuilder,
+    builder: &mut ProofTreeBuilder,
     visited: &mut HashSet<(String, Vec<Value>)>,
     depth: usize,
 ) -> NodeId {
@@ -434,7 +434,7 @@ fn build_aggregate_node(
                     if ctx.config.full_mode || all_inputs.len() < sample_limit {
                         all_inputs.push(truncated_vals.clone());
                     }
-                    // Build child derivation nodes for contributing tuples
+                    // Build child proof nodes for contributing tuples
                     // (capped to avoid explosion on large aggregations)
                     if child_ids.len() < sample_limit {
                         let truncated_tuple = Tuple::new(truncated_vals);
@@ -466,7 +466,7 @@ fn build_aggregate_node(
         (Some(all_inputs), None)
     };
 
-    builder.insert_unique(DerivationNode {
+    builder.insert_unique(ProofNode {
         kind: NodeKind::Aggregate,
         conclusion: Conclusion {
             pred: relation.to_string(),
@@ -520,7 +520,7 @@ mod tests {
     use crate::ast::Atom;
     use crate::ast::BodyPredicate;
     use crate::ast::Term;
-    use crate::provenance::derivation_graph::NodeKind;
+    use crate::provenance::proof_tree::NodeKind;
 
     fn int(v: i32) -> Value {
         Value::Int32(v)
@@ -578,7 +578,7 @@ mod tests {
     fn test_base_fact() {
         let data = base_data(vec![("edge", vec![vec![int(1), int(2)]])]);
         let ctx = ProofContext::new(&[], &data, default_config());
-        let graph = build_derivation_graph("edge", &tuple(vec![int(1), int(2)]), &ctx)
+        let graph = build_proof_tree("edge", &tuple(vec![int(1), int(2)]), &ctx)
             .expect("should find derivation");
         assert_eq!(graph.node_count(), 1);
         let root = &graph.nodes[&graph.roots[0]];
@@ -592,7 +592,7 @@ mod tests {
     fn test_base_fact_missing() {
         let data = base_data(vec![("edge", vec![vec![int(1), int(2)]])]);
         let ctx = ProofContext::new(&[], &data, default_config());
-        let result = build_derivation_graph("edge", &tuple(vec![int(99), int(99)]), &ctx);
+        let result = build_proof_tree("edge", &tuple(vec![int(99), int(99)]), &ctx);
         assert!(result.is_err());
     }
 
@@ -606,7 +606,7 @@ mod tests {
         let data = base_data(vec![("base", vec![vec![int(42)]])]);
         let ctx = ProofContext::new(&rules, &data, default_config());
 
-        let graph = build_derivation_graph("derived", &tuple(vec![int(42)]), &ctx)
+        let graph = build_proof_tree("derived", &tuple(vec![int(42)]), &ctx)
             .expect("should find derivation");
 
         assert_eq!(graph.node_count(), 2); // rule + fact
@@ -636,7 +636,7 @@ mod tests {
         )]);
         let ctx = ProofContext::new(&rules, &data, default_config());
 
-        let graph = build_derivation_graph("path", &tuple(vec![int(1), int(3)]), &ctx)
+        let graph = build_proof_tree("path", &tuple(vec![int(1), int(3)]), &ctx)
             .expect("should find derivation");
 
         let root = &graph.nodes[&graph.roots[0]];
@@ -688,7 +688,7 @@ mod tests {
 
         let ctx = ProofContext::new(&rules, &data, default_config()).with_derived_data(&derived);
 
-        let graph = build_derivation_graph("path", &tuple(vec![int(1), int(4)]), &ctx)
+        let graph = build_proof_tree("path", &tuple(vec![int(1), int(4)]), &ctx)
             .expect("should find derivation");
         assert!(!graph.has_truncated());
         assert!(graph.max_depth() >= 3);
@@ -723,7 +723,7 @@ mod tests {
         let ctx = ProofContext::new(&rules, &data, default_config());
 
         // Should not hang
-        let graph = build_derivation_graph("path", &tuple(vec![int(1), int(2)]), &ctx)
+        let graph = build_proof_tree("path", &tuple(vec![int(1), int(2)]), &ctx)
             .expect("should find derivation");
         assert!(!graph.nodes.is_empty());
     }
@@ -742,8 +742,8 @@ mod tests {
         let ctx = ProofContext::new(&rules, &data, default_config());
 
         // Node 1 is safe
-        let graph = build_derivation_graph("safe", &tuple(vec![int(1)]), &ctx)
-            .expect("should find derivation");
+        let graph =
+            build_proof_tree("safe", &tuple(vec![int(1)]), &ctx).expect("should find derivation");
         let root = &graph.nodes[&graph.roots[0]];
         assert_eq!(root.kind, NodeKind::Rule);
         // Should have a negation child
@@ -754,7 +754,7 @@ mod tests {
         assert!(has_negation);
 
         // Node 2 is not safe
-        let result = build_derivation_graph("safe", &tuple(vec![int(2)]), &ctx);
+        let result = build_proof_tree("safe", &tuple(vec![int(2)]), &ctx);
         assert!(result.is_err());
     }
 
@@ -782,7 +782,7 @@ mod tests {
         config.max_depth = 5;
         let ctx = ProofContext::new(&rules, &data, config);
 
-        let result = build_derivation_graph("chain", &tuple(vec![int(0), int(100)]), &ctx);
+        let result = build_proof_tree("chain", &tuple(vec![int(0), int(100)]), &ctx);
         // Should not panic or hang
         if let Ok(graph) = result {
             // May have truncated nodes
@@ -823,7 +823,7 @@ mod tests {
 
         let ctx = ProofContext::new(&rules, &data, default_config()).with_derived_data(&derived);
 
-        let graph = build_derivation_graph(
+        let graph = build_proof_tree(
             "reachable_count",
             &tuple(vec![Value::string("berlin"), Value::Int64(3)]),
             &ctx,
@@ -863,7 +863,7 @@ mod tests {
         )]);
         let ctx = ProofContext::new(&rules, &data, default_config());
 
-        let graph = build_derivation_graph("cnt", &tuple(vec![int(1), Value::Int64(2)]), &ctx)
+        let graph = build_proof_tree("cnt", &tuple(vec![int(1), Value::Int64(2)]), &ctx)
             .expect("aggregate should not fail");
         assert!(!graph.has_truncated());
         assert_eq!(graph.nodes[&graph.roots[0]].kind, NodeKind::Aggregate);
@@ -892,7 +892,7 @@ mod tests {
         config.aggregation_sample_size = 10;
         let ctx = ProofContext::new(&rules, &data, config);
 
-        let graph = build_derivation_graph("cnt", &tuple(vec![int(1), Value::Int64(25)]), &ctx)
+        let graph = build_proof_tree("cnt", &tuple(vec![int(1), Value::Int64(25)]), &ctx)
             .expect("should produce graph");
         let root = &graph.nodes[&graph.roots[0]];
         let agg = root.aggregate.as_ref().unwrap();
@@ -928,7 +928,7 @@ mod tests {
         config.aggregation_sample_size = 10;
         let ctx = ProofContext::new(&rules, &data, config);
 
-        let graph = build_derivation_graph("cnt", &tuple(vec![int(1), Value::Int64(25)]), &ctx)
+        let graph = build_proof_tree("cnt", &tuple(vec![int(1), Value::Int64(25)]), &ctx)
             .expect("should produce graph");
         let root = &graph.nodes[&graph.roots[0]];
         let agg = root.aggregate.as_ref().unwrap();
@@ -965,11 +965,11 @@ mod tests {
         )]);
         let ctx = ProofContext::new(&rules, &data, default_config());
 
-        let graph = build_derivation_graph("big", &tuple(vec![int(1), int(200)]), &ctx)
+        let graph = build_proof_tree("big", &tuple(vec![int(1), int(200)]), &ctx)
             .expect("should find derivation");
         assert!(!graph.nodes.is_empty());
 
-        let result = build_derivation_graph("big", &tuple(vec![int(2), int(50)]), &ctx);
+        let result = build_proof_tree("big", &tuple(vec![int(2), int(50)]), &ctx);
         assert!(result.is_err());
     }
 
@@ -982,8 +982,8 @@ mod tests {
         let data = base_data(vec![("base", vec![vec![int(1)]])]);
         let ctx = ProofContext::new(&rules, &data, default_config());
 
-        let graph = build_derivation_graph("level2", &tuple(vec![int(1)]), &ctx)
-            .expect("should find derivation");
+        let graph =
+            build_proof_tree("level2", &tuple(vec![int(1)]), &ctx).expect("should find derivation");
         assert!(graph.max_depth() >= 3); // level2 -> level1 -> base
     }
 
@@ -1036,7 +1036,7 @@ mod tests {
 
         let ctx = ProofContext::new(&rules, &data, default_config()).with_derived_data(&derived);
 
-        let graph = build_derivation_graph("can_reach", &tuple(vec![int(1), int(5)]), &ctx)
+        let graph = build_proof_tree("can_reach", &tuple(vec![int(1), int(5)]), &ctx)
             .expect("should find derivation");
         assert!(!graph.has_truncated());
         assert!(graph.max_depth() <= 10);
@@ -1052,7 +1052,7 @@ mod tests {
         )];
         let ctx = ProofContext::new(&rules, &data, default_config());
 
-        let graph = build_derivation_graph("path", &tuple(vec![int(1), int(2)]), &ctx)
+        let graph = build_proof_tree("path", &tuple(vec![int(1), int(2)]), &ctx)
             .expect("should find derivation");
 
         let json = graph.to_json().expect("should serialize");

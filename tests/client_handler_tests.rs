@@ -946,14 +946,14 @@ async fn test_why_timing_mode_summary_has_breakdown() {
         .timing_breakdown
         .expect(".why with timing_mode=Summary should produce timing_breakdown");
     assert!(tb.total_us > 0);
-    // .why breakdown should have query_execution and derivation_graph_construction entries
+    // .why breakdown should have query_execution and proof_tree_construction entries
     assert!(
         tb.rules.len() == 2,
-        "Expected 2 rule entries (query_execution + derivation_graph_construction), got {}",
+        "Expected 2 rule entries (query_execution + proof_tree_construction), got {}",
         tb.rules.len()
     );
     assert_eq!(tb.rules[0].rule_head, "query_execution");
-    assert_eq!(tb.rules[1].rule_head, "derivation_graph_construction");
+    assert_eq!(tb.rules[1].rule_head, "proof_tree_construction");
 }
 
 #[tokio::test]

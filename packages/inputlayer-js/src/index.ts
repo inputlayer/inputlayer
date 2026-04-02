@@ -85,8 +85,8 @@ export type {
   WhyResult,
   WhyNotResult,
   WhyNotBlocker,
-  DerivationGraph,
-  DerivationNode,
+  ProofTree,
+  ProofNode,
 } from './knowledge-graph.js';
 
 // Auth

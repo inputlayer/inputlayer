@@ -45,18 +45,18 @@ export interface WsAuthErrorMessage {
   message: string
 }
 
-// --- Derivation Graph Types ---
+// --- Proof Tree Types ---
 
 export type JsonValue = string | number | boolean | null
 
-export interface WsDerivationGraph {
+export interface WsProofTree {
   version: number
   query?: string
   roots: string[]
-  nodes: Record<string, WsDerivationNode>
+  nodes: Record<string, WsProofNode>
 }
 
-export interface WsDerivationNode {
+export interface WsProofNode {
   kind: "fact" | "rule" | "negation" | "vector_search" | "aggregate" | "truncated" | "why_not"
   conclusion: { pred: string; args: JsonValue[] }
   source?: "edb" | "derived"
@@ -129,7 +129,7 @@ export interface WsResultMessage {
   row_provenance?: string[]
   metadata?: WsResultMetadata
   switched_kg?: string
-  derivation_graphs?: WsDerivationGraph[]
+  proof_trees?: WsProofTree[]
   timing_breakdown?: WsTimingBreakdown
 }
 
@@ -174,7 +174,7 @@ export interface WsResultStartMessage {
   execution_time_ms: number
   metadata?: WsResultMetadata
   switched_kg?: string
-  derivation_graphs?: WsDerivationGraph[]
+  proof_trees?: WsProofTree[]
   timing_breakdown?: WsTimingBreakdown
 }
 

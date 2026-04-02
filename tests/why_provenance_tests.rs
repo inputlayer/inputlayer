@@ -1,7 +1,7 @@
-//! Integration tests for derivation graph construction.
+//! Integration tests for proof tree construction.
 
-use inputlayer::provenance::backward_chaining::{build_derivation_graph, ProofContext};
-use inputlayer::provenance::derivation_graph::NodeKind;
+use inputlayer::provenance::backward_chaining::{build_proof_tree, ProofContext};
+use inputlayer::provenance::proof_tree::NodeKind;
 use inputlayer::provenance::ProofConfig;
 use inputlayer::value::{Tuple, Value};
 use std::collections::HashMap;
@@ -26,14 +26,14 @@ fn base_data(entries: Vec<(&str, Vec<Vec<Value>>)>) -> HashMap<String, Vec<Tuple
 }
 
 #[test]
-fn test_derivation_graph_base_fact() {
+fn test_proof_tree_base_fact() {
     let data = base_data(vec![(
         "edge",
         vec![vec![int(1), int(2)], vec![int(3), int(4)]],
     )]);
     let ctx = ProofContext::new(&[], &data, ProofConfig::default());
 
-    let graph = build_derivation_graph("edge", &tuple(vec![int(1), int(2)]), &ctx)
+    let graph = build_proof_tree("edge", &tuple(vec![int(1), int(2)]), &ctx)
         .expect("should find derivation");
     assert_eq!(graph.roots.len(), 1);
     let root = &graph.nodes[&graph.roots[0]];
@@ -43,7 +43,7 @@ fn test_derivation_graph_base_fact() {
 }
 
 #[test]
-fn test_derivation_graph_derived_rule() {
+fn test_proof_tree_derived_rule() {
     use inputlayer::ast::{Atom, BodyPredicate, Rule, Term};
 
     let rules = vec![Rule {
@@ -59,8 +59,8 @@ fn test_derivation_graph_derived_rule() {
     let data = base_data(vec![("node", vec![vec![int(1)], vec![int(2)]])]);
     let ctx = ProofContext::new(&rules, &data, ProofConfig::default());
 
-    let graph = build_derivation_graph("active", &tuple(vec![int(1)]), &ctx)
-        .expect("should find derivation");
+    let graph =
+        build_proof_tree("active", &tuple(vec![int(1)]), &ctx).expect("should find derivation");
     let root = &graph.nodes[&graph.roots[0]];
     assert_eq!(root.kind, NodeKind::Rule);
     assert_eq!(root.conclusion.pred, "active");
@@ -71,7 +71,7 @@ fn test_derivation_graph_derived_rule() {
 }
 
 #[test]
-fn test_derivation_graph_negation() {
+fn test_proof_tree_negation() {
     use inputlayer::ast::{Atom, BodyPredicate, Rule, Term};
 
     let rules = vec![Rule {
@@ -96,8 +96,7 @@ fn test_derivation_graph_negation() {
     ]);
     let ctx = ProofContext::new(&rules, &data, ProofConfig::default());
 
-    let graph =
-        build_derivation_graph("safe", &tuple(vec![int(1)]), &ctx).expect("should find proof");
+    let graph = build_proof_tree("safe", &tuple(vec![int(1)]), &ctx).expect("should find proof");
     let root = &graph.nodes[&graph.roots[0]];
     assert_eq!(root.kind, NodeKind::Rule);
     let has_negation = root
@@ -106,16 +105,16 @@ fn test_derivation_graph_negation() {
         .any(|id| graph.nodes[id].kind == NodeKind::Negation);
     assert!(has_negation);
 
-    let result = build_derivation_graph("safe", &tuple(vec![int(2)]), &ctx);
+    let result = build_proof_tree("safe", &tuple(vec![int(2)]), &ctx);
     assert!(result.is_err());
 }
 
 #[test]
-fn test_derivation_graph_json_export() {
+fn test_proof_tree_json_export() {
     let data = base_data(vec![("edge", vec![vec![int(1), int(2)]])]);
     let ctx = ProofContext::new(&[], &data, ProofConfig::default());
 
-    let graph = build_derivation_graph("edge", &tuple(vec![int(1), int(2)]), &ctx)
+    let graph = build_proof_tree("edge", &tuple(vec![int(1), int(2)]), &ctx)
         .expect("should find derivation");
 
     let json = graph.to_json().expect("should serialize");
@@ -130,11 +129,11 @@ fn test_derivation_graph_json_export() {
 }
 
 #[test]
-fn test_derivation_graph_format_tree() {
+fn test_proof_tree_format_tree() {
     let data = base_data(vec![("edge", vec![vec![int(1), int(2)]])]);
     let ctx = ProofContext::new(&[], &data, ProofConfig::default());
 
-    let graph = build_derivation_graph("edge", &tuple(vec![int(1), int(2)]), &ctx)
+    let graph = build_proof_tree("edge", &tuple(vec![int(1), int(2)]), &ctx)
         .expect("should find derivation");
 
     let formatted = graph.format_tree();
@@ -142,7 +141,7 @@ fn test_derivation_graph_format_tree() {
 }
 
 #[test]
-fn test_derivation_graph_depth_50_limit() {
+fn test_proof_tree_depth_50_limit() {
     use inputlayer::ast::{Atom, BodyPredicate, Rule, Term};
 
     let links: Vec<Vec<Value>> = (0..60).map(|i| vec![int(i), int(i + 1)]).collect();
@@ -196,7 +195,7 @@ fn test_derivation_graph_depth_50_limit() {
     let ctx = ProofContext::new(&rules, &data, config);
 
     // Should not hang or panic
-    let result = build_derivation_graph("chain", &tuple(vec![int(0), int(60)]), &ctx);
+    let result = build_proof_tree("chain", &tuple(vec![int(0), int(60)]), &ctx);
     if let Ok(graph) = result {
         assert!(graph.max_depth() <= 55);
     }
@@ -204,7 +203,7 @@ fn test_derivation_graph_depth_50_limit() {
 
 /// End-to-end test through StorageEngine (same path as the GUI's .why handler).
 #[test]
-fn test_derivation_graph_flights_no_truncation() {
+fn test_proof_tree_flights_no_truncation() {
     use inputlayer::ast::{Atom, BodyPredicate, Rule, Term};
     use inputlayer::statement::{RuleDef, SerializableRule};
     use inputlayer::storage_engine::StorageEngine;
@@ -309,7 +308,7 @@ fn test_derivation_graph_flights_no_truncation() {
     let mut truncated_count = 0;
     let mut total_graphs = 0;
     for t in &result_tuples {
-        match build_derivation_graph("can_reach", t, &ctx) {
+        match build_proof_tree("can_reach", t, &ctx) {
             Ok(graph) => {
                 total_graphs += 1;
                 if graph.has_truncated() {
@@ -326,13 +325,13 @@ fn test_derivation_graph_flights_no_truncation() {
     assert!(total_graphs > 0);
     assert_eq!(
         truncated_count, 0,
-        "no derivation graphs should be truncated (got {truncated_count}/{total_graphs})"
+        "no proof trees should be truncated (got {truncated_count}/{total_graphs})"
     );
 }
 
 /// End-to-end test for aggregation rules.
 #[test]
-fn test_derivation_graph_aggregation() {
+fn test_proof_tree_aggregation() {
     use inputlayer::ast::{AggregateFunc, Atom, BodyPredicate, Rule, Term};
     use inputlayer::statement::{RuleDef, SerializableRule};
     use inputlayer::storage_engine::StorageEngine;
@@ -458,7 +457,7 @@ fn test_derivation_graph_aggregation() {
     let mut errors = 0;
 
     for t in &result_tuples {
-        match build_derivation_graph("reachable_count", t, &ctx) {
+        match build_proof_tree("reachable_count", t, &ctx) {
             Ok(graph) => {
                 if graph.has_truncated() {
                     truncated_count += 1;
@@ -484,12 +483,12 @@ fn test_derivation_graph_aggregation() {
     assert!(aggregate_count > 0, "should have aggregate nodes");
 }
 
-/// Verify derivation graphs built via the handler path (same as GUI).
+/// Verify proof trees built via the handler path (same as GUI).
 /// Uses the actual Handler::query_program method with .why command.
 #[tokio::test]
-async fn test_derivation_graph_via_handler() {
+async fn test_proof_tree_via_handler() {
     use inputlayer::protocol::Handler;
-    use inputlayer::provenance::derivation_graph::NodeKind;
+    use inputlayer::provenance::proof_tree::NodeKind;
     use inputlayer::Config;
 
     let tmp = tempfile::tempdir().expect("temp dir");
@@ -555,9 +554,7 @@ async fn test_derivation_graph_via_handler() {
         .await
         .expect("why query");
 
-    let graphs = result
-        .derivation_graphs
-        .expect("should have derivation_graphs");
+    let graphs = result.proof_trees.expect("should have proof_trees");
     assert!(!graphs.is_empty(), "should have graphs");
 
     let mut errors: Vec<String> = Vec::new();
@@ -634,19 +631,19 @@ async fn test_derivation_graph_via_handler() {
 
     if !errors.is_empty() {
         panic!(
-            "Derivation graph errors ({}):\n  {}",
+            "Proof tree errors ({}):\n  {}",
             errors.len(),
             errors.join("\n  ")
         );
     }
 }
 
-/// Verify EVERY node in every derivation graph has correct arity and structure.
+/// Verify EVERY node in every proof tree has correct arity and structure.
 /// This catches the bug where can_reach nodes get direct_flight's 4 args instead of 2.
 #[test]
-fn test_derivation_graph_node_correctness() {
+fn test_proof_tree_node_correctness() {
     use inputlayer::ast::{Atom, BodyPredicate, Rule, Term};
-    use inputlayer::provenance::derivation_graph::NodeKind;
+    use inputlayer::provenance::proof_tree::NodeKind;
     use inputlayer::statement::{RuleDef, SerializableRule};
     use inputlayer::storage_engine::StorageEngine;
     use inputlayer::Config;
@@ -762,7 +759,7 @@ fn test_derivation_graph_node_correctness() {
         let dst = t.get(1).map(|v| format!("{v}")).unwrap_or_default();
         let label = format!("can_reach({src}, {dst})");
 
-        let graph = match build_derivation_graph("can_reach", t, &ctx) {
+        let graph = match build_proof_tree("can_reach", t, &ctx) {
             Ok(g) => g,
             Err(e) => {
                 errors.push(format!("{label}: build failed: {e}"));
@@ -857,7 +854,7 @@ fn test_derivation_graph_node_correctness() {
 
     if !errors.is_empty() {
         panic!(
-            "Derivation graph correctness errors ({}):\n  {}",
+            "Proof tree correctness errors ({}):\n  {}",
             errors.len(),
             errors.join("\n  ")
         );
@@ -867,9 +864,9 @@ fn test_derivation_graph_node_correctness() {
 /// Test aggregation via the handler path - verifies sample_inputs arity
 /// and that derived fact nodes don't leak wider tuples.
 #[tokio::test]
-async fn test_derivation_graph_aggregation_via_handler() {
+async fn test_proof_tree_aggregation_via_handler() {
     use inputlayer::protocol::Handler;
-    use inputlayer::provenance::derivation_graph::NodeKind;
+    use inputlayer::provenance::proof_tree::NodeKind;
     use inputlayer::Config;
 
     let tmp = tempfile::tempdir().expect("temp dir");
@@ -920,7 +917,7 @@ async fn test_derivation_graph_aggregation_via_handler() {
         .query_program(None, r#".why ?reachable_count(City, N)"#.into())
         .await
         .unwrap();
-    let graphs = result.derivation_graphs.expect("should have graphs");
+    let graphs = result.proof_trees.expect("should have graphs");
 
     let mut errors: Vec<String> = Vec::new();
 
@@ -978,7 +975,7 @@ async fn test_derivation_graph_aggregation_via_handler() {
 
     if !errors.is_empty() {
         panic!(
-            "Aggregation derivation graph errors ({}):\n  {}",
+            "Aggregation proof tree errors ({}):\n  {}",
             errors.len(),
             errors.join("\n  ")
         );

@@ -54,7 +54,7 @@ interface StreamingState {
   executionTimeMs: number
   metadata?: WsResultStartMessage["metadata"]
   switchedKg?: string
-  derivationGraphs?: import("./ws-types").WsDerivationGraph[]
+  proofTrees?: import("./ws-types").WsProofTree[]
   timingBreakdown?: import("./ws-types").WsTimingBreakdown
   rows: (string | number | boolean | null)[][]
   rowProvenance: string[]
@@ -296,7 +296,7 @@ export class WsClient {
           executionTimeMs: msg.execution_time_ms,
           metadata: msg.metadata,
           switchedKg: msg.switched_kg,
-          derivationGraphs: msg.derivation_graphs,
+          proofTrees: msg.proof_trees,
           timingBreakdown: msg.timing_breakdown,
           rows: [],
           rowProvenance: [],
@@ -334,7 +334,7 @@ export class WsClient {
             row_provenance: s.rowProvenance.length > 0 ? s.rowProvenance : undefined,
             metadata: s.metadata,
             switched_kg: s.switchedKg,
-            derivation_graphs: s.derivationGraphs,
+            proof_trees: s.proofTrees,
             timing_breakdown: s.timingBreakdown,
           }
           const pending = this.pendingQueue.shift()

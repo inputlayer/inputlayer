@@ -61,6 +61,8 @@ from inputlayer.knowledge_graph import (
     IndexStats,
     InsertResult,
     KnowledgeGraph,
+    ProofNode,
+    ProofTree,
     RelationDescription,
     RelationInfo,
     RuleInfo,
@@ -140,6 +142,8 @@ __all__ = [
     "ClearResult",
     "DebugResult",
     "ServerStatus",
+    "ProofNode",
+    "ProofTree",
     "WhyResult",
     "WhyNotResult",
     # Auth

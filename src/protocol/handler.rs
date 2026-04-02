@@ -494,15 +494,15 @@ impl QueryJob {
 
     /// Build proof trees explaining why query results were derived.
     ///
-    /// Returns a QueryResult with both the result rows AND derivation graphs
-    /// in the `derivation_graphs` field, so clients get typed data not text.
+    /// Returns a QueryResult with both the result rows AND proof trees
+    /// in the `proof_trees` field, so clients get typed data not text.
     fn why_query(
         &self,
         knowledge_graph: Option<String>,
         query: String,
         full_mode: bool,
     ) -> Result<QueryResult, String> {
-        use crate::provenance::backward_chaining::{build_derivation_graph, ProofContext};
+        use crate::provenance::backward_chaining::{build_proof_tree, ProofContext};
         use crate::provenance::ProofConfig;
 
         let start = std::time::Instant::now();
@@ -557,7 +557,7 @@ impl QueryJob {
         let ctx = ProofContext::with_index_info(&rules, &base_data, config.clone(), index_info)
             .with_derived_data(&derived_data);
 
-        // Build wire rows and derivation graphs
+        // Build wire rows and proof trees
         let schema = extract_query_schema(&query, &result_tuples);
         let mut rows = Vec::new();
         let mut graphs = Vec::new();
@@ -569,14 +569,14 @@ impl QueryJob {
                 .collect();
             rows.push(WireTuple::new(values));
 
-            let mut graph = match build_derivation_graph(&relation, tuple, &ctx) {
+            let mut graph = match build_proof_tree(&relation, tuple, &ctx) {
                 Ok(g) => g,
                 Err(err) => {
-                    tracing::warn!(relation = %relation, error = %err, "build_derivation_graph failed");
+                    tracing::warn!(relation = %relation, error = %err, "build_proof_tree failed");
                     // Fallback: single truncated node
-                    use crate::provenance::derivation_graph::*;
-                    let mut builder = GraphBuilder::new();
-                    let id = builder.insert_unique(DerivationNode {
+                    use crate::provenance::proof_tree::*;
+                    let mut builder = ProofTreeBuilder::new();
+                    let id = builder.insert_unique(ProofNode {
                         kind: NodeKind::Truncated,
                         conclusion: Conclusion {
                             pred: relation.clone(),
@@ -625,7 +625,7 @@ impl QueryJob {
                             workers: 1,
                         },
                         crate::execution::timing::RuleTiming {
-                            rule_head: "derivation_graph_construction".into(),
+                            rule_head: "proof_tree_construction".into(),
                             execution_us: proof_us,
                             is_recursive: false,
                             workers: 1,
@@ -645,14 +645,14 @@ impl QueryJob {
             execution_time_ms: start.elapsed().as_millis() as u64,
             metadata: None,
             switched_kg: None,
-            derivation_graphs: Some(graphs),
+            proof_trees: Some(graphs),
             timing_breakdown,
         })
     }
 
     /// Explain why a specific tuple was NOT derived.
     ///
-    /// Returns a QueryResult with the explanation as structured derivation graph.
+    /// Returns a QueryResult with the explanation as structured proof tree.
     fn why_not_query(
         &self,
         knowledge_graph: Option<String>,
@@ -685,7 +685,7 @@ impl QueryJob {
         let query_us = query_start.elapsed().as_micros() as u64;
 
         let explain_start = std::time::Instant::now();
-        // Build the rich derivation graph (for structured export/GUI)
+        // Build the rich proof tree (for structured export/GUI)
         let mut graph = explain_why_not(&relation, &tuple, &ctx);
         graph.query = Some(format!(".why_not {input}"));
         let explain_us = explain_start.elapsed().as_micros() as u64;
@@ -738,7 +738,7 @@ impl QueryJob {
             execution_time_ms: start.elapsed().as_millis() as u64,
             metadata: None,
             switched_kg: None,
-            derivation_graphs: Some(vec![graph]),
+            proof_trees: Some(vec![graph]),
             timing_breakdown,
         })
     }
@@ -1294,7 +1294,7 @@ impl Handler {
             execution_time_ms: 0,
             metadata: None,
             switched_kg: None,
-            derivation_graphs: None,
+            proof_trees: None,
             timing_breakdown: None,
         })
     }
@@ -1566,7 +1566,7 @@ impl Handler {
             execution_time_ms: 0,
             metadata: None,
             switched_kg: None,
-            derivation_graphs: None,
+            proof_trees: None,
             timing_breakdown: None,
         })
     }
@@ -1616,7 +1616,7 @@ impl Handler {
             execution_time_ms: 0,
             metadata: None,
             switched_kg: None,
-            derivation_graphs: None,
+            proof_trees: None,
             timing_breakdown: None,
         })
     }
@@ -2178,7 +2178,7 @@ impl Handler {
                     execution_time_ms: 0,
                     metadata: None,
                     switched_kg: None,
-                    derivation_graphs: None,
+                    proof_trees: None,
                     timing_breakdown: None,
                 });
             }
@@ -2241,7 +2241,7 @@ impl Handler {
                 execution_time_ms: 0,
                 metadata: None,
                 switched_kg: None,
-                derivation_graphs: None,
+                proof_trees: None,
                 timing_breakdown: None,
             });
         }
@@ -3406,7 +3406,7 @@ impl QueryJob {
                                             execution_time_ms: start.elapsed().as_millis() as u64,
                                             metadata: None,
                                             switched_kg: None,
-                                            derivation_graphs: None,
+                                            proof_trees: None,
                                             timing_breakdown: None,
                                         });
                                     }
@@ -3580,7 +3580,7 @@ impl QueryJob {
                 execution_time_ms: start.elapsed().as_millis() as u64,
                 metadata: None,
                 switched_kg: switched_kg_result,
-                derivation_graphs: None,
+                proof_trees: None,
                 timing_breakdown: None,
             });
         }
@@ -3681,23 +3681,18 @@ impl QueryJob {
             .collect();
 
         // Build schema from first result or default to 2 columns.
-        // Prefer variable names from the query head (e.g. ?rel(From, To) -> "From", "To").
-        // Only fall back to registered schema names if the query extraction produces
-        // generic positional names (col0, col1, ...).
+        // Prefer registered schema column names when the relation has a defined schema.
+        // Fall back to query variable names only when no schema exists.
         let schema: Vec<ColumnDef> = if let Some(first) = results.first() {
             let arity = first.values().len();
-            let query_names = extract_column_names_from_query(&query_program, arity);
-            let has_real_names = query_names.iter().any(|n| !n.starts_with("col"));
-            let col_names = if has_real_names {
-                query_names
-            } else if let Some(ref names) = schema_col_names {
+            let col_names = if let Some(ref names) = schema_col_names {
                 if names.len() == arity {
                     names.clone()
                 } else {
-                    query_names
+                    extract_column_names_from_query(&query_program, arity)
                 }
             } else {
-                query_names
+                extract_column_names_from_query(&query_program, arity)
             };
 
             first
@@ -3753,7 +3748,7 @@ impl QueryJob {
             execution_time_ms: start.elapsed().as_millis() as u64,
             metadata: None,
             switched_kg: None,
-            derivation_graphs: None,
+            proof_trees: None,
             timing_breakdown,
         })
     }
@@ -3820,8 +3815,12 @@ impl Handler {
             ));
         }
 
-        // Touch session to prevent idle reaping during query execution
-        self.sessions.touch_session(session_id)?;
+        // Touch session to prevent idle reaping during query execution.
+        // If session was reaped (e.g., WS reconnect), fall back to non-session query.
+        if self.sessions.touch_session(session_id).is_err() {
+            tracing::debug!(session_id = %session_id, "session_gone_fallback_to_query_program");
+            return self.query_program(None, program).await;
+        }
 
         // Check if session is clean → fast path
         let is_clean = self.sessions.is_session_clean(session_id)?;
@@ -4057,7 +4056,7 @@ impl Handler {
             execution_time_ms,
             metadata: result_metadata,
             switched_kg: None,
-            derivation_graphs: None,
+            proof_trees: None,
             timing_breakdown,
         })
     }
@@ -4237,8 +4236,13 @@ impl Handler {
         }
 
         // Any session-bound activity should keep the session alive.
+        // If the session was reaped (e.g., after WS reconnect), log and continue
+        // rather than failing the query - the session state is lost but queries
+        // against persistent data should still work.
         if let Some(sid) = session_id {
-            self.sessions.touch_session(sid)?;
+            if let Err(e) = self.sessions.touch_session(sid) {
+                tracing::debug!(session_id = %sid, error = %e, "session_touch_failed_continuing");
+            }
         }
 
         // Fast path: intercept session meta commands that need SessionManager
@@ -4476,7 +4480,7 @@ impl Handler {
             execution_time_ms: 0,
             metadata: None,
             switched_kg: None,
-            derivation_graphs: None,
+            proof_trees: None,
             timing_breakdown: None,
         }
     }
@@ -4532,7 +4536,7 @@ impl Handler {
             execution_time_ms: 0,
             metadata: None,
             switched_kg: None,
-            derivation_graphs: None,
+            proof_trees: None,
             timing_breakdown: None,
         })
     }
@@ -5598,12 +5602,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_query_program_with_session_invalid_id() {
+    async fn test_query_program_with_session_invalid_id_falls_back() {
         let (handler, _tmp) = make_test_handler();
+        // Invalid session should gracefully fall back to non-session query
+        // (returns Ok with empty results, not an error)
         let result = handler
             .query_program_with_session(&"99999".to_string(), "?data(X)".to_string())
             .await;
-        assert!(result.is_err());
+        assert!(
+            result.is_ok(),
+            "invalid session should fall back to query_program, not error"
+        );
     }
 
     // --- session_add_rule test ---
@@ -7441,6 +7450,104 @@ mod tests {
     fn test_extract_column_names_all_constants() {
         let names = extract_column_names_from_query("?facts(1, 2)", 2);
         assert_eq!(names, vec!["1", "2"]);
+    }
+
+    // ── Column header priority integration tests ────────────────────────────
+
+    #[tokio::test]
+    async fn test_schema_relation_uses_schema_column_names() {
+        let (handler, _tmp) = make_test_handler();
+        // Define schema, insert data, query with different variable names
+        handler
+            .query_program(
+                None,
+                "+product(product_id: int, name: string, price: float)".to_string(),
+            )
+            .await
+            .expect("schema registration failed");
+        handler
+            .query_program(None, "+product[(1, \"Widget\", 9.99)]".to_string())
+            .await
+            .expect("insert failed");
+        let result = handler
+            .query_program(None, "?product(X, Y, Z)".to_string())
+            .await
+            .expect("query failed");
+        let col_names: Vec<String> = result.schema.iter().map(|c| c.name.clone()).collect();
+        assert_eq!(
+            col_names,
+            vec!["product_id", "name", "price"],
+            "schema-defined relation should use schema column names, not query variables"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_no_schema_relation_uses_query_variable_names() {
+        let (handler, _tmp) = make_test_handler();
+        // Insert without schema, query with variables
+        handler
+            .query_program(None, "+edge[(1, 2), (2, 3)]".to_string())
+            .await
+            .expect("insert failed");
+        let result = handler
+            .query_program(None, "?edge(From, To)".to_string())
+            .await
+            .expect("query failed");
+        let col_names: Vec<String> = result.schema.iter().map(|c| c.name.clone()).collect();
+        assert_eq!(
+            col_names,
+            vec!["From", "To"],
+            "no-schema relation should use query variable names"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_derived_relation_uses_query_variable_names() {
+        let (handler, _tmp) = make_test_handler();
+        handler
+            .query_program(None, "+edge[(1, 2), (2, 3)]".to_string())
+            .await
+            .expect("insert failed");
+        handler
+            .query_program(
+                None,
+                "+path(A, B) <- edge(A, B)\n+path(A, C) <- path(A, B), edge(B, C)".to_string(),
+            )
+            .await
+            .expect("rule registration failed");
+        let result = handler
+            .query_program(None, "?path(Source, Dest)".to_string())
+            .await
+            .expect("query failed");
+        let col_names: Vec<String> = result.schema.iter().map(|c| c.name.clone()).collect();
+        assert_eq!(
+            col_names,
+            vec!["Source", "Dest"],
+            "derived relation (rule) should use query variable names"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_schema_relation_with_constant_in_query() {
+        let (handler, _tmp) = make_test_handler();
+        handler
+            .query_program(None, "+item(item_id: int, label: string)".to_string())
+            .await
+            .expect("schema registration failed");
+        handler
+            .query_program(None, "+item[(1, \"alpha\"), (2, \"beta\")]".to_string())
+            .await
+            .expect("insert failed");
+        let result = handler
+            .query_program(None, "?item(1, Name)".to_string())
+            .await
+            .expect("query failed");
+        let col_names: Vec<String> = result.schema.iter().map(|c| c.name.clone()).collect();
+        assert_eq!(
+            col_names,
+            vec!["item_id", "label"],
+            "schema names should be used even when query has constants"
+        );
     }
 
     // ── Meta-command handler tests ──────────────────────────────────────────

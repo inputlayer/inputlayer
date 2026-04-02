@@ -413,18 +413,15 @@ async fn test_step5_why_reachable() {
     )
     .await;
 
-    // .why should return a result with derivation graphs
+    // .why should return a result with proof trees
     let result = exec(&handler, r#".why ?can_reach("new_york", "sydney")"#).await;
     assert_eq!(result.rows.len(), 1, ".why should return the proven tuple");
     assert!(
-        result.derivation_graphs.is_some(),
-        ".why should include derivation graphs"
+        result.proof_trees.is_some(),
+        ".why should include proof trees"
     );
-    let graphs = result.derivation_graphs.as_ref().unwrap();
-    assert!(
-        !graphs.is_empty(),
-        "Should have at least one derivation graph"
-    );
+    let graphs = result.proof_trees.as_ref().unwrap();
+    assert!(!graphs.is_empty(), "Should have at least one proof tree");
 }
 
 #[tokio::test]
