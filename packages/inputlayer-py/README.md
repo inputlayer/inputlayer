@@ -264,6 +264,66 @@ uv run python -m examples.langchain.runner --all
 
 Requires a running InputLayer server and optionally LM Studio (or any OpenAI-compatible server) for LLM examples.
 
+## LangGraph Integration
+
+```bash
+pip install inputlayer-client-dev[langgraph]
+```
+
+Build stateful, multi-step agent workflows with InputLayer as the reasoning layer:
+
+```python
+from inputlayer.integrations.langgraph import kg_node, kg_router
+
+# Node: query the KG as a graph step
+search = kg_node(
+    query=lambda s: f'?article(Id, Title, Content, "{s["topic"]}", Emb)',
+    state_key="articles",
+)
+
+# Router: Datalog rules decide the next step
+route = kg_router(
+    branches={
+        "answer": "?enough_context(X)",
+        "gather": "?missing_info(X)",
+    },
+    default="gather",
+)
+
+graph.add_node("search", search)
+graph.add_conditional_edges("search", route)
+```
+
+### Components
+
+| Component | What it does |
+|-----------|-------------|
+| `kg_node()` | Creates graph nodes that query or mutate the KG |
+| `kg_router()` | Routes graph execution based on Datalog query results |
+| `InputLayerState` | TypedDict base class with KG handle |
+
+### Examples
+
+See [`examples/langgraph/`](examples/langgraph/) — 9 examples:
+
+```bash
+uv run python -m examples.langgraph.runner --list
+uv run python -m examples.langgraph.runner 1 5
+uv run python -m examples.langgraph.runner --all
+```
+
+| # | Example | Description |
+|---|---------|-------------|
+| 1 | Reasoning loop | Fact accumulation + rule-driven loop termination |
+| 2 | Multi-step investigation | Incremental evidence gathering + pattern detection |
+| 3 | Human-in-the-loop | Policy rules gate actions for approval |
+| 4 | Branching pipeline | Route documents to specialized processors |
+| 5 | Self-correcting agent | Datalog rules validate, LLM fixes, loop until pass |
+| 6 | Collaborative planning | Multiple experts + conflict detection |
+| 7 | Event correlation | Pattern matching across event streams |
+| 8 | Tool selection | KG rules match questions to best tool |
+| 9 | Streaming aggregation | Threshold breach detection + auto-remediation |
+
 ## Sync Client
 
 For scripts, notebooks, and non-async contexts:
