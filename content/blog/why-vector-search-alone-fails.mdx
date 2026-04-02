@@ -1,15 +1,15 @@
 ---
-title: "Why Vector Search Alone Fails Your AI Agent"
+title: "Why Search Alone Fails Your AI Agent"
 date: "2026-02-25"
 category: "Architecture"
 excerpt: "When the answer lives across three separate facts in three separate systems, similarity search can't get there. Here's what does."
 ---
 
-# Why Vector Search Alone Fails Your AI Agent
+# Why Search Alone Fails Your AI Agent
 
-A patient asks your healthcare AI agent: "Can I eat shrimp tonight?" The system returns shrimp recipes, nutritional info, some allergy FAQs. Helpful content, high similarity scores, completely confident. Also potentially dangerous - because this patient takes Amiodarone, a cardiac medication that interacts with iodine, and shrimp is high in iodine. The correct answer could keep them out of the hospital, and it's nowhere in the search results.
+A patient asks your healthcare AI agent: "Can I eat shrimp tonight?" The system returns shrimp recipes, nutritional info, some allergy FAQs. Helpful content, high similarity scores, completely confident. Also potentially dangerous, because this patient takes Amiodarone, a cardiac medication that interacts with iodine, and shrimp is high in iodine. The correct answer could keep them out of the hospital, and it's nowhere in the search results.
 
-The answer lives across three facts in three separate systems: the patient's medication list, a drug interaction database, and a nutritional profile. No single document contains the connection. The phrase "shrimp dinner" shares zero embedding similarity with "medication contraindication." This isn't a relevance problem - the system returned exactly what was most similar. It's a reasoning problem, and similarity search doesn't reason.
+The answer lives across three facts in three separate systems: the patient's medication list, a drug interaction database, and a nutritional profile. No single document contains the connection. The phrase "shrimp dinner" looks nothing like "medication contraindication" to a search engine. This isn't a relevance problem. The system returned exactly what looked most related. It's a reasoning problem, and search doesn't reason.
 
 ## What went wrong
 
@@ -19,9 +19,9 @@ The correct answer is "No, and it could be dangerous." But that answer doesn't l
 Sarah --takes-> Amiodarone --interacts-> Iodine --found in-> Shrimp [highlight]
 ```
 
-The patient takes a specific medication. That medication interacts with iodine. Shrimp is high in iodine. Each fact sits in a different database. And the phrase "shrimp dinner" has zero similarity to "medication contraindications" - they share no words, no concepts, no embedding overlap.
+The patient takes a specific medication. That medication interacts with iodine. Shrimp is high in iodine. Each fact sits in a different database. And the phrase "shrimp dinner" has zero similarity to "medication contraindications." They share no words, no concepts, nothing a search engine would connect.
 
-**The connection between these facts is logical, not semantic.** You can't find it by looking for similar text. You have to follow a chain of relationships from one fact to the next. That's what InputLayer does.
+**The connection between these facts is logical, not textual.** You can't find it by looking for similar words. You have to follow a chain of relationships from one fact to the next. That's what InputLayer does.
 
 ## This shows up everywhere
 
@@ -35,15 +35,15 @@ The healthcare example is vivid, but this same pattern appears in every domain w
 
 In every case, the answer requires **following a chain of connected facts**. The information exists, but it's spread across different sources, and the connections between them are structural, not textual.
 
-## What teams end up building without a reasoning layer
+## What you end up building without a reasoning layer
 
-To work around this, teams start adding systems. A graph database for relationships. A rules engine for business logic. An authorization service for access control. Application code to stitch it all together.
+To work around this, you start adding systems. A graph database for relationships. A rules engine for business logic. An authorization service for access control. Application code to stitch it all together.
 
 ```flow
 Question -> Vector DB -> Graph DB -> Rules -> Auth -> App code [primary]
 ```
 
-Each boundary between systems is a place where state can diverge - a permission revoked in one system but not yet propagated to another, a fact updated in the source but stale in the cache. The reasoning logic ends up scattered across services. When a fact changes, you have to propagate the change across all of them. It works, but it's fragile, and each new capability makes it more fragile.
+Each boundary between systems is a place where things can fall out of sync. A permission revoked in one system but not yet propagated to another, a fact updated in the source but stale in the cache. The reasoning logic ends up scattered across services. When a fact changes, you have to propagate the change across all of them. It works, but it's fragile, and each new capability makes it more fragile.
 
 ## What it looks like with InputLayer
 
@@ -59,7 +59,7 @@ Question -> InputLayer [primary] -> Derived conclusions
 
 Your vector database finds similar content. InputLayer follows chains of facts and derives conclusions.
 
-When the patient's medication list changes, InputLayer automatically updates every downstream risk assessment. When an employee changes departments, their permissions recalculate through the org hierarchy. When a corporate ownership structure shifts, the compliance analysis adjusts. All of this happens incrementally - only the affected conclusions recompute, not the entire knowledge base.
+When the patient's medication list changes, InputLayer automatically updates every downstream risk assessment. When an employee changes departments, their permissions recalculate through the org hierarchy. When a corporate ownership structure shifts, the compliance analysis adjusts. All of this happens incrementally. Only the affected conclusions recompute, not the entire knowledge base.
 
 ## Getting started
 

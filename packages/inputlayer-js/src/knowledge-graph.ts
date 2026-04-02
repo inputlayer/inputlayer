@@ -76,7 +76,7 @@ export interface ClearResult {
   details: Array<[string, number]>;
 }
 
-export interface ExplainResult {
+export interface DebugResult {
   iql: string;
   plan: string;
 }
@@ -86,47 +86,61 @@ export interface ServerStatus {
   knowledgeGraph: string;
 }
 
-/** A node in a proof tree explaining why a fact was derived. */
-export interface ProofTree {
-  nodeType: string;
-  relation?: string;
-  values?: unknown[];
-  ruleName?: string;
-  clauseIndex?: number;
-  clauseText?: string;
-  bindings?: Array<[string, unknown]>;
-  children?: ProofTree[];
-  pattern?: string;
-  indexName?: string;
-  metric?: string;
-  queryVector?: number[];
-  resultId?: number;
-  distance?: number;
-  k?: number;
-  efSearch?: number;
-  aggregateFn?: string;
-  contributingCount?: number;
-  sampleInputs?: unknown[][];
-  fullInputs?: unknown[][] | null;
-  iteration?: number;
-  inner?: ProofTree;
-  depthLimit?: number;
+/** A node in a derivation graph explaining why a fact was derived. */
+export interface DerivationNode {
+  kind: 'fact' | 'rule' | 'negation' | 'vector_search' | 'aggregate' | 'truncated' | 'why_not';
+  conclusion: { pred: string; args: unknown[] };
+  rule_id?: string;
+  bindings?: Record<string, unknown>;
+  aggregate?: {
+    fn: string;
+    value_var: string;
+    result: unknown;
+    contributing_count: number;
+    sample_inputs?: unknown[][];
+    full_inputs?: unknown[][] | null;
+  };
+  negation?: { pattern: string };
+  vector_search?: {
+    index_name: string;
+    metric: string;
+    query_vector: number[];
+    result_id: number;
+    distance: number;
+    k: number;
+    ef_search?: number;
+  };
+  truncated?: { depth_limit: number };
+  why_not?: {
+    rule_name: string;
+    clause_index: number;
+    clause_text: string;
+    blocker: Record<string, unknown>;
+  };
+  children: string[];
 }
 
-/** Result of a .why query with proof trees. */
+/** A derivation graph - a DAG of derivation nodes. */
+export interface DerivationGraph {
+  version: number;
+  roots: string[];
+  nodes: Record<string, DerivationNode>;
+}
+
+/** Result of a .why query with derivation graphs. */
 export interface WhyResult {
   /** Result data rows */
   results: ResultSet;
-  /** Structured proof trees - one per result row */
-  proofTrees: ProofTree[];
+  /** Structured derivation graphs - one per result row */
+  derivationGraphs: DerivationGraph[];
 }
 
 /** Explanation of why a fact was NOT derived. */
 export interface WhyNotResult {
   /** Human-readable explanation */
   text: string;
-  /** Structured explanation data */
-  explanation: ProofTree | null;
+  /** Structured explanation as derivation graph */
+  explanation: DerivationGraph | null;
 }
 
 /** Blocker details for why-not explanations. */
@@ -558,13 +572,13 @@ export class KnowledgeGraph {
   // ── Meta ────────────────────────────────────────────────────────
 
   /** Show the query plan without executing. */
-  async explain(opts: QueryOptions): Promise<ExplainResult> {
+  async debug(opts: QueryOptions): Promise<DebugResult> {
     await this.ensureKg();
     let iql = compileQuery(opts);
     if (Array.isArray(iql)) {
       iql = iql[0];
     }
-    const result = await this.conn.execute(`.explain ${iql}`);
+    const result = await this.conn.execute(`.debug ${iql}`);
     const planText = result.rows.map((row) => String(row[0])).join('\n');
     return { iql, plan: planText };
   }
@@ -592,9 +606,8 @@ export class KnowledgeGraph {
       rowProvenance: result.row_provenance,
       timingBreakdown: result.timing_breakdown,
     });
-    // Map wire proof trees to SDK ProofTree type (snake_case -> camelCase)
-    const proofTrees: ProofTree[] = (result.proof_trees ?? []).map(mapWireProofTree);
-    return { results: resultSet, proofTrees };
+    const derivationGraphs: DerivationGraph[] = (result.derivation_graphs ?? []) as DerivationGraph[];
+    return { results: resultSet, derivationGraphs };
   }
 
   /** Explain why a specific fact was NOT derived.
@@ -616,7 +629,7 @@ export class KnowledgeGraph {
       .join(', ');
     const result = await this.conn.execute(`.why_not ${relName}(${vals})`);
     const text = result.rows.map((row) => String(row[0])).join('\n');
-    const explanation = result.proof_trees?.[0] ? mapWireProofTree(result.proof_trees[0]) : null;
+    const explanation = (result.derivation_graphs?.[0] ?? null) as DerivationGraph | null;
     return { text, explanation };
   }
 
@@ -675,38 +688,3 @@ export class KnowledgeGraph {
   }
 }
 
-/** Maximum recursion depth for mapping wire proof trees. */
-const MAX_PROOF_TREE_DEPTH = 100;
-
-/** Map wire-format proof tree (snake_case) to SDK ProofTree (camelCase). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapWireProofTree(wire: any, depth = 0): ProofTree {
-  if (depth >= MAX_PROOF_TREE_DEPTH) {
-    return { nodeType: 'truncated', depthLimit: MAX_PROOF_TREE_DEPTH };
-  }
-  return {
-    nodeType: wire.node_type,
-    relation: wire.relation,
-    values: wire.values,
-    ruleName: wire.rule_name,
-    clauseIndex: wire.clause_index,
-    clauseText: wire.clause_text,
-    bindings: wire.bindings?.map((b: { variable: string; value: unknown }) => [b.variable, b.value] as [string, unknown]),
-    children: wire.children?.map((c: unknown) => mapWireProofTree(c, depth + 1)),
-    pattern: wire.pattern,
-    indexName: wire.index_name,
-    metric: wire.metric,
-    queryVector: wire.query_vector,
-    resultId: wire.result_id,
-    distance: wire.distance,
-    k: wire.k,
-    efSearch: wire.ef_search,
-    aggregateFn: wire.aggregate_fn,
-    contributingCount: wire.contributing_count,
-    sampleInputs: wire.sample_inputs,
-    fullInputs: wire.full_inputs,
-    iteration: wire.iteration,
-    inner: wire.inner ? mapWireProofTree(wire.inner, depth + 1) : undefined,
-    depthLimit: wire.depth_limit,
-  };
-}

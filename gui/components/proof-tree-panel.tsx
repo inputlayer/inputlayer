@@ -15,14 +15,13 @@ import {
   AlertTriangle,
   RefreshCw,
   FileJson,
-  Table2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useDatalogStore } from "@/lib/datalog-store"
 import { cn } from "@/lib/utils"
 import type { QueryResult } from "@/lib/datalog-store"
-import type { WsProofTree } from "@/lib/ws-types"
+import type { WsDerivationGraph, WsDerivationNode, JsonValue } from "@/lib/ws-types"
 
 // ── Error Boundary ────────────────────────────────────────────────
 
@@ -53,13 +52,8 @@ class ProofTreeErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundary
   render() {
     if (this.state.hasError) {
       return this.props.fallback ?? (
-        <div className="flex h-full flex-col items-center justify-center gap-3 p-8">
-          <AlertTriangle className="h-6 w-6 text-destructive" />
-          <p className="text-sm text-destructive">Failed to render proof tree</p>
-          <p className="text-xs text-muted-foreground max-w-sm text-center">{this.state.error?.message}</p>
-          <Button variant="outline" size="sm" onClick={() => this.setState({ hasError: false, error: null })}>
-            Retry
-          </Button>
+        <div className="p-4 text-sm text-red-500">
+          Error rendering derivation graph: {this.state.error?.message}
         </div>
       )
     }
@@ -67,102 +61,81 @@ class ProofTreeErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundary
   }
 }
 
-interface ProofTreePanelProps {
-  query: string
-  result: QueryResult | null
-}
+// ── Helpers ────────────────────────────────────────────────────
 
-/**
- * Extract the query portion from editor content for .why computation.
- * Handles: ?query(X), .why ?query(X), .why full ?query(X), multi-line programs.
- */
-function extractQueryLine(text: string): string | null {
-  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean)
-
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i]
-
-    // Direct ?query shorthand
-    if (line.startsWith("?")) return line
-
-    // .why or .why full - extract the query argument
-    const whyMatch = line.match(/^\.why\s+(?:full\s+)?(.+)$/)
-    if (whyMatch) return whyMatch[1]
-
-    // .why_not - the whole line IS the command, no separate query to extract
-    if (line.startsWith(".why_not ")) return null
-
-    // Bare query rule (not insert/delete/meta)
-    if (line.includes("<-") && !line.startsWith("+") && !line.startsWith("-") && !line.startsWith(".")) {
-      return line
+function extractQueryLine(editorContent: string): string | null {
+  // Find the LAST ?query(...) line, since the server returns results
+  // for the last query when multiple statements are in the editor.
+  let lastQuery: string | null = null
+  for (const line of editorContent.split("\n")) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith("?") && trimmed.includes("(")) {
+      lastQuery = trimmed
     }
+    const whyMatch = trimmed.match(/^\.why\s+(?:full\s+)?(.+)$/)
+    if (whyMatch) lastQuery = whyMatch[1]
+    if (trimmed.startsWith(".why_not ")) return null
   }
-
-  // Single line that looks like a query
-  const trimmed = text.trim()
-  if (trimmed && !trimmed.includes("\n") && !trimmed.startsWith("+") && !trimmed.startsWith(".")) {
-    return trimmed
-  }
-
-  return null
+  return lastQuery
 }
 
-function formatCellValue(v: string | number | boolean | null): string {
+function formatCellValue(v: JsonValue): string {
   if (v === null) return "NULL"
   if (typeof v === "string") return `"${v}"`
   return String(v)
 }
 
-function formatBindingValue(v: string | number | boolean | null): string {
-  if (v === null) return "NULL"
-  if (typeof v === "string") return `"${v}"`
-  return String(v)
+// ── Node kind configuration ────────────────────────────────────
+
+const kindConfig: Record<string, { icon: typeof Database; label: string; color: string }> = {
+  fact: { icon: Database, label: "fact", color: "emerald" },
+  rule: { icon: GitBranch, label: "rule", color: "blue" },
+  negation: { icon: ShieldOff, label: "absent", color: "amber" },
+  vector_search: { icon: Search, label: "vector", color: "purple" },
+  aggregate: { icon: Layers, label: "aggregate", color: "cyan" },
+  truncated: { icon: AlertTriangle, label: "truncated", color: "red" },
+  why_not: { icon: ShieldOff, label: "not derived", color: "rose" },
 }
 
-// --- Proof tree node renderer (consumes structured WsProofTree) ---
+// ── Derivation Node Renderer ────────────────────────────────────
 
-function ProofNodeView({ node, defaultOpen = true, depth = 0 }: { node: WsProofTree; defaultOpen?: boolean; depth?: number }) {
+function DerivationNodeView({
+  nodeId,
+  graph,
+  defaultOpen = true,
+  depth = 0,
+}: {
+  nodeId: string
+  graph: WsDerivationGraph
+  defaultOpen?: boolean
+  depth?: number
+}) {
   const autoCollapse = depth >= 10
-  const [open, setOpen] = useState(autoCollapse ? false : defaultOpen)
-  const children = node.children ?? (node.inner ? [node.inner] : [])
-  const hasChildren = children.length > 0
+  const [open, setOpen] = useState(defaultOpen && !autoCollapse)
 
-  const typeConfig: Record<string, { icon: typeof Database; label: string; color: string }> = {
-    base_fact:      { icon: Database,      label: "fact",      color: "emerald" },
-    rule_application: { icon: GitBranch,   label: "rule",      color: "blue" },
-    negation:       { icon: ShieldOff,     label: "absent",    color: "amber" },
-    vector_search:  { icon: Search,        label: "vector",    color: "purple" },
-    aggregation:    { icon: Layers,        label: "aggregate", color: "cyan" },
-    truncated:      { icon: AlertTriangle, label: "truncated", color: "red" },
-    why_not:        { icon: ShieldOff,     label: "why-not",   color: "amber" },
-  }
+  const node = graph.nodes[nodeId]
+  if (!node) return null
 
-  const cfg = typeConfig[node.node_type] ?? { icon: TreePine, label: node.node_type, color: "slate" }
+  const hasChildren = node.children && node.children.length > 0
+  const cfg = kindConfig[node.kind] ?? { icon: TreePine, label: node.kind, color: "slate" }
   const Icon = cfg.icon
 
-  // Build display text based on node type
-  let mainText = ""
+  // Build display text
+  const conclusionStr = `${node.conclusion.pred}(${node.conclusion.args.map(formatCellValue).join(", ")})`
+
   let detailText = ""
-  if (node.node_type === "base_fact") {
-    const vals = node.values?.map(formatBindingValue).join(", ") ?? ""
-    mainText = `${node.relation ?? "?"}(${vals})`
-  } else if (node.node_type === "rule_application") {
-    mainText = `${node.rule_name ?? "?"} (clause ${node.clause_index ?? 0})`
-    detailText = node.clause_text ?? ""
-  } else if (node.node_type === "negation") {
-    mainText = `no matching ${node.relation ?? "?"}(${node.pattern ?? ""})`
-  } else if (node.node_type === "vector_search") {
-    mainText = `index=${node.index_name}, metric=${node.metric}`
-    detailText = `result: id=${node.result_id}, distance=${node.distance?.toFixed(6)}, k=${node.k}`
-  } else if (node.node_type === "aggregation") {
-    mainText = `${node.rule_name}.${node.aggregate_fn}`
-    detailText = `${node.contributing_count} contributing tuples`
-  } else if (node.node_type === "truncated") {
-    mainText = `proof exceeds depth limit (${node.depth_limit})`
-  } else if (node.node_type === "why_not") {
-    mainText = `${node.relation ?? "?"} - negative explanation`
-  } else {
-    mainText = node.node_type
+  if (node.kind === "rule" && node.rule_id) {
+    detailText = node.rule_id
+  } else if (node.kind === "aggregate" && node.aggregate) {
+    detailText = `${node.aggregate.fn}(${node.aggregate.value_var}) = ${formatCellValue(node.aggregate.result)} over ${node.aggregate.contributing_count} tuples`
+  } else if (node.kind === "negation" && node.negation) {
+    detailText = `no matching ${node.negation.pattern}`
+  } else if (node.kind === "vector_search" && node.vector_search) {
+    detailText = `index=${node.vector_search.index_name}, metric=${node.vector_search.metric}, distance=${node.vector_search.distance.toFixed(6)}, k=${node.vector_search.k}`
+  } else if (node.kind === "truncated" && node.truncated) {
+    detailText = `derivation exceeds depth limit (${node.truncated.depth_limit})`
+  } else if (node.kind === "why_not" && node.why_not) {
+    detailText = `${node.why_not.blocker.type}: ${node.why_not.blocker.reason ?? node.why_not.blocker.predicate_text ?? ""}`
   }
 
   return (
@@ -187,9 +160,9 @@ function ProofNodeView({ node, defaultOpen = true, depth = 0 }: { node: WsProofT
         <Icon className={cn("mt-0.5 h-3.5 w-3.5 flex-shrink-0")} style={{ color: `var(--color-${cfg.color}-500)` }} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="font-mono text-xs font-medium text-foreground/90">{mainText}</span>
+            <span className="font-mono text-xs font-medium text-foreground/90">{conclusionStr}</span>
             <Badge
-              variant={node.node_type === "truncated" ? "destructive" : "secondary"}
+              variant={node.kind === "truncated" || node.kind === "why_not" ? "destructive" : "secondary"}
               className="h-4 px-1.5 text-[10px] font-normal"
             >
               {cfg.label}
@@ -198,23 +171,40 @@ function ProofNodeView({ node, defaultOpen = true, depth = 0 }: { node: WsProofT
           {detailText && (
             <p className="mt-0.5 font-mono text-[11px] text-muted-foreground leading-relaxed">{detailText}</p>
           )}
-          {node.bindings && node.bindings.length > 0 && (
+          {node.bindings && Object.keys(node.bindings).length > 0 && (
             <div className="mt-1 flex flex-wrap gap-1">
-              {node.bindings.map((b, i) => (
+              {Object.entries(node.bindings).map(([variable, value], i) => (
                 <span key={i} className="inline-flex items-center rounded-sm bg-foreground/[0.05] px-1.5 py-0.5 font-mono text-[10px] leading-none">
-                  <span className="text-blue-500 dark:text-blue-400">{b.variable}</span>
+                  <span className="text-blue-500 dark:text-blue-400">{variable}</span>
                   <span className="mx-0.5 text-muted-foreground/60">=</span>
-                  <span className="text-foreground/80">{formatBindingValue(b.value)}</span>
+                  <span className="text-foreground/80">{formatCellValue(value)}</span>
                 </span>
               ))}
             </div>
+          )}
+          {node.kind === "aggregate" && node.aggregate?.sample_inputs && node.aggregate.sample_inputs.length > 0 && (
+            <div className="mt-1 space-y-0.5">
+              {node.aggregate.sample_inputs.map((row, i) => (
+                <div key={i} className="font-mono text-[10px] text-muted-foreground/80">
+                  ({row.map(formatCellValue).join(", ")})
+                </div>
+              ))}
+              {(node.aggregate.contributing_count ?? 0) > node.aggregate.sample_inputs.length && (
+                <div className="font-mono text-[10px] text-muted-foreground/50 italic">
+                  ... and {(node.aggregate.contributing_count ?? 0) - node.aggregate.sample_inputs.length} more
+                </div>
+              )}
+            </div>
+          )}
+          {node.kind === "why_not" && node.why_not?.clause_text && (
+            <p className="mt-0.5 font-mono text-[10px] text-muted-foreground/60">{node.why_not.clause_text}</p>
           )}
         </div>
       </div>
       {open && hasChildren && (
         <div className="ml-[18px] mt-0.5 space-y-0.5 border-l border-border/30 pl-2">
-          {children.map((child, i) => (
-            <ProofNodeView key={i} node={child} defaultOpen={true} depth={depth + 1} />
+          {node.children.map((childId, i) => (
+            <DerivationNodeView key={i} nodeId={childId} graph={graph} defaultOpen={true} depth={depth + 1} />
           ))}
         </div>
       )}
@@ -222,73 +212,52 @@ function ProofNodeView({ node, defaultOpen = true, depth = 0 }: { node: WsProofT
   )
 }
 
-// --- Result tuple card with inline proof ---
+// --- Result tuple card with inline derivation ---
 
 function ResultTupleCard({
   index,
   columns,
   row,
-  proof,
+  graph,
 }: {
   index: number
   columns: string[]
   row: (string | number | boolean | null)[]
-  proof: WsProofTree | null
+  graph: WsDerivationGraph | null
 }) {
-  const [open, setOpen] = useState(true)
-
   return (
-    <div className="rounded-lg border border-border/60 bg-card overflow-hidden">
-      <div
-        className="flex items-center gap-3 px-3 py-2 bg-muted/30 border-b border-border/40 cursor-pointer hover:bg-muted/50 transition-colors"
-        onClick={() => setOpen(!open)}
-      >
-        {open ? (
-          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground/60 flex-shrink-0" />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 flex-shrink-0" />
-        )}
-        <Table2 className="h-3.5 w-3.5 text-foreground/50 flex-shrink-0" />
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <Badge variant="outline" className="h-4 px-1.5 text-[10px] font-mono flex-shrink-0">
-            #{index + 1}
-          </Badge>
-          <div className="flex items-center gap-1.5 overflow-hidden">
-            {columns.map((col, ci) => (
-              <span key={ci} className="inline-flex items-center gap-0.5 font-mono text-xs truncate">
-                <span className="text-muted-foreground">{col}=</span>
-                <span className="font-medium text-foreground/90">{formatCellValue(row[ci])}</span>
-                {ci < columns.length - 1 && <span className="text-muted-foreground/40 mx-0.5">,</span>}
-              </span>
-            ))}
-          </div>
+    <div className="rounded-lg border bg-card">
+      <div className="flex items-center gap-2 border-b px-3 py-1.5">
+        <span className="text-xs font-medium text-muted-foreground">#{index + 1}</span>
+        <div className="flex gap-2">
+          {row.map((val, i) => (
+            <span key={i} className="font-mono text-xs">
+              {columns[i] && <span className="text-muted-foreground/60">{columns[i]}=</span>}
+              <span className="text-foreground">{formatCellValue(val)}</span>
+            </span>
+          ))}
         </div>
       </div>
-      {open && (
-        <div className="px-2 py-2">
-          {proof ? (
-            <div className="space-y-0.5">
-              {/* If this is a wrapper with children, show children directly */}
-              {proof.children && proof.children.length > 0 ? (
-                proof.children.map((child, i) => (
-                  <ProofNodeView key={i} node={child} defaultOpen={true} />
-                ))
-              ) : (
-                <ProofNodeView node={proof} defaultOpen={true} />
-              )}
-            </div>
-          ) : (
-            <p className="px-2 py-3 text-center text-xs text-muted-foreground italic">
-              No proof available for this result
-            </p>
-          )}
+      {graph && (
+        <div className="p-2 space-y-0.5">
+          {graph.roots.map((rootId, i) => (
+            <DerivationNodeView key={i} nodeId={rootId} graph={graph} defaultOpen={true} depth={0} />
+          ))}
         </div>
+      )}
+      {!graph && (
+        <div className="p-2 text-xs text-muted-foreground">No derivation available</div>
       )}
     </div>
   )
 }
 
-// --- Main panel ---
+// --- Main Panel ---
+
+interface ProofTreePanelProps {
+  query: string
+  result: QueryResult | null
+}
 
 export function ProofTreePanel(props: ProofTreePanelProps) {
   return (
@@ -299,36 +268,34 @@ export function ProofTreePanel(props: ProofTreePanelProps) {
 }
 
 function ProofTreePanelInner({ query, result }: ProofTreePanelProps) {
-  const cachedProofsRef = useRef<{ query: string; result: QueryResult } | null>(null)
+  const cachedRef = useRef<{ query: string; result: QueryResult } | null>(null)
   const [whyResult, setWhyResult] = useState<QueryResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const { whyQuery } = useDatalogStore()
+  const [viewMode, setViewMode] = useState<"tree" | "json">("tree")
 
-  // Use proofs from the result if it was a .why query, otherwise use separately fetched
-  const hasInlineProofs = result?.proofTrees && result.proofTrees.length > 0
-  const activeResult = hasInlineProofs ? result : whyResult
-  const proofTrees = activeResult?.proofTrees ?? null
+  // Use graphs from the result if it was a .why query, otherwise use separately fetched
+  const hasInlineGraphs = result?.derivationGraphs && result.derivationGraphs.length > 0
+  const activeResult = hasInlineGraphs ? result : whyResult
+  const graphs = activeResult?.derivationGraphs ?? null
 
   const loadProof = useCallback(async () => {
     if (!query) return
     setLoading(true)
     setError(null)
     try {
-      // Extract the ?query(...) portion from potentially multi-line editor content
       const queryLine = extractQueryLine(query)
       if (!queryLine) {
         setError("No query found to explain. Run a ?query(...) first.")
         setLoading(false)
         return
       }
-      // Execute .why query - returns structured QueryResult with proof_trees
       const response = await (useDatalogStore.getState().executeInternalQuery(`.why ${queryLine}`))
       if (response.status === "error") {
-        setError(response.error ?? "Failed to compute proofs")
+        setError(response.error ?? "Failed to compute derivation graph")
       } else {
         setWhyResult(response)
-        cachedProofsRef.current = { query, result: response }
+        cachedRef.current = { query, result: response }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -338,107 +305,121 @@ function ProofTreePanelInner({ query, result }: ProofTreePanelProps) {
   }, [query])
 
   // Restore cache
-  if (!whyResult && cachedProofsRef.current?.query === query) {
-    setWhyResult(cachedProofsRef.current.result)
+  if (!whyResult && cachedRef.current?.query === query) {
+    setWhyResult(cachedRef.current.result)
   }
 
-  const handleExportJson = useCallback(() => {
-    if (!proofTrees) return
-    const blob = new Blob([JSON.stringify(proofTrees, null, 2)], { type: "application/json" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = "proof-trees.json"
-    a.click()
-    URL.revokeObjectURL(url)
-  }, [proofTrees])
+  const handleExportJson = useCallback(async () => {
+    if (!query) return
+    const queryLine = extractQueryLine(query)
+    if (!queryLine) return
+
+    // Export uses .why full for complete, verifiable derivation graphs
+    try {
+      const fullResponse = await useDatalogStore.getState().executeInternalQuery(`.why full ${queryLine}`)
+      const exportGraphs = fullResponse?.derivationGraphs ?? graphs
+      if (!exportGraphs) return
+      const blob = new Blob([JSON.stringify(exportGraphs, null, 2)], { type: "application/json" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = "derivation-graphs.json"
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      if (!graphs) return
+      const blob = new Blob([JSON.stringify(graphs, null, 2)], { type: "application/json" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = "derivation-graphs.json"
+      a.click()
+      URL.revokeObjectURL(url)
+    }
+  }, [query, graphs])
 
   const rows = activeResult?.data ?? result?.data ?? []
   const columns = activeResult?.columns ?? result?.columns ?? []
 
-  // Show compute button if no proofs available yet
-  if (!hasInlineProofs && !whyResult && !loading && !error) {
+  // Show compute button if no graphs available yet
+  if (!graphs || graphs.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-muted-foreground">
-        <div className="rounded-full bg-emerald-500/10 p-4">
-          <TreePine className="h-8 w-8 text-emerald-500/50" />
-        </div>
-        <div className="text-center">
-          <p className="text-sm font-medium text-foreground/70">Derivation Proofs</p>
-          <p className="mt-1 max-w-xs text-xs text-muted-foreground">
-            See why each result was derived - trace through rules and base facts
-          </p>
-        </div>
-        <Button onClick={loadProof} variant="outline" size="sm" className="gap-2">
-          <TreePine className="h-4 w-4" />
-          Compute Proofs
-        </Button>
-      </div>
-    )
-  }
-
-  if (loading) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
-        <Loader2 className="h-6 w-6 animate-spin text-emerald-500" />
-        <p className="text-sm">Building proof trees...</p>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 p-8">
-        <p className="text-sm text-destructive">{error}</p>
-        <Button onClick={loadProof} variant="outline" size="sm">Retry</Button>
+      <div className="flex flex-col items-center justify-center gap-3 py-12 text-muted-foreground">
+        <TreePine className="h-8 w-8 opacity-30" />
+        {error ? (
+          <>
+            <p className="text-sm text-red-500 max-w-md text-center">{error}</p>
+            <Button variant="outline" size="sm" onClick={loadProof} disabled={loading}>
+              {loading ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-2 h-3 w-3" />}
+              Retry
+            </Button>
+          </>
+        ) : (
+          <>
+            <p className="text-sm">Run a query, then click below to see how the results were derived.</p>
+            <Button variant="outline" size="sm" onClick={loadProof} disabled={loading || !query}>
+              {loading ? <Loader2 className="mr-2 h-3 w-3 animate-spin" /> : <TreePine className="mr-2 h-3 w-3" />}
+              Compute Derivation Graph
+            </Button>
+          </>
+        )}
       </div>
     )
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex h-9 items-center justify-between border-b border-border/50 bg-emerald-500/5 px-3 flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <TreePine className="h-3.5 w-3.5 text-emerald-500" />
-          <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">Derivation Proof</span>
-          {rows.length > 0 && (
-            <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
-              {rows.length} result{rows.length !== 1 ? "s" : ""}
-            </Badge>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" className="h-6 gap-1 px-2 text-xs" onClick={handleExportJson}>
-            <FileJson className="h-3 w-3" />
-            Export JSON
+    <div className="flex flex-col gap-2 p-2 h-full overflow-auto">
+      <div className="flex items-center justify-between flex-shrink-0">
+        <span className="text-xs font-medium text-muted-foreground">
+          {rows.length} result{rows.length !== 1 ? "s" : ""} with derivation graphs
+        </span>
+        <div className="flex gap-1">
+          <Button
+            variant={viewMode === "tree" ? "secondary" : "ghost"}
+            size="sm"
+            className="h-6 gap-1 px-2 text-xs"
+            onClick={() => setViewMode("tree")}
+          >
+            <TreePine className="h-3 w-3" />
+            Tree
           </Button>
-          {!hasInlineProofs && (
-            <Button variant="ghost" size="sm" className="h-6 gap-1 px-2 text-xs" onClick={loadProof}>
-              <RefreshCw className="h-3 w-3" />
-            </Button>
-          )}
+          <Button
+            variant={viewMode === "json" ? "secondary" : "ghost"}
+            size="sm"
+            className="h-6 gap-1 px-2 text-xs"
+            onClick={() => setViewMode("json")}
+          >
+            <FileJson className="h-3 w-3" />
+            JSON
+          </Button>
+          <div className="w-px h-4 bg-border mx-0.5" />
+          <Button variant="ghost" size="sm" className="h-6 gap-1 px-2 text-xs" onClick={loadProof} disabled={loading}>
+            <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} />
+            Refresh
+          </Button>
+          <Button variant="ghost" size="sm" className="h-6 gap-1 px-2 text-xs" onClick={handleExportJson}>
+            <Download className="h-3 w-3" />
+            Export
+          </Button>
         </div>
       </div>
-
-      <div className="flex-1 overflow-auto p-3 space-y-2">
-        {rows.length > 0 && proofTrees ? (
-          rows.map((row, i) => (
+      {viewMode === "tree" ? (
+        <div className="space-y-2">
+          {rows.map((row, i) => (
             <ResultTupleCard
               key={i}
               index={i}
-              columns={columns}
+              columns={columns.map((c) => String(c))}
               row={row}
-              proof={proofTrees[i] ?? null}
+              graph={graphs[i] ?? null}
             />
-          ))
-        ) : proofTrees && proofTrees.length > 0 ? (
-          proofTrees.map((tree, i) => (
-            <ProofNodeView key={i} node={tree} defaultOpen={true} />
-          ))
-        ) : (
-          <p className="p-4 text-center text-sm text-muted-foreground">No results to explain.</p>
-        )}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <pre className="flex-1 p-3 text-[11px] font-mono text-muted-foreground bg-muted/30 rounded-md overflow-auto">
+          {JSON.stringify(graphs, null, 2)}
+        </pre>
+      )}
     </div>
   )
 }

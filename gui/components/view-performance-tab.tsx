@@ -228,9 +228,9 @@ function irNodeColor(text: string): string {
 }
 
 function QueryPlanSection({ view }: { view: View }) {
-  const planSections = view.explainPlan ? parsePipelineTrace(view.explainPlan) : []
+  const planSections = view.debugPlan ? parsePipelineTrace(view.debugPlan) : []
 
-  if (!view.explainPlan) {
+  if (!view.debugPlan) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <Code className="h-8 w-8 text-muted-foreground/30 mb-3" />
@@ -242,7 +242,7 @@ function QueryPlanSection({ view }: { view: View }) {
   if (planSections.length === 0) {
     return (
       <div className="p-4">
-        <pre className="rounded-md bg-muted/30 p-3 font-mono text-xs text-foreground overflow-x-auto whitespace-pre-wrap">{view.explainPlan}</pre>
+        <pre className="rounded-md bg-muted/30 p-3 font-mono text-xs text-foreground overflow-x-auto whitespace-pre-wrap">{view.debugPlan}</pre>
       </div>
     )
   }

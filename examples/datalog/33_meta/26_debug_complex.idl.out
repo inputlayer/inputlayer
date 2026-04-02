@@ -16,7 +16,7 @@ Inserted 2 fact(s) into 'product'.
 Inserted 2 fact(s) into 'sale'.
 > +order_item[(101, 201), (102, 201)]
 Inserted 2 fact(s) into 'order_item'.
-> .explain ?product(PId, Name), sale(SId, PId, Price), order_item(SId, CId)
+> .debug ?product(PId, Name), sale(SId, PId, Price), order_item(SId, CId)
 Query Plan:
 ═══════════════════════════════════════════════════════════
                     PIPELINE TRACE                          

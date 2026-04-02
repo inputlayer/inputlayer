@@ -7,9 +7,9 @@ excerpt: "A supplier was reinstated three days ago. The agent still treats them 
 
 # Why Your AI Agent Is Making Decisions With Yesterday's Data
 
-A supplier was reinstated three days ago. Your procurement agent is still routing orders to more expensive alternatives. Customers are getting delayed shipment notices. The operations team is fielding complaints they can't explain. Nobody knows the block was lifted because the derived state - "this supplier is suspended" - hasn't caught up with the fact that changed on Tuesday.
+A supplier was reinstated three days ago. Your procurement agent is still routing orders to more expensive alternatives. Customers are getting delayed shipment notices. The operations team is fielding complaints they can't explain. Nobody knows the block was lifted because the calculated conclusion, "this supplier is suspended," hasn't caught up with the fact that changed on Tuesday.
 
-The model is fine. The retrieval pipeline is working. The problem is quieter and harder to catch: the conclusions your agent acts on - "this order is blocked," "this line is unavailable," "this supplier can't fulfill" - are stale. They were true when they were derived. They're not true anymore. And nothing in the system knows the difference.
+The model is fine. The retrieval pipeline is working. The problem is quieter and harder to catch: the conclusions your agent acts on ("this order is blocked," "this line is unavailable," "this supplier can't fulfill") are stale. They were true when they were derived. They're not true anymore. And nothing in the system knows the difference.
 
 ## How Most Agent Architectures Handle Context
 
@@ -17,17 +17,17 @@ The standard pattern: at query time, retrieve relevant context from a vector dat
 
 This works when your data changes slowly. It breaks when your data changes faster than your retrieval pipeline refreshes.
 
-The fundamental issue is that full recomputation doesn't scale. A 2,000-node entity graph takes 11.3 seconds to recompute transitive closure from scratch. Run that hourly, and you're spending 271 seconds per day on recomputation - for one graph, one query type. And even then, between refreshes, you can't know whether the context you retrieved is current or one cycle stale.
+The fundamental issue is that full recomputation doesn't scale. A 2,000-node entity graph takes 11.3 seconds to follow every chain of connections from scratch. Run that hourly, and you're spending 271 seconds per day on recomputation. That's for one graph, one query type. And even then, between refreshes, you can't know whether the context you retrieved is current or one cycle stale.
 
 ## The Incremental Alternative
 
 Incremental computation flips this around: only recompute what changed.
 
-When a supplier status changes from suspended to active, the only derivations that need updating are the ones that depended on that supplier's status. Not the entire graph.
+When a supplier status changes from suspended to active, the only conclusions that need updating are the ones that depended on that supplier's status. Not the entire graph.
 
-This is what incremental computation engines do. They maintain a dependency graph between facts and derived conclusions. When a fact changes, they propagate the delta through only the affected paths.
+This is what incremental computation engines do. They maintain a dependency graph between facts and conclusions. When a fact changes, they spread the update through only the affected paths.
 
-InputLayer is built on Differential Dataflow for exactly this property. The same 2,000-node transitive closure query that takes 11.3 seconds to recompute from scratch takes 6.83ms when a single edge is inserted - because only the paths affected by that edge are re-evaluated.
+InputLayer is built on Differential Dataflow, a computation engine designed to process changes efficiently rather than re-running everything. The same 2,000-node query that takes 11.3 seconds to follow every chain of connections from scratch takes 6.83ms when a single connection is added, because only the paths affected by that connection are re-evaluated.
 
 ## What This Means by Domain
 
@@ -35,7 +35,7 @@ InputLayer is built on Differential Dataflow for exactly this property. The same
 
 **Supply chain:** When a supplier comes off a sanctions watch list, the orders blocked by that flag are immediately unblocked. No manual reconciliation, no stale flags in the next batch job.
 
-**Financial risk:** When a beneficial ownership relationship changes, the affected transaction flags update in real time. Compliance sees the current ownership graph, not last week's.
+**Financial risk:** When a beneficial ownership relationship changes, the affected transaction flags update in real time. You see the current ownership graph, not last week's.
 
 ## The Implementation Pattern
 
@@ -45,12 +45,12 @@ Your data pipeline writes facts to InputLayer as they change:
 +supplier("sup_02", "status", "active")  // previously suspended
 ```
 
-InputLayer propagates the delta. Derivations that depended on `sup_02` being suspended are retracted. New derivations based on the active status are computed. Your agent queries against current state, not a snapshot.
+InputLayer spreads the update. Conclusions that depended on `sup_02` being suspended are removed. New conclusions based on the active status are computed. Your agent queries against current state, not a snapshot.
 
-The key property is correct retraction: when a fact is deleted or updated, every conclusion derived through it disappears automatically. Differential Dataflow handles this natively.
+The key property is smart cleanup: when a fact is deleted or updated, every conclusion that was built on top of it disappears automatically. Nothing stale lingers. Differential Dataflow handles this natively.
 
 ## The bottom line
 
 When a supplier status changes at 3pm, the next query at 3:01pm should reflect that change. Not the next morning after the batch job runs.
 
-InputLayer maintains derived conclusions incrementally. When a fact changes, only the affected conclusions update - in milliseconds, not hours. And every decision traces back to the specific facts and rules in effect at the time it was made.
+InputLayer maintains its conclusions incrementally. When a fact changes, only the affected conclusions update, in milliseconds, not hours. And every decision traces back to the specific facts and rules in effect at the time it was made.

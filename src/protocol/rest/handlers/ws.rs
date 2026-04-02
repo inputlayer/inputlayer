@@ -87,7 +87,7 @@ enum WsResponse {
         #[serde(skip_serializing_if = "Option::is_none")]
         metadata: Option<SessionQueryMetadataDto>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        proof_trees: Option<Vec<crate::provenance::wire::WireProofTree>>,
+        derivation_graphs: Option<Vec<crate::provenance::derivation_graph::DerivationGraph>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         timing_breakdown: Option<crate::execution::TimingBreakdown>,
     },
@@ -524,7 +524,7 @@ async fn handle_ws_query(handler: &Arc<Handler>, session_id: &str, query: String
                 execution_time_ms: start.elapsed().as_millis() as u64,
                 row_provenance,
                 metadata,
-                proof_trees: response.proof_trees,
+                derivation_graphs: response.derivation_graphs,
                 timing_breakdown: response.timing_breakdown,
             }
         }
@@ -688,7 +688,7 @@ enum GlobalWsResponse {
         #[serde(skip_serializing_if = "Option::is_none")]
         switched_kg: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        proof_trees: Option<Vec<crate::provenance::wire::WireProofTree>>,
+        derivation_graphs: Option<Vec<crate::provenance::derivation_graph::DerivationGraph>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         timing_breakdown: Option<crate::execution::TimingBreakdown>,
     },
@@ -703,7 +703,7 @@ enum GlobalWsResponse {
         #[serde(skip_serializing_if = "Option::is_none")]
         switched_kg: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        proof_trees: Option<Vec<crate::provenance::wire::WireProofTree>>,
+        derivation_graphs: Option<Vec<crate::provenance::derivation_graph::DerivationGraph>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         timing_breakdown: Option<crate::execution::TimingBreakdown>,
     },
@@ -1396,7 +1396,7 @@ async fn send_global_execute(
                 row_provenance: row_provenance.clone(),
                 metadata: metadata.clone(),
                 switched_kg: response.switched_kg.clone(),
-                proof_trees: response.proof_trees.clone(),
+                derivation_graphs: response.derivation_graphs.clone(),
                 timing_breakdown: response.timing_breakdown.clone(),
             };
 
@@ -1454,7 +1454,7 @@ async fn send_global_execute(
                     execution_time_ms: response.execution_time_ms,
                     metadata,
                     switched_kg: response.switched_kg,
-                    proof_trees: response.proof_trees,
+                    derivation_graphs: response.derivation_graphs,
                     timing_breakdown: response.timing_breakdown,
                 };
                 if !send_global_response(sender, &start_msg, session_id).await {
@@ -1554,7 +1554,7 @@ mod tests {
             execution_time_ms: 5,
             row_provenance: vec!["persistent".to_string()],
             metadata: None,
-            proof_trees: None,
+            derivation_graphs: None,
             timing_breakdown: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
@@ -1661,7 +1661,7 @@ mod tests {
             row_provenance: vec![],
             metadata: None,
             switched_kg: None,
-            proof_trees: None,
+            derivation_graphs: None,
             timing_breakdown: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
@@ -1684,7 +1684,7 @@ mod tests {
             row_provenance: vec![],
             metadata: None,
             switched_kg: Some("new_kg".to_string()),
-            proof_trees: None,
+            derivation_graphs: None,
             timing_breakdown: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
@@ -1774,7 +1774,7 @@ mod tests {
             execution_time_ms: 42,
             metadata: None,
             switched_kg: None,
-            proof_trees: None,
+            derivation_graphs: None,
             timing_breakdown: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
@@ -1784,7 +1784,7 @@ mod tests {
         // Optional fields omitted when None
         assert!(!json.contains("metadata"));
         assert!(!json.contains("switched_kg"));
-        assert!(!json.contains("proof_trees"));
+        assert!(!json.contains("derivation_graphs"));
     }
 
     #[test]
@@ -1854,7 +1854,7 @@ mod tests {
                 warnings: vec![],
             }),
             switched_kg: Some("new_kg".to_string()),
-            proof_trees: None,
+            derivation_graphs: None,
             timing_breakdown: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
@@ -1862,11 +1862,31 @@ mod tests {
         assert!(json.contains("\"truncated\":true"));
         assert!(json.contains("\"metadata\""));
         assert!(json.contains("\"switched_kg\":\"new_kg\""));
-        assert!(!json.contains("proof_trees"));
+        assert!(!json.contains("derivation_graphs"));
     }
 
     #[test]
-    fn test_global_ws_response_result_start_with_proof_trees() {
+    fn test_global_ws_response_result_start_with_derivation_graphs() {
+        use crate::provenance::derivation_graph::*;
+        let mut builder = GraphBuilder::new();
+        let fact_id = builder.insert(DerivationNode {
+            kind: NodeKind::Fact,
+            conclusion: Conclusion {
+                pred: "edge".into(),
+                args: vec![crate::value::Value::Int32(1), crate::value::Value::Int32(2)],
+            },
+            rule_id: None,
+            bindings: None,
+            aggregate: None,
+            negation: None,
+            vector_search: None,
+            truncated: None,
+            why_not: None,
+            source: None,
+            children: vec![],
+        });
+        let graph = builder.finish(vec![fact_id]);
+
         let resp = GlobalWsResponse::ResultStart {
             columns: vec!["x".to_string()],
             total_count: 1,
@@ -1874,17 +1894,12 @@ mod tests {
             execution_time_ms: 5,
             metadata: None,
             switched_kg: None,
-            proof_trees: Some(vec![crate::provenance::wire::WireProofTree {
-                node_type: "base_fact".to_string(),
-                relation: Some("edge".to_string()),
-                values: Some(vec![serde_json::json!(1), serde_json::json!(2)]),
-                ..crate::provenance::wire::WireProofTree::empty_pub()
-            }]),
+            derivation_graphs: Some(vec![graph]),
             timing_breakdown: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
-        assert!(json.contains("\"proof_trees\""));
-        assert!(json.contains("\"node_type\":\"base_fact\""));
-        assert!(json.contains("\"relation\":\"edge\""));
+        assert!(json.contains("\"derivation_graphs\""));
+        assert!(json.contains("\"kind\":\"fact\""));
+        assert!(json.contains("\"pred\":\"edge\""));
     }
 }

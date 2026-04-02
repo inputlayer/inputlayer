@@ -14,7 +14,7 @@ Switched to knowledge graph: test_explain_join_n33t17
 Inserted 2 fact(s) into 'user'.
 > +order[(101, 1), (102, 2)]
 Inserted 2 fact(s) into 'order'.
-> .explain ?user(UserId, Name), order(OrderId, UserId)
+> .debug ?user(UserId, Name), order(OrderId, UserId)
 Query Plan:
 ═══════════════════════════════════════════════════════════
                     PIPELINE TRACE                          

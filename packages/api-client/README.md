@@ -79,8 +79,8 @@ const result = await client.query.execute({
   timeoutMs: 30000, // optional
 });
 
-// Explain query plan
-const plan = await client.query.explain({
+// Debug query plan
+const plan = await client.query.debug({
   query: 'ancestor(X, Y)?',
   database: 'mydb',
 });

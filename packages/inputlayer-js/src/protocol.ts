@@ -78,7 +78,7 @@ export interface ResultResponse {
   metadata?: Record<string, any>;
   switched_kg?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  proof_trees?: any[];
+  derivation_graphs?: any[];
   timing_breakdown?: TimingBreakdown;
 }
 
@@ -99,7 +99,7 @@ export interface ResultStartResponse {
   metadata?: Record<string, any>;
   switched_kg?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  proof_trees?: any[];
+  derivation_graphs?: any[];
   timing_breakdown?: TimingBreakdown;
 }
 

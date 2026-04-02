@@ -45,30 +45,61 @@ export interface WsAuthErrorMessage {
   message: string
 }
 
-export interface WsProofTree {
-  node_type: string
-  relation?: string
-  values?: (string | number | boolean | null)[]
-  rule_name?: string
-  clause_index?: number
-  clause_text?: string
-  bindings?: Array<{ variable: string; value: string | number | boolean | null }>
-  children?: WsProofTree[]
-  pattern?: string
-  index_name?: string
-  metric?: string
-  query_vector?: number[]
-  result_id?: number
-  distance?: number
-  k?: number
-  ef_search?: number
-  aggregate_fn?: string
-  contributing_count?: number
-  sample_inputs?: (string | number | boolean | null)[][]
-  full_inputs?: (string | number | boolean | null)[][] | null
-  iteration?: number
-  inner?: WsProofTree
-  depth_limit?: number
+// --- Derivation Graph Types ---
+
+export type JsonValue = string | number | boolean | null
+
+export interface WsDerivationGraph {
+  version: number
+  query?: string
+  roots: string[]
+  nodes: Record<string, WsDerivationNode>
+}
+
+export interface WsDerivationNode {
+  kind: "fact" | "rule" | "negation" | "vector_search" | "aggregate" | "truncated" | "why_not"
+  conclusion: { pred: string; args: JsonValue[] }
+  source?: "edb" | "derived"
+  rule_id?: string
+  bindings?: Record<string, JsonValue>
+  aggregate?: {
+    fn: string
+    value_var: string
+    result: JsonValue
+    contributing_count: number
+    sample_inputs?: JsonValue[][]
+    full_inputs?: JsonValue[][] | null
+  }
+  negation?: { pattern: string }
+  vector_search?: {
+    index_name: string
+    metric: string
+    query_vector: number[]
+    result_id: number
+    distance: number
+    k: number
+    ef_search?: number
+  }
+  truncated?: { depth_limit: number }
+  why_not?: {
+    rule_name: string
+    clause_index: number
+    clause_text: string
+    blocker: {
+      type: string
+      reason?: string
+      predicate_index?: number
+      predicate_text?: string
+      comparison_text?: string
+      lhs_value?: string
+      rhs_value?: string
+      relation?: string
+      matching_tuple?: JsonValue[]
+      index_name?: string
+      k?: number
+    }
+  }
+  children: string[]
 }
 
 export interface WsTimingBreakdown {
@@ -98,7 +129,7 @@ export interface WsResultMessage {
   row_provenance?: string[]
   metadata?: WsResultMetadata
   switched_kg?: string
-  proof_trees?: WsProofTree[]
+  derivation_graphs?: WsDerivationGraph[]
   timing_breakdown?: WsTimingBreakdown
 }
 
@@ -143,7 +174,7 @@ export interface WsResultStartMessage {
   execution_time_ms: number
   metadata?: WsResultMetadata
   switched_kg?: string
-  proof_trees?: WsProofTree[]
+  derivation_graphs?: WsDerivationGraph[]
   timing_breakdown?: WsTimingBreakdown
 }
 

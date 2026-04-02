@@ -17,10 +17,10 @@ InputLayer traces that chain in a single query and keeps the answer current as i
 | Capability | Vector DBs | InputLayer | Together |
 |---|---|---|---|
 | Find similar content | Native, optimized at scale | Native | Use either or both |
-| Follow chains of relationships | No | Native | InputLayer handles this |
-| Evaluate rules recursively | No | Native | InputLayer handles this |
-| Update conclusions when facts change | No | Native (6.83ms per change) | InputLayer handles this |
-| Retract stale conclusions automatically | No | Native | InputLayer handles this |
+| Follow chains of relationships | Outside scope | Native | InputLayer handles this |
+| Evaluate rules recursively | Outside scope | Native | InputLayer handles this |
+| Update conclusions when facts change | Re-index | Native (6.83ms per change) | InputLayer handles this |
+| Retract stale conclusions automatically | Outside scope | Native | InputLayer handles this |
 | Enforce access policies in the query | Metadata filters only | Recursive logic | InputLayer handles hierarchies |
 
 ## Three things InputLayer handles that vector databases weren't built for

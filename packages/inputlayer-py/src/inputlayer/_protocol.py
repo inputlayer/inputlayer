@@ -79,7 +79,7 @@ class ResultResponse:
     row_provenance: list[str] | None = None
     metadata: dict[str, Any] | None = None
     switched_kg: str | None = None
-    proof_trees: list[dict[str, Any]] | None = None
+    derivation_graphs: list[dict[str, Any]] | None = None
     timing_breakdown: dict[str, Any] | None = None
 
 
@@ -97,7 +97,7 @@ class ResultStartResponse:
     execution_time_ms: int
     metadata: dict[str, Any] | None = None
     switched_kg: str | None = None
-    proof_trees: list[dict[str, Any]] | None = None
+    derivation_graphs: list[dict[str, Any]] | None = None
     timing_breakdown: dict[str, Any] | None = None
 
 
@@ -185,7 +185,7 @@ def deserialize_message(data: str | bytes) -> ServerMessage:
             row_provenance=obj.get("row_provenance"),
             metadata=obj.get("metadata"),
             switched_kg=obj.get("switched_kg"),
-            proof_trees=obj.get("proof_trees"),
+            derivation_graphs=obj.get("derivation_graphs"),
             timing_breakdown=obj.get("timing_breakdown"),
         )
     if msg_type == "error":
@@ -201,7 +201,7 @@ def deserialize_message(data: str | bytes) -> ServerMessage:
             execution_time_ms=obj["execution_time_ms"],
             metadata=obj.get("metadata"),
             switched_kg=obj.get("switched_kg"),
-            proof_trees=obj.get("proof_trees"),
+            derivation_graphs=obj.get("derivation_graphs"),
             timing_breakdown=obj.get("timing_breakdown"),
         )
     if msg_type == "result_chunk":

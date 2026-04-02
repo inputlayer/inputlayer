@@ -682,10 +682,10 @@ impl StorageEngine {
             .map_err(|e| StorageError::Other(format!("Query execution failed: {e}")))
     }
 
-    /// Explain a query plan without executing it.
+    /// Debug a query plan without executing it.
     ///
     /// Runs parse → IR → optimize on the query and returns the pipeline trace.
-    pub fn explain_query_on(
+    pub fn debug_query_on(
         &self,
         kg: &str,
         program: &str,
@@ -700,7 +700,7 @@ impl StorageEngine {
             db_guard.snapshot()
         };
 
-        // Prepend persistent rules (same as execute_with_rules) so the explain
+        // Prepend persistent rules (same as execute_with_rules) so the debug
         // plan matches actual execution behavior.
         let combined = if snapshot.rule_prefix().is_empty() {
             program.to_string()
@@ -712,8 +712,8 @@ impl StorageEngine {
         engine.input_tuples_mut().clone_from(&snapshot.input_tuples);
 
         engine
-            .explain(&combined)
-            .map_err(|e| StorageError::Other(format!("Query explain failed: {e}")))
+            .debug(&combined)
+            .map_err(|e| StorageError::Other(format!("Query debug failed: {e}")))
     }
 
     /// Execute a query with rules and return both results and proof context.
@@ -728,7 +728,8 @@ impl StorageEngine {
         Vec<Tuple>,
         Vec<crate::ast::Rule>,
         std::collections::HashMap<String, Vec<Tuple>>,
-        std::collections::HashMap<String, String>, // index_name -> metric
+        std::collections::HashMap<String, Vec<Tuple>>, // derived relation data
+        std::collections::HashMap<String, String>,     // index_name -> metric
     )> {
         let db = self
             .knowledge_graphs
@@ -757,14 +758,14 @@ impl StorageEngine {
             (snap, metrics)
         };
 
-        let result_tuples = snapshot
-            .execute_with_rules_tuples(program)
+        let (result_tuples, derived_data) = snapshot
+            .execute_with_rules_tuples_and_derived(program)
             .map_err(|e| StorageError::Other(format!("Query execution failed: {e}")))?;
 
         let rules = snapshot.rules.as_ref().clone();
         let base_data = snapshot.input_tuples.as_ref().clone();
 
-        Ok((result_tuples, rules, base_data, index_metrics))
+        Ok((result_tuples, rules, base_data, derived_data, index_metrics))
     }
 
     /// Get rules and base data for a knowledge graph (for provenance queries).
@@ -5000,18 +5001,18 @@ mod tests {
     }
 
     #[test]
-    fn test_explain_query() {
+    fn test_debug_query() {
         let temp = TempDir::new().unwrap();
         let config = create_test_config(temp.path().to_path_buf());
         let storage = StorageEngine::new(config).unwrap();
 
-        storage.create_knowledge_graph("explain_kg").unwrap();
+        storage.create_knowledge_graph("debug_kg").unwrap();
         storage
-            .insert_into("explain_kg", "edge", vec![(1, 2)])
+            .insert_into("debug_kg", "edge", vec![(1, 2)])
             .unwrap();
 
         let trace = storage
-            .explain_query_on("explain_kg", "result(X, Y) <- edge(X, Y)")
+            .debug_query_on("debug_kg", "result(X, Y) <- edge(X, Y)")
             .unwrap();
         assert!(trace.ast.is_some());
     }
@@ -5284,18 +5285,18 @@ mod tests {
     }
 
     #[test]
-    fn test_explain_query_on() {
+    fn test_debug_query_on() {
         let temp = TempDir::new().unwrap();
         let config = create_test_config(temp.path().to_path_buf());
         let storage = StorageEngine::new(config).unwrap();
 
-        storage.create_knowledge_graph("explain_kg").unwrap();
+        storage.create_knowledge_graph("debug_kg").unwrap();
         storage
-            .insert_into("explain_kg", "edge", vec![(1, 2)])
+            .insert_into("debug_kg", "edge", vec![(1, 2)])
             .unwrap();
 
         let trace = storage
-            .explain_query_on("explain_kg", "result(X, Y) <- edge(X, Y)")
+            .debug_query_on("debug_kg", "result(X, Y) <- edge(X, Y)")
             .unwrap();
         assert!(trace.ast.is_some());
     }

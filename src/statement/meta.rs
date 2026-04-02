@@ -55,10 +55,16 @@ pub enum MetaCommand {
     // System commands
     Compact,
     Status,
-    Explain(String), // .explain <query> - show query plan without executing
+    Debug(String),   // .debug <query> - show query plan without executing
     Why(String),     // .why <query> - show proof trees for query results
     WhyFull(String), // .why full <query> - show full proof trees (all contributors)
     WhyNot(String),  // .why_not <relation>(<values>) - explain missing derivation
+    // Teaching agent commands
+    AgentMessage(String), // .agent <message> - send message to teaching agent
+    AgentStart(String),   // .agent start <example_id> - start a teaching example
+    AgentSetup(String),   // .agent setup <example_id> - get setup IQL for an example
+    AgentExamples,        // .agent examples - list available examples
+
     Help,
     Quit,
 
@@ -161,10 +167,14 @@ fn format_meta_debug(cmd: &MetaCommand) -> String {
         MetaCommand::ClearPrefix(s) => format!("ClearPrefix({s:?})"),
         MetaCommand::Compact => "Compact".to_string(),
         MetaCommand::Status => "Status".to_string(),
-        MetaCommand::Explain(s) => format!("Explain({s:?})"),
+        MetaCommand::Debug(s) => format!("Debug({s:?})"),
         MetaCommand::Why(s) => format!("Why({s:?})"),
         MetaCommand::WhyFull(s) => format!("WhyFull({s:?})"),
         MetaCommand::WhyNot(s) => format!("WhyNot({s:?})"),
+        MetaCommand::AgentMessage(s) => format!("AgentMessage({s:?})"),
+        MetaCommand::AgentStart(s) => format!("AgentStart({s:?})"),
+        MetaCommand::AgentSetup(s) => format!("AgentSetup({s:?})"),
+        MetaCommand::AgentExamples => "AgentExamples".to_string(),
         MetaCommand::Help => "Help".to_string(),
         MetaCommand::Quit => "Quit".to_string(),
         MetaCommand::Load { path, mode } => {
@@ -243,20 +253,16 @@ pub fn parse_meta_command(input: &str) -> Result<MetaCommand, String> {
         "clear" => parse_clear_command(&parts),
         "compact" => Ok(MetaCommand::Compact),
         "status" => Ok(MetaCommand::Status),
-        "explain" => {
+        "debug" => {
             if parts.len() < 2 {
-                Err("Usage: .explain <query>".to_string())
+                Err("Usage: .debug <query>".to_string())
             } else {
-                // Everything after ".explain " is the query
-                let query = input
-                    .strip_prefix("explain")
-                    .unwrap_or("")
-                    .trim()
-                    .to_string();
+                // Everything after ".debug " is the query
+                let query = input.strip_prefix("debug").unwrap_or("").trim().to_string();
                 if query.is_empty() {
-                    Err("Usage: .explain <query>".to_string())
+                    Err("Usage: .debug <query>".to_string())
                 } else {
-                    Ok(MetaCommand::Explain(query))
+                    Ok(MetaCommand::Debug(query))
                 }
             }
         }
@@ -285,6 +291,18 @@ pub fn parse_meta_command(input: &str) -> Result<MetaCommand, String> {
                 }
             } else {
                 Ok(MetaCommand::Why(rest))
+            }
+        }
+        "agent" => {
+            let rest = input.strip_prefix("agent").unwrap_or("").trim().to_string();
+            if rest.is_empty() || rest == "examples" {
+                Ok(MetaCommand::AgentExamples)
+            } else if let Some(example_id) = rest.strip_prefix("start ") {
+                Ok(MetaCommand::AgentStart(example_id.trim().to_string()))
+            } else if let Some(example_id) = rest.strip_prefix("setup ") {
+                Ok(MetaCommand::AgentSetup(example_id.trim().to_string()))
+            } else {
+                Ok(MetaCommand::AgentMessage(rest))
             }
         }
         "help" | "?" => Ok(MetaCommand::Help),
@@ -1165,18 +1183,18 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_explain() {
-        let cmd = parse_meta_command(".explain ?edge(X, Y)").unwrap();
-        if let MetaCommand::Explain(query) = cmd {
+    fn test_parse_debug() {
+        let cmd = parse_meta_command(".debug ?edge(X, Y)").unwrap();
+        if let MetaCommand::Debug(query) = cmd {
             assert_eq!(query, "?edge(X, Y)");
         } else {
-            panic!("Expected Explain");
+            panic!("Expected Debug");
         }
     }
 
     #[test]
-    fn test_parse_explain_missing_query() {
-        let result = parse_meta_command(".explain");
+    fn test_parse_debug_missing_query() {
+        let result = parse_meta_command(".debug");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Usage"));
     }

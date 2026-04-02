@@ -1,4 +1,4 @@
-// Test: .explain shows Antijoin node for negation queries
+// Test: .debug shows Antijoin node for negation queries
 .kg create test_explain_neg_n33t20
 .kg use test_explain_neg_n33t20
 
@@ -6,7 +6,7 @@
 +fired[(2,)]
 
 // Explain a query with negation - should show Antijoin in plan
-.explain ?employee(Id, Name), !fired(Id)
+.debug ?employee(Id, Name), !fired(Id)
 
 // Cleanup
 .kg use default

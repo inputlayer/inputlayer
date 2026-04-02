@@ -151,7 +151,7 @@ operations:
       - `.session list` / `.session clear` - Session management
       - `.index list` / `.index create ...` / `.index drop <name>` - Index management
       - `.clear prefix <prefix>` - Clear relations by prefix
-      - `.explain <query>` - Show query plan without executing
+      - `.debug <query>` - Show query plan without executing
       - `.help` - Show available commands
       - `.status` - Server status
       - `.compact` - Trigger compaction

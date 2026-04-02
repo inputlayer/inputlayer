@@ -251,7 +251,7 @@ class Connection:
                     row_provenance=all_provenance or None,
                     metadata=start.metadata,
                     switched_kg=start.switched_kg,
-                    proof_trees=start.proof_trees,
+                    derivation_graphs=start.derivation_graphs,
                 )
 
             raise InternalError(f"Unexpected message during streaming: {response!r}")

@@ -1,16 +1,17 @@
-//! Body predicate proving and candidate enumeration.
+//! Body predicate proving and candidate enumeration for derivation graphs.
 //!
-//! Extracted from backward_chaining.rs to keep modules under 500 lines.
 //! Contains `prove_body` (left-to-right body predicate proving) and
 //! `enumerate_derived_candidates` (forward candidate generation for derived relations).
 
 use crate::ast::BodyPredicate;
-use crate::provenance::backward_chaining::{build_proofs_inner, ProofContext};
+use crate::provenance::backward_chaining::{build_node, ProofContext};
+use crate::provenance::derivation_graph::{
+    Conclusion, DerivationNode, GraphBuilder, NegationInfo, NodeId, NodeKind, VectorSearchInfo,
+};
 use crate::provenance::unification::{
     evaluate_comparison, find_matching_tuples, format_bound_terms, substitute_atom, Bindings,
     BoundTerm,
 };
-use crate::provenance::ProofTree;
 use crate::value::Value;
 use std::collections::HashSet;
 
@@ -20,15 +21,16 @@ pub const MAX_DERIVED_CANDIDATES: usize = 1000;
 
 /// Prove all body predicates, propagating bindings left-to-right.
 ///
-/// Returns all valid combinations of (final_bindings, child_proof_trees).
+/// Returns all valid combinations of (final_bindings, child_node_ids).
 pub fn prove_body(
     body: &[BodyPredicate],
     initial_bindings: Bindings,
     ctx: &ProofContext<'_>,
+    builder: &mut GraphBuilder,
     visited: &mut HashSet<(String, Vec<Value>)>,
     depth: usize,
-) -> Result<Vec<(Bindings, Vec<ProofTree>)>, String> {
-    let mut states: Vec<(Bindings, Vec<ProofTree>)> = vec![(initial_bindings, Vec::new())];
+) -> Result<Vec<(Bindings, Vec<NodeId>)>, String> {
+    let mut states: Vec<(Bindings, Vec<NodeId>)> = vec![(initial_bindings, Vec::new())];
 
     for (pred_idx, pred) in body.iter().enumerate() {
         let mut next_states = Vec::new();
@@ -37,26 +39,17 @@ pub fn prove_body(
                 BodyPredicate::Positive(atom) => {
                     let bound = substitute_atom(atom, bindings);
 
-                    // First try base data (includes materialized views)
+                    // First try base data
                     let mut matches = find_matching_tuples(&atom.relation, &bound, ctx.base_data);
-                    if matches.is_empty() && ctx.base_data.contains_key(&atom.relation) {
-                        // Debug: show bound pattern and first tuple to compare
-                        let bound_dbg: Vec<String> = bound.iter().map(|b| format!("{b:?}")).collect();
-                        let first_tuple = ctx.base_data.get(&atom.relation).and_then(|t| t.first());
-                        let tuple_dbg = first_tuple.map(|t| {
-                            (0..t.arity()).filter_map(|i| t.get(i).map(|v| format!("{v:?}"))).collect::<Vec<_>>().join(", ")
-                        });
-                        tracing::debug!(
-                            relation = %atom.relation,
-                            bound = ?bound_dbg,
-                            first_tuple = ?tuple_dbg,
-                            base_count = ctx.base_data.get(&atom.relation).map_or(0, |t| t.len()),
-                            "prove_body: 0 matches despite data present"
-                        );
+
+                    // Then try derived data
+                    if matches.is_empty() && ctx.is_derived(&atom.relation) {
+                        if let Some(derived_data) = ctx.derived_data {
+                            matches = find_matching_tuples(&atom.relation, &bound, derived_data);
+                        }
                     }
 
-                    // For derived relations with no base matches, enumerate
-                    // candidates by trying all rules that produce this relation
+                    // Last resort: enumerate candidates
                     if matches.is_empty() && ctx.is_derived(&atom.relation) {
                         matches = enumerate_derived_candidates(
                             &atom.relation,
@@ -71,20 +64,19 @@ pub fn prove_body(
                         let mut extended = bindings.clone();
                         extended.extend(new_binds);
 
-                        // Recursively prove the matched tuple
-                        let mut sub_proofs = Vec::new();
-                        build_proofs_inner(
+                        // Recursively build derivation node for the matched tuple
+                        let sub_ids = build_node(
                             &atom.relation,
                             &matched_tuple,
                             ctx,
+                            builder,
                             visited,
                             depth,
-                            &mut sub_proofs,
                         )?;
 
-                        if let Some(proof) = sub_proofs.into_iter().next() {
+                        if let Some(node_id) = sub_ids.into_iter().next() {
                             let mut new_children = children_so_far.clone();
-                            new_children.push(proof);
+                            new_children.push(node_id);
                             next_states.push((extended, new_children));
                         }
                     }
@@ -93,24 +85,43 @@ pub fn prove_body(
                     let bound = substitute_atom(atom, bindings);
                     let matches = find_matching_tuples(&atom.relation, &bound, ctx.base_data);
                     if matches.is_empty() {
-                        // Negation succeeds: no matching tuple exists
                         let pattern_str = format_bound_terms(&bound);
-                        let mut new_children = children_so_far.clone();
-                        new_children.push(ProofTree::NegationProof {
-                            relation: atom.relation.clone(),
-                            pattern: pattern_str,
+                        let node_id = builder.insert_unique(DerivationNode {
+                            kind: NodeKind::Negation,
+                            conclusion: Conclusion {
+                                pred: atom.relation.clone(),
+                                args: bound
+                                    .iter()
+                                    .filter_map(|b| match b {
+                                        BoundTerm::Concrete(v) => Some(v.clone()),
+                                        BoundTerm::Unbound(_) => None,
+                                    })
+                                    .collect(),
+                            },
+                            rule_id: None,
+                            bindings: None,
+                            aggregate: None,
+                            negation: Some(NegationInfo {
+                                pattern: pattern_str,
+                            }),
+                            vector_search: None,
+                            truncated: None,
+                            why_not: None,
+                            source: None,
+                            children: vec![],
                         });
+                        let mut new_children = children_so_far.clone();
+                        new_children.push(node_id);
                         next_states.push((bindings.clone(), new_children));
                     }
-                    // If matches is non-empty, negation fails -> this path is dead
                 }
                 BodyPredicate::Comparison(lhs, op, rhs) => {
                     match evaluate_comparison(lhs, op, rhs, bindings) {
                         Ok(true) => {
                             next_states.push((bindings.clone(), children_so_far.clone()));
                         }
-                        Ok(false) => {} // Comparison failed, path is dead
-                        Err(_) => {}    // Unbound variable, path is dead
+                        Ok(false) => {}
+                        Err(_) => {}
                     }
                 }
                 BodyPredicate::HnswNearest {
@@ -121,8 +132,6 @@ pub fn prove_body(
                     ef_search,
                     query: query_term,
                 } => {
-                    // For HNSW, the result is already in the base data as a
-                    // synthetic relation. Check if id_var and distance_var are bound.
                     let result_id = bindings.get(id_var);
                     let distance = bindings.get(distance_var);
                     if let (Some(id_val), Some(dist_val)) = (result_id, distance) {
@@ -136,13 +145,10 @@ pub fn prove_body(
                             _ => continue,
                         };
 
-                        // Resolve index metadata from context
                         let info = ctx.index_info.get(index_name);
                         let metric =
                             info.map_or_else(|| "unknown".to_string(), |i| i.metric.clone());
 
-                        // Resolve query vector: from index info, or from
-                        // bindings if the query term is a variable
                         let query_vector = info
                             .map(|i| i.query_vector.clone())
                             .or_else(|| match query_term {
@@ -159,16 +165,33 @@ pub fn prove_body(
                             })
                             .unwrap_or_default();
 
-                        let mut new_children = children_so_far.clone();
-                        new_children.push(ProofTree::VectorSearchProof {
-                            index_name: index_name.clone(),
-                            metric,
-                            query_vector,
-                            result_id: rid,
-                            distance: dist,
-                            k: *k,
-                            ef_search: *ef_search,
+                        let node_id = builder.insert_unique(DerivationNode {
+                            kind: NodeKind::VectorSearch,
+                            conclusion: Conclusion {
+                                pred: index_name.clone(),
+                                args: vec![Value::Int64(rid), Value::Float64(dist)],
+                            },
+                            rule_id: None,
+                            bindings: None,
+                            aggregate: None,
+                            negation: None,
+                            vector_search: Some(VectorSearchInfo {
+                                index_name: index_name.clone(),
+                                metric,
+                                query_vector,
+                                result_id: rid,
+                                distance: dist,
+                                k: *k,
+                                ef_search: *ef_search,
+                            }),
+                            truncated: None,
+                            why_not: None,
+                            source: None,
+                            children: vec![],
                         });
+
+                        let mut new_children = children_so_far.clone();
+                        new_children.push(node_id);
                         next_states.push((bindings.clone(), new_children));
                     }
                 }
@@ -199,9 +222,6 @@ pub fn enumerate_derived_candidates_pub(
 
 /// For a derived relation with no base data, enumerate candidate tuples
 /// by forward-evaluating each rule clause's body predicates.
-///
-/// Capped at `MAX_DERIVED_CANDIDATES` to prevent exponential blowup
-/// when multiple rules each produce many candidates.
 fn enumerate_derived_candidates(
     relation: &str,
     bound_terms: &[BoundTerm],
@@ -215,13 +235,14 @@ fn enumerate_derived_candidates(
 
     let rules = ctx.rules_for(relation);
     let mut candidates = Vec::new();
+    // Need a temporary builder for enumeration (nodes are discarded)
+    let mut temp_builder = GraphBuilder::new();
 
     for rule in &rules {
         if candidates.len() >= MAX_DERIVED_CANDIDATES {
             break;
         }
 
-        // Build initial bindings from the bound terms matching the head pattern
         let mut head_bindings = Bindings::new();
         for (bt, head_arg) in bound_terms.iter().zip(rule.head.args.iter()) {
             if let BoundTerm::Concrete(val) = bt {
@@ -231,15 +252,20 @@ fn enumerate_derived_candidates(
             }
         }
 
-        // Try to satisfy all body predicates with these partial bindings
-        match prove_body(&rule.body, head_bindings, ctx, visited, depth + 1) {
+        match prove_body(
+            &rule.body,
+            head_bindings,
+            ctx,
+            &mut temp_builder,
+            visited,
+            depth + 1,
+        ) {
             Ok(results) => {
                 for (final_bindings, _) in results {
                     if candidates.len() >= MAX_DERIVED_CANDIDATES {
                         break;
                     }
 
-                    // Construct the head tuple from the final bindings
                     let mut head_values = Vec::new();
                     let mut valid = true;
                     for arg in &rule.head.args {
@@ -264,7 +290,6 @@ fn enumerate_derived_candidates(
                     }
                     if valid {
                         let tuple = crate::value::Tuple::new(head_values);
-                        // Check that it matches the bound pattern
                         let mut matches_pattern = true;
                         for (i, bt) in bound_terms.iter().enumerate() {
                             if let BoundTerm::Concrete(expected) = bt {
@@ -277,7 +302,6 @@ fn enumerate_derived_candidates(
                             }
                         }
                         if matches_pattern {
-                            // Extract new bindings for unbound variables
                             let mut new_binds = Bindings::new();
                             for (i, bt) in bound_terms.iter().enumerate() {
                                 if let BoundTerm::Unbound(var) = bt {
@@ -296,4 +320,239 @@ fn enumerate_derived_candidates(
     }
 
     candidates
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{Atom, ComparisonOp, Term};
+    use crate::provenance::backward_chaining::ProofContext;
+    use crate::provenance::derivation_graph::NodeKind;
+    use crate::provenance::ProofConfig;
+    use crate::value::{Tuple, Value};
+    use std::collections::HashMap;
+
+    fn int(v: i32) -> Value {
+        Value::Int32(v)
+    }
+
+    fn base_data(entries: Vec<(&str, Vec<Vec<Value>>)>) -> HashMap<String, Vec<Tuple>> {
+        entries
+            .into_iter()
+            .map(|(name, rows)| (name.to_string(), rows.into_iter().map(Tuple::new).collect()))
+            .collect()
+    }
+
+    fn pos(rel: &str, args: Vec<&str>) -> BodyPredicate {
+        BodyPredicate::Positive(Atom {
+            relation: rel.to_string(),
+            args: args
+                .into_iter()
+                .map(|s| Term::Variable(s.to_string()))
+                .collect(),
+        })
+    }
+
+    fn neg(rel: &str, args: Vec<&str>) -> BodyPredicate {
+        BodyPredicate::Negated(Atom {
+            relation: rel.to_string(),
+            args: args
+                .into_iter()
+                .map(|s| Term::Variable(s.to_string()))
+                .collect(),
+        })
+    }
+
+    #[test]
+    fn test_positive_base_match() {
+        let data = base_data(vec![("edge", vec![vec![int(1), int(2)]])]);
+        let ctx = ProofContext::new(&[], &data, ProofConfig::default());
+        let mut builder = GraphBuilder::new();
+        let mut visited = HashSet::new();
+        let mut bindings = Bindings::new();
+        bindings.insert("X".into(), int(1));
+
+        let body = vec![pos("edge", vec!["X", "Y"])];
+        let results =
+            prove_body(&body, bindings, &ctx, &mut builder, &mut visited, 0).expect("should match");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].1.len(), 1); // one child node
+        assert_eq!(results[0].0.get("Y"), Some(&int(2)));
+    }
+
+    #[test]
+    fn test_positive_derived_fallback() {
+        let data = base_data(vec![]);
+        let derived = {
+            let mut m = HashMap::new();
+            m.insert("path".to_string(), vec![Tuple::new(vec![int(1), int(3)])]);
+            m
+        };
+        let rules = vec![crate::ast::Rule {
+            head: Atom {
+                relation: "path".into(),
+                args: vec![Term::Variable("X".into()), Term::Variable("Y".into())],
+            },
+            body: vec![pos("edge", vec!["X", "Y"])],
+        }];
+        let ctx =
+            ProofContext::new(&rules, &data, ProofConfig::default()).with_derived_data(&derived);
+        let mut builder = GraphBuilder::new();
+        let mut visited = HashSet::new();
+        let bindings = Bindings::new();
+
+        let body = vec![pos("path", vec!["X", "Y"])];
+        let results = prove_body(&body, bindings, &ctx, &mut builder, &mut visited, 0)
+            .expect("should match via derived_data");
+        assert!(!results.is_empty());
+    }
+
+    #[test]
+    fn test_negation_succeeds() {
+        let data = base_data(vec![("node", vec![vec![int(1)]])]);
+        let ctx = ProofContext::new(&[], &data, ProofConfig::default());
+        let mut builder = GraphBuilder::new();
+        let mut visited = HashSet::new();
+        let mut bindings = Bindings::new();
+        bindings.insert("X".into(), int(1));
+
+        // !danger(X) should succeed since danger is empty
+        let body = vec![neg("danger", vec!["X"])];
+        let results = prove_body(&body, bindings, &ctx, &mut builder, &mut visited, 0)
+            .expect("negation should succeed");
+        assert_eq!(results.len(), 1);
+        // Should have a negation child node
+        let child_id = &results[0].1[0];
+        let graph = builder.finish(vec![]);
+        let child = graph.nodes.get(child_id).unwrap();
+        assert_eq!(child.kind, NodeKind::Negation);
+    }
+
+    #[test]
+    fn test_negation_fails() {
+        let data = base_data(vec![("danger", vec![vec![int(1)]])]);
+        let ctx = ProofContext::new(&[], &data, ProofConfig::default());
+        let mut builder = GraphBuilder::new();
+        let mut visited = HashSet::new();
+        let mut bindings = Bindings::new();
+        bindings.insert("X".into(), int(1));
+
+        // !danger(X) should fail since danger(1) exists
+        let body = vec![neg("danger", vec!["X"])];
+        let result = prove_body(&body, bindings, &ctx, &mut builder, &mut visited, 0);
+        assert!(result.is_err(), "negation should fail when tuple exists");
+    }
+
+    #[test]
+    fn test_comparison_passes() {
+        let data = base_data(vec![("item", vec![vec![int(1), int(200)]])]);
+        let ctx = ProofContext::new(&[], &data, ProofConfig::default());
+        let mut builder = GraphBuilder::new();
+        let mut visited = HashSet::new();
+        let bindings = Bindings::new();
+
+        let body = vec![
+            pos("item", vec!["X", "S"]),
+            BodyPredicate::Comparison(
+                Term::Variable("S".into()),
+                ComparisonOp::GreaterThan,
+                Term::Constant(100),
+            ),
+        ];
+        let results = prove_body(&body, bindings, &ctx, &mut builder, &mut visited, 0)
+            .expect("comparison should pass");
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_comparison_fails_filters() {
+        let data = base_data(vec![("item", vec![vec![int(1), int(50)]])]);
+        let ctx = ProofContext::new(&[], &data, ProofConfig::default());
+        let mut builder = GraphBuilder::new();
+        let mut visited = HashSet::new();
+        let bindings = Bindings::new();
+
+        let body = vec![
+            pos("item", vec!["X", "S"]),
+            BodyPredicate::Comparison(
+                Term::Variable("S".into()),
+                ComparisonOp::GreaterThan,
+                Term::Constant(100),
+            ),
+        ];
+        let result = prove_body(&body, bindings, &ctx, &mut builder, &mut visited, 0);
+        assert!(result.is_err(), "comparison should fail");
+    }
+
+    #[test]
+    fn test_multi_body_join() {
+        let data = base_data(vec![(
+            "edge",
+            vec![vec![int(1), int(2)], vec![int(2), int(3)]],
+        )]);
+        let ctx = ProofContext::new(&[], &data, ProofConfig::default());
+        let mut builder = GraphBuilder::new();
+        let mut visited = HashSet::new();
+        let bindings = Bindings::new();
+
+        let body = vec![pos("edge", vec!["X", "Y"]), pos("edge", vec!["Y", "Z"])];
+        let results = prove_body(&body, bindings, &ctx, &mut builder, &mut visited, 0)
+            .expect("join should work");
+        // Should find path 1->2->3
+        assert!(!results.is_empty());
+        let (final_bindings, children) = &results[0];
+        assert_eq!(final_bindings.get("X"), Some(&int(1)));
+        assert_eq!(final_bindings.get("Z"), Some(&int(3)));
+        assert_eq!(children.len(), 2);
+    }
+
+    #[test]
+    fn test_empty_states_error() {
+        let data = base_data(vec![]);
+        let ctx = ProofContext::new(&[], &data, ProofConfig::default());
+        let mut builder = GraphBuilder::new();
+        let mut visited = HashSet::new();
+        let bindings = Bindings::new();
+
+        let body = vec![pos("nonexistent", vec!["X"])];
+        let result = prove_body(&body, bindings, &ctx, &mut builder, &mut visited, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_candidate_cap() {
+        // Create many rules that produce many candidates
+        let mut rules = Vec::new();
+        let mut data_entries = Vec::new();
+        for i in 0..10 {
+            let base_name = format!("base_{i}");
+            rules.push(crate::ast::Rule {
+                head: Atom {
+                    relation: "derived".into(),
+                    args: vec![Term::Variable("X".into())],
+                },
+                body: vec![BodyPredicate::Positive(Atom {
+                    relation: base_name.clone(),
+                    args: vec![Term::Variable("X".into())],
+                })],
+            });
+            let tuples: Vec<Vec<Value>> = (0..200).map(|j| vec![int(i * 200 + j)]).collect();
+            data_entries.push((base_name, tuples.into_iter().map(Tuple::new).collect()));
+        }
+
+        let base_data_map: HashMap<String, Vec<Tuple>> = data_entries.into_iter().collect();
+        let ctx = ProofContext::new(&rules, &base_data_map, ProofConfig::default());
+
+        let bound_terms = vec![BoundTerm::Unbound("X".into())];
+        let mut visited = HashSet::new();
+        let candidates =
+            enumerate_derived_candidates_pub("derived", &bound_terms, &ctx, &mut visited, 0);
+
+        assert!(
+            candidates.len() <= MAX_DERIVED_CANDIDATES,
+            "got {} candidates, expected <= {}",
+            candidates.len(),
+            MAX_DERIVED_CANDIDATES
+        );
+    }
 }

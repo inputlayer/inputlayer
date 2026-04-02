@@ -128,7 +128,13 @@ pub fn find_matching_tuples(
         }
     }
     if results.is_empty() && !tuples.is_empty() {
-        tracing::debug!(relation, total = tuples.len(), arity_mismatches, value_mismatches, "find_matching_tuples: no results");
+        tracing::debug!(
+            relation,
+            total = tuples.len(),
+            arity_mismatches,
+            value_mismatches,
+            "find_matching_tuples: no results"
+        );
     }
     results
 }

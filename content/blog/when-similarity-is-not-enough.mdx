@@ -7,11 +7,11 @@ excerpt: "Some queries need the system to follow a chain of relationships to rea
 
 # When Similarity Is Not Enough
 
-A healthcare AI agent gets a simple question from a patient: "Can I eat shrimp tonight?" The system does exactly what it's designed to do - embeds the query, runs a similarity search, and returns shrimp recipes, nutritional facts, and some seafood allergy FAQs. All highly relevant to the words "eat shrimp." All completely wrong for this patient.
+A healthcare AI agent gets a simple question from a patient: "Can I eat shrimp tonight?" The system does exactly what it's designed to do. It embeds the query, runs a similarity search, and returns shrimp recipes, nutritional facts, and some seafood allergy FAQs. All highly relevant to the words "eat shrimp." All completely wrong for this patient.
 
-The patient takes Amiodarone, a cardiac medication that interacts with iodine. Shrimp is high in iodine. The correct answer is "No, and here's why" - but that answer doesn't live in any single document. It lives across three facts in three different systems: the patient's medication list, a drug interaction database, and a nutritional profile. The phrase "shrimp dinner" has zero semantic overlap with "medication contraindication." You can't find the connection by looking for similar text. You have to follow a chain of relationships from one fact to the next.
+The patient takes Amiodarone, a cardiac medication that interacts with iodine. Shrimp is high in iodine. The correct answer is "No, and here's why," but that answer doesn't live in any single document. It lives across three facts in three different systems: the patient's medication list, a drug interaction database, and a nutritional profile. The phrase "shrimp dinner" has zero textual similarity with "medication contraindication." You can't find the connection by looking for similar text. You have to follow a chain of relationships from one fact to the next.
 
-This is the gap between retrieval and reasoning - and it shows up far beyond healthcare. Every time the answer requires connecting facts across sources rather than finding a matching document, similarity search alone will confidently return the wrong result.
+This is the gap between retrieval and reasoning, and it shows up far beyond healthcare. Every time the answer requires connecting facts across sources rather than finding a matching document, similarity search alone will return results that are semantically relevant but miss the logical connection.
 
 ## Three signs you need reasoning alongside retrieval
 
@@ -20,7 +20,7 @@ This is the gap between retrieval and reasoning - and it shows up far beyond hea
 You find yourself making multiple database calls and reconciling the results: query the vector database for relevant docs, query a graph for relationships, hit an auth service, merge everything in application code.
 
 ```
-// This pattern means you're solving a reasoning problem with glue code
+// This pattern means you're solving a reasoning problem with custom stitching code
 const docs = await vectorDB.search(queryEmbedding, topK=50);
 const userPerms = await authService.getPermissions(userId);
 const filteredDocs = docs.filter(d =>
@@ -31,13 +31,13 @@ const filteredDocs = docs.filter(d =>
 // ^ This recursive check is the tell
 ```
 
-That recursive `isSubordinate` check at the end is the tell. You've hit a reasoning problem and you're solving it with imperative code and API calls. It works, but it's fragile, slow, and hard to keep consistent.
+That recursive `isSubordinate` check at the end is the tell. You've hit a reasoning problem and you're solving it with manual code and API calls. It works, but it's fragile, slow, and hard to keep consistent.
 
-InputLayer handles the entire thing in one query - resolving the org hierarchy, checking permissions, and filtering results in a single pass.
+InputLayer handles the entire thing in one query, resolving the org hierarchy, checking permissions, and filtering results in a single pass.
 
 ### 2. Access policies involve hierarchies
 
-Your permission model started simple - department-based, maybe role-based. But now it involves hierarchies: managers can see their reports' documents, and their reports' reports, and so on down the chain.
+Your permission model started simple, department-based, maybe role-based. But now it involves hierarchies: managers can see their reports' documents, and their reports' reports, and so on down the chain.
 
 ```graph
 User --dept filter-> Documents [success]
@@ -47,11 +47,11 @@ User --dept filter-> Documents [success]
 Alice --manages-> Bob --manages-> Carol --manages-> ??? [highlight]
 ```
 
-You can't express "everyone in Alice's transitive reporting chain" as a flat filter because you don't know who's in that chain until you recursively traverse the org chart. And that chain changes every time someone joins, leaves, or transfers. InputLayer evaluates the hierarchy as part of the query, against the current org chart, every time.
+You can't express "everyone in Alice's full chain of who-reports-to-whom" as a flat filter because you don't know who's in that chain until you recursively traverse the org chart. And that chain changes every time someone joins, leaves, or transfers. InputLayer evaluates the hierarchy as part of the query, against the current org chart, every time.
 
 ### 3. Derived conclusions outlive their source facts
 
-A partner relationship ended three months ago. The partnership flag was removed from the CRM. But the integration recommendations, the priority support routing, the shared document access - those derived conclusions are still sitting in various caches and indexes. Nobody cleaned them up because nobody knows all the places they spread to.
+A partner relationship ended three months ago. The partnership flag was removed from the CRM. But the integration recommendations, the priority support routing, the shared document access. Those derived conclusions are still sitting in various caches and indexes. Nobody cleaned them up because nobody knows all the places they spread to.
 
 ```tree
 Partnership ended [highlight]
@@ -74,7 +74,7 @@ InputLayer [primary] --concludes-> Derived facts
 
 Most real applications need both. A customer support agent needs to find relevant help articles (retrieval) and check the customer's subscription tier (reasoning). A research assistant needs to find related papers (retrieval) and trace the citation graph to foundational work (reasoning). A financial advisor needs to find matching investment products (retrieval) and verify regulatory compliance (reasoning).
 
-Use each system for what it does best. For cases where you need both at the same time - "find documents similar to X that this user is authorized to see through their reporting chain" - InputLayer handles the combined query in a single pass with its native vector search capabilities.
+Use each system for what it does best. For cases where you need both at the same time, like "find documents similar to X that this user is authorized to see through their reporting chain," InputLayer handles the combined query in a single pass with its native vector search capabilities.
 
 ## Getting started
 

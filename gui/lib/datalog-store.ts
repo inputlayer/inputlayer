@@ -49,7 +49,7 @@ export interface View {
   arity: number
   dependencies: string[]
   computationSteps: ComputationStep[]
-  explainPlan: string
+  debugPlan: string
   isSession: boolean
   benchmark?: ViewBenchmark
 }
@@ -84,7 +84,7 @@ export interface QueryResult {
   rowProvenance?: string[]
   hasEphemeral?: boolean
   ephemeralSources?: string[]
-  proofTrees?: import("./ws-types").WsProofTree[]
+  derivationGraphs?: import("./ws-types").WsDerivationGraph[]
   timingBreakdown?: import("./ws-types").WsTimingBreakdown
 }
 
@@ -115,6 +115,7 @@ interface StoredConnection {
 
 interface DatalogStore {
   connection: DatalogConnection | null
+  username: string | null
   knowledgeGraphs: KnowledgeGraph[]
   selectedKnowledgeGraph: KnowledgeGraph | null
   relations: Relation[]
@@ -145,13 +146,14 @@ interface DatalogStore {
   cancelCurrentQuery: () => void
   loadRelationData: (relationName: string) => Promise<Relation | null>
   loadViewData: (viewName: string) => Promise<View | null>
-  explainQuery: (query: string) => Promise<string>
+  debugQuery: (query: string) => Promise<string>
   whyQuery: (query: string) => Promise<string>
   whyNotQuery: (input: string) => Promise<string>
   createKnowledgeGraph: (name: string) => Promise<void>
   deleteKnowledgeGraph: (name: string) => Promise<void>
   deleteRelation: (name: string) => Promise<void>
   dropRule: (name: string, isSession: boolean) => Promise<void>
+  loadExample: (categoryId: string, example: { name: string; description: string; code: string }) => Promise<void>
 
   // Persistence and refresh
   initFromStorage: () => Promise<void>
@@ -275,7 +277,7 @@ async function fetchViews(ws: WsClient): Promise<View[]> {
     arity: 0, // will be set from parsed definition in loadViewData()
     dependencies: [],
     computationSteps: [],
-    explainPlan: "",
+    debugPlan: "",
     isSession: false,
   }))
 }
@@ -314,6 +316,7 @@ async function checkHealth(host: string, port: number): Promise<void> {
 
 export const useDatalogStore = create<DatalogStore>((set, get) => ({
   connection: null,
+  username: null,
   knowledgeGraphs: [],
   selectedKnowledgeGraph: null,
   relations: [],
@@ -401,6 +404,24 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
       } : {}),
     })
 
+    // Auto-connect: if no stored session but we're served by an InputLayer server
+    // (same origin), skip the connection screen and connect automatically.
+    if (!stored && typeof window !== "undefined") {
+      const port = parseInt(window.location.port || (window.location.protocol === "https:" ? "443" : "80"), 10)
+      try {
+        await checkHealth(window.location.hostname, port)
+        // Server is alive on same origin - auto-connect with dev API key
+        stored = { host: window.location.hostname, port, name: "Local Server", username: "admin", password: "dev-api-key" }
+        ;(stored as unknown as Record<string, unknown>).apiKey = "dev-api-key"
+        set({
+          isRestoringSession: true,
+          connection: { id: "1", name: stored.name, host: stored.host, port: stored.port, status: "connecting" as const },
+        })
+      } catch {
+        // No same-origin server - show connection screen
+      }
+    }
+
     if (!stored) return
 
     try {
@@ -409,7 +430,8 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
       const savedKgName = getSelectedKgFromStorage()
       const kg = savedKgName || "default"
 
-      const ws = new WsClient({ url: buildWsUrl(stored.host, stored.port), kg, username: stored.username, password: stored.password })
+      const apiKey = (stored as unknown as Record<string, unknown>).apiKey as string | undefined
+      const ws = new WsClient({ url: buildWsUrl(stored.host, stored.port), kg, username: stored.username, password: stored.password, apiKey })
       await ws.connect()
       wsClient = ws
 
@@ -425,6 +447,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
 
       set({
         connection: { id: "1", name: stored.name, host: stored.host, port: stored.port, status: "connected" },
+        username: stored.username,
         knowledgeGraphs,
       })
 
@@ -476,9 +499,34 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
       console.error("Failed to restore session:", error)
       if (stateUnsubscribe) { stateUnsubscribe(); stateUnsubscribe = null }
       if (notificationUnsubscribe) { notificationUnsubscribe(); notificationUnsubscribe = null }
-      // Don't clear storage on transient failures - the user can retry on next refresh.
-      // Storage is only cleared on explicit disconnect.
       if (wsClient) { wsClient.disconnect(); wsClient = null }
+
+      // Session restore failed - try auto-connect with dev API key before showing login
+      if (typeof window !== "undefined") {
+        const port = parseInt(window.location.port || (window.location.protocol === "https:" ? "443" : "80"), 10)
+        try {
+          await checkHealth(window.location.hostname, port)
+          // Server is up - try connecting with dev API key
+          const ws = new WsClient({ url: buildWsUrl(window.location.hostname, port), kg: "default", apiKey: "dev-api-key" })
+          await ws.connect()
+          wsClient = ws
+          const knowledgeGraphs = await fetchKnowledgeGraphs(ws)
+          saveConnectionToStorage(window.location.hostname, port, "Local Server", "admin", "dev-api-key")
+          set({
+            isRestoringSession: false,
+            connection: { id: "1", name: "Local Server", host: window.location.hostname, port, status: "connected" },
+            username: "admin",
+            knowledgeGraphs,
+          })
+          if (knowledgeGraphs.length > 0) {
+            await get().loadKnowledgeGraph(knowledgeGraphs[0].name)
+          }
+          return
+        } catch {
+          // Auto-connect also failed - show login screen
+        }
+      }
+
       set({ isRestoringSession: false, connection: null, knowledgeGraphs: [], selectedKnowledgeGraph: null, relations: [], views: [] })
     }
   },
@@ -507,14 +555,14 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
 
       if (knowledgeGraphs.length === 0) {
         toast.warning("No knowledge graphs found", { description: "Create a knowledge graph to get started." })
-        set({ connection: { id: "1", name, host, port, status: "connected" }, knowledgeGraphs })
+        set({ connection: { id: "1", name, host, port, status: "connected" }, username, knowledgeGraphs })
         return
       }
 
       // Find current KG (the one the WS session is already bound to)
       const currentKg = knowledgeGraphs[0]
 
-      set({ connection: { id: "1", name, host, port, status: "connected" }, knowledgeGraphs })
+      set({ connection: { id: "1", name, host, port, status: "connected" }, username, knowledgeGraphs })
 
       if (currentKg) {
         await get().loadKnowledgeGraph(currentKg.name)
@@ -553,7 +601,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
     if (refreshDebounceTimer) { clearTimeout(refreshDebounceTimer); refreshDebounceTimer = null }
     if (wsClient) { wsClient.disconnect(); wsClient = null }
     clearStorage()
-    set({ connection: null, knowledgeGraphs: [], selectedKnowledgeGraph: null, relations: [], views: [] })
+    set({ connection: null, username: null, knowledgeGraphs: [], selectedKnowledgeGraph: null, relations: [], views: [] })
   },
 
   loadKnowledgeGraph: async (kgName: string) => {
@@ -587,10 +635,14 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
 
       saveSelectedKgToStorage(kgName)
 
+      const updatedKg = { ...kg, relationsCount: relations.length, viewsCount: views.length }
       set({
-        selectedKnowledgeGraph: { ...kg, relationsCount: relations.length, viewsCount: views.length },
+        selectedKnowledgeGraph: updatedKg,
         relations: relationsWithFlags,
         views: viewsWithFlags,
+        knowledgeGraphs: get().knowledgeGraphs.map((k) =>
+          k.name === kgName ? updatedKg : k
+        ),
       })
     } catch (error) {
       console.error("Failed to load knowledge graph:", error)
@@ -631,7 +683,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
           definition: existing?.definition || v.definition,
           dependencies: existing?.dependencies?.length ? existing.dependencies : v.dependencies,
           computationSteps: existing?.computationSteps?.length ? existing.computationSteps : v.computationSteps,
-          explainPlan: existing?.explainPlan || v.explainPlan,
+          debugPlan: existing?.debugPlan || v.debugPlan,
           arity: existing?.arity || v.arity,
         }
       })
@@ -711,7 +763,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
         rowProvenance: response.row_provenance,
         hasEphemeral: response.metadata?.has_ephemeral,
         ephemeralSources: response.metadata?.ephemeral_sources,
-        proofTrees: response.proof_trees,
+        derivationGraphs: response.derivation_graphs,
         timingBreakdown: response.timing_breakdown,
       }
       get().addQueryToHistory(result)
@@ -775,7 +827,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
         rowProvenance: response.row_provenance,
         hasEphemeral: response.metadata?.has_ephemeral,
         ephemeralSources: response.metadata?.ephemeral_sources,
-        proofTrees: response.proof_trees,
+        derivationGraphs: response.derivation_graphs,
         timingBreakdown: response.timing_breakdown,
       }
     } catch (error) {
@@ -849,13 +901,13 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
       // Derive arity from the first clause head (more reliable than clauseCount)
       const arity = clauses.length > 0 ? clauses[0].headArity : view.arity
 
-      // Fetch explain plan (best-effort)
-      let explainPlan = ""
+      // Fetch debug plan (best-effort)
+      let debugPlan = ""
       try {
         const vars = generateVariables(arity > 0 ? arity : 2)
-        explainPlan = await get().explainQuery(`?${viewName}(${vars.join(", ")})`)
+        debugPlan = await get().debugQuery(`?${viewName}(${vars.join(", ")})`)
       } catch {
-        // explain may fail for views with no data or complex recursive views
+        // debug may fail for views with no data or complex recursive views
       }
 
       // Auto-benchmark: run the view query to get timing breakdown (best-effort)
@@ -880,7 +932,7 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
         definition,
         dependencies,
         computationSteps,
-        explainPlan,
+        debugPlan,
         arity,
         benchmark,
       }
@@ -896,9 +948,9 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
   },
 
 
-  explainQuery: async (query: string): Promise<string> => {
+  debugQuery: async (query: string): Promise<string> => {
     if (!wsClient) throw new Error("Not connected")
-    const result = await wsClient.execute(`.explain ${query}`)
+    const result = await wsClient.execute(`.debug ${query}`)
     return result.rows.map((row) => String(row[0])).join("\n")
   },
 
@@ -948,5 +1000,65 @@ export const useDatalogStore = create<DatalogStore>((set, get) => ({
     const command = isSession ? `.session drop ${name}` : `.rule drop ${name}`
     await wsClient.execute(command)
     await get().refreshCurrentKnowledgeGraph()
+  },
+
+  loadExample: async (categoryId: string, example: { name: string; description: string; code: string }): Promise<void> => {
+    if (!wsClient) return
+    const { splitExampleCode } = await import("@/lib/examples")
+    const { setup, queries } = splitExampleCode(example.code)
+
+    // Meta examples (.kg commands, .rule management) just paste the code directly
+    const hasMeta = example.code.includes(".kg ")
+    const hasSetup = setup.trim().length > 0
+    if (hasMeta || (!hasSetup && !queries.trim())) {
+      const content = `// ${example.name}\n// ${example.description}\n\n${example.code}`
+      set({ editorContent: content })
+      if (typeof window !== "undefined") safeLsSet(STORAGE_KEY_EDITOR, content)
+      return
+    }
+
+    // Use the example name as the KG name (slugified)
+    const kgName = example.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_|_$/g, "") || "_playground"
+
+    try {
+      // Wipe and recreate the KG, seed all data in one batch
+      try { await wsClient.execute(`.kg drop ${kgName}`) } catch { /* ignore */ }
+      try { await wsClient.execute(`.kg create ${kgName}`) } catch { /* ignore */ }
+      await wsClient.execute(`.kg use ${kgName}`)
+      if (setup) {
+        // Send entire setup as one program (single round trip)
+        try { await wsClient.execute(setup) } catch { /* ignore partial failures */ }
+      }
+
+      // Build guide content for the editor
+      const guide = `// ${example.name}
+// ${example.description}
+//
+// Knowledge graph "${kgName}" is ready with data and rules loaded.
+// Follow the Learn panel on the right for a guided walkthrough.
+// Paste suggested queries here and press Cmd+Enter to run them.
+`
+
+      // Load the KG (fetches relations, updates dropdown) - skip editor override
+      await get().loadKnowledgeGraph(kgName)
+
+      // Set the editor content to the guide
+      set({ editorContent: guide })
+      if (typeof window !== "undefined") safeLsSet(STORAGE_KEY_EDITOR, guide)
+
+      // Auto-execute the first query so the user sees results immediately
+      const firstQuery = queries.split("\n").find((l) => l.trim().startsWith("?") || l.trim().startsWith(".why") || l.trim().startsWith(".rel"))
+      if (firstQuery) {
+        await get().executeQuery(firstQuery.trim())
+      }
+    } catch (error) {
+      console.error("Failed to load example:", error)
+      const content = `// ${example.name}\n// ${example.description}\n\n${example.code}`
+      set({ editorContent: content })
+      if (typeof window !== "undefined") safeLsSet(STORAGE_KEY_EDITOR, content)
+    }
   },
 }))

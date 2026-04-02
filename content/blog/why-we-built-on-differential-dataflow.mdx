@@ -2,20 +2,20 @@
 title: "Why We Built InputLayer on Differential Dataflow"
 date: "2026-01-30"
 category: "Engineering"
-excerpt: "One fact changes. Two million derived conclusions exist. How many need to update? Usually a few hundred. Differential Dataflow finds exactly those - in milliseconds."
+excerpt: "One fact changes. Two million derived conclusions exist. How many need to update? Usually a few hundred. Differential Dataflow finds exactly those, in milliseconds."
 ---
 
 # Why We Built InputLayer on Differential Dataflow
 
-We needed an engine where deleting one fact from a graph with two million derived conclusions would correctly retract exactly the right subset - in milliseconds, not minutes. Getting this wrong means phantom permissions that should have been revoked, stale compliance flags that miss a sanctions hit, or recommendations pointing to discontinued products. These aren't edge cases. They're the normal state of any system where facts change and derived conclusions don't keep up.
+We needed an engine where deleting one fact from a graph with two million derived conclusions would correctly retract exactly the right subset in milliseconds, not minutes. Getting this wrong means phantom permissions that should have been revoked, stale compliance flags that miss a sanctions hit, or recommendations pointing to discontinued products. These aren't edge cases. They're the normal state of any system where facts change and derived conclusions don't keep up.
 
-The choice of computation engine determines whether these bugs are even possible. We chose Differential Dataflow because it makes an entire category of consistency failures structurally impossible - not caught by tests, not handled by cleanup jobs, but eliminated at the engine level. Here's the story behind that choice.
+The choice of computation engine determines whether these bugs are even possible. We chose Differential Dataflow because it makes an entire category of consistency failures structurally impossible. Not caught by tests, not handled by cleanup jobs, but eliminated at the engine level. Here's the story behind that choice.
 
 ## The problem that started everything
 
 We wanted to build a knowledge graph engine that could do something deceptively simple: keep derived conclusions up to date when facts change.
 
-That sounds straightforward until you think about scale. Imagine a knowledge graph with 100,000 facts and 50 rules that derive new conclusions from those facts. Some of those rules are recursive - their output feeds back into their input. The initial computation produces millions of derived facts. Fine - that's a one-time cost.
+That sounds straightforward until you think about scale. Imagine a knowledge graph with 100,000 facts and 50 rules that derive new conclusions from those facts. Some of those rules are recursive, meaning their output feeds back into their input. The initial computation produces millions of derived facts. Fine, that's a one-time cost.
 
 But then a single fact changes. One employee transfers departments. One entity gets added to a sanctions list. One product goes out of stock.
 
@@ -23,7 +23,7 @@ But then a single fact changes. One employee transfers departments. One entity g
 100K facts + 50 rules -> 2M derived facts [primary] -> 1 fact changes -> ~100 affected [highlight]
 ```
 
-With a naive approach, you throw away all 2 million derived facts and recompute them from scratch. For small graphs, that's fast enough. For production workloads, it doesn't work. At 11 seconds per recomputation on a 2,000-node graph, you're locked into batch processing. Real-time permission checks, live compliance screening, instant recommendation updates - none of that is practical.
+With a naive approach, you throw away all 2 million derived facts and recompute them from scratch. For small graphs, that's fast enough. For production workloads, it doesn't work. At 11 seconds per recomputation on a 2,000-node graph, you're locked into batch processing. Real-time permission checks, live compliance screening, instant recommendation updates. None of that is practical.
 
 We needed an engine that could update just the affected derivations, correctly, in milliseconds.
 
@@ -31,10 +31,10 @@ We needed an engine that could update just the affected derivations, correctly, 
 
 We found it in Frank McSherry's work on [Differential Dataflow](https://github.com/TimelyDataflow/differential-dataflow), built on top of [Timely Dataflow](https://github.com/TimelyDataflow/timely-dataflow). Both are Rust libraries. The performance was a bonus. The computational model was the real discovery.
 
-The core idea is simple enough to explain in a paragraph: instead of storing derived data as static results, the engine represents everything as *weighted differences*. Adding a fact is a +1 difference. Removing a fact is a -1 difference. Every computation in the system processes differences in and produces differences out. This means every operation is naturally incremental - it never looks at the whole dataset, only at what changed.
+The core idea is simple enough to explain in a paragraph: instead of storing derived data as static results, the engine tracks *changes*. Adding a fact is a +1. Removing a fact is a -1. Every computation in the system takes changes in and produces changes out. This means every operation is naturally incremental. It never looks at the whole dataset, only at what changed.
 
 ```flow
-Traditional: Changed fact -> Recompute ALL [highlight] -> Rebuilt results
+Full recompute: Changed fact -> Recompute ALL [highlight] -> Rebuilt results
 ```
 
 ```flow
@@ -43,7 +43,7 @@ Differential: Changed fact -> Compute diff only [success] -> Updated derivations
 
 ## How it handles the hard part: recursive retraction
 
-The real test of an incremental system isn't additions - it's deletions. And specifically, deletions through recursive derivation chains.
+The real test of an incremental system isn't additions. It's deletions. And specifically, deletions through recursive chains of reasoning.
 
 Here's the scenario that breaks naive incremental systems. Alice has authority over Charlie through two independent paths:
 
@@ -52,9 +52,9 @@ Alice --manages-> Bob --manages-> Charlie [primary]
 Alice --manages-> Diana --manages-> Charlie [primary]
 ```
 
-Remove Bob's management of Charlie. Does Alice lose authority over Charlie? *No* - the path through Diana still supports it. Now remove Diana's management of Charlie too. Does Alice lose authority over Charlie? *Yes* - there are no remaining paths.
+Remove Bob's management of Charlie. Does Alice lose authority over Charlie? *No*, the path through Diana still supports it. Now remove Diana's management of Charlie too. Does Alice lose authority over Charlie? *Yes*, there are no remaining paths.
 
-Differential Dataflow handles this through its weight-based model. Each derived fact carries a weight representing the number of independent derivation paths. Removing a path decreases the weight. The fact only retracts when the weight hits zero.
+Differential Dataflow handles this through its weight-based model. Each derived fact carries a weight representing the number of independent reasoning paths that support it. Removing a path decreases the weight. The fact only retracts when the weight hits zero.
 
 ```steps
 Both paths: weight = 2 :: via Bob + Diana
@@ -62,27 +62,27 @@ Remove Bob path: weight = 1 :: survives [success]
 Remove Diana path: weight = 0 :: retracted [highlight]
 ```
 
-This sounds simple in theory. In practice, getting it right through multiple levels of recursive derivation, where intermediate conclusions can also have multiple support paths, is extraordinarily difficult. Differential Dataflow solves it at the engine level, which means we didn't have to.
+This sounds simple in theory. In practice, getting it right through multiple levels of recursive reasoning, where intermediate conclusions can also have multiple support paths, is extraordinarily difficult. Differential Dataflow solves it at the engine level, which means we didn't have to.
 
-## What this gives InputLayer users
+## What this gives you
 
 Building on Differential Dataflow gave us three properties that show up directly in what you can build with InputLayer.
 
 **Incremental maintenance:** When a fact changes, only the affected derivations recompute. On a 2,000-node graph with 400,000 derived relationships, updating a single edge takes 6.83ms instead of 11.3 seconds. That's a 1,652x speedup that turns batch-only workloads into real-time operations.
 
-**Correct retraction:** Delete a fact, and everything derived through it disappears - but only if there's no alternative derivation path. Phantom permissions, stale recommendations, lingering compliance flags - these bugs simply don't exist when the engine handles retraction correctly.
+**Correct retraction:** Delete a fact, and everything derived through it disappears, but only if there's no alternative reasoning path. Phantom permissions, stale recommendations, lingering compliance flags. These bugs simply don't exist when the engine handles retraction correctly.
 
-**Demand-driven evaluation:** We combined Differential Dataflow with Magic Sets optimization, which rewrites recursive rules to only compute what's needed for a specific query. Ask "who does Alice have authority over?" and the engine starts from Alice and follows only her paths - it doesn't compute authority for the entire organization. Query time is proportional to the relevant portion of the graph.
+**On-demand computation:** We combined Differential Dataflow with an optimization called Magic Sets, which rewrites recursive rules so the engine only computes what's needed for a specific query. Ask "who does Alice have authority over?" and the engine starts from Alice and follows only her paths. It doesn't compute authority for the entire organization. Query time is proportional to the relevant portion of the graph.
 
 ## The tradeoffs
 
 No engineering decision is free. Here's what we trade.
 
-**Memory:** Differential Dataflow maintains operator state in memory. For very large datasets, memory usage grows with the size of the maintained derivations. We handle this with persistent storage - Parquet files plus a write-ahead log - that lets us recover state without keeping everything in memory indefinitely. But it's a real consideration for very large knowledge graphs.
+**Memory:** Differential Dataflow keeps its working memory in RAM. For very large datasets, memory usage grows with the size of the maintained results. We handle this with persistent storage (Parquet files plus a write-ahead log) that lets us recover state without keeping everything in memory indefinitely. But it's a real consideration for very large knowledge graphs.
 
-**Complexity floor:** The Timely/Differential Dataflow programming model is powerful but has a steep learning curve. We invested significant engineering time building the abstraction layer that compiles high-level rules into efficient dataflow graphs. Users never touch the dataflow layer directly - but we do, and it required deep expertise to get right.
+**Complexity floor:** The Timely/Differential Dataflow programming model is powerful but has a steep learning curve. We invested significant engineering time building the abstraction layer that compiles high-level rules into efficient computation pipelines. You never touch the dataflow layer directly, but we do, and it required deep expertise to get right.
 
-**Single-node:** Currently, InputLayer runs on a single node. Timely Dataflow supports distributed computation, and that's on our roadmap. But today, the engine is bounded by what a single machine can handle. For most knowledge graph workloads, that's millions of facts and derived relationships - but it's a real limit for truly massive datasets.
+**Single-node:** Currently, InputLayer runs on a single node. Timely Dataflow supports distributed computation, and that's on our roadmap. But today, the engine is bounded by what a single machine can handle. For most knowledge graph workloads, that's millions of facts and derived relationships, but it's a real limit for truly massive datasets.
 
 ## Where the choice matters most
 

@@ -218,12 +218,46 @@ impl KnowledgeGraphSnapshot {
         result
     }
 
+    /// Execute a query with rules, returning tuples AND all derived relation data.
+    ///
+    /// Used by the provenance system to pass materialized derived tuples
+    /// to the backward chainer, avoiding expensive re-derivation.
+    pub fn execute_with_rules_tuples_and_derived(
+        &self,
+        program: &str,
+    ) -> Result<(Vec<Tuple>, HashMap<String, Vec<Tuple>>), String> {
+        use crate::execution::TimingMode;
+        self.execute_with_rules_tuples_profiled_full(program, TimingMode::Off)
+            .map(|(tuples, derived, _timing)| (tuples, derived))
+    }
+
     /// Execute a query with rules, returning tuples and optional timing breakdown.
     pub fn execute_with_rules_tuples_profiled(
         &self,
         program: &str,
         timing_mode: crate::execution::TimingMode,
     ) -> Result<(Vec<Tuple>, Option<crate::execution::TimingBreakdown>), String> {
+        self.execute_with_rules_tuples_profiled_full(program, timing_mode)
+            .map(|(tuples, _derived, timing)| (tuples, timing))
+    }
+
+    /// Execute a query with rules, returning tuples, all derived relation data,
+    /// and optional timing breakdown.
+    ///
+    /// The derived data contains all intermediate relation results computed during
+    /// evaluation, used by the provenance system for backward chaining.
+    pub fn execute_with_rules_tuples_profiled_full(
+        &self,
+        program: &str,
+        timing_mode: crate::execution::TimingMode,
+    ) -> Result<
+        (
+            Vec<Tuple>,
+            HashMap<String, Vec<Tuple>>,
+            Option<crate::execution::TimingBreakdown>,
+        ),
+        String,
+    > {
         let start = Instant::now();
         let combined = if self.rule_prefix.is_empty() {
             program.to_string()
@@ -375,7 +409,9 @@ impl KnowledgeGraphSnapshot {
         engine.set_shared_input(shared);
 
         let combined = format!("{}{}", self.rule_prefix, program);
-        let result = engine.execute_tuples_profiled(&combined);
+        let result = engine
+            .execute_tuples_profiled(&combined)
+            .map(|(tuples, _derived, timing)| (tuples, timing));
         info!(
             program_len = program.len(),
             combined_len = combined.len(),

@@ -6,14 +6,14 @@ title: Explainability
 
 Every fact in InputLayer is traceable. When the engine derives a result, you can ask *why* it was derived and get a complete proof tree showing the chain of rules and base facts that produced it. When an expected result is missing, you can ask *why not* and get a precise explanation of which rule condition failed.
 
-This is one of InputLayer's core differentiators: unlike vector similarity searches that return "the embedding was close," InputLayer tells you "the system derived X because rule A applied to facts B and C."
+This is one of InputLayer's core differentiators: while similarity searches explain results through distance scores, InputLayer provides deterministic logical derivation chains - "the system derived X because rule A applied to facts B and C."
 
-## Query Plans with `.explain`
+## Query Plans with `.debug`
 
 Before diving into derivation proofs, you can inspect how a query will execute:
 
 ```datalog
-.explain ?reachable(1, X)
+.debug ?reachable(1, X)
 ```
 
 This shows the compilation pipeline (AST, IR, optimizations) without running the query. Useful for understanding query performance.

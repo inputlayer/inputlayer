@@ -87,7 +87,7 @@ const TOKEN_REGEX = new RegExp(
     // String literal (with escapes)
     /"(?:[^"\\]|\\.)*(?:"|$)/.source,
     // Meta commands (dot-prefix) - must precede punctuation
-    /\.(?:kg\s+(?:create|list|use|drop)|rel|rule\s+(?:list|drop|remove|def|clear|edit|query)|session\s+(?:clear|drop)|index\s+(?:list|create|drop|stats|rebuild)|user\s+(?:list|create|drop|password|role)|apikey\s+(?:create|list|revoke)|kg|rule|session|index|user|apikey|load|compact|status|help|quit|exit|explain|\?|q)\b/.source,
+    /\.(?:kg\s+(?:create|list|use|drop)|rel|rule\s+(?:list|drop|remove|def|clear|edit|query)|session\s+(?:clear|drop)|index\s+(?:list|create|drop|stats|rebuild)|user\s+(?:list|create|drop|password|role)|apikey\s+(?:create|list|revoke)|kg|rule|session|index|user|apikey|load|compact|status|help|quit|exit|debug|\?|q)\b/.source,
     // Rule arrow
     /<-/.source,
     // Comparison operators (before < > punctuation)

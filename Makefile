@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test js-test front-build front-deploy gui-build run run-server coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -517,13 +517,34 @@ flush-dev:
 gui-build:
 	cd gui && npm ci && npm run build
 
-# Build GUI + run the server (GUI served at http://localhost:8080/)
+# Build GUI + run the server. Examples load on-demand from the GUI.
+# Reads secrets from .env file (gitignored).
 run: gui-build
+	@echo "Starting InputLayer..."
+	@echo "======================"
+	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
 	cargo run --bin inputlayer-server
 
-# Run the server without rebuilding GUI (assumes gui/dist/ already exists)
+# Run the server without rebuilding GUI
 run-server:
 	cargo run --bin inputlayer-server
+
+# Pre-seed demo knowledge graphs (for demo.inputlayer.ai deployment)
+demo: gui-build
+	@rm -rf ./data
+	@echo "Building server and client..."
+	@cargo build --bin inputlayer-server --bin inputlayer-client
+	@echo ""
+	@echo "Starting InputLayer with demo data..."
+	@echo "======================================"
+	@scripts/demo-local.sh
+	@rm -rf ./data
+	@echo "Building server and client..."
+	@cargo build --bin inputlayer-server --bin inputlayer-client
+	@echo ""
+	@echo "Starting InputLayer with demo data..."
+	@echo "======================================"
+	@scripts/demo-local.sh
 
 # Frontend Website
 

@@ -18,6 +18,8 @@ export interface WsClientConfig {
   username?: string
   /** Password for login authentication */
   password?: string
+  /** API key for authentication (alternative to username/password) */
+  apiKey?: string
   /** Auto-reconnect on unexpected close (default: true) */
   autoReconnect?: boolean
   /** Max reconnect attempts (default: 10) */
@@ -52,7 +54,7 @@ interface StreamingState {
   executionTimeMs: number
   metadata?: WsResultStartMessage["metadata"]
   switchedKg?: string
-  proofTrees?: import("./ws-types").WsProofTree[]
+  derivationGraphs?: import("./ws-types").WsDerivationGraph[]
   timingBreakdown?: import("./ws-types").WsTimingBreakdown
   rows: (string | number | boolean | null)[][]
   rowProvenance: string[]
@@ -78,6 +80,7 @@ export class WsClient {
   private readonly kg: string
   private readonly username: string
   private readonly password: string
+  private readonly apiKey: string
   private readonly autoReconnect: boolean
   private readonly maxReconnectAttempts: number
   private readonly reconnectDelayMs: number
@@ -87,6 +90,7 @@ export class WsClient {
     this.kg = config.kg ?? "default"
     this.username = config.username ?? ""
     this.password = config.password ?? ""
+    this.apiKey = config.apiKey ?? ""
     this.autoReconnect = config.autoReconnect ?? true
     this.maxReconnectAttempts = config.maxReconnectAttempts ?? 10
     this.reconnectDelayMs = config.reconnectDelayMs ?? 1000
@@ -109,12 +113,12 @@ export class WsClient {
       let authenticated = false
 
       ws.onopen = () => {
-        // Send login message immediately after connection
-        ws.send(JSON.stringify({
-          type: "login",
-          username: this.username,
-          password: this.password,
-        }))
+        // Send auth message immediately after connection
+        if (this.apiKey) {
+          ws.send(JSON.stringify({ type: "authenticate", api_key: this.apiKey }))
+        } else {
+          ws.send(JSON.stringify({ type: "login", username: this.username, password: this.password }))
+        }
       }
 
       ws.onmessage = (event) => {
@@ -292,7 +296,7 @@ export class WsClient {
           executionTimeMs: msg.execution_time_ms,
           metadata: msg.metadata,
           switchedKg: msg.switched_kg,
-          proofTrees: msg.proof_trees,
+          derivationGraphs: msg.derivation_graphs,
           timingBreakdown: msg.timing_breakdown,
           rows: [],
           rowProvenance: [],
@@ -330,7 +334,7 @@ export class WsClient {
             row_provenance: s.rowProvenance.length > 0 ? s.rowProvenance : undefined,
             metadata: s.metadata,
             switched_kg: s.switchedKg,
-            proof_trees: s.proofTrees,
+            derivation_graphs: s.derivationGraphs,
             timing_breakdown: s.timingBreakdown,
           }
           const pending = this.pendingQueue.shift()

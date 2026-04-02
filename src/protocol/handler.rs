@@ -182,6 +182,8 @@ pub struct Handler {
         Arc<parking_lot::Mutex<std::collections::VecDeque<PersistentNotification>>>,
     /// Accumulated timing histogram buckets for Prometheus export.
     timing_histograms: Arc<crate::execution::timing::TimingHistograms>,
+    /// Teaching agent for guided onboarding.
+    agent: Arc<crate::agent::AgentManager>,
 }
 
 /// Current epoch milliseconds.
@@ -457,7 +459,7 @@ impl QueryJob {
             .map_err(|e| e.to_string())
     }
 
-    fn explain_query(
+    fn debug_query(
         &self,
         knowledge_graph: Option<String>,
         query: String,
@@ -477,7 +479,7 @@ impl QueryJob {
         };
 
         let trace = storage
-            .explain_query_on(&kg_name, &query)
+            .debug_query_on(&kg_name, &query)
             .map_err(|e| format!("{e}"))?;
 
         let optimizations = vec![
@@ -492,16 +494,15 @@ impl QueryJob {
 
     /// Build proof trees explaining why query results were derived.
     ///
-    /// Returns a QueryResult with both the result rows AND structured proof trees
-    /// in the `proof_trees` field, so clients get typed data not text.
+    /// Returns a QueryResult with both the result rows AND derivation graphs
+    /// in the `derivation_graphs` field, so clients get typed data not text.
     fn why_query(
         &self,
         knowledge_graph: Option<String>,
         query: String,
         full_mode: bool,
     ) -> Result<QueryResult, String> {
-        use crate::provenance::backward_chaining::{build_proofs, ProofContext};
-        use crate::provenance::wire::WireProofTree;
+        use crate::provenance::backward_chaining::{build_derivation_graph, ProofContext};
         use crate::provenance::ProofConfig;
 
         let start = std::time::Instant::now();
@@ -519,7 +520,7 @@ impl QueryJob {
         };
 
         let query_start = std::time::Instant::now();
-        let (mut result_tuples, rules, base_data, index_metrics) = storage
+        let (mut result_tuples, rules, base_data, derived_data, index_metrics) = storage
             .execute_and_get_context(&kg_name, &query)
             .map_err(|e| format!("{e}"))?;
         let query_us = query_start.elapsed().as_micros() as u64;
@@ -548,17 +549,18 @@ impl QueryJob {
                     name,
                     crate::provenance::backward_chaining::IndexProofInfo {
                         metric,
-                        query_vector: Vec::new(), // Filled from AST during backward chaining
+                        query_vector: Vec::new(),
                     },
                 )
             })
             .collect();
-        let ctx = ProofContext::with_index_info(&rules, &base_data, config.clone(), index_info);
+        let ctx = ProofContext::with_index_info(&rules, &base_data, config.clone(), index_info)
+            .with_derived_data(&derived_data);
 
-        // Build wire rows from result tuples
+        // Build wire rows and derivation graphs
         let schema = extract_query_schema(&query, &result_tuples);
         let mut rows = Vec::new();
-        let mut wire_proofs = Vec::new();
+        let mut graphs = Vec::new();
 
         let proof_start = std::time::Instant::now();
         for tuple in &result_tuples {
@@ -567,28 +569,38 @@ impl QueryJob {
                 .collect();
             rows.push(WireTuple::new(values));
 
-            // Build proof tree for this tuple
-            let proof = match build_proofs(&relation, tuple, &ctx) {
-                Ok(proofs) => {
-                    if proofs.len() == 1 {
-                        WireProofTree::from(&proofs[0])
-                    } else {
-                        // Multiple proofs - wrap in a synthetic parent
-                        WireProofTree::from(&crate::provenance::ProofTree::RuleApplication {
-                            rule_name: relation.clone(),
-                            clause_index: 0,
-                            clause_text: format!("{} alternative proofs", proofs.len()),
-                            bindings: vec![],
-                            children: proofs,
-                        })
-                    }
-                }
+            let mut graph = match build_derivation_graph(&relation, tuple, &ctx) {
+                Ok(g) => g,
                 Err(err) => {
-                    tracing::warn!(relation = %relation, error = %err, "build_proofs failed");
-                    WireProofTree::from(&crate::provenance::ProofTree::Truncated { depth_limit: config.max_depth })
+                    tracing::warn!(relation = %relation, error = %err, "build_derivation_graph failed");
+                    // Fallback: single truncated node
+                    use crate::provenance::derivation_graph::*;
+                    let mut builder = GraphBuilder::new();
+                    let id = builder.insert_unique(DerivationNode {
+                        kind: NodeKind::Truncated,
+                        conclusion: Conclusion {
+                            pred: relation.clone(),
+                            args: (0..tuple.arity())
+                                .filter_map(|i| tuple.get(i).cloned())
+                                .collect(),
+                        },
+                        rule_id: None,
+                        bindings: None,
+                        aggregate: None,
+                        negation: None,
+                        vector_search: None,
+                        truncated: Some(TruncatedInfo {
+                            depth_limit: config.max_depth,
+                        }),
+                        why_not: None,
+                        source: None,
+                        children: vec![],
+                    });
+                    builder.finish(vec![id])
                 }
             };
-            wire_proofs.push(proof);
+            graph.query = Some(query.clone());
+            graphs.push(graph);
         }
         let proof_us = proof_start.elapsed().as_micros() as u64;
 
@@ -613,7 +625,7 @@ impl QueryJob {
                             workers: 1,
                         },
                         crate::execution::timing::RuleTiming {
-                            rule_head: "proof_construction".into(),
+                            rule_head: "derivation_graph_construction".into(),
                             execution_us: proof_us,
                             is_recursive: false,
                             workers: 1,
@@ -633,23 +645,21 @@ impl QueryJob {
             execution_time_ms: start.elapsed().as_millis() as u64,
             metadata: None,
             switched_kg: None,
-            proof_trees: Some(wire_proofs),
+            derivation_graphs: Some(graphs),
             timing_breakdown,
         })
     }
 
     /// Explain why a specific tuple was NOT derived.
     ///
-    /// Returns a QueryResult with the explanation serialized as structured JSON
-    /// in a `why_not` column, plus the full WhyNotExplanation in proof_trees metadata.
+    /// Returns a QueryResult with the explanation as structured derivation graph.
     fn why_not_query(
         &self,
         knowledge_graph: Option<String>,
         input: String,
     ) -> Result<QueryResult, String> {
         use crate::provenance::backward_chaining::ProofContext;
-        use crate::provenance::why_not::explain_why_not;
-        use crate::provenance::wire::WireWhyNotExplanation;
+        use crate::provenance::why_not::{explain_why_not, format_why_not_text};
         use crate::provenance::ProofConfig;
 
         let start = std::time::Instant::now();
@@ -675,14 +685,13 @@ impl QueryJob {
         let query_us = query_start.elapsed().as_micros() as u64;
 
         let explain_start = std::time::Instant::now();
-        let explanation = explain_why_not(&relation, &tuple, &ctx);
+        // Build the rich derivation graph (for structured export/GUI)
+        let mut graph = explain_why_not(&relation, &tuple, &ctx);
+        graph.query = Some(format!(".why_not {input}"));
         let explain_us = explain_start.elapsed().as_micros() as u64;
 
-        let wire_exp = WireWhyNotExplanation::from(&explanation);
-        let json_str = serde_json::to_string(&wire_exp).unwrap_or_default();
-
-        // Return human-readable text in rows + structured JSON in a second column
-        let formatted = explanation.format_explanation();
+        // Derive text from the graph (no duplicated logic)
+        let formatted = format_why_not_text(&graph);
         let rows: Vec<WireTuple> = formatted
             .lines()
             .map(|line| WireTuple::new(vec![WireValue::String(line.to_string())]))
@@ -729,15 +738,7 @@ impl QueryJob {
             execution_time_ms: start.elapsed().as_millis() as u64,
             metadata: None,
             switched_kg: None,
-            // Embed the structured why-not as a single proof tree node
-            proof_trees: Some(vec![crate::provenance::wire::WireProofTree {
-                node_type: "why_not".to_string(),
-                relation: Some(relation),
-                rule_name: None,
-                clause_index: None,
-                clause_text: Some(json_str),
-                ..crate::provenance::wire::WireProofTree::empty_pub()
-            }]),
+            derivation_graphs: Some(vec![graph]),
             timing_breakdown,
         })
     }
@@ -770,6 +771,9 @@ impl Handler {
                 std::collections::VecDeque::new(),
             )),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
+            agent: Arc::new(crate::agent::AgentManager::new(
+                crate::agent::AgentConfig::default(),
+            )),
         }
     }
 
@@ -806,6 +810,9 @@ impl Handler {
                 std::collections::VecDeque::new(),
             )),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
+            agent: Arc::new(crate::agent::AgentManager::new(
+                crate::agent::AgentConfig::default(),
+            )),
         }
     }
 
@@ -1287,7 +1294,7 @@ impl Handler {
             execution_time_ms: 0,
             metadata: None,
             switched_kg: None,
-            proof_trees: None,
+            derivation_graphs: None,
             timing_breakdown: None,
         })
     }
@@ -1559,7 +1566,7 @@ impl Handler {
             execution_time_ms: 0,
             metadata: None,
             switched_kg: None,
-            proof_trees: None,
+            derivation_graphs: None,
             timing_breakdown: None,
         })
     }
@@ -1609,7 +1616,7 @@ impl Handler {
             execution_time_ms: 0,
             metadata: None,
             switched_kg: None,
-            proof_trees: None,
+            derivation_graphs: None,
             timing_breakdown: None,
         })
     }
@@ -2064,12 +2071,181 @@ impl Handler {
             .map_err(|e| e.to_string())
     }
 
+    /// Process an agent message asynchronously.
+    ///
+    /// Called from the WebSocket handler for `.agent` commands.
+    pub async fn agent_query(
+        &self,
+        session_id: &str,
+        command: &str,
+        kg_context: &str,
+    ) -> Result<crate::agent::AgentResponse, String> {
+        let trimmed = command.trim();
+
+        if trimmed == "examples" || trimmed.is_empty() {
+            // List examples
+            let examples = crate::agent::examples::all_examples();
+            let list = examples
+                .iter()
+                .map(|ex| format!("- **{}** ({}): {}", ex.name, ex.category, ex.description))
+                .collect::<Vec<_>>()
+                .join("\n");
+            return Ok(crate::agent::AgentResponse {
+                content: format!(
+                    "Available examples:\n\n{list}\n\nUse `.agent start <id>` to begin."
+                ),
+                suggested_query: None,
+                done: true,
+            });
+        }
+
+        if let Some(example_id) = trimmed.strip_prefix("start ") {
+            let example_id = example_id.trim();
+            let session_key = self
+                .agent
+                .get_or_create_session(session_id, example_id)
+                .await;
+            return self
+                .agent
+                .start_example(&session_key, example_id, kg_context)
+                .await;
+        }
+
+        // Advance to next step in scripted lesson
+        if trimmed == "next" {
+            let sessions = self.agent.sessions.read().await;
+            let session_key = sessions.keys().find(|k| k.starts_with(session_id)).cloned();
+            drop(sessions);
+            if let Some(key) = session_key {
+                return self.agent.next_step(&key).await;
+            }
+            return Ok(crate::agent::AgentResponse {
+                content: "No active lesson.".to_string(),
+                suggested_query: None,
+                done: true,
+            });
+        }
+
+        // Regular message - continue conversation (use Claude if available)
+        let sessions = self.agent.sessions.read().await;
+        let session_key = sessions.keys().find(|k| k.starts_with(session_id)).cloned();
+        drop(sessions);
+
+        let session_key = match session_key {
+            Some(k) => k,
+            None => {
+                return Ok(crate::agent::AgentResponse {
+                    content: "No active example. Start one with `.agent start <example_id>` or see available examples with `.agent examples`.".to_string(),
+                    suggested_query: None,
+                    done: true,
+                });
+            }
+        };
+
+        self.agent
+            .process_message(&session_key, trimmed, kg_context)
+            .await
+    }
+
     /// Execute a Datalog program and return results.
     pub async fn query_program(
         &self,
         knowledge_graph: Option<String>,
         program: String,
     ) -> Result<QueryResult, String> {
+        // Intercept .agent commands - these need async context for Claude API calls
+        let trimmed = program.trim();
+        if trimmed.starts_with(".agent ") || trimmed == ".agent" {
+            let agent_cmd = trimmed.strip_prefix(".agent").unwrap_or("").trim();
+
+            // .agent setup <id> - return setup IQL for an example (for KG seeding)
+            if let Some(example_id) = agent_cmd.strip_prefix("setup ") {
+                let example_id = example_id.trim();
+                let setup = crate::agent::examples::get_example(example_id)
+                    .map(|ex| {
+                        ex.steps
+                            .iter()
+                            .map(|s| s.iql)
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                    .unwrap_or_default();
+                return Ok(QueryResult {
+                    rows: vec![WireTuple::new(vec![WireValue::String(setup)])],
+                    schema: vec![ColumnDef::string("setup")],
+                    total_count: 1,
+                    truncated: false,
+                    execution_time_ms: 0,
+                    metadata: None,
+                    switched_kg: None,
+                    derivation_graphs: None,
+                    timing_breakdown: None,
+                });
+            }
+
+            let session_id = "default"; // TODO: use actual WS session ID
+            let kg_name = knowledge_graph.as_deref().unwrap_or("default");
+            let kg_context = {
+                let storage = self.storage.read();
+                let mut ctx = format!("Knowledge graph: {kg_name}\n");
+
+                // Include relations with schemas and row counts
+                if let Ok(relations) = storage.list_relations_with_typed_metadata_in(kg_name) {
+                    if !relations.is_empty() {
+                        ctx.push_str("Relations:\n");
+                        let mut sorted = relations;
+                        sorted.sort_by(|a, b| a.0.cmp(&b.0));
+                        for (name, typed_cols, count) in &sorted {
+                            let cols = typed_cols
+                                .iter()
+                                .map(|(n, t)| format!("{n}: {t}"))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            ctx.push_str(&format!("  {name}({cols}) - {count} tuples\n"));
+                        }
+                    }
+                }
+
+                // Include rule names
+                if let Ok(rules) = storage.list_rules_in(kg_name) {
+                    if !rules.is_empty() {
+                        ctx.push_str(&format!("Rules: {}\n", rules.join(", ")));
+                    }
+                }
+
+                ctx
+            };
+
+            let response = self.agent_query(session_id, agent_cmd, &kg_context).await?;
+
+            let mut rows = vec![WireTuple::new(vec![WireValue::String(
+                response.content.clone(),
+            )])];
+            if let Some(ref sq) = response.suggested_query {
+                rows.push(WireTuple::new(vec![WireValue::String(format!(
+                    "suggested_query:{sq}"
+                ))]));
+            }
+            if response.done {
+                rows.push(WireTuple::new(vec![WireValue::String(
+                    "done:true".to_string(),
+                )]));
+            }
+
+            let total_count = rows.len();
+            return Ok(QueryResult {
+                rows,
+                schema: vec![ColumnDef::string("agent_response")],
+                total_count,
+                truncated: false,
+                execution_time_ms: 0,
+                metadata: None,
+                switched_kg: None,
+                derivation_graphs: None,
+                timing_breakdown: None,
+            });
+        }
+
         let program_len = program.len();
         let query_start = Instant::now();
 
@@ -3137,17 +3313,14 @@ impl QueryJob {
                                         }
                                     }
 
-                                    // === Explain command ===
-                                    MetaCommand::Explain(query) => {
-                                        // Transform ?shorthand before explain
-                                        let explain_query = match transform_query_shorthand(&query)
-                                        {
+                                    // === Debug command ===
+                                    MetaCommand::Debug(query) => {
+                                        // Transform ?shorthand before debug
+                                        let debug_query = match transform_query_shorthand(&query) {
                                             Ok(t) => t.query,
                                             Err(_) => query,
                                         };
-                                        match self
-                                            .explain_query(Some(kg.to_string()), explain_query)
-                                        {
+                                        match self.debug_query(Some(kg.to_string()), debug_query) {
                                             Ok((plan, optimizations)) => {
                                                 messages.push("Query Plan:".to_string());
                                                 messages.push(plan);
@@ -3158,7 +3331,7 @@ impl QueryJob {
                                                 }
                                             }
                                             Err(e) => {
-                                                messages.push(format!("Explain error: {e}"));
+                                                messages.push(format!("Debug error: {e}"));
                                             }
                                         }
                                     }
@@ -3200,6 +3373,48 @@ impl QueryJob {
                                             }
                                             Err(e) => messages.push(format!("Why-not error: {e}")),
                                         }
+                                    }
+
+                                    // === Agent commands ===
+                                    MetaCommand::AgentExamples => {
+                                        let examples = crate::agent::examples::all_examples();
+                                        let rows: Vec<WireTuple> = examples
+                                            .iter()
+                                            .map(|ex| {
+                                                WireTuple::new(vec![
+                                                    WireValue::String(ex.id.to_string()),
+                                                    WireValue::String(ex.name.to_string()),
+                                                    WireValue::String(ex.category.to_string()),
+                                                    WireValue::String(ex.description.to_string()),
+                                                    WireValue::String(ex.difficulty.to_string()),
+                                                ])
+                                            })
+                                            .collect();
+                                        let total_count = rows.len();
+                                        drop(storage);
+                                        return Ok(QueryResult {
+                                            rows,
+                                            schema: vec![
+                                                ColumnDef::string("id"),
+                                                ColumnDef::string("name"),
+                                                ColumnDef::string("category"),
+                                                ColumnDef::string("description"),
+                                                ColumnDef::string("difficulty"),
+                                            ],
+                                            total_count,
+                                            truncated: false,
+                                            execution_time_ms: start.elapsed().as_millis() as u64,
+                                            metadata: None,
+                                            switched_kg: None,
+                                            derivation_graphs: None,
+                                            timing_breakdown: None,
+                                        });
+                                    }
+                                    MetaCommand::AgentStart(_)
+                                    | MetaCommand::AgentMessage(_)
+                                    | MetaCommand::AgentSetup(_) => {
+                                        // Agent commands are handled async via query_program
+                                        messages.push("Agent commands require async context. Use the GUI chat panel.".to_string());
                                     }
 
                                     // === Index commands ===
@@ -3365,7 +3580,7 @@ impl QueryJob {
                 execution_time_ms: start.elapsed().as_millis() as u64,
                 metadata: None,
                 switched_kg: switched_kg_result,
-                proof_trees: None,
+                derivation_graphs: None,
                 timing_breakdown: None,
             });
         }
@@ -3466,18 +3681,23 @@ impl QueryJob {
             .collect();
 
         // Build schema from first result or default to 2 columns.
-        // Use registered schema column names if available and arity matches,
-        // otherwise extract variable names from the query head.
+        // Prefer variable names from the query head (e.g. ?rel(From, To) -> "From", "To").
+        // Only fall back to registered schema names if the query extraction produces
+        // generic positional names (col0, col1, ...).
         let schema: Vec<ColumnDef> = if let Some(first) = results.first() {
             let arity = first.values().len();
-            let col_names = if let Some(ref names) = schema_col_names {
+            let query_names = extract_column_names_from_query(&query_program, arity);
+            let has_real_names = query_names.iter().any(|n| !n.starts_with("col"));
+            let col_names = if has_real_names {
+                query_names
+            } else if let Some(ref names) = schema_col_names {
                 if names.len() == arity {
                     names.clone()
                 } else {
-                    extract_column_names_from_query(&query_program, arity)
+                    query_names
                 }
             } else {
-                extract_column_names_from_query(&query_program, arity)
+                query_names
             };
 
             first
@@ -3533,18 +3753,18 @@ impl QueryJob {
             execution_time_ms: start.elapsed().as_millis() as u64,
             metadata: None,
             switched_kg: None,
-            proof_trees: None,
+            derivation_graphs: None,
             timing_breakdown,
         })
     }
 }
 
 impl Handler {
-    /// Explain a query plan without executing it.
+    /// Debug a query plan without executing it.
     ///
     /// Runs the full compilation pipeline (parse → IR → optimize) and returns
     /// a human-readable representation of the query plan at each stage.
-    pub fn explain_query(
+    pub fn debug_query(
         &self,
         knowledge_graph: Option<String>,
         query: String,
@@ -3564,7 +3784,7 @@ impl Handler {
         };
 
         let trace = storage
-            .explain_query_on(&kg_name, &query)
+            .debug_query_on(&kg_name, &query)
             .map_err(|e| format!("{e}"))?;
 
         let optimizations = vec![
@@ -3837,7 +4057,7 @@ impl Handler {
             execution_time_ms,
             metadata: result_metadata,
             switched_kg: None,
-            proof_trees: None,
+            derivation_graphs: None,
             timing_breakdown,
         })
     }
@@ -4256,7 +4476,7 @@ impl Handler {
             execution_time_ms: 0,
             metadata: None,
             switched_kg: None,
-            proof_trees: None,
+            derivation_graphs: None,
             timing_breakdown: None,
         }
     }
@@ -4312,7 +4532,7 @@ impl Handler {
             execution_time_ms: 0,
             metadata: None,
             switched_kg: None,
-            proof_trees: None,
+            derivation_graphs: None,
             timing_breakdown: None,
         })
     }
@@ -5106,58 +5326,58 @@ mod tests {
         assert_eq!(result.rows.len(), 0);
     }
 
-    // --- explain tests ---
+    // --- debug tests ---
 
     #[test]
-    fn test_explain_query_simple() {
-        let (handler, _tmp) = handler_with_kg("explain_test_kg");
-        // explain_query takes a Datalog rule, not a ?query
-        let result = handler.explain_query(
-            Some("explain_test_kg".to_string()),
+    fn test_debug_query_simple() {
+        let (handler, _tmp) = handler_with_kg("debug_test_kg");
+        // debug_query takes a Datalog rule, not a ?query
+        let result = handler.debug_query(
+            Some("debug_test_kg".to_string()),
             "__q__(X, Y) <- edge(X, Y)".to_string(),
         );
-        assert!(result.is_ok(), "explain failed: {:?}", result.err());
+        assert!(result.is_ok(), "debug failed: {:?}", result.err());
         let (trace, optimizations) = result.expect("operation should succeed");
         assert!(!trace.is_empty());
         assert!(!optimizations.is_empty());
     }
 
     #[test]
-    fn test_explain_query_no_kg_error() {
+    fn test_debug_query_no_kg_error() {
         let (storage, _tmp) = make_test_storage();
         let handler = Handler::new(storage);
-        let result = handler.explain_query(None, "?edge(X, Y)".to_string());
+        let result = handler.debug_query(None, "?edge(X, Y)".to_string());
         // No current KG selected → error
         assert!(result.is_err());
     }
 
     #[test]
-    fn test_explain_query_join() {
-        let (handler, _tmp) = handler_with_kg("explain_join_kg");
-        let result = handler.explain_query(
-            Some("explain_join_kg".to_string()),
+    fn test_debug_query_join() {
+        let (handler, _tmp) = handler_with_kg("debug_join_kg");
+        let result = handler.debug_query(
+            Some("debug_join_kg".to_string()),
             "__q__(X, Z) <- edge(X, Y), edge(Y, Z)".to_string(),
         );
-        assert!(result.is_ok(), "explain join failed: {:?}", result.err());
+        assert!(result.is_ok(), "debug join failed: {:?}", result.err());
         let (trace, _) = result.expect("operation should succeed");
         assert!(!trace.is_empty());
     }
 
     #[test]
-    fn test_explain_query_recursive() {
-        let (handler, _tmp) = handler_with_kg("explain_rec_kg");
-        let result = handler.explain_query(
-            Some("explain_rec_kg".to_string()),
+    fn test_debug_query_recursive() {
+        let (handler, _tmp) = handler_with_kg("debug_rec_kg");
+        let result = handler.debug_query(
+            Some("debug_rec_kg".to_string()),
             "__q__(X, Y) <- edge(X, Y)".to_string(),
         );
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_explain_query_nonexistent_kg() {
+    fn test_debug_query_nonexistent_kg() {
         let (storage, _tmp) = make_test_storage();
         let handler = Handler::new(storage);
-        let result = handler.explain_query(
+        let result = handler.debug_query(
             Some("nonexistent_kg".to_string()),
             "__q__(X, Y) <- edge(X, Y)".to_string(),
         );
@@ -5166,11 +5386,11 @@ mod tests {
     }
 
     #[test]
-    fn test_explain_query_returns_optimization_list() {
-        let (handler, _tmp) = handler_with_kg("explain_opt_kg");
+    fn test_debug_query_returns_optimization_list() {
+        let (handler, _tmp) = handler_with_kg("debug_opt_kg");
         let (_, optimizations) = handler
-            .explain_query(
-                Some("explain_opt_kg".to_string()),
+            .debug_query(
+                Some("debug_opt_kg".to_string()),
                 "__q__(X, Y) <- edge(X, Y)".to_string(),
             )
             .expect("operation should succeed");
@@ -6488,16 +6708,16 @@ mod tests {
     }
 
     #[test]
-    fn test_handler_explain_query() {
+    fn test_handler_debug_query() {
         let (handler, _tmp) = make_test_handler();
         {
             let storage = handler.get_storage_mut();
             storage
-                .create_knowledge_graph("explain_h_kg")
+                .create_knowledge_graph("debug_h_kg")
                 .expect("knowledge graph creation failed");
         }
-        let trace = handler.explain_query(
-            Some("explain_h_kg".to_string()),
+        let trace = handler.debug_query(
+            Some("debug_h_kg".to_string()),
             "result(X, Y) <- edge(X, Y)".to_string(),
         );
         assert!(trace.is_ok());
@@ -7394,14 +7614,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_handler_meta_explain() {
+    async fn test_handler_meta_debug() {
         let (handler, _tmp) = make_test_handler();
         handler
             .query_program(None, "+edge[(1, 2), (3, 4)]".to_string())
             .await
             .expect("query execution failed");
         let result = handler
-            .query_program(None, ".explain ?edge(X, Y)".to_string())
+            .query_program(None, ".debug ?edge(X, Y)".to_string())
             .await
             .expect("query execution failed");
         let text = result
@@ -7415,8 +7635,8 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        // Explain should produce some plan output
-        assert!(!text.is_empty(), "explain should produce non-empty output");
+        // Debug should produce some plan output
+        assert!(!text.is_empty(), "debug should produce non-empty output");
     }
 }
 
