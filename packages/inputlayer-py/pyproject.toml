@@ -48,6 +48,9 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 
+[tool.ruff.lint.per-file-ignores]
+"examples/langchain/ex*.py" = ["F405", "F403"]
+
 [tool.mypy]
 python_version = "3.10"
 strict = true

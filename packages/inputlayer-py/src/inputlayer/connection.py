@@ -124,6 +124,12 @@ class Connection:
         await self._authenticate()
         self._connected = True
 
+        # NOTE: _receive_loop is NOT started automatically because it races
+        # with execute() for WebSocket messages. Notifications are handled
+        # inline during _read_result() instead. The loop can be started
+        # manually for idle notification listening if needed:
+        #   self._recv_task = asyncio.create_task(self._receive_loop())
+
     async def close(self) -> None:
         """Close the connection gracefully."""
         self._connected = False

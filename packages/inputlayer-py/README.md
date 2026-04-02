@@ -9,8 +9,10 @@ Write Python. No query syntax required. The OLM compiles typed Python classes in
 ```bash
 pip install inputlayer-client-dev
 
-# With pandas DataFrame support
-pip install inputlayer-client-dev[pandas]
+# With extras
+pip install inputlayer-client-dev[pandas]      # DataFrame support
+pip install inputlayer-client-dev[langchain]   # LangChain integration
+pip install inputlayer-client-dev[all]         # everything
 ```
 
 Requirements: Python 3.10+ and a running InputLayer server.
@@ -180,6 +182,88 @@ def on_update(event):
     print(f"{event.count} new readings")
 ```
 
+## LangChain Integration
+
+```bash
+pip install inputlayer-client-dev[langchain]
+```
+
+### Retriever
+
+Query the knowledge graph using Datalog and get LangChain `Document` objects:
+
+```python
+from inputlayer.integrations.langchain import InputLayerRetriever
+
+retriever = InputLayerRetriever(
+    kg=kg,
+    query='?article(Id, Title, Content, Cat, Emb), user_interest("{input}", Cat)',
+    page_content_columns=["content"],
+    metadata_columns=["title", "category"],
+)
+
+# Works in any LCEL chain
+chain = retriever | prompt | llm | StrOutputParser()
+result = await chain.ainvoke("alice")
+```
+
+### Tool
+
+Let agents query the knowledge graph directly:
+
+```python
+from inputlayer.integrations.langchain import InputLayerTool
+
+tool = InputLayerTool(
+    kg=kg,
+    name="query_articles",
+    description="Query the knowledge graph using Datalog.",
+)
+agent = create_tool_calling_agent(llm, [tool], prompt)
+```
+
+Both components support native async (`ainvoke`) and sync (`invoke`) — safe to use in Jupyter notebooks, FastAPI, and LangGraph.
+
+### Examples
+
+See [`examples/langchain/`](examples/langchain/) — 17 examples covering AI/LLM integration patterns:
+
+```bash
+# List all examples
+uv run python -m examples.langchain.runner --list
+
+# Run specific examples
+uv run python -m examples.langchain.runner 1 3 9
+
+# Run a range
+uv run python -m examples.langchain.runner 1-5
+
+# Run all
+uv run python -m examples.langchain.runner --all
+```
+
+| # | Example | Description |
+|---|---------|-------------|
+| 1 | Retriever + Datalog | Join queries with `{input}` placeholder |
+| 2 | Vector search | Cosine similarity with distance filter |
+| 3 | Tool for agents | Raw Datalog + template mode |
+| 4 | LCEL chain | Full retriever \| prompt \| llm \| parser pipeline |
+| 5 | KG building | Extract facts from documents with LLM |
+| 6 | Explainable RAG | `.why()` proof trees + `.why_not()` explanations |
+| 7 | Multi-hop reasoning | Transitive closure over org graph |
+| 8 | Conversational memory | Chat turns as facts, rules derive context |
+| 9 | Access-controlled RAG | Clearance-based document filtering via rules |
+| 10 | Multi-agent | Researcher + fact-checker with shared KG |
+| 11 | Anomaly detection | Salary band rules flag violations |
+| 12 | Hallucination detection | Ground LLM claims against KG facts |
+| 13 | Guardrails | Policy rules block unsafe content |
+| 14 | GraphRAG | Entity extraction + community detection |
+| 15 | Semantic caching | Cache LLM responses, topic-based matching |
+| 16 | Recommendation engine | Collaborative filtering via Datalog |
+| 17 | Data lineage | Source attribution + conflict detection |
+
+Requires a running InputLayer server and optionally LM Studio (or any OpenAI-compatible server) for LLM examples.
+
 ## Sync Client
 
 For scripts, notebooks, and non-async contexts:
@@ -334,13 +418,16 @@ See the [`examples/`](examples/) directory:
 | `08_session_rules.py` | Ad-hoc ephemeral views |
 | `09_access_control.py` | User/ACL management |
 | `10_migrations.py` | Django-style schema versioning |
+| `langchain/` | 17 LangChain integration examples (see above) |
 
 ## Development
 
 ```bash
 cd packages/inputlayer-py
-pip install -e ".[dev]"
-python -m pytest tests/ -v
+uv sync --extra dev
+uv run pytest tests/ -v
+uv run ruff check src/ tests/
+uv run mypy src/inputlayer/
 ```
 
 ## License
