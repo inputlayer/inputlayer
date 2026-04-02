@@ -2384,6 +2384,497 @@ async def example_graphrag(kg):
     print(f"\n{GREEN}  {answer.strip()}{RESET}")
 
 
+# ── Example 15: Semantic caching ─────────────────────────────────────
+
+
+async def example_semantic_caching(kg):
+    """Semantic caching: cache LLM responses as KG facts.
+
+    Rules match incoming queries to cached answers based on topic
+    overlap. Exact matches return instantly; topic matches suggest
+    relevant cached answers that may avoid an LLM call.
+    """
+    header("Semantic caching", 15)
+
+    # ── Schema ───────────────────────────────────────────────────────
+
+    await kg.execute("+llm_cache(question: string, answer: string, timestamp: int)")
+    await kg.execute("+cache_topic(question: string, topic: string)")
+
+    # ── Rules ────────────────────────────────────────────────────────
+
+    # Exact cache hit
+    await kg.execute("+cache_exact_hit(Question, Answer) <- llm_cache(Question, Answer, Ts)")
+
+    # Topic-based match: incoming question shares a topic with cache
+    await kg.execute(
+        "+cache_topic_hit(IncomingQ, CachedQ, Answer, Topic) <- "
+        "cache_topic(IncomingQ, Topic), "
+        "cache_topic(CachedQ, Topic), "
+        "llm_cache(CachedQ, Answer, Ts), "
+        "IncomingQ != CachedQ"
+    )
+
+    subheader("Rules defined")
+    print(f"{DIM}  cache_exact_hit <- direct question match{RESET}")
+    print(f"{DIM}  cache_topic_hit <- same topic, different question{RESET}")
+
+    # ── Seed the cache ───────────────────────────────────────────────
+
+    cached = [
+        ("What is Python?", "Python is a high-level programming language.", 1000),
+        ("Explain transformers", "Transformers use self-attention for sequences.", 1001),
+        ("What is Rust?", "Rust is a memory-safe systems language.", 1002),
+        ("How does BERT work?", "BERT uses masked language modeling on transformers.", 1003),
+        ("What is Docker?", "Docker containers package apps with dependencies.", 1004),
+    ]
+
+    topics = [
+        ("What is Python?", "python"),
+        ("What is Python?", "programming"),
+        ("Explain transformers", "transformers"),
+        ("Explain transformers", "nlp"),
+        ("What is Rust?", "rust"),
+        ("What is Rust?", "programming"),
+        ("How does BERT work?", "bert"),
+        ("How does BERT work?", "transformers"),
+        ("How does BERT work?", "nlp"),
+        ("What is Docker?", "docker"),
+        ("What is Docker?", "devops"),
+    ]
+
+    for q, a, ts in cached:
+        eq = q.replace('"', '\\"')
+        ea = a.replace('"', '\\"')
+        await kg.execute(f'+llm_cache("{eq}", "{ea}", {ts})')
+
+    for q, t in topics:
+        eq = q.replace('"', '\\"')
+        await kg.execute(f'+cache_topic("{eq}", "{t}")')
+
+    subheader("Step 1: Cache populated")
+    print(f"  {DIM}{len(cached)} cached responses, {len(topics)} topic tags{RESET}")
+
+    # ── Step 2: Test cache hits ──────────────────────────────────────
+
+    subheader("Step 2: Query the cache")
+
+    # Exact hit
+    r = await kg.execute('?cache_exact_hit("What is Python?", Answer)')
+    print(f'\n  {WHITE}Exact: "What is Python?"{RESET}')
+    if r.rows:
+        print(f"  {GREEN}HIT: {r.rows[0][1]}{RESET}")
+    else:
+        print(f"  {RED}MISS{RESET}")
+
+    # Miss
+    r = await kg.execute('?cache_exact_hit("What is Go?", Answer)')
+    print(f'\n  {WHITE}Exact: "What is Go?"{RESET}')
+    if r.rows:
+        print(f"  {GREEN}HIT: {r.rows[0][1]}{RESET}")
+    else:
+        print(f"  {YELLOW}MISS — no exact match{RESET}")
+
+    # Topic match — new question about transformers
+    new_q = "How do transformers handle long sequences?"
+    await kg.execute(f'+cache_topic("{new_q}", "transformers")')
+
+    r = await kg.execute(f'?cache_topic_hit("{new_q}", CachedQ, Answer, Topic)')
+    print(f'\n  {WHITE}Topic: "{new_q}"{RESET}')
+    if r.rows:
+        seen = set()
+        for row in r.rows:
+            cached_q = row[1]
+            if cached_q not in seen:
+                seen.add(cached_q)
+                print(f'  {CYAN}RELATED:{RESET} "{cached_q}" {DIM}(topic: {row[3]}){RESET}')
+                print(f"    {DIM}{row[2]}{RESET}")
+    else:
+        print(f"  {YELLOW}No related cache entries{RESET}")
+
+    # ── Step 3: Show savings ─────────────────────────────────────────
+
+    subheader("Step 3: Cache efficiency")
+
+    queries = [
+        "What is Python?",
+        "Explain transformers",
+        "What is Kubernetes?",
+        "How does BERT work?",
+        "What is Go?",
+    ]
+
+    hits = 0
+    misses = 0
+    for q in queries:
+        eq = q.replace('"', '\\"')
+        r = await kg.execute(f'?cache_exact_hit("{eq}", Answer)')
+        if r.rows:
+            hits += 1
+            print(f'  {GREEN}HIT{RESET}  "{q}"')
+        else:
+            misses += 1
+            print(f'  {RED}MISS{RESET} "{q}"')
+
+    rate = (hits / len(queries)) * 100
+    print(
+        f"\n  {WHITE}Hit rate: {hits}/{len(queries)} ({rate:.0f}%) — saved {hits} LLM calls{RESET}"
+    )
+
+
+# ── Example 16: Recommendation engine ────────────────────────────────
+
+
+async def example_recommendation(kg):
+    """Collaborative filtering via Datalog rules.
+
+    Users rate items. Rules derive similar users (shared high ratings)
+    and recommendations (items liked by similar users). The LLM
+    explains recommendations in natural language.
+    """
+    header("Recommendation engine", 16)
+
+    # ── Schema ───────────────────────────────────────────────────────
+
+    await kg.execute("+user_rating(user: string, item: string, score: int)")
+    await kg.execute("+item_info(name: string, category: string)")
+
+    # ── Data ─────────────────────────────────────────────────────────
+
+    ratings = [
+        ("alice", "python_masterclass", 5),
+        ("alice", "rust_handbook", 4),
+        ("alice", "ml_fundamentals", 5),
+        ("alice", "deep_learning_101", 5),
+        ("bob", "python_masterclass", 5),
+        ("bob", "go_concurrency", 4),
+        ("bob", "ml_fundamentals", 4),
+        ("bob", "data_engineering", 5),
+        ("carol", "rust_handbook", 5),
+        ("carol", "systems_programming", 5),
+        ("carol", "linux_internals", 4),
+        ("dave", "ml_fundamentals", 5),
+        ("dave", "deep_learning_101", 5),
+        ("dave", "nlp_with_transformers", 5),
+        ("dave", "python_masterclass", 4),
+    ]
+
+    items = [
+        ("python_masterclass", "programming"),
+        ("rust_handbook", "programming"),
+        ("go_concurrency", "programming"),
+        ("ml_fundamentals", "machine_learning"),
+        ("deep_learning_101", "machine_learning"),
+        ("nlp_with_transformers", "machine_learning"),
+        ("data_engineering", "data"),
+        ("systems_programming", "systems"),
+        ("linux_internals", "systems"),
+    ]
+
+    for user, item, score in ratings:
+        await kg.execute(f'+user_rating("{user}", "{item}", {score})')
+    for name, cat in items:
+        await kg.execute(f'+item_info("{name}", "{cat}")')
+
+    # ── Rules ────────────────────────────────────────────────────────
+
+    # Similar users: both rated the same item >= 4
+    await kg.execute(
+        "+similar_users(A, B, SharedItem) <- "
+        "user_rating(A, SharedItem, ScoreA), "
+        "user_rating(B, SharedItem, ScoreB), "
+        "A != B, ScoreA >= 4, ScoreB >= 4"
+    )
+
+    # Recommend: items that similar users rated highly
+    await kg.execute(
+        "+raw_recommendation(TargetUser, Item, Via, Score) <- "
+        "similar_users(TargetUser, Via, SharedItem), "
+        "user_rating(Via, Item, Score), "
+        "Score >= 4, TargetUser != Via"
+    )
+
+    subheader("Data loaded")
+    print(f"  {DIM}{len(ratings)} ratings, {len(items)} items, 4 users{RESET}")
+
+    # ── Step 1: Similar users ────────────────────────────────────────
+
+    subheader("Step 1: Similar users (shared high ratings)")
+
+    for user in ["alice", "bob", "carol", "dave"]:
+        r = await kg.execute(f'?similar_users("{user}", Other, SharedItem)')
+        others: dict[str, list[str]] = {}
+        for row in r.rows:
+            others.setdefault(row[1], []).append(row[2])
+        if others:
+            parts = []
+            for other, shared in sorted(others.items()):
+                parts.append(f"{other} ({', '.join(shared)})")
+            print(f"  {GREEN}{user}{RESET}: {DIM}{'; '.join(parts)}{RESET}")
+
+    # ── Step 2: Recommendations ──────────────────────────────────────
+
+    subheader("Step 2: Recommendations for alice")
+
+    r = await kg.execute('?raw_recommendation("alice", Item, Via, Score)')
+    # Deduplicate and filter out items alice already rated
+    r_alice = await kg.execute('?user_rating("alice", Item, Score)')
+    alice_items = {row[0] for row in r_alice.rows}
+
+    recs: dict[str, list[str]] = {}
+    for row in r.rows:
+        item, via = row[0], row[1]
+        if item not in alice_items:
+            recs.setdefault(item, []).append(via)
+
+    print()
+    for item, recommenders in sorted(recs.items()):
+        r_info = await kg.execute(f'?item_info("{item}", Category)')
+        cat = r_info.rows[0][1] if r_info.rows else "?"
+        print(
+            f"  {GREEN}{item}{RESET} {DIM}[{cat}]{RESET} — "
+            f"recommended by {CYAN}{', '.join(sorted(set(recommenders)))}{RESET}"
+        )
+
+    # ── Step 3: LLM explains recommendations ─────────────────────────
+
+    base_url = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
+    model = os.environ.get("LLM_MODEL", "deepseek/deepseek-r1-0528-qwen3-8b")
+
+    try:
+        import httpx
+
+        resp = httpx.get(f"{base_url}/models", timeout=2)
+        resp.raise_for_status()
+    except Exception:
+        print(f"\n{DIM}  No LLM — skipping explanation.{RESET}")
+        return
+
+    from langchain_core.output_parsers import StrOutputParser
+    from langchain_core.prompts import ChatPromptTemplate
+    from langchain_openai import ChatOpenAI
+
+    llm = ChatOpenAI(base_url=base_url, api_key="lm-studio", model=model, temperature=0)
+
+    context_parts = ["Alice's ratings:"]
+    for row in r_alice.rows:
+        context_parts.append(f"  - {row[0]}: {row[1]}/5")
+
+    context_parts.append("\nRecommendations (from collaborative filtering):")
+    for item, recommenders in sorted(recs.items()):
+        context_parts.append(f"  - {item} (recommended by {', '.join(sorted(set(recommenders)))})")
+
+    prompt = ChatPromptTemplate.from_template(
+        "You are a learning recommendation system. Based on "
+        "collaborative filtering results from a knowledge graph, "
+        "explain why these items are recommended for Alice.\n\n"
+        "{context}\n\n"
+        "Write a brief, personalized recommendation message."
+    )
+
+    chain = prompt | llm | StrOutputParser()
+
+    subheader("Step 3: LLM explains recommendations")
+    answer = await chain.ainvoke({"context": "\n".join(context_parts)})
+    print(f"\n{GREEN}  {answer.strip()}{RESET}")
+
+
+# ── Example 17: Data lineage ────────────────────────────────────────
+
+
+async def example_data_lineage(kg):
+    """Data lineage: track provenance of every derived fact.
+
+    Source documents have reliability ratings. Facts are linked to their
+    sources. Rules compute: multi-sourced facts (higher confidence),
+    single-sourced facts (need verification), and reliability scores.
+    The LLM generates an audit report.
+    """
+    header("Data lineage and provenance", 17)
+
+    # ── Schema ───────────────────────────────────────────────────────
+
+    await kg.execute(
+        "+data_source(id: int, name: string, source_type: string, reliability: string)"
+    )
+    await kg.execute(
+        "+sourced_claim(id: int, subject: string, predicate: string, "
+        "object: string, source_id: int)"
+    )
+
+    # ── Sources with reliability ─────────────────────────────────────
+
+    sources = [
+        (1, "arxiv_2024_001", "paper", "high"),
+        (2, "tech_blog_post", "blog", "medium"),
+        (3, "twitter_thread", "social", "low"),
+        (4, "official_docs", "documentation", "high"),
+        (5, "arxiv_2024_002", "paper", "high"),
+    ]
+
+    for sid, name, stype, rel in sources:
+        await kg.execute(f'+data_source({sid}, "{name}", "{stype}", "{rel}")')
+
+    # ── Facts with source attribution ────────────────────────────────
+
+    claims = [
+        # Confirmed by multiple sources
+        (1, "GPT-4", "architecture", "transformer", 1),
+        (2, "GPT-4", "architecture", "transformer", 2),
+        (3, "GPT-4", "architecture", "transformer", 4),
+        # Single high-reliability source
+        (4, "GPT-4", "context_window", "128k", 1),
+        # Conflicting claims
+        (5, "GPT-4", "parameters", "1.8T", 3),  # low reliability
+        (6, "GPT-4", "parameters", "unknown", 4),  # high reliability
+        # Single low-reliability source
+        (7, "GPT-5", "release_date", "2025", 3),
+    ]
+
+    for cid, subj, pred, obj, src in claims:
+        escaped_obj = obj.replace('"', '\\"')
+        await kg.execute(f'+sourced_claim({cid}, "{subj}", "{pred}", "{escaped_obj}", {src})')
+
+    # ── Lineage rules ────────────────────────────────────────────────
+
+    # Fact with its source reliability
+    await kg.execute(
+        "+claim_reliability(ClaimId, Subj, Pred, Obj, SrcName, Reliability) <- "
+        "sourced_claim(ClaimId, Subj, Pred, Obj, SrcId), "
+        "data_source(SrcId, SrcName, SrcType, Reliability)"
+    )
+
+    # Multi-sourced: same fact from 2+ different sources
+    await kg.execute(
+        "+multi_sourced(Subj, Pred, Obj, SrcA, SrcB) <- "
+        "sourced_claim(IdA, Subj, Pred, Obj, SrcA), "
+        "sourced_claim(IdB, Subj, Pred, Obj, SrcB), "
+        "SrcA != SrcB"
+    )
+
+    # Conflicting claims: same subject+predicate, different objects
+    await kg.execute(
+        "+conflict(Subj, Pred, ObjA, SrcA, ObjB, SrcB) <- "
+        "sourced_claim(IdA, Subj, Pred, ObjA, SrcA), "
+        "sourced_claim(IdB, Subj, Pred, ObjB, SrcB), "
+        "ObjA != ObjB, SrcA != SrcB"
+    )
+
+    subheader("Data loaded")
+    print(f"  {DIM}{len(sources)} sources, {len(claims)} sourced claims{RESET}")
+    print(f"  {DIM}Rules: claim_reliability, multi_sourced, conflict{RESET}")
+
+    # ── Step 1: Lineage view ─────────────────────────────────────────
+
+    subheader("Step 1: Fact lineage (source attribution)")
+
+    r = await kg.execute("?claim_reliability(Id, Subj, Pred, Obj, SrcName, Rel)")
+
+    # Group by fact
+    by_fact: dict[str, list[tuple[str, str]]] = {}
+    for row in r.rows:
+        key = f"{row[1]} {row[2]} {row[3]}"
+        by_fact.setdefault(key, []).append((row[4], row[5]))
+
+    print()
+    for fact, sources_list in sorted(by_fact.items()):
+        src_strs = []
+        for src_name, rel in sources_list:
+            rel_color = GREEN if rel == "high" else (YELLOW if rel == "medium" else RED)
+            src_strs.append(f"{src_name} ({rel_color}{rel}{RESET})")
+        print(f"  {WHITE}{fact}{RESET}")
+        for s in src_strs:
+            print(f"    {DIM}from{RESET} {s}")
+
+    # ── Step 2: Multi-sourced facts ──────────────────────────────────
+
+    subheader("Step 2: Multi-sourced facts (high confidence)")
+
+    r = await kg.execute("?multi_sourced(Subj, Pred, Obj, SrcA, SrcB)")
+    seen: set[str] = set()
+    print()
+    for row in r.rows:
+        key = f"{row[0]} {row[1]} {row[2]}"
+        if key not in seen:
+            seen.add(key)
+            print(
+                f"  {GREEN}confirmed{RESET} {WHITE}{key}{RESET} {DIM}({row[3]} + {row[4]}){RESET}"
+            )
+
+    # ── Step 3: Conflicts ────────────────────────────────────────────
+
+    subheader("Step 3: Conflicting claims")
+
+    r = await kg.execute("?conflict(Subj, Pred, ObjA, SrcA, ObjB, SrcB)")
+    seen_conflicts: set[str] = set()
+    print()
+    for row in r.rows:
+        key = f"{row[0]}.{row[1]}"
+        pair = tuple(sorted([str(row[2]), str(row[4])]))
+        conflict_key = f"{key}.{pair}"
+        if conflict_key not in seen_conflicts:
+            seen_conflicts.add(conflict_key)
+            print(f"  {RED}conflict{RESET} {WHITE}{row[0]} {row[1]}{RESET}")
+            print(
+                f'    source {row[3]}: {YELLOW}"{row[2]}"{RESET} vs '
+                f'source {row[5]}: {YELLOW}"{row[4]}"{RESET}'
+            )
+
+    # ── Step 4: LLM audit report ─────────────────────────────────────
+
+    base_url = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
+    model = os.environ.get("LLM_MODEL", "deepseek/deepseek-r1-0528-qwen3-8b")
+
+    try:
+        import httpx
+
+        resp = httpx.get(f"{base_url}/models", timeout=2)
+        resp.raise_for_status()
+    except Exception:
+        print(f"\n{DIM}  No LLM — skipping audit report.{RESET}")
+        return
+
+    from langchain_core.output_parsers import StrOutputParser
+    from langchain_core.prompts import ChatPromptTemplate
+    from langchain_openai import ChatOpenAI
+
+    llm = ChatOpenAI(base_url=base_url, api_key="lm-studio", model=model, temperature=0)
+
+    # Build audit context
+    context_parts = ["Data lineage audit:\n"]
+    context_parts.append("Multi-sourced (confirmed):")
+    for fact in sorted(seen):
+        context_parts.append(f"  - {fact}")
+
+    context_parts.append("\nConflicting claims:")
+    r = await kg.execute("?conflict(Subj, Pred, ObjA, SrcA, ObjB, SrcB)")
+    seen_c: set[str] = set()
+    for row in r.rows:
+        pair = tuple(sorted([str(row[2]), str(row[4])]))
+        key = f"{row[0]}.{row[1]}.{pair}"
+        if key not in seen_c:
+            seen_c.add(key)
+            context_parts.append(
+                f'  - {row[0]} {row[1]}: src {row[3]} says "{row[2]}", src {row[5]} says "{row[4]}"'
+            )
+
+    context_parts.append("\nSingle low-reliability claims:")
+    context_parts.append("  - GPT-5 release_date 2025 (from twitter_thread, low)")
+
+    prompt = ChatPromptTemplate.from_template(
+        "You are a data quality auditor. Based on the lineage analysis "
+        "from a knowledge graph, write a brief audit summary. Flag "
+        "risks and recommend actions.\n\n"
+        "{context}\n\n"
+        "Audit summary (3-5 bullet points):"
+    )
+    chain = prompt | llm | StrOutputParser()
+
+    subheader("Step 4: LLM audit report")
+    answer = await chain.ainvoke({"context": "\n".join(context_parts)})
+    print(f"\n{GREEN}  {answer.strip()}{RESET}")
+
+
 # ── Main ─────────────────────────────────────────────────────────────
 
 
@@ -2411,6 +2902,9 @@ async def main():
         await example_hallucination_detection(kg)
         await example_guardrails(kg)
         await example_graphrag(kg)
+        await example_semantic_caching(kg)
+        await example_recommendation(kg)
+        await example_data_lineage(kg)
 
         # Cleanup
         await il.drop_knowledge_graph("langchain_demo")
