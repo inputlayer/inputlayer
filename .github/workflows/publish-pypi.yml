@@ -37,6 +37,8 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -48,14 +50,14 @@ jobs:
 
       - name: Set dev version
         run: |
-          SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
+          COMMIT_COUNT=$(git rev-list --count HEAD)
           BASE_VERSION=$(python -c "
           import re
           with open('pyproject.toml') as f:
               m = re.search(r'version\s*=\s*\"(.+?)\"', f.read())
               print(m.group(1))
           ")
-          DEV_VERSION="${BASE_VERSION}.dev${SHORT_SHA}"
+          DEV_VERSION="${BASE_VERSION}.dev${COMMIT_COUNT}"
           echo "Publishing version: ${DEV_VERSION}"
           sed -i "s/^version = \".*\"/version = \"${DEV_VERSION}\"/" pyproject.toml
 
