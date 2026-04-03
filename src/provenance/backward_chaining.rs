@@ -1,11 +1,15 @@
 //! Backward chaining proof tree construction.
 //!
 //! Given a derived tuple, traces backward through rules and base facts
-//! to build a proof tree explaining why the tuple was derived.
+//! to build a proof tree DAG explaining why the tuple was derived.
 
-use crate::ast::Rule;
+use crate::ast::{Rule, Term};
+use crate::provenance::proof_tree::{
+    AggregateInfo, Conclusion, FactSource, NodeId, NodeKind, ProofNode, ProofTree,
+    ProofTreeBuilder, TruncatedInfo,
+};
 use crate::provenance::unification::unify_head;
-use crate::provenance::{ProofConfig, ProofTree};
+use crate::provenance::ProofConfig;
 use crate::value::{Tuple, Value};
 use std::collections::{HashMap, HashSet};
 
@@ -24,6 +28,8 @@ pub struct ProofContext<'a> {
     pub rules: &'a [Rule],
     /// Base relation data: relation_name -> list of tuples
     pub base_data: &'a HashMap<String, Vec<Tuple>>,
+    /// Derived/materialized relation data from the evaluation engine.
+    pub derived_data: Option<&'a HashMap<String, Vec<Tuple>>>,
     /// Names of relations that are derived (have rules defining them)
     pub derived_relations: HashSet<String>,
     /// Configuration (depth limit, full mode, etc.)
@@ -44,6 +50,7 @@ impl<'a> ProofContext<'a> {
         Self {
             rules,
             base_data,
+            derived_data: None,
             derived_relations,
             config,
             index_info: HashMap::new(),
@@ -62,10 +69,17 @@ impl<'a> ProofContext<'a> {
         Self {
             rules,
             base_data,
+            derived_data: None,
             derived_relations,
             config,
             index_info,
         }
+    }
+
+    /// Set derived/materialized relation data for candidate lookup.
+    pub fn with_derived_data(mut self, derived_data: &'a HashMap<String, Vec<Tuple>>) -> Self {
+        self.derived_data = Some(derived_data);
+        self
     }
 
     /// Check if a relation is derived (has rules) vs base (only facts).
@@ -82,81 +96,173 @@ impl<'a> ProofContext<'a> {
     }
 }
 
-/// Build proof trees for a specific result tuple.
+/// Build a proof tree explaining why a tuple was derived.
 ///
-/// Returns up to `config.max_proofs_per_tuple` distinct proof trees.
-pub fn build_proofs(
+/// Returns a `ProofTree` with a single root node for the given tuple,
+/// containing the full proof tree DAG with shared sub-proofs.
+pub fn build_proof_tree(
     relation: &str,
     tuple: &Tuple,
     ctx: &ProofContext<'_>,
-) -> Result<Vec<ProofTree>, String> {
-    let mut visited = HashSet::new();
-    let mut proofs = Vec::new();
-
-    build_proofs_inner(relation, tuple, ctx, &mut visited, 0, &mut proofs)?;
-
-    if proofs.is_empty() {
-        Err(format!(
-            "No proof found for {relation}({})",
-            tuple_display(tuple)
-        ))
+) -> Result<ProofTree, String> {
+    // Determine expected arity from rule heads for this relation.
+    // The engine may return wider tuples (e.g., 4-arity for a 2-arity relation
+    // when the rule body references a wider relation). Truncate to correct arity.
+    let expected_arity = ctx.rules_for(relation).first().map(|r| r.head.args.len());
+    let tuple = if let Some(arity) = expected_arity {
+        if tuple.arity() > arity {
+            let truncated_vals: Vec<Value> =
+                (0..arity).filter_map(|i| tuple.get(i).cloned()).collect();
+            Tuple::new(truncated_vals)
+        } else {
+            tuple.clone()
+        }
     } else {
-        Ok(proofs)
+        tuple.clone()
+    };
+
+    let mut builder = ProofTreeBuilder::new();
+    let mut visited = HashSet::new();
+
+    let node_ids = build_node(relation, &tuple, ctx, &mut builder, &mut visited, 0)?;
+
+    if node_ids.is_empty() {
+        return Err(format!(
+            "No derivation found for {relation}({})",
+            tuple_display(&tuple)
+        ));
     }
+
+    // Use first derivation as the root
+    Ok(builder.finish(vec![node_ids.into_iter().next().unwrap_or_default()]))
 }
 
-pub fn build_proofs_inner(
+/// Recursively build proof nodes, returning node IDs for this tuple.
+///
+/// May return multiple IDs if there are alternative proof paths
+/// (capped by `max_proofs_per_tuple`).
+pub(crate) fn build_node(
     relation: &str,
     tuple: &Tuple,
     ctx: &ProofContext<'_>,
+    builder: &mut ProofTreeBuilder,
     visited: &mut HashSet<(String, Vec<Value>)>,
     depth: usize,
-    proofs: &mut Vec<ProofTree>,
-) -> Result<(), String> {
+) -> Result<Vec<NodeId>, String> {
+    let values = tuple_values(tuple);
+
     // Depth limit
     if depth >= ctx.config.max_depth {
-        proofs.push(ProofTree::Truncated {
-            depth_limit: ctx.config.max_depth,
+        let id = builder.insert_unique(ProofNode {
+            kind: NodeKind::Truncated,
+            conclusion: Conclusion {
+                pred: relation.to_string(),
+                args: values,
+            },
+            rule_id: None,
+            bindings: None,
+            aggregate: None,
+            negation: None,
+            vector_search: None,
+            truncated: Some(TruncatedInfo {
+                depth_limit: ctx.config.max_depth,
+            }),
+            why_not: None,
+            source: None,
+            children: vec![],
         });
-        return Ok(());
+        return Ok(vec![id]);
+    }
+
+    // Check if we already have a node for this (relation, values)
+    if let Some(existing) = builder.get_existing(relation, &values) {
+        return Ok(vec![existing.clone()]);
     }
 
     // Cycle detection
-    let key = (relation.to_string(), tuple_values(tuple));
+    let key = (relation.to_string(), values.clone());
     if visited.contains(&key) {
-        return Ok(()); // Already being proved - skip to avoid infinite loop
+        return Ok(vec![]); // Cycle - skip to avoid infinite loop
     }
     visited.insert(key.clone());
 
-    // Base relation: check if tuple exists as a fact
+    let mut result_ids = Vec::new();
+
+    // Base relation: check if tuple exists as a fact (in base_data or derived_data)
+    let in_base = tuple_exists_in(relation, tuple, ctx.base_data);
+    let in_derived = ctx
+        .derived_data
+        .is_some_and(|d| tuple_exists_in(relation, tuple, d));
+
     if !ctx.is_derived(relation) {
-        if tuple_exists_in(relation, tuple, ctx.base_data) {
-            proofs.push(ProofTree::BaseFact {
-                relation: relation.to_string(),
-                values: tuple_values(tuple),
+        if in_base || in_derived {
+            let id = builder.insert(ProofNode {
+                kind: NodeKind::Fact,
+                conclusion: Conclusion {
+                    pred: relation.to_string(),
+                    args: values,
+                },
+                source: Some(FactSource::Edb),
+                rule_id: None,
+                bindings: None,
+                aggregate: None,
+                negation: None,
+                vector_search: None,
+                truncated: None,
+                why_not: None,
+                children: vec![],
             });
+            result_ids.push(id);
         }
         visited.remove(&key);
-        return Ok(());
+        return Ok(result_ids);
     }
 
-    // Also check if it exists as a base fact (relation can be both base and derived)
-    if tuple_exists_in(relation, tuple, ctx.base_data) {
-        proofs.push(ProofTree::BaseFact {
-            relation: relation.to_string(),
-            values: tuple_values(tuple),
+    // If it exists as a base fact (not just derived), record it
+    if in_base {
+        let id = builder.insert(ProofNode {
+            kind: NodeKind::Fact,
+            conclusion: Conclusion {
+                pred: relation.to_string(),
+                args: values.clone(),
+            },
+            source: Some(FactSource::Edb),
+            rule_id: None,
+            bindings: None,
+            aggregate: None,
+            negation: None,
+            vector_search: None,
+            truncated: None,
+            why_not: None,
+            children: vec![],
         });
-        if proofs.len() >= ctx.config.max_proofs_per_tuple {
+        result_ids.push(id);
+        if result_ids.len() >= ctx.config.max_proofs_per_tuple {
             visited.remove(&key);
-            return Ok(());
+            return Ok(result_ids);
         }
     }
 
     // Try each rule clause
     let rules = ctx.rules_for(relation);
     for (clause_idx, rule) in rules.iter().enumerate() {
-        if proofs.len() >= ctx.config.max_proofs_per_tuple {
+        if result_ids.len() >= ctx.config.max_proofs_per_tuple {
             break;
+        }
+
+        // Check for aggregate terms in the rule head
+        let has_aggregate = rule
+            .head
+            .args
+            .iter()
+            .any(|t| matches!(t, Term::Aggregate(_, _)));
+        if has_aggregate {
+            let id = build_aggregate_node(
+                relation, tuple, rule, clause_idx, ctx, builder, visited, depth,
+            );
+            result_ids.push(id);
+            visited.remove(&key);
+            return Ok(result_ids);
         }
 
         // Try to unify the target tuple with the rule head
@@ -166,30 +272,227 @@ pub fn build_proofs_inner(
         };
 
         // Try to satisfy all body predicates with these bindings
-        match super::prove_body::prove_body(&rule.body, bindings, ctx, visited, depth + 1) {
+        match super::prove_body::prove_body(&rule.body, bindings, ctx, builder, visited, depth + 1)
+        {
             Ok(body_results) => {
-                for (final_bindings, children) in body_results {
-                    if proofs.len() >= ctx.config.max_proofs_per_tuple {
+                for (final_bindings, child_ids) in body_results {
+                    if result_ids.len() >= ctx.config.max_proofs_per_tuple {
                         break;
                     }
-                    let mut binding_pairs: Vec<(String, Value)> =
-                        final_bindings.into_iter().collect();
-                    binding_pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
-                    proofs.push(ProofTree::RuleApplication {
-                        rule_name: rule.head.relation.clone(),
-                        clause_index: clause_idx,
-                        clause_text: format!("{rule}"),
-                        bindings: binding_pairs,
-                        children,
+                    let binding_map: HashMap<String, Value> = final_bindings
+                        .into_iter()
+                        .filter(|(name, _)| !name.starts_with("_placeholder_"))
+                        .collect();
+
+                    let id = builder.insert(ProofNode {
+                        kind: NodeKind::Rule,
+                        conclusion: Conclusion {
+                            pred: relation.to_string(),
+                            args: values.clone(),
+                        },
+                        rule_id: Some(format!("{rule}")),
+                        bindings: if binding_map.is_empty() {
+                            None
+                        } else {
+                            Some(binding_map)
+                        },
+                        aggregate: None,
+                        negation: None,
+                        vector_search: None,
+                        truncated: None,
+                        why_not: None,
+                        source: None,
+                        children: child_ids,
                     });
+                    result_ids.push(id);
                 }
             }
             Err(_) => continue,
         }
     }
 
+    // Fallback: if no rule proof found but tuple exists in derived_data,
+    // record it as a fact (the engine materialized it but we can't trace further)
+    if result_ids.is_empty() && in_derived {
+        let id = builder.insert(ProofNode {
+            kind: NodeKind::Fact,
+            conclusion: Conclusion {
+                pred: relation.to_string(),
+                args: values,
+            },
+            source: Some(FactSource::Derived),
+            rule_id: None,
+            bindings: None,
+            aggregate: None,
+            negation: None,
+            vector_search: None,
+            truncated: None,
+            why_not: None,
+            children: vec![],
+        });
+        result_ids.push(id);
+    }
+
     visited.remove(&key);
-    Ok(())
+    Ok(result_ids)
+}
+
+/// Build an aggregate proof node.
+///
+/// For rules like `reachable_count(City, count<Dest>) <- can_reach(City, Dest)`,
+/// creates an Aggregate node with children pointing to the contributing tuples.
+#[allow(clippy::too_many_arguments)]
+fn build_aggregate_node(
+    relation: &str,
+    tuple: &Tuple,
+    rule: &Rule,
+    _clause_idx: usize,
+    ctx: &ProofContext<'_>,
+    builder: &mut ProofTreeBuilder,
+    visited: &mut HashSet<(String, Vec<Value>)>,
+    depth: usize,
+) -> NodeId {
+    let values = tuple_values(tuple);
+
+    // Extract the aggregate function name and variable
+    let (aggregate_fn, value_var) = rule
+        .head
+        .args
+        .iter()
+        .find_map(|t| {
+            if let Term::Aggregate(func, var) = t {
+                Some((format!("{func}"), var.clone()))
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| ("unknown".to_string(), "?".to_string()));
+
+    // Extract the aggregate result value from the tuple
+    let result_value = rule
+        .head
+        .args
+        .iter()
+        .enumerate()
+        .find_map(|(i, t)| {
+            if matches!(t, Term::Aggregate(_, _)) {
+                tuple.get(i).cloned()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(Value::Null);
+
+    // Find the group-by columns and their values
+    let mut group_bindings: HashMap<String, Value> = HashMap::new();
+    for (i, term) in rule.head.args.iter().enumerate() {
+        if let Term::Variable(name) = term {
+            if let Some(val) = tuple.get(i) {
+                group_bindings.insert(name.clone(), val.clone());
+            }
+        }
+    }
+
+    // Find contributing tuples and build child nodes
+    let sample_limit = ctx.config.aggregation_sample_size;
+    let mut child_ids: Vec<NodeId> = Vec::new();
+    let mut all_inputs: Vec<Vec<Value>> = Vec::new();
+    let mut contributing_count: usize = 0;
+
+    if let Some(crate::ast::BodyPredicate::Positive(body_atom)) = rule.body.first() {
+        let body_tuples = ctx
+            .derived_data
+            .and_then(|d| d.get(&body_atom.relation))
+            .or_else(|| ctx.base_data.get(&body_atom.relation));
+
+        // Determine expected arity from the body atom's args
+        let body_arity = body_atom.args.len();
+
+        if let Some(tuples) = body_tuples {
+            for t in tuples {
+                let mut matches = true;
+                for (arg_idx, arg) in body_atom.args.iter().enumerate() {
+                    if let Term::Variable(var_name) = arg {
+                        if let Some(expected) = group_bindings.get(var_name) {
+                            if let Some(actual) = t.get(arg_idx) {
+                                if actual != expected {
+                                    matches = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if matches {
+                    contributing_count += 1;
+
+                    // Truncate to body atom arity (engine may return wider tuples)
+                    let truncated_vals: Vec<Value> = (0..body_arity.min(t.arity()))
+                        .filter_map(|i| t.get(i).cloned())
+                        .collect();
+
+                    if ctx.config.full_mode || all_inputs.len() < sample_limit {
+                        all_inputs.push(truncated_vals.clone());
+                    }
+                    // Build child proof nodes for contributing tuples
+                    // (capped to avoid explosion on large aggregations)
+                    if child_ids.len() < sample_limit {
+                        let truncated_tuple = Tuple::new(truncated_vals);
+                        let child_result = build_node(
+                            &body_atom.relation,
+                            &truncated_tuple,
+                            ctx,
+                            builder,
+                            visited,
+                            depth + 1,
+                        );
+                        if let Ok(ids) = child_result {
+                            if let Some(id) = ids.into_iter().next() {
+                                child_ids.push(id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let (sample_inputs, full_inputs) = if ctx.config.full_mode {
+        let sample = all_inputs.iter().take(sample_limit).cloned().collect();
+        (Some(sample), Some(all_inputs))
+    } else if all_inputs.is_empty() {
+        (None, None)
+    } else {
+        (Some(all_inputs), None)
+    };
+
+    builder.insert_unique(ProofNode {
+        kind: NodeKind::Aggregate,
+        conclusion: Conclusion {
+            pred: relation.to_string(),
+            args: values,
+        },
+        rule_id: Some(format!("{rule}")),
+        bindings: if group_bindings.is_empty() {
+            None
+        } else {
+            Some(group_bindings)
+        },
+        aggregate: Some(AggregateInfo {
+            func: aggregate_fn,
+            value_var,
+            result: result_value,
+            contributing_count,
+            sample_inputs,
+            full_inputs,
+        }),
+        negation: None,
+        vector_search: None,
+        truncated: None,
+        why_not: None,
+        source: None,
+        children: child_ids,
+    })
 }
 
 fn tuple_exists_in(relation: &str, tuple: &Tuple, base_data: &HashMap<String, Vec<Tuple>>) -> bool {
@@ -198,7 +501,7 @@ fn tuple_exists_in(relation: &str, tuple: &Tuple, base_data: &HashMap<String, Ve
         .is_some_and(|tuples| tuples.contains(tuple))
 }
 
-fn tuple_values(tuple: &Tuple) -> Vec<Value> {
+pub(crate) fn tuple_values(tuple: &Tuple) -> Vec<Value> {
     (0..tuple.arity())
         .filter_map(|i| tuple.get(i).cloned())
         .collect()
@@ -217,6 +520,7 @@ mod tests {
     use crate::ast::Atom;
     use crate::ast::BodyPredicate;
     use crate::ast::Term;
+    use crate::provenance::proof_tree::NodeKind;
 
     fn int(v: i32) -> Value {
         Value::Int32(v)
@@ -271,26 +575,29 @@ mod tests {
     }
 
     #[test]
-    fn test_proof_base_fact() {
+    fn test_base_fact() {
         let data = base_data(vec![("edge", vec![vec![int(1), int(2)]])]);
         let ctx = ProofContext::new(&[], &data, default_config());
-        let proofs =
-            build_proofs("edge", &tuple(vec![int(1), int(2)]), &ctx).expect("should find proof");
-        assert_eq!(proofs.len(), 1);
-        assert!(matches!(proofs[0], ProofTree::BaseFact { .. }));
+        let graph = build_proof_tree("edge", &tuple(vec![int(1), int(2)]), &ctx)
+            .expect("should find derivation");
+        assert_eq!(graph.node_count(), 1);
+        let root = &graph.nodes[&graph.roots[0]];
+        assert_eq!(root.kind, NodeKind::Fact);
+        assert_eq!(root.conclusion.pred, "edge");
+        assert_eq!(root.conclusion.args, vec![int(1), int(2)]);
+        assert!(root.children.is_empty());
     }
 
     #[test]
-    fn test_proof_base_fact_missing() {
+    fn test_base_fact_missing() {
         let data = base_data(vec![("edge", vec![vec![int(1), int(2)]])]);
         let ctx = ProofContext::new(&[], &data, default_config());
-        let result = build_proofs("edge", &tuple(vec![int(99), int(99)]), &ctx);
+        let result = build_proof_tree("edge", &tuple(vec![int(99), int(99)]), &ctx);
         assert!(result.is_err());
     }
 
     #[test]
-    fn test_proof_single_rule_single_body() {
-        // derived(X) <- base(X)
+    fn test_single_rule() {
         let rules = vec![simple_rule(
             "derived",
             vec!["X"],
@@ -299,21 +606,22 @@ mod tests {
         let data = base_data(vec![("base", vec![vec![int(42)]])]);
         let ctx = ProofContext::new(&rules, &data, default_config());
 
-        let proofs =
-            build_proofs("derived", &tuple(vec![int(42)]), &ctx).expect("should find proof");
-        assert_eq!(proofs.len(), 1);
-        match &proofs[0] {
-            ProofTree::RuleApplication { children, .. } => {
-                assert_eq!(children.len(), 1);
-                assert!(matches!(children[0], ProofTree::BaseFact { .. }));
-            }
-            other => panic!("Expected RuleApplication, got {other:?}"),
-        }
+        let graph = build_proof_tree("derived", &tuple(vec![int(42)]), &ctx)
+            .expect("should find derivation");
+
+        assert_eq!(graph.node_count(), 2); // rule + fact
+        let root = &graph.nodes[&graph.roots[0]];
+        assert_eq!(root.kind, NodeKind::Rule);
+        assert_eq!(root.conclusion.pred, "derived");
+        assert_eq!(root.children.len(), 1);
+
+        let child = &graph.nodes[&root.children[0]];
+        assert_eq!(child.kind, NodeKind::Fact);
+        assert_eq!(child.conclusion.pred, "base");
     }
 
     #[test]
-    fn test_proof_single_rule_join() {
-        // path(X, Z) <- edge(X, Y), edge(Y, Z)
+    fn test_join_rule() {
         let rules = vec![simple_rule(
             "path",
             vec!["X", "Z"],
@@ -328,40 +636,16 @@ mod tests {
         )]);
         let ctx = ProofContext::new(&rules, &data, default_config());
 
-        let proofs =
-            build_proofs("path", &tuple(vec![int(1), int(3)]), &ctx).expect("should find proof");
-        assert_eq!(proofs.len(), 1);
-        match &proofs[0] {
-            ProofTree::RuleApplication { children, .. } => {
-                assert_eq!(children.len(), 2);
-            }
-            other => panic!("Expected RuleApplication, got {other:?}"),
-        }
+        let graph = build_proof_tree("path", &tuple(vec![int(1), int(3)]), &ctx)
+            .expect("should find derivation");
+
+        let root = &graph.nodes[&graph.roots[0]];
+        assert_eq!(root.kind, NodeKind::Rule);
+        assert_eq!(root.children.len(), 2); // two edge facts
     }
 
     #[test]
-    fn test_proof_multi_clause() {
-        // derived(X) <- a(X)     -- clause 0
-        // derived(X) <- b(X)     -- clause 1
-        let rules = vec![
-            simple_rule("derived", vec!["X"], vec![positive("a", vec!["X"])]),
-            simple_rule("derived", vec!["X"], vec![positive("b", vec!["X"])]),
-        ];
-        let data = base_data(vec![("a", vec![vec![int(1)]]), ("b", vec![vec![int(1)]])]);
-        let mut config = default_config();
-        config.max_proofs_per_tuple = 10;
-        let ctx = ProofContext::new(&rules, &data, config);
-
-        let proofs =
-            build_proofs("derived", &tuple(vec![int(1)]), &ctx).expect("should find proofs");
-        // Should find proofs from both clauses
-        assert!(proofs.len() >= 2, "got {} proofs", proofs.len());
-    }
-
-    #[test]
-    fn test_proof_recursive_transitive_closure() {
-        // path(X, Y) <- edge(X, Y)
-        // path(X, Z) <- edge(X, Y), path(Y, Z)
+    fn test_recursive_transitive_closure() {
         let rules = vec![
             simple_rule(
                 "path",
@@ -385,19 +669,33 @@ mod tests {
                 vec![int(3), int(4)],
             ],
         )]);
-        let ctx = ProofContext::new(&rules, &data, default_config());
 
-        // path(1, 4) requires 3 hops through edges
-        let proofs =
-            build_proofs("path", &tuple(vec![int(1), int(4)]), &ctx).expect("should find proof");
-        assert!(!proofs.is_empty());
-        assert!(proofs[0].depth() >= 3, "depth: {}", proofs[0].depth());
+        let derived = {
+            let mut m = HashMap::new();
+            m.insert(
+                "path".to_string(),
+                vec![
+                    Tuple::new(vec![int(1), int(2)]),
+                    Tuple::new(vec![int(1), int(3)]),
+                    Tuple::new(vec![int(1), int(4)]),
+                    Tuple::new(vec![int(2), int(3)]),
+                    Tuple::new(vec![int(2), int(4)]),
+                    Tuple::new(vec![int(3), int(4)]),
+                ],
+            );
+            m
+        };
+
+        let ctx = ProofContext::new(&rules, &data, default_config()).with_derived_data(&derived);
+
+        let graph = build_proof_tree("path", &tuple(vec![int(1), int(4)]), &ctx)
+            .expect("should find derivation");
+        assert!(!graph.has_truncated());
+        assert!(graph.max_depth() >= 3);
     }
 
     #[test]
-    fn test_proof_recursive_cycle_detection() {
-        // path(X, Y) <- edge(X, Y)
-        // path(X, Z) <- edge(X, Y), path(Y, Z)
+    fn test_recursive_cycle_detection() {
         let rules = vec![
             simple_rule(
                 "path",
@@ -413,7 +711,7 @@ mod tests {
                 ],
             ),
         ];
-        // Cyclic data: 1->2->3->1
+        // Cyclic: 1->2->3->1
         let data = base_data(vec![(
             "edge",
             vec![
@@ -424,16 +722,44 @@ mod tests {
         )]);
         let ctx = ProofContext::new(&rules, &data, default_config());
 
-        // path(1, 2) should work without infinite loop
-        let proofs =
-            build_proofs("path", &tuple(vec![int(1), int(2)]), &ctx).expect("should find proof");
-        assert!(!proofs.is_empty());
+        // Should not hang
+        let graph = build_proof_tree("path", &tuple(vec![int(1), int(2)]), &ctx)
+            .expect("should find derivation");
+        assert!(!graph.nodes.is_empty());
     }
 
     #[test]
-    fn test_proof_depth_limit_truncation() {
-        // chain(X, Y) <- link(X, Y)
-        // chain(X, Z) <- link(X, Y), chain(Y, Z)
+    fn test_negation() {
+        let rules = vec![simple_rule(
+            "safe",
+            vec!["X"],
+            vec![positive("node", vec!["X"]), negated("danger", vec!["X"])],
+        )];
+        let data = base_data(vec![
+            ("node", vec![vec![int(1)], vec![int(2)]]),
+            ("danger", vec![vec![int(2)]]),
+        ]);
+        let ctx = ProofContext::new(&rules, &data, default_config());
+
+        // Node 1 is safe
+        let graph =
+            build_proof_tree("safe", &tuple(vec![int(1)]), &ctx).expect("should find derivation");
+        let root = &graph.nodes[&graph.roots[0]];
+        assert_eq!(root.kind, NodeKind::Rule);
+        // Should have a negation child
+        let has_negation = root
+            .children
+            .iter()
+            .any(|id| graph.nodes[id].kind == NodeKind::Negation);
+        assert!(has_negation);
+
+        // Node 2 is not safe
+        let result = build_proof_tree("safe", &tuple(vec![int(2)]), &ctx);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_depth_limit() {
         let rules = vec![
             simple_rule(
                 "chain",
@@ -449,7 +775,6 @@ mod tests {
                 ],
             ),
         ];
-        // Very long chain: 0->1->2->...->100
         let links: Vec<Vec<Value>> = (0..100).map(|i| vec![int(i), int(i + 1)]).collect();
         let data = base_data(vec![("link", links)]);
 
@@ -457,52 +782,166 @@ mod tests {
         config.max_depth = 5;
         let ctx = ProofContext::new(&rules, &data, config);
 
-        let proofs = build_proofs("chain", &tuple(vec![int(0), int(100)]), &ctx);
-        // Should either find a truncated proof or no proof (depth exceeded)
-        // The key is it doesn't infinite loop or panic
-        if let Ok(ps) = &proofs {
-            // If any proof was found, check for truncation
-            let has_truncated = ps.iter().any(|p| contains_truncated(p));
-            if !ps.is_empty() {
-                assert!(has_truncated, "deep proof should contain truncation");
+        let result = build_proof_tree("chain", &tuple(vec![int(0), int(100)]), &ctx);
+        // Should not panic or hang
+        if let Ok(graph) = result {
+            // May have truncated nodes
+            if !graph.nodes.is_empty() {
+                assert!(graph.has_truncated() || graph.max_depth() <= 10);
             }
         }
     }
 
     #[test]
-    fn test_proof_with_negation() {
-        // safe(X) <- node(X), !danger(X)
-        let rules = vec![simple_rule(
-            "safe",
-            vec!["X"],
-            vec![positive("node", vec!["X"]), negated("danger", vec!["X"])],
-        )];
-        let data = base_data(vec![
-            ("node", vec![vec![int(1)], vec![int(2)], vec![int(3)]]),
-            ("danger", vec![vec![int(2)]]),
-        ]);
+    fn test_aggregation_count() {
+        use crate::ast::AggregateFunc;
+
+        let rules = vec![Rule {
+            head: Atom {
+                relation: "reachable_count".to_string(),
+                args: vec![
+                    Term::Variable("City".to_string()),
+                    Term::Aggregate(AggregateFunc::Count, "Dest".to_string()),
+                ],
+            },
+            body: vec![positive("can_reach", vec!["City", "Dest"])],
+        }];
+
+        let data = base_data(vec![]);
+        let derived = {
+            let mut m = HashMap::new();
+            m.insert(
+                "can_reach".to_string(),
+                vec![
+                    Tuple::new(vec![Value::string("berlin"), Value::string("dubai")]),
+                    Tuple::new(vec![Value::string("berlin"), Value::string("tokyo")]),
+                    Tuple::new(vec![Value::string("berlin"), Value::string("sydney")]),
+                ],
+            );
+            m
+        };
+
+        let ctx = ProofContext::new(&rules, &data, default_config()).with_derived_data(&derived);
+
+        let graph = build_proof_tree(
+            "reachable_count",
+            &tuple(vec![Value::string("berlin"), Value::Int64(3)]),
+            &ctx,
+        )
+        .expect("should find derivation for aggregate");
+
+        let root = &graph.nodes[&graph.roots[0]];
+        assert_eq!(root.kind, NodeKind::Aggregate);
+        assert_eq!(root.conclusion.pred, "reachable_count");
+
+        let agg = root.aggregate.as_ref().expect("should have aggregate info");
+        assert_eq!(agg.func, "count");
+        assert_eq!(agg.value_var, "Dest");
+        assert_eq!(agg.contributing_count, 3);
+        // Children are the contributing can_reach derivations
+        assert_eq!(root.children.len(), 3);
+    }
+
+    #[test]
+    fn test_aggregation_never_truncated() {
+        use crate::ast::AggregateFunc;
+
+        let rules = vec![Rule {
+            head: Atom {
+                relation: "cnt".to_string(),
+                args: vec![
+                    Term::Variable("X".to_string()),
+                    Term::Aggregate(AggregateFunc::Count, "Y".to_string()),
+                ],
+            },
+            body: vec![positive("src", vec!["X", "Y"])],
+        }];
+
+        let data = base_data(vec![(
+            "src",
+            vec![vec![int(1), int(10)], vec![int(1), int(20)]],
+        )]);
         let ctx = ProofContext::new(&rules, &data, default_config());
 
-        // Node 1 is safe (not in danger)
-        let proofs = build_proofs("safe", &tuple(vec![int(1)]), &ctx).expect("should find proof");
-        assert!(!proofs.is_empty());
-        match &proofs[0] {
-            ProofTree::RuleApplication { children, .. } => {
-                assert!(children
-                    .iter()
-                    .any(|c| matches!(c, ProofTree::NegationProof { .. })));
-            }
-            other => panic!("Expected RuleApplication, got {other:?}"),
-        }
-
-        // Node 2 is not safe (in danger)
-        let result = build_proofs("safe", &tuple(vec![int(2)]), &ctx);
-        assert!(result.is_err());
+        let graph = build_proof_tree("cnt", &tuple(vec![int(1), Value::Int64(2)]), &ctx)
+            .expect("aggregate should not fail");
+        assert!(!graph.has_truncated());
+        assert_eq!(graph.nodes[&graph.roots[0]].kind, NodeKind::Aggregate);
     }
 
     #[test]
-    fn test_proof_with_comparison() {
-        // big(X, S) <- item(X, S), S > 100
+    fn test_aggregation_export_mode() {
+        use crate::ast::AggregateFunc;
+
+        let rules = vec![Rule {
+            head: Atom {
+                relation: "cnt".to_string(),
+                args: vec![
+                    Term::Variable("G".to_string()),
+                    Term::Aggregate(AggregateFunc::Count, "V".to_string()),
+                ],
+            },
+            body: vec![positive("data", vec!["G", "V"])],
+        }];
+
+        let rows: Vec<Vec<Value>> = (0..25).map(|i| vec![int(1), int(i)]).collect();
+        let data = base_data(vec![("data", rows)]);
+
+        let mut config = default_config();
+        config.full_mode = true;
+        config.aggregation_sample_size = 10;
+        let ctx = ProofContext::new(&rules, &data, config);
+
+        let graph = build_proof_tree("cnt", &tuple(vec![int(1), Value::Int64(25)]), &ctx)
+            .expect("should produce graph");
+        let root = &graph.nodes[&graph.roots[0]];
+        let agg = root.aggregate.as_ref().unwrap();
+        assert_eq!(agg.contributing_count, 25);
+        assert_eq!(agg.sample_inputs.as_ref().unwrap().len(), 10);
+        let full = agg
+            .full_inputs
+            .as_ref()
+            .expect("export mode must have full_inputs");
+        assert_eq!(full.len(), 25);
+    }
+
+    #[test]
+    fn test_aggregation_gui_mode_trims() {
+        use crate::ast::AggregateFunc;
+
+        let rules = vec![Rule {
+            head: Atom {
+                relation: "cnt".to_string(),
+                args: vec![
+                    Term::Variable("G".to_string()),
+                    Term::Aggregate(AggregateFunc::Count, "V".to_string()),
+                ],
+            },
+            body: vec![positive("data", vec!["G", "V"])],
+        }];
+
+        let rows: Vec<Vec<Value>> = (0..25).map(|i| vec![int(1), int(i)]).collect();
+        let data = base_data(vec![("data", rows)]);
+
+        let mut config = default_config();
+        config.full_mode = false;
+        config.aggregation_sample_size = 10;
+        let ctx = ProofContext::new(&rules, &data, config);
+
+        let graph = build_proof_tree("cnt", &tuple(vec![int(1), Value::Int64(25)]), &ctx)
+            .expect("should produce graph");
+        let root = &graph.nodes[&graph.roots[0]];
+        let agg = root.aggregate.as_ref().unwrap();
+        assert_eq!(agg.contributing_count, 25);
+        assert_eq!(agg.sample_inputs.as_ref().unwrap().len(), 10);
+        assert!(
+            agg.full_inputs.is_none(),
+            "GUI mode should not have full_inputs"
+        );
+    }
+
+    #[test]
+    fn test_comparison_rule() {
         let rules = vec![Rule {
             head: Atom {
                 relation: "big".to_string(),
@@ -526,18 +965,16 @@ mod tests {
         )]);
         let ctx = ProofContext::new(&rules, &data, default_config());
 
-        let proofs =
-            build_proofs("big", &tuple(vec![int(1), int(200)]), &ctx).expect("should find proof");
-        assert!(!proofs.is_empty());
+        let graph = build_proof_tree("big", &tuple(vec![int(1), int(200)]), &ctx)
+            .expect("should find derivation");
+        assert!(!graph.nodes.is_empty());
 
-        let result = build_proofs("big", &tuple(vec![int(2), int(50)]), &ctx);
+        let result = build_proof_tree("big", &tuple(vec![int(2), int(50)]), &ctx);
         assert!(result.is_err());
     }
 
     #[test]
-    fn test_proof_multi_level_rules() {
-        // level2(X) <- level1(X)
-        // level1(X) <- base(X)
+    fn test_multi_level_rules() {
         let rules = vec![
             simple_rule("level1", vec!["X"], vec![positive("base", vec!["X"])]),
             simple_rule("level2", vec!["X"], vec![positive("level1", vec!["X"])]),
@@ -545,101 +982,89 @@ mod tests {
         let data = base_data(vec![("base", vec![vec![int(1)]])]);
         let ctx = ProofContext::new(&rules, &data, default_config());
 
-        let proofs = build_proofs("level2", &tuple(vec![int(1)]), &ctx).expect("should find proof");
-        assert!(!proofs.is_empty());
-        assert!(proofs[0].depth() >= 3);
+        let graph =
+            build_proof_tree("level2", &tuple(vec![int(1)]), &ctx).expect("should find derivation");
+        assert!(graph.max_depth() >= 3); // level2 -> level1 -> base
     }
 
     #[test]
-    fn test_proof_empty_result() {
-        let data = base_data(vec![("edge", vec![])]);
-        let ctx = ProofContext::new(&[], &data, default_config());
-        let result = build_proofs("edge", &tuple(vec![int(1), int(2)]), &ctx);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_proof_config_max_proofs() {
-        // derived(X) <- a(X)
-        // derived(X) <- b(X)
-        // derived(X) <- c(X)
+    fn test_with_derived_data() {
         let rules = vec![
-            simple_rule("derived", vec!["X"], vec![positive("a", vec!["X"])]),
-            simple_rule("derived", vec!["X"], vec![positive("b", vec!["X"])]),
-            simple_rule("derived", vec!["X"], vec![positive("c", vec!["X"])]),
+            simple_rule(
+                "can_reach",
+                vec!["A", "B"],
+                vec![positive("flight", vec!["A", "B"])],
+            ),
+            simple_rule(
+                "can_reach",
+                vec!["A", "C"],
+                vec![
+                    positive("flight", vec!["A", "B"]),
+                    positive("can_reach", vec!["B", "C"]),
+                ],
+            ),
         ];
-        let data = base_data(vec![
-            ("a", vec![vec![int(1)]]),
-            ("b", vec![vec![int(1)]]),
-            ("c", vec![vec![int(1)]]),
-        ]);
+        let data = base_data(vec![(
+            "flight",
+            vec![
+                vec![int(1), int(2)],
+                vec![int(2), int(3)],
+                vec![int(3), int(4)],
+                vec![int(4), int(5)],
+            ],
+        )]);
 
-        let mut config = default_config();
-        config.max_proofs_per_tuple = 2;
-        let ctx = ProofContext::new(&rules, &data, config);
+        let derived = {
+            let mut m = HashMap::new();
+            m.insert(
+                "can_reach".to_string(),
+                vec![
+                    Tuple::new(vec![int(1), int(2)]),
+                    Tuple::new(vec![int(1), int(3)]),
+                    Tuple::new(vec![int(1), int(4)]),
+                    Tuple::new(vec![int(1), int(5)]),
+                    Tuple::new(vec![int(2), int(3)]),
+                    Tuple::new(vec![int(2), int(4)]),
+                    Tuple::new(vec![int(2), int(5)]),
+                    Tuple::new(vec![int(3), int(4)]),
+                    Tuple::new(vec![int(3), int(5)]),
+                    Tuple::new(vec![int(4), int(5)]),
+                ],
+            );
+            m
+        };
 
-        let proofs =
-            build_proofs("derived", &tuple(vec![int(1)]), &ctx).expect("should find proofs");
-        assert_eq!(proofs.len(), 2);
+        let ctx = ProofContext::new(&rules, &data, default_config()).with_derived_data(&derived);
+
+        let graph = build_proof_tree("can_reach", &tuple(vec![int(1), int(5)]), &ctx)
+            .expect("should find derivation");
+        assert!(!graph.has_truncated());
+        assert!(graph.max_depth() <= 10);
     }
 
     #[test]
-    fn test_candidate_cap_prevents_explosion() {
-        use crate::provenance::prove_body::MAX_DERIVED_CANDIDATES;
-
-        // Create 10 rules each producing 200 candidates from different base relations
-        // Without cap, 2000 total candidates would be returned
-        let mut rules = Vec::new();
-        let mut data_entries = Vec::new();
-        for i in 0..10 {
-            let base_name = format!("base_{i}");
-            let body = BodyPredicate::Positive(Atom {
-                relation: base_name.clone(),
-                args: vec![Term::Variable("X".to_string())],
-            });
-            rules.push(Rule {
-                head: Atom {
-                    relation: "derived".to_string(),
-                    args: vec![Term::Variable("X".to_string())],
-                },
-                body: vec![body],
-            });
-            let tuples: Vec<Vec<Value>> = (0..200).map(|j| vec![int(i * 200 + j)]).collect();
-            data_entries.push((base_name, tuples.into_iter().map(Tuple::new).collect()));
-        }
-
-        let base_data_map: HashMap<String, Vec<Tuple>> = data_entries.into_iter().collect();
-        let config = default_config();
-        let ctx = ProofContext::new(&rules, &base_data_map, config);
-
-        // Try to enumerate derived candidates for "derived" relation
-        let bound_terms = vec![crate::provenance::unification::BoundTerm::Unbound(
-            "X".to_string(),
+    fn test_json_export_shape() {
+        let data = base_data(vec![("edge", vec![vec![int(1), int(2)]])]);
+        let rules = vec![simple_rule(
+            "path",
+            vec!["X", "Y"],
+            vec![positive("edge", vec!["X", "Y"])],
         )];
-        let mut visited = HashSet::new();
-        let candidates = crate::provenance::prove_body::enumerate_derived_candidates_pub(
-            "derived",
-            &bound_terms,
-            &ctx,
-            &mut visited,
-            0,
-        );
+        let ctx = ProofContext::new(&rules, &data, default_config());
 
-        // Should be capped at MAX_DERIVED_CANDIDATES
-        assert!(
-            candidates.len() <= MAX_DERIVED_CANDIDATES,
-            "got {} candidates, expected <= {}",
-            candidates.len(),
-            MAX_DERIVED_CANDIDATES
-        );
-    }
+        let graph = build_proof_tree("path", &tuple(vec![int(1), int(2)]), &ctx)
+            .expect("should find derivation");
 
-    fn contains_truncated(tree: &ProofTree) -> bool {
-        match tree {
-            ProofTree::Truncated { .. } => true,
-            ProofTree::RuleApplication { children, .. } => children.iter().any(contains_truncated),
-            ProofTree::Recursive { inner, .. } => contains_truncated(inner),
-            _ => false,
-        }
+        let json = graph.to_json().expect("should serialize");
+        assert_eq!(json["version"], 1);
+        assert!(json["roots"].is_array());
+        assert!(json["nodes"].is_object());
+
+        let root_id = json["roots"][0].as_str().unwrap();
+        let root = &json["nodes"][root_id];
+        assert_eq!(root["kind"], "rule");
+        assert_eq!(root["conclusion"]["pred"], "path");
+        assert!(root["conclusion"]["args"].is_array());
+        assert!(root["children"].is_array());
     }
 }

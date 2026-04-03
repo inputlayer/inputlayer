@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useCallback, useMemo } from "react"
+import { useState, useCallback, useMemo, useEffect, Suspense } from "react"
+import { useSearchParams } from "next/navigation"
 import { AppShell } from "@/components/app-shell"
 import { QueryEditorPanel } from "@/components/query-editor-panel"
 import { QueryResultsPanel } from "@/components/query-results-panel"
@@ -35,12 +36,31 @@ function useSidebarOpen() {
 }
 
 export default function QueryPage() {
-  const { selectedKnowledgeGraph, executeQuery, setEditorContent, cancelCurrentQuery } = useDatalogStore()
+  return (
+    <Suspense>
+      <QueryPageInner />
+    </Suspense>
+  )
+}
+
+function QueryPageInner() {
+  const { selectedKnowledgeGraph, executeQuery, setEditorContent, cancelCurrentQuery, executeInternalQuery, loadExample } = useDatalogStore()
   const [queryResult, setQueryResult] = useState<QueryResult | null>(null)
   const [isExecuting, setIsExecuting] = useState(false)
   const [error, setError] = useState<StructuredError | null>(null)
   const [activeQuery, setActiveQuery] = useState("")
   const [sidebarOpen, toggleSidebar] = useSidebarOpen()
+  const [pendingExample, setPendingExample] = useState<string | null>(null)
+  const searchParams = useSearchParams()
+
+  // Handle ?example=XXX URL parameter
+  useEffect(() => {
+    const exampleId = searchParams.get("example")
+    if (exampleId && selectedKnowledgeGraph) {
+      // Start the agent for this example
+      executeInternalQuery(`.agent start ${exampleId}`).catch(() => {})
+    }
+  }, [searchParams, selectedKnowledgeGraph, executeInternalQuery])
 
   const handleExecuteQuery = useCallback(
     async (query: string) => {
@@ -84,8 +104,13 @@ export default function QueryPage() {
             <div className="flex items-center gap-2">
               <Zap className="h-3.5 w-3.5 text-primary" />
               <span className="text-xs font-medium">Query Editor</span>
+              {selectedKnowledgeGraph && (
+                <>
+                  <div className="h-3 w-px bg-border" />
+                  <span className="text-xs text-muted-foreground">{selectedKnowledgeGraph.name}</span>
+                </>
+              )}
             </div>
-            {selectedKnowledgeGraph && <span className="text-xs text-muted-foreground">{selectedKnowledgeGraph.name}</span>}
             <Button
               variant="ghost"
               size="sm"
@@ -122,14 +147,23 @@ export default function QueryPage() {
                 error={error}
                 isExecuting={isExecuting}
                 activeQuery={activeQuery}
+                sidebarOpen={sidebarOpen}
+                onStartExample={() => {
+                  if (!sidebarOpen) toggleSidebar()
+                }}
               />
             </ResizablePanel>
           </ResizablePanelGroup>
         </div>
 
         {sidebarOpen && (
-          <aside className="h-full w-72 flex-shrink-0 border-l border-border/50 bg-muted/20">
-            <QuerySidebar onSelectQuery={handleExecuteQuery} onLoadQuery={setEditorContent} />
+          <aside className="h-full flex-shrink-0 border-l border-border/50 bg-muted/20" style={{ width: 360, minWidth: 280, maxWidth: 520, resize: "horizontal", overflow: "hidden" }}>
+            <QuerySidebar
+              onSelectQuery={handleExecuteQuery}
+              onLoadQuery={setEditorContent}
+              pendingExample={pendingExample}
+              onPendingExampleHandled={() => setPendingExample(null)}
+            />
           </aside>
         )}
       </div>

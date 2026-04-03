@@ -6,25 +6,25 @@
 // A realistic org chart where authority flows downward.
 // Adding one new edge only recomputes the conclusions that depend on it.
 
-+employee[("alice",   "Alice Johnson",   "CEO"),
-          ("bob",     "Bob Martinez",    "VP Engineering"),
-          ("charlie", "Charlie Park",    "VP Sales"),
-          ("diana",   "Diana Lee",       "Engineering Manager"),
-          ("eve",     "Eve Wilson",      "Sales Manager"),
-          ("frank",   "Frank Chen",      "Senior Engineer"),
-          ("grace",   "Grace Kim",       "Sales Lead"),
-          ("hank",    "Hank Brown",      "Engineer"),
-          ("iris",    "Iris Patel",      "Engineer"),
-          ("jack",    "Jack Taylor",     "Sales Rep")]
++employee("alice",   "Alice Johnson",   "CEO")
++employee("bob",     "Bob Martinez",    "VP Engineering")
++employee("charlie", "Charlie Park",    "VP Sales")
++employee("diana",   "Diana Lee",       "Engineering Manager")
++employee("eve",     "Eve Wilson",      "Sales Manager")
++employee("frank",   "Frank Chen",      "Senior Engineer")
++employee("grace",   "Grace Kim",       "Sales Lead")
++employee("hank",    "Hank Brown",      "Engineer")
++employee("iris",    "Iris Patel",      "Engineer")
++employee("jack",    "Jack Taylor",     "Sales Rep")
 
-+manages[("alice", "bob"),
-         ("alice", "charlie"),
-         ("bob", "diana"),
-         ("bob", "eve"),
-         ("diana", "frank"),
-         ("diana", "hank"),
-         ("eve", "grace"),
-         ("charlie", "jack")]
++manages("alice", "bob")
++manages("alice", "charlie")
++manages("bob", "diana")
++manages("bob", "eve")
++manages("diana", "frank")
++manages("diana", "hank")
++manages("eve", "grace")
++manages("charlie", "jack")
 
 // ── Recursive authority rule ───────────────────────────────────────────
 // Direct authority

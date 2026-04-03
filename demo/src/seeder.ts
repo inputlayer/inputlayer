@@ -32,6 +32,18 @@ function parseStatements(content: string): string[] {
       continue
     }
 
+    // A new line starting with '+' or '.' that isn't a continuation
+    // of a multi-line rule (indicated by the previous line ending with
+    // '<-' or ',') is a new statement.
+    if ((stripped.startsWith("+") || stripped.startsWith(".")) && current.trim()) {
+      const trimmedCurrent = current.trimEnd()
+      const isContinuation = trimmedCurrent.endsWith("<-") || trimmedCurrent.endsWith(",")
+      if (!isContinuation) {
+        statements.push(current.trim())
+        current = ""
+      }
+    }
+
     // Append to current statement
     current += (current ? "\n" : "") + stripped
   }
@@ -48,11 +60,23 @@ function parseStatements(content: string): string[] {
  * Check if a knowledge graph already has data (has been seeded before).
  * We check by listing relations - if any exist, consider it seeded.
  */
-async function isSeeded(adminClient: AdminClient, kgName: string): Promise<boolean> {
+async function isSeeded(adminClient: AdminClient, kgName: string, seedsDir: string): Promise<boolean> {
   try {
     await adminClient.execute(`.kg use ${kgName}`)
     const rows = await adminClient.execute(".rel")
-    return rows.length > 0
+    if (rows.length === 0) return false
+
+    // Check that at least the first relation from the seed file exists.
+    // The "default" KG is auto-created by InputLayer with 0 user relations,
+    // so just checking .rel length isn't enough.
+    const filePath = path.join(seedsDir, `${kgName}.idl`)
+    if (!fs.existsSync(filePath)) return false
+    const content = fs.readFileSync(filePath, "utf-8")
+    const match = content.match(/^\+(\w+)\(/m)
+    if (!match) return rows.length > 0
+    const firstRelation = match[1]
+    const relNames = rows.map((r: unknown[]) => String(r[0]))
+    return relNames.includes(firstRelation)
   } catch {
     return false
   }
@@ -100,7 +124,10 @@ async function seedKg(
     }
 
     try {
-      await adminClient.execute(stmt)
+      // Join multi-line statements into a single line - the engine
+      // may not handle newlines in WebSocket execute messages
+      const oneLine = stmt.replace(/\n\s*/g, " ")
+      await adminClient.execute(oneLine)
       executed++
     } catch (err) {
       console.error(`[seeder] error in ${kgName}: ${err}`)
@@ -119,7 +146,7 @@ export async function seedAll(adminClient: AdminClient, seedsDir: string): Promi
   console.log("[seeder] checking demo knowledge graphs...")
 
   for (const kgName of DEMO_KGS) {
-    const seeded = await isSeeded(adminClient, kgName)
+    const seeded = await isSeeded(adminClient, kgName, seedsDir)
     if (seeded) {
       console.log(`[seeder] ${kgName}: already seeded, skipping`)
       continue

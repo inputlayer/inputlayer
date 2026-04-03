@@ -395,13 +395,13 @@ Clear all facts from relations whose names start with the given prefix.
 
 **Note:** An empty prefix is rejected. This clears data only - schemas and rules are preserved.
 
-### `.explain <query>`
+### `.debug <query>`
 
 Show the query plan for a query without executing it. Displays the logical plan and applied optimizations.
 
 ```
-.explain ?edge(X, Y)
-.explain ?path(1, X)
+.debug ?edge(X, Y)
+.debug ?path(1, X)
 ```
 
 ### `.why <query>`

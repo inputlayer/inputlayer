@@ -643,11 +643,11 @@ describe.skipIf(SKIP)('Integration: Multi-KG', () => {
   });
 });
 
-// ── Explain Tests ───────────────────────────────────────────────────
+// ── Debug Tests ─────────────────────────────────────────────────────
 
-describe.skipIf(SKIP)('Integration: Explain', () => {
+describe.skipIf(SKIP)('Integration: Debug', () => {
   let client: InputLayer;
-  const kg_name = kgName('explain');
+  const kg_name = kgName('debug');
 
   beforeAll(async () => {
     client = new InputLayer(API_KEY ? { url: SERVER_URL, apiKey: API_KEY } : { url: SERVER_URL, username: USERNAME, password: PASSWORD });
@@ -661,9 +661,9 @@ describe.skipIf(SKIP)('Integration: Explain', () => {
     await client.close();
   });
 
-  it('explains a query plan via raw IQL', async () => {
+  it('debugs a query plan via raw IQL', async () => {
     const kg = client.knowledgeGraph(kg_name);
-    const result = await kg.execute('.explain ?employee(Id, Name, Dept, Salary, Active)');
+    const result = await kg.execute('.debug ?employee(Id, Name, Dept, Salary, Active)');
     expect(result.length).toBeGreaterThan(0);
   });
 });

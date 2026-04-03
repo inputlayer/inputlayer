@@ -130,12 +130,12 @@ export class QueryApi {
     });
   }
 
-  /** Explain a query plan */
-  async explain(params: {
+  /** Debug a query plan */
+  async debug(params: {
     query: string;
     knowledgeGraph: string;
   }): Promise<{ plan: string; optimizations: string[] }> {
-    return customFetch('/query/explain', {
+    return customFetch('/query/debug', {
       method: 'POST',
       body: params,
     });

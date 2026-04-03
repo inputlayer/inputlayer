@@ -9,15 +9,15 @@ function buildHtml(inviteUrl: string, kg: string): string {
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
-<body style="margin:0;padding:0;background:#09090b;color:#fafafa;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
+<body style="margin:0;padding:0;background:#ffffff;color:#09090b;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
   <div style="max-width:480px;margin:0 auto;padding:48px 24px">
     <div style="margin-bottom:32px">
-      <strong style="font-size:18px;color:#fafafa">InputLayer</strong>
+      <strong style="font-size:18px;color:#09090b">InputLayer</strong>
     </div>
-    <h1 style="font-size:24px;font-weight:600;margin:0 0 16px;color:#fafafa">Your demo access is ready</h1>
-    <p style="font-size:14px;line-height:1.6;color:#a1a1aa;margin:0 0 24px">
+    <h1 style="font-size:24px;font-weight:600;margin:0 0 16px;color:#09090b">Your demo access is ready</h1>
+    <p style="font-size:14px;line-height:1.6;color:#52525b;margin:0 0 24px">
       Click the button below to open the InputLayer Studio with the
-      <strong style="color:#fafafa">${kg}</strong> knowledge graph loaded.
+      <strong style="color:#09090b">${kg}</strong> knowledge graph loaded.
       Your credentials will be set up automatically.
     </p>
     <a href="${inviteUrl}" style="display:inline-block;background:#2563eb;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:500">

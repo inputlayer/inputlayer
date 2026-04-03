@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { SiteHeader } from "@/components/site-header"
 import { SiteFooter } from "@/components/site-footer"
 import { EmbeddingDiagram, DiamondDiagram, WaterfallDiagram, ProvenanceTreeDiagram, VisualCodeTabs, HeroVisualization } from "@/components/landing-diagrams"
@@ -27,90 +27,112 @@ const DEMO_BASE_URL = "https://demo.inputlayer.ai"
 
 // ── Syntax-highlighted code blocks ──────────────────────────────────────
 
-const rulesVectorsCode = `// Multi-hop: payment -> account standing -> eligibility
-+paid_invoice[("cust_1", "inv_99")]
-+dispute_resolved[("cust_1", "d_42")]
-+product[("pro_a", "Widget Pro", [0.82, 0.44]),
-         ("pro_b", "Widget Lite", [0.79, 0.41])]
+const rulesVectorsCode = `// Flight network
++direct_flight[("new_york", "london", 7.0),
+               ("london", "paris", 1.5),
+               ("paris", "tokyo", 12.0),
+               ("tokyo", "sydney", 9.5)]
 
-// Hop 1: account in good standing if paid AND disputes resolved
-+good_standing(C) <- paid_invoice(C, _), dispute_resolved(C, _)
+// What each destination is like (culture, beach, food, nightlife)
++destination[("london", [0.82, 0.15, 0.71, 0.68]),
+             ("paris",  [0.88, 0.12, 0.63, 0.95]),
+             ("tokyo",  [0.76, 0.22, 0.85, 0.94]),
+             ("sydney", [0.31, 0.91, 0.42, 0.67])]
 
-// Hop 2: eligible to buy if in good standing
-+eligible(C, P) <- good_standing(C), product(P, _, _)
+// If you can get there (even with connections), you can reach it
++can_reach(A, B) <- direct_flight(A, B, _)
++can_reach(A, C) <- direct_flight(A, B, _), can_reach(B, C)
 
-// Query: rules derive eligibility, vectors rank by relevance
-?eligible("cust_1", Pid),
- product(Pid, Name, Emb),
- Dist = cosine(Emb, [0.80, 0.43]),
- Dist < 0.1
-// -> pro_a  "Widget Pro"   Dist: 0.001
-// -> pro_b  "Widget Lite"  Dist: 0.003
-// 3 hops of reasoning, then vector ranking - one query`
+// Where can I fly from NYC that feels like a beach vacation?
+?can_reach("new_york", Dest),
+ destination(Dest, Emb),
+ Dist = cosine(Emb, [0.25, 0.95, 0.40, 0.55])
+// -> sydney  0.08  (best match - beaches & outdoors)
+// -> tokyo   0.52
+// -> london  0.61
+// -> paris   0.65
+// Logic finds where you CAN go, search ranks by what you WANT`
 
-const retractionCode = `// Two reasons to block a customer
-+unpaid_bill[("customer_42")]
-+unverified_card[("customer_42")]
+const retractionCode = `// Two independent routes to Sydney
++direct_flight[("new_york", "london", 7.0),
+               ("london", "paris", 1.5),
+               ("paris", "tokyo", 12.0),
+               ("tokyo", "sydney", 9.5),
+               ("london", "dubai", 7.0),
+               ("dubai", "sydney", 11.0)]
 
-// Either reason blocks purchasing
-+blocked(C) <- unpaid_bill(C)
-+blocked(C) <- unverified_card(C)
++can_reach(A, B) <- direct_flight(A, B, _)
++can_reach(A, C) <- direct_flight(A, B, _), can_reach(B, C)
 
-?blocked("customer_42")
-// -> "customer_42"         (blocked)
+?can_reach("new_york", "sydney")
+// -> reachable              (via Tokyo AND via Dubai)
 
-// Customer pays the bill:
--unpaid_bill("customer_42")
-?blocked("customer_42")
-// -> "customer_42"         (still blocked - card unverified)
+// Dubai route cancelled:
+-direct_flight("london", "dubai", 7.0)
+?can_reach("new_york", "sydney")
+// -> reachable              (still reachable via Tokyo)
 
-// Customer verifies their card:
--unverified_card("customer_42")
-?blocked("customer_42")
-// -> No results.           (correctly unblocked)`
+// Tokyo route also cancelled:
+-direct_flight("tokyo", "sydney", 9.5)
+?can_reach("new_york", "sydney")
+// -> No results.            (correctly unreachable)`
 
-const incrementalCode = `+manages[("alice", "bob"), ("bob", "charlie")]
+const incrementalCode = `+direct_flight[("new_york", "london", 7.0),
+               ("london", "paris", 1.5),
+               ("paris", "tokyo", 12.0),
+               ("tokyo", "sydney", 9.5)]
 
-+authority(X, Y) <- manages(X, Y)
-+authority(X, Z) <- authority(X, Y), manages(Y, Z)
++can_reach(A, B) <- direct_flight(A, B, _)
++can_reach(A, C) <- direct_flight(A, B, _), can_reach(B, C)
 
-?authority("alice", Who)
-// -> "alice" | "bob"
-// -> "alice" | "charlie"    (2 rows)
+?can_reach("new_york", Dest)
+// -> london, paris, tokyo, sydney   (4 destinations)
 
-// Add one new edge:
-+manages("charlie", "diana")
+// Add one new route:
++direct_flight("london", "dubai", 7.0)
 
-?authority("alice", Who)
-// -> "alice" | "bob"
-// -> "alice" | "charlie"
-// -> "alice" | "diana"      (3 rows, only diana recomputed)`
+?can_reach("new_york", Dest)
+// -> london, paris, tokyo, sydney, dubai
+// Only new connections calculated - not everything from scratch`
 
-const provenanceCode = `// Agent decided to purchase from Acme Supplies
-+budget_remaining[("team_a", 5000)]
-+approved_vendor[("acme_supplies")]
-+order[("team_a", "acme_supplies", 3200)]
+const provenanceCode = `+direct_flight[("new_york", "london", 7.0),
+               ("london", "paris", 1.5),
+               ("paris", "tokyo", 12.0),
+               ("tokyo", "sydney", 9.5)]
 
-+purchase_ok(T, V, Amt) <- order(T, V, Amt),
-  approved_vendor(V), budget_remaining(T, B), Amt <= B
++can_reach(A, B) <- direct_flight(A, B, _)
++can_reach(A, C) <- direct_flight(A, B, _), can_reach(B, C)
 
-// Why was this purchase approved?
-.why ?purchase_ok("team_a", "acme_supplies", 3200)
-// [rule] purchase_ok (clause 0)
-//   bindings: T="team_a", V="acme_supplies", Amt=3200
-//   [base] order("team_a", "acme_supplies", 3200)
-//   [base] approved_vendor("acme_supplies")
-//   [base] budget_remaining("team_a", 5000)
-//   [eval] 3200 <= 5000 -> true
+// How can I get from New York to Sydney?
+.why ?can_reach("new_york", "sydney")
+// [rule] can_reach (clause 1)
+//   [base] direct_flight("new_york", "london", 7.0)
+//   [rule] can_reach("london", "sydney")
+//     [base] direct_flight("london", "paris", 1.5)
+//     [rule] can_reach("paris", "sydney")
+//       [base] direct_flight("paris", "tokyo", 12.0)
+//       [base] direct_flight("tokyo", "sydney", 9.5)
 
-// Why wasn't Globex Corp approved?
-.why_not purchase_ok("team_a", "globex_corp", 1500)
-// Rule: purchase_ok (clause 0)
-//   Blocker: approved_vendor("globex_corp") - No matching tuples`
+// Why can't I reach São Paulo?
+.why_not can_reach("new_york", "sao_paulo")
+// No flights to "sao_paulo" from anywhere in the network`
 
 const dockerCommand = "docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer"
 
 // ── Helper components ───────────────────────────────────────────────────
+
+function RotatingWord({ words }: { words: string[] }) {
+  const [index, setIndex] = useState(0)
+  useEffect(() => {
+    const timer = setInterval(() => setIndex((i) => (i + 1) % words.length), 2000)
+    return () => clearInterval(timer)
+  }, [words.length])
+  return (
+    <span className="inline-block min-w-[80px] text-primary font-semibold transition-opacity duration-300">
+      {words[index]}
+    </span>
+  )
+}
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -152,6 +174,9 @@ export default function LandingPage() {
           <div className="grid gap-12 lg:grid-cols-2 lg:gap-16 items-center">
             <div className="space-y-8">
               <RotatingHero />
+              <p className="text-lg text-muted-foreground max-w-[540px]">
+                Store facts. Write rules. InputLayer draws conclusions, keeps them up to date as things change, and can show exactly how it got every conclusion.
+              </p>
               <div className="flex flex-wrap gap-3 pt-2">
                 <a
                   href={`${DEMO_BASE_URL}/demo/request-access?kg=flights`}
@@ -171,159 +196,9 @@ export default function LandingPage() {
                 </Link>
               </div>
             </div>
-            <div className="space-y-4">
+            <div>
               <HeroVisualization />
-              <div className="flex justify-center">
-                <a
-                  href={`${DEMO_BASE_URL}/demo/request-access?kg=flights`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-sm text-primary font-medium hover:underline"
-                >
-                  <Play className="h-3.5 w-3.5" />
-                  Open in Studio
-                </a>
-              </div>
             </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Rules + Vectors ────────────────────────────────────────── */}
-      <section className="border-b border-border/50">
-        <div className="mx-auto max-w-6xl px-6 py-20">
-          <div className="grid gap-12 lg:grid-cols-2 items-start">
-            <div className="space-y-6">
-              <p className="text-sm font-semibold text-primary uppercase tracking-wider">Rules + vector search</p>
-              <h2 className="text-3xl font-bold tracking-tight">
-                Vector search was never built for logic.
-              </h2>
-              <p className="text-muted-foreground">
-                Example: A customer asks "what can I buy?" Simple filtering won't cut it - their eligibility depends on account status, which depends on payment history, which depends on dispute resolutions. That's three hops of reasoning before you even get to ranking products. A vector store can filter on metadata it already has. It can't derive new facts from chains of rules.
-              </p>
-              <p className="text-sm font-semibold text-primary uppercase tracking-wider pt-2">Best of both worlds</p>
-              <p className="text-muted-foreground">
-                InputLayer evaluates rules and ranks by vector similarity, all in a <strong>single query</strong>. Rules derive conclusions through multi-hop reasoning - like whether a customer is eligible based on a chain of conditions. Vector search ranks what's left by relevance. It's the best of both worlds, vector search powered with reasoning.
-              </p>
-              <a
-                href={`${DEMO_BASE_URL}/demo/request-access?kg=rules_vectors`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-sm text-primary font-medium hover:underline pt-2"
-              >
-                <Play className="h-3.5 w-3.5" />
-                Open in Studio
-              </a>
-            </div>
-            <VisualCodeTabs visual={<EmbeddingDiagram />} code={rulesVectorsCode} />
-          </div>
-        </div>
-      </section>
-
-      {/* ── Correct Retraction ─────────────────────────────────────── */}
-      <section className="border-b border-border/50">
-        <div className="mx-auto max-w-6xl px-6 py-20">
-          <div className="grid gap-12 lg:grid-cols-2 items-start">
-            <div className="space-y-6">
-              <p className="text-sm font-semibold text-primary uppercase tracking-wider">Correct retraction</p>
-              <h2 className="text-3xl font-bold tracking-tight">
-                Multiple reasons, one conclusion. Remove one - does the conclusion hold?
-              </h2>
-              <p className="text-muted-foreground">
-                Your customer didn't pay a bill and gets temporarily blocked from buying anything. Once that bill is paid, they should be unblocked - an easy problem to solve. But what if there are multiple facts that concluded the ban? Imagine, they also failed to confirm their credit card information. Multiple retraction paths, a harder problem to solve.
-              </p>
-              <p className="text-muted-foreground">
-                With InputLayer, conclusions only retract when every path is cleared. The customer stays blocked until the bill is paid and the card is verified. No premature unblocking, no manual checks.
-              </p>
-              <a
-                href={`${DEMO_BASE_URL}/demo/request-access?kg=retraction`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-sm text-primary font-medium hover:underline pt-2"
-              >
-                <Play className="h-3.5 w-3.5" />
-                Open in Studio
-              </a>
-            </div>
-            <VisualCodeTabs visual={<DiamondDiagram />} code={retractionCode} />
-          </div>
-        </div>
-      </section>
-
-      {/* ── Incremental Updates ─────────────────────────────────────── */}
-      <section className="border-b border-border/50">
-        <div className="mx-auto max-w-6xl px-6 py-20">
-          <div className="grid gap-12 lg:grid-cols-2 items-start">
-            <div className="space-y-6">
-              <p className="text-sm font-semibold text-primary uppercase tracking-wider">Incremental updates</p>
-              <h2 className="text-3xl font-bold tracking-tight">
-                Computing conclusions in record time and at any scale.
-              </h2>
-              <p className="text-muted-foreground">
-                Imagine a 2,000-node dependency graph, common for business applications. If one fact changes (a record expires, a supplier is suspended, ownership changes etc.) every conclusion built on that fact needs to be updated. Without InputLayer, recomputing everything takes 11.3 seconds. InputLayer traces the impact forward and updates only what's affected, making it record-fast at any scale.
-              </p>
-              <div className="flex gap-8 pt-2">
-                <div>
-                  <span className="text-4xl font-extrabold text-primary">6.83ms</span>
-                  <p className="text-xs text-muted-foreground mt-1">incremental update</p>
-                </div>
-                <div>
-                  <span className="text-4xl font-extrabold text-muted-foreground/30">11.3s</span>
-                  <p className="text-xs text-muted-foreground mt-1">full recompute</p>
-                </div>
-                <div>
-                  <span className="text-4xl font-extrabold text-primary">1,652x</span>
-                  <p className="text-xs text-muted-foreground mt-1">faster</p>
-                </div>
-              </div>
-              <a
-                href={`${DEMO_BASE_URL}/demo/request-access?kg=incremental`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-sm text-primary font-medium hover:underline pt-2"
-              >
-                <Play className="h-3.5 w-3.5" />
-                Open in Studio
-              </a>
-            </div>
-            <VisualCodeTabs visual={<WaterfallDiagram />} code={incrementalCode} />
-          </div>
-        </div>
-      </section>
-
-      {/* ── Provenance ─────────────────────────────────────────────── */}
-      <section className="border-b border-border/50">
-        <div className="mx-auto max-w-6xl px-6 py-20">
-          <div className="grid gap-12 lg:grid-cols-2 items-start">
-            <div className="space-y-6">
-              <p className="text-sm font-semibold text-primary uppercase tracking-wider">Provenance</p>
-              <h2 className="text-3xl font-bold tracking-tight">
-                Always know "why" a decision was made by AI
-              </h2>
-              <p className="text-muted-foreground">
-                Your AI agent decides to purchase supplies and makes a mistake. Understanding the "why" becomes crucial for fixing the issue. A simple "the model predicted this decision" is not auditable, actionable or trustworthy. With InputLayer you can simply run <code className="text-xs bg-muted/50 px-1.5 py-0.5 rounded">.why</code> and get a structured proof tree: facts, rules, and the chain of reasoning that produced the decision. Or run <code className="text-xs bg-muted/50 px-1.5 py-0.5 rounded">.why_not</code> to see exactly which condition blocked something.
-              </p>
-              <div className="flex justify-center gap-8 pt-2">
-                <div className="text-center">
-                  <span className="text-5xl font-extrabold text-primary">100%</span>
-                  <p className="text-xs text-muted-foreground mt-1">of results fully traceable</p>
-                </div>
-                <div className="text-center">
-                  <span className="text-5xl font-extrabold text-primary">100%</span>
-                  <p className="text-xs text-muted-foreground mt-1">of results fully verifiable</p>
-                </div>
-              </div>
-              <a
-                href={`${DEMO_BASE_URL}/demo/request-access?kg=provenance`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-sm text-primary font-medium hover:underline pt-2"
-              >
-                <Play className="h-3.5 w-3.5" />
-                Open in Studio
-              </a>
-            </div>
-            <VisualCodeTabs visual={<ProvenanceTreeDiagram />} code={provenanceCode} />
           </div>
         </div>
       </section>
@@ -332,21 +207,21 @@ export default function LandingPage() {
       <section className="border-b border-border/50">
         <div className="mx-auto max-w-6xl px-6 py-20">
           <div className="max-w-2xl mb-12">
-            <p className="text-sm font-semibold text-primary uppercase tracking-wider mb-2">The reasoning layer for AI agents</p>
+            <p className="text-sm font-semibold text-primary uppercase tracking-wider mb-2">How it works</p>
             <h2 className="text-3xl font-bold tracking-tight">
-              Derive what's true from what's stored, before the LLM ever sees it
+              Give your AI conclusions it can trust
             </h2>
             <p className="text-muted-foreground mt-4">
-              InputLayer is the reasoning layer for AI agents. It derives conclusions from facts and rules so your agent works with what's actually true - not what a model approximates.
+              InputLayer figures out what&apos;s true from the facts and rules you give it. Your AI gets reliable, up-to-date conclusions instead of guessing, and every conclusion can be traced back to the facts behind it.
             </p>
           </div>
 
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
             {[
-              { icon: <Brain className="h-6 w-6 text-primary" />, title: "Agent memory that reasons", desc: "Your agent stores facts. InputLayer derives what follows - before the LLM prompt is built." },
-              { icon: <Zap className="h-6 w-6 text-primary" />, title: "Beyond vector retrieval", desc: "Similarity search finds context. Rules filter to what's actually true. One query, both." },
-              { icon: <Shield className="h-6 w-6 text-primary" />, title: "Auditable decisions", desc: "Every conclusion traces back to the facts and rules that produced it. Ask .why on any result." },
-              { icon: <GitBranch className="h-6 w-6 text-primary" />, title: "Memory that stays current", desc: "One fact changes, derived conclusions update in milliseconds. No stale context, no recomputation." },
+              { icon: <Brain className="h-6 w-6 text-primary" />, title: "Thinks, not just stores", desc: "Your AI stores facts. InputLayer connects the dots and draws conclusions automatically." },
+              { icon: <Zap className="h-6 w-6 text-primary" />, title: "Search + logic together", desc: "Find things by similarity, then filter by what's actually true. One query, both at once." },
+              { icon: <Shield className="h-6 w-6 text-primary" />, title: "Shows its work", desc: "Every conclusion traces back to the facts and rules that produced it. Ask \"why?\" on any result." },
+              { icon: <GitBranch className="h-6 w-6 text-primary" />, title: "Always up to date", desc: "When a fact changes, every affected conclusion updates in milliseconds. No waiting, no rebuilding." },
             ].map((persona) => (
               <div
                 key={persona.title}
@@ -367,10 +242,10 @@ export default function LandingPage() {
           <div className="space-y-6 mb-12">
             <p className="text-sm font-semibold text-primary uppercase tracking-wider">Comparison</p>
             <h2 className="text-3xl font-bold tracking-tight">
-              The reasoning layer your stack is missing
+              What you get that other tools don&apos;t do
             </h2>
             <p className="text-muted-foreground max-w-2xl">
-              InputLayer is not a replacement for your data stack or your AI platform. It is the streaming reasoning layer that sits between them - filling the gap that neither vector search nor graph traversal can cover alone.
+              Databases store data. InputLayer thinks about it, combining search, logic, and live updates in one place.
             </p>
           </div>
 
@@ -378,15 +253,152 @@ export default function LandingPage() {
             columns={["Vector DBs", "Graph DBs", "SQL", "InputLayer"]}
             highlightColumn="InputLayer"
             rows={[
-              { capability: "Vector similarity", values: { "Vector DBs": "native", "Graph DBs": "plugin", "SQL": "none", "InputLayer": "native" } },
-              { capability: "Graph traversal", values: { "Vector DBs": "none", "Graph DBs": "native", "SQL": "partial", "InputLayer": "native" } },
-              { capability: "Rule-based inference", values: { "Vector DBs": "none", "Graph DBs": "none", "SQL": "none", "InputLayer": "native" } },
-              { capability: "Recursive reasoning", values: { "Vector DBs": "none", "Graph DBs": "partial", "SQL": "partial", "InputLayer": "native" } },
-              { capability: "Incremental updates", values: { "Vector DBs": "none", "Graph DBs": "none", "SQL": "partial", "InputLayer": "native" } },
-              { capability: "Correct retraction", values: { "Vector DBs": "none", "Graph DBs": "none", "SQL": "none", "InputLayer": "native" } },
-              { capability: "Explainable retrieval", values: { "Vector DBs": "none", "Graph DBs": "partial", "SQL": "none", "InputLayer": "native" } },
+              { capability: "Find by similarity", values: { "Vector DBs": "native", "Graph DBs": "plugin", "SQL": "plugin", "InputLayer": "native" } },
+              { capability: "Follow connections", values: { "Vector DBs": "none", "Graph DBs": "native", "SQL": "partial", "InputLayer": "native" } },
+              { capability: "Apply rules", values: { "Vector DBs": "none", "Graph DBs": "partial", "SQL": "partial", "InputLayer": "native" } },
+              { capability: "Chain logic together", values: { "Vector DBs": "none", "Graph DBs": "native", "SQL": "native", "InputLayer": "native" } },
+              { capability: "Live updates", values: { "Vector DBs": "none", "Graph DBs": "none", "SQL": "partial", "InputLayer": "native" } },
+              { capability: "Undo when facts change", values: { "Vector DBs": "none", "Graph DBs": "recompute", "SQL": "recompute", "InputLayer": "native" } },
+              { capability: "Explain every conclusion", values: { "Vector DBs": "none", "Graph DBs": "partial", "SQL": "partial", "InputLayer": "native" } },
             ]}
           />
+        </div>
+      </section>
+
+      {/* ── Rules + Vectors ────────────────────────────────────────── */}
+      <section className="border-b border-border/50">
+        <div className="mx-auto max-w-6xl px-6 py-20">
+          <div className="grid gap-12 lg:grid-cols-2 items-start">
+            <div className="space-y-6">
+              <p className="text-sm font-semibold text-primary uppercase tracking-wider">Search + logic</p>
+              <h2 className="text-3xl font-bold tracking-tight">
+                Where can I fly that feels like a beach vacation?
+              </h2>
+              <p className="text-muted-foreground">
+                You're in New York and want beach destinations, but only ones you can actually get to. First, InputLayer follows the flight network to figure out which cities are reachable (even with connecting flights). Then it ranks those cities by how well they match "beach vacation."
+              </p>
+              <p className="text-sm font-semibold text-primary uppercase tracking-wider pt-2">One query does both</p>
+              <p className="text-muted-foreground">
+                Rules figure out where you can go. Search ranks by what you want. InputLayer does both in a <strong>single query</strong>. No stitching things together, no extra steps.
+              </p>
+              <a
+                href={`${DEMO_BASE_URL}/demo/request-access?kg=flights`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm text-primary font-medium hover:underline pt-2"
+              >
+                <Play className="h-3.5 w-3.5" />
+                Open in Studio
+              </a>
+            </div>
+            <VisualCodeTabs visual={<EmbeddingDiagram />} code={rulesVectorsCode} />
+          </div>
+        </div>
+      </section>
+
+      {/* ── Correct Retraction ─────────────────────────────────────── */}
+      <section className="border-b border-border/50">
+        <div className="mx-auto max-w-6xl px-6 py-20">
+          <div className="grid gap-12 lg:grid-cols-2 items-start">
+            <div className="space-y-6">
+              <p className="text-sm font-semibold text-primary uppercase tracking-wider">Smart undo</p>
+              <h2 className="text-3xl font-bold tracking-tight">
+                Cancel a route. Does the destination stay reachable?
+              </h2>
+              <p className="text-muted-foreground">
+                Sydney is reachable from New York two ways, through Tokyo and through Dubai. Cancel the Dubai route, and most systems would just wipe the conclusion. But the Tokyo route still works.
+              </p>
+              <p className="text-muted-foreground">
+                InputLayer tracks both paths. It only removes a conclusion when every way to reach it is gone. Sydney stays reachable until both routes are cancelled. No wrong removals, no stale conclusions.
+              </p>
+              <a
+                href={`${DEMO_BASE_URL}/demo/request-access?kg=flights`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm text-primary font-medium hover:underline pt-2"
+              >
+                <Play className="h-3.5 w-3.5" />
+                Open in Studio
+              </a>
+            </div>
+            <VisualCodeTabs visual={<DiamondDiagram />} code={retractionCode} />
+          </div>
+        </div>
+      </section>
+
+      {/* ── Incremental Updates ─────────────────────────────────────── */}
+      <section className="border-b border-border/50">
+        <div className="mx-auto max-w-6xl px-6 py-20">
+          <div className="grid gap-12 lg:grid-cols-2 items-start">
+            <div className="space-y-6">
+              <p className="text-sm font-semibold text-primary uppercase tracking-wider">Instant updates</p>
+              <h2 className="text-3xl font-bold tracking-tight">
+                Add a route. Only the affected conclusions update.
+              </h2>
+              <p className="text-muted-foreground">
+                Your flight network has 2,000 airports and hundreds of thousands of possible connections. Add one new route, say London to Dubai, and most systems recalculate everything from scratch. InputLayer only updates the conclusions that actually changed.
+              </p>
+              <div className="flex gap-8 pt-2">
+                <div>
+                  <span className="text-4xl font-extrabold text-primary">6.83ms</span>
+                  <p className="text-xs text-muted-foreground mt-1">incremental update</p>
+                </div>
+                <div>
+                  <span className="text-4xl font-extrabold text-muted-foreground/30">11.3s</span>
+                  <p className="text-xs text-muted-foreground mt-1">full recompute</p>
+                </div>
+                <div>
+                  <span className="text-4xl font-extrabold text-primary">1,652x</span>
+                  <p className="text-xs text-muted-foreground mt-1">faster</p>
+                </div>
+              </div>
+              <a
+                href={`${DEMO_BASE_URL}/demo/request-access?kg=flights`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm text-primary font-medium hover:underline pt-2"
+              >
+                <Play className="h-3.5 w-3.5" />
+                Open in Studio
+              </a>
+            </div>
+            <VisualCodeTabs visual={<WaterfallDiagram />} code={incrementalCode} />
+          </div>
+        </div>
+      </section>
+
+      {/* ── Provenance ─────────────────────────────────────────────── */}
+      <section className="border-b border-border/50">
+        <div className="mx-auto max-w-6xl px-6 py-20">
+          <div className="grid gap-12 lg:grid-cols-2 items-start">
+            <div className="space-y-6">
+              <p className="text-sm font-semibold text-primary uppercase tracking-wider">Explainability</p>
+              <h2 className="text-3xl font-bold tracking-tight">
+                Ask &quot;why?&quot; and get the full reasoning chain
+              </h2>
+              <p className="text-muted-foreground">
+                How does New York connect to Sydney? Ask <code className="text-xs bg-muted/50 px-1.5 py-0.5 rounded">.why</code> and see every step: NY to London, London to Paris, Paris to Tokyo, Tokyo to Sydney. Or ask <code className="text-xs bg-muted/50 px-1.5 py-0.5 rounded">.why_not</code> to see why São Paulo can&apos;t be reached. Every conclusion comes with the receipts.
+              </p>
+              <div className="flex justify-center pt-2">
+                <div className="text-center">
+                  <span className="text-5xl font-extrabold text-primary">100%</span>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    of results fully <RotatingWord words={["explainable", "traceable", "verifiable", "reproducible"]} />
+                  </p>
+                </div>
+              </div>
+              <a
+                href={`${DEMO_BASE_URL}/demo/request-access?kg=flights`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm text-primary font-medium hover:underline pt-2"
+              >
+                <Play className="h-3.5 w-3.5" />
+                Open in Studio
+              </a>
+            </div>
+            <VisualCodeTabs visual={<ProvenanceTreeDiagram />} code={provenanceCode} />
+          </div>
         </div>
       </section>
 
@@ -410,15 +422,15 @@ export default function LandingPage() {
             {[
               {
                 slug: "why-vector-search-alone-fails",
-                context: "Extends: Rules + vector search",
-                title: "Why Vector Search Alone Fails Your AI Agent",
-                desc: "Similarity scores can't encode business rules. This post walks through the ink cartridge problem and shows how rules and vectors work together in a single query.",
+                context: "Extends: Search + logic",
+                title: "Why Search Alone Isn't Enough for Your AI Agent",
+                desc: "Finding similar items is useful, but it can't tell you which destinations are actually reachable. See how rules and search work together in one query.",
               },
               {
                 slug: "correct-retraction-why-delete-should-actually-delete",
-                context: "Extends: Correct conclusion retraction",
-                title: "Correct Retraction: Why Delete Should Actually Delete",
-                desc: "When an entity is cleared from a sanctions list, which flags should retract? The diamond problem is subtle, and most systems get it wrong.",
+                context: "Extends: Smart undo",
+                title: "Why Delete Should Actually Delete",
+                desc: "When a route gets cancelled, which destinations become unreachable? Getting the right conclusion is harder than it sounds, and getting it wrong can break everything downstream.",
               },
             ].map((post) => (
               <Link
@@ -475,7 +487,7 @@ export default function LandingPage() {
                   step: "2",
                   icon: <BookOpen className="h-5 w-5 text-primary" />,
                   title: "Learn the syntax",
-                  desc: "Datalog rules, facts, queries - the full language reference.",
+                  desc: "How to write facts, rules, and queries. The full reference.",
                   href: "/docs/",
                   external: false,
                   label: "Read the docs",

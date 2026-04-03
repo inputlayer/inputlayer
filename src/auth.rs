@@ -243,7 +243,7 @@ fn authorize_kg_viewer(stmt: &Statement) -> Result<(), String> {
             | MetaCommand::SessionDropName(_)
             | MetaCommand::IndexList
             | MetaCommand::IndexStats(_)
-            | MetaCommand::Explain(_)
+            | MetaCommand::Debug(_)
             | MetaCommand::Status
             | MetaCommand::Help
             | MetaCommand::Quit
@@ -323,7 +323,7 @@ fn authorize_editor_meta(cmd: &MetaCommand) -> Result<(), String> {
         MetaCommand::ClearPrefix(_) | MetaCommand::Load { .. } => Ok(()),
 
         // Read-only system commands
-        MetaCommand::Explain(_)
+        MetaCommand::Debug(_)
         | MetaCommand::Why(_)
         | MetaCommand::WhyFull(_)
         | MetaCommand::WhyNot(_)
@@ -336,6 +336,12 @@ fn authorize_editor_meta(cmd: &MetaCommand) -> Result<(), String> {
         MetaCommand::KgAclGrant { .. } | MetaCommand::KgAclRevoke { .. } => {
             Err("Permission denied: only KG owners or admins can manage ACLs".to_string())
         }
+
+        // Agent commands - allowed for all roles
+        MetaCommand::AgentMessage(_)
+        | MetaCommand::AgentStart(_)
+        | MetaCommand::AgentSetup(_)
+        | MetaCommand::AgentExamples => Ok(()),
 
         // Admin-only commands
         MetaCommand::Compact => Err("Permission denied: only admins can compact".to_string()),
@@ -424,13 +430,19 @@ fn authorize_viewer_meta(cmd: &MetaCommand) -> Result<(), String> {
         MetaCommand::Load { .. } => Err("Permission denied: viewers cannot load files".to_string()),
 
         // Read-only system commands
-        MetaCommand::Explain(_)
+        MetaCommand::Debug(_)
         | MetaCommand::Why(_)
         | MetaCommand::WhyFull(_)
         | MetaCommand::WhyNot(_)
         | MetaCommand::Status
         | MetaCommand::Help
         | MetaCommand::Quit => Ok(()),
+
+        // Agent commands - allowed for all roles
+        MetaCommand::AgentMessage(_)
+        | MetaCommand::AgentStart(_)
+        | MetaCommand::AgentSetup(_)
+        | MetaCommand::AgentExamples => Ok(()),
 
         // Admin-only
         MetaCommand::Compact => Err("Permission denied: viewers cannot compact".to_string()),

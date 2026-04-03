@@ -18,6 +18,8 @@ export interface WsClientConfig {
   username?: string
   /** Password for login authentication */
   password?: string
+  /** API key for authentication (alternative to username/password) */
+  apiKey?: string
   /** Auto-reconnect on unexpected close (default: true) */
   autoReconnect?: boolean
   /** Max reconnect attempts (default: 10) */
@@ -78,6 +80,7 @@ export class WsClient {
   private readonly kg: string
   private readonly username: string
   private readonly password: string
+  private readonly apiKey: string
   private readonly autoReconnect: boolean
   private readonly maxReconnectAttempts: number
   private readonly reconnectDelayMs: number
@@ -87,6 +90,7 @@ export class WsClient {
     this.kg = config.kg ?? "default"
     this.username = config.username ?? ""
     this.password = config.password ?? ""
+    this.apiKey = config.apiKey ?? ""
     this.autoReconnect = config.autoReconnect ?? true
     this.maxReconnectAttempts = config.maxReconnectAttempts ?? 10
     this.reconnectDelayMs = config.reconnectDelayMs ?? 1000
@@ -109,12 +113,12 @@ export class WsClient {
       let authenticated = false
 
       ws.onopen = () => {
-        // Send login message immediately after connection
-        ws.send(JSON.stringify({
-          type: "login",
-          username: this.username,
-          password: this.password,
-        }))
+        // Send auth message immediately after connection
+        if (this.apiKey) {
+          ws.send(JSON.stringify({ type: "authenticate", api_key: this.apiKey }))
+        } else {
+          ws.send(JSON.stringify({ type: "login", username: this.username, password: this.password }))
+        }
       }
 
       ws.onmessage = (event) => {

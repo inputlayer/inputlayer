@@ -2,16 +2,16 @@
 title: "Correct Retraction: Why Delete Should Actually Delete"
 date: "2026-01-15"
 category: "Engineering"
-excerpt: "Bob left the company. His direct access was revoked. But Alice's transitive access to documents through Bob's position was never cleaned up. For three months."
+excerpt: "Bob left the company. His direct access was revoked. But Alice's indirect access to documents through Bob's position was never cleaned up. For three months."
 ---
 
 # Correct Retraction: Why Delete Should Actually Delete
 
-Three months after a security incident, the forensics team discovers something troubling. A former employee, Bob, had his access revoked on the day he left. His account was deactivated. His role was removed from the auth system. Everything looked clean. But Bob had authority over a team of six people, and those six people had authored sensitive documents. The system had derived that Bob's manager, Alice, could access those documents through Bob's position. When Bob left, his direct access disappeared - but Alice's transitive access, the part derived through Bob, was never cleaned up. For three months, Alice could see documents she had no business seeing. The compliance team spent 200 hours on the resulting investigation, and the company disclosed the access violation to two regulators.
+Three months after a security incident, your forensics team discovers something troubling. A former employee, Bob, had his access revoked on the day he left. His account was deactivated. His role was removed from the auth system. Everything looked clean. But Bob had authority over a team of six people, and those six people had authored sensitive documents. The system had figured out that Bob's manager, Alice, could access those documents through Bob's position. When Bob left, his direct access disappeared. But Alice's indirect access, the part she had only because of Bob, was never cleaned up. For three months, Alice could see documents she had no business seeing. Your compliance team spent 200 hours on the resulting investigation, and the company disclosed the access violation to two regulators.
 
-This isn't a contrived scenario. It's what happens when derived permissions don't retract correctly. And it's not limited to access control - stale compliance flags that keep triggering investigation queues for weeks after the underlying risk is resolved, phantom entity relationships that cause false positives in sanctions screening, recommendation signals that keep surfacing products long after they've been discontinued. Every system that derives conclusions from connected facts has this problem, and most handle it badly.
+This isn't a contrived scenario. It's what happens when derived permissions don't retract correctly. And it's not limited to access control. Stale compliance flags keep triggering investigation queues for weeks after the underlying risk is resolved. Phantom entity relationships cause false positives in sanctions screening. Recommendation signals keep surfacing products long after they've been discontinued. If you're building any system that automatically builds up conclusions from connected facts, you face this problem, and the three common approaches each have significant tradeoffs.
 
-InputLayer solves this with weighted differences: every derived conclusion tracks how many independent paths support it. Delete a path, and the weight goes down. Only when it reaches zero does the conclusion disappear. This handles the simple cases and the hard ones - like when Alice has authority over Charlie through both Bob and Diana, and removing one path should preserve the other.
+InputLayer solves this by counting support. Every conclusion the system reaches tracks how many independent paths lead to it. Remove a path, and the count goes down. Only when it reaches zero does the conclusion disappear. This handles the simple cases and the hard ones, like when Alice has authority over Charlie through both Bob and Diana, and removing one path should preserve the other.
 
 ## Simple on the surface, hard underneath
 
@@ -19,7 +19,7 @@ At first glance, retraction seems trivial. Delete a fact, delete everything that
 
 Let's walk through why it's not that simple.
 
-Alice manages Bob. Bob manages Charlie. The system derives transitive authority:
+Alice manages Bob. Bob manages Charlie. The system derives indirect authority:
 
 ```tree
 Alice [primary]
@@ -39,7 +39,7 @@ authority(Alice, Charlie) :: RETRACT - derived via Bob [highlight]
 authority(Bob, Charlie) :: KEEP - independent [success]
 ```
 
-Alice loses authority over both Bob and Charlie. But Bob keeps authority over Charlie because that relationship doesn't depend on Alice's management of Bob. The retraction needs to be precise - it can't just cascade blindly down the graph.
+Alice loses authority over both Bob and Charlie. But Bob keeps authority over Charlie because that relationship doesn't depend on Alice's management of Bob. The retraction needs to be precise. It can't just blindly walk down the chain and delete everything it finds.
 
 OK, that's manageable. But now consider the harder case.
 
@@ -55,7 +55,7 @@ Alice [primary]
     Charlie
 ```
 
-Alice has authority over Charlie through *two independent paths*: through Bob and through Diana. The derived fact `authority(Alice, Charlie)` has two reasons to exist.
+Alice has authority over Charlie through *two independent paths*: one through Bob and one through Diana. The conclusion `authority(Alice, Charlie)` has two reasons to exist.
 
 Now Bob stops managing Charlie:
 
@@ -79,15 +79,15 @@ Charlie (no paths remain) [highlight]
 
 *Now* Alice should lose authority over Charlie. Both supporting paths are gone.
 
-This is the multiple derivation path problem, and it's what makes correct retraction genuinely difficult. A derived conclusion should only disappear when *every* path that supports it has been removed. Not when the first path is removed. Not when most paths are removed. Only when the count reaches zero.
+This is the multiple paths problem, and it's what makes correct retraction genuinely difficult. A conclusion should only disappear when *every* path that supports it has been removed. Not when the first path is removed. Not when most paths are removed. Only when the count reaches zero.
 
 ## The three common approaches
 
-**Append-only.** Mark a source fact as deleted, but leave derived facts in whatever cache, index, or materialized view they were written to. Fast, but you get phantom permissions and ghost recommendations - stale conclusions that nobody cleans up because nobody knows where they all spread to.
+**Append-only.** You mark a source fact as deleted, but leave derived facts in whatever cache, index, or materialized view they were written to. Fast, but you get phantom permissions and ghost recommendations. Stale conclusions that you can't clean up because you don't know where they all spread to.
 
-**Full recomputation.** Throw away all derived data and re-derive from scratch. Correct, but expensive - seconds to minutes on large knowledge graphs. Between batch runs, your data is potentially inconsistent.
+**Full recomputation.** You throw away all derived data and re-derive from scratch. Correct, but expensive. Seconds to minutes on large knowledge graphs. Between batch runs, your data is potentially inconsistent.
 
-**Cascade deletion.** Walk from the retracted fact and delete anything downstream. Fast, but wrong whenever the diamond problem appears - you'll delete conclusions that should have survived because they had alternative paths.
+**Follow-the-chain deletion.** You walk from the retracted fact and delete anything downstream. Fast, but wrong whenever the diamond problem appears. You'll delete conclusions that should have survived because they had alternative paths.
 
 ```tree
 Approaches [primary]
@@ -98,33 +98,33 @@ Approaches [primary]
     Retraction: Yes [success]
     Diamond: Yes [success]
     Speed: Slow [highlight]
-  Cascade deletion
+  Follow-the-chain deletion
     Retraction: Yes [success]
     Diamond: No [highlight]
     Speed: Fast but wrong [highlight]
-  Weighted differences (InputLayer)
+  Support counting (InputLayer)
     Retraction: Yes [success]
     Diamond: Yes [success]
     Speed: Fast and correct [success]
 ```
 
-## How InputLayer solves it: weighted differences
+## How InputLayer solves it: counting support
 
-InputLayer is built on Differential Dataflow, which represents every derived fact as a weighted record. The weight counts the number of independent derivation paths that support the conclusion.
+InputLayer is built on Differential Dataflow, which tracks a support count for every conclusion the system reaches. That count reflects the number of independent paths that lead to the conclusion.
 
 Here's the diamond example, step by step:
 
 ```steps
-Initial: weight = 2 (via Bob + Diana) :: authority(Alice, Charlie)
-Remove Bob path: weight = 1 :: survives [success]
-Remove Diana path: weight = 0 :: retracted [highlight]
+Initial: count = 2 (via Bob + Diana) :: authority(Alice, Charlie)
+Remove Bob path: count = 1 :: survives [success]
+Remove Diana path: count = 0 :: retracted [highlight]
 ```
 
-The engine doesn't need to search for alternative paths or do any special-case reasoning. The weight arithmetic handles it automatically. And this works through any number of recursive levels - if the derivation chain is 10 hops deep with branching paths at every level, the weights still track correctly.
+The engine doesn't need to search for alternative paths or do any special-case reasoning. The counting handles it automatically. And this works through any number of recursive levels. If your reasoning chain is 10 hops deep with branching paths at every level, the counts still track correctly.
 
 ## Retraction through recursive chains
 
-The diamond problem is hard enough with a single level of derivation. With recursion, it gets harder - but the weighted approach still handles it.
+The diamond problem is hard enough with a single level of reasoning. With recursion, it gets harder. But the counting approach still handles it.
 
 Consider a deeper hierarchy:
 
@@ -132,19 +132,19 @@ Consider a deeper hierarchy:
 Alice --manages-> Bob --manages-> Charlie --manages-> Diana --manages-> Eve [primary]
 ```
 
-The derived fact `authority(Alice, Eve)` goes through 4 hops. If you remove "Charlie manages Diana," the engine needs to retract not just `authority(Charlie, Diana)` but also `authority(Alice, Diana)`, `authority(Bob, Diana)`, `authority(Alice, Eve)`, `authority(Bob, Eve)`, and `authority(Charlie, Eve)` - every derived authority that passed through the Charlie-Diana link.
+The conclusion `authority(Alice, Eve)` goes through 4 hops. If you remove "Charlie manages Diana," the engine needs to retract not just `authority(Charlie, Diana)` but also `authority(Alice, Diana)`, `authority(Bob, Diana)`, `authority(Alice, Eve)`, `authority(Bob, Eve)`, and `authority(Charlie, Eve)`. Every derived authority that passed through the Charlie-Diana link.
 
 But if Diana also reports to someone else (say, Frank, who reports to Alice through a different branch), some of those authority relationships might survive through the alternative path.
 
-The engine tracks all of this through differences. Each removal spreads as a -1 difference through the derivation graph. At each node, the difference combines with existing weights. Conclusions retract when and only when their weight reaches zero. No manual reasoning about paths needed.
+The engine tracks all of this through its counting mechanism. Each removal ripples through the reasoning chain as a -1 adjustment. At each step, the adjustment combines with the existing count. Conclusions retract when and only when their count reaches zero. No manual reasoning about paths needed.
 
 ## Why this matters: three real scenarios
 
-**Access control:** When someone leaves the company, every permission derived through their position needs to disappear. But only the permissions that were *exclusively* derived through their position. If a document was accessible through two independent authorization paths and one is removed, access should continue through the remaining path. Getting this wrong means either phantom permissions (security risk) or over-retraction (broken access for people who should still have it).
+**Access control:** When someone leaves your company, every permission derived through their position needs to disappear. But only the permissions that were *exclusively* derived through their position. If a document was accessible through two independent authorization paths and you remove one, access should continue through the remaining path. Getting this wrong means either phantom permissions (security risk) or over-retraction (broken access for people who should still have it).
 
-**Recommendations:** When a product is discontinued, every recommendation that included it should vanish. If a recommendation was "users who bought X also bought Y," and Y is discontinued, the recommendation disappears. But if Y was also recommended through a different signal (semantic similarity, category affinity), that recommendation should survive through the remaining signal.
+**Recommendations:** When you discontinue a product, every recommendation that included it should vanish. If a recommendation was "users who bought X also bought Y," and Y is discontinued, the recommendation disappears. But if Y was also recommended through a different signal (semantic similarity, category affinity), that recommendation should survive through the remaining signal.
 
-**Compliance:** When an entity is removed from a sanctions list, every downstream flag derived from that designation should clear. But if an entity had sanctions exposure through two different ownership paths, removing one designation should correctly preserve the remaining exposure. Your compliance team should not be chasing alerts that are no longer valid. They should also not miss alerts that are still valid because the retraction was too aggressive.
+**Compliance:** When an entity is removed from a sanctions list, every downstream flag derived from that designation should clear. But if an entity had sanctions exposure through two different ownership paths, removing one designation should correctly preserve the remaining exposure. Your compliance team should not be chasing alerts that are no longer valid, and should also not miss alerts that are still valid because the retraction was too aggressive.
 
 ## Performance
 
@@ -156,7 +156,7 @@ Correct retraction is only useful if it's fast enough to happen in real time. If
 | Retract 10 edges, propagate all downstream changes | ~100ms |
 | Retract 100 edges, propagate all downstream changes | ~1 second |
 
-These numbers come from our benchmark graph with ~400,000 derived relationships. The incremental approach means each retraction only touches the affected portion of the derivation graph. The total graph size barely matters - what matters is the size of the ripple effect from the specific retraction.
+These numbers come from our benchmark graph with ~400,000 derived relationships. The incremental approach means each retraction only touches the affected portion of the reasoning chain. The total graph size barely matters. What matters is the size of the ripple effect from the specific retraction.
 
 ## Getting started
 

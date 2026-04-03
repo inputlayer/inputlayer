@@ -80,12 +80,13 @@ export type {
   InsertResult,
   DeleteResult,
   ClearResult,
-  ExplainResult,
+  DebugResult,
   ServerStatus,
   WhyResult,
   WhyNotResult,
   WhyNotBlocker,
   ProofTree,
+  ProofNode,
 } from './knowledge-graph.js';
 
 // Auth

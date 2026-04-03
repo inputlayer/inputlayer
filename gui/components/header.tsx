@@ -138,9 +138,11 @@ export function Header() {
                             <Database className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                             <div className="min-w-0 flex-1">
                               <span className="font-medium">{kg.name}</span>
-                              <p className="text-xs text-muted-foreground">
-                                {kg.relationsCount} relations • {kg.viewsCount} views
-                              </p>
+                              {(kg.relationsCount > 0 || kg.viewsCount > 0) && (
+                                <p className="text-xs text-muted-foreground">
+                                  {kg.relationsCount} relation{kg.relationsCount !== 1 ? "s" : ""} • {kg.viewsCount} view{kg.viewsCount !== 1 ? "s" : ""}
+                                </p>
+                              )}
                             </div>
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">

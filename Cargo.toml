@@ -149,8 +149,8 @@ temporal = []
 distributed = []
 
 [profile.release]
-lto = true
-codegen-units = 1
+lto = false
+codegen-units = 4
 opt-level = 3
 
 [profile.bench]

@@ -136,7 +136,7 @@ const META_COMMANDS: CompletionItem[] = [
   // System commands
   { label: ".compact", kind: "meta", detail: "compact storage", insertText: ".compact" },
   { label: ".status", kind: "meta", detail: "show system status", insertText: ".status" },
-  { label: ".explain", kind: "meta", detail: ".explain <query> - show plan", insertText: ".explain " },
+  { label: ".debug", kind: "meta", detail: ".debug <query> - show plan", insertText: ".debug " },
   { label: ".load", kind: "meta", detail: ".load <file> [--replace|--merge]", insertText: ".load " },
   { label: ".help", kind: "meta", detail: "show help", insertText: ".help" },
 ]

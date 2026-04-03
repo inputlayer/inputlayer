@@ -3,7 +3,7 @@
 import type React from "react"
 
 import { useState, useRef, useCallback, useMemo, useEffect, useSyncExternalStore } from "react"
-import { Play, Copy, Check, Trash2, Square } from "lucide-react"
+import { Play, Copy, Check, Trash2, Square, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useDatalogStore } from "@/lib/datalog-store"
@@ -344,6 +344,20 @@ export function QueryEditorPanel({ onExecute, onCancel, isExecuting, errorLines 
           )}
         </div>
       </div>
+
+      {/* Multi-query indicator */}
+      {(() => {
+        const queryLines = query.split("\n").filter((l) => l.trim().startsWith("?"))
+        if (queryLines.length > 1) {
+          return (
+            <div className="flex items-center gap-1.5 border-b border-amber-500/20 bg-amber-500/5 px-3 py-1 text-[10px] text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="h-3 w-3 flex-shrink-0" />
+              <span>Multiple queries detected - only the last query's results will be shown</span>
+            </div>
+          )
+        }
+        return null
+      })()}
 
       {/* Code editor area */}
       <div ref={editorAreaRef} className="relative flex flex-1 overflow-hidden bg-[var(--code-bg)]">

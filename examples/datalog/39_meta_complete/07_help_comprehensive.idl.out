@@ -26,7 +26,7 @@ Meta Commands:
   .session clear       Clear all session rules
   .session drop <n|name>  Drop session rule by index or relation name
   .clear prefix <p>    Clear all facts from relations with prefix
-  .explain <query>     Show query plan without executing
+  .debug <query>       Show query plan without executing
   .status              Server status
   .help                Show this help
   .quit                Exit
@@ -64,7 +64,7 @@ Meta Commands:
   .session clear       Clear all session rules
   .session drop <n|name>  Drop session rule by index or relation name
   .clear prefix <p>    Clear all facts from relations with prefix
-  .explain <query>     Show query plan without executing
+  .debug <query>       Show query plan without executing
   .status              Server status
   .help                Show this help
   .quit                Exit
@@ -102,7 +102,7 @@ Meta Commands:
   .session clear       Clear all session rules
   .session drop <n|name>  Drop session rule by index or relation name
   .clear prefix <p>    Clear all facts from relations with prefix
-  .explain <query>     Show query plan without executing
+  .debug <query>       Show query plan without executing
   .status              Server status
   .help                Show this help
   .quit                Exit
@@ -140,7 +140,7 @@ Meta Commands:
   .session clear       Clear all session rules
   .session drop <n|name>  Drop session rule by index or relation name
   .clear prefix <p>    Clear all facts from relations with prefix
-  .explain <query>     Show query plan without executing
+  .debug <query>       Show query plan without executing
   .status              Server status
   .help                Show this help
   .quit                Exit
@@ -178,7 +178,7 @@ Meta Commands:
   .session clear       Clear all session rules
   .session drop <n|name>  Drop session rule by index or relation name
   .clear prefix <p>    Clear all facts from relations with prefix
-  .explain <query>     Show query plan without executing
+  .debug <query>       Show query plan without executing
   .status              Server status
   .help                Show this help
   .quit                Exit

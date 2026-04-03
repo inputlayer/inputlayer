@@ -7,18 +7,18 @@
 // A customer can be blocked for multiple independent reasons.
 // Only when ALL reasons are cleared should they be unblocked.
 
-+customer[("customer_42", "Jane Doe", "jane@example.com"),
-          ("customer_17", "Bob Smith", "bob@example.com"),
-          ("customer_88", "Alice Chen", "alice@example.com")]
++customer("customer_42", "Jane Doe", "jane@example.com")
++customer("customer_17", "Bob Smith", "bob@example.com")
++customer("customer_88", "Alice Chen", "alice@example.com")
 
 // Blocking conditions - multiple independent reasons
-+unpaid_bill[("customer_42", "inv_301", 450.00),
-             ("customer_17", "inv_220", 125.50)]
++unpaid_bill("customer_42", "inv_301", 450.00)
++unpaid_bill("customer_17", "inv_220", 125.50)
 
-+unverified_card[("customer_42", "card_9x"),
-                 ("customer_88", "card_3z")]
++unverified_card("customer_42", "card_9x")
++unverified_card("customer_88", "card_3z")
 
-+failed_kyc[("customer_88", "2025-01-15")]
++failed_kyc("customer_88", "2025-01-15")
 
 // ── Blocking rules ─────────────────────────────────────────────────────
 // Each condition independently blocks the customer

@@ -80,8 +80,11 @@ pub fn find_matching_tuples(
     };
 
     let mut results = Vec::new();
+    let mut arity_mismatches = 0usize;
+    let mut value_mismatches = 0usize;
     for tuple in tuples {
         if tuple.arity() != bound_terms.len() {
+            arity_mismatches += 1;
             continue;
         }
         let mut new_bindings = Bindings::new();
@@ -97,6 +100,13 @@ pub fn find_matching_tuples(
             match bt {
                 BoundTerm::Concrete(expected) => {
                     if !values_equal(expected, value) {
+                        if value_mismatches == 0 {
+                            tracing::debug!(
+                                relation, i, expected = ?expected, actual = ?value,
+                                "find_matching_tuples: value mismatch on first failure"
+                            );
+                        }
+                        value_mismatches += 1;
                         matches = false;
                         break;
                     }
@@ -116,6 +126,15 @@ pub fn find_matching_tuples(
         if matches {
             results.push((tuple.clone(), new_bindings));
         }
+    }
+    if results.is_empty() && !tuples.is_empty() {
+        tracing::debug!(
+            relation,
+            total = tuples.len(),
+            arity_mismatches,
+            value_mismatches,
+            "find_matching_tuples: no results"
+        );
     }
     results
 }
@@ -153,6 +172,9 @@ fn resolve_to_value(term: &Term, bindings: &Bindings) -> Result<Value, String> {
     }
 }
 
+/// Counter for generating unique placeholder names
+static PLACEHOLDER_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Resolve a single term: replace variables with their bindings.
 fn resolve_term(term: &Term, bindings: &Bindings) -> BoundTerm {
     match term {
@@ -160,7 +182,10 @@ fn resolve_term(term: &Term, bindings: &Bindings) -> BoundTerm {
             Some(val) => BoundTerm::Concrete(val.clone()),
             None => BoundTerm::Unbound(name.clone()),
         },
-        Term::Placeholder => BoundTerm::Unbound("_".to_string()),
+        Term::Placeholder => {
+            let id = PLACEHOLDER_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            BoundTerm::Unbound(format!("_placeholder_{id}"))
+        }
         _ => match term_to_value(term) {
             Some(v) => BoundTerm::Concrete(v),
             None => BoundTerm::Unbound(format!("{term:?}")),

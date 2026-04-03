@@ -362,10 +362,10 @@ const tuples = result.toTuples();  // Array<any[]>
 
 ### Query Plans
 
-To understand how a query will execute without running it, use `explain()`:
+To understand how a query will execute without running it, use `debug()`:
 
 ```typescript
-const plan = await kg.explain({
+const plan = await kg.debug({
   select: [Employee],
   join: [Employee],
   where: Employee.col("department").eq("eng"),

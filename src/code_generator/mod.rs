@@ -758,8 +758,17 @@ impl CodeGenerator {
                             .join(edges_keyed)
                             .map(|(_y_key, (x, z))| Tuple::new(vec![x, z]));
 
+                        // Base case: project edges to 2 columns (from, to) to match
+                        // the recursive case arity. Edge relations may have extra columns
+                        // (e.g. direct_flight has a 3rd "hours" column) that must be dropped.
+                        let base_case = edges_in_scope.map(|tuple| {
+                            let x = tuple.get(0).cloned().unwrap_or(Value::Null);
+                            let y = tuple.get(1).cloned().unwrap_or(Value::Null);
+                            Tuple::new(vec![x, y])
+                        });
+
                         // Combine base case and recursive case
-                        let next = edges_in_scope.concat(recursive).distinct_core::<R>();
+                        let next = base_case.concat(recursive).distinct_core::<R>();
 
                         // Set variable for next iteration
                         variable.set(next.clone());
@@ -926,8 +935,13 @@ impl CodeGenerator {
                             .join(edges_keyed)
                             .map(|(_y_key, (x, z))| Tuple::new(vec![x, z]));
 
-                        // Base = seed edges only (not all edges)
-                        let next = seed_edges_in.concat(recursive).distinct_core::<R>();
+                        // Base = seed edges projected to 2 cols (from, to)
+                        let base_case = seed_edges_in.map(|tuple| {
+                            let x = tuple.get(0).cloned().unwrap_or(Value::Null);
+                            let y = tuple.get(1).cloned().unwrap_or(Value::Null);
+                            Tuple::new(vec![x, y])
+                        });
+                        let next = base_case.concat(recursive).distinct_core::<R>();
 
                         variable.set(next.clone());
                         next.leave()

@@ -18,11 +18,13 @@ interface QueryResultsPanelProps {
   error: StructuredError | null
   isExecuting: boolean
   activeQuery: string
+  sidebarOpen?: boolean
+  onStartExample?: () => void
 }
 
 /** Detect if query is purely a mutation (insert/delete/meta, no query lines) */
 /** Meta commands that return query-like results (not mutations). */
-const RESULT_META_COMMANDS = [".why ", ".why_not ", ".explain "]
+const RESULT_META_COMMANDS = [".why ", ".why_not ", ".debug ", ".rel", ".rule", ".status", ".session"]
 
 function isMutationQuery(query: string): boolean {
   const lines = query.split("\n").map((l) => l.trim()).filter((l) => l.length > 0 && !l.startsWith("//"))
@@ -91,7 +93,7 @@ function compareValues(a: string | number | boolean | null, b: string | number |
 
 const PAGE_SIZE = 200
 
-export function QueryResultsPanel({ result, error, isExecuting, activeQuery }: QueryResultsPanelProps) {
+export function QueryResultsPanel({ result, error, isExecuting, activeQuery, sidebarOpen, onStartExample }: QueryResultsPanelProps) {
   const [copied, setCopied] = useState(false)
   const [sort, setSort] = useState<SortState | null>(null)
   const [page, setPage] = useState(0)
@@ -99,19 +101,24 @@ export function QueryResultsPanel({ result, error, isExecuting, activeQuery }: Q
   const hasUserSelectedTab = useRef(false)
   const prevResultId = useRef<string | null>(null)
 
-  // Reset page when result changes. Auto-switch to proof tab only on first proof result.
+  // Reset page when result changes. Auto-switch tabs based on result content.
   useEffect(() => {
     setPage(0)
-    // Only auto-switch if the result actually changed (new query) and user hasn't manually picked a tab
     const resultId = result?.id ?? null
     if (resultId !== prevResultId.current) {
       prevResultId.current = resultId
       hasUserSelectedTab.current = false
     }
-    if (!hasUserSelectedTab.current && result?.proofTrees && result.proofTrees.length > 0) {
-      setActiveTab("proof")
+    const hasProof = result?.proofTrees && result.proofTrees.length > 0
+    if (!hasUserSelectedTab.current) {
+      if (hasProof) {
+        setActiveTab("proof")
+      } else if (activeTab === "proof") {
+        // Previous result had a proof tree but new one doesn't - switch back to table
+        setActiveTab("table")
+      }
     }
-  }, [result])
+  }, [result]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSort = (colIndex: number) => {
     setSort((prev) => {
@@ -218,31 +225,7 @@ export function QueryResultsPanel({ result, error, isExecuting, activeQuery }: Q
   }
 
   if (!result) {
-    return (
-      <div className="flex h-full items-center justify-center bg-muted/20">
-        <div className="text-center max-w-sm">
-          <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-muted">
-            <Rows3 className="h-5 w-5 text-muted-foreground" />
-          </div>
-          <p className="text-sm font-medium text-muted-foreground">No results yet</p>
-          <p className="mt-1 text-xs text-muted-foreground">Write a query above and press Run</p>
-          <div className="mt-4 flex flex-col gap-1.5 text-[10px] text-muted-foreground/60">
-            <div className="flex items-center justify-center gap-2">
-              <kbd className="rounded bg-muted px-1.5 py-0.5 font-mono">?relation(X, Y)</kbd>
-              <span>to query</span>
-            </div>
-            <div className="flex items-center justify-center gap-2">
-              <kbd className="rounded bg-muted px-1.5 py-0.5 font-mono">+data[(1, 2)]</kbd>
-              <span>to insert</span>
-            </div>
-            <div className="flex items-center justify-center gap-2">
-              <kbd className="rounded bg-muted px-1.5 py-0.5 font-mono">+rule(X) &lt;- body(X)</kbd>
-              <span>to define a rule</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
+    return <WelcomePanel sidebarOpen={sidebarOpen} onStartExample={onStartExample} />
   }
 
   // Compute row provenance breakdown
@@ -581,5 +564,32 @@ function ResultTable({
         )
       })()}
     </>
+  )
+}
+
+// --- Welcome Panel (shown when no query has been run yet) ---
+
+function WelcomePanel({ sidebarOpen, onStartExample }: { sidebarOpen?: boolean; onStartExample?: () => void }) {
+  return (
+    <div className="flex h-full items-center justify-center bg-muted/20 overflow-auto">
+      <div className="max-w-md px-4 py-8 text-center">
+        <h2 className="text-lg font-semibold text-foreground">Welcome to InputLayer</h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          A reasoning engine that derives conclusions from facts and rules, and explains why.
+        </p>
+        {sidebarOpen ? (
+          <p className="mt-4 text-sm text-muted-foreground">
+            Pick a learning journey from the sidebar to get started.
+          </p>
+        ) : (
+          <button
+            onClick={() => onStartExample?.()}
+            className="mt-6 inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            Let&apos;s get started
+          </button>
+        )}
+      </div>
+    </div>
   )
 }

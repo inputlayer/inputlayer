@@ -1514,7 +1514,7 @@ fn print_help() {
     println!("  .session clear       Clear all session rules");
     println!("  .session drop <n|name>  Drop session rule by index or relation name");
     println!("  .clear prefix <p>    Clear all facts from relations with prefix");
-    println!("  .explain <query>     Show query plan without executing");
+    println!("  .debug <query>       Show query plan without executing");
     println!("  .status              Server status");
     println!("  .help                Show this help");
     println!("  .quit                Exit");

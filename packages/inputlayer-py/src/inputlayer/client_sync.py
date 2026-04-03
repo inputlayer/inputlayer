@@ -11,7 +11,7 @@ from inputlayer.index import HnswIndex
 from inputlayer.knowledge_graph import (
     ClearResult,
     DeleteResult,
-    ExplainResult,
+    DebugResult,
     IndexInfo,
     IndexStats,
     InsertResult,
@@ -123,8 +123,8 @@ class KnowledgeGraphSync:
     def list_acl(self) -> list[AclEntry]:
         return self._loop.run_until_complete(self._kg.list_acl())
 
-    def explain(self, *select: Any, **kwargs: Any) -> ExplainResult:
-        return self._loop.run_until_complete(self._kg.explain(*select, **kwargs))
+    def debug(self, *select: Any, **kwargs: Any) -> DebugResult:
+        return self._loop.run_until_complete(self._kg.debug(*select, **kwargs))
 
     def why(self, *select: Any, full: bool = False, **kwargs: Any) -> "WhyResult":
         return self._loop.run_until_complete(
