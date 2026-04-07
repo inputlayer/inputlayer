@@ -10,8 +10,8 @@ import websockets
 from websockets.asyncio.client import ClientConnection
 
 from inputlayer._protocol import (
-    AuthenticateMessage,
     AuthenticatedResponse,
+    AuthenticateMessage,
     AuthErrorResponse,
     ErrorResponse,
     ExecuteMessage,
@@ -23,7 +23,6 @@ from inputlayer._protocol import (
     ResultEndResponse,
     ResultResponse,
     ResultStartResponse,
-    ServerMessage,
     deserialize_message,
 )
 from inputlayer.exceptions import (
@@ -72,6 +71,7 @@ class Connection:
         self._dispatcher = NotificationDispatcher()
         self._recv_task: asyncio.Task | None = None
         self._execute_lock = asyncio.Lock()
+
 
     # ── Properties ────────────────────────────────────────────────────
 
