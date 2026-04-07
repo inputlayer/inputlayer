@@ -62,6 +62,7 @@ EXAMPLES = [
     ("ex15_caching", "Semantic caching"),
     ("ex16_recommendation", "Recommendation engine"),
     ("ex17_lineage", "Data lineage and provenance"),
+    ("ex18_vectorstore", "VectorStore (LangChain interface)"),
 ]
 
 # Examples that require an LLM server
