@@ -41,6 +41,7 @@ EXAMPLES = [
     ("ex07_event_correlation", "Event correlation pipeline"),
     ("ex08_tool_selection", "Tool selection via rules"),
     ("ex09_streaming_aggregation", "Streaming aggregation with alerts"),
+    ("ex10_resumable_graph", "Resumable graph with checkpointer"),
 ]
 
 LLM_EXAMPLES = {1, 2, 5, 7, 9}

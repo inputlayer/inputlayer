@@ -10,8 +10,8 @@ import websockets
 from websockets.asyncio.client import ClientConnection
 
 from inputlayer._protocol import (
-    AuthenticateMessage,
     AuthenticatedResponse,
+    AuthenticateMessage,
     AuthErrorResponse,
     ErrorResponse,
     ExecuteMessage,
@@ -23,7 +23,6 @@ from inputlayer._protocol import (
     ResultEndResponse,
     ResultResponse,
     ResultStartResponse,
-    ServerMessage,
     deserialize_message,
 )
 from inputlayer.exceptions import (
@@ -71,6 +70,13 @@ class Connection:
 
         self._dispatcher = NotificationDispatcher()
         self._recv_task: asyncio.Task | None = None
+
+        # The WebSocket protocol is single-flight: only one request can
+        # be in flight at a time, and the matching response must be
+        # consumed before the next request is sent. This lock serializes
+        # all execute() calls so concurrent callers (e.g., LangGraph
+        # checkpointer + parallel branches) are safely interleaved.
+        self._exec_lock = asyncio.Lock()
 
     # ── Properties ────────────────────────────────────────────────────
 
@@ -178,14 +184,17 @@ class Connection:
         """Send a program/command and wait for the result.
 
         Transparently assembles streamed results (result_start → chunks → result_end).
+
+        This method is safe to call concurrently — it's serialized internally
+        so the WebSocket's request/response pairs never interleave.
         """
         if not self._connected or not self._ws:
             raise ConnectionError("Not connected")
 
-        msg = ExecuteMessage(program=program)
-        await self._ws.send(msg.to_json())
-
-        return await self._read_result()
+        async with self._exec_lock:
+            msg = ExecuteMessage(program=program)
+            await self._ws.send(msg.to_json())
+            return await self._read_result()
 
     async def _read_result(self) -> ResultResponse:
         """Read messages until we get a complete result, dispatching notifications."""
