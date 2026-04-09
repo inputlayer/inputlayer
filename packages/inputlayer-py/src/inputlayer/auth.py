@@ -1,4 +1,7 @@
-"""Authentication helpers - data classes and meta-command compilation for user/key/ACL management."""
+"""Authentication helpers.
+
+Data classes and meta-command compilation for user/key/ACL management.
+"""
 
 from __future__ import annotations
 

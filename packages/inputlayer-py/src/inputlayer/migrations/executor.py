@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from inputlayer.migrations.loader import MigrationInfo
 from inputlayer.migrations.recorder import KGExecutor, MigrationRecorder
 

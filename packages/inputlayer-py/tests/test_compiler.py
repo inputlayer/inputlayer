@@ -116,7 +116,10 @@ class TestCompileValue:
 class TestCompileSchema:
     def test_basic(self):
         result = compile_schema(Employee)
-        assert result == "+employee(id: int, name: string, department: string, salary: float, active: bool)"
+        assert result == (
+            "+employee(id: int, name: string, department: string,"
+            " salary: float, active: bool)"
+        )
 
     def test_vector_type(self):
         result = compile_schema(Document)

@@ -400,8 +400,10 @@ class KnowledgeGraph:
                 # Try pandas DataFrame
                 try:
                     instances = [rel_cls(**row) for row in data.to_dict("records")]
-                except Exception:
-                    raise TypeError(f"Unsupported data type: {type(data).__name__}")
+                except Exception as err:
+                    raise TypeError(
+                        f"Unsupported data type: {type(data).__name__}"
+                    ) from err
             if len(instances) == 1:
                 iql = compile_insert(instances[0])
             else:

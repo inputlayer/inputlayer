@@ -6,9 +6,8 @@ Matches the AsyncAPI spec at ``docs/spec/asyncapi.yaml``.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
-
 
 # ── Client → Server messages ──────────────────────────────────────────
 
@@ -153,7 +152,9 @@ ServerMessage = (
 
 # ── Serialization / Deserialization ───────────────────────────────────
 
-def serialize_message(msg: LoginMessage | AuthenticateMessage | ExecuteMessage | PingMessage) -> str:
+def serialize_message(
+    msg: LoginMessage | AuthenticateMessage | ExecuteMessage | PingMessage,
+) -> str:
     """Serialize a client message to JSON."""
     return msg.to_json()
 

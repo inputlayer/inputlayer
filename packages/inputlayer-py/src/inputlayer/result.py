@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Any, Iterator
+from typing import Any
 
 
 @dataclass
@@ -55,14 +56,14 @@ class ResultSet:
         return self._row_to_obj(self.rows[0])
 
     def scalar(self) -> Any:
-        """Return the single value from a 1×1 result."""
+        """Return the single value from a 1x1 result."""
         if not self.rows or not self.rows[0]:
             raise ValueError("No results to extract scalar from")
         return self.rows[0][0]
 
     def to_dicts(self) -> list[dict[str, Any]]:
         """Convert all rows to list of dicts."""
-        return [dict(zip(self.columns, row)) for row in self.rows]
+        return [dict(zip(self.columns, row, strict=False)) for row in self.rows]
 
     def to_tuples(self) -> list[tuple[Any, ...]]:
         """Convert all rows to list of tuples."""
@@ -76,15 +77,15 @@ class ResultSet:
             raise ImportError(
                 "pandas is required for to_df(). "
                 "Install with: pip install inputlayer[pandas]"
-            )
+            ) from None
         return pd.DataFrame(self.rows, columns=self.columns)
 
     def _row_to_obj(self, row: list[Any]) -> Any:
         """Convert a row to a typed object or SimpleNamespace."""
         if self._relation_cls is not None:
             try:
-                kwargs = dict(zip(self.columns, row))
+                kwargs = dict(zip(self.columns, row, strict=False))
                 return self._relation_cls(**kwargs)
             except Exception:
                 pass
-        return SimpleNamespace(**dict(zip(self.columns, row)))
+        return SimpleNamespace(**dict(zip(self.columns, row, strict=False)))

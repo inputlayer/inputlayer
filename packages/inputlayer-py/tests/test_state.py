@@ -2,14 +2,11 @@
 
 from typing import ClassVar
 
-import pytest
-
 from inputlayer.derived import Derived, From
 from inputlayer.index import HnswIndex
 from inputlayer.migrations.state import ModelState
 from inputlayer.relation import Relation
 from inputlayer.types import Timestamp, Vector
-
 
 # ── Test models ──────────────────────────────────────────────────────
 

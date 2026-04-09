@@ -4,12 +4,12 @@ from typing import ClassVar
 
 import pytest
 
-from inputlayer._ast import Column as AstColumn, BoolExpr, Comparison, Literal
-from inputlayer._proxy import ColumnProxy, RelationProxy
+from inputlayer._ast import Column as AstColumn
+from inputlayer._ast import Comparison, Literal
+from inputlayer._proxy import RelationProxy
 from inputlayer.compiler import compile_rule
 from inputlayer.derived import Derived, From, FromWhere, RuleClause
 from inputlayer.relation import Relation
-
 
 # ── Test Relations ────────────────────────────────────────────────────
 

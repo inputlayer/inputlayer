@@ -30,22 +30,22 @@ class Migration:
             state = {"relations": {...}, "rules": {...}, "indexes": {}}
     """
 
-    dependencies: list[str] = []
-    operations: list[Operation] = []
-    state: dict[str, Any] = {}
+    dependencies: list[str] = []  # noqa: RUF012
+    operations: list[Operation] = []  # noqa: RUF012
+    state: dict[str, Any] = {}  # noqa: RUF012
 
 
 __all__ = [
+    "CreateIndex",
+    "CreateRelation",
+    "CreateRule",
+    "DropIndex",
+    "DropRelation",
+    "DropRule",
     "Migration",
     "ModelState",
-    "CreateRelation",
-    "DropRelation",
-    "CreateRule",
-    "DropRule",
-    "ReplaceRule",
-    "CreateIndex",
-    "DropIndex",
-    "RunIQL",
     "Operation",
+    "ReplaceRule",
+    "RunIQL",
     "operation_from_dict",
 ]

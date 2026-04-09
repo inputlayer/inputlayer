@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from inputlayer._ast import BoolExpr, Expr
@@ -51,7 +51,7 @@ class _FromBase:
     def _build_proxy_args(self) -> list[RelationProxy]:
         """Build proxy objects matching the From(...) arguments."""
         proxies = []
-        for rn, cls, alias in self._relations:
+        for rn, _cls, alias in self._relations:
             proxies.append(RelationProxy(rn, ref_alias=alias))
         return proxies
 
