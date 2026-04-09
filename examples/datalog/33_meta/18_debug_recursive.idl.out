@@ -5,16 +5,18 @@ Server status: healthy
 Authenticated as: admin
 Current knowledge graph: default
 
-> .kg create test_explain_agg_n33t21
-Knowledge graph 'test_explain_agg_n33t21' created.
-Switched to knowledge graph: test_explain_agg_n33t21
-> .kg use test_explain_agg_n33t21
-Switched to knowledge graph: test_explain_agg_n33t21
-> +sales[(1, 100), (1, 200), (2, 300)]
-Inserted 3 fact(s) into 'sales'.
-> +sales_count(Region, count<Amount>) <- sales(Region, Amount)
-Rule 'sales_count' registered.
-> .explain ?sales_count(Region, Count)
+> .kg create test_explain_recursive_n33t18
+Knowledge graph 'test_explain_recursive_n33t18' created.
+Switched to knowledge graph: test_explain_recursive_n33t18
+> .kg use test_explain_recursive_n33t18
+Switched to knowledge graph: test_explain_recursive_n33t18
+> +edge[(1, 2), (2, 3)]
+Inserted 2 fact(s) into 'edge'.
+> +path(X, Y) <- edge(X, Y)
+Rule 'path' registered.
+> +path(X, Z) <- edge(X, Y), path(Y, Z)
+Rule 'path' registered.
+> .debug ?path(X, Y)
 Query Plan:
 ═══════════════════════════════════════════════════════════
                     PIPELINE TRACE                          
@@ -23,35 +25,53 @@ Query Plan:
 ┌---------------------------------------------------------┐
 | PARSING                                                 |
 `---------------------------------------------------------┘
-  Rules parsed: 2
+  Rules parsed: 3
 
-  Rule 1: sales_count(Variable("Region"), Aggregate(Count, "Amount")) <- sales(Variable("Region"), Variable("Amount"))
-  Rule 2: __query__(Variable("Region"), Variable("Count")) <- sales_count(Variable("Region"), Variable("Count"))
+  Rule 1: path(Variable("X"), Variable("Y")) <- edge(Variable("X"), Variable("Y"))
+  Rule 2: path(Variable("X"), Variable("Z")) <- edge(Variable("X"), Variable("Y")), path(Variable("Y"), Variable("Z"))
+  Rule 3: __query__(Variable("X"), Variable("Y")) <- path(Variable("X"), Variable("Y"))
 
 ┌---------------------------------------------------------┐
 | IR CONSTRUCTION                                         |
 `---------------------------------------------------------┘
-  IR nodes: 3
+  IR nodes: 7
   Rules: 2
 
   Rule 1 IR:
-    Aggregate[group_by=[0], aggs=[Count(1)]] -> [Region, count_Amount]
-      Scan(sales)[Region, Amount]
+    Union (2 inputs)
+    |- Input 1:
+        Scan(edge)[X, Y]
+    |- Input 2:
+        Map[[0, 2]] -> [X, Z]
+          Join[L:[1], R:[0]] -> [X, Y, Z]
+          |- Left:
+              Scan(edge)[X, Y]
+          `- Right:
+              Scan(path)[Y, Z]
 
   Rule 2 IR:
-    Scan(sales_count)[Region, Count]
+    Scan(path)[X, Y]
 
 ┌---------------------------------------------------------┐
 | OPTIMIZATION                                            |
 `---------------------------------------------------------┘
-  IR nodes: 3 -> 3 (0 eliminated)
+  IR nodes: 7 -> 8 (0 eliminated)
 
   Rule 1 Optimized IR:
-    Aggregate[group_by=[0], aggs=[Count(1)]] -> [Region, count_Amount]
-      Scan(sales)[Region, Amount]
+    Distinct
+      Join[L:[0, 2], R:[1, 0]] -> [Y, Z, X]
+      |- Left:
+          Distinct
+            Join[L:[0], R:[1]] -> [Y, Z, X]
+            |- Left:
+                Scan(path)[Y, Z]
+            `- Right:
+                Scan(edge)[X, Y]
+      `- Right:
+          Scan(edge)[X, Y]
 
   Rule 2 Optimized IR:
-    Scan(sales_count)[Region, Count]
+    Scan(path)[X, Y]
 
 ═══════════════════════════════════════════════════════════
 
@@ -63,5 +83,5 @@ Optimization passes:
   - Basic Optimizations (identity elimination, filter simplification)
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop test_explain_agg_n33t21
-Knowledge graph 'test_explain_agg_n33t21' dropped.
+> .kg drop test_explain_recursive_n33t18
+Knowledge graph 'test_explain_recursive_n33t18' dropped.

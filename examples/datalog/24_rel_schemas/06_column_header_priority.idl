@@ -1,0 +1,36 @@
+// Test: Column Header Priority
+// Description: Verifies that schema column names take priority over query variables,
+// and that query variables are used when no schema exists.
+
+.kg create test_col_headers_n24t06
+.kg use test_col_headers_n24t06
+
+// === Case 1: Schema-defined relation uses schema names ===
++product(product_id: int, name: string, price: float)
++product[(1, "Widget", 9.99), (2, "Gadget", 19.99), (3, "Doohickey", 4.99)]
+
+// Query with different variable names - should still show schema names
+?product(X, Y, Z)
+
+// === Case 2: No-schema relation uses query variable names ===
++edge(1, 2)
++edge(2, 3)
++edge(3, 4)
+
+// Query with variables - should show variable names since no schema
+?edge(From, To)
+
+// === Case 3: Derived relation (rule) uses query variable names ===
++reachable(A, B) <- edge(A, B)
++reachable(A, C) <- reachable(A, B), edge(B, C)
+?reachable(Source, Dest)
+
+// === Case 4: Schema relation queried with constants ===
+?product(1, Name, Price)
+
+// === Case 5: No-schema relation queried with different variable names ===
+?edge(Src, Dst)
+
+// Cleanup
+.kg use default
+.kg drop test_col_headers_n24t06

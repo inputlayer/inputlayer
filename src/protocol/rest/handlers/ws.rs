@@ -87,7 +87,7 @@ enum WsResponse {
         #[serde(skip_serializing_if = "Option::is_none")]
         metadata: Option<SessionQueryMetadataDto>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        proof_trees: Option<Vec<crate::provenance::wire::WireProofTree>>,
+        proof_trees: Option<Vec<crate::provenance::proof_tree::ProofTree>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         timing_breakdown: Option<crate::execution::TimingBreakdown>,
     },
@@ -688,7 +688,7 @@ enum GlobalWsResponse {
         #[serde(skip_serializing_if = "Option::is_none")]
         switched_kg: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        proof_trees: Option<Vec<crate::provenance::wire::WireProofTree>>,
+        proof_trees: Option<Vec<crate::provenance::proof_tree::ProofTree>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         timing_breakdown: Option<crate::execution::TimingBreakdown>,
     },
@@ -703,7 +703,7 @@ enum GlobalWsResponse {
         #[serde(skip_serializing_if = "Option::is_none")]
         switched_kg: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        proof_trees: Option<Vec<crate::provenance::wire::WireProofTree>>,
+        proof_trees: Option<Vec<crate::provenance::proof_tree::ProofTree>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         timing_breakdown: Option<crate::execution::TimingBreakdown>,
     },
@@ -1867,6 +1867,26 @@ mod tests {
 
     #[test]
     fn test_global_ws_response_result_start_with_proof_trees() {
+        use crate::provenance::proof_tree::*;
+        let mut builder = ProofTreeBuilder::new();
+        let fact_id = builder.insert(ProofNode {
+            kind: NodeKind::Fact,
+            conclusion: Conclusion {
+                pred: "edge".into(),
+                args: vec![crate::value::Value::Int32(1), crate::value::Value::Int32(2)],
+            },
+            rule_id: None,
+            bindings: None,
+            aggregate: None,
+            negation: None,
+            vector_search: None,
+            truncated: None,
+            why_not: None,
+            source: None,
+            children: vec![],
+        });
+        let graph = builder.finish(vec![fact_id]);
+
         let resp = GlobalWsResponse::ResultStart {
             columns: vec!["x".to_string()],
             total_count: 1,
@@ -1874,17 +1894,12 @@ mod tests {
             execution_time_ms: 5,
             metadata: None,
             switched_kg: None,
-            proof_trees: Some(vec![crate::provenance::wire::WireProofTree {
-                node_type: "base_fact".to_string(),
-                relation: Some("edge".to_string()),
-                values: Some(vec![serde_json::json!(1), serde_json::json!(2)]),
-                ..crate::provenance::wire::WireProofTree::empty_pub()
-            }]),
+            proof_trees: Some(vec![graph]),
             timing_breakdown: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"proof_trees\""));
-        assert!(json.contains("\"node_type\":\"base_fact\""));
-        assert!(json.contains("\"relation\":\"edge\""));
+        assert!(json.contains("\"kind\":\"fact\""));
+        assert!(json.contains("\"pred\":\"edge\""));
     }
 }

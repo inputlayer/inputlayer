@@ -5,34 +5,34 @@
 
 // ── Direct flight routes ───────────────────────────────────────────────
 
-+airline[("sky_atlantic", "Sky Atlantic"),
-         ("euro_air",     "EuroAir"),
-         ("pacific_wing", "Pacific Wing"),
-         ("southern_jet", "Southern Jet")]
++airline("sky_atlantic", "Sky Atlantic")
++airline("euro_air",     "EuroAir")
++airline("pacific_wing", "Pacific Wing")
++airline("southern_jet", "Southern Jet")
 
-+city[("new_york",  "New York",  "North America"),
-      ("london",    "London",    "Europe"),
-      ("paris",     "Paris",     "Europe"),
-      ("tokyo",     "Tokyo",     "Asia"),
-      ("sydney",    "Sydney",    "Oceania"),
-      ("dubai",     "Dubai",     "Middle East"),
-      ("singapore", "Singapore", "Asia"),
-      ("berlin",    "Berlin",    "Europe"),
-      ("sao_paulo", "Sao Paulo", "South America"),
-      ("cape_town", "Cape Town", "Africa")]
++city("new_york",  "New York",  "North America")
++city("london",    "London",    "Europe")
++city("paris",     "Paris",     "Europe")
++city("tokyo",     "Tokyo",     "Asia")
++city("sydney",    "Sydney",    "Oceania")
++city("dubai",     "Dubai",     "Middle East")
++city("singapore", "Singapore", "Asia")
++city("berlin",    "Berlin",    "Europe")
++city("sao_paulo", "Sao Paulo", "South America")
++city("cape_town", "Cape Town", "Africa")
 
-+direct_flight[("new_york",  "london",    "sky_atlantic", 7.0),
-               ("london",    "paris",     "euro_air",     1.5),
-               ("paris",     "tokyo",     "euro_air",     12.0),
-               ("tokyo",     "sydney",    "pacific_wing", 9.5),
-               ("london",    "dubai",     "sky_atlantic", 7.0),
-               ("dubai",     "singapore", "pacific_wing", 7.5),
-               ("singapore", "tokyo",     "pacific_wing", 6.5),
-               ("singapore", "sydney",    "pacific_wing", 8.0),
-               ("paris",     "berlin",    "euro_air",     1.5),
-               ("new_york",  "sao_paulo", "southern_jet", 10.0),
-               ("dubai",     "cape_town", "southern_jet", 9.5),
-               ("berlin",    "dubai",     "euro_air",     5.5)]
++direct_flight("new_york",  "london",    "sky_atlantic", 7.0)
++direct_flight("london",    "paris",     "euro_air",     1.5)
++direct_flight("paris",     "tokyo",     "euro_air",     12.0)
++direct_flight("tokyo",     "sydney",    "pacific_wing", 9.5)
++direct_flight("london",    "dubai",     "sky_atlantic", 7.0)
++direct_flight("dubai",     "singapore", "pacific_wing", 7.5)
++direct_flight("singapore", "tokyo",     "pacific_wing", 6.5)
++direct_flight("singapore", "sydney",    "pacific_wing", 8.0)
++direct_flight("paris",     "berlin",    "euro_air",     1.5)
++direct_flight("new_york",  "sao_paulo", "southern_jet", 10.0)
++direct_flight("dubai",     "cape_town", "southern_jet", 9.5)
++direct_flight("berlin",    "dubai",     "euro_air",     5.5)
 
 // ── Reachability rules (recursive) ─────────────────────────────────────
 

@@ -7,27 +7,27 @@ excerpt: "A compliance audit asks 'why was transaction #8472 flagged?' You can e
 
 # What Explainable AI Actually Requires at the Data Layer
 
-A compliance audit asks: "Why was transaction #8472 flagged?" Your team can explain the model - it scored high based on certain features. They can show attention weights, feature importance, confidence scores. The auditor nods, then asks the next question: "But why did the system have that information in the first place? Which entity relationships, which ownership chains, which sanctions data led it to retrieve the context it used?" Silence. The context retrieval pipeline is a black box - embeddings in, documents out, no trace of the reasoning in between.
+A compliance audit asks: "Why was transaction #8472 flagged?" Your team can explain the model. It scored high based on certain features. You can show which inputs mattered most and how confident the model was. The auditor nods, then asks the next question: "But why did the system have that information in the first place? Which entity relationships, which ownership chains, which sanctions data led it to retrieve the context it used?" Silence. Your context retrieval pipeline returns similarity scores and distances, but can't trace the logical chain of facts and rules that determined which context was relevant.
 
-The audit fails. The consequence isn't a note in a report. It's a formal finding, a remediation plan with a 90-day deadline, and the real possibility of restricted AI deployment until the gap is closed. For regulated industries - financial services, healthcare, defense - a failed explainability audit can mean suspended product launches, mandatory process reversions to manual review, and in severe cases, regulatory action that makes the news.
+The audit fails. The consequence isn't a note in a report. It's a formal finding, a remediation plan with a 90-day deadline, and the real possibility of restricted AI deployment until the gap is closed. If you're in a regulated industry (financial services, healthcare, defense), a failed explainability audit can mean suspended product launches, mandatory process reversions to manual review, and in severe cases, regulatory action that makes the news.
 
-Most teams focus on model explainability because that's where the tooling is. But the harder question - the one that actually determines whether you pass the audit - is this:
+You probably focus on model explainability because that's where the tooling is. But the harder question, the one that actually determines whether you pass the audit, is this:
 
 **Why did the system have that information in the first place?**
 
 ## The Two Explainability Problems
 
-There are two distinct explainability problems in enterprise AI. Most organizations are solving only one of them.
+There are two distinct explainability problems in enterprise AI. You're probably solving only one of them.
 
-**Problem 1: Model explainability.** Why did the model produce this output given this input? This is where most tooling focuses - interpretability frameworks, attention visualization, counterfactual explanations.
+**Problem 1: Model explainability.** Why did the model produce this output given this input? This is where most tooling focuses. Tools that show which inputs influenced the output and why.
 
 **Problem 2: Context explainability.** Why was this context included in the prompt? Why did the system surface this fact as relevant? Why did this user have access to this document?
 
-Problem 2 is where enterprise AI systems actually fail audits. The model explanation satisfies the first round of questions. The context explanation - or lack of it - is where the finding gets written.
+Problem 2 is where your AI system actually fails audits. The model explanation satisfies the first round of questions. The context explanation, or lack of it, is where the finding gets written.
 
 ## The context audit gap
 
-When your retrieval pipeline is "embed the query, find nearest neighbors, inject top-k into the prompt," the audit trail is thin. "This document was included because its embedding was 0.73 cosine-similar to the query" doesn't satisfy a regulator.
+When your retrieval pipeline is "embed the query, find nearest neighbors, inject top-k into the prompt," the audit trail is thin. "This document was included because its embedding was 0.73 similar to the query" doesn't satisfy a regulator.
 
 You need to be able to reconstruct, after the fact, exactly which facts, which rules, and which state produced the context that drove the decision. And you need to prove that the access control and relevance logic applied at query time was consistent with your stated policies.
 
@@ -35,17 +35,17 @@ You need to be able to reconstruct, after the fact, exactly which facts, which r
 
 For enterprise AI to be genuinely explainable, the context retrieval layer needs to provide three things:
 
-**1. Derivation traces.** For every piece of context surfaced to the model, a complete trace showing which facts and rules produced it. Not just "this document was retrieved" but "this document was retrieved because rule R fired on facts F1 and F2." Without this, your audit response is "the system retrieved documents that seemed relevant" - which satisfies no regulator.
+**1. Reasoning trails.** For every piece of context surfaced to the model, a complete trail showing which facts and rules produced it. Not just "this document was retrieved" but "this document was retrieved because rule R fired on facts F1 and F2." Without this, your audit response is "the system retrieved documents that seemed relevant." That satisfies no regulator.
 
-**2. Point-in-time reproducibility.** The ability to reconstruct, for any past decision, exactly what state the knowledge graph was in at the moment the context was retrieved. This requires that the data layer maintain a history of fact changes, not just current state. Without this, you can describe what the system does today but not what it did on the day the decision was made. Regulators care about the latter.
+**2. Replaying past decisions exactly as they happened.** The ability to reconstruct, for any past decision, exactly what state the knowledge graph was in at the moment the context was retrieved. This requires that the data layer maintain a history of fact changes, not just current state. Without this, you can describe what the system does today but not what it did on the day the decision was made. Regulators care about the latter.
 
-**3. Policy-as-logic.** Access control, relevance rules, and business policies expressed as formal logic that can be inspected, versioned, and audited - not as middleware code that may diverge from stated policy. Without this, your stated access policy and your actual access behavior can diverge silently. The gap is invisible until an audit finds a document that was served to someone who shouldn't have seen it.
+**3. Policies written as auditable rules.** Access control, relevance rules, and business policies expressed as clear, versioned logic that can be inspected and audited. Not buried code that may diverge from stated policy. Without this, your stated access policy and your actual access behavior can diverge silently. The gap is invisible until an audit finds a document that was served to someone who shouldn't have seen it.
 
 ## How InputLayer provides this
 
-InputLayer stores facts explicitly and expresses rules as versioned logic. Every derived conclusion traces back to the named rules and named facts that produced it. The `.why` command returns the complete proof tree for any result.
+InputLayer stores facts explicitly and expresses rules as versioned logic. Every derived conclusion traces back to the named rules and named facts that produced it. The `.why` command returns the complete reasoning chain for any result.
 
-When a fact is deleted, every conclusion derived from it disappears automatically - the system never serves context based on outdated data. When a fact changes, only the affected conclusions recompute.
+When a fact is deleted, every conclusion derived from it disappears automatically. The system never serves context based on outdated data. When a fact changes, only the affected conclusions recompute.
 
 The result: for any past decision, you can reconstruct the complete chain. This output was produced by this model, operating on this context, which was derived by these rules from these facts, which were current as of this timestamp.
 

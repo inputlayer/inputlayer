@@ -21,17 +21,17 @@ function useInView(threshold = 0.3) {
 
 /* ═══════════════════════════════════════════════════════════════════════ */
 /*  1. EMBEDDING SPACE — Rules + Vectors                                  */
-/*  2D scatter showing products clustered by similarity,                  */
-/*  with a rule boundary that separates compatible from incompatible      */
+/*  2D scatter showing destinations clustered by similarity,              */
+/*  with a rule boundary that separates reachable from unreachable        */
 /* ═══════════════════════════════════════════════════════════════════════ */
 
-const embProducts = [
-  { id: "pg245", label: "Canon PG-245", x: 280, y: 95, sim: 0.83, ok: true },
-  { id: "cl246", label: "Canon CL-246", x: 340, y: 155, sim: 0.79, ok: true },
-  { id: "pg245xl", label: "PG-245XL", x: 240, y: 150, sim: 0.81, ok: true },
-  { id: "ep202", label: "Epson 202", x: 360, y: 85, sim: 0.83, ok: false },
-  { id: "br3013", label: "Brother LC3013", x: 310, y: 50, sim: 0.77, ok: false },
-  { id: "hpdeskjet", label: "HP 61", x: 390, y: 130, sim: 0.75, ok: false },
+const embDestinations = [
+  { id: "sydney", label: "Sydney", x: 160, y: 85, sim: 0.08, ok: true },
+  { id: "tokyo", label: "Tokyo", x: 310, y: 80, sim: 0.52, ok: true },
+  { id: "london", label: "London", x: 360, y: 155, sim: 0.61, ok: true },
+  { id: "paris", label: "Paris", x: 330, y: 130, sim: 0.65, ok: true },
+  { id: "rio", label: "Rio", x: 180, y: 150, sim: 0.12, ok: false },
+  { id: "bali", label: "Bali", x: 230, y: 100, sim: 0.15, ok: false },
 ]
 
 export function EmbeddingDiagram() {
@@ -70,13 +70,13 @@ export function EmbeddingDiagram() {
         <text x={12} y={h / 2} textAnchor="middle" transform={`rotate(-90, 12, ${h / 2})`} style={{ fill: "var(--muted-foreground)", fontSize: 9, opacity: 0.5 }}>embedding dimension 2</text>
 
         {/* Cluster label */}
-        <text x={310} y={228} textAnchor="middle" style={{ fill: "var(--muted-foreground)", fontSize: 10, opacity: visible ? 0.5 : 0 , transition: "opacity 0.8s 0.3s" }}>
-          all semantically similar to &quot;printer ink&quot;
+        <text x={270} y={228} textAnchor="middle" style={{ fill: "var(--muted-foreground)", fontSize: 10, opacity: visible ? 0.5 : 0 , transition: "opacity 0.8s 0.3s" }}>
+          ranked by similarity to &quot;beach vacation&quot;
         </text>
 
         {/* Rule boundary line */}
         <line
-          x1={220} y1={10} x2={220} y2={h - 30}
+          x1={270} y1={10} x2={270} y2={h - 30}
           style={{
             stroke: "url(#emb-rule-line)",
             strokeWidth: 2,
@@ -85,15 +85,15 @@ export function EmbeddingDiagram() {
             transition: "opacity 0.6s 1.5s",
           }}
         />
-        <text x={120} y={25} textAnchor="middle" style={{ fill: "var(--primary)", fontSize: 9, fontWeight: 600, opacity: visible ? 0.8 : 0, transition: "opacity 0.5s 1.8s" }}>
-          COMPATIBLE
+        <text x={400} y={25} textAnchor="middle" style={{ fill: "var(--primary)", fontSize: 9, fontWeight: 600, opacity: visible ? 0.8 : 0, transition: "opacity 0.5s 1.8s" }}>
+          REACHABLE
         </text>
-        <text x={400} y={25} textAnchor="middle" style={{ fill: "var(--muted-foreground)", fontSize: 9, fontWeight: 600, opacity: visible ? 0.5 : 0, transition: "opacity 0.5s 1.8s" }}>
-          INCOMPATIBLE
+        <text x={140} y={25} textAnchor="middle" style={{ fill: "var(--muted-foreground)", fontSize: 9, fontWeight: 600, opacity: visible ? 0.5 : 0, transition: "opacity 0.5s 1.8s" }}>
+          UNREACHABLE
         </text>
 
-        {/* Product dots */}
-        {embProducts.map((p, i) => {
+        {/* Destination dots */}
+        {embDestinations.map((p, i) => {
           const delay = 0.3 + i * 0.12
           const ruleDelay = 1.6 + i * 0.08
           return (
@@ -139,9 +139,9 @@ export function EmbeddingDiagram() {
 
         {/* Query vector */}
         <g style={{ opacity: visible ? 1 : 0, transition: "opacity 0.5s 0.1s" }}>
-          <circle cx={100} cy={130} r={4} style={{ fill: "var(--primary)", stroke: "var(--primary)", strokeWidth: 1.5, opacity: 0.8 }} />
-          <text x={100} y={120} textAnchor="middle" style={{ fill: "var(--primary)", fontSize: 9, fontWeight: 600 }}>query</text>
-          <text x={100} y={145} textAnchor="middle" style={{ fill: "var(--primary)", fontSize: 8, opacity: 0.7 }}>&quot;ink for my printer&quot;</text>
+          <circle cx={100} cy={100} r={4} style={{ fill: "var(--primary)", stroke: "var(--primary)", strokeWidth: 1.5, opacity: 0.8 }} />
+          <text x={100} y={90} textAnchor="middle" style={{ fill: "var(--primary)", fontSize: 9, fontWeight: 600 }}>query</text>
+          <text x={100} y={115} textAnchor="middle" style={{ fill: "var(--primary)", fontSize: 8, opacity: 0.7 }}>&quot;beach vacation&quot;</text>
         </g>
       </svg>
     </div>
@@ -150,7 +150,7 @@ export function EmbeddingDiagram() {
 
 /* ═══════════════════════════════════════════════════════════════════════ */
 /*  2. DIAMOND RETRACTION — Correct retraction                            */
-/*  Animated ownership graph showing two paths to gamma,                  */
+/*  Two independent flight paths to Sydney,                               */
 /*  sequentially removing them to demonstrate correct retraction          */
 /* ═══════════════════════════════════════════════════════════════════════ */
 
@@ -159,9 +159,9 @@ export function DiamondDiagram() {
   const w = 480, h = 300
 
   const nodes = [
-    { id: "Customer", x: 240, y: 45 },
-    { id: "Unpaid Bill", x: 110, y: 165 },
-    { id: "Unverified Card", x: 370, y: 165 },
+    { id: "Sydney", x: 240, y: 45 },
+    { id: "via Tokyo", x: 110, y: 165 },
+    { id: "via Dubai", x: 370, y: 165 },
   ]
 
   return (
@@ -172,8 +172,8 @@ export function DiamondDiagram() {
             <path d="M0,0 L10,4 L0,8z" style={{ fill: "var(--border)" }} />
           </marker>
           <radialGradient id="dia-glow" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor="oklch(0.7 0.18 25)" stopOpacity="0.25" />
-            <stop offset="100%" stopColor="oklch(0.7 0.18 25)" stopOpacity="0" />
+            <stop offset="0%" stopColor="oklch(0.7 0.18 160)" stopOpacity="0.25" />
+            <stop offset="100%" stopColor="oklch(0.7 0.18 160)" stopOpacity="0" />
           </radialGradient>
           <filter id="dia-shadow">
             <feDropShadow dx="0" dy="1" stdDeviation="3" floodColor="black" floodOpacity="0.2" />
@@ -191,7 +191,7 @@ export function DiamondDiagram() {
             60%, 85% { opacity: 0.12; }
             90%, 100% { opacity: 0.12; }
           }
-          @keyframes dia-blocked {
+          @keyframes dia-reachable {
             0%, 25% { opacity: 1; }
             30%, 55% { opacity: 1; }
             60%, 85% { opacity: 0; }
@@ -202,23 +202,23 @@ export function DiamondDiagram() {
             30%, 55% { opacity: 1; }
             60%, 100% { opacity: 0; }
           }
-          @keyframes dia-unblocked {
+          @keyframes dia-unreachable {
             0%, 55% { opacity: 0; }
             65%, 85% { opacity: 1; }
             90%, 100% { opacity: 0; }
           }
         `}</style>
 
-        {/* Edge: Customer -> Unpaid Bill (path 1 - resolves first) */}
+        {/* Edge: Sydney <- via Dubai (path 1 - cancelled first) */}
         <g style={{ animation: visible ? "dia-phase 10s ease-in-out 1s infinite" : "none" }}>
-          <line x1={205} y1={62} x2={140} y2={142} style={{ stroke: "var(--border)", strokeWidth: 1.5 }} markerEnd="url(#dia-arrow)" />
-          <text x={150} y={100} textAnchor="middle" style={{ fill: "var(--muted-foreground)", fontSize: 9, opacity: 0.5 }}>blocks</text>
+          <line x1={340} y1={142} x2={275} y2={62} style={{ stroke: "var(--border)", strokeWidth: 1.5 }} markerEnd="url(#dia-arrow)" />
+          <text x={330} y={100} textAnchor="middle" style={{ fill: "var(--muted-foreground)", fontSize: 9, opacity: 0.5 }}>derives</text>
         </g>
 
-        {/* Edge: Customer -> Unverified Card (path 2 - resolves second) */}
+        {/* Edge: Sydney <- via Tokyo (path 2 - cancelled second) */}
         <g style={{ animation: visible ? "dia-phase2 10s ease-in-out 1s infinite" : "none" }}>
-          <line x1={275} y1={62} x2={340} y2={142} style={{ stroke: "var(--border)", strokeWidth: 1.5 }} markerEnd="url(#dia-arrow)" />
-          <text x={330} y={100} textAnchor="middle" style={{ fill: "var(--muted-foreground)", fontSize: 9, opacity: 0.5 }}>blocks</text>
+          <line x1={140} y1={142} x2={205} y2={62} style={{ stroke: "var(--border)", strokeWidth: 1.5 }} markerEnd="url(#dia-arrow)" />
+          <text x={150} y={100} textAnchor="middle" style={{ fill: "var(--muted-foreground)", fontSize: 9, opacity: 0.5 }}>derives</text>
         </g>
 
         {/* Nodes */}
@@ -233,19 +233,19 @@ export function DiamondDiagram() {
           </g>
         ))}
 
-        {/* BLOCKED badge on Customer */}
-        <g style={{ animation: visible ? "dia-blocked 10s ease-in-out 1s infinite" : "none" }}>
+        {/* REACHABLE badge on Sydney */}
+        <g style={{ animation: visible ? "dia-reachable 10s ease-in-out 1s infinite" : "none" }}>
           <circle cx={240} cy={45} r={55} fill="url(#dia-glow)" />
-          <rect x={298} y={30} width={62} height={20} rx={10} style={{ fill: "oklch(0.6 0.18 25 / 0.25)", stroke: "oklch(0.7 0.18 25 / 0.6)", strokeWidth: 0.5 }} />
-          <text x={329} y={43} textAnchor="middle" style={{ fill: "oklch(0.85 0.15 25)", fontSize: 8, fontWeight: 700, letterSpacing: "0.06em" }}>BLOCKED</text>
+          <rect x={298} y={30} width={75} height={20} rx={10} style={{ fill: "oklch(0.6 0.18 160 / 0.25)", stroke: "oklch(0.7 0.18 160 / 0.6)", strokeWidth: 0.5 }} />
+          <text x={335} y={43} textAnchor="middle" style={{ fill: "oklch(0.85 0.15 160)", fontSize: 8, fontWeight: 700, letterSpacing: "0.06em" }}>REACHABLE</text>
         </g>
 
         {/* Phase labels */}
-        <text x={240} y={225} textAnchor="middle" style={{ fill: "oklch(0.7 0.15 25)", fontSize: 10, fontWeight: 500, animation: visible ? "dia-label1 10s ease-in-out 1s infinite" : "none" }}>
-          bill paid - still blocked (card unverified)
+        <text x={240} y={225} textAnchor="middle" style={{ fill: "oklch(0.7 0.18 160)", fontSize: 10, fontWeight: 500, animation: visible ? "dia-label1 10s ease-in-out 1s infinite" : "none" }}>
+          Dubai cancelled - still reachable via Tokyo
         </text>
-        <text x={240} y={225} textAnchor="middle" style={{ fill: "oklch(0.7 0.18 160)", fontSize: 10, fontWeight: 500, animation: visible ? "dia-unblocked 10s ease-in-out 1s infinite" : "none" }}>
-          both resolved - customer unblocked
+        <text x={240} y={225} textAnchor="middle" style={{ fill: "oklch(0.7 0.15 25)", fontSize: 10, fontWeight: 500, animation: visible ? "dia-unreachable 10s ease-in-out 1s infinite" : "none" }}>
+          both cancelled - correctly unreachable
         </text>
       </svg>
     </div>
@@ -279,7 +279,7 @@ export function WaterfallDiagram() {
             }}
           />
           <div className="absolute inset-0 flex items-center justify-center" style={{ opacity: visible ? 1 : 0, transition: "opacity 0.4s 2s" }}>
-            <span className="text-xs font-mono" style={{ color: "white" }}>recomputes all 400,000 derived relationships</span>
+            <span className="text-xs font-mono" style={{ color: "white" }}>recomputes all 400,000 reachable pairs</span>
           </div>
         </div>
       </div>
@@ -316,8 +316,8 @@ export function WaterfallDiagram() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════ */
-/*  4. PROOF TREE — Provenance                                            */
-/*  Derivation tree matching IL Studio's proof tree panel style           */
+/*  4. PROOF TREE — Provenance                                      */
+/*  Derivation tree matching IL Studio's proof tree panel style     */
 /* ═══════════════════════════════════════════════════════════════════════ */
 
 interface PNode {
@@ -327,19 +327,40 @@ interface PNode {
 }
 
 const proofData: PNode = {
-  label: 'purchase_ok("team_a", "acme_supplies", 3200)',
+  label: 'can_reach("new_york", "sydney")',
   type: "conclusion",
   children: [
     {
-      label: "purchase_ok(T,V,Amt) <- order(T,V,Amt), approved_vendor(V), budget_remaining(T,B), Amt <= B",
+      label: "can_reach(A,C) <- direct_flight(A,B,_), can_reach(B,C)",
       type: "rule",
       children: [
-        { label: 'base_fact: order("team_a", "acme_supplies", 3200)', type: "fact" },
-        { label: 'base_fact: approved_vendor("acme_supplies")', type: "fact" },
-        { label: 'base_fact: budget_remaining("team_a", 5000)', type: "fact" },
+        { label: 'direct_flight("new_york", "london", 7.0)', type: "fact" },
         {
-          label: "eval: 3200 <= 5000 -> true",
+          label: 'can_reach("london", "sydney")',
           type: "derived",
+          children: [
+            {
+              label: "can_reach(A,C) <- direct_flight(A,B,_), can_reach(B,C)",
+              type: "rule",
+              children: [
+                { label: 'direct_flight("london", "paris", 1.5)', type: "fact" },
+                {
+                  label: 'can_reach("paris", "sydney")',
+                  type: "derived",
+                  children: [
+                    {
+                      label: "can_reach(A,C) <- direct_flight(A,B,_), can_reach(B,C)",
+                      type: "rule",
+                      children: [
+                        { label: 'direct_flight("paris", "tokyo", 12.0)', type: "fact" },
+                        { label: 'direct_flight("tokyo", "sydney", 9.5)', type: "fact" },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
         },
       ],
     },
@@ -551,7 +572,7 @@ export function HeroVisualization() {
       <div>
         <div className="flex items-center gap-2 mb-2">
           <span className="w-2 h-2 rounded-full" style={{ background: "var(--primary)", boxShadow: "0 0 8px var(--primary)" }} />
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-primary">Derived conclusions</span>
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-primary">Conclusions (computed automatically)</span>
           <div className="h-px flex-1 bg-primary/20" />
         </div>
         <div className="space-y-1.5">
@@ -588,14 +609,11 @@ export function HeroVisualization() {
         <div className="inline-flex items-center gap-2 border border-primary/20 rounded-full px-3.5 py-1.5">
           <div className="w-[5px] h-[5px] rounded-full bg-primary animate-pulse flex-shrink-0" />
           <span className="font-mono text-[11px] text-primary uppercase tracking-[0.09em]">
-            Open Source · Streaming · Traceable · Verifiable
+            Live · Reliable · Traceable · Explainable
           </span>
         </div>
       </div>
 
-      <p className="text-sm text-muted-foreground leading-relaxed pt-1" style={{ opacity: visible ? 1 : 0, transition: "opacity 0.5s 2.8s" }}>
-        Store facts. Define rules. InputLayer makes conclusions, keeps them current as data changes, and explains every result with a proof tree.
-      </p>
     </div>
   )
 }

@@ -5,14 +5,16 @@ Server status: healthy
 Authenticated as: admin
 Current knowledge graph: default
 
-> .kg create test_explain_filter_n33t19
-Knowledge graph 'test_explain_filter_n33t19' created.
-Switched to knowledge graph: test_explain_filter_n33t19
-> .kg use test_explain_filter_n33t19
-Switched to knowledge graph: test_explain_filter_n33t19
-> +score[(1, 95), (2, 72), (3, 88)]
-Inserted 3 fact(s) into 'score'.
-> .explain ?score(Id, S), S > 80
+> .kg create test_explain_neg_n33t20
+Knowledge graph 'test_explain_neg_n33t20' created.
+Switched to knowledge graph: test_explain_neg_n33t20
+> .kg use test_explain_neg_n33t20
+Switched to knowledge graph: test_explain_neg_n33t20
+> +employee[(1, "Alice"), (2, "Bob"), (3, "Carol")]
+Inserted 3 fact(s) into 'employee'.
+> +fired[(2,)]
+Inserted 1 fact(s) into 'fired'.
+> .debug ?employee(Id, Name), !fired(Id)
 Query Plan:
 ═══════════════════════════════════════════════════════════
                     PIPELINE TRACE                          
@@ -23,26 +25,32 @@ Query Plan:
 `---------------------------------------------------------┘
   Rules parsed: 1
 
-  Rule 1: __query__(Variable("Id"), Variable("S")) <- score(Variable("Id"), Variable("S")), Variable("S") > Constant(80)
+  Rule 1: __query__(Variable("Id"), Variable("Name")) <- employee(Variable("Id"), Variable("Name")), !fired(Variable("Id"))
 
 ┌---------------------------------------------------------┐
 | IR CONSTRUCTION                                         |
 `---------------------------------------------------------┘
-  IR nodes: 2
+  IR nodes: 3
   Rules: 1
 
   Rule 1 IR:
-    Filter(ColumnGtConst(1, 80))
-      Scan(score)[Id, S]
+    Antijoin[L:[0], R:[0]] -> [Id, Name]
+    |- Left:
+        Scan(employee)[Id, Name]
+    `- Right:
+        Scan(fired)[Id]
 
 ┌---------------------------------------------------------┐
 | OPTIMIZATION                                            |
 `---------------------------------------------------------┘
-  IR nodes: 2 -> 2 (0 eliminated)
+  IR nodes: 3 -> 3 (0 eliminated)
 
   Rule 1 Optimized IR:
-    Filter(ColumnGtConst(1, 80))
-      Scan(score)[Id, S]
+    Antijoin[L:[0], R:[0]] -> [Id, Name]
+    |- Left:
+        Scan(employee)[Id, Name]
+    `- Right:
+        Scan(fired)[Id]
 
 ═══════════════════════════════════════════════════════════
 
@@ -54,5 +62,5 @@ Optimization passes:
   - Basic Optimizations (identity elimination, filter simplification)
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop test_explain_filter_n33t19
-Knowledge graph 'test_explain_filter_n33t19' dropped.
+> .kg drop test_explain_neg_n33t20
+Knowledge graph 'test_explain_neg_n33t20' dropped.

@@ -322,7 +322,7 @@ pub struct QueryResult {
     /// Proof trees for why-provenance queries (present only for .why results)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
-    pub proof_trees: Option<Vec<crate::provenance::wire::WireProofTree>>,
+    pub proof_trees: Option<Vec<crate::provenance::proof_tree::ProofTree>>,
     /// Per-stage timing breakdown (present when timing_mode is Summary or Detailed)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]

@@ -638,3 +638,62 @@ export function getAllExamples(): (Example & { categoryId: string; categoryName:
 export function getExampleCount(): number {
   return EXAMPLE_CATEGORIES.reduce((sum, cat) => sum + cat.examples.length, 0)
 }
+
+/**
+ * Split an example's code into setup (inserts/rules) and queries.
+ * Setup statements are executed silently when creating the example KG.
+ * Query statements are loaded into the editor with a guide comment.
+ */
+export function splitExampleCode(code: string): { setup: string; queries: string } {
+  const setupLines: string[] = []
+  const queryLines: string[] = []
+  let inQuerySection = false
+
+  for (const line of code.split("\n")) {
+    const trimmed = line.trim()
+
+    // Empty lines and comments go to whichever section we're in
+    if (!trimmed || trimmed.startsWith("//")) {
+      if (inQuerySection) {
+        queryLines.push(line)
+      } else {
+        setupLines.push(line)
+      }
+      continue
+    }
+
+    // Queries, .why, .why_not, .rel, .rules go to query section
+    if (trimmed.startsWith("?") || trimmed.startsWith(".why") || trimmed.startsWith(".rel") || trimmed.startsWith(".rules")) {
+      inQuerySection = true
+      queryLines.push(line)
+      continue
+    }
+
+    // Inserts (+), deletes (-), rules (+...(...) <-) go to setup
+    if (trimmed.startsWith("+") || trimmed.startsWith("-")) {
+      setupLines.push(line)
+      continue
+    }
+
+    // Anything else (meta commands, session rules without +) - keep in current section
+    if (inQuerySection) {
+      queryLines.push(line)
+    } else {
+      setupLines.push(line)
+    }
+  }
+
+  return {
+    setup: setupLines.join("\n").trim(),
+    queries: queryLines.join("\n").trim(),
+  }
+}
+
+/** Generate a KG-safe name from a category and example name. */
+export function exampleKgName(categoryId: string, exampleName: string): string {
+  const slug = exampleName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "")
+  return `ex_${categoryId}_${slug}`
+}

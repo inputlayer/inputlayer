@@ -365,10 +365,10 @@ df = result.to_df()           # pandas DataFrame (requires pandas)
 
 ### Query Plans
 
-To understand how a query will execute without running it, use `explain()`:
+To understand how a query will execute without running it, use `debug()`:
 
 ```python
-plan = await kg.explain(
+plan = await kg.debug(
     Employee,
     where=lambda e: e.department == "eng",
 )

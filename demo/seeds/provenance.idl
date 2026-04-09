@@ -6,29 +6,29 @@
 // An AI agent decides whether to approve purchase orders.
 // Every decision must be auditable and explainable.
 
-+team[("team_alpha", "Alpha Team", "Engineering"),
-      ("team_beta",  "Beta Team",  "Marketing"),
-      ("team_gamma", "Gamma Team", "Research")]
++team("team_alpha", "Alpha Team", "Engineering")
++team("team_beta",  "Beta Team",  "Marketing")
++team("team_gamma", "Gamma Team", "Research")
 
-+budget_remaining[("team_alpha", 15000),
-                  ("team_beta",  3000),
-                  ("team_gamma", 50000)]
++budget_remaining("team_alpha", 15000)
++budget_remaining("team_beta",  3000)
++budget_remaining("team_gamma", 50000)
 
-+approved_vendor[("acme_supplies",    "Acme Industrial Supplies"),
-                 ("techmart",         "TechMart Electronics"),
-                 ("office_depot",     "Office Depot")]
++approved_vendor("acme_supplies",    "Acme Industrial Supplies")
++approved_vendor("techmart",         "TechMart Electronics")
++approved_vendor("office_depot",     "Office Depot")
 
 // Vendor risk scores (lower is better)
-+vendor_risk[("acme_supplies", 0.12),
-             ("techmart", 0.35),
-             ("office_depot", 0.08)]
++vendor_risk("acme_supplies", 0.12)
++vendor_risk("techmart", 0.35)
++vendor_risk("office_depot", 0.08)
 
-+order[("team_alpha", "acme_supplies", 3200,  "Server rack"),
-       ("team_alpha", "techmart",      8500,  "GPU cluster"),
-       ("team_beta",  "office_depot",  450,   "Office supplies"),
-       ("team_beta",  "acme_supplies", 5000,  "Standing desks"),
-       ("team_gamma", "techmart",      12000, "Lab equipment"),
-       ("team_gamma", "globex_corp",   1500,  "Chemicals")]
++order("team_alpha", "acme_supplies", 3200,  "Server rack")
++order("team_alpha", "techmart",      8500,  "GPU cluster")
++order("team_beta",  "office_depot",  450,   "Office supplies")
++order("team_beta",  "acme_supplies", 5000,  "Standing desks")
++order("team_gamma", "techmart",      12000, "Lab equipment")
++order("team_gamma", "globex_corp",   1500,  "Chemicals")
 
 // ── Approval rules ─────────────────────────────────────────────────────
 

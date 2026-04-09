@@ -9,36 +9,36 @@
 // Step 3: Rank by vector similarity
 
 // Customers and their invoices
-+customer[("cust_1", "Acme Corp"),
-          ("cust_2", "Globex Inc"),
-          ("cust_3", "Initech LLC")]
++customer("cust_1", "Acme Corp")
++customer("cust_2", "Globex Inc")
++customer("cust_3", "Initech LLC")
 
-+paid_invoice[("cust_1", "inv_99"),
-              ("cust_1", "inv_100"),
-              ("cust_2", "inv_50")]
++paid_invoice("cust_1", "inv_99")
++paid_invoice("cust_1", "inv_100")
++paid_invoice("cust_2", "inv_50")
 
-+dispute_resolved[("cust_1", "d_42"),
-                  ("cust_2", "d_10")]
++dispute_resolved("cust_1", "d_42")
++dispute_resolved("cust_2", "d_10")
 
 // Products with embedding vectors for similarity search
 // Embeddings represent ink characteristics (density, viscosity, color profile)
-+product[("pg245",   "Canon PG-245",       [0.82, 0.44, 0.91]),
-         ("cl246",   "Canon CL-246",       [0.79, 0.41, 0.88]),
-         ("pg245xl", "Canon PG-245XL",     [0.84, 0.46, 0.93]),
-         ("ep202",   "Epson 202",          [0.31, 0.85, 0.22]),
-         ("br3013",  "Brother LC3013",     [0.28, 0.79, 0.19]),
-         ("hp61",    "HP 61",             [0.35, 0.82, 0.25])]
++product("pg245",   "Canon PG-245",       [0.82, 0.44, 0.91])
++product("cl246",   "Canon CL-246",       [0.79, 0.41, 0.88])
++product("pg245xl", "Canon PG-245XL",     [0.84, 0.46, 0.93])
++product("ep202",   "Epson 202",          [0.31, 0.85, 0.22])
++product("br3013",  "Brother LC3013",     [0.28, 0.79, 0.19])
++product("hp61",    "HP 61",             [0.35, 0.82, 0.25])
 
 // Compatibility rules: which products work with which printers
-+compatible_with[("pg245",   "canon_pixma_mg2525"),
-                 ("cl246",   "canon_pixma_mg2525"),
-                 ("pg245xl", "canon_pixma_mg2525"),
-                 ("pg245",   "canon_pixma_ts3120"),
-                 ("cl246",   "canon_pixma_ts3120")]
++compatible_with("pg245",   "canon_pixma_mg2525")
++compatible_with("cl246",   "canon_pixma_mg2525")
++compatible_with("pg245xl", "canon_pixma_mg2525")
++compatible_with("pg245",   "canon_pixma_ts3120")
++compatible_with("cl246",   "canon_pixma_ts3120")
 
-+owns_printer[("cust_1", "canon_pixma_mg2525"),
-              ("cust_2", "canon_pixma_ts3120"),
-              ("cust_3", "canon_pixma_mg2525")]
++owns_printer("cust_1", "canon_pixma_mg2525")
++owns_printer("cust_2", "canon_pixma_ts3120")
++owns_printer("cust_3", "canon_pixma_mg2525")
 
 // ── Rules (multi-hop reasoning) ────────────────────────────────────────
 

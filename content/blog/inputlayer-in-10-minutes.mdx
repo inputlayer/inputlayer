@@ -7,9 +7,9 @@ excerpt: "A hands-on tutorial to get InputLayer running and build your first kno
 
 # InputLayer in 10 Minutes: From Docker to Your First Knowledge Graph
 
-Someone changes a role in your org chart. Now you need to figure out which permissions changed, which documents need re-filtering, and which downstream reports are stale. In most systems, that's a ticket, a script, and a prayer that you caught everything.
+Someone changes a role in your org chart. Now you need to figure out which permissions changed, which documents need re-filtering, and which downstream reports are stale. In custom-built permission systems, that's a ticket, a script, and a prayer that you caught everything.
 
-In 10 minutes, you'll build a knowledge graph that derives conclusions automatically, updates them incrementally when facts change, and explains every result with a proof tree. Not a toy demo - the same mechanics that handle access control hierarchies, compliance chains, and recommendation graphs in production. Let's build it.
+In 10 minutes, you'll build a knowledge graph that derives conclusions automatically, updates them in real time when facts change, and explains every result with a full reasoning chain. Not a toy demo. These are the same mechanics that handle access control hierarchies, compliance chains, and recommendation graphs in production. Let's build it.
 
 ## Step 1: Start InputLayer
 
@@ -19,7 +19,7 @@ Run this in your terminal:
 docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer
 ```
 
-You'll see InputLayer start up and print a message telling you it's ready. That's it - no config files, no setup.
+You'll see InputLayer start up and print a message telling you it's ready. That's it. No config files, no setup.
 
 ## Step 2: Open the REPL
 
@@ -29,7 +29,7 @@ Now you need a way to talk to InputLayer. Open your browser and go to:
 http://localhost:8080
 ```
 
-This opens InputLayer's interactive REPL - a command line where you can type queries and see results immediately. Think of it like a SQL console, but for knowledge graphs.
+This opens InputLayer's interactive REPL, a command line where you can type queries and see results immediately. Think of it like a SQL console, but for knowledge graphs.
 
 You can also use the [Python SDK](/docs/guides/python-sdk/) or the [REST API](/docs/guides/configuration/), but the REPL is the fastest way to explore.
 
@@ -52,7 +52,7 @@ Alice [primary]
     Diana
 ```
 
-That's the entire org chart. Three facts, four people. InputLayer stores these immediately - no schema to define, no tables to create.
+That's the entire org chart. Three facts, four people. InputLayer stores these immediately. No schema to define, no tables to create.
 
 You can already ask simple questions: "Who does Bob manage?" returns Charlie and Diana. "Who manages Bob?" returns Alice. These are direct lookups, nothing special yet.
 
@@ -60,7 +60,7 @@ You can already ask simple questions: "Who does Bob manage?" returns Charlie and
 
 This is the step where InputLayer becomes fundamentally different from a regular database.
 
-We want to answer: *"Who does Alice have authority over?"* Alice manages Bob directly. But does she have authority over Charlie? She doesn't manage Charlie - Bob does. But intuitively, yes - because she manages the person who manages Charlie.
+We want to answer: *"Who does Alice have authority over?"* Alice manages Bob directly. But does she have authority over Charlie? She doesn't manage Charlie. Bob does. But intuitively, yes, because she manages the person who manages Charlie.
 
 You express this intuition as a rule:
 
@@ -70,7 +70,7 @@ If A manages B, then A has authority over B.
 If A has authority over B, and B has authority over C, then A has authority over C too.
 ```
 
-That second sentence is the important part - it's recursive. It says: authority flows down through the management chain, no matter how deep it goes.
+That second sentence is the important part. It's recursive. It says: authority flows down through the management chain, no matter how deep it goes.
 
 When you enter this rule, InputLayer immediately starts reasoning. It applies the rule over and over until there are no more conclusions to draw. Here's what it figures out:
 
@@ -89,7 +89,7 @@ Now query: *"Who does Alice have authority over?"*
 
 The answer: **Bob, Charlie, and Diana.**
 
-Alice doesn't manage Charlie or Diana directly. But the engine followed the chain and figured it out. This is something a regular database can't do - it required two hops of reasoning.
+Alice doesn't manage Charlie or Diana directly. But the engine followed the chain and derived it automatically. SQL can compute this too, but InputLayer maintains the result in real time. When facts change, conclusions update in milliseconds without re-running the query.
 
 ## Step 6: Add vector search
 
@@ -119,7 +119,7 @@ Alice [primary]
       Frank [success]
 ```
 
-Query authority again. Frank shows up in Alice's results immediately - even though you never told the system about Alice's relationship to Frank. The engine derived it: Alice has authority over Diana, Diana manages Frank, therefore Alice has authority over Frank.
+Query authority again. Frank shows up in Alice's results immediately, even though you never told the system about Alice's relationship to Frank. The engine derived it: Alice has authority over Diana, Diana manages Frank, therefore Alice has authority over Frank.
 
 The important part: InputLayer didn't recompute everything from scratch. It identified that the new fact only affects a small part of the graph and updated just that. On a 2,000-node graph, this is over **1,600x faster** than recomputing everything.
 
@@ -133,9 +133,9 @@ Alice [primary]
     Charlie
 ```
 
-Query authority again. Diana and Frank are gone from Alice's results. But Bob still has authority over Charlie - that relationship doesn't depend on Diana at all.
+Query authority again. Diana and Frank are gone from Alice's results. But Bob still has authority over Charlie. That relationship doesn't depend on Diana at all.
 
-Here's the subtle part: what if Diana had reported to Alice through *two* paths? Say both Bob and Eve managed Diana. Removing Bob's management of Diana shouldn't remove Alice's authority over Diana if the Eve path still exists. InputLayer tracks this automatically - a conclusion only disappears when *all* paths supporting it are gone.
+Here's the subtle part: what if Diana had reported to Alice through *two* paths? Say both Bob and Eve managed Diana. Removing Bob's management of Diana shouldn't remove Alice's authority over Diana if the Eve path still exists. InputLayer tracks this automatically. A conclusion only disappears when *all* paths supporting it are gone.
 
 ## What you just built
 
@@ -146,10 +146,10 @@ In about 10 minutes, you've used:
 | Knowledge graph | Stored facts about people and relationships |
 | Recursive reasoning | A rule derived authority chains automatically |
 | Vector search | Combined similarity with logical reasoning |
-| Incremental updates | New facts propagated in milliseconds |
+| Incremental updates | New facts spread in milliseconds |
 | Correct retraction | Removed facts cleaned up precisely |
 
-These capabilities normally require stitching together multiple systems - a graph database, a vector database, a rules engine, application code. InputLayer handles them all in one place.
+These capabilities often live in separate systems: graph traversal in one, vector search in another, business rules in application code. InputLayer handles them in one place.
 
 ## Next steps
 

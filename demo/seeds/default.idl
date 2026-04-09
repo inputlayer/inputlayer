@@ -7,24 +7,28 @@
 
 // ── Base facts ─────────────────────────────────────────────────────────
 
-+customer[("c1", "Alice",   "alice@example.com",   "premium"),
-          ("c2", "Bob",     "bob@example.com",     "standard"),
-          ("c3", "Charlie", "charlie@example.com", "premium"),
-          ("c4", "Diana",   "diana@example.com",   "suspended")]
++customer("c1", "Alice",   "alice@example.com",   "premium")
++customer("c2", "Bob",     "bob@example.com",     "standard")
++customer("c3", "Charlie", "charlie@example.com", "premium")
++customer("c4", "Diana",   "diana@example.com",   "suspended")
 
-+product[("p1", "Widget Pro",     49.99,  "electronics"),
-         ("p2", "Widget Lite",    29.99,  "electronics"),
-         ("p3", "Gadget Max",     149.99, "electronics"),
-         ("p4", "Basic Toolkit",  19.99,  "tools"),
-         ("p5", "Premium Toolkit", 89.99, "tools")]
++product("p1", "Widget Pro",     49.99,  "electronics")
++product("p2", "Widget Lite",    29.99,  "electronics")
++product("p3", "Gadget Max",     149.99, "electronics")
++product("p4", "Basic Toolkit",  19.99,  "tools")
++product("p5", "Premium Toolkit", 89.99, "tools")
 
-+inventory[("p1", 150), ("p2", 500), ("p3", 0), ("p4", 200), ("p5", 75)]
++inventory("p1", 150)
++inventory("p2", 500)
++inventory("p3", 0)
++inventory("p4", 200)
++inventory("p5", 75)
 
-+order[("o1", "c1", "p1", 2),
-       ("o2", "c1", "p3", 1),
-       ("o3", "c2", "p2", 3),
-       ("o4", "c3", "p5", 1),
-       ("o5", "c4", "p1", 1)]
++order("o1", "c1", "p1", 2)
++order("o2", "c1", "p3", 1)
++order("o3", "c2", "p2", 3)
++order("o4", "c3", "p5", 1)
++order("o5", "c4", "p1", 1)
 
 // ── Business rules ─────────────────────────────────────────────────────
 

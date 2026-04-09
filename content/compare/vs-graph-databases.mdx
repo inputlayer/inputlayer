@@ -20,10 +20,10 @@ InputLayer evaluates logical rules over facts, computes recursive conclusions, a
 |---|---|---|
 | Traverse stored relationships | Native | Native |
 | Pattern matching on graphs | Native | Native |
-| Derive new relationships from rules | Limited | Native |
-| Recursive rule evaluation | Limited | Native |
-| Update conclusions when facts change | Manual rebuild | Automatic, incremental |
-| Retract correctly when facts are deleted | Manual | Automatic (weight-based) |
+| Derive new relationships from rules | Via procedures | Native |
+| Recursive traversal | Native | Native |
+| Update conclusions when facts change | Recompute per query | Automatic, incremental |
+| Retract derived state when facts are deleted | Recompute per query | Automatic (weight-based) |
 | Vector similarity search | Plugin | Native |
 | Visual exploration tools | Mature | Via API |
 | Clustering | Native | Single-node |
@@ -42,7 +42,7 @@ Authority from two sources [primary]
     Therefore Alice has authority over everyone in Engineering
 ```
 
-In InputLayer, you define both sources of authority as rules. The engine derives the combined result. In a graph query language, you'd need to write separate queries and reconcile the results in application code.
+In InputLayer, you define both sources of authority as rules. The engine derives the combined result. In a graph query language, you can combine patterns in a single query, but without automatic incremental maintenance when the underlying data changes.
 
 **Keeping derived state consistent.** When someone leaves the company, a graph database still has all the edges you stored. You decide what to invalidate and rebuild. InputLayer tracks which conclusions depend on which facts. Remove "Alice manages Bob" and every conclusion that was derived through that relationship retracts automatically - but conclusions supported by alternative paths survive.
 

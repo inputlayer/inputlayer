@@ -97,6 +97,9 @@
 //! | `recursion` | Recursion detection & stratification |
 //! | `storage_engine` | Multi-knowledge-graph persistence |
 
+// Teaching agent (Claude-powered onboarding)
+pub mod agent;
+
 // AST and IR modules (consolidated from crates/)
 pub mod ast;
 pub mod derived_relations; // Derived relation materialization
@@ -1500,17 +1503,39 @@ impl DatalogEngine {
     /// all intermediate rules (views) and making them available as input data.
     pub fn execute_tuples(&mut self, source: &str) -> Result<Vec<Tuple>, String> {
         self.execute_tuples_profiled(source)
-            .map(|(tuples, _)| tuples)
+            .map(|(tuples, _, _)| tuples)
     }
 
-    /// Execute the full pipeline returning tuples and an optional timing breakdown.
+    /// Execute the full pipeline returning query results AND all accumulated
+    /// derived relation contents.
     ///
-    /// This is the profiled entry point. The timing breakdown is populated
-    /// according to the engine's `timing_mode` setting.
+    /// This is used by the provenance system to avoid re-deriving tuples
+    /// during backward chaining proof construction.
+    pub fn execute_tuples_with_derived(
+        &mut self,
+        source: &str,
+    ) -> Result<(Vec<Tuple>, HashMap<String, Vec<Tuple>>), String> {
+        self.execute_tuples_profiled(source)
+            .map(|(tuples, derived, _)| (tuples, derived))
+    }
+
+    /// Execute the full pipeline returning tuples, all accumulated derived
+    /// relation contents, and an optional timing breakdown.
+    ///
+    /// The derived data (`HashMap<String, Vec<Tuple>>`) contains all intermediate
+    /// relation results computed during evaluation. This is used by the provenance
+    /// system to avoid expensive re-derivation during backward chaining.
     pub fn execute_tuples_profiled(
         &mut self,
         source: &str,
-    ) -> Result<(Vec<Tuple>, Option<execution::TimingBreakdown>), String> {
+    ) -> Result<
+        (
+            Vec<Tuple>,
+            HashMap<String, Vec<Tuple>>,
+            Option<execution::TimingBreakdown>,
+        ),
+        String,
+    > {
         let debug = std::env::var("IL_DEBUG").is_ok();
         if debug {
             eprintln!("DEBUG execute_tuples: starting");
@@ -1674,7 +1699,7 @@ impl DatalogEngine {
             "engine_execute_complete"
         );
         let timing = collector.finish();
-        Ok((last_result, timing))
+        Ok((last_result, accumulated_results, timing))
     }
 
     /// Execute all rules in the program
@@ -1815,11 +1840,11 @@ impl DatalogEngine {
         Ok((results, trace))
     }
 
-    /// Explain a query plan without executing it.
+    /// Debug a query plan without executing it.
     ///
     /// Runs the full compilation pipeline (parse → SIP → IR → optimize)
     /// and returns a PipelineTrace showing the plan at each stage.
-    pub fn explain(&mut self, source: &str) -> Result<PipelineTrace, String> {
+    pub fn debug(&mut self, source: &str) -> Result<PipelineTrace, String> {
         let mut trace = PipelineTrace::new();
 
         // Parse + SIP rewriting
@@ -2235,11 +2260,11 @@ mod tests {
     }
 
     #[test]
-    fn test_explain() {
+    fn test_debug() {
         let mut engine = DatalogEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
 
-        let trace = engine.explain("path(X, Y) <- edge(X, Y)").unwrap();
+        let trace = engine.debug("path(X, Y) <- edge(X, Y)").unwrap();
         assert!(trace.ast.is_some());
     }
 
@@ -2781,10 +2806,10 @@ mod tests {
     }
 
     #[test]
-    fn test_explain_produces_trace() {
+    fn test_debug_produces_trace() {
         let mut engine = DatalogEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
-        let trace = engine.explain("result(X, Y) <- edge(X, Y)").unwrap();
+        let trace = engine.debug("result(X, Y) <- edge(X, Y)").unwrap();
         assert!(trace.ast.is_some());
     }
 
