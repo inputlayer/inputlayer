@@ -190,6 +190,7 @@ pub fn authorize_kg_operation(kg_role: &KgRole, stmt: &Statement) -> Result<(), 
 
 fn authorize_kg_editor(stmt: &Statement) -> Result<(), String> {
     match stmt {
+        // KG editors can read, write, and manage schema
         Statement::Query(_)
         | Statement::Insert(_)
         | Statement::Delete(_)
@@ -202,13 +203,67 @@ fn authorize_kg_editor(stmt: &Statement) -> Result<(), String> {
         | Statement::DeleteRelationOrRule(_) => Ok(()),
 
         Statement::Meta(cmd) => match cmd {
+            // KG editors cannot drop KGs or manage ACLs (Owner only)
             MetaCommand::KgDrop(_) => {
                 Err("Permission denied: only KG owners can drop this knowledge graph".to_string())
             }
             MetaCommand::KgAclGrant { .. } | MetaCommand::KgAclRevoke { .. } => {
                 Err("Permission denied: only KG owners can manage ACLs".to_string())
             }
-            _ => Ok(()),
+            // KG navigation
+            MetaCommand::KgShow | MetaCommand::KgList | MetaCommand::KgUse(_) | MetaCommand::KgCreate(_) => Ok(()),
+            // Relation/rule management
+            MetaCommand::RelList
+            | MetaCommand::RelDescribe(_)
+            | MetaCommand::RelDrop(_)
+            | MetaCommand::RuleList
+            | MetaCommand::RuleQuery(_)
+            | MetaCommand::RuleShowDef(_)
+            | MetaCommand::RuleDrop(_)
+            | MetaCommand::RuleDropPrefix(_)
+            | MetaCommand::RuleEdit { .. }
+            | MetaCommand::RuleClear(_)
+            | MetaCommand::RuleRemove { .. } => Ok(()),
+            // Index management
+            MetaCommand::IndexList
+            | MetaCommand::IndexCreate(_)
+            | MetaCommand::IndexDrop(_)
+            | MetaCommand::IndexStats(_)
+            | MetaCommand::IndexRebuild(_) => Ok(()),
+            // Data loading/clearing
+            MetaCommand::ClearPrefix(_) | MetaCommand::Load { .. } => Ok(()),
+            // ACL list (read-only)
+            MetaCommand::KgAclList(_) => Ok(()),
+            // Session commands (ephemeral)
+            MetaCommand::SessionList
+            | MetaCommand::SessionClear
+            | MetaCommand::SessionDrop(_)
+            | MetaCommand::SessionDropName(_) => Ok(()),
+            // Read-only system commands
+            MetaCommand::Debug(_)
+            | MetaCommand::Why(_)
+            | MetaCommand::WhyFull(_)
+            | MetaCommand::WhyNot(_)
+            | MetaCommand::Status
+            | MetaCommand::Help
+            | MetaCommand::Quit => Ok(()),
+            // Agent commands
+            MetaCommand::AgentMessage(_)
+            | MetaCommand::AgentStart(_)
+            | MetaCommand::AgentSetup(_)
+            | MetaCommand::AgentExamples => Ok(()),
+            // System administration (admin only, should not reach per-KG check)
+            MetaCommand::Compact
+            | MetaCommand::UserList
+            | MetaCommand::UserCreate { .. }
+            | MetaCommand::UserDrop(_)
+            | MetaCommand::UserPassword { .. }
+            | MetaCommand::UserRole { .. }
+            | MetaCommand::ApiKeyCreate(_)
+            | MetaCommand::ApiKeyList
+            | MetaCommand::ApiKeyRevoke(_) => {
+                Err("Permission denied: only admins can perform this operation".to_string())
+            }
         },
     }
 }
@@ -229,6 +284,7 @@ fn authorize_kg_viewer(stmt: &Statement) -> Result<(), String> {
         }
 
         Statement::Meta(cmd) => match cmd {
+            // Read-only operations
             MetaCommand::KgShow
             | MetaCommand::KgList
             | MetaCommand::KgUse(_)
@@ -237,17 +293,26 @@ fn authorize_kg_viewer(stmt: &Statement) -> Result<(), String> {
             | MetaCommand::RuleList
             | MetaCommand::RuleQuery(_)
             | MetaCommand::RuleShowDef(_)
-            | MetaCommand::SessionList
-            | MetaCommand::SessionClear
-            | MetaCommand::SessionDrop(_)
-            | MetaCommand::SessionDropName(_)
             | MetaCommand::IndexList
             | MetaCommand::IndexStats(_)
             | MetaCommand::Debug(_)
+            | MetaCommand::Why(_)
+            | MetaCommand::WhyFull(_)
+            | MetaCommand::WhyNot(_)
             | MetaCommand::Status
             | MetaCommand::Help
             | MetaCommand::Quit
             | MetaCommand::KgAclList(_) => Ok(()),
+            // Session commands (ephemeral, per-connection)
+            MetaCommand::SessionList
+            | MetaCommand::SessionClear
+            | MetaCommand::SessionDrop(_)
+            | MetaCommand::SessionDropName(_) => Ok(()),
+            // Agent commands (read-only interaction)
+            MetaCommand::AgentMessage(_)
+            | MetaCommand::AgentStart(_)
+            | MetaCommand::AgentSetup(_)
+            | MetaCommand::AgentExamples => Ok(()),
             _ => {
                 Err("Permission denied: you have viewer access to this knowledge graph".to_string())
             }
@@ -256,20 +321,39 @@ fn authorize_kg_viewer(stmt: &Statement) -> Result<(), String> {
 }
 
 // ── Authorization ───────────────────────────────────────────────────────────
+//
+// Two-layer authorization model:
+//
+//   Layer 1 - Global role (`authorize_statement`):
+//     Gates system-level operations only: user management, API keys, compaction,
+//     and KG creation (editors can create, viewers cannot).
+//     All data operations (insert, delete, rules, schema, ACL) pass through
+//     to Layer 2 regardless of global role.
+//
+//   Layer 2 - Per-KG role (`authorize_kg_operation`):
+//     Gates all operations on a specific knowledge graph. The KG role (Owner,
+//     Editor, Viewer) determines what the user can do within that KG.
+//     This is the authority for data access - not the global role.
+//
+// This separation means a global Viewer who is a KG Owner can fully manage
+// their KG, and a global Editor who is a KG Viewer can only read that KG.
 
-/// Check whether a role is authorized to execute a given statement.
-/// Returns `Ok(())` if allowed, `Err(message)` if denied.
+/// Check whether a global role is authorized to execute a given statement.
+/// This only gates system-level operations. Data/KG-scoped operations are
+/// always passed through here and gated by per-KG authorization instead.
 pub fn authorize_statement(role: &Role, stmt: &Statement) -> Result<(), String> {
     match role {
-        Role::Admin => Ok(()), // Admin can do everything
-        Role::Editor => authorize_editor(stmt),
-        Role::Viewer => authorize_viewer(stmt),
+        Role::Admin => Ok(()),
+        Role::Editor | Role::Viewer => authorize_non_admin(role, stmt),
     }
 }
 
-fn authorize_editor(stmt: &Statement) -> Result<(), String> {
+/// Authorization for non-admin users (editors and viewers).
+/// Only blocks system-level operations. Data operations are deferred to per-KG auth.
+fn authorize_non_admin(role: &Role, stmt: &Statement) -> Result<(), String> {
     match stmt {
-        // Editors can query, insert, delete, define rules
+        // All data operations are deferred to per-KG authorization.
+        // The per-KG role (Owner/Editor/Viewer) determines access.
         Statement::Query(_)
         | Statement::Insert(_)
         | Statement::Delete(_)
@@ -281,19 +365,28 @@ fn authorize_editor(stmt: &Statement) -> Result<(), String> {
         | Statement::TypeDecl(_)
         | Statement::DeleteRelationOrRule(_) => Ok(()),
 
-        Statement::Meta(cmd) => authorize_editor_meta(cmd),
+        Statement::Meta(cmd) => authorize_non_admin_meta(role, cmd),
     }
 }
 
-fn authorize_editor_meta(cmd: &MetaCommand) -> Result<(), String> {
+/// Meta command authorization for non-admin users.
+fn authorize_non_admin_meta(role: &Role, cmd: &MetaCommand) -> Result<(), String> {
     match cmd {
-        // Editors can view/use KGs, but not create/drop
-        MetaCommand::KgShow | MetaCommand::KgList | MetaCommand::KgUse(_) => Ok(()),
-        MetaCommand::KgCreate(_) | MetaCommand::KgDrop(_) => {
-            Err("Permission denied: only admins can create/drop knowledge graphs".to_string())
+        // KG lifecycle: editors can create, viewers cannot.
+        // Drop is deferred to per-KG auth (requires Owner).
+        MetaCommand::KgCreate(_) => {
+            if *role == Role::Viewer {
+                Err("Permission denied: viewers cannot create knowledge graphs".to_string())
+            } else {
+                Ok(())
+            }
         }
+        MetaCommand::KgDrop(_) => Ok(()), // per-KG Owner check enforces this
 
-        // Editors can view and manipulate relations/rules
+        // KG navigation - all roles
+        MetaCommand::KgShow | MetaCommand::KgList | MetaCommand::KgUse(_) => Ok(()),
+
+        // Data operations on relations/rules - deferred to per-KG auth
         MetaCommand::RelList
         | MetaCommand::RelDescribe(_)
         | MetaCommand::RelDrop(_)
@@ -306,130 +399,28 @@ fn authorize_editor_meta(cmd: &MetaCommand) -> Result<(), String> {
         | MetaCommand::RuleClear(_)
         | MetaCommand::RuleRemove { .. } => Ok(()),
 
-        // Session commands are always allowed
-        MetaCommand::SessionList
-        | MetaCommand::SessionClear
-        | MetaCommand::SessionDrop(_)
-        | MetaCommand::SessionDropName(_) => Ok(()),
-
-        // Index management
+        // Index management - deferred to per-KG auth
         MetaCommand::IndexList
         | MetaCommand::IndexCreate(_)
         | MetaCommand::IndexDrop(_)
         | MetaCommand::IndexStats(_)
         | MetaCommand::IndexRebuild(_) => Ok(()),
 
-        // Editors can clear and load
+        // Data loading/clearing - deferred to per-KG auth
         MetaCommand::ClearPrefix(_) | MetaCommand::Load { .. } => Ok(()),
 
-        // Read-only system commands
-        MetaCommand::Debug(_)
-        | MetaCommand::Why(_)
-        | MetaCommand::WhyFull(_)
-        | MetaCommand::WhyNot(_)
-        | MetaCommand::Status
-        | MetaCommand::Help
-        | MetaCommand::Quit => Ok(()),
+        // ACL management - deferred to per-KG auth (requires Owner)
+        MetaCommand::KgAclList(_)
+        | MetaCommand::KgAclGrant { .. }
+        | MetaCommand::KgAclRevoke { .. } => Ok(()),
 
-        // KG ACL commands - editors can list ACLs but not modify
-        MetaCommand::KgAclList(_) => Ok(()),
-        MetaCommand::KgAclGrant { .. } | MetaCommand::KgAclRevoke { .. } => {
-            Err("Permission denied: only KG owners or admins can manage ACLs".to_string())
-        }
-
-        // Agent commands - allowed for all roles
-        MetaCommand::AgentMessage(_)
-        | MetaCommand::AgentStart(_)
-        | MetaCommand::AgentSetup(_)
-        | MetaCommand::AgentExamples => Ok(()),
-
-        // Admin-only commands
-        MetaCommand::Compact => Err("Permission denied: only admins can compact".to_string()),
-        MetaCommand::UserList
-        | MetaCommand::UserCreate { .. }
-        | MetaCommand::UserDrop(_)
-        | MetaCommand::UserPassword { .. }
-        | MetaCommand::UserRole { .. } => {
-            Err("Permission denied: only admins can manage users".to_string())
-        }
-        MetaCommand::ApiKeyCreate(_) | MetaCommand::ApiKeyList | MetaCommand::ApiKeyRevoke(_) => {
-            Err("Permission denied: only admins can manage API keys".to_string())
-        }
-    }
-}
-
-fn authorize_viewer(stmt: &Statement) -> Result<(), String> {
-    match stmt {
-        // Viewers can only query and use session rules/facts
-        Statement::Query(_) | Statement::SessionRule(_) | Statement::Fact(_) => Ok(()),
-
-        // Viewers cannot modify data
-        Statement::Insert(_) => Err("Permission denied: viewers cannot insert data".to_string()),
-        Statement::Delete(_) => Err("Permission denied: viewers cannot delete data".to_string()),
-        Statement::Update(_) => Err("Permission denied: viewers cannot update data".to_string()),
-        Statement::PersistentRule(_) => {
-            Err("Permission denied: viewers cannot create persistent rules".to_string())
-        }
-        Statement::SchemaDecl(_) => {
-            Err("Permission denied: viewers cannot define schemas".to_string())
-        }
-        Statement::TypeDecl(_) => Err("Permission denied: viewers cannot define types".to_string()),
-        Statement::DeleteRelationOrRule(_) => {
-            Err("Permission denied: viewers cannot delete relations/rules".to_string())
-        }
-
-        Statement::Meta(cmd) => authorize_viewer_meta(cmd),
-    }
-}
-
-fn authorize_viewer_meta(cmd: &MetaCommand) -> Result<(), String> {
-    match cmd {
-        // Viewers can view KG info
-        MetaCommand::KgShow | MetaCommand::KgList | MetaCommand::KgUse(_) => Ok(()),
-        MetaCommand::KgCreate(_) | MetaCommand::KgDrop(_) => {
-            Err("Permission denied: viewers cannot create/drop knowledge graphs".to_string())
-        }
-
-        // Viewers can list/describe relations and rules
-        MetaCommand::RelList
-        | MetaCommand::RelDescribe(_)
-        | MetaCommand::RuleList
-        | MetaCommand::RuleQuery(_)
-        | MetaCommand::RuleShowDef(_) => Ok(()),
-
-        // Viewers cannot drop relations
-        MetaCommand::RelDrop(_) => {
-            Err("Permission denied: viewers cannot drop relations".to_string())
-        }
-
-        // Viewers cannot modify rules
-        MetaCommand::RuleDrop(_)
-        | MetaCommand::RuleDropPrefix(_)
-        | MetaCommand::RuleEdit { .. }
-        | MetaCommand::RuleClear(_)
-        | MetaCommand::RuleRemove { .. } => {
-            Err("Permission denied: viewers cannot modify rules".to_string())
-        }
-
-        // Session commands are always allowed (they're ephemeral)
+        // Session commands - always allowed (ephemeral, per-connection)
         MetaCommand::SessionList
         | MetaCommand::SessionClear
         | MetaCommand::SessionDrop(_)
         | MetaCommand::SessionDropName(_) => Ok(()),
 
-        // Viewers cannot manage indexes
-        MetaCommand::IndexList | MetaCommand::IndexStats(_) => Ok(()),
-        MetaCommand::IndexCreate(_) | MetaCommand::IndexDrop(_) | MetaCommand::IndexRebuild(_) => {
-            Err("Permission denied: viewers cannot manage indexes".to_string())
-        }
-
-        // Viewers cannot clear or load
-        MetaCommand::ClearPrefix(_) => {
-            Err("Permission denied: viewers cannot clear data".to_string())
-        }
-        MetaCommand::Load { .. } => Err("Permission denied: viewers cannot load files".to_string()),
-
-        // Read-only system commands
+        // Read-only system commands - all roles
         MetaCommand::Debug(_)
         | MetaCommand::Why(_)
         | MetaCommand::WhyFull(_)
@@ -438,14 +429,16 @@ fn authorize_viewer_meta(cmd: &MetaCommand) -> Result<(), String> {
         | MetaCommand::Help
         | MetaCommand::Quit => Ok(()),
 
-        // Agent commands - allowed for all roles
+        // Agent commands - all roles
         MetaCommand::AgentMessage(_)
         | MetaCommand::AgentStart(_)
         | MetaCommand::AgentSetup(_)
         | MetaCommand::AgentExamples => Ok(()),
 
-        // Admin-only
-        MetaCommand::Compact => Err("Permission denied: viewers cannot compact".to_string()),
+        // System administration - admin only
+        MetaCommand::Compact => {
+            Err("Permission denied: only admins can compact".to_string())
+        }
         MetaCommand::UserList
         | MetaCommand::UserCreate { .. }
         | MetaCommand::UserDrop(_)
@@ -455,12 +448,6 @@ fn authorize_viewer_meta(cmd: &MetaCommand) -> Result<(), String> {
         }
         MetaCommand::ApiKeyCreate(_) | MetaCommand::ApiKeyList | MetaCommand::ApiKeyRevoke(_) => {
             Err("Permission denied: only admins can manage API keys".to_string())
-        }
-
-        // KG ACL - viewers can list but not modify
-        MetaCommand::KgAclList(_) => Ok(()),
-        MetaCommand::KgAclGrant { .. } | MetaCommand::KgAclRevoke { .. } => {
-            Err("Permission denied: only KG owners or admins can manage ACLs".to_string())
         }
     }
 }
@@ -564,88 +551,27 @@ mod tests {
     }
 
     #[test]
-    fn test_editor_cannot_kg_create_drop() {
+    fn test_editor_global_auth() {
         use crate::statement::parse_statement;
-        let denied = vec![".kg create test", ".kg drop test", ".compact"];
-        for s in denied {
-            let stmt = parse_statement(s).unwrap();
-            assert!(
-                authorize_statement(&Role::Editor, &stmt).is_err(),
-                "Editor should be denied: {s}"
-            );
-        }
-    }
-
-    #[test]
-    fn test_editor_can_insert_delete_query() {
-        use crate::statement::parse_statement;
-        let allowed = vec!["?edge(X, Y)", "+edge(1, 2)", "-edge(1, 2)", ".rel"];
+        // Global auth passes all data/KG ops through to per-KG auth
+        let allowed = vec![
+            ".kg create test",
+            ".kg drop test",
+            "+edge(1, 2)",
+            "-edge(1, 2)",
+            ".kg acl grant mykg bob editor",
+            ".kg acl revoke mykg bob",
+        ];
         for s in allowed {
             let stmt = parse_statement(s).unwrap();
             assert!(
                 authorize_statement(&Role::Editor, &stmt).is_ok(),
-                "Editor should be allowed: {s}"
+                "Editor should pass global auth: {s}"
             );
         }
-    }
-
-    #[test]
-    fn test_viewer_cannot_insert_delete() {
-        use crate::statement::parse_statement;
+        // System operations remain admin-only
         let denied = vec![
-            "+edge(1, 2)",
-            "-edge(1, 2)",
-            ".kg create test",
-            ".kg drop test",
             ".compact",
-            ".rule drop path",
-        ];
-        for s in denied {
-            let stmt = parse_statement(s).unwrap();
-            assert!(
-                authorize_statement(&Role::Viewer, &stmt).is_err(),
-                "Viewer should be denied: {s}"
-            );
-        }
-    }
-
-    #[test]
-    fn test_viewer_can_query_and_session() {
-        use crate::statement::parse_statement;
-        let allowed = vec![
-            "?edge(X, Y)",
-            ".rel",
-            ".rule",
-            ".kg list",
-            ".status",
-            ".session",
-        ];
-        for s in allowed {
-            let stmt = parse_statement(s).unwrap();
-            assert!(
-                authorize_statement(&Role::Viewer, &stmt).is_ok(),
-                "Viewer should be allowed: {s}"
-            );
-        }
-    }
-
-    #[test]
-    fn test_viewer_cannot_manage_users() {
-        use crate::statement::parse_statement;
-        let denied = vec![".user list", ".apikey list"];
-        for s in denied {
-            let stmt = parse_statement(s).unwrap();
-            assert!(
-                authorize_statement(&Role::Viewer, &stmt).is_err(),
-                "Viewer should be denied: {s}"
-            );
-        }
-    }
-
-    #[test]
-    fn test_editor_cannot_manage_users() {
-        use crate::statement::parse_statement;
-        let denied = vec![
             ".user list",
             ".user create bob pass editor",
             ".apikey create mykey",
@@ -654,7 +580,47 @@ mod tests {
             let stmt = parse_statement(s).unwrap();
             assert!(
                 authorize_statement(&Role::Editor, &stmt).is_err(),
-                "Editor should be denied: {s}"
+                "Editor should be denied at global level: {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_viewer_global_auth() {
+        use crate::statement::parse_statement;
+        // Data ops pass global auth for viewers (per-KG auth is the authority)
+        let allowed = vec![
+            "?edge(X, Y)",
+            "+edge(1, 2)",
+            "-edge(1, 2)",
+            ".rel",
+            ".rule",
+            ".kg list",
+            ".kg drop test",
+            ".status",
+            ".session",
+            ".kg acl grant mykg bob editor",
+        ];
+        for s in allowed {
+            let stmt = parse_statement(s).unwrap();
+            assert!(
+                authorize_statement(&Role::Viewer, &stmt).is_ok(),
+                "Viewer should pass global auth: {s}"
+            );
+        }
+
+        // Only KG creation and system ops are blocked at global level
+        let denied = vec![
+            ".kg create test",
+            ".compact",
+            ".user list",
+            ".apikey list",
+        ];
+        for s in denied {
+            let stmt = parse_statement(s).unwrap();
+            assert!(
+                authorize_statement(&Role::Viewer, &stmt).is_err(),
+                "Viewer should be denied at global level: {s}"
             );
         }
     }
@@ -748,22 +714,21 @@ mod tests {
     }
 
     #[test]
-    fn test_acl_commands_parsing() {
+    fn test_acl_commands_global_auth() {
         use crate::statement::parse_statement;
-        // List
-        let stmt = parse_statement(".kg acl list mykg").unwrap();
-        assert!(authorize_statement(&Role::Admin, &stmt).is_ok());
-
-        // Grant
-        let stmt = parse_statement(".kg acl grant mykg bob editor").unwrap();
-        assert!(authorize_statement(&Role::Admin, &stmt).is_ok());
-        assert!(authorize_statement(&Role::Editor, &stmt).is_err());
-        assert!(authorize_statement(&Role::Viewer, &stmt).is_err());
-
-        // Revoke
-        let stmt = parse_statement(".kg acl revoke mykg bob").unwrap();
-        assert!(authorize_statement(&Role::Admin, &stmt).is_ok());
-        assert!(authorize_statement(&Role::Editor, &stmt).is_err());
+        // ACL ops pass global auth for all roles (per-KG Owner check is the authority)
+        let acl_ops = vec![
+            ".kg acl list mykg",
+            ".kg acl grant mykg bob editor",
+            ".kg acl revoke mykg bob",
+        ];
+        for s in &acl_ops {
+            let stmt = parse_statement(s).unwrap();
+            assert!(authorize_statement(&Role::Admin, &stmt).is_ok(), "Admin: {s}");
+            assert!(authorize_statement(&Role::Editor, &stmt).is_ok(), "Editor: {s}");
+            assert!(authorize_statement(&Role::Viewer, &stmt).is_ok(), "Viewer: {s}");
+        }
+        // But per-KG auth still gates these (tested in KG role tests)
     }
 
     #[test]

@@ -930,6 +930,14 @@ impl Handler {
 
     /// Create a new session bound to a knowledge graph.
     pub fn create_session(&self, knowledge_graph: &str) -> Result<SessionId, String> {
+        // Block direct access to the system KG
+        if knowledge_graph == crate::auth::INTERNAL_KG {
+            return Err(format!(
+                "Access denied: '{}' is a system knowledge graph",
+                crate::auth::INTERNAL_KG
+            ));
+        }
+
         // Validate KG exists (or auto-create if configured)
         let storage = self.storage.read();
         storage
@@ -937,6 +945,25 @@ impl Handler {
             .map_err(|e| format!("Knowledge graph '{knowledge_graph}' not found: {e}"))?;
         drop(storage);
         self.sessions.create_session(knowledge_graph)
+    }
+
+    /// Create a session with per-KG access check.
+    /// Rejects if the user has no access to the requested KG.
+    pub fn create_session_with_auth(
+        &self,
+        knowledge_graph: &str,
+        auth: &crate::auth::AuthIdentity,
+    ) -> Result<SessionId, String> {
+        // Admins skip per-KG checks
+        if auth.role != crate::auth::Role::Admin {
+            if self
+                .get_kg_role_for_user(knowledge_graph, &auth.username, &auth.role)
+                .is_none()
+            {
+                return Err("Access denied".to_string());
+            }
+        }
+        self.create_session(knowledge_graph)
     }
 
     /// Close a session.
@@ -1396,6 +1423,23 @@ impl Handler {
             }
         }
 
+        // Also revoke all KG ACL entries for this user
+        if let Some(acls) = snapshot.input_tuples.get("kg_acls") {
+            let to_delete: Vec<_> = acls
+                .iter()
+                .filter(|t| {
+                    t.values()
+                        .get(1)
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|u| u == username)
+                })
+                .cloned()
+                .collect();
+            if !to_delete.is_empty() {
+                let _ = storage.delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_delete);
+            }
+        }
+
         tracing::info!(username, "audit_user_dropped");
         Ok(self.message_result(&format!("User '{username}' dropped.")))
     }
@@ -1836,6 +1880,63 @@ impl Handler {
 
         tracing::info!(kg = kg_name, user = username, "audit_kg_acl_revoked");
         Ok(format!("Revoked access on '{kg_name}' from '{username}'."))
+    }
+
+    /// Look up the current global role for a user from storage.
+    /// Returns None if the user no longer exists (e.g., was dropped).
+    fn refresh_user_role(&self, identity: &crate::auth::AuthIdentity) -> Option<crate::auth::Role> {
+        use crate::auth;
+
+        let storage = self.storage.read();
+        let snapshot = storage.get_snapshot_for(auth::INTERNAL_KG).ok()?;
+        drop(storage);
+
+        let empty_vec = Vec::new();
+        let users = snapshot.input_tuples.get("users").unwrap_or(&empty_vec);
+
+        for tuple in users {
+            let vals = tuple.values();
+            if vals.len() >= 3 {
+                if let (Some(u), Some(r)) = (vals[0].as_str(), vals[2].as_str()) {
+                    if u == identity.username {
+                        return r.parse::<auth::Role>().ok();
+                    }
+                }
+            }
+        }
+
+        None // user was dropped
+    }
+
+    /// Remove all ACL entries for a dropped knowledge graph.
+    fn cleanup_kg_acls(&self, kg_name: &str) {
+        use crate::auth;
+
+        let storage = self.storage.read();
+        let snapshot = match storage.get_snapshot_for(auth::INTERNAL_KG) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+
+        let empty_vec = Vec::new();
+        let acls = snapshot.input_tuples.get("kg_acls").unwrap_or(&empty_vec);
+
+        let to_remove: Vec<_> = acls
+            .iter()
+            .filter(|t| {
+                t.values()
+                    .first()
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|k| k == kg_name)
+            })
+            .cloned()
+            .collect();
+
+        if !to_remove.is_empty() {
+            let count = to_remove.len();
+            let _ = storage.delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove);
+            tracing::info!(kg = kg_name, count, "audit_kg_acls_cleaned_up");
+        }
     }
 
     /// Get mutable access to the storage engine.
@@ -4168,18 +4269,59 @@ impl Handler {
 
         let trimmed = program.trim();
 
+        // Refresh the user's global role from storage on every call.
+        // The AuthIdentity passed in was captured at login time and may be stale
+        // if an admin changed the user's role since then.
+        let refreshed_identity = if let Some(identity) = auth {
+            match self.refresh_user_role(identity) {
+                Some(role) => Some(crate::auth::AuthIdentity {
+                    username: identity.username.clone(),
+                    role,
+                }),
+                None => {
+                    // User was dropped while session was active
+                    return Err("Access denied: user no longer exists".to_string());
+                }
+            }
+        } else {
+            None
+        };
+        let effective_auth = refreshed_identity.as_ref().or(auth);
+
         // Authorization check: if auth is provided, validate the statement
-        if let Some(identity) = auth {
+        if let Some(identity) = effective_auth {
             if let Ok(ref stmt) = statement::parse_statement(trimmed) {
                 crate::auth::authorize_statement(&identity.role, stmt)?;
             }
         }
 
-        // Protect _internal KG from direct access
+        // Protect _internal KG from direct access.
+        // Block both explicit commands AND sessions already bound to _internal.
+        let session_kg_owned: Option<String> = if knowledge_graph.is_none() {
+            session_id.and_then(|sid| self.sessions.session_kg(sid).ok())
+        } else {
+            None
+        };
+        let current_kg = knowledge_graph
+            .as_deref()
+            .or(session_kg_owned.as_deref());
+
+        if let Some(identity) = effective_auth {
+            if identity.role != crate::auth::Role::Admin {
+                if current_kg == Some(crate::auth::INTERNAL_KG) {
+                    return Err(format!(
+                        "Access denied: '{}' is a system knowledge graph",
+                        crate::auth::INTERNAL_KG
+                    ));
+                }
+            }
+        }
         if let Ok(ref stmt) = statement::parse_statement(trimmed) {
             match stmt {
                 statement::Statement::Meta(
-                    statement::MetaCommand::KgUse(name) | statement::MetaCommand::KgDrop(name),
+                    statement::MetaCommand::KgUse(name)
+                    | statement::MetaCommand::KgDrop(name)
+                    | statement::MetaCommand::KgCreate(name),
                 ) if name == crate::auth::INTERNAL_KG => {
                     return Err(format!(
                         "Access denied: '{}' is a system knowledge graph",
@@ -4190,8 +4332,8 @@ impl Handler {
             }
         }
 
-        // Per-KG authorization: check if user has access to the target KG
-        if let Some(identity) = auth {
+        // Per-KG authorization: check if user has access to the target KG.
+        if let Some(identity) = effective_auth {
             if identity.role != crate::auth::Role::Admin {
                 if let Ok(ref stmt) = statement::parse_statement(trimmed) {
                     // Determine which KG the operation targets
@@ -4207,7 +4349,7 @@ impl Handler {
                         statement::Statement::Meta(statement::MetaCommand::KgAclList(
                             ref kg_opt,
                         )) => kg_opt.as_deref(),
-                        // For KG create and list, skip KG-level check (global role check suffices)
+                        // KG create doesn't target an existing KG; list/show/help are global
                         statement::Statement::Meta(
                             statement::MetaCommand::KgCreate(_)
                             | statement::MetaCommand::KgList
@@ -4217,7 +4359,7 @@ impl Handler {
                             | statement::MetaCommand::Status,
                         ) => None,
                         // All other statements operate on the current KG
-                        _ => knowledge_graph.as_deref(),
+                        _ => current_kg,
                     };
 
                     if let Some(kg) = target_kg {
@@ -4226,9 +4368,7 @@ impl Handler {
                         {
                             crate::auth::authorize_kg_operation(&kg_role, stmt)?;
                         } else {
-                            return Err(format!(
-                                "Access denied: you have no access to knowledge graph '{kg}'"
-                            ));
+                            return Err("Access denied".to_string());
                         }
                     }
                 }
@@ -4420,6 +4560,19 @@ impl Handler {
         // in the SessionManager, so they never reach this point.
         let is_query = trimmed.starts_with('?');
 
+        // Detect KG create/drop before program is moved into query_program.
+        // Extracting these from the parsed statement avoids fragile string matching
+        // on the result messages.
+        let (kg_create_name, kg_drop_name) = match statement::parse_statement(trimmed) {
+            Ok(statement::Statement::Meta(statement::MetaCommand::KgCreate(name))) => {
+                (Some(name), None)
+            }
+            Ok(statement::Statement::Meta(statement::MetaCommand::KgDrop(name))) => {
+                (None, Some(name))
+            }
+            _ => (None, None),
+        };
+
         let result = if is_query {
             if let Some(sid) = session_id {
                 self.query_program_with_session(sid, program).await?
@@ -4435,17 +4588,30 @@ impl Handler {
             self.sessions.switch_kg(sid, new_kg)?;
         }
 
-        // If a KG was dropped, clean up sessions still bound to it.
-        // The drop message format is "Knowledge graph 'X' dropped."
-        if result.schema.len() == 1 && result.schema[0].name == "message" {
-            for row in &result.rows {
-                if let Some(WireValue::String(ref msg)) = row.values.first() {
-                    if let Some(rest) = msg.strip_prefix("Knowledge graph '") {
-                        if let Some(kg_name) = rest.strip_suffix("' dropped.") {
-                            self.sessions.close_sessions_for_kg(kg_name);
-                        }
+        // Auto-grant owner ACL to the creator of a new KG.
+        // Verified by checking switched_kg (only set on successful create).
+        if let Some(identity) = effective_auth {
+            if identity.role != crate::auth::Role::Admin {
+                if let Some(ref name) = kg_create_name {
+                    if result.switched_kg.as_deref() == Some(name.as_str()) {
+                        let _ = self.handle_kg_acl_grant(name, &identity.username, "owner");
                     }
                 }
+            }
+        }
+
+        // If a KG was dropped, clean up sessions and ACLs.
+        // Verified by checking the result message (drop sets a message, not switched_kg).
+        if let Some(ref name) = kg_drop_name {
+            let drop_succeeded = result.rows.iter().any(|row| {
+                matches!(
+                    row.values.first(),
+                    Some(WireValue::String(s)) if s.contains("dropped")
+                )
+            });
+            if drop_succeeded {
+                self.sessions.close_sessions_for_kg(name);
+                self.cleanup_kg_acls(name);
             }
         }
 
