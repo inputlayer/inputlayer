@@ -211,7 +211,10 @@ fn authorize_kg_editor(stmt: &Statement) -> Result<(), String> {
                 Err("Permission denied: only KG owners can manage ACLs".to_string())
             }
             // KG navigation
-            MetaCommand::KgShow | MetaCommand::KgList | MetaCommand::KgUse(_) | MetaCommand::KgCreate(_) => Ok(()),
+            MetaCommand::KgShow
+            | MetaCommand::KgList
+            | MetaCommand::KgUse(_)
+            | MetaCommand::KgCreate(_) => Ok(()),
             // Relation/rule management
             MetaCommand::RelList
             | MetaCommand::RelDescribe(_)
@@ -436,9 +439,7 @@ fn authorize_non_admin_meta(role: &Role, cmd: &MetaCommand) -> Result<(), String
         | MetaCommand::AgentExamples => Ok(()),
 
         // System administration - admin only
-        MetaCommand::Compact => {
-            Err("Permission denied: only admins can compact".to_string())
-        }
+        MetaCommand::Compact => Err("Permission denied: only admins can compact".to_string()),
         MetaCommand::UserList
         | MetaCommand::UserCreate { .. }
         | MetaCommand::UserDrop(_)
@@ -610,12 +611,7 @@ mod tests {
         }
 
         // Only KG creation and system ops are blocked at global level
-        let denied = vec![
-            ".kg create test",
-            ".compact",
-            ".user list",
-            ".apikey list",
-        ];
+        let denied = vec![".kg create test", ".compact", ".user list", ".apikey list"];
         for s in denied {
             let stmt = parse_statement(s).unwrap();
             assert!(
@@ -724,9 +720,18 @@ mod tests {
         ];
         for s in &acl_ops {
             let stmt = parse_statement(s).unwrap();
-            assert!(authorize_statement(&Role::Admin, &stmt).is_ok(), "Admin: {s}");
-            assert!(authorize_statement(&Role::Editor, &stmt).is_ok(), "Editor: {s}");
-            assert!(authorize_statement(&Role::Viewer, &stmt).is_ok(), "Viewer: {s}");
+            assert!(
+                authorize_statement(&Role::Admin, &stmt).is_ok(),
+                "Admin: {s}"
+            );
+            assert!(
+                authorize_statement(&Role::Editor, &stmt).is_ok(),
+                "Editor: {s}"
+            );
+            assert!(
+                authorize_statement(&Role::Viewer, &stmt).is_ok(),
+                "Viewer: {s}"
+            );
         }
         // But per-KG auth still gates these (tested in KG role tests)
     }

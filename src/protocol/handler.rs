@@ -955,13 +955,12 @@ impl Handler {
         auth: &crate::auth::AuthIdentity,
     ) -> Result<SessionId, String> {
         // Admins skip per-KG checks
-        if auth.role != crate::auth::Role::Admin {
-            if self
+        if auth.role != crate::auth::Role::Admin
+            && self
                 .get_kg_role_for_user(knowledge_graph, &auth.username, &auth.role)
                 .is_none()
-            {
-                return Err("Access denied".to_string());
-            }
+        {
+            return Err("Access denied".to_string());
         }
         self.create_session(knowledge_graph)
     }
@@ -4302,18 +4301,16 @@ impl Handler {
         } else {
             None
         };
-        let current_kg = knowledge_graph
-            .as_deref()
-            .or(session_kg_owned.as_deref());
+        let current_kg = knowledge_graph.as_deref().or(session_kg_owned.as_deref());
 
         if let Some(identity) = effective_auth {
-            if identity.role != crate::auth::Role::Admin {
-                if current_kg == Some(crate::auth::INTERNAL_KG) {
-                    return Err(format!(
-                        "Access denied: '{}' is a system knowledge graph",
-                        crate::auth::INTERNAL_KG
-                    ));
-                }
+            if identity.role != crate::auth::Role::Admin
+                && current_kg == Some(crate::auth::INTERNAL_KG)
+            {
+                return Err(format!(
+                    "Access denied: '{}' is a system knowledge graph",
+                    crate::auth::INTERNAL_KG
+                ));
             }
         }
         if let Ok(ref stmt) = statement::parse_statement(trimmed) {
