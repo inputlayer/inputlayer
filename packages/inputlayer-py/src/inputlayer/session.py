@@ -10,7 +10,6 @@ from inputlayer.relation import Relation
 if TYPE_CHECKING:
     from inputlayer.connection import Connection
     from inputlayer.derived import Derived
-    from inputlayer.result import ResultSet
 
 
 class Session:
@@ -35,7 +34,6 @@ class Session:
 
     async def define_rules(self, *targets: type[Derived]) -> None:
         """Define session-scoped rules (no + prefix)."""
-        from inputlayer.derived import Derived
 
         for target in targets:
             head_name = Relation._resolve_name(target)

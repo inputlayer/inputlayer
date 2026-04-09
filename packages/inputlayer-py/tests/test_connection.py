@@ -1,13 +1,11 @@
 """Tests for inputlayer.connection - mocked WebSocket connection tests."""
 
-import asyncio
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
 from inputlayer._protocol import (
-    AuthenticatedResponse,
     ResultResponse,
 )
 from inputlayer.connection import Connection

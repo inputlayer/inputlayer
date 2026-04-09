@@ -1,6 +1,5 @@
 """Tests for inputlayer.migrations.autodetector - diff engine."""
 
-import pytest
 
 from inputlayer.migrations.autodetector import detect_changes
 from inputlayer.migrations.operations import (
@@ -13,7 +12,6 @@ from inputlayer.migrations.operations import (
     ReplaceRule,
 )
 from inputlayer.migrations.state import ModelState
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 

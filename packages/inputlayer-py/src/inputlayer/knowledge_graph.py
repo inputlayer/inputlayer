@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
+from typing import TYPE_CHECKING, Any
 
-from inputlayer._ast import BoolExpr, Expr, OrderedColumn
+from inputlayer._ast import Expr, OrderedColumn
 from inputlayer._proxy import ColumnProxy, RelationProxy, RelationRef
 from inputlayer.auth import AclEntry
 from inputlayer.compiler import (
@@ -105,7 +106,7 @@ class ServerStatus:
 class WhyResult:
     """Result of a .why query with structured proof trees."""
 
-    results: "ResultSet"
+    results: ResultSet
     proof_trees: list[dict[str, Any]]
     result_count: int = 0
 
@@ -183,8 +184,10 @@ class KnowledgeGraph:
                 # Try pandas DataFrame
                 try:
                     instances = [rel_cls(**row) for row in data.to_dict("records")]
-                except Exception:
-                    raise TypeError(f"Unsupported data type: {type(data).__name__}")
+                except Exception as err:
+                    raise TypeError(
+                        f"Unsupported data type: {type(data).__name__}"
+                    ) from err
             if len(instances) == 1:
                 datalog = compile_insert(instances[0])
             else:
@@ -374,7 +377,6 @@ class KnowledgeGraph:
         where: Callable | None = None,
     ) -> ResultSet:
         """Perform a vector similarity search."""
-        from inputlayer.functions import cosine, euclidean, manhattan, dot
 
         rel_name = Relation._resolve_name(relation)
         cols = Relation._get_columns(relation)
@@ -392,7 +394,12 @@ class KnowledgeGraph:
 
         # Build query using top_k or within_radius
         vec_str = "[" + ", ".join(str(v) for v in query_vec) + "]"
-        dist_fn = {"cosine": "cosine", "euclidean": "euclidean", "manhattan": "manhattan", "dot_product": "dot"}
+        dist_fn = {
+            "cosine": "cosine",
+            "euclidean": "euclidean",
+            "manhattan": "manhattan",
+            "dot_product": "dot",
+        }
         fn_name = dist_fn.get(metric, "cosine")
 
         if k is not None:
@@ -405,7 +412,10 @@ class KnowledgeGraph:
             col_vars = ", ".join(f"X{i}" for i in range(len(cols)))
             vec_var = f"X{cols.index(column)}"
             dist_assign = f"Dist = {fn_name}({vec_var}, {vec_str})"
-            query = f"?within_radius<{radius}, {col_vars}, Dist:asc> <- {rel_name}({col_vars}), {dist_assign}"
+            query = (
+                f"?within_radius<{radius}, {col_vars}, Dist:asc>"
+                f" <- {rel_name}({col_vars}), {dist_assign}"
+            )
         else:
             raise ValueError("Must specify either k or radius")
 
@@ -423,7 +433,6 @@ class KnowledgeGraph:
 
     async def define_rules(self, *targets: type[Derived]) -> None:
         """Deploy persistent rule definitions."""
-        from inputlayer.derived import Derived
 
         for target in targets:
             head_name = Relation._resolve_name(target)

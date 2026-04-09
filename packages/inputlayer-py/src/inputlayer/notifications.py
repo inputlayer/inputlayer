@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ class NotificationDispatcher:
         self._callbacks: list[tuple[str | None, str | None, str | None, Callback]] = []
         self._queue: asyncio.Queue[NotificationEvent] = asyncio.Queue()
         self._last_seq: int = 0
+        self._background_tasks: set[asyncio.Task[Any]] = set()
 
     @property
     def last_seq(self) -> int:
@@ -72,7 +74,9 @@ class NotificationDispatcher:
             try:
                 result = cb(event)
                 if asyncio.iscoroutine(result):
-                    asyncio.ensure_future(result)
+                    task = asyncio.ensure_future(result)
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
             except Exception:
                 pass  # Callbacks should not break the dispatcher
 

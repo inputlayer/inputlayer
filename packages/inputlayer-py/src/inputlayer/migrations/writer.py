@@ -39,16 +39,36 @@ def _render_operation(op: Operation) -> str:
     """Render a single operation as a Python constructor call."""
     if isinstance(op, CreateRelation):
         cols = _repr_columns(op.columns)
-        return f'ops.CreateRelation(\n            name="{op.name}",\n            columns={cols},\n        )'
+        return (
+            f'ops.CreateRelation(\n'
+            f'            name="{op.name}",\n'
+            f'            columns={cols},\n'
+            f'        )'
+        )
     if isinstance(op, DropRelation):
         cols = _repr_columns(op.columns)
-        return f'ops.DropRelation(\n            name="{op.name}",\n            columns={cols},\n        )'
+        return (
+            f'ops.DropRelation(\n'
+            f'            name="{op.name}",\n'
+            f'            columns={cols},\n'
+            f'        )'
+        )
     if isinstance(op, CreateRule):
         clauses = _repr_str_list(op.clauses)
-        return f'ops.CreateRule(\n            name="{op.name}",\n            clauses={clauses},\n        )'
+        return (
+            f'ops.CreateRule(\n'
+            f'            name="{op.name}",\n'
+            f'            clauses={clauses},\n'
+            f'        )'
+        )
     if isinstance(op, DropRule):
         clauses = _repr_str_list(op.clauses)
-        return f'ops.DropRule(\n            name="{op.name}",\n            clauses={clauses},\n        )'
+        return (
+            f'ops.DropRule(\n'
+            f'            name="{op.name}",\n'
+            f'            clauses={clauses},\n'
+            f'        )'
+        )
     if isinstance(op, ReplaceRule):
         old = _repr_str_list(op.old_clauses)
         new = _repr_str_list(op.new_clauses)
@@ -86,7 +106,12 @@ def _render_operation(op: Operation) -> str:
     if isinstance(op, RunDatalog):
         fwd = _repr_str_list(op.forward)
         bwd = _repr_str_list(op.backward)
-        return f'ops.RunDatalog(\n            forward={fwd},\n            backward={bwd},\n        )'
+        return (
+            f'ops.RunDatalog(\n'
+            f'            forward={fwd},\n'
+            f'            backward={bwd},\n'
+            f'        )'
+        )
     raise TypeError(f"Unknown operation type: {type(op).__name__}")
 
 

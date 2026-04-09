@@ -6,14 +6,14 @@ taking Python objects and returning Datalog strings.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Sequence
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
 from inputlayer._ast import (
     AggExpr,
     And,
     Arithmetic,
     BoolExpr,
-    Column as AstColumn,
     Comparison,
     Expr,
     FuncCall,
@@ -25,8 +25,11 @@ from inputlayer._ast import (
     Or,
     OrderedColumn,
 )
+from inputlayer._ast import (
+    Column as AstColumn,
+)
 from inputlayer._naming import column_to_variable
-from inputlayer.types import Timestamp, Vector, VectorInt8, python_type_to_datalog
+from inputlayer.types import Timestamp, python_type_to_datalog
 
 if TYPE_CHECKING:
     from inputlayer.relation import Relation
@@ -217,7 +220,7 @@ def _compile_comparison(comp: Comparison, env: _VarEnv) -> str:
 
 def _compile_in(expr: InExpr | NegatedIn, env: _VarEnv, *, negated: bool) -> str:
     """Compile in_() / negated in_() to Datalog."""
-    src_var = compile_expr(expr.column, env)
+    compile_expr(expr.column, env)
     assert isinstance(expr.target_column, AstColumn)
     tgt_col = expr.target_column
     # Build a body atom for the target relation with the column bound
@@ -235,7 +238,7 @@ def _compile_in(expr: InExpr | NegatedIn, env: _VarEnv, *, negated: bool) -> str
 def _compile_match(match: MatchExpr, env: _VarEnv) -> str:
     """Compile a MatchExpr to a Datalog body atom."""
     parts = []
-    for col_name, source_expr in match.bindings.items():
+    for _col_name, source_expr in match.bindings.items():
         var = compile_expr(source_expr, env)
         parts.append(var)
     atom_inner = ", ".join(parts)
@@ -351,7 +354,7 @@ def compile_conditional_delete(
     # Build a variable environment that maps columns to X0, X1, ...
     env = _VarEnv()
     for i, col in enumerate(columns):
-        col_ast = AstColumn(name, col)
+        AstColumn(name, col)
         key = f"{name}.{col}"
         env._map[key] = vars_[i]
 
@@ -362,7 +365,7 @@ def compile_conditional_delete(
     cond_parts = compile_bool_expr(condition, env)
     cond_parts = [p for p in cond_parts if p]  # Remove empty strings from join unification
 
-    body_parts = [body_rel] + cond_parts
+    body_parts = [body_rel, *cond_parts]
     return f"{head} <- {', '.join(body_parts)}"
 
 
@@ -383,8 +386,8 @@ def compile_query(
 
     Returns a single string, or a list of strings if OR conditions require splitting.
     """
-    from inputlayer.relation import Relation
     from inputlayer._proxy import RelationRef
+    from inputlayer.relation import Relation
 
     env = _VarEnv()
 
@@ -458,7 +461,7 @@ def compile_query(
             head_parts.append(var)
 
     # Add computed columns to head
-    for alias_name, expr in computed.items():
+    for _alias_name, expr in computed.items():
         compiled = compile_expr(expr, env)
         head_parts.append(compiled)
 
@@ -525,10 +528,14 @@ def compile_query(
 
 def _process_join_condition(condition: BoolExpr, env: _VarEnv) -> None:
     """Process join conditions to set up variable unification."""
-    if isinstance(condition, Comparison) and condition.op == "=":
-        if isinstance(condition.left, AstColumn) and isinstance(condition.right, AstColumn):
-            env.unify(condition.left, condition.right)
-            return
+    if (
+        isinstance(condition, Comparison)
+        and condition.op == "="
+        and isinstance(condition.left, AstColumn)
+        and isinstance(condition.right, AstColumn)
+    ):
+        env.unify(condition.left, condition.right)
+        return
     if isinstance(condition, And):
         _process_join_condition(condition.left, env)
         _process_join_condition(condition.right, env)
@@ -575,7 +582,7 @@ def _compile_agg_query(
                 ast_col = AstColumn(rn, col)
                 head_parts.append(env.get_var(ast_col))
 
-    for alias_name, expr in computed.items():
+    for _alias_name, expr in computed.items():
         if isinstance(expr, AggExpr):
             agg_parts.append(compile_expr(expr, env))
         else:

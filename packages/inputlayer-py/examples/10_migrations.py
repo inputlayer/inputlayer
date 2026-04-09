@@ -25,7 +25,6 @@ from typing import ClassVar
 
 from inputlayer import Derived, From, HnswIndex, Relation, Timestamp, Vector
 
-
 # ── Relations ────────────────────────────────────────────────────────
 
 

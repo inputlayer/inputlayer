@@ -9,7 +9,6 @@ from inputlayer._ast import (
     AggExpr,
     And,
     Arithmetic,
-    Column as AstColumn,
     Comparison,
     FuncCall,
     Literal,
@@ -17,8 +16,9 @@ from inputlayer._ast import (
     Or,
     OrderedColumn,
 )
-from inputlayer._proxy import ColumnProxy
-from inputlayer.aggregations import avg, count, count_distinct, max_, min_, sum_, top_k
+from inputlayer._ast import (
+    Column as AstColumn,
+)
 from inputlayer.compiler import (
     _VarEnv,
     compile_bulk_insert,
@@ -32,8 +32,7 @@ from inputlayer.compiler import (
     compile_value,
 )
 from inputlayer.relation import Relation
-from inputlayer.types import Timestamp, Vector, VectorInt8
-
+from inputlayer.types import Timestamp, Vector
 
 # ── Test Relations ────────────────────────────────────────────────────
 
@@ -117,7 +116,10 @@ class TestCompileValue:
 class TestCompileSchema:
     def test_basic(self):
         result = compile_schema(Employee)
-        assert result == "+employee(id: int, name: string, department: string, salary: float, active: bool)"
+        assert result == (
+            "+employee(id: int, name: string, department: string,"
+            " salary: float, active: bool)"
+        )
 
     def test_vector_type(self):
         result = compile_schema(Document)
@@ -313,7 +315,10 @@ class TestCompileQuery:
             Employee,
             relations=[Employee],
         )
-        assert result == "?Id, Name, Department, Salary, Active <- employee(Id, Name, Department, Salary, Active)"
+        assert result == (
+            "?Id, Name, Department, Salary, Active"
+            " <- employee(Id, Name, Department, Salary, Active)"
+        )
 
     def test_select_columns(self):
         result = compile_query(

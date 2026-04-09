@@ -5,11 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from inputlayer._ast import (
-    AggExpr,
     And,
     Arithmetic,
     BoolExpr,
-    Column as AstColumn,
     Comparison,
     Expr,
     InExpr,
@@ -19,6 +17,9 @@ from inputlayer._ast import (
     Not,
     Or,
     OrderedColumn,
+)
+from inputlayer._ast import (
+    Column as AstColumn,
 )
 
 if TYPE_CHECKING:

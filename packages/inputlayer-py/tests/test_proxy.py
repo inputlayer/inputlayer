@@ -5,7 +5,6 @@ import pytest
 from inputlayer._ast import (
     And,
     Arithmetic,
-    Column as AstColumn,
     Comparison,
     InExpr,
     Literal,
@@ -13,6 +12,9 @@ from inputlayer._ast import (
     Not,
     Or,
     OrderedColumn,
+)
+from inputlayer._ast import (
+    Column as AstColumn,
 )
 from inputlayer._proxy import ColumnProxy, RelationProxy
 

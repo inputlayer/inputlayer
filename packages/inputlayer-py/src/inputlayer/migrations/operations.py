@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -114,10 +114,10 @@ class ReplaceRule:
     new_clauses: list[str]
 
     def forward_commands(self) -> list[str]:
-        return [f".rule drop {self.name}"] + list(self.new_clauses)
+        return [f".rule drop {self.name}", *list(self.new_clauses)]
 
     def backward_commands(self) -> list[str]:
-        return [f".rule drop {self.name}"] + list(self.old_clauses)
+        return [f".rule drop {self.name}", *list(self.old_clauses)]
 
     def describe(self) -> str:
         return f"Replace rule {self.name}"

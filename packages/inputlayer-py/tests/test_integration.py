@@ -13,15 +13,10 @@ import pytest
 from inputlayer import (
     Derived,
     From,
-    HnswIndex,
     InputLayer,
     Relation,
-    ResultSet,
-    Timestamp,
     Vector,
     count,
-    functions,
-    sum_,
 )
 
 pytestmark = pytest.mark.skipif(

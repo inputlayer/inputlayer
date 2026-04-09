@@ -1,6 +1,7 @@
 """Tests for inputlayer.relation - Relation base class, schema introspection."""
 
 import pytest
+from pydantic import ValidationError
 
 from inputlayer._proxy import ColumnProxy, RelationRef
 from inputlayer.relation import Relation
@@ -71,7 +72,7 @@ class TestGetColumnTypes:
 class TestFrozen:
     def test_immutable(self):
         e = Employee(id=1, name="Alice", department="eng", salary=100000.0, active=True)
-        with pytest.raises(Exception):  # ValidationError from Pydantic
+        with pytest.raises(ValidationError):
             e.name = "Bob"  # type: ignore
 
 
@@ -100,7 +101,7 @@ class TestRefs:
         assert r2.alias == "employee_2"
 
     def test_refs_proxy(self):
-        r1, r2 = Employee.refs(2)
+        r1, _r2 = Employee.refs(2)
         col = r1.name
         assert isinstance(col, ColumnProxy)
         assert col.ref_alias == "employee_1"

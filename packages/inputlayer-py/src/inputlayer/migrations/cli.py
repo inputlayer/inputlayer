@@ -5,10 +5,8 @@ from __future__ import annotations
 import argparse
 import importlib
 import inspect
-import os
 import sys
 from pathlib import Path
-from typing import Any
 
 from inputlayer.migrations.autodetector import detect_changes
 from inputlayer.migrations.loader import get_latest_state, get_next_number, load_migrations
@@ -36,7 +34,12 @@ def _discover_models(module_path: str) -> tuple[list, list, list]:
             indexes.append(obj)
         elif isinstance(obj, type) and issubclass(obj, Derived) and obj is not Derived:
             derived.append(obj)
-        elif isinstance(obj, type) and issubclass(obj, Relation) and obj is not Relation and not issubclass(obj, Derived):
+        elif (
+            isinstance(obj, type)
+            and issubclass(obj, Relation)
+            and obj is not Relation
+            and not issubclass(obj, Derived)
+        ):
             relations.append(obj)
 
     return relations, derived, indexes
@@ -196,7 +199,10 @@ def _add_connection_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--kg", required=True, help="Knowledge graph name")
     parser.add_argument("--username", default=None, help="Username for authentication")
     parser.add_argument("--password", default=None, help="Password for authentication")
-    parser.add_argument("--api-key", dest="api_key", default=None, help="API key for authentication")
+    parser.add_argument(
+        "--api-key", dest="api_key", default=None,
+        help="API key for authentication",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -215,7 +221,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     # makemigrations
     make = subparsers.add_parser("makemigrations", help="Generate a new migration")
-    make.add_argument("--models", required=True, help="Python module path containing models (e.g. myapp.models)")
+    make.add_argument(
+        "--models", required=True,
+        help="Python module path containing models (e.g. myapp.models)",
+    )
     make.add_argument("--name", default=None, help="Custom migration name suffix")
     make.set_defaults(func=_cmd_makemigrations)
 
