@@ -15,7 +15,6 @@ async def run(kg):
 
     base_url = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
     model = os.environ.get("LLM_MODEL", "deepseek/deepseek-r1-0528-qwen3-8b")
-    embed_model = os.environ.get("LLM_EMBED_MODEL", "text-embedding-nomic-embed-text-v1.5")
 
     try:
         import httpx
@@ -26,16 +25,10 @@ async def run(kg):
         print(f"\n{DIM}  No LLM server detected at {base_url} — skipping.{RESET}")
         return
 
-    from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+    from langchain_openai import ChatOpenAI
     from pydantic import Field as PydanticField
 
     llm = ChatOpenAI(base_url=base_url, api_key="lm-studio", model=model, temperature=0)
-    embeddings = OpenAIEmbeddings(
-        base_url=base_url,
-        api_key="lm-studio",
-        model=embed_model,
-        check_embedding_ctx_length=False,
-    )
 
     # ── Define extraction schema (Pydantic model for structured output) ──
 
@@ -88,35 +81,27 @@ async def run(kg):
         print(f"  {YELLOW}[{a.category}]{RESET} {GREEN}{a.title}{RESET}")
         print(f"  {DIM}{a.content}{RESET}")
 
-    # ── Step 2: Generate embeddings ──────────────────────────────────
+    # ── Step 2: Persist via InputLayerVectorStore ────────────────────
 
-    subheader("Step 2: Generate embeddings")
-    print(f"{DIM}  Model: {embed_model}{RESET}\n")
+    subheader("Step 2: Embed + insert via InputLayerVectorStore")
+    print(f"{DIM}  Embedder: DemoEmbeddings (3-dim, deterministic){RESET}\n")
 
-    texts_to_embed = [f"{a.title}: {a.content}" for a in extracted.articles]
-    vectors = embeddings.embed_documents(texts_to_embed)
+    # In real code:
+    #   embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+    #   vs = InputLayerVectorStore(kg=kg, relation=Article, embeddings=embeddings)
+    # The store handles embed -> insert in one call.
+    vs = InputLayerVectorStore(
+        kg=kg,
+        relation=Article,
+        embeddings=DemoEmbeddings(),
+        ensure_schema=False,  # already defined by setup()
+    )
 
-    print(f"  {DIM}Generated {len(vectors)} vectors ({len(vectors[0])} dims each){RESET}")
-
-    # ── Step 3: Insert into KG ───────────────────────────────────────
-
-    subheader("Step 3: Insert into InputLayer KG")
-
-    next_id = 100  # start IDs above the seed data
-    new_articles = []
-    for i, a in enumerate(extracted.articles):
-        new_articles.append(
-            Article(
-                id=next_id + i,
-                title=a.title,
-                content=a.content,
-                category=a.category,
-                embedding=vectors[i][:3],  # truncate to 3 dims to match our schema
-            )
-        )
-
-    await kg.insert(new_articles)
-    print(f"\n  {GREEN}Inserted {len(new_articles)} new articles into the KG{RESET}")
+    texts = [a.content for a in extracted.articles]
+    metadatas = [{"title": a.title, "category": a.category} for a in extracted.articles]
+    ids = [100 + i for i in range(len(extracted.articles))]  # int IDs (Article.id: int)
+    inserted_ids = await vs.aadd_texts(texts=texts, metadatas=metadatas, ids=ids)
+    print(f"  {GREEN}Persisted {len(inserted_ids)} documents through the vector store{RESET}")
 
     # ── Step 4: Verify — query the KG for the new articles ───────────
 

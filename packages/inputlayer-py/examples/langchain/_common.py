@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, ClassVar
+
+from langchain_core.embeddings import Embeddings
 
 from inputlayer import (
     Derived,
@@ -13,7 +15,12 @@ from inputlayer import (
     Relation,
     Vector,
 )
-from inputlayer.integrations.langchain import InputLayerRetriever, InputLayerTool
+from inputlayer.integrations.langchain import (
+    InputLayerIQLTool,
+    InputLayerRetriever,
+    InputLayerVectorStore,
+    tools_from_relations,
+)
 
 # ── Re-exports for examples ─────────────────────────────────────────
 
@@ -29,12 +36,14 @@ __all__ = [
     "WHITE",
     "YELLOW",
     "Article",
+    "DemoEmbeddings",
     "Derived",
     "From",
     "HnswIndex",
     "InputLayer",
+    "InputLayerIQLTool",
     "InputLayerRetriever",
-    "InputLayerTool",
+    "InputLayerVectorStore",
     "Relation",
     "RelevantArticle",
     "UserInterest",
@@ -50,6 +59,7 @@ __all__ = [
     "subheader",
     "success",
     "tool_table",
+    "tools_from_relations",
 ]
 
 # ── ANSI colors ──────────────────────────────────────────────────────
@@ -92,12 +102,53 @@ def doc_row(
 
 
 def tool_table(text: str) -> None:
-    """Pretty-print a tab-separated tool result as a table."""
-    lines = text.strip().split("\n")
-    if not lines:
+    """Pretty-print a tool result as a table.
+
+    Accepts both the JSON format emitted by ``InputLayerIQLTool`` and
+    ``tools_from_relations`` (a JSON array of row dicts, optionally
+    wrapped in ``{rows, truncated, shown, total}``) and the legacy
+    tab-separated text format.
+    """
+    import json
+
+    text = text.strip()
+    if not text or text == "[]":
+        print(f"  {DIM}(no rows){RESET}")
         return
 
-    rows = [line.split("\t") for line in lines]
+    rows: list[list[str]] = []
+    truncation_note: str | None = None
+    try:
+        parsed: Any = json.loads(text)
+    except json.JSONDecodeError:
+        parsed = None
+
+    if parsed is not None:
+        records: list[dict] = []
+        if isinstance(parsed, list):
+            records = [r for r in parsed if isinstance(r, dict)]
+        elif isinstance(parsed, dict):
+            if "error" in parsed:
+                print(f"  {RED}{parsed['error']}{RESET}")
+                return
+            records = parsed.get("rows", []) or []
+            if parsed.get("truncated"):
+                truncation_note = (
+                    f"... ({parsed['total'] - parsed['shown']} more rows)"
+                )
+        if not records:
+            print(f"  {DIM}(no rows){RESET}")
+            return
+        cols = list(records[0].keys())
+        rows.append(cols)
+        for rec in records:
+            rows.append([str(rec.get(c, "")) for c in cols])
+    else:
+        rows = [line.split("\t") for line in text.split("\n")]
+
+    if not rows:
+        return
+
     widths = [0] * len(rows[0])
     for row in rows:
         for i, cell in enumerate(row):
@@ -118,6 +169,8 @@ def tool_table(text: str) -> None:
             print(f"  {DIM}{row[0]}{RESET}")
         else:
             print(fmt_row(row))
+    if truncation_note:
+        print(f"  {DIM}{truncation_note}{RESET}")
 
 
 def success(text: str) -> None:
@@ -149,6 +202,43 @@ def get_llm() -> Any:
     return ChatOpenAI(base_url=base_url, api_key="lm-studio", model=model, temperature=0)
 
 
+# ── Demo embedder ────────────────────────────────────────────────────
+
+
+class DemoEmbeddings(Embeddings):
+    """Tiny deterministic embedder for examples - no external service needed.
+
+    Maps each text to a 3-dim vector based on keyword presence:
+        [ML score, web score, db score]
+    """
+
+    _KEYWORDS: ClassVar[dict[int, tuple[str, ...]]] = {
+        0: ("learning", "neural", "model", "ml", "ai", "train", "agent"),
+        1: ("api", "rest", "http", "web", "url", "request"),
+        2: ("graph", "database", "node", "edge", "store", "db", "data"),
+    }
+
+    def embed_query(self, text: str) -> list[float]:
+        text_lc = text.lower()
+        vec = [0.0, 0.0, 0.0]
+        for i, kws in self._KEYWORDS.items():
+            vec[i] = sum(text_lc.count(k) for k in kws) / 3.0
+        # Normalize
+        norm = sum(v * v for v in vec) ** 0.5
+        if norm == 0:
+            return [0.33, 0.33, 0.33]
+        return [v / norm for v in vec]
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed_query(t) for t in texts]
+
+    async def aembed_query(self, text: str) -> list[float]:
+        return self.embed_query(text)
+
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self.embed_documents(texts)
+
+
 # ── Schema definitions ───────────────────────────────────────────────
 
 
@@ -166,7 +256,7 @@ class UserInterest(Relation):
 
 
 class RelevantArticle(Derived):
-    """Articles relevant to a user — derived via Datalog rules."""
+    """Articles relevant to a user — derived via IQL rules."""
 
     title: str
     content: str

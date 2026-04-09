@@ -21,7 +21,7 @@ async def _insert_hallucination_claims(kg):
         await kg.execute(f'+llm_claim({cid}, "{subj}", "{pred}", "{obj}")')
         print(f"  {DIM}claim {cid}:{RESET} {subj} {DIM}{pred}{RESET} {obj}")
 
-    subheader("Datalog rules verify claims (instant)")
+    subheader("IQL rules verify claims (instant)")
 
 
 async def _show_grounding_results(kg):
@@ -60,7 +60,7 @@ async def run(kg):
     """Ground LLM outputs against KG facts to detect hallucinations.
 
     The LLM generates an answer, we extract claims from it, then
-    Datalog rules cross-reference each claim against known facts.
+    IQL rules cross-reference each claim against known facts.
     Claims are classified as: grounded, hallucinated, or unverifiable.
     """
     header("Hallucination detection / answer grounding", 12)
@@ -178,9 +178,9 @@ async def run(kg):
         await kg.execute(f'+llm_claim({i + 1}, "{c.subject}", "{c.predicate}", "{escaped_obj}")')
         print(f"  {DIM}claim {i + 1}:{RESET} {c.subject} {DIM}{c.predicate}{RESET} {c.object}")
 
-    # ── Step 3: Datalog rules verify claims ──────────────────────────
+    # ── Step 3: IQL rules verify claims ──────────────────────────
 
-    subheader("Step 3: Datalog rules verify claims (instant)")
+    subheader("Step 3: IQL rules verify claims (instant)")
     await _show_grounding_results(kg)
 
     # ── Step 4: Produce grounded summary ─────────────────────────────

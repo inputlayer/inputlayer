@@ -188,41 +188,56 @@ def on_update(event):
 pip install inputlayer-client-dev[langchain]
 ```
 
+The full integration guide lives at [docs/guides/langchain](../../docs/content/docs/guides/langchain.mdx). Highlights:
+
+### Vector store
+
+Drop-in `langchain_core.vectorstores.VectorStore` backed by an InputLayer `Relation`. Embeds documents through any LangChain `Embeddings` instance, supports metadata filters, deletion, and `as_retriever()`:
+
+```python
+from inputlayer import Relation, Vector
+from inputlayer.integrations.langchain import InputLayerVectorStore
+from langchain_openai import OpenAIEmbeddings
+
+class Chunk(Relation):
+    id: str
+    content: str
+    source: str
+    embedding: Vector
+
+await kg.define(Chunk)
+vs = InputLayerVectorStore(kg=kg, relation=Chunk, embeddings=OpenAIEmbeddings())
+await vs.aadd_texts(["..."], metadatas=[{"source": "wiki"}], ids=["doc1"])
+docs = await vs.asimilarity_search("query", k=5, filter={"source": "wiki"})
+```
+
 ### Retriever
 
-Query the knowledge graph using Datalog and get LangChain `Document` objects:
+`InputLayerRetriever` runs in vector mode (with an `Embeddings` instance) or in InputLayer Query Language mode with safe `:input` parameter binding:
 
 ```python
 from inputlayer.integrations.langchain import InputLayerRetriever
 
 retriever = InputLayerRetriever(
     kg=kg,
-    query='?article(Id, Title, Content, Cat, Emb), user_interest("{input}", Cat)',
+    query="?article(I, T, C, Cat, E), user_interest(:input, Cat)",
     page_content_columns=["content"],
     metadata_columns=["title", "category"],
 )
-
-# Works in any LCEL chain
-chain = retriever | prompt | llm | StrOutputParser()
-result = await chain.ainvoke("alice")
+result = await retriever.ainvoke("alice")
 ```
 
-### Tool
+### Structured agent tools
 
-Let agents query the knowledge graph directly:
+`tools_from_relations` generates one `StructuredTool` per `Relation` with typed equality, range, and IN-list filters. The LLM never has to write IQL:
 
 ```python
-from inputlayer.integrations.langchain import InputLayerTool
-
-tool = InputLayerTool(
-    kg=kg,
-    name="query_articles",
-    description="Query the knowledge graph using Datalog.",
-)
-agent = create_tool_calling_agent(llm, [tool], prompt)
+from inputlayer.integrations.langchain import tools_from_relations
+tools = tools_from_relations(kg, [Employee, Article])
+agent = create_tool_calling_agent(llm, tools, prompt)
 ```
 
-Both components support native async (`ainvoke`) and sync (`invoke`) — safe to use in Jupyter notebooks, FastAPI, and LangGraph.
+For agents that genuinely need raw IQL access, `InputLayerIQLTool` is the escape hatch. All components support both sync (`invoke`) and async (`ainvoke`) and are safe to use inside Jupyter, FastAPI, and LangGraph.
 
 ### Examples
 

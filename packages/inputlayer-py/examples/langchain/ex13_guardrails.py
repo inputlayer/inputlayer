@@ -6,7 +6,7 @@ from examples.langchain._common import *
 
 
 async def run(kg):
-    """Rule-based guardrails: Datalog rules define content policies,
+    """Rule-based guardrails: IQL rules define content policies,
     LLM output is checked against them before returning to the user.
 
     Policies are declarative facts — add/remove rules without code changes.

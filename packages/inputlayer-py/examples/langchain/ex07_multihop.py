@@ -37,7 +37,7 @@ async def run(kg):
     """Multi-hop graph reasoning: the KG computes transitive closure,
     the LLM interprets the results.
 
-    Shows that complex graph traversal happens in Datalog rules,
+    Shows that complex graph traversal happens in IQL rules,
     not in the LLM — the LLM just reads the derived conclusions.
     """
     header("Multi-hop reasoning", 7)
@@ -171,7 +171,7 @@ async def run(kg):
 
     prompt = ChatPromptTemplate.from_template(
         "You are an organizational analyst. The following facts were derived "
-        "from a knowledge graph using Datalog rules — the chain of command "
+        "from a knowledge graph using IQL rules — the chain of command "
         "and influence relationships were computed automatically via "
         "transitive closure, not manually defined.\n\n"
         "{context}\n\n"

@@ -117,9 +117,6 @@ class KnowledgeGraphSync:
     def list_acl(self) -> list[AclEntry]:
         return run_sync(self._kg.list_acl())
 
-    def explain(self, *select: Any, **kwargs: Any) -> ExplainResult:
-        return run_sync(self._kg.explain(*select, **kwargs))
-
     def debug(self, *select: Any, **kwargs: Any) -> DebugResult:
         return run_sync(self._kg.debug(*select, **kwargs))
 

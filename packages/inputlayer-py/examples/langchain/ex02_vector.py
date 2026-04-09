@@ -1,4 +1,4 @@
-"""Retriever with vector search."""
+"""Retriever with vector search and a real Embeddings instance."""
 
 import asyncio
 
@@ -6,29 +6,33 @@ from examples.langchain._common import *
 
 
 async def run(kg):
-    """Use vector similarity search to retrieve documents."""
+    """Vector similarity search driven by a LangChain Embeddings instance.
+
+    The retriever now accepts a natural-language query string and embeds
+    it internally - same contract as every other LangChain retriever.
+    """
     header("Retriever with vector search", 2)
 
-    print(f"\n{DIM}  Query: cosine similarity < 0.5 against ML-like vector{RESET}")
+    print(f"\n{DIM}  Embedding the query and running cosine top-k against Article{RESET}")
 
     retriever = InputLayerRetriever(
         kg=kg,
-        query=(
-            "?article(Id, Title, Content, Category, Emb), Dist = cosine(Emb, [{input}]), Dist < 0.5"
-        ),
-        page_content_columns=["Content"],
-        metadata_columns=["Title", "Category"],
-        score_column="Dist",
+        relation=Article,
+        embeddings=DemoEmbeddings(),  # swap in OpenAIEmbeddings() in real code
+        k=3,
+        metric="cosine",
+        page_content_columns=["content"],
+        metadata_columns=["title", "category"],
     )
 
-    docs = await retriever.ainvoke("0.12, 0.88, 0.03")
+    docs = await retriever.ainvoke("teach me about neural networks")
 
-    subheader(f"Similar to ML query vector ({len(docs)} found):")
+    subheader(f"Top-{len(docs)} similar articles:")
     for doc in docs:
         doc_row(
-            title=doc.metadata.get("Title", ""),
+            title=doc.metadata.get("title", ""),
             content=doc.page_content,
-            tag=doc.metadata.get("Category", ""),
+            tag=doc.metadata.get("category", ""),
             score=doc.metadata.get("score", ""),
         )
 

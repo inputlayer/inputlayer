@@ -6,7 +6,7 @@ from examples.langchain._common import *
 
 
 async def run(kg):
-    """Collaborative filtering via Datalog rules.
+    """Collaborative filtering via IQL rules.
 
     Users rate items. Rules derive similar users (shared high ratings)
     and recommendations (items liked by similar users). The LLM

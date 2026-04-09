@@ -9,7 +9,6 @@ from inputlayer._ast import (
     AggExpr,
     And,
     Arithmetic,
-    Column as AstColumn,
     Comparison,
     FuncCall,
     Literal,
@@ -17,8 +16,9 @@ from inputlayer._ast import (
     Or,
     OrderedColumn,
 )
-from inputlayer._proxy import ColumnProxy
-from inputlayer.aggregations import avg, count, count_distinct, max_, min_, sum_, top_k
+from inputlayer._ast import (
+    Column as AstColumn,
+)
 from inputlayer.compiler import (
     _VarEnv,
     compile_bulk_insert,
@@ -32,8 +32,7 @@ from inputlayer.compiler import (
     compile_value,
 )
 from inputlayer.relation import Relation
-from inputlayer.types import Timestamp, Vector, VectorInt8
-
+from inputlayer.types import Timestamp, Vector
 
 # ── Test Relations ────────────────────────────────────────────────────
 
@@ -313,7 +312,9 @@ class TestCompileQuery:
             Employee,
             relations=[Employee],
         )
-        assert result == "?Id, Name, Department, Salary, Active <- employee(Id, Name, Department, Salary, Active)"
+        # The compiler now emits the body-only ``?body`` form because
+        # IQL does not accept the ``?head <- body`` query syntax.
+        assert result == "?employee(Id, Name, Department, Salary, Active)"
 
     def test_select_columns(self):
         result = compile_query(
@@ -352,14 +353,18 @@ class TestCompileQuery:
         )
         assert "limit(10, 20)" in result
 
-    def test_with_order_by(self):
+    def test_with_order_by_is_client_side(self):
+        # ``order_by`` is intentionally not compiled into the query body:
+        # IQL only supports ordering inside aggregate heads. The SDK
+        # applies ``order_by`` client-side in ``KnowledgeGraph.query``.
         result = compile_query(
             Employee,
             relations=[Employee],
             order_by=OrderedColumn(AstColumn("employee", "salary"), descending=True),
         )
         assert isinstance(result, str)
-        assert "Salary:desc" in result
+        assert ":desc" not in result
+        assert ":asc" not in result
 
     def test_join(self):
         on_cond = Comparison(
@@ -379,24 +384,34 @@ class TestCompileQuery:
         assert "department(" in result
 
     def test_aggregation_count(self):
+        from inputlayer.compiler import AggCompiled
+
         agg = AggExpr(func="count", column=AstColumn("employee", "id"))
         result = compile_query(
             agg,
             relations=[Employee],
         )
-        assert isinstance(result, str)
-        assert "count<Id>" in result
+        # Aggregate queries return an AggCompiled (rule + query) pair
+        # because IQL does not allow aggregates in ad-hoc query bodies.
+        assert isinstance(result, AggCompiled)
+        assert "count<Id>" in result.setup
+        assert result.setup.startswith(result.rule_name + "(")
+        assert result.query.startswith("?" + result.rule_name + "(")
 
     def test_aggregation_with_groupby(self):
+        from inputlayer.compiler import AggCompiled
+
         agg = AggExpr(func="count", column=AstColumn("employee", "id"))
         result = compile_query(
             AstColumn("employee", "department"),
             agg,
             relations=[Employee],
         )
-        assert isinstance(result, str)
-        assert "Department" in result
-        assert "count<Id>" in result
+        assert isinstance(result, AggCompiled)
+        assert "Department" in result.setup
+        assert "count<Id>" in result.setup
+        # The grouping key shows up first in the head column projection.
+        assert result.head_columns[0] == "Department"
 
     def test_or_condition_splits(self):
         cond = Or(

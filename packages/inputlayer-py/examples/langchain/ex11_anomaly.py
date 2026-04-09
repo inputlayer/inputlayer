@@ -6,7 +6,7 @@ from examples.langchain._common import *
 
 
 async def run(kg):
-    """Rule-based anomaly detection: Datalog rules define expected patterns,
+    """Rule-based anomaly detection: IQL rules define expected patterns,
     automatically flag violations, and the LLM explains them.
 
     No vector DB can do this — anomaly detection requires logical rules
@@ -95,7 +95,7 @@ async def run(kg):
 
     # ── Step 1: Show detected anomalies ──────────────────────────────
 
-    subheader("Step 1: Detected anomalies (instant — Datalog rules)")
+    subheader("Step 1: Detected anomalies (instant — IQL rules)")
 
     r = await kg.execute("?overpaid(Name, Role, Salary, Max)")
     print(f"\n  {RED}Overpaid ({len(r.rows)}):{RESET}")
@@ -174,7 +174,7 @@ async def run(kg):
     context = "\n".join(context_parts)
 
     prompt = ChatPromptTemplate.from_template(
-        "You are an HR analytics system. Datalog rules in a knowledge "
+        "You are an HR analytics system. IQL rules in a knowledge "
         "graph automatically detected the following salary anomalies "
         "by comparing employee data against defined salary bands.\n\n"
         "{context}\n\n"

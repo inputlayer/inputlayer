@@ -7,11 +7,11 @@ from examples.langchain._common import *
 
 async def run(kg):
     """GraphRAG: build a knowledge graph from documents, compute entity
-    communities via Datalog rules, then summarize communities for
+    communities via IQL rules, then summarize communities for
     high-level questions.
 
     This is the Microsoft Research GraphRAG pattern implemented with
-    InputLayer's Datalog engine instead of a custom graph pipeline.
+    InputLayer's IQL engine instead of a custom graph pipeline.
     """
     header("GraphRAG — entity graph from documents", 14)
 

@@ -30,7 +30,7 @@ class _RelationMeta(ModelMetaclass):
             fields = None
         if isinstance(fields, dict) and name in fields:
             rel_name = _resolve_name(cls)
-            return ColumnProxy(rel_name, name)
+            return ColumnProxy(rel_name, name, relation_cls=cls)
         raise AttributeError(f"type object '{cls.__name__}' has no attribute '{name}'")
 
 

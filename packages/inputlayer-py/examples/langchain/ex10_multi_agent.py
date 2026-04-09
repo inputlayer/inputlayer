@@ -25,7 +25,7 @@ async def _insert_hardcoded_claims(kg):
             f"  {GREEN}{subj}{RESET} {DIM}{pred}{RESET} {CYAN}{obj}{RESET} {DIM}conf={conf}{RESET}"
         )
 
-    subheader("Step 3: Fact-checker (Datalog rules — instant)")
+    subheader("Step 3: Fact-checker (IQL rules — instant)")
 
 
 async def _show_results(kg):
@@ -50,7 +50,7 @@ async def run(kg):
 
     Agent 1 (Researcher): extracts claims from articles.
     Agent 2 (Fact-checker): cross-references claims against known facts.
-    Datalog rules automatically detect verified claims, contradictions,
+    IQL rules automatically detect verified claims, contradictions,
     and novel (unverifiable) claims.
 
     The KG is the shared reasoning layer — agents don't talk to each
@@ -177,7 +177,7 @@ async def run(kg):
 
     # ── Agent 2: Fact-checker — rules already fired ──────────────────
 
-    subheader("Step 3: Fact-checker (Datalog rules — instant)")
+    subheader("Step 3: Fact-checker (IQL rules — instant)")
     print(f"{DIM}  Rules fired automatically when claims were inserted{RESET}")
 
     await _show_results(kg)

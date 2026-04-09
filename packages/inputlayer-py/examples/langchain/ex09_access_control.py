@@ -6,7 +6,7 @@ from examples.langchain._common import *
 
 
 async def run(kg):
-    """Access-controlled RAG: Datalog rules enforce document visibility.
+    """Access-controlled RAG: IQL rules enforce document visibility.
 
     Documents have clearance levels. Users have roles. Rules compute
     which documents each user can see. The retriever automatically
@@ -74,7 +74,7 @@ async def run(kg):
     for role, level in grants:
         await kg.execute(f'+clearance_grants("{role}", "{level}")')
 
-    # The access control query joins three relations in Datalog:
+    # The access control query joins three relations in InputLayer Query Language:
     #   classified_doc(Id, Title, Content, Clr),
     #   acl_user("<user>", Role),
     #   clearance_grants(Role, Clr)
@@ -116,7 +116,7 @@ async def run(kg):
 
     subheader("Step 2: Same retriever, different users")
     print(
-        f"{DIM}  The retriever query is identical — access control is in the Datalog rules{RESET}"
+        f"{DIM}  The retriever query is identical — access control is in the IQL rules{RESET}"
     )
 
     for username, _role in users:

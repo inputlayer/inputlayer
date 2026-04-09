@@ -5,11 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from inputlayer._ast import (
-    AggExpr,
     And,
     Arithmetic,
     BoolExpr,
-    Column as AstColumn,
     Comparison,
     Expr,
     InExpr,
@@ -20,6 +18,9 @@ from inputlayer._ast import (
     Or,
     OrderedColumn,
 )
+from inputlayer._ast import (
+    Column as AstColumn,
+)
 
 if TYPE_CHECKING:
     from inputlayer.relation import Relation
@@ -28,10 +29,28 @@ if TYPE_CHECKING:
 class ColumnProxy:
     """Proxy returned by Relation.column_name - builds AST nodes via operators."""
 
-    def __init__(self, relation: str, name: str, *, ref_alias: str | None = None) -> None:
+    def __init__(
+        self,
+        relation: str,
+        name: str,
+        *,
+        ref_alias: str | None = None,
+        relation_cls: type | None = None,
+    ) -> None:
         self._relation = relation
         self._name = name
         self._ref_alias = ref_alias
+        self._relation_cls = relation_cls
+
+    @property
+    def relation_cls(self) -> type | None:
+        """The originating ``Relation`` subclass, if known.
+
+        Set when the proxy was created via attribute access on a
+        ``Relation`` class (``Sale.region``). Stays ``None`` for
+        proxies built from raw column references.
+        """
+        return self._relation_cls
 
     @property
     def relation(self) -> str:

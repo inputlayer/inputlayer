@@ -108,9 +108,30 @@ class InputLayer:
         return self._kgs[name]
 
     async def list_knowledge_graphs(self) -> list[str]:
-        """List all knowledge graphs."""
+        """List all knowledge graphs.
+
+        The server's ``.kg list`` command returns a header row followed
+        by one indented line per knowledge graph, with the active KG
+        marked by a trailing ``*``::
+
+            Knowledge Graphs:
+              default *
+              demo
+
+        We strip whitespace and the active marker, and skip the header.
+        """
         result = await self._conn.execute(".kg list")
-        return [row[0] for row in result.rows] if result.rows else []
+        out: list[str] = []
+        for row in result.rows or []:
+            if not row:
+                continue
+            text = str(row[0]).strip()
+            if not text or text.endswith(":"):
+                continue
+            if text.endswith(" *"):
+                text = text[:-2].rstrip()
+            out.append(text)
+        return out
 
     async def drop_knowledge_graph(self, name: str) -> None:
         """Drop a knowledge graph."""

@@ -1,4 +1,4 @@
-"""Retriever with Datalog query."""
+"""Retriever with a parameterized IQL query."""
 
 import asyncio
 
@@ -6,14 +6,22 @@ from examples.langchain._common import *
 
 
 async def run(kg):
-    """Use a raw Datalog query to retrieve documents."""
-    header("Retriever with Datalog query", 1)
+    """Use an IQL query with a safe :input placeholder.
 
-    print(f"\n{DIM}  Query: article JOIN user_interest on category, filtered by user{RESET}")
+    The query joins ``article`` and ``user_interest`` and filters by the
+    user name passed at invoke time. The ``:input`` placeholder is
+    escaped before substitution, so quotes and backslashes in the input
+    cannot break out of the literal.
+    """
+    header("Retriever with parameterized IQL query", 1)
+
+    print(f"\n{DIM}  Query: article JOIN user_interest, filtered by user (:input){RESET}")
 
     retriever = InputLayerRetriever(
         kg=kg,
-        query='?article(Id, Title, Content, Cat, Emb), user_interest("{input}", Cat)',
+        query=(
+            "?article(I, T, C, Cat, E), user_interest(:input, Cat)"
+        ),
         page_content_columns=["content"],
         metadata_columns=["title", "category"],
     )

@@ -1,40 +1,42 @@
-"""Tool for agent queries."""
+"""Structured tools generated from Relation schemas (no IQL for the agent)."""
 
 import asyncio
 
 from examples.langchain._common import *
+from examples.langchain._common import Article, UserInterest
 
 
 async def run(kg):
-    """Use InputLayerTool to let an agent query the KG."""
-    header("Tool for agent queries", 3)
+    """Generate one StructuredTool per relation.
 
-    general_tool = InputLayerTool(
-        kg=kg,
-        name="query_articles",
-        description=(
-            "Query the articles knowledge graph using Datalog. "
-            "Available relations: article(id, title, content, category, embedding), "
-            "user_interest(user, category). "
-            "Example: ?article(Id, Title, Content, Category, Emb)"
-        ),
-    )
+    The LLM sees typed argument schemas - no IQL to hallucinate. Each
+    call to a generated tool composes an IQL query with equality / range
+    filters and dispatches it via ``kg.execute``.
+    """
+    header("Structured tools from Relations", 3)
 
-    search_tool = InputLayerTool(
-        kg=kg,
-        name="search_by_category",
-        description="Search articles by category. Input should be a category name.",
-        query_template='?article(Id, Title, Content, "{input}", Emb)',
-    )
+    tools = tools_from_relations(kg, [Article, UserInterest])
 
-    subheader("General tool — all articles:")
-    print(f"{DIM}  > ?article(Id, Title, Content, Category, Emb){RESET}\n")
-    result = await general_tool.ainvoke("?article(Id, Title, Content, Category, Emb)")
+    print(f"\n{DIM}  Generated {len(tools)} tools:{RESET}")
+    for t in tools:
+        fields = ", ".join(t.args_schema.model_fields.keys())
+        print(f"  {CYAN}{t.name}{RESET}({DIM}{fields}{RESET})")
+
+    article_tool, interest_tool = tools
+
+    subheader("Filter articles by category='ml':")
+    print(f"{DIM}  > search_article(category='ml'){RESET}\n")
+    result = await article_tool.ainvoke({"category": "ml"})
     tool_table(result)
 
-    subheader("Search tool — articles in 'ml' category:")
-    print(f'{DIM}  > search_by_category("ml"){RESET}\n')
-    result = await search_tool.ainvoke("ml")
+    subheader("Filter articles by id range:")
+    print(f"{DIM}  > search_article(min_id=2, max_id=4){RESET}\n")
+    result = await article_tool.ainvoke({"min_id": 2, "max_id": 4})
+    tool_table(result)
+
+    subheader("Look up alice's interests:")
+    print(f"{DIM}  > search_user_interest(user='alice'){RESET}\n")
+    result = await interest_tool.ainvoke({"user": "alice"})
     tool_table(result)
 
 

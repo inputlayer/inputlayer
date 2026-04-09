@@ -45,7 +45,7 @@ from examples.langchain._common import (
 # ── Example registry ─────────────────────────────────────────────────
 
 EXAMPLES = [
-    ("ex01_retriever", "Retriever with Datalog query"),
+    ("ex01_retriever", "Retriever with IQL query"),
     ("ex02_vector", "Retriever with vector search"),
     ("ex03_tool", "Tool for agent queries"),
     ("ex04_lcel_chain", "LCEL chain with LLM"),
@@ -111,6 +111,8 @@ async def run_examples(numbers: list[int]) -> None:
     print(f"\n{BOLD}{BLUE}  InputLayer + LangChain Integration Demo{RESET}")
     print(f"{DIM}  Running {len(numbers)} of {len(EXAMPLES)} examples{RESET}")
 
+    llm_available = check_llm()
+
     async with InputLayer(
         os.environ.get("INPUTLAYER_URL", "ws://localhost:8080/ws"),
         username=os.environ.get("INPUTLAYER_USER", "admin"),
@@ -125,6 +127,10 @@ async def run_examples(numbers: list[int]) -> None:
 
         for num in numbers:
             module_name, title = EXAMPLES[num - 1]
+            if num in LLM_EXAMPLES and not llm_available:
+                skipped += 1
+                print(f"\n  {YELLOW}SKIP example {num} ({title}): no LLM server{RESET}")
+                continue
             try:
                 mod = importlib.import_module(f"examples.langchain.{module_name}")
                 await mod.run(kg)

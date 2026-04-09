@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
+from typing import TYPE_CHECKING, Any
 
-from inputlayer._ast import BoolExpr, Expr, OrderedColumn
+from inputlayer._ast import AggExpr, Column as AstColumn
+from inputlayer._ast import Expr, OrderedColumn
 from inputlayer._proxy import ColumnProxy, RelationProxy, RelationRef
 from inputlayer.auth import AclEntry
 from inputlayer.compiler import (
+    AggCompiled,
     compile_bulk_insert,
     compile_conditional_delete,
     compile_delete,
@@ -17,6 +20,7 @@ from inputlayer.compiler import (
     compile_rule,
     compile_schema,
 )
+from inputlayer.exceptions import QueryError
 from inputlayer.index import HnswIndex
 from inputlayer.relation import Relation
 from inputlayer.result import ResultSet
@@ -25,6 +29,62 @@ from inputlayer.session import Session
 if TYPE_CHECKING:
     from inputlayer.connection import Connection
     from inputlayer.derived import Derived
+
+
+# ── Helpers ───────────────────────────────────────────────────────────
+
+
+def _column_relation_class(expr: Any) -> type | None:
+    """Best-effort lookup of the originating Relation class for a column.
+
+    Aggregations like ``count(Sale.region)`` end up holding an
+    ``AstColumn`` (no class reference), so we walk the global subclass
+    list of ``Relation`` and match by relation name. Returns ``None``
+    when the column doesn't correspond to a known relation.
+    """
+    if not isinstance(expr, AstColumn):
+        return None
+    rel_name = expr.relation
+    for sub in Relation.__subclasses__():
+        if Relation._resolve_name(sub) == rel_name:
+            return sub
+    # Walk one level deeper for grandchildren of Relation.
+    for sub in Relation.__subclasses__():
+        for grand in sub.__subclasses__():
+            if Relation._resolve_name(grand) == rel_name:
+                return grand
+    return None
+
+
+def _resolve_sort_column(
+    order_ast: Any, columns: list[str]
+) -> tuple[str | None, bool]:
+    """Resolve an ``order_by`` AST to a (result_column, descending) pair.
+
+    Returns ``(None, False)`` if the column cannot be located in the
+    result set, in which case the caller should leave the rows alone.
+    """
+    descending = False
+    target: AstColumn | None = None
+    if isinstance(order_ast, OrderedColumn):
+        descending = order_ast.descending
+        if isinstance(order_ast.column, AstColumn):
+            target = order_ast.column
+    elif isinstance(order_ast, AstColumn):
+        target = order_ast
+    if target is None:
+        return None, descending
+    # Engine returns either schema-column casing or the capitalized variable
+    # form, depending on whether computed expressions are present. Try
+    # both before giving up.
+    candidates = [target.name, target.name[:1].upper() + target.name[1:]]
+    for cand in candidates:
+        if cand in columns:
+            return cand, descending
+    lower_lookup = {c.lower(): c for c in columns}
+    if target.name.lower() in lower_lookup:
+        return lower_lookup[target.name.lower()], descending
+    return None, descending
 
 
 # ── Data classes ──────────────────────────────────────────────────────
@@ -126,7 +186,7 @@ class ProofNode:
     why_not: dict[str, Any] | None = None
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "ProofNode":
+    def from_dict(cls, d: dict[str, Any]) -> ProofNode:
         """Parse a node from the wire JSON format."""
         conc = d.get("conclusion", {})
         return cls(
@@ -154,7 +214,7 @@ class ProofTree:
     query: str | None = None
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "ProofTree":
+    def from_dict(cls, d: dict[str, Any]) -> ProofTree:
         """Parse a proof tree from the wire JSON format."""
         nodes = {k: ProofNode.from_dict(v) for k, v in d.get("nodes", {}).items()}
         return cls(
@@ -169,7 +229,7 @@ class ProofTree:
 class WhyResult:
     """Result of a .why query with structured proof trees."""
 
-    results: "ResultSet"
+    results: ResultSet
     proof_trees: list[ProofTree]
     result_count: int = 0
 
@@ -190,6 +250,22 @@ class KnowledgeGraph:
         self._conn = connection
         self._session = Session(connection)
 
+    async def _ensure_current(self) -> None:
+        """Make sure the connection is bound to this KG before running ops.
+
+        ``il.knowledge_graph(name)`` returns a handle without switching
+        the server-side current KG, so every operation must verify the
+        binding. This method is a no-op when the connection is already
+        on the right KG.
+        """
+        if self._conn.current_kg != self._name:
+            await self._conn.execute(f".kg use {self._name}")
+
+    async def _execute(self, datalog: str) -> Any:
+        """Execute a statement, switching to this KG first if needed."""
+        await self._ensure_current()
+        return await self._conn.execute(datalog)
+
     @property
     def name(self) -> str:
         return self._name
@@ -204,27 +280,49 @@ class KnowledgeGraph:
         """Deploy schema definitions. Idempotent."""
         for rel in relations:
             datalog = compile_schema(rel)
-            await self._conn.execute(datalog)
+            await self._execute(datalog)
 
     async def relations(self) -> list[RelationInfo]:
-        """List all relations in this KG."""
-        result = await self._conn.execute(".rel")
-        return [
-            RelationInfo(name=row[0], row_count=int(row[1]) if len(row) > 1 else 0)
-            for row in result.rows
-        ]
+        """List all relations in this KG.
+
+        The server's ``.rel`` command returns either a single info line
+        when there are no relations, or a header row followed by one
+        formatted line per relation::
+
+            Relations:
+              edge (arity: 2, columns: [src: int, dst: int], tuples: 12)
+
+        We parse the formatted lines and skip everything else, so we
+        return an empty list when no relations exist instead of mistakenly
+        treating the header as a relation name.
+        """
+        import re
+
+        result = await self._execute(".rel")
+        out: list[RelationInfo] = []
+        line_re = re.compile(r"^\s*([A-Za-z_][A-Za-z_0-9]*)\s*\(.*tuples:\s*(\d+)")
+        for row in result.rows:
+            if not row:
+                continue
+            text = str(row[0])
+            m = line_re.match(text)
+            if m:
+                out.append(
+                    RelationInfo(name=m.group(1), row_count=int(m.group(2)))
+                )
+        return out
 
     async def describe(self, relation: type[Relation] | str) -> RelationDescription:
         """Describe a relation's schema."""
         name = relation if isinstance(relation, str) else Relation._resolve_name(relation)
-        result = await self._conn.execute(f".rel {name}")
+        result = await self._execute(f".rel {name}")
         columns = [ColumnInfo(name=row[0], type=row[1]) for row in result.rows]
         return RelationDescription(name=name, columns=columns, row_count=0, sample=[])
 
     async def drop_relation(self, relation: type[Relation] | str) -> None:
         """Drop a relation and all its data."""
         name = relation if isinstance(relation, str) else Relation._resolve_name(relation)
-        await self._conn.execute(f".rel drop {name}")
+        await self._execute(f".rel drop {name}")
 
     # ── Insert ────────────────────────────────────────────────────────
 
@@ -262,7 +360,7 @@ class KnowledgeGraph:
         else:
             raise TypeError(f"Unsupported facts type: {type(facts).__name__}")
 
-        result = await self._conn.execute(datalog)
+        result = await self._execute(datalog)
         return InsertResult(count=len(result.rows) if result.rows else 0)
 
     # ── Delete ────────────────────────────────────────────────────────
@@ -283,14 +381,14 @@ class KnowledgeGraph:
         elif isinstance(facts, list):
             for fact in facts:
                 datalog = compile_delete(fact)
-                await self._conn.execute(datalog)
+                await self._execute(datalog)
             return DeleteResult(count=len(facts))
         elif isinstance(facts, Relation):
             datalog = compile_delete(facts)
         else:
             raise TypeError(f"Unsupported facts type: {type(facts).__name__}")
 
-        result = await self._conn.execute(datalog)
+        result = await self._execute(datalog)
         return DeleteResult(count=len(result.rows) if result.rows else 0)
 
     # ── Query ─────────────────────────────────────────────────────────
@@ -310,33 +408,46 @@ class KnowledgeGraph:
         # Convert ColumnProxy to AST
         ast_select = []
         relations = join or []
+
+        def _maybe_add_relation(cls: type | None) -> None:
+            if cls is None:
+                return
+            if any(
+                (isinstance(r, type) and r is cls)
+                or (isinstance(r, RelationRef) and r.relation_cls is cls)
+                for r in relations
+            ):
+                return
+            relations.append(cls)
+
         for s in select:
             if isinstance(s, ColumnProxy):
                 ast_select.append(s._to_ast())
-                # Auto-add relation to join list if not present
-                if not any(
-                    (isinstance(r, type) and Relation._resolve_name(r) == s.relation)
-                    or (isinstance(r, RelationRef) and r.relation_name == s.relation)
-                    for r in relations
-                ):
-                    # We can't auto-add without the class, but the relation name is enough
-                    pass
+                _maybe_add_relation(s.relation_cls)
             elif isinstance(s, type) and issubclass(s, Relation):
                 ast_select.append(s)
-                if not any(
-                    (isinstance(r, type) and r is s)
-                    or (isinstance(r, RelationRef) and r.relation_cls is s)
-                    for r in relations
-                ):
-                    relations.append(s)
+                _maybe_add_relation(s)
+            elif isinstance(s, AggExpr):
+                ast_select.append(s)
+                # Aggregates wrap a column - if the column came from a
+                # Relation class proxy, auto-add that relation to the
+                # join list so the body atom is included.
+                if s.column is not None:
+                    _agg_cls = _column_relation_class(s.column)
+                    _maybe_add_relation(_agg_cls)
             else:
                 ast_select.append(s)
 
-        # Convert computed columns
+        # Convert computed columns and harvest any embedded Relation refs.
         ast_computed = {}
         for k, v in computed.items():
             if isinstance(v, ColumnProxy):
                 ast_computed[k] = v._to_ast()
+                _maybe_add_relation(v.relation_cls)
+            elif isinstance(v, AggExpr):
+                ast_computed[k] = v
+                if v.column is not None:
+                    _maybe_add_relation(_column_relation_class(v.column))
             else:
                 ast_computed[k] = v
 
@@ -385,18 +496,58 @@ class KnowledgeGraph:
             computed=ast_computed or None,
         )
 
-        if isinstance(datalog, list):
+        if isinstance(datalog, AggCompiled):
+            # Aggregate query: register a temporary session rule, query
+            # it, and best-effort drop it. The rule lives in the session
+            # so a leak only persists for the lifetime of the connection.
+            setup_result = await self._execute(datalog.setup)
+            if setup_result.columns == ["error"]:
+                raise QueryError(
+                    setup_result.rows[0][0] if setup_result.rows else "unknown error",
+                    query=datalog.setup,
+                )
+            try:
+                result = await self._execute(datalog.query)
+                if result.columns == ["error"]:
+                    raise QueryError(
+                        result.rows[0][0] if result.rows else "unknown error",
+                        query=datalog.query,
+                    )
+                rs = ResultSet(
+                    columns=result.columns,
+                    rows=result.rows,
+                    row_count=result.row_count,
+                    total_count=result.total_count,
+                    truncated=result.truncated,
+                    execution_time_ms=result.execution_time_ms,
+                )
+            finally:
+                import contextlib
+
+                with contextlib.suppress(Exception):
+                    await self._execute(f".rule drop {datalog.rule_name}")
+        elif isinstance(datalog, list):
             # OR split → execute each and union
             all_rows: list[list] = []
             columns: list[str] = []
             for q in datalog:
-                result = await self._conn.execute(q)
+                result = await self._execute(q)
+                if result.columns == ["error"]:
+                    raise QueryError(
+                        result.rows[0][0] if result.rows else "unknown error",
+                        query=q,
+                    )
                 if not columns:
                     columns = result.columns
                 all_rows.extend(result.rows)
-            return ResultSet(columns=columns, rows=all_rows)
+            rs = ResultSet(columns=columns, rows=all_rows)
         else:
-            result = await self._conn.execute(datalog)
+            result = await self._execute(datalog)
+            if result.columns == ["error"]:
+                raise QueryError(
+                    result.rows[0][0] if result.rows else "unknown error",
+                    query=datalog,
+                )
             rs = ResultSet(
                 columns=result.columns,
                 rows=result.rows,
@@ -411,7 +562,21 @@ class KnowledgeGraph:
                 rs.has_ephemeral = result.metadata.get("has_ephemeral", False)
                 rs.ephemeral_sources = result.metadata.get("ephemeral_sources", [])
                 rs.warnings = result.metadata.get("warnings", [])
-            return rs
+
+        # Apply client-side order_by + offset slicing. The compiler does
+        # not include order_by in the query body because IQL only allows
+        # ordering inside aggregate heads.
+        if order_ast is not None and rs.rows:
+            sort_col, descending = _resolve_sort_column(order_ast, rs.columns)
+            if sort_col is not None:
+                idx = rs.columns.index(sort_col)
+                rs.rows.sort(
+                    key=lambda r, _i=idx: (r[_i] is None, r[_i]),
+                    reverse=descending,
+                )
+        if offset is not None and offset > 0:
+            rs.rows = rs.rows[offset:]
+        return rs
 
     async def query_stream(
         self,
@@ -438,7 +603,6 @@ class KnowledgeGraph:
         where: Callable | None = None,
     ) -> ResultSet:
         """Perform a vector similarity search."""
-        from inputlayer.functions import cosine, euclidean, manhattan, dot
 
         rel_name = Relation._resolve_name(relation)
         cols = Relation._get_columns(relation)
@@ -454,26 +618,54 @@ class KnowledgeGraph:
             if column is None:
                 raise ValueError(f"No vector column found in {rel_name}")
 
-        # Build query using top_k or within_radius
-        vec_str = "[" + ", ".join(str(v) for v in query_vec) + "]"
-        dist_fn = {"cosine": "cosine", "euclidean": "euclidean", "manhattan": "manhattan", "dot_product": "dot"}
+        # Build query. Top-k aggregates are only valid inside a rule
+        # head, so we register a temporary session rule and query it.
+        # The rule name is unique per call to avoid colliding with
+        # session state across concurrent calls on the same KG.
+        import secrets
+
+        vec_str = "[" + ", ".join(repr(float(v)) for v in query_vec) + "]"
+        dist_fn = {
+            "cosine": "cosine",
+            "euclidean": "euclidean",
+            "manhattan": "manhattan",
+            "dot_product": "dot",
+            "dot": "dot",
+        }
         fn_name = dist_fn.get(metric, "cosine")
 
+        # Capitalized variable names match IQL grammar (lowercase atoms
+        # parse as constants).
+        col_vars = [c[:1].upper() + c[1:] for c in cols]
+        col_vars_str = ", ".join(col_vars)
+        vec_var = col_vars[cols.index(column)]
+        dist_assign = f"Dist = {fn_name}({vec_var}, {vec_str})"
+
         if k is not None:
-            # top_k query
-            col_vars = ", ".join(f"X{i}" for i in range(len(cols)))
-            vec_var = f"X{cols.index(column)}"
-            dist_assign = f"Dist = {fn_name}({vec_var}, {vec_str})"
-            query = f"?top_k<{k}, {col_vars}, Dist:asc> <- {rel_name}({col_vars}), {dist_assign}"
+            rule_name = f"il_vec_search_{secrets.token_hex(4)}"
+            await self._execute(
+                f"{rule_name}(top_k<{k}, {col_vars_str}, Dist:asc>) "
+                f"<- {rel_name}({col_vars_str}), {dist_assign}"
+            )
+            query = f"?{rule_name}({col_vars_str}, Dist)"
         elif radius is not None:
-            col_vars = ", ".join(f"X{i}" for i in range(len(cols)))
-            vec_var = f"X{cols.index(column)}"
-            dist_assign = f"Dist = {fn_name}({vec_var}, {vec_str})"
-            query = f"?within_radius<{radius}, {col_vars}, Dist:asc> <- {rel_name}({col_vars}), {dist_assign}"
+            rule_name = f"il_vec_search_{secrets.token_hex(4)}"
+            await self._execute(
+                f"{rule_name}({col_vars_str}, Dist) "
+                f"<- {rel_name}({col_vars_str}), {dist_assign}, Dist <= {radius}"
+            )
+            query = f"?{rule_name}({col_vars_str}, Dist)"
         else:
             raise ValueError("Must specify either k or radius")
 
-        result = await self._conn.execute(query)
+        result = await self._execute(query)
+        # Best-effort cleanup of the session rule. Failures are non-fatal
+        # because the rule is namespaced per call and dies with the session.
+        import contextlib
+
+        with contextlib.suppress(Exception):
+            await self._execute(f".rule drop {rule_name}")
+
         return ResultSet(
             columns=result.columns,
             rows=result.rows,
@@ -487,7 +679,6 @@ class KnowledgeGraph:
 
     async def define_rules(self, *targets: type[Derived]) -> None:
         """Deploy persistent rule definitions."""
-        from inputlayer.derived import Derived
 
         for target in targets:
             head_name = Relation._resolve_name(target)
@@ -501,11 +692,11 @@ class KnowledgeGraph:
                     clause.condition,
                     persistent=True,
                 )
-                await self._conn.execute(datalog)
+                await self._execute(datalog)
 
     async def list_rules(self) -> list[RuleInfo]:
         """List all rules in this KG."""
-        result = await self._conn.execute(".rule list")
+        result = await self._execute(".rule list")
         rules = []
         for row in result.rows:
             rules.append(RuleInfo(name=row[0], clause_count=int(row[1]) if len(row) > 1 else 1))
@@ -515,20 +706,20 @@ class KnowledgeGraph:
         """Get the Datalog definition of a rule."""
         if isinstance(name, type):
             name = Relation._resolve_name(name)
-        result = await self._conn.execute(f".rule show {name}")
+        result = await self._execute(f".rule show {name}")
         return [row[0] for row in result.rows]
 
     async def drop_rule(self, name: str | type) -> None:
         """Drop all clauses of a rule."""
         if isinstance(name, type):
             name = Relation._resolve_name(name)
-        await self._conn.execute(f".rule drop {name}")
+        await self._execute(f".rule drop {name}")
 
     async def drop_rule_clause(self, name: str | type, index: int) -> None:
         """Remove a specific clause from a rule (1-based index)."""
         if isinstance(name, type):
             name = Relation._resolve_name(name)
-        await self._conn.execute(f".rule remove {name} {index}")
+        await self._execute(f".rule remove {name} {index}")
 
     async def edit_rule_clause(self, name: str | type, index: int, clause: Any) -> None:
         """Replace a specific rule clause (remove + re-add)."""
@@ -548,27 +739,27 @@ class KnowledgeGraph:
             clause.condition,
             persistent=True,
         )
-        await self._conn.execute(datalog)
+        await self._execute(datalog)
 
     async def clear_rule(self, name: str | type) -> None:
         """Clear a rule's materialized data."""
         if isinstance(name, type):
             name = Relation._resolve_name(name)
-        await self._conn.execute(f".rule clear {name}")
+        await self._execute(f".rule clear {name}")
 
     async def drop_rules_by_prefix(self, prefix: str) -> None:
         """Drop all rules whose names start with prefix."""
-        await self._conn.execute(f".rule drop prefix {prefix}")
+        await self._execute(f".rule drop prefix {prefix}")
 
     # ── Indexes ───────────────────────────────────────────────────────
 
     async def create_index(self, index: HnswIndex) -> None:
         """Create an HNSW vector index."""
-        await self._conn.execute(index.to_datalog())
+        await self._execute(index.to_datalog())
 
     async def list_indexes(self) -> list[IndexInfo]:
         """List all indexes."""
-        result = await self._conn.execute(".index list")
+        result = await self._execute(".index list")
         indexes = []
         for row in result.rows:
             indexes.append(IndexInfo(
@@ -582,7 +773,7 @@ class KnowledgeGraph:
 
     async def index_stats(self, name: str) -> IndexStats:
         """Get statistics for an index."""
-        result = await self._conn.execute(f".index stats {name}")
+        result = await self._execute(f".index stats {name}")
         row = result.rows[0] if result.rows else [name, 0, 0, 0]
         return IndexStats(
             name=str(row[0]),
@@ -593,25 +784,25 @@ class KnowledgeGraph:
 
     async def drop_index(self, name: str) -> None:
         """Drop an index."""
-        await self._conn.execute(f".index drop {name}")
+        await self._execute(f".index drop {name}")
 
     async def rebuild_index(self, name: str) -> None:
         """Rebuild an index."""
-        await self._conn.execute(f".index rebuild {name}")
+        await self._execute(f".index rebuild {name}")
 
     # ── ACL ───────────────────────────────────────────────────────────
 
     async def grant_access(self, username: str, role: str) -> None:
         """Grant per-KG access."""
-        await self._conn.execute(f".kg acl grant {self._name} {username} {role}")
+        await self._execute(f".kg acl grant {self._name} {username} {role}")
 
     async def revoke_access(self, username: str) -> None:
         """Revoke per-KG access."""
-        await self._conn.execute(f".kg acl revoke {self._name} {username}")
+        await self._execute(f".kg acl revoke {self._name} {username}")
 
     async def list_acl(self) -> list[AclEntry]:
         """List ACL entries."""
-        result = await self._conn.execute(f".kg acl list {self._name}")
+        result = await self._execute(f".kg acl list {self._name}")
         return [
             AclEntry(username=row[0], role=row[1])
             for row in result.rows
@@ -625,7 +816,7 @@ class KnowledgeGraph:
         datalog = compile_query(*select, **kwargs)
         if isinstance(datalog, list):
             datalog = datalog[0]
-        result = await self._conn.execute(f".debug {datalog}")
+        result = await self._execute(f".debug {datalog}")
         plan_text = "\n".join(row[0] for row in result.rows)
         return DebugResult(datalog=datalog, plan=plan_text)
 
@@ -639,7 +830,7 @@ class KnowledgeGraph:
         if isinstance(datalog, list):
             datalog = datalog[0]
         cmd = f".why full {datalog}" if full else f".why {datalog}"
-        result = await self._conn.execute(cmd)
+        result = await self._execute(cmd)
         result_set = ResultSet(
             columns=result.columns,
             rows=result.rows,
@@ -675,7 +866,7 @@ class KnowledgeGraph:
             else:
                 parts.append(str(v))
         vals_str = ", ".join(parts)
-        result = await self._conn.execute(f".why_not {rel_name}({vals_str})")
+        result = await self._execute(f".why_not {rel_name}({vals_str})")
         text = "\n".join(str(row[0]) for row in result.rows)
         raw_graphs = getattr(result, "proof_trees", None) or []
         explanation = ProofTree.from_dict(raw_graphs[0]) if raw_graphs and isinstance(raw_graphs[0], dict) else (raw_graphs[0] if raw_graphs else None)
@@ -683,11 +874,11 @@ class KnowledgeGraph:
 
     async def compact(self) -> None:
         """Trigger storage compaction."""
-        await self._conn.execute(".compact")
+        await self._execute(".compact")
 
     async def status(self) -> ServerStatus:
         """Get server status."""
-        result = await self._conn.execute(".status")
+        result = await self._execute(".status")
         row = result.rows[0] if result.rows else ["unknown", "unknown"]
         return ServerStatus(
             version=str(row[0]) if len(row) > 0 else "unknown",
@@ -699,11 +890,11 @@ class KnowledgeGraph:
         cmd = f".load {path}"
         if mode:
             cmd += f" {mode}"
-        await self._conn.execute(cmd)
+        await self._execute(cmd)
 
     async def clear_prefix(self, prefix: str) -> ClearResult:
         """Clear all relations matching a prefix."""
-        result = await self._conn.execute(f".clear prefix {prefix}")
+        result = await self._execute(f".clear prefix {prefix}")
         return ClearResult(
             relations_cleared=len(result.rows),
             facts_cleared=sum(int(row[1]) for row in result.rows if len(row) > 1),
@@ -712,7 +903,7 @@ class KnowledgeGraph:
 
     async def execute(self, datalog: str) -> ResultSet:
         """Execute raw Datalog."""
-        result = await self._conn.execute(datalog)
+        result = await self._execute(datalog)
         return ResultSet(
             columns=result.columns,
             rows=result.rows,

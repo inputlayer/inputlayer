@@ -6,14 +6,15 @@ taking Python objects and returning Datalog strings.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from inputlayer._ast import (
     AggExpr,
     And,
     Arithmetic,
     BoolExpr,
-    Column as AstColumn,
     Comparison,
     Expr,
     FuncCall,
@@ -25,8 +26,11 @@ from inputlayer._ast import (
     Or,
     OrderedColumn,
 )
+from inputlayer._ast import (
+    Column as AstColumn,
+)
 from inputlayer._naming import column_to_variable
-from inputlayer.types import Timestamp, Vector, VectorInt8, python_type_to_datalog
+from inputlayer.types import Timestamp, python_type_to_datalog
 
 if TYPE_CHECKING:
     from inputlayer.relation import Relation
@@ -383,8 +387,8 @@ def compile_query(
 
     Returns a single string, or a list of strings if OR conditions require splitting.
     """
-    from inputlayer.relation import Relation
     from inputlayer._proxy import RelationRef
+    from inputlayer.relation import Relation
 
     env = _VarEnv()
 
@@ -457,31 +461,23 @@ def compile_query(
             var = env.get_var(s)
             head_parts.append(var)
 
-    # Add computed columns to head
-    for alias_name, expr in computed.items():
-        compiled = compile_expr(expr, env)
-        head_parts.append(compiled)
+    # NOTE: ``head_parts`` is no longer used to build the query string
+    # because IQL has no separate ``?head <- body`` projection. Computed
+    # columns are emitted as body bindings further down.
+    _ = head_parts
 
-    # Handle order_by
-    if order_by is not None:
-        # Find and replace the matching head variable with ordered version
-        if isinstance(order_by, OrderedColumn):
-            order_var = compile_expr(order_by.column, env)
-            suffix = ":desc" if order_by.descending else ":asc"
-            # Replace in head_parts
-            for i, hp in enumerate(head_parts):
-                if hp == order_var:
-                    head_parts[i] = f"{order_var}{suffix}"
-                    break
-        elif isinstance(order_by, AstColumn):
-            order_var = env.get_var(order_by)
-            suffix = ":asc"
-            for i, hp in enumerate(head_parts):
-                if hp == order_var:
-                    head_parts[i] = f"{order_var}{suffix}"
-                    break
+    # NOTE: order_by is intentionally not compiled into the query body.
+    # IQL only supports ordering inside aggregate heads (top_k, etc.),
+    # so for plain queries the SDK applies ``order_by`` client-side
+    # in ``KnowledgeGraph.query`` after the rows come back. The
+    # ``order_by`` parameter is preserved purely so the call site can
+    # apply it.
+    _ = order_by  # consumed by the caller, not the compiler
 
-    # Build body atoms for each relation
+    # Build body atoms for each relation. We always project the full
+    # relation - the engine returns schema column names for plain
+    # projections and variable names when computed expressions are
+    # present, and there is no separate "head" projection in IQL.
     for rn, cls, alias in all_relations:
         cols = Relation._get_columns(cls)
         atom_parts = []
@@ -491,36 +487,43 @@ def compile_query(
             if var is not None:
                 atom_parts.append(var)
             else:
-                atom_parts.append("_")
+                # Materialize a fresh variable so the column is bound
+                # and can appear in subsequent body filters / computeds.
+                atom_parts.append(env.get_var(ast_col))
         body_atoms.append(f"{rn}({', '.join(atom_parts)})")
 
+    # Computed columns become body bindings: Var = expr
+    computed_body: list[str] = []
+    for alias_name, expr in computed.items():
+        compiled = compile_expr(expr, env)
+        var_name = column_to_variable(alias_name)
+        computed_body.append(f"{var_name} = {compiled}")
+
     # Combine body
-    all_body = body_atoms + where_parts
+    all_body = body_atoms + computed_body + where_parts
     if limit is not None:
         if offset is not None:
             all_body.append(f"limit({limit}, {offset})")
         else:
             all_body.append(f"limit({limit})")
 
-    head_str = ", ".join(head_parts)
-
     if or_branches is not None:
         # Multiple queries for OR
         queries = []
         for branch_parts in or_branches:
             branch_parts = [p for p in branch_parts if p]
-            branch_body = body_atoms + branch_parts
+            branch_body = body_atoms + computed_body + branch_parts
             if limit is not None:
                 if offset is not None:
                     branch_body.append(f"limit({limit}, {offset})")
                 else:
                     branch_body.append(f"limit({limit})")
-            queries.append(f"?{head_str} <- {', '.join(branch_body)}")
+            queries.append(f"?{', '.join(branch_body)}")
         return queries
 
     if all_body:
-        return f"?{head_str} <- {', '.join(all_body)}"
-    return f"?{head_str}"
+        return f"?{', '.join(all_body)}"
+    return "?"
 
 
 def _process_join_condition(condition: BoolExpr, env: _VarEnv) -> None:
@@ -545,6 +548,27 @@ def _has_or(expr: BoolExpr) -> bool:
     return False
 
 
+@dataclass(frozen=True)
+class AggCompiled:
+    """Compiled aggregate query that needs a temporary session rule.
+
+    IQL only permits aggregates inside rule heads, so the SDK registers a
+    short-lived rule and then queries it. ``setup`` contains the rule
+    definition (one statement) and ``query`` is the trailing ``?`` query.
+    The caller is expected to execute ``setup`` before ``query`` and may
+    optionally drop the rule afterwards.
+
+    ``head_columns`` lists the head variable names in the order they
+    appear in the rule head, which lets the caller present a stable
+    column projection regardless of how the engine names them.
+    """
+
+    setup: str
+    query: str
+    rule_name: str
+    head_columns: list[str]
+
+
 def _compile_agg_query(
     select: tuple,
     env: _VarEnv,
@@ -555,31 +579,42 @@ def _compile_agg_query(
     limit: int | None,
     offset: int | None,
     computed: dict[str, Expr],
-) -> str:
-    """Compile a query with aggregation."""
+) -> AggCompiled:
+    """Compile a query with aggregation into a (rule, query) pair."""
+    import secrets
+
     from inputlayer.relation import Relation
 
     head_parts: list[str] = []
     agg_parts: list[str] = []
+    head_column_names: list[str] = []
 
     # Separate grouping keys from aggregations
     for s in select:
         if isinstance(s, AggExpr):
-            agg_parts.append(compile_expr(s, env))
+            compiled = compile_expr(s, env)
+            agg_parts.append(compiled)
+            head_column_names.append(_agg_label(s))
         elif isinstance(s, AstColumn):
-            head_parts.append(env.get_var(s))
+            var = env.get_var(s)
+            head_parts.append(var)
+            head_column_names.append(var)
         elif isinstance(s, type) and issubclass(s, Relation):
             rn = Relation._resolve_name(s)
             cols = Relation._get_columns(s)
             for col in cols:
                 ast_col = AstColumn(rn, col)
-                head_parts.append(env.get_var(ast_col))
+                var = env.get_var(ast_col)
+                head_parts.append(var)
+                head_column_names.append(var)
 
     for alias_name, expr in computed.items():
+        compiled = compile_expr(expr, env)
         if isinstance(expr, AggExpr):
-            agg_parts.append(compile_expr(expr, env))
+            agg_parts.append(compiled)
         else:
-            head_parts.append(compile_expr(expr, env))
+            head_parts.append(compiled)
+        head_column_names.append(column_to_variable(alias_name))
 
     # Build body
     body_atoms: list[str] = []
@@ -592,7 +627,7 @@ def _compile_agg_query(
             if var is not None:
                 atom_parts.append(var)
             else:
-                atom_parts.append("_")
+                atom_parts.append(env.get_var(ast_col))
         body_atoms.append(f"{rn}({', '.join(atom_parts)})")
 
     all_body = body_atoms + where_parts
@@ -605,9 +640,28 @@ def _compile_agg_query(
     all_head = head_parts + agg_parts
     head_str = ", ".join(all_head)
 
-    if all_body:
-        return f"?{head_str} <- {', '.join(all_body)}"
-    return f"?{head_str}"
+    # Aggregates can only live inside a rule head, so register a
+    # uniquely-named session rule and query it. The rule name has no
+    # leading underscore because the IQL parser rejects ``?_relation(...)``
+    # queries.
+    rule_name = f"il_agg_{secrets.token_hex(4)}"
+    setup = f"{rule_name}({head_str}) <- {', '.join(all_body)}"
+    query_args = ", ".join(head_column_names)
+    query = f"?{rule_name}({query_args})"
+
+    return AggCompiled(
+        setup=setup,
+        query=query,
+        rule_name=rule_name,
+        head_columns=head_column_names,
+    )
+
+
+def _agg_label(agg: AggExpr) -> str:
+    """Pick a deterministic projection name for an aggregate expression."""
+    if agg.column is not None and isinstance(agg.column, AstColumn):
+        return column_to_variable(agg.column.name)
+    return agg.func.capitalize()
 
 
 # ── Rule compilation ──────────────────────────────────────────────────

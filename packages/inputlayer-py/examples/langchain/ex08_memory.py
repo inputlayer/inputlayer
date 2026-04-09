@@ -6,10 +6,10 @@ from examples.langchain._common import *
 
 
 async def run(kg):
-    """Conversational memory backed by KG facts and Datalog rules.
+    """Conversational memory backed by KG facts and IQL rules.
 
     Each message turn is stored as a fact. The LLM extracts topics and
-    entities per turn. Datalog rules derive active context, conversation
+    entities per turn. IQL rules derive active context, conversation
     threads, and relevant history — the LLM uses these derived facts
     to produce context-aware responses.
 
@@ -132,7 +132,7 @@ async def run(kg):
 
     # ── Step 2: Query derived context ────────────────────────────────
 
-    subheader("Step 2: Derived context (computed by Datalog rules)")
+    subheader("Step 2: Derived context (computed by IQL rules)")
 
     r = await kg.execute("?active_topic(T)")
     topics = sorted(row[0] for row in r.rows)
@@ -200,7 +200,7 @@ async def run(kg):
     context = "\n".join(context_parts)
 
     subheader("Step 3: LLM responds using rule-derived context")
-    print(f"{DIM}  Context assembled from Datalog-derived facts, not raw history{RESET}")
+    print(f"{DIM}  Context assembled from IQL-derived facts, not raw history{RESET}")
 
     prompt = ChatPromptTemplate.from_template(
         "You are a helpful ML engineering assistant. The following context was "
