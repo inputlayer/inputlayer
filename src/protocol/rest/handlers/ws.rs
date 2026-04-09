@@ -924,7 +924,7 @@ async fn handle_global_ws_connection(
         "ws_authenticated"
     );
 
-    let session_id = match handler.create_session(&kg) {
+    let session_id = match handler.create_session_with_auth(&kg, &auth_identity) {
         Ok(id) => {
             let stats = handler.session_stats();
             info!(session_id = %id, kg = %kg, active_sessions = stats.total_sessions, "ws_session_created");
@@ -933,7 +933,7 @@ async fn handle_global_ws_connection(
         Err(e) => {
             warn!(kg = %kg, error = %e, "ws_session_create_failed");
             let err_msg = GlobalWsResponse::Error {
-                message: "Failed to create session".to_string(),
+                message: e.clone(),
                 validation_errors: None,
             };
             if let Ok(json) = serde_json::to_string(&err_msg) {

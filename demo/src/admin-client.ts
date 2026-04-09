@@ -219,10 +219,10 @@ export class AdminClient {
     password: string,
     kg: string
   ): Promise<{ username: string; password: string }> {
-    // Create user with viewer role
-    await this.execute(`.user create ${username} ${password} viewer`)
+    // Create user with editor role so they can create their own KGs (e.g. tutorials)
+    await this.execute(`.user create ${username} ${password} editor`)
 
-    // Grant viewer access to all demo KGs so users can switch between them
+    // Grant viewer access to all demo KGs so users can browse but not modify them
     for (const kgName of AdminClient.DEMO_KGS) {
       try {
         await this.execute(`.kg acl grant ${kgName} ${username} viewer`)
@@ -231,7 +231,7 @@ export class AdminClient {
       }
     }
 
-    console.log(`[admin-client] created demo user ${username} with viewer access to all demo KGs`)
+    console.log(`[admin-client] created demo user ${username} with editor role and viewer access to demo KGs`)
     return { username, password }
   }
 
