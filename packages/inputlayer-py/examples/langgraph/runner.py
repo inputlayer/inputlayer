@@ -42,9 +42,10 @@ EXAMPLES = [
     ("ex08_tool_selection", "Tool selection via rules"),
     ("ex09_streaming_aggregation", "Streaming aggregation with alerts"),
     ("ex10_resumable_graph", "Resumable graph with checkpointer"),
+    ("ex11_memory", "Semantic memory with derived context"),
 ]
 
-LLM_EXAMPLES = {1, 2, 5, 7, 9}
+LLM_EXAMPLES = {1, 2, 5, 7, 9, 10}
 
 
 def print_menu() -> None:
