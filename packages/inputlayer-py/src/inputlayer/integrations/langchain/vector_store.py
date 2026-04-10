@@ -448,6 +448,14 @@ class InputLayerVectorStore(VectorStore):
                 vec_col_idx = i
                 break
 
+        if vec_col_idx is None:
+            warnings.warn(
+                f"Could not find vector column {self._vector_field!r} in "
+                f"result columns {result.columns!r}; MMR diversity scoring "
+                f"will have no effect.",
+                stacklevel=2,
+            )
+
         out: list[tuple[Document, float, list[float]]] = []
         docs_and_scores = self._rows_to_documents(result.columns, ranked)
         for (doc, score), row in zip(docs_and_scores, ranked, strict=False):

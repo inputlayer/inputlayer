@@ -6,8 +6,8 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from inputlayer._ast import AggExpr, Column as AstColumn
-from inputlayer._ast import Expr, OrderedColumn
+from inputlayer._ast import AggExpr, Expr, OrderedColumn
+from inputlayer._ast import Column as AstColumn
 from inputlayer._proxy import ColumnProxy, RelationProxy, RelationRef
 from inputlayer.auth import AclEntry
 from inputlayer.compiler import (
@@ -257,9 +257,20 @@ class KnowledgeGraph:
         the server-side current KG, so every operation must verify the
         binding. This method is a no-op when the connection is already
         on the right KG.
+
+        If the KG does not exist yet, we create it first (the server's
+        ``auto_create_knowledge_graphs`` defaults to ``false``, so
+        ``.kg use <name>`` alone would fail for a brand-new KG).
         """
-        if self._conn.current_kg != self._name:
-            await self._conn.execute(f".kg use {self._name}")
+        if self._conn.current_kg == self._name:
+            return
+        result = await self._conn.execute(f".kg use {self._name}")
+        if result.columns == ["error"]:
+            msg = result.rows[0][0] if result.rows else ""
+            if "not found" in msg.lower():
+                await self._conn.execute(f".kg create {self._name}")
+            else:
+                raise QueryError(msg, query=f".kg use {self._name}")
 
     async def _execute(self, datalog: str) -> Any:
         """Execute a statement, switching to this KG first if needed."""

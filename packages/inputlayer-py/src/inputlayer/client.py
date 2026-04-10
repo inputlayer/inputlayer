@@ -134,7 +134,13 @@ class InputLayer:
         return out
 
     async def drop_knowledge_graph(self, name: str) -> None:
-        """Drop a knowledge graph."""
+        """Drop a knowledge graph and all its data.
+
+        The server rejects dropping the currently active KG, so we
+        switch to ``default`` first if needed.
+        """
+        if self._conn.current_kg == name:
+            await self._conn.execute(".kg use default")
         await self._conn.execute(f".kg drop {name}")
         self._kgs.pop(name, None)
 

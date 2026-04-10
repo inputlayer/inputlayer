@@ -89,7 +89,6 @@ class TestSchema:
             names = [r.name for r in rels]
             assert "edge" in names
         finally:
-            await kg.execute(".kg use default")
             await client.drop_knowledge_graph("test_schema_py")
 
 
@@ -156,35 +155,20 @@ class TestRules:
 class TestDelete:
     @pytest.mark.asyncio
     async def test_conditional_delete(self, client: InputLayer):
-        # Use a uniquely-named relation to avoid the cross-KG storage
-        # leakage tracked in inputlayer/inputlayer#76. Until that server
-        # bug is fixed, two tests that both define ``Employee`` see each
-        # other's rows even though they live in distinct knowledge graphs.
-        from inputlayer import Relation as _R
-
-        class DelEmployee(_R):
-            __relation_name__ = "del_employee"
-            id: int
-            name: str
-            department: str
-            salary: float
-            active: bool
-
         kg = client.knowledge_graph("test_delete_py")
         try:
-            await kg.define(DelEmployee)
+            await kg.define(Employee)
             await kg.insert([
-                DelEmployee(id=1, name="Alice", department="eng",
-                            salary=120000.0, active=True),
-                DelEmployee(id=2, name="Bob", department="hr",
-                            salary=90000.0, active=True),
+                Employee(id=1, name="Alice", department="eng",
+                         salary=120000.0, active=True),
+                Employee(id=2, name="Bob", department="hr",
+                         salary=90000.0, active=True),
             ])
-            await kg.delete(DelEmployee, where=lambda e: e.department == "hr")
-            result = await kg.query(DelEmployee)
+            await kg.delete(Employee, where=lambda e: e.department == "hr")
+            result = await kg.query(Employee)
             assert len(result) == 1
             assert result.rows[0][1] == "Alice"
         finally:
-            await kg.execute(".kg use default")
             await client.drop_knowledge_graph("test_delete_py")
 
 

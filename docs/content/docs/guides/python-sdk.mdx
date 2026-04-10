@@ -759,8 +759,6 @@ This is a large topic with its own dedicated guide. See [Migrations](migrations)
 
 A few rough edges to be aware of in the current pre-alpha SDK:
 
-- **Relations are not isolated across knowledge graphs** ([inputlayer/inputlayer#76](https://github.com/inputlayer/inputlayer/issues/76)). Defining the same relation name in two knowledge graphs and inserting into both leaks rows from one to the other. Until the storage refactor lands, the workaround is to give every logical schema its own `__relation_name__` so different knowledge graphs use distinct names. The integration test suites in `packages/inputlayer-py/tests/` follow this pattern (`del_employee`, `lc_iql_doc`, `lc_vec_doc`, etc.).
-
 - **Aggregates are session rules under the hood**. `kg.query(count(Employee.id))` works by registering a temporary session rule and querying it. The rule is best-effort dropped after the call, so if your process dies between rule registration and cleanup the rule lingers until the WebSocket session ends. This is invisible to application code but worth knowing if you read server logs.
 
 - **`order_by` and `offset` are applied client-side** for plain queries. IQL only supports ordering inside aggregate heads (`top_k`, `within_radius`, etc.), so the SDK sorts and slices the result rows in Python after they come back. This is fine for typical result sizes but is not appropriate for streaming over millions of rows.

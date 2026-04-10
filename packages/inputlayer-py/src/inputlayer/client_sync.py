@@ -15,8 +15,8 @@ from inputlayer.client import InputLayer
 from inputlayer.index import HnswIndex
 from inputlayer.knowledge_graph import (
     ClearResult,
-    DeleteResult,
     DebugResult,
+    DeleteResult,
     IndexInfo,
     IndexStats,
     InsertResult,

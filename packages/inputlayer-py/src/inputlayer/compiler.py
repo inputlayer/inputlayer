@@ -428,43 +428,7 @@ def compile_query(
         )
 
     # Simple query (no aggregations)
-    head_parts: list[str] = []
     body_atoms: list[str] = []
-
-    # Collect selected columns per relation
-    selected_by_rel: dict[str, list[AstColumn]] = {}
-    full_relations: list[tuple[str, type[Relation], str | None]] = []
-
-    for s in select:
-        if isinstance(s, type) and issubclass(s, Relation):
-            rn = Relation._resolve_name(s)
-            full_relations.append((rn, s, None))
-        elif isinstance(s, AstColumn):
-            key = s.ref_alias or s.relation
-            selected_by_rel.setdefault(key, []).append(s)
-
-    # If selecting full relations, select all their columns
-    if full_relations:
-        for rn, cls, alias in full_relations:
-            cols = Relation._get_columns(cls)
-            for col in cols:
-                ast_col = AstColumn(rn, col, alias)
-                var = env.get_var(ast_col)
-                head_parts.append(var)
-            # Also ensure relation is in the body
-            if not any(r[0] == rn and r[2] == alias for r in all_relations):
-                all_relations.append((rn, cls, alias))
-
-    # Add individual selected columns to head
-    for s in select:
-        if isinstance(s, AstColumn):
-            var = env.get_var(s)
-            head_parts.append(var)
-
-    # NOTE: ``head_parts`` is no longer used to build the query string
-    # because IQL has no separate ``?head <- body`` projection. Computed
-    # columns are emitted as body bindings further down.
-    _ = head_parts
 
     # NOTE: order_by is intentionally not compiled into the query body.
     # IQL only supports ordering inside aggregate heads (top_k, etc.),
