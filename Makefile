@@ -319,7 +319,10 @@ python-test:
 # the release server binary. Starts the server, sets up unique data
 # dir, runs the tests with INPUTLAYER_INTEGRATION=1, then stops the
 # server. Used by CI to keep the langchain integration honest.
-python-test-live: build-release
+# Build without gui-build so CI doesn't need Node.js. The server runs
+# headless for integration tests.
+python-test-live:
+	@cargo build --all-features --release
 	@DATA_DIR=$$(mktemp -d -t il-py-live-XXXXXX); \
 	rm -rf $$DATA_DIR && mkdir -p $$DATA_DIR; \
 	echo "[python-test-live] data dir: $$DATA_DIR"; \
@@ -354,7 +357,8 @@ python-test-live: build-release
 # python-test-examples runs the langchain examples that don't require
 # an LLM (1, 2, 3) end-to-end against a live server. Catches example
 # regressions that the unit tests cannot.
-python-test-examples: build-release
+python-test-examples:
+	@cargo build --all-features --release
 	@DATA_DIR=$$(mktemp -d -t il-py-ex-XXXXXX); \
 	rm -rf $$DATA_DIR && mkdir -p $$DATA_DIR; \
 	lsof -ti :8080 | xargs -r kill -9 2>/dev/null || true; \
