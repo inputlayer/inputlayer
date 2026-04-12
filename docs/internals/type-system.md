@@ -47,7 +47,7 @@ A `type` declaration introduces a **value type**. Types describe the **shape and
 
 ### 1.3 Aliases and Refinements
 
-```datalog
+```iql
 type Email: string(pattern("^[^@]+@[^@]+$"))
 type Id:    int(range(1, 1000000))
 type Tags:  list[string](not_empty)
@@ -69,7 +69,7 @@ The semantics of refinements (`pattern`, `range`, `not_empty`, …) are implemen
 
 ### 1.4 Record Types
 
-```datalog
+```iql
 type User: {
     id:      Id,
     name:    string(not_empty),
@@ -107,7 +107,7 @@ AnnotName   ::= "key" | "unique" | "not_empty" | ...
 
 ### 2.2 Schema Declaration
 
-```datalog
+```iql
 +user(
     id:      int,
     name:    string,
@@ -127,7 +127,7 @@ Each parameter is a **column** in the relation.
 
 ### 2.3 Schema with Type References
 
-```datalog
+```iql
 type Id:    int
 type Email: string
 
@@ -159,7 +159,7 @@ Arg         ::= Term
 
 Example (positional):
 
-```datalog
+```iql
 user(1, "Alice", "alice@example.com")
 ```
 
@@ -172,7 +172,7 @@ FactDecl    ::= "+" Atom "."
 
 Example:
 
-```datalog
+```iql
 +user(1, "Alice", "alice@example.com")
 +user[(2, "Bob", "bob@example.com"), (3, "Charlie", "charlie@example.com")]
 ```
@@ -194,7 +194,7 @@ RelOp       ::= "=" | "!=" | "<" | ">" | "<=" | ">="
 
 ### 4.4 Persistent vs Session Rules
 
-```datalog
+```iql
 // Persistent rule (with + prefix) - stored and incrementally maintained
 +admin_email(Email) <-
     user(_, _, Email),
@@ -241,7 +241,7 @@ PersistentRule ::= "+" RuleName "(" ParamList ")" "<-" Body "."
 
 Rules without `+` prefix are **session rules**:
 
-```datalog
+```iql
 temp_result(X, Y) <- source(X, Y), X > 10
 ```
 
@@ -271,7 +271,7 @@ Do NOT confuse:
 
 ## 8. Complete Example
 
-```datalog
+```iql
 // Type definitions
 type Id: int(range(1, 1000000))
 type Email: string(pattern("^[^@]+@[^@]+$"))
@@ -302,7 +302,7 @@ temp(Id) <- user(Id, _, _), high_spender(Id)
 
 Given a rule:
 
-```datalog
+```iql
 +admin_email(Email) <- user(_, _, Email), admin(Email)
 ```
 

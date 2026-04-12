@@ -1,6 +1,6 @@
 //! # Magic Sets Transformation
 //!
-//! Demand-driven rewriting for recursive Datalog queries with bound arguments.
+//! Demand-driven rewriting for recursive IQL queries with bound arguments.
 //!
 //! When a query like `?reach(1, Y)` is issued against recursive rules, the engine
 //! normally computes the full transitive closure and then filters. Magic Sets rewrites
@@ -10,14 +10,14 @@
 //! ## Example
 //!
 //! Original program (after `transform_query_shorthand`):
-//! ```datalog
+//! ```iql
 //! reach(X, Y) <- edge(X, Y)
 //! reach(X, Z) <- reach(X, Y), edge(Y, Z)
 //! __query__(_c0, Y) <- reach(_c0, Y), _c0 = 1
 //! ```
 //!
 //! After Magic Sets rewrite:
-//! ```datalog
+//! ```iql
 //! reach_bf(X, Y) <- magic_reach_bf(X), edge(X, Y)
 //! reach_bf(X, Z) <- magic_reach_bf(X), reach_bf(X, Y), edge(Y, Z)
 //! __query__(_c0, Y) <- reach_bf(_c0, Y), _c0 = 1

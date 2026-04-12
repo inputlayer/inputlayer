@@ -13,7 +13,7 @@ from inputlayer.migrations.operations import (
     DropRule,
     Operation,
     ReplaceRule,
-    RunDatalog,
+    RunIQL,
 )
 
 
@@ -83,10 +83,10 @@ def _render_operation(op: Operation) -> str:
             f'            ef_search={op.ef_search},\n'
             f'        )'
         )
-    if isinstance(op, RunDatalog):
+    if isinstance(op, RunIQL):
         fwd = _repr_str_list(op.forward)
         bwd = _repr_str_list(op.backward)
-        return f'ops.RunDatalog(\n            forward={fwd},\n            backward={bwd},\n        )'
+        return f'ops.RunIQL(\n            forward={fwd},\n            backward={bwd},\n        )'
     raise TypeError(f"Unknown operation type: {type(op).__name__}")
 
 

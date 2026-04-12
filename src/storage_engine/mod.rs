@@ -46,7 +46,7 @@ use crate::storage::{
     KnowledgeGraphMetadata, KnowledgeGraphsMetadata, StorageError, StorageResult,
 };
 use crate::value::Tuple;
-use crate::DatalogEngine;
+use crate::IQLEngine;
 use arc_swap::ArcSwap;
 use chrono::Utc;
 use dashmap::DashMap;
@@ -90,7 +90,7 @@ pub struct StorageEngine {
 /// Single knowledge graph instance
 pub struct KnowledgeGraph {
     name: String,
-    engine: DatalogEngine,
+    engine: IQLEngine,
     metadata: KnowledgeGraphMetadata,
     /// Data directory for this knowledge graph (used for rule and schema persistence)
     data_dir: PathBuf,
@@ -612,7 +612,7 @@ impl StorageEngine {
         db.delete_in_memory(relation, &tuples, time)
     }
 
-    /// Execute a Datalog query on the current knowledge graph
+    /// Execute an IQL query on the current knowledge graph
     ///
     /// Returns binary tuples (i32, i32) for backward compatibility.
     /// For arbitrary arity results, use `execute_query_tuples` instead.
@@ -626,7 +626,7 @@ impl StorageEngine {
         self.execute_query_on(&db_name, program)
     }
 
-    /// Execute a Datalog query on a specific knowledge graph (explicit API)
+    /// Execute an IQL query on a specific knowledge graph (explicit API)
     ///
     /// Uses a completely lock-free read path via snapshots.
     /// The snapshot is obtained atomically (O(1)) and execution proceeds
@@ -652,7 +652,7 @@ impl StorageEngine {
             .map_err(|e| StorageError::Other(format!("Query execution failed: {e}")))
     }
 
-    /// Execute a Datalog query on the current knowledge graph, returning arbitrary arity tuples
+    /// Execute an IQL query on the current knowledge graph, returning arbitrary arity tuples
     pub fn execute_query_tuples(&self, program: &str) -> StorageResult<Vec<Tuple>> {
         let db_name = self
             .current_kg
@@ -663,7 +663,7 @@ impl StorageEngine {
         self.execute_query_tuples_on(&db_name, program)
     }
 
-    /// Execute a Datalog query on a specific knowledge graph, returning arbitrary arity tuples
+    /// Execute an IQL query on a specific knowledge graph, returning arbitrary arity tuples
     pub fn execute_query_tuples_on(&self, kg: &str, program: &str) -> StorageResult<Vec<Tuple>> {
         let db = self
             .knowledge_graphs
@@ -708,7 +708,7 @@ impl StorageEngine {
             format!("{}{}", snapshot.rule_prefix(), program)
         };
 
-        let mut engine = crate::DatalogEngine::new();
+        let mut engine = crate::IQLEngine::new();
         engine.input_tuples_mut().clone_from(&snapshot.input_tuples);
 
         engine
@@ -1649,7 +1649,7 @@ impl StorageEngine {
     /// 1. Discover knowledge graphs from persist shards
     /// 2. For each knowledge graph, read all shards
     /// 3. Consolidate updates to get current state
-    /// 4. Populate in-memory `DatalogEngine`
+    /// 4. Populate in-memory `IQLEngine`
     fn load_all_knowledge_graphs(&mut self) -> StorageResult<()> {
         // Discover knowledge graphs from persist shards
         let shard_names = self.persist.list_shards()?;
@@ -1725,7 +1725,7 @@ impl StorageEngine {
         data_dir: PathBuf,
     ) -> StorageResult<KnowledgeGraph> {
         let prefix = format!("{name}:");
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         let mut metadata = KnowledgeGraphMetadata::new(name.to_string());
 
         // Find all shards for this knowledge graph
@@ -2038,7 +2038,7 @@ impl KnowledgeGraph {
 
         KnowledgeGraph {
             name: name.clone(),
-            engine: DatalogEngine::new(),
+            engine: IQLEngine::new(),
             metadata: KnowledgeGraphMetadata::new(name),
             data_dir,
             rule_catalog,
@@ -2485,7 +2485,7 @@ impl KnowledgeGraph {
 
         // Execute using a fresh engine with cloned data (like snapshot execution)
         // This avoids needing &mut self
-        let mut temp_engine = crate::DatalogEngine::new();
+        let mut temp_engine = crate::IQLEngine::new();
         temp_engine
             .input_tuples
             .clone_from(&self.engine.input_tuples);
@@ -2958,7 +2958,7 @@ impl KnowledgeGraph {
     }
 }
 
-/// Format a Rule as a Datalog string (uses Rule's Display impl)
+/// Format a Rule as an IQL string (uses Rule's Display impl)
 fn format_rule(rule: &crate::ast::Rule) -> String {
     rule.to_string()
 }

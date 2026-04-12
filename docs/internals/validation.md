@@ -255,7 +255,7 @@ impl ValidationLayer {
 
 Schemas follow the same session vs persistent pattern as rules:
 
-```datalog
+```iql
 // Persistent schema - saved with knowledge graph
 +user(id: int, name: string)
 
@@ -280,7 +280,7 @@ InputLayer supports two ingestion patterns: schema-first (traditional) and data-
 
 Define the schema before inserting data. All inserts are validated immediately.
 
-```datalog
+```iql
 .kg create mydb
 .kg use mydb
 
@@ -299,7 +299,7 @@ Define the schema before inserting data. All inserts are validated immediately.
 - Better for production systems
 
 **Bulk loading with schema-first:**
-```datalog
+```iql
 +product(sku: string, name: string, price: float)
 
 // Bulk insert - all tuples validated before any are inserted
@@ -311,7 +311,7 @@ Define the schema before inserting data. All inserts are validated immediately.
 ```
 
 **File loading with schema-first:**
-```datalog
+```iql
 +sensor_reading(timestamp: int, sensor_id: string, value: float)
 
 // Load validates each row against schema
@@ -322,7 +322,7 @@ Define the schema before inserting data. All inserts are validated immediately.
 
 Insert data without a schema (schema-less mode), then optionally add a schema later.
 
-```datalog
+```iql
 .kg use mydb
 
 // 1. Insert data freely - no validation
@@ -341,7 +341,7 @@ Insert data without a schema (schema-less mode), then optionally add a schema la
 - Flexible for ad-hoc analysis
 
 **Schema-less behavior:**
-```datalog
+```iql
 // Without schema, anything goes
 +mixed(1, "text")
 +mixed("also text", 42)
@@ -350,7 +350,7 @@ Insert data without a schema (schema-less mode), then optionally add a schema la
 ```
 
 **Adding schema to existing data:**
-```datalog
+```iql
 // Existing data
 +event(1, "click", 1704067200)
 +event(2, "view", 1704067260)
@@ -372,7 +372,7 @@ Insert data without a schema (schema-less mode), then optionally add a schema la
 
 If existing data doesn't match the proposed schema, the schema definition is **rejected** (not the data):
 
-```datalog
+```iql
 +user(1, "alice")
 +user("not-an-int", "bob")     // String in first column - allowed without schema
 
@@ -385,7 +385,7 @@ If existing data doesn't match the proposed schema, the schema definition is **r
 
 The user must fix the data first:
 
-```datalog
+```iql
 -user("not-an-int", "bob")     // Remove bad row
 +user(id: int, name: string)   // Now schema can be registered
 ```
@@ -394,7 +394,7 @@ The user must fix the data first:
 
 You can switch between modes as needed:
 
-```datalog
+```iql
 // Start schema-less for exploration
 +experiment(1, "trial-a", 0.5)
 +experiment(2, "trial-b", 0.7)
@@ -414,7 +414,7 @@ You can switch between modes as needed:
 
 Use session schemas to temporarily validate without persisting:
 
-```datalog
+```iql
 // Production has no schema (legacy data)
 // But you want to validate a batch before inserting
 
@@ -600,7 +600,7 @@ vector_type ::= "vector" "[" integer "]" ;
 ```
 
 Examples:
-```datalog
+```iql
 +user(id: int, name: string, active: bool)
 +embedding(id: int, vec: vector[128])
 product(sku: string, price: float)  // Session schema

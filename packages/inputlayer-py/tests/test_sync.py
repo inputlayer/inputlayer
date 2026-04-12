@@ -511,6 +511,56 @@ def test_knowledge_graph_sync_delete_with_where() -> None:
     mock_kg.delete.assert_awaited_once_with(Employee, where=where_fn)
 
 
+def test_knowledge_graph_sync_edit_rule_clause_delegates() -> None:
+    from inputlayer.client_sync import KnowledgeGraphSync
+
+    mock_kg = MagicMock()
+    mock_kg.edit_rule_clause = AsyncMock()
+
+    sync_kg = KnowledgeGraphSync(mock_kg)
+    sync_kg.edit_rule_clause("my_rule", 1, "clause_obj")
+
+    mock_kg.edit_rule_clause.assert_awaited_once_with("my_rule", 1, "clause_obj")
+
+
+def test_knowledge_graph_sync_query_stream_delegates() -> None:
+    from inputlayer.client_sync import KnowledgeGraphSync
+
+    mock_kg = MagicMock()
+
+    async def fake_stream(*args, **kwargs):
+        yield [[1, 2], [3, 4]]
+        yield [[5, 6]]
+
+    mock_kg.query_stream = fake_stream
+
+    sync_kg = KnowledgeGraphSync(mock_kg)
+    batches = sync_kg.query_stream()
+    assert batches == [[[1, 2], [3, 4]], [[5, 6]]]
+
+
+def test_knowledge_graph_sync_vector_search_delegates() -> None:
+    from inputlayer.client_sync import KnowledgeGraphSync
+    from inputlayer.result import ResultSet
+
+    mock_result = ResultSet(
+        columns=["Id", "Dist"], rows=[["1", 0.1]], row_count=1
+    )
+    mock_kg = MagicMock()
+    mock_kg.vector_search = AsyncMock(return_value=mock_result)
+
+    sync_kg = KnowledgeGraphSync(mock_kg)
+    result = sync_kg.vector_search(
+        "FakeRelation", [0.1, 0.2], k=5, extra_iql_clauses=["Source = \"a\""]
+    )
+
+    assert result.row_count == 1
+    mock_kg.vector_search.assert_awaited_once()
+    call_kwargs = mock_kg.vector_search.await_args[1]
+    assert call_kwargs["k"] == 5
+    assert call_kwargs["extra_iql_clauses"] == ["Source = \"a\""]
+
+
 def test_input_layer_sync_connect_close() -> None:
     """InputLayerSync.connect/close delegate through run_sync."""
     from inputlayer.client_sync import InputLayerSync
@@ -571,6 +621,33 @@ def test_input_layer_sync_knowledge_graph_returns_sync_wrapper() -> None:
         assert isinstance(kg, KnowledgeGraphSync)
         assert kg.name == "my_kg"
         mock_client.knowledge_graph.assert_called_once_with("my_kg", create=True)
+
+
+def test_loop_thread_concurrent_shutdown_safe() -> None:
+    """Concurrent shutdown calls should not raise."""
+    lt = _LoopThread()
+
+    async def coro() -> int:
+        return 1
+
+    lt.run(coro())
+    # Shutting down from multiple threads concurrently should be safe.
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [pool.submit(lt.shutdown) for _ in range(4)]
+        for f in futures:
+            f.result()  # should not raise
+
+
+def test_loop_thread_custom_timeout() -> None:
+    """Timeout parameter is respected."""
+    lt = _LoopThread(timeout=0.01)
+
+    async def coro() -> None:
+        await asyncio.sleep(10)
+
+    with pytest.raises(TimeoutError):
+        lt.run(coro())
+    lt.shutdown()
 
 
 def test_input_layer_sync_user_management() -> None:

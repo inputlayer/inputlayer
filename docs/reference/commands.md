@@ -346,7 +346,7 @@ The `.load` command executes statements from a file.
 Load and execute a file in strict mode.
 
 ```
-.load schema.idl
+.load schema.iql
 ```
 
 **Behavior:**
@@ -359,7 +359,7 @@ Load and execute a file in strict mode.
 Atomically replace existing definitions.
 
 ```
-.load views/access_control.idl --replace
+.load views/access_control.iql --replace
 ```
 
 **Behavior:**
@@ -375,7 +375,7 @@ Atomically replace existing definitions.
 Merge with existing definitions.
 
 ```
-.load additional_rules.idl --merge
+.load additional_rules.iql --merge
 ```
 
 **Behavior:**
@@ -397,7 +397,7 @@ Merge with existing definitions.
 
 | Extension | Description |
 |-----------|-------------|
-| `.idl` | InputLayer script (statements) |
+| `.iql` | InputLayer script (statements) |
 
 ## System Commands
 

@@ -1,6 +1,6 @@
-//! # Datalog Parser
+//! # IQL Parser
 //!
-//! Lexes and parses Datalog source code into AST.
+//! Lexes and parses IQL source code into AST.
 //! Handles rules, atoms, terms, negation, comparisons, aggregates,
 //! arithmetic, function calls, and comments (% and /* */).
 
@@ -42,7 +42,7 @@ pub fn strip_block_comments(source: &str) -> String {
     result
 }
 
-/// Parse a Datalog program (supports // and /* */ comments).
+/// Parse an IQL program (supports // and /* */ comments).
 pub fn parse_program(source: &str) -> Result<Program, String> {
     let mut program = Program::new();
 

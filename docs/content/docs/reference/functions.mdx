@@ -30,7 +30,7 @@ Distance functions for f32 vectors. All return `Float64`.
 
 Euclidean (L2) distance between two vectors.
 
-```datalog
+```iql
 // Syntax
 D = euclidean(V1, V2)
 
@@ -55,7 +55,7 @@ similar(Id1, Id2, Dist) <-
 
 Cosine distance (1 - cosine similarity) between two vectors.
 
-```datalog
+```iql
 // Syntax
 D = cosine(V1, V2)
 
@@ -81,7 +81,7 @@ similar_docs(Id1, Id2) <-
 
 Dot product of two vectors.
 
-```datalog
+```iql
 // Syntax
 Score = dot(V1, V2)
 
@@ -104,7 +104,7 @@ relevance(QueryId, DocId, Score) <-
 
 Manhattan (L1) distance between two vectors. Good for sparse vectors.
 
-```datalog
+```iql
 // Syntax
 D = manhattan(V1, V2)
 
@@ -132,7 +132,7 @@ Operations for manipulating vectors.
 
 Normalize vector to unit length.
 
-```datalog
+```iql
 // Syntax
 Normalized = normalize(V)
 
@@ -155,7 +155,7 @@ normalized_embedding(Id, NormV) <-
 
 Get the dimension (length) of a float32 vector.
 
-```datalog
+```iql
 // Syntax
 Dim = vec_dim(V)
 
@@ -177,7 +177,7 @@ valid_embedding(Id, V) <-
 
 Element-wise addition of two vectors.
 
-```datalog
+```iql
 // Syntax
 Sum = vec_add(V1, V2)
 
@@ -202,7 +202,7 @@ combined(Id, SumV) <-
 
 Scale vector by a scalar value.
 
-```datalog
+```iql
 // Syntax
 Scaled = vec_scale(V, S)
 
@@ -229,7 +229,7 @@ Functions for approximate nearest neighbor search.
 
 Compute LSH bucket ID for a float32 vector.
 
-```datalog
+```iql
 // Syntax
 Bucket = lsh_bucket(V, TableIdx, NumHyperplanes)
 
@@ -255,7 +255,7 @@ lsh_index(Id, Table, Bucket) <-
 
 Generate multi-probe sequence for a bucket by Hamming distance.
 
-```datalog
+```iql
 // Syntax
 Probes = lsh_probes(Bucket, NumHyperplanes, NumProbes)
 
@@ -278,7 +278,7 @@ probe_buckets(OrigBucket, Probes) <-
 
 Compute LSH bucket and probes in one call for float32 vectors.
 
-```datalog
+```iql
 // Syntax
 Buckets = lsh_multi_probe(V, TableIdx, NumHyperplanes, NumProbes)
 ```
@@ -301,7 +301,7 @@ Functions for int8 vector quantization (memory-efficient storage).
 
 Linear quantization: maps [min, max] to [-128, 127].
 
-```datalog
+```iql
 // Syntax
 QV = quantize_linear(V)
 
@@ -322,7 +322,7 @@ compressed(Id, QV) <-
 
 Symmetric quantization: maps [-max_abs, max_abs] to [-127, 127], preserving zero.
 
-```datalog
+```iql
 QV = quantize_symmetric(V)
 ```
 
@@ -339,7 +339,7 @@ QV = quantize_symmetric(V)
 
 Convert int8 vector back to f32.
 
-```datalog
+```iql
 FV = dequantize(QV)
 ```
 
@@ -356,7 +356,7 @@ FV = dequantize(QV)
 
 Dequantize with explicit scale factor.
 
-```datalog
+```iql
 FV = dequantize_scaled(QV, Scale)
 ```
 
@@ -378,7 +378,7 @@ Direct computation on int8 values for maximum speed.
 
 Euclidean distance for int8 vectors.
 
-```datalog
+```iql
 D = euclidean_int8(QV1, QV2)
 ```
 
@@ -394,7 +394,7 @@ D = euclidean_int8(QV1, QV2)
 
 Cosine distance for int8 vectors.
 
-```datalog
+```iql
 D = cosine_int8(QV1, QV2)
 ```
 
@@ -410,7 +410,7 @@ D = cosine_int8(QV1, QV2)
 
 Dot product for int8 vectors.
 
-```datalog
+```iql
 Score = dot_int8(QV1, QV2)
 ```
 
@@ -426,7 +426,7 @@ Score = dot_int8(QV1, QV2)
 
 Manhattan distance for int8 vectors.
 
-```datalog
+```iql
 D = manhattan_int8(QV1, QV2)
 ```
 
@@ -446,7 +446,7 @@ Functions for time-based queries and temporal reasoning.
 
 Get current Unix timestamp in milliseconds.
 
-```datalog
+```iql
 Now = time_now()
 ```
 
@@ -461,7 +461,7 @@ Now = time_now()
 
 Compute difference between two timestamps.
 
-```datalog
+```iql
 Diff = time_diff(T1, T2)
 ```
 
@@ -477,7 +477,7 @@ Diff = time_diff(T1, T2)
 
 Add duration to timestamp.
 
-```datalog
+```iql
 NewTime = time_add(Ts, DurationMs)
 ```
 
@@ -493,7 +493,7 @@ NewTime = time_add(Ts, DurationMs)
 
 Subtract duration from timestamp.
 
-```datalog
+```iql
 NewTime = time_sub(Ts, DurationMs)
 ```
 
@@ -509,7 +509,7 @@ NewTime = time_sub(Ts, DurationMs)
 
 Exponential time decay. Formula: `0.5^(age/half_life)`.
 
-```datalog
+```iql
 Weight = time_decay(Ts, Now, HalfLifeMs)
 ```
 
@@ -528,7 +528,7 @@ Weight = time_decay(Ts, Now, HalfLifeMs)
 
 Linear time decay. Formula: `max(0, 1 - age/max_age)`.
 
-```datalog
+```iql
 Weight = time_decay_linear(Ts, Now, MaxAgeMs)
 ```
 
@@ -654,7 +654,7 @@ General-purpose math functions. All accept Int64 or Float64 inputs (coerced to f
 
 Generic absolute value. Preserves input type.
 
-```datalog
+```iql
 A = abs(X)
 ```
 
@@ -669,7 +669,7 @@ A = abs(X)
 
 Absolute value of an integer.
 
-```datalog
+```iql
 AbsVal = abs_int64(X)
 ```
 
@@ -686,7 +686,7 @@ AbsVal = abs_int64(X)
 
 Absolute value of a float.
 
-```datalog
+```iql
 AbsVal = abs_float64(X)
 ```
 
@@ -701,7 +701,7 @@ AbsVal = abs_float64(X)
 
 Square root.
 
-```datalog
+```iql
 R = sqrt(X)
 ```
 
@@ -718,7 +718,7 @@ R = sqrt(X)
 
 Power function.
 
-```datalog
+```iql
 R = pow(Base, Exp)
 ```
 
@@ -734,7 +734,7 @@ R = pow(Base, Exp)
 
 Natural logarithm (base e).
 
-```datalog
+```iql
 R = log(X)
 ```
 
@@ -751,7 +751,7 @@ R = log(X)
 
 Exponential function (e^x).
 
-```datalog
+```iql
 R = exp(X)
 ```
 
@@ -766,7 +766,7 @@ R = exp(X)
 
 Sine function (radians).
 
-```datalog
+```iql
 R = sin(X)
 ```
 
@@ -781,7 +781,7 @@ R = sin(X)
 
 Cosine function (radians).
 
-```datalog
+```iql
 R = cos(X)
 ```
 
@@ -796,7 +796,7 @@ R = cos(X)
 
 Tangent function (radians).
 
-```datalog
+```iql
 R = tan(X)
 ```
 
@@ -811,7 +811,7 @@ R = tan(X)
 
 Round down to nearest integer.
 
-```datalog
+```iql
 R = floor(X)
 ```
 
@@ -826,7 +826,7 @@ R = floor(X)
 
 Round up to nearest integer.
 
-```datalog
+```iql
 R = ceil(X)
 ```
 
@@ -841,7 +841,7 @@ R = ceil(X)
 
 Sign function. Returns -1, 0, or 1.
 
-```datalog
+```iql
 S = sign(X)
 ```
 
@@ -862,7 +862,7 @@ Functions for string manipulation.
 
 Get string length (byte count).
 
-```datalog
+```iql
 L = len(S)
 
 // Example
@@ -883,7 +883,7 @@ long_names(Name, L) <-
 
 Convert string to uppercase (Unicode-aware).
 
-```datalog
+```iql
 U = upper(S)
 ```
 
@@ -898,7 +898,7 @@ U = upper(S)
 
 Convert string to lowercase (Unicode-aware).
 
-```datalog
+```iql
 L = lower(S)
 ```
 
@@ -913,7 +913,7 @@ L = lower(S)
 
 Remove leading and trailing whitespace.
 
-```datalog
+```iql
 T = trim(S)
 ```
 
@@ -928,7 +928,7 @@ T = trim(S)
 
 Extract a substring.
 
-```datalog
+```iql
 Sub = substr(S, Start, Len)
 
 // Example - Get first 3 characters
@@ -952,7 +952,7 @@ prefix(Name, P) <-
 
 Replace all occurrences of a substring.
 
-```datalog
+```iql
 R = replace(S, Find, Replacement)
 
 // Example
@@ -974,7 +974,7 @@ cleaned(R) <-
 
 Concatenate multiple values into a string. Variable arity (2+ arguments).
 
-```datalog
+```iql
 R = concat(S1, S2)
 
 // Example - Build full name
@@ -1000,7 +1000,7 @@ Scalar comparison functions returning the minimum or maximum of two values.
 
 Return the smaller of two values.
 
-```datalog
+```iql
 M = min_val(A, B)
 
 // Example - Clamp to range
@@ -1023,7 +1023,7 @@ clamped(X, C) <-
 
 Return the larger of two values.
 
-```datalog
+```iql
 M = max_val(A, B)
 ```
 

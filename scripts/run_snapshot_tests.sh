@@ -1,6 +1,6 @@
 #!/bin/bash
-# Snapshot Test Runner for InputLayer Datalog
-# Compares actual output against expected .idl.out files
+# Snapshot Test Runner for InputLayer IQL
+# Compares actual output against expected .iql.out files
 #
 # Design principles:
 # - 1 connection per test: each test script IS the client invocation
@@ -11,7 +11,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-EXAMPLES_DIR="$PROJECT_DIR/examples/datalog"
+EXAMPLES_DIR="$PROJECT_DIR/examples/iql"
 SERVER_PORT="${INPUTLAYER_TEST_PORT:-8080}"
 SERVER_URL="http://127.0.0.1:${SERVER_PORT}"
 CLIENT_SERVER_URL="${SERVER_URL}"
@@ -126,7 +126,7 @@ extract_kgs() {
 
 # List non-default knowledge graphs via client
 ws_list_kgs() {
-    local script_file="${TEMP_DIR}/_kg_list.idl"
+    local script_file="${TEMP_DIR}/_kg_list.iql"
     local output_file="${TEMP_DIR}/_kg_list.out"
     printf '%s\n' ".kg list" > "$script_file"
     perl -e 'alarm shift; exec @ARGV' 15 "$CLIENT_BIN" --server "$CLIENT_SERVER_URL" --script "$script_file" >"$output_file" 2>/dev/null || true
@@ -141,7 +141,7 @@ ws_drop_kgs() {
     local kgs="$1"
     [[ -z "$kgs" ]] && return 0
     local script_file
-    script_file=$(mktemp "${TEMP_DIR}/_kg_drop_XXXXXX.idl")
+    script_file=$(mktemp "${TEMP_DIR}/_kg_drop_XXXXXX.iql")
     {
         printf '%s\n' ".kg use default"
         for kg in $kgs; do
@@ -446,7 +446,7 @@ if [[ -n "$stale_kgs" ]]; then
 fi
 
 # Warmup: send a few queries to ensure the server's WS pipeline is fully ready
-warmup_script="${TEMP_DIR}/_warmup.idl"
+warmup_script="${TEMP_DIR}/_warmup.iql"
 printf '%s\n' ".kg list" ".status" > "$warmup_script"
 for i in 1 2 3; do
     perl -e 'alarm shift; exec @ARGV' 10 "$CLIENT_BIN" --server "$CLIENT_SERVER_URL" --script "$warmup_script" >/dev/null 2>&1 || true
@@ -466,7 +466,7 @@ echo "========================================"
 echo ""
 
 # Find test files (exclude _ prefix helpers and _pending_ tests)
-TEST_FILES=$(find "$EXAMPLES_DIR" -name "*.idl" -type f ! -name "_*" ! -name "*_pending_*" | sort)
+TEST_FILES=$(find "$EXAMPLES_DIR" -name "*.iql" -type f ! -name "_*" ! -name "*_pending_*" | sort)
 
 if [[ -n "$FILTER" ]]; then
     TEST_FILES=$(echo "$TEST_FILES" | grep "$FILTER")
@@ -478,7 +478,7 @@ else
     TEST_TOTAL=$(echo "$TEST_FILES" | wc -l | tr -d ' ')
 fi
 
-PENDING_COUNT=$(find "$EXAMPLES_DIR" -name "*_pending_*.idl" -type f | wc -l | tr -d ' ')
+PENDING_COUNT=$(find "$EXAMPLES_DIR" -name "*_pending_*.iql" -type f | wc -l | tr -d ' ')
 
 # Run tests
 if [[ "$PARALLEL_JOBS" -le 1 ]]; then

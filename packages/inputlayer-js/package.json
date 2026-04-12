@@ -51,7 +51,7 @@
   "keywords": [
     "inputlayer",
     "knowledge-graph",
-    "datalog",
+    "iql",
     "reasoning",
     "typescript",
     "vector-search"

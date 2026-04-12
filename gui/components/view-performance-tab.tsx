@@ -1,8 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import type { View } from "@/lib/datalog-store"
-import { useDatalogStore } from "@/lib/datalog-store"
+import type { View } from "@/lib/iql-store"
+import { useIQLStore } from "@/lib/iql-store"
 import {
   TimingDisplay, MiniWaterfall, formatUs, Tip, PIPELINE_STAGES, EXECUTION_COLOR,
 } from "@/components/timing-display"
@@ -82,8 +82,8 @@ function TimingSection({ view }: { view: View }) {
 // ── Sub-tab: Inputs ─────────────────────────────────────────────────────────
 
 function InputsSection({ view }: { view: View }) {
-  const relations = useDatalogStore((s) => s.relations)
-  const recentMutations = useDatalogStore((s) => s.recentMutations)
+  const relations = useIQLStore((s) => s.relations)
+  const recentMutations = useIQLStore((s) => s.recentMutations)
   const isRecursive = view.dependencies.includes(view.name)
   const bm = view.benchmark
 

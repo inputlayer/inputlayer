@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation"
 import { AppShell } from "@/components/app-shell"
 import { GraphSidebar } from "@/components/graph-sidebar"
 import { GraphCanvas } from "@/components/graph-canvas"
-import { useDatalogStore, type Relation } from "@/lib/datalog-store"
+import { useIQLStore, type Relation } from "@/lib/iql-store"
 import { buildGraphElements } from "@/lib/graph-utils"
 import { generateVariables } from "@/lib/ws-parsers"
 import { AlertCircle, RefreshCw } from "lucide-react"
@@ -20,7 +20,7 @@ function GraphPageInner() {
     refreshCurrentKnowledgeGraph,
     loadRelationData,
     executeInternalQuery,
-  } = useDatalogStore()
+  } = useIQLStore()
 
   const searchParams = useSearchParams()
   const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set())

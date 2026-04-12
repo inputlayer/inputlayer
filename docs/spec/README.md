@@ -1,6 +1,6 @@
-# InputLayer Datalog Specification
+# InputLayer IQL Specification
 
-This section contains the authoritative specification for InputLayer's Datalog dialect. All claims in this documentation must match the actual implementation.
+This section contains the authoritative specification for InputLayer's IQL dialect. All claims in this documentation must match the actual implementation.
 
 ## Contents
 
@@ -49,25 +49,25 @@ InputLayer supports 9 value types:
 ## Quick Reference
 
 ### Fact Syntax
-```datalog
+```iql
 +relation(value1, value2)     // Persistent fact
 relation(value1, value2)      // Session fact
 -relation(value1, value2)     // Delete fact
 ```
 
 ### Rule Syntax
-```datalog
+```iql
 +derived(X, Y) <- base(X, Z), other(Z, Y)     // Persistent rule
 derived(X, Y) <- base(X, Z), other(Z, Y)      // Session rule
 ```
 
 ### Query Syntax
-```datalog
+```iql
 ?relation(X, Y), X > 10
 ```
 
 ### Aggregation Syntax
-```datalog
+```iql
 ?count<X> <- relation(X, _)
 ?sum<Value> <- data(_, Value)
 ?top_k<5, Item, Score:desc> <- scores(Item, Score)

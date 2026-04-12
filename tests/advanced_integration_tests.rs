@@ -1,6 +1,6 @@
 //! Multi-hop joins, self-joins, and complex filter combinations.
 
-use inputlayer::DatalogEngine;
+use inputlayer::IQLEngine;
 use std::collections::HashSet;
 
 /// Helper to convert results to set for easy comparison
@@ -10,7 +10,7 @@ fn to_set(results: Vec<(i32, i32)>) -> HashSet<(i32, i32)> {
 
 #[test]
 fn test_chained_joins_3hop() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (4, 5)]);
 
     // 3-hop paths
@@ -25,7 +25,7 @@ fn test_chained_joins_3hop() {
 
 #[test]
 fn test_self_join_with_filter() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     engine.add_fact("data", vec![(1, 2), (2, 3), (3, 4), (5, 6)]);
 
     // Find pairs where x connects to z through y, with X < Z
@@ -41,7 +41,7 @@ fn test_self_join_with_filter() {
 
 #[test]
 fn test_column_swap_projection() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     engine.add_fact("edge", vec![(1, 2), (3, 4), (5, 6)]);
 
     // Swap columns: result(Y, X) <- edge(X, Y)
@@ -56,7 +56,7 @@ fn test_column_swap_projection() {
 
 #[test]
 fn test_join_with_column_equality() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     engine.add_fact("r", vec![(1, 2), (2, 3), (3, 3)]);
     engine.add_fact("s", vec![(2, 10), (3, 20), (3, 30)]);
 
@@ -72,7 +72,7 @@ fn test_join_with_column_equality() {
 
 #[test]
 fn test_variable_reuse_in_body() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     // Add edges including bidirectional ones to form cycles
     engine.add_fact("edge", vec![(1, 2), (2, 1), (2, 3), (3, 1), (4, 4)]);
 
@@ -97,7 +97,7 @@ fn test_variable_reuse_in_body() {
 
 #[test]
 fn test_join_with_multiple_constraints() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     engine.add_fact("r", vec![(1, 2), (2, 3), (3, 4)]);
     engine.add_fact("s", vec![(2, 5), (3, 6), (4, 7)]);
 
@@ -113,7 +113,7 @@ fn test_join_with_multiple_constraints() {
 
 #[test]
 fn test_nested_join_complex() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     engine.add_fact("a", vec![(1, 2), (2, 3)]);
     engine.add_fact("b", vec![(2, 4), (3, 5)]);
     engine.add_fact("c", vec![(4, 6), (5, 7)]);
@@ -127,7 +127,7 @@ fn test_nested_join_complex() {
 
 #[test]
 fn test_safety_violation_detection() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     engine.add_fact("edge", vec![(1, 2)]);
 
     // Unsafe: z not in body
@@ -145,7 +145,7 @@ fn test_safety_violation_detection() {
 
 #[test]
 fn test_empty_knowledge_graph_query() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     // No facts added
 
     let query = "result(X, Y) <- edge(X, Y)";
@@ -156,7 +156,7 @@ fn test_empty_knowledge_graph_query() {
 
 #[test]
 fn test_optimization_actually_optimizes() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     engine.add_fact("edge", vec![(1, 2), (2, 3)]);
 
     // Query that creates identity projection (will be optimized away)
@@ -174,7 +174,7 @@ fn test_optimization_actually_optimizes() {
 
 #[test]
 fn test_multiple_rules_execution() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
     let program = "
@@ -200,7 +200,7 @@ fn test_multiple_rules_execution() {
 
 #[test]
 fn test_asymmetric_joins() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     engine.add_fact("parent", vec![(1, 2), (1, 3), (2, 4)]);
     engine.add_fact("age", vec![(1, 50), (2, 25), (3, 22), (4, 5)]);
 
@@ -221,7 +221,7 @@ fn test_asymmetric_joins() {
 
 #[test]
 fn test_fact_parsing() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     // Test parsing facts (rules with no body)
     let program = "
@@ -240,7 +240,7 @@ fn test_fact_parsing() {
 
 #[test]
 fn test_comment_handling() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     engine.add_fact("edge", vec![(1, 2)]);
 
     let program = "
@@ -255,7 +255,7 @@ fn test_comment_handling() {
 
 #[test]
 fn test_whitespace_handling() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     engine.add_fact("edge", vec![(1, 2)]);
 
     // Test various whitespace scenarios
@@ -280,7 +280,7 @@ fn test_config_creation() {
     assert!(config.enable_subplan_sharing);
     assert!(config.enable_boolean_specialization);
 
-    let mut engine = DatalogEngine::with_config(config);
+    let mut engine = IQLEngine::with_config(config);
     engine.add_fact("edge", vec![(1, 2)]);
 
     let results = engine.execute("result(X, Y) <- edge(X, Y)").unwrap();
@@ -289,7 +289,7 @@ fn test_config_creation() {
 
 #[test]
 fn test_distinct_eliminates_duplicates() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     // Add duplicate facts
     engine.add_fact("data", vec![(1, 2), (1, 2), (2, 3), (2, 3), (3, 4)]);
 
@@ -303,7 +303,7 @@ fn test_distinct_eliminates_duplicates() {
 
 #[test]
 fn test_no_constraints_returns_all() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     engine.add_fact("edge", vec![(1, 2), (3, 4), (5, 6)]);
 
     let query = "result(X, Y) <- edge(X, Y)";
@@ -314,7 +314,7 @@ fn test_no_constraints_returns_all() {
 
 #[test]
 fn test_catalog_tracks_schemas() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     engine.add_fact("edge", vec![(1, 2)]);
 
     let catalog = engine.catalog();
@@ -323,7 +323,7 @@ fn test_catalog_tracks_schemas() {
 
 #[test]
 fn test_ir_nodes_generated() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     engine.add_fact("edge", vec![(1, 2)]);
 
     engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
@@ -335,7 +335,7 @@ fn test_ir_nodes_generated() {
 
 #[test]
 fn test_optimization_config_accessible() {
-    let engine = DatalogEngine::new();
+    let engine = IQLEngine::new();
     let config = engine.config();
 
     // Verify default configuration - all optimizations enabled
@@ -347,7 +347,7 @@ fn test_optimization_config_accessible() {
 
 #[test]
 fn test_multiple_atoms_in_body() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     engine.add_fact("r", vec![(1, 2)]);
     engine.add_fact("s", vec![(2, 3)]);
     engine.add_fact("t", vec![(3, 4)]);
@@ -529,7 +529,7 @@ fn test_sip_chain_join_correctness() {
         enable_magic_sets: true,
     };
 
-    let mut engine = DatalogEngine::with_config(config);
+    let mut engine = IQLEngine::with_config(config);
 
     // Chain data: a -> b -> c -> d
     engine.add_fact("r", vec![(1, 2), (3, 4)]);
@@ -559,7 +559,7 @@ fn test_sip_two_way_join_correctness() {
         enable_magic_sets: true,
     };
 
-    let mut engine = DatalogEngine::with_config(config);
+    let mut engine = IQLEngine::with_config(config);
 
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
@@ -587,7 +587,7 @@ fn test_sip_with_dangling_tuples() {
         enable_magic_sets: true,
     };
 
-    let mut engine = DatalogEngine::with_config(config);
+    let mut engine = IQLEngine::with_config(config);
 
     // R has tuples that won't match S, S has tuples that won't match T
     engine.add_fact("r", vec![(1, 2), (100, 200), (300, 400)]); // 100,300 won't join

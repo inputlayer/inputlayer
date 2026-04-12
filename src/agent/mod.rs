@@ -112,7 +112,7 @@ pub struct AgentResponse {
 pub const IQL_REFERENCE: &str = r"
 ## InputLayer Quick Reference
 
-InputLayer is a knowledge graph engine with recursive Datalog, incremental maintenance, and provenance.
+InputLayer is a knowledge graph engine with recursive IQL, incremental maintenance, and provenance.
 
 ### IQL Syntax
 - `+fact(a, b)` - insert a fact
@@ -145,7 +145,7 @@ InputLayer is a knowledge graph engine with recursive Datalog, incremental maint
 - `.session` / `.session clear` - session rule management
 - `.index list` / `.index create <name> on <rel>(<col>) [metric cosine]` - HNSW vector index management
 - `.index stats <name>` / `.index rebuild <name>` / `.index drop <name>`
-- `.load <file.idl>` - execute an IDL script file
+- `.load <file.iql>` - execute an IDL script file
 - `.status` - system status
 - `.compact` - compact storage
 
@@ -332,10 +332,10 @@ impl AgentManager {
 }
 
 /// Extract a suggested query from the agent's response.
-/// Looks for ```iql or ```datalog code blocks, or lines starting with ? or .why
+/// Looks for ```iql or ```iql code blocks, or lines starting with ? or .why
 fn extract_suggested_query(response: &str) -> Option<String> {
     // Look for fenced code blocks
-    for marker in ["```iql", "```datalog", "```"] {
+    for marker in ["```iql", "```iql", "```"] {
         if let Some(start) = response.find(marker) {
             let code_start = start + marker.len();
             if let Some(end) = response[code_start..].find("```") {
@@ -371,8 +371,8 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_suggested_query_datalog_block() {
-        let response = "Run this:\n```datalog\n.why ?purchase_ok(\"team_a\", \"acme\", 3200)\n```";
+    fn test_extract_suggested_query_iql_block_why() {
+        let response = "Run this:\n```iql\n.why ?purchase_ok(\"team_a\", \"acme\", 3200)\n```";
         assert_eq!(
             extract_suggested_query(response),
             Some(".why ?purchase_ok(\"team_a\", \"acme\", 3200)".to_string())

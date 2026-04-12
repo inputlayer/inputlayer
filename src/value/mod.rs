@@ -38,7 +38,7 @@ use std::sync::Arc;
 // Re-export Arrow's DataType for schema definitions
 pub use arrow::datatypes::DataType as ArrowDataType;
 
-/// Supported data types for Datalog values
+/// Supported data types for IQL values
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DataType {
     Int32,

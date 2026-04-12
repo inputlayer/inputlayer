@@ -19,7 +19,7 @@ When agents store observations as structured facts and derive conclusions throug
 
 A customer success agent monitors two accounts. It has stored three observations about each.
 
-```datalog
+```iql
 // Acme: enterprise customer, $150K contract, declining usage, renewal in April
 +customer[("acme", "enterprise", 150000)]
 +usage_trend[("acme", "declining")]
@@ -39,7 +39,7 @@ Six facts. Each one is a specific, testable observation - not a text passage tha
 
 Churn risk requires three conditions: the customer is high-value, their usage is dropping, and their renewal is imminent. Each condition is its own rule with clear criteria.
 
-```datalog
+```iql
 // High-value: enterprise tier with contract over $100K
 +high_value(C) <- customer(C, "enterprise", Amt), Amt > 100000
 
@@ -59,7 +59,7 @@ These rules are readable, auditable, and versionable. When the definition of "hi
 
 ## Who is at risk?
 
-```datalog
+```iql
 ?churn_risk(C)
 ```
 
@@ -80,7 +80,7 @@ Acme is flagged. Globex is not.
 
 This is the point of the entire page. The `.why` command returns the proof tree - the exact chain of facts and rules that produced the conclusion.
 
-```datalog
+```iql
 .why ?churn_risk("acme")
 ```
 
@@ -94,7 +94,7 @@ This isn't a model's interpretation. It's a deterministic chain you can inspect,
 
 Equally important: understanding why a conclusion was not reached.
 
-```datalog
+```iql
 .why_not churn_risk("globex")
 ```
 
@@ -114,12 +114,12 @@ Globex is not at churn risk because it's not high-value. It's a startup with a $
 
 The customer success team runs an intervention. Acme's usage stabilizes.
 
-```datalog
+```iql
 -usage_trend("acme", "declining")
 +usage_trend[("acme", "stable")]
 ```
 
-```datalog
+```iql
 ?churn_risk(C)
 ```
 

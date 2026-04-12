@@ -2,12 +2,12 @@
 //!
 //! Tests the 3-rule recursive same_component query
 
-use inputlayer::DatalogEngine;
+use inputlayer::IQLEngine;
 
 fn main() {
     println!("=== Debug Recursive Union ===\n");
 
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     // Simple graph: 1->2->3->4
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
@@ -23,7 +23,7 @@ fn main() {
     }
 
     // Reset
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
     // Test 2 - two rules for same head (non-recursive union)
@@ -41,7 +41,7 @@ __result__(X, Y) :- sc(X, Y).
     }
 
     // Reset
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
     // Test 3 - recursive rule with union detection

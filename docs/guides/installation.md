@@ -125,7 +125,7 @@ The data directory contains:
 
 ## Python SDK
 
-To interact with InputLayer from Python (no Datalog required):
+To interact with InputLayer from Python (no IQL required):
 
 ```bash
 pip install inputlayer
@@ -138,7 +138,7 @@ See the [Python SDK Guide](python-sdk.md) for full documentation.
 Now that you have InputLayer installed:
 
 1. **[Your First Program](first-program.md)** - Write your first InputLayer program
-2. **[Python SDK](python-sdk.md)** - Use Python instead of raw Datalog
+2. **[Python SDK](python-sdk.md)** - Use Python instead of raw IQL
 3. **[Core Concepts](core-concepts.md)** - Understand facts, rules, and queries
 4. **[REPL Guide](repl.md)** - Master the interactive environment
 

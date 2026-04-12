@@ -7,8 +7,8 @@ import { QueryEditorPanel } from "@/components/query-editor-panel"
 import { QueryResultsPanel } from "@/components/query-results-panel"
 import { QuerySidebar } from "@/components/query-sidebar"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
-import { useDatalogStore } from "@/lib/datalog-store"
-import type { QueryResult, ValidationError } from "@/lib/datalog-store"
+import { useIQLStore } from "@/lib/iql-store"
+import type { QueryResult, ValidationError } from "@/lib/iql-store"
 import { Zap, AlertTriangle, PanelRightClose, PanelRightOpen, GripHorizontal } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -44,7 +44,7 @@ export default function QueryPage() {
 }
 
 function QueryPageInner() {
-  const { selectedKnowledgeGraph, executeQuery, setEditorContent, cancelCurrentQuery, executeInternalQuery, loadExample } = useDatalogStore()
+  const { selectedKnowledgeGraph, executeQuery, setEditorContent, cancelCurrentQuery, executeInternalQuery, loadExample } = useIQLStore()
   const [queryResult, setQueryResult] = useState<QueryResult | null>(null)
   const [isExecuting, setIsExecuting] = useState(false)
   const [error, setError] = useState<StructuredError | null>(null)

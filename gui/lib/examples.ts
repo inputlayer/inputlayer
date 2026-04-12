@@ -1,4 +1,4 @@
-/** Comprehensive Datalog examples organized by category, extracted from 1,100+ snapshot tests. */
+/** Comprehensive IQL examples organized by category, extracted from 1,100+ snapshot tests. */
 
 export interface Example {
   name: string

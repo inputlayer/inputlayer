@@ -1,6 +1,6 @@
-# InputLayer IDL - VS Code Extension
+# InputLayer IQL - VS Code Extension
 
-Syntax highlighting for InputLayer (`.idl` / `.dl`) files.
+Syntax highlighting for InputLayer (`.iql`) files.
 
 ## Features
 
@@ -10,7 +10,7 @@ Syntax highlighting for InputLayer (`.idl` / `.dl`) files.
 - Line (`//`) and block (`/* */`) comment support with nesting
 - Comment toggling with `Cmd+/` / `Ctrl+/`
 - Bracket matching, auto-closing pairs, bracket pair colorization
-- File associations: `.idl`, `.dl`
+- File associations: `.iql`
 
 ### Semantic highlighting
 
@@ -37,7 +37,7 @@ Schema declarations distinguish column names from relation names:
 
 ### Arrow ligature
 
-The extension enables font ligatures for `.idl` files. With a ligature font, `<-` displays as `←`:
+The extension enables font ligatures for `.iql` files. With a ligature font, `<-` displays as `←`:
 
 **Recommended fonts:** Fira Code, JetBrains Mono, Cascadia Code, Iosevka
 
@@ -71,7 +71,7 @@ The extension enables font ligatures for `.idl` files. With a ligature font, `<-
 ### Manual install
 
 ```bash
-cp -r packages/inputlayer-vscode ~/.vscode/extensions/inputlayer-idl-0.1.0
+cp -r packages/inputlayer-vscode ~/.vscode/extensions/inputlayer-iql-0.1.0
 ```
 
 Then quit and reopen VS Code.
@@ -84,8 +84,8 @@ code --extensionDevelopmentPath=$(pwd)/packages/inputlayer-vscode
 
 ## Development
 
-The TextMate grammar (`syntaxes/idl.tmLanguage.json`) is derived from:
-- PEG tokenizer: `src/syntax/datalog.pest` (token definitions)
+The TextMate grammar (`syntaxes/iql.tmLanguage.json`) is derived from:
+- PEG tokenizer: `src/syntax/iql.pest` (token definitions)
 - Schema types: `src/schema/mod.rs` (`SchemaType::from_str`)
 - Built-in functions: `src/vector_ops.rs`
 

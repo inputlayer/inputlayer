@@ -11,7 +11,7 @@ class CreateRelation:
     """Create a new relation with a typed schema."""
 
     name: str
-    columns: list[tuple[str, str]]  # [(col_name, datalog_type), ...]
+    columns: list[tuple[str, str]]  # [(col_name, iql_type), ...]
 
     def forward_commands(self) -> list[str]:
         parts = ", ".join(f"{col}: {tp}" for col, tp in self.columns)
@@ -61,7 +61,7 @@ class CreateRule:
     """Create a new rule with one or more clauses."""
 
     name: str
-    clauses: list[str]  # Compiled Datalog strings
+    clauses: list[str]  # Compiled IQL strings
 
     def forward_commands(self) -> list[str]:
         return list(self.clauses)
@@ -242,8 +242,8 @@ class DropIndex:
 
 
 @dataclass(frozen=True)
-class RunDatalog:
-    """Execute arbitrary Datalog commands (escape hatch)."""
+class RunIQL:
+    """Execute arbitrary IQL commands (escape hatch)."""
 
     forward: list[str]
     backward: list[str]
@@ -256,13 +256,13 @@ class RunDatalog:
 
     def describe(self) -> str:
         n = len(self.forward)
-        return f"Run {n} custom Datalog command{'s' if n != 1 else ''}"
+        return f"Run {n} custom IQL command{'s' if n != 1 else ''}"
 
     def to_dict(self) -> dict[str, Any]:
-        return {"type": "RunDatalog", "forward": self.forward, "backward": self.backward}
+        return {"type": "RunIQL", "forward": self.forward, "backward": self.backward}
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> RunDatalog:
+    def from_dict(cls, d: dict[str, Any]) -> RunIQL:
         return cls(forward=d["forward"], backward=d["backward"])
 
 
@@ -275,7 +275,7 @@ Operation = (
     | ReplaceRule
     | CreateIndex
     | DropIndex
-    | RunDatalog
+    | RunIQL
 )
 
 _OPERATION_REGISTRY: dict[str, type] = {
@@ -286,7 +286,7 @@ _OPERATION_REGISTRY: dict[str, type] = {
     "ReplaceRule": ReplaceRule,
     "CreateIndex": CreateIndex,
     "DropIndex": DropIndex,
-    "RunDatalog": RunDatalog,
+    "RunIQL": RunIQL,
 }
 
 

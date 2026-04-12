@@ -4,7 +4,7 @@ import { Database, ChevronDown, Search, Check, Plus, Trash2, Loader2 } from "luc
 import { Logo } from "@/components/logo"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { ConnectionStatus } from "@/components/connection-status"
-import { useDatalogStore } from "@/lib/datalog-store"
+import { useIQLStore } from "@/lib/iql-store"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -30,7 +30,7 @@ import { toast } from "sonner"
 const KG_NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/
 
 export function Header() {
-  const { selectedKnowledgeGraph, connection, knowledgeGraphs, loadKnowledgeGraph, createKnowledgeGraph, deleteKnowledgeGraph } = useDatalogStore()
+  const { selectedKnowledgeGraph, connection, knowledgeGraphs, loadKnowledgeGraph, createKnowledgeGraph, deleteKnowledgeGraph } = useIQLStore()
   const [searchQuery, setSearchQuery] = useState("")
   const [newKgName, setNewKgName] = useState("")
   const [newKgError, setNewKgError] = useState<string | null>(null)

@@ -39,9 +39,9 @@ echo ""
 echo "Seeding demo knowledge graphs..."
 
 SEED_FAIL=0
-for seed in "$SEEDS_DIR"/*.idl; do
-    KG_NAME=$(basename "$seed" .idl)
-    SEED_SCRIPT=$(mktemp /tmp/il-demo-seed.XXXXXX.idl)
+for seed in "$SEEDS_DIR"/*.iql; do
+    KG_NAME=$(basename "$seed" .iql)
+    SEED_SCRIPT=$(mktemp /tmp/il-demo-seed.XXXXXX.iql)
 
     echo ".kg create $KG_NAME" > "$SEED_SCRIPT"
     echo ".kg use $KG_NAME" >> "$SEED_SCRIPT"
@@ -75,7 +75,7 @@ echo ""
 echo "Verifying..."
 VERIFY_FAIL=0
 for kg in default flights incremental provenance retraction rules_vectors; do
-    VER_SCRIPT=$(mktemp /tmp/il-demo-ver.XXXXXX.idl)
+    VER_SCRIPT=$(mktemp /tmp/il-demo-ver.XXXXXX.iql)
     echo ".kg use $kg" > "$VER_SCRIPT"
     echo ".rel" >> "$VER_SCRIPT"
 

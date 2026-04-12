@@ -19,7 +19,7 @@ This matters because recommending an incompatible product isn't just irrelevant 
 
 Three cartridges, one printer, one shopper. Two cartridges are compatible with Canon printers. One is not. All three have very similar embeddings.
 
-```datalog
+```iql
 // Products with embedding vectors
 +product[
     ("pg245", "Canon PG-245 Black Ink", 14.99, [0.82, 0.15, 0.91, 0.44]),
@@ -43,7 +43,7 @@ Look at the embeddings. PG-245 is `[0.82, 0.15, 0.91, 0.44]`. Epson 202 is `[0.8
 
 A product is recommendable to a shopper if they own a compatible device and the product is in stock. One line.
 
-```datalog
+```iql
 +recommendable(S, P) <- owns(S, Dev), compatible(Dev, P), in_stock(P)
 ```
 
@@ -53,7 +53,7 @@ This connects three separate facts - purchase history, compatibility matrix, and
 
 ## Rules filter first
 
-```datalog
+```iql
 ?recommendable("shopper_42", Pid)
 ```
 
@@ -75,7 +75,7 @@ Two results. The Epson 202 is excluded - not because of its embedding, but becau
 
 Now add cosine distance to rank the compatible results by relevance. Lower distance means more similar.
 
-```datalog
+```iql
 ?recommendable("shopper_42", Pid),
  product(Pid, Desc, Price, Emb),
  Dist = cosine(Emb, [0.81, 0.16, 0.89, 0.42]),
@@ -100,11 +100,11 @@ One query. Rules filtered to what's compatible, vectors ranked by relevance. The
 
 The PG-245 sells out.
 
-```datalog
+```iql
 -in_stock("pg245")
 ```
 
-```datalog
+```iql
 ?recommendable("shopper_42", Pid)
 ```
 

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 import warnings
 from collections.abc import Iterable
-from typing import Any, get_args, get_origin
+from typing import Any, get_args
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -13,6 +14,28 @@ from langchain_core.vectorstores import VectorStore
 
 from inputlayer._sync import run_sync
 from inputlayer.relation import Relation
+
+logger = logging.getLogger(__name__)
+
+
+_METRIC_MAP = {
+    "cosine": "cosine",
+    "euclidean": "euclidean",
+    "dot": "dot",
+    "dot_product": "dot",
+}
+
+_VALID_METRICS = set(_METRIC_MAP)
+
+
+def _resolve_metric(metric: str) -> str:
+    fn = _METRIC_MAP.get(metric)
+    if fn is None:
+        raise ValueError(
+            f"Unknown metric {metric!r}; "
+            f"supported values: {sorted(_VALID_METRICS)}"
+        )
+    return fn
 
 
 class InputLayerVectorStore(VectorStore):
@@ -252,32 +275,14 @@ class InputLayerVectorStore(VectorStore):
         metric: str,
         filter: dict[str, Any] | None = None,
     ) -> list[tuple[Document, float]]:
-        """Run vector similarity by emitting IQL directly.
-
-        We compose ``?relation(...), Dist = <metric>(Vec, [...]), <filters>``
-        ourselves so we can append ``filter=`` clauses to the same query
-        and rank client-side. ``kg.vector_search`` would also work, but
-        it does not currently support arbitrary metadata filters.
-        """
+        """Run vector similarity via ``kg.vector_search()``."""
         from inputlayer.integrations.langchain.params import iql_literal
 
-        rel_name = Relation._resolve_name(self._relation)
-        cols = Relation._get_columns(self._relation)
-        # IQL requires capitalized variable names - lowercase atoms are
-        # parsed as constants, not bindings.
-        cap = {c: c[:1].upper() + c[1:] for c in cols}
-        vec_var = cap[self._vector_field]
-        vec_lit = iql_literal([float(v) for v in embedding])
-        fn = {
-            "cosine": "cosine",
-            "euclidean": "euclidean",
-            "dot": "dot",
-            "dot_product": "dot",
-        }.get(metric, "cosine")
+        _resolve_metric(metric)  # validate early
 
-        # Build optional metadata filters. Each filter becomes an
-        # equality clause in the query body. Unknown keys are ignored
-        # with a warning so the call still runs.
+        # Build optional metadata filter clauses.
+        cols = Relation._get_columns(self._relation)
+        cap = {c: c[:1].upper() + c[1:] for c in cols}
         filter_clauses: list[str] = []
         if filter:
             for key, value in filter.items():
@@ -290,26 +295,16 @@ class InputLayerVectorStore(VectorStore):
                     continue
                 filter_clauses.append(f"{cap[key]} = {iql_literal(value)}")
 
-        iql_parts = [
-            f"?{rel_name}({', '.join(cap[c] for c in cols)})",
-            f"Dist = {fn}({vec_var}, {vec_lit})",
-        ]
-        iql_parts.extend(filter_clauses)
-        iql = ", ".join(iql_parts)
-        result = await self._kg.execute(iql)
-        if result.columns == ["error"]:
-            raise RuntimeError(
-                f"InputLayer rejected vector query: "
-                f"{result.rows[0][0] if result.rows else 'unknown error'}"
-            )
+        result = await self._kg.vector_search(
+            self._relation,
+            [float(v) for v in embedding],
+            column=self._vector_field,
+            k=k,
+            metric=metric,
+            extra_iql_clauses=filter_clauses or None,
+        )
 
-        if "Dist" in result.columns:
-            dist_idx = result.columns.index("Dist")
-            ranked = sorted(result.rows, key=lambda r: r[dist_idx])[:k]
-        else:
-            ranked = result.rows[:k]
-
-        return self._rows_to_documents(result.columns, ranked)
+        return self._rows_to_documents(result.columns, result.rows)
 
     # ── Maximal Marginal Relevance ───────────────────────────────────
 
@@ -393,24 +388,15 @@ class InputLayerVectorStore(VectorStore):
         """Like ``_search_by_vector`` but also returns each row's embedding.
 
         MMR needs the actual embeddings, which the public document path
-        deliberately strips. We re-run the same query but extract the
-        vector column directly from the row tuple before mapping to
-        Documents.
+        deliberately strips. We use ``kg.vector_search()`` then extract
+        the vector column from each row before mapping to Documents.
         """
         from inputlayer.integrations.langchain.params import iql_literal
 
-        rel_name = Relation._resolve_name(self._relation)
+        _resolve_metric(metric)  # validate early
+
         cols = Relation._get_columns(self._relation)
         cap = {c: c[:1].upper() + c[1:] for c in cols}
-        vec_var = cap[self._vector_field]
-        vec_lit = iql_literal([float(v) for v in embedding])
-        fn = {
-            "cosine": "cosine",
-            "euclidean": "euclidean",
-            "dot": "dot",
-            "dot_product": "dot",
-        }.get(metric, "cosine")
-
         filter_clauses: list[str] = []
         if filter:
             for key, value in filter.items():
@@ -424,22 +410,14 @@ class InputLayerVectorStore(VectorStore):
                     continue
                 filter_clauses.append(f"{cap[key]} = {iql_literal(value)}")
 
-        iql_parts = [
-            f"?{rel_name}({', '.join(cap[c] for c in cols)})",
-            f"Dist = {fn}({vec_var}, {vec_lit})",
-        ]
-        iql_parts.extend(filter_clauses)
-        iql = ", ".join(iql_parts)
-        result = await self._kg.execute(iql)
-        if result.columns == ["error"]:
-            msg = result.rows[0][0] if result.rows else "unknown error"
-            raise RuntimeError(f"InputLayer rejected MMR query: {msg}")
-
-        if "Dist" in result.columns:
-            dist_idx = result.columns.index("Dist")
-            ranked = sorted(result.rows, key=lambda r: r[dist_idx])[:k]
-        else:
-            ranked = result.rows[:k]
+        result = await self._kg.vector_search(
+            self._relation,
+            [float(v) for v in embedding],
+            column=self._vector_field,
+            k=k,
+            metric=metric,
+            extra_iql_clauses=filter_clauses or None,
+        )
 
         # Find the vector column index in the result.
         vec_col_idx = None
@@ -457,8 +435,8 @@ class InputLayerVectorStore(VectorStore):
             )
 
         out: list[tuple[Document, float, list[float]]] = []
-        docs_and_scores = self._rows_to_documents(result.columns, ranked)
-        for (doc, score), row in zip(docs_and_scores, ranked, strict=False):
+        docs_and_scores = self._rows_to_documents(result.columns, result.rows)
+        for (doc, score), row in zip(docs_and_scores, result.rows, strict=False):
             vec = list(row[vec_col_idx]) if vec_col_idx is not None else []
             out.append((doc, score, vec))
         return out
@@ -620,7 +598,3 @@ def _required_metadata_fields(
             continue
         required.append(f)
     return required
-
-
-# Silence "imported but unused" if get_origin ends up unused after edits.
-_ = get_origin

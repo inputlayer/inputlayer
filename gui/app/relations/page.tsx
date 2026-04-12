@@ -6,7 +6,7 @@ import { AppShell } from "@/components/app-shell"
 import { RelationsExplorer } from "@/components/relations-explorer"
 import { RelationDetailPanel } from "@/components/relation-detail-panel"
 import { ViewDetailPanel } from "@/components/view-detail-panel"
-import { useDatalogStore, type Relation, type View } from "@/lib/datalog-store"
+import { useIQLStore, type Relation, type View } from "@/lib/iql-store"
 import { AlertCircle, Network, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -17,7 +17,7 @@ function RelationsPageInner() {
     views,
     isRefreshing,
     refreshCurrentKnowledgeGraph
-  } = useDatalogStore()
+  } = useIQLStore()
   const searchParams = useSearchParams()
   const [selectedRelation, setSelectedRelation] = useState<Relation | null>(null)
   const [selectedView, setSelectedView] = useState<View | null>(null)

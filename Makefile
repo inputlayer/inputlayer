@@ -295,7 +295,7 @@ integration-test:
 e2e-test:
 	./scripts/run_snapshot_tests.sh
 
-# Regenerate snapshot .idl.out files (sequential mode)
+# Regenerate snapshot .iql.out files (sequential mode)
 e2e-update:
 	./scripts/run_snapshot_tests.sh --update
 

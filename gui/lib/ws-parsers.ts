@@ -268,7 +268,7 @@ export function parseSessionNames(result: WsResultMessage): string[] {
 }
 
 /**
- * Generate Datalog variable names for a given arity.
+ * Generate IQL variable names for a given arity.
  * arity 1 → ["A"], arity 3 → ["A", "B", "C"], arity 27 → ["A", "B", ..., "Z", "A1"]
  */
 export function generateVariables(arity: number): string[] {

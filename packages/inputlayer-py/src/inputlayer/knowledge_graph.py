@@ -151,7 +151,7 @@ class ClearResult:
 
 @dataclass(frozen=True)
 class DebugResult:
-    datalog: str
+    iql: str
     plan: str
 
 
@@ -272,10 +272,10 @@ class KnowledgeGraph:
             else:
                 raise QueryError(msg, query=f".kg use {self._name}")
 
-    async def _execute(self, datalog: str) -> Any:
+    async def _execute(self, iql: str) -> Any:
         """Execute a statement, switching to this KG first if needed."""
         await self._ensure_current()
-        return await self._conn.execute(datalog)
+        return await self._conn.execute(iql)
 
     @property
     def name(self) -> str:
@@ -290,8 +290,8 @@ class KnowledgeGraph:
     async def define(self, *relations: type[Relation]) -> None:
         """Deploy schema definitions. Idempotent."""
         for rel in relations:
-            datalog = compile_schema(rel)
-            await self._execute(datalog)
+            iql = compile_schema(rel)
+            await self._execute(iql)
 
     async def relations(self) -> list[RelationInfo]:
         """List all relations in this KG.
@@ -359,19 +359,19 @@ class KnowledgeGraph:
                 except Exception:
                     raise TypeError(f"Unsupported data type: {type(data).__name__}")
             if len(instances) == 1:
-                datalog = compile_insert(instances[0])
+                iql = compile_insert(instances[0])
             else:
-                datalog = compile_bulk_insert(rel_cls, instances)
+                iql = compile_bulk_insert(rel_cls, instances)
         elif isinstance(facts, list):
             if not facts:
                 return InsertResult(count=0)
-            datalog = compile_bulk_insert(type(facts[0]), facts)
+            iql = compile_bulk_insert(type(facts[0]), facts)
         elif isinstance(facts, Relation):
-            datalog = compile_insert(facts)
+            iql = compile_insert(facts)
         else:
             raise TypeError(f"Unsupported facts type: {type(facts).__name__}")
 
-        result = await self._execute(datalog)
+        result = await self._execute(iql)
         return InsertResult(count=len(result.rows) if result.rows else 0)
 
     # ── Delete ────────────────────────────────────────────────────────
@@ -388,18 +388,18 @@ class KnowledgeGraph:
             rel_cls = facts
             proxy = RelationProxy(Relation._resolve_name(rel_cls))
             condition = where(proxy)
-            datalog = compile_conditional_delete(rel_cls, condition)
+            iql = compile_conditional_delete(rel_cls, condition)
         elif isinstance(facts, list):
             for fact in facts:
-                datalog = compile_delete(fact)
-                await self._execute(datalog)
+                iql = compile_delete(fact)
+                await self._execute(iql)
             return DeleteResult(count=len(facts))
         elif isinstance(facts, Relation):
-            datalog = compile_delete(facts)
+            iql = compile_delete(facts)
         else:
             raise TypeError(f"Unsupported facts type: {type(facts).__name__}")
 
-        result = await self._execute(datalog)
+        result = await self._execute(iql)
         return DeleteResult(count=len(result.rows) if result.rows else 0)
 
     # ── Query ─────────────────────────────────────────────────────────
@@ -496,7 +496,7 @@ class KnowledgeGraph:
             else:
                 order_ast = order_by
 
-        datalog = compile_query(
+        compiled = compile_query(
             *ast_select,
             relations=relations,
             on_condition=on_condition,
@@ -507,22 +507,22 @@ class KnowledgeGraph:
             computed=ast_computed or None,
         )
 
-        if isinstance(datalog, AggCompiled):
+        if isinstance(compiled, AggCompiled):
             # Aggregate query: register a temporary session rule, query
             # it, and best-effort drop it. The rule lives in the session
             # so a leak only persists for the lifetime of the connection.
-            setup_result = await self._execute(datalog.setup)
+            setup_result = await self._execute(compiled.setup)
             if setup_result.columns == ["error"]:
                 raise QueryError(
                     setup_result.rows[0][0] if setup_result.rows else "unknown error",
-                    query=datalog.setup,
+                    query=compiled.setup,
                 )
             try:
-                result = await self._execute(datalog.query)
+                result = await self._execute(compiled.query)
                 if result.columns == ["error"]:
                     raise QueryError(
                         result.rows[0][0] if result.rows else "unknown error",
-                        query=datalog.query,
+                        query=compiled.query,
                     )
                 rs = ResultSet(
                     columns=result.columns,
@@ -536,12 +536,12 @@ class KnowledgeGraph:
                 import contextlib
 
                 with contextlib.suppress(Exception):
-                    await self._execute(f".rule drop {datalog.rule_name}")
-        elif isinstance(datalog, list):
+                    await self._execute(f".rule drop {compiled.rule_name}")
+        elif isinstance(compiled, list):
             # OR split → execute each and union
             all_rows: list[list] = []
             columns: list[str] = []
-            for q in datalog:
+            for q in compiled:
                 result = await self._execute(q)
                 if result.columns == ["error"]:
                     raise QueryError(
@@ -553,11 +553,11 @@ class KnowledgeGraph:
                 all_rows.extend(result.rows)
             rs = ResultSet(columns=columns, rows=all_rows)
         else:
-            result = await self._execute(datalog)
+            result = await self._execute(compiled)
             if result.columns == ["error"]:
                 raise QueryError(
                     result.rows[0][0] if result.rows else "unknown error",
-                    query=datalog,
+                    query=compiled,
                 )
             rs = ResultSet(
                 columns=result.columns,
@@ -611,10 +611,24 @@ class KnowledgeGraph:
         k: int | None = None,
         radius: float | None = None,
         metric: str = "cosine",
-        where: Callable | None = None,
+        extra_iql_clauses: list[str] | None = None,
     ) -> ResultSet:
-        """Perform a vector similarity search."""
+        """Perform a vector similarity search.
 
+        Composes a direct IQL query of the form
+        ``?relation(...), Dist = metric(VecCol, [...]), <filters>``
+        and applies k/radius filtering client-side.
+
+        ``extra_iql_clauses`` appends raw IQL body clauses for metadata
+        filtering. Clause strings are NOT escaped; callers must use
+        ``iql_literal()`` for any user-supplied values. Example::
+
+            from inputlayer.integrations.langchain.params import iql_literal
+            await kg.vector_search(
+                Doc, vec, k=10,
+                extra_iql_clauses=[f"Source = {iql_literal(user_source)}"],
+            )
+        """
         rel_name = Relation._resolve_name(relation)
         cols = Relation._get_columns(relation)
 
@@ -629,58 +643,59 @@ class KnowledgeGraph:
             if column is None:
                 raise ValueError(f"No vector column found in {rel_name}")
 
-        # Build query. Top-k aggregates are only valid inside a rule
-        # head, so we register a temporary session rule and query it.
-        # The rule name is unique per call to avoid colliding with
-        # session state across concurrent calls on the same KG.
-        import secrets
+        if k is None and radius is None:
+            raise ValueError("Must specify either k or radius")
 
         vec_str = "[" + ", ".join(repr(float(v)) for v in query_vec) + "]"
-        dist_fn = {
+        _valid_metrics = {
             "cosine": "cosine",
             "euclidean": "euclidean",
             "manhattan": "manhattan",
             "dot_product": "dot",
             "dot": "dot",
         }
-        fn_name = dist_fn.get(metric, "cosine")
+        fn_name = _valid_metrics.get(metric)
+        if fn_name is None:
+            raise ValueError(
+                f"Unknown metric {metric!r}; "
+                f"supported values: {sorted(_valid_metrics)}"
+            )
 
-        # Capitalized variable names match IQL grammar (lowercase atoms
-        # parse as constants).
-        col_vars = [c[:1].upper() + c[1:] for c in cols]
-        col_vars_str = ", ".join(col_vars)
-        vec_var = col_vars[cols.index(column)]
-        dist_assign = f"Dist = {fn_name}({vec_var}, {vec_str})"
+        # IQL variables must be capitalized (lowercase atoms are constants).
+        cap = {c: c[:1].upper() + c[1:] for c in cols}
+        vec_var = cap[column]
 
+        iql_parts = [
+            f"?{rel_name}({', '.join(cap[c] for c in cols)})",
+            f"Dist = {fn_name}({vec_var}, {vec_str})",
+        ]
+
+        # Radius filter is applied server-side in the query body.
+        if radius is not None:
+            iql_parts.append(f"Dist <= {radius}")
+
+        if extra_iql_clauses:
+            iql_parts.extend(extra_iql_clauses)
+
+        iql = ", ".join(iql_parts)
+        result = await self._execute(iql)
+
+        if result.columns == ["error"]:
+            msg = result.rows[0][0] if result.rows else "unknown error"
+            raise QueryError(msg, query=iql)
+
+        # Sort by distance ascending (closer = better) and apply k limit.
+        rows = result.rows
+        if "Dist" in result.columns:
+            dist_idx = result.columns.index("Dist")
+            rows = sorted(rows, key=lambda r: r[dist_idx])
         if k is not None:
-            rule_name = f"il_vec_search_{secrets.token_hex(4)}"
-            await self._execute(
-                f"{rule_name}(top_k<{k}, {col_vars_str}, Dist:asc>) "
-                f"<- {rel_name}({col_vars_str}), {dist_assign}"
-            )
-            query = f"?{rule_name}({col_vars_str}, Dist)"
-        elif radius is not None:
-            rule_name = f"il_vec_search_{secrets.token_hex(4)}"
-            await self._execute(
-                f"{rule_name}({col_vars_str}, Dist) "
-                f"<- {rel_name}({col_vars_str}), {dist_assign}, Dist <= {radius}"
-            )
-            query = f"?{rule_name}({col_vars_str}, Dist)"
-        else:
-            raise ValueError("Must specify either k or radius")
-
-        result = await self._execute(query)
-        # Best-effort cleanup of the session rule. Failures are non-fatal
-        # because the rule is namespaced per call and dies with the session.
-        import contextlib
-
-        with contextlib.suppress(Exception):
-            await self._execute(f".rule drop {rule_name}")
+            rows = rows[:k]
 
         return ResultSet(
             columns=result.columns,
-            rows=result.rows,
-            row_count=result.row_count,
+            rows=rows,
+            row_count=len(rows),
             total_count=result.total_count,
             truncated=result.truncated,
             execution_time_ms=result.execution_time_ms,
@@ -695,7 +710,7 @@ class KnowledgeGraph:
             head_name = Relation._resolve_name(target)
             head_columns = Relation._get_columns(target)
             for clause in target.rules:
-                datalog = compile_rule(
+                iql = compile_rule(
                     head_name,
                     head_columns,
                     clause.select_map,
@@ -703,7 +718,7 @@ class KnowledgeGraph:
                     clause.condition,
                     persistent=True,
                 )
-                await self._execute(datalog)
+                await self._execute(iql)
 
     async def list_rules(self) -> list[RuleInfo]:
         """List all rules in this KG."""
@@ -714,7 +729,7 @@ class KnowledgeGraph:
         return rules
 
     async def rule_definition(self, name: str | type) -> list[str]:
-        """Get the Datalog definition of a rule."""
+        """Get the IQL definition of a rule."""
         if isinstance(name, type):
             name = Relation._resolve_name(name)
         result = await self._execute(f".rule show {name}")
@@ -742,7 +757,7 @@ class KnowledgeGraph:
         else:
             head_name = name
             head_columns = list(clause.select_map.keys())
-        datalog = compile_rule(
+        iql = compile_rule(
             head_name,
             head_columns,
             clause.select_map,
@@ -750,7 +765,7 @@ class KnowledgeGraph:
             clause.condition,
             persistent=True,
         )
-        await self._execute(datalog)
+        await self._execute(iql)
 
     async def clear_rule(self, name: str | type) -> None:
         """Clear a rule's materialized data."""
@@ -766,7 +781,7 @@ class KnowledgeGraph:
 
     async def create_index(self, index: HnswIndex) -> None:
         """Create an HNSW vector index."""
-        await self._execute(index.to_datalog())
+        await self._execute(index.to_iql())
 
     async def list_indexes(self) -> list[IndexInfo]:
         """List all indexes."""
@@ -824,12 +839,12 @@ class KnowledgeGraph:
 
     async def debug(self, *select: Any, **kwargs: Any) -> DebugResult:
         """Show the query plan without executing."""
-        datalog = compile_query(*select, **kwargs)
-        if isinstance(datalog, list):
-            datalog = datalog[0]
-        result = await self._execute(f".debug {datalog}")
+        compiled = compile_query(*select, **kwargs)
+        if isinstance(compiled, list):
+            compiled = compiled[0]
+        result = await self._execute(f".debug {compiled}")
         plan_text = "\n".join(row[0] for row in result.rows)
-        return DebugResult(datalog=datalog, plan=plan_text)
+        return DebugResult(iql=compiled, plan=plan_text)
 
     async def why(self, *select: Any, full: bool = False, **kwargs: Any) -> WhyResult:
         """Show proof trees explaining why query results were derived.
@@ -837,10 +852,10 @@ class KnowledgeGraph:
         Returns structured proof trees alongside the result data.
         Each result row has a corresponding proof tree explaining its derivation.
         """
-        datalog = compile_query(*select, **kwargs)
-        if isinstance(datalog, list):
-            datalog = datalog[0]
-        cmd = f".why full {datalog}" if full else f".why {datalog}"
+        compiled = compile_query(*select, **kwargs)
+        if isinstance(compiled, list):
+            compiled = compiled[0]
+        cmd = f".why full {compiled}" if full else f".why {compiled}"
         result = await self._execute(cmd)
         result_set = ResultSet(
             columns=result.columns,
@@ -912,9 +927,9 @@ class KnowledgeGraph:
             details=[(row[0], int(row[1])) for row in result.rows if len(row) > 1],
         )
 
-    async def execute(self, datalog: str) -> ResultSet:
-        """Execute raw Datalog."""
-        result = await self._execute(datalog)
+    async def execute(self, iql: str) -> ResultSet:
+        """Execute raw IQL."""
+        result = await self._execute(iql)
         return ResultSet(
             columns=result.columns,
             rows=result.rows,

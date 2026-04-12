@@ -9,7 +9,7 @@ A relation is a table that stores facts. Each relation has:
 - A **schema** (the columns and their types)
 - **Facts** (the rows)
 
-```datalog
+```iql
 // Create a relation by inserting facts
 +person("alice", 30)
 +person("bob", 25)
@@ -21,7 +21,7 @@ This creates a `person` relation with 2 columns (name and age) and 2 rows.
 
 A fact is a single row in a relation. Facts contain only values (no variables).
 
-```datalog
+```iql
 // Insert facts
 +edge(1, 2)           // edge has two integer columns
 +user("alice", true)  // user has string and boolean columns
@@ -35,7 +35,7 @@ Rules define new relations based on existing data. A rule has:
 - A **head** (the relation being defined)
 - A **body** (the conditions for deriving facts)
 
-```datalog
+```iql
 // "path exists from X to Y if edge exists from X to Y"
 +path(X, Y) <- edge(X, Y)
 
@@ -60,7 +60,7 @@ Views are virtual tables:
 
 A query asks a question about your data. It returns matching facts.
 
-```datalog
+```iql
 // Find all edges starting from node 1
 ?edge(1, X)
 
@@ -99,7 +99,7 @@ Constants are literal values:
 
 An atom is a relation name with arguments:
 
-```datalog
+```iql
 edge(1, 2)              // Atom with two constants
 person(Name, Age)       // Atom with two variables
 friend(X, "alice")      // Atom with variable and constant
@@ -111,7 +111,7 @@ In a rule body, atoms specify patterns to match. In a rule head, atoms specify w
 
 You can declare a relation's schema before inserting data:
 
-```datalog
+```iql
 // Declare schema with types
 +employee(id: int, name: string, salary: int)
 
@@ -126,7 +126,7 @@ Schema declarations are optional. Without a schema, InputLayer accepts any value
 
 Like rules, schemas can be session or persistent:
 
-```datalog
+```iql
 // Persistent schema - saved with knowledge graph
 +user(id: int, email: string, name: string)
 
@@ -143,7 +143,7 @@ An InputLayer session consists of:
 3. **Session rules** - temporary rules for this session
 4. **Queries** - questions you ask
 
-```datalog
+```iql
 // 1. Insert facts (stored)
 +edge[(1, 2), (2, 3), (3, 4)]
 
@@ -162,7 +162,7 @@ long_path(X, Y) <- path(X, Y), X < Y
 
 A knowledge graph is a named container for relations and rules. It's like a database in SQL systems.
 
-```datalog
+```iql
 .kg create social        // Create a knowledge graph
 .kg use social           // Switch to it
 +follows(1, 2)           // Data goes in 'social'

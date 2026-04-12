@@ -9,11 +9,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { useDatalogStore } from "@/lib/datalog-store"
+import { useIQLStore } from "@/lib/iql-store"
 import { cn } from "@/lib/utils"
 
 export function ConnectionStatus() {
-  const { connection, disconnect } = useDatalogStore()
+  const { connection, disconnect } = useIQLStore()
 
   const status = connection?.status || "disconnected"
 

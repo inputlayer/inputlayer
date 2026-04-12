@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
-import { useDatalogStore } from "@/lib/datalog-store"
+import { useIQLStore } from "@/lib/iql-store"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Logo } from "@/components/logo"
 
@@ -43,7 +43,7 @@ export function ConnectionScreen() {
   const [error, setError] = useState<string | null>(null)
   const [portError, setPortError] = useState<string | null>(null)
 
-  const { connect } = useDatalogStore()
+  const { connect } = useIQLStore()
 
   const handleConnect = async () => {
     const portNum = parseInt(port)

@@ -92,7 +92,7 @@ See [Functions Reference](functions.md) for complete documentation.
 
 ## Syntax Quick Reference
 
-```datalog
+```iql
 // Facts
 +relation(value1, value2)     // Insert persistent fact
 relation(value1, value2)      // Insert session fact

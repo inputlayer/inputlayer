@@ -1,4 +1,4 @@
-"""Tests for inputlayer.compiler - the core Python → Datalog compilation layer.
+"""Tests for inputlayer.compiler - the core Python → IQL compilation layer.
 
 This is the most critical test file (~80 tests covering all compilation paths).
 """

@@ -1,4 +1,4 @@
-import type { Relation, View } from "./datalog-store"
+import type { Relation, View } from "./iql-store"
 
 export type CompletionKind = "relation" | "view" | "column" | "function" | "aggregate" | "keyword" | "meta"
 
@@ -149,7 +149,7 @@ function isGenericColumns(columns: string[]): boolean {
 }
 
 /**
- * Convert a column name to a Datalog variable (capitalize first letter).
+ * Convert a column name to a IQL variable (capitalize first letter).
  * e.g., "name" → "Name", "id" → "Id", "salary" → "Salary"
  */
 function colToVariable(col: string): string {
@@ -202,7 +202,7 @@ function arityToVars(arity: number): string[] {
 }
 
 /**
- * Find the start of the current Datalog statement in the text before the cursor.
+ * Find the start of the current IQL statement in the text before the cursor.
  * A statement ends with `.` NOT between digits (to skip decimal numbers like 3.14).
  */
 function findStatementStart(text: string, cursorPos: number): number {

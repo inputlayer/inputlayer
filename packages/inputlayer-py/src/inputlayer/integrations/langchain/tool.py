@@ -16,6 +16,7 @@ Two flavors:
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -29,6 +30,8 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 from inputlayer._sync import run_sync
 from inputlayer.integrations.langchain.params import bind_params, iql_literal
 from inputlayer.relation import Relation
+
+logger = logging.getLogger(__name__)
 
 # ── Scalar type detection ────────────────────────────────────────────
 
@@ -92,6 +95,7 @@ class InputLayerIQLTool(BaseTool):
         else:
             compiled = query
 
+        logger.debug("IQL tool query: %s", compiled)
         result = await self.kg.execute(compiled)
         return _format_result(result, self.max_rows)
 
@@ -216,13 +220,12 @@ def _make_relation_runner(
 
     The runner parses the supplied kwargs into clauses, compiles them
     to an IQL query of the form ``?relation(Var1, Var2, ...), Filter, ...``,
-    and dispatches via ``kg.execute``. This bypasses the SDK's
-    ``kg.query`` helper, which currently emits a query form the engine
-    does not accept (``?Vars <- body``).
+    and dispatches via ``kg.execute``.
 
-    For ``IN``-list filters we emit one query per value and union the
-    rows client-side, since IQL has no native disjunction operator
-    inside a query body.
+    We use ``kg.execute`` rather than ``kg.query`` because the tool
+    needs IN-list expansion (one query per value, union client-side)
+    and direct JSON output, which are concerns specific to the tool
+    layer rather than the core query API.
 
     The runner exposes ``parse_clauses``, ``build_iql``, and
     ``build_iql_queries`` so unit tests can introspect what would be
@@ -291,6 +294,7 @@ def _make_relation_runner(
         seen: set[tuple[Any, ...]] = set()
 
         for q in queries:
+            logger.debug("Structured tool query: %s", q)
             result = await kg.execute(q)
             if result.columns == ["error"]:
                 return json.dumps(

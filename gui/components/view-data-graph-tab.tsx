@@ -1,8 +1,8 @@
 "use client"
 
 import { useEffect, useState, useCallback, useRef } from "react"
-import type { View } from "@/lib/datalog-store"
-import { useDatalogStore } from "@/lib/datalog-store"
+import type { View } from "@/lib/iql-store"
+import { useIQLStore } from "@/lib/iql-store"
 import { generateVariables } from "@/lib/ws-parsers"
 import { Loader2, AlertCircle, Share2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -13,7 +13,7 @@ interface ViewDataGraphTabProps {
 }
 
 export function ViewDataGraphTab({ view }: ViewDataGraphTabProps) {
-  const { selectedKnowledgeGraph, executeInternalQuery } = useDatalogStore()
+  const { selectedKnowledgeGraph, executeInternalQuery } = useIQLStore()
   const [data, setData] = useState<(string | number | boolean | null)[][]>([])
   const [columns, setColumns] = useState<string[]>([])
   const [loading, setLoading] = useState(true)

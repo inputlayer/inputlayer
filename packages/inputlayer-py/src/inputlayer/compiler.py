@@ -1,7 +1,7 @@
-"""Compiler: Python objects and AST nodes → Datalog text.
+"""Compiler: Python objects and AST nodes → IQL text.
 
 This is the core compilation layer. Every method is pure (no I/O),
-taking Python objects and returning Datalog strings.
+taking Python objects and returning IQL strings.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from inputlayer._ast import (
     Column as AstColumn,
 )
 from inputlayer._naming import column_to_variable
-from inputlayer.types import Timestamp, python_type_to_datalog
+from inputlayer.types import Timestamp, python_type_to_iql
 
 if TYPE_CHECKING:
     from inputlayer.relation import Relation
@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 
 
 def compile_value(value: Any) -> str:
-    """Compile a Python value to its Datalog literal representation."""
+    """Compile a Python value to its IQL literal representation."""
     if value is None:
         return "null"
     if isinstance(value, bool):
@@ -68,7 +68,7 @@ class _VarEnv:
     """Variable environment for tracking column→variable mappings with union-find.
 
     Ensures that join conditions like e.department == d.name produce a single
-    shared Datalog variable.
+    shared IQL variable.
     """
 
     def __init__(self) -> None:
@@ -90,7 +90,7 @@ class _VarEnv:
             self._parent[rb] = ra
 
     def get_var(self, col: AstColumn) -> str:
-        """Get or create a Datalog variable for a column."""
+        """Get or create an IQL variable for a column."""
         key = f"{col.ref_alias or col.relation}.{col.name}"
         root = self._find(key)
         if root in self._map:
@@ -105,7 +105,7 @@ class _VarEnv:
         return var
 
     def unify(self, col_a: AstColumn, col_b: AstColumn) -> str:
-        """Unify two columns to the same Datalog variable (join condition)."""
+        """Unify two columns to the same IQL variable (join condition)."""
         key_a = f"{col_a.ref_alias or col_a.relation}.{col_a.name}"
         key_b = f"{col_b.ref_alias or col_b.relation}.{col_b.name}"
         self._union(key_a, key_b)
@@ -128,7 +128,7 @@ class _VarEnv:
 
 
 def compile_expr(expr: Expr, env: _VarEnv) -> str:
-    """Compile an Expr AST node to Datalog text."""
+    """Compile an Expr AST node to IQL text."""
     if isinstance(expr, AstColumn):
         return env.get_var(expr)
     if isinstance(expr, Literal):
@@ -150,7 +150,7 @@ def compile_expr(expr: Expr, env: _VarEnv) -> str:
 
 
 def _compile_agg_expr(agg: AggExpr, env: _VarEnv) -> str:
-    """Compile an aggregation expression to Datalog syntax."""
+    """Compile an aggregation expression to IQL syntax."""
     func = agg.func
     parts: list[str] = []
 
@@ -178,10 +178,10 @@ def _compile_agg_expr(agg: AggExpr, env: _VarEnv) -> str:
 
 
 def compile_bool_expr(expr: BoolExpr, env: _VarEnv) -> list[str]:
-    """Compile a BoolExpr to a list of Datalog body literals.
+    """Compile a BoolExpr to a list of IQL body literals.
 
     AND → multiple literals; OR → raises (must be handled by caller splitting).
-    Returns a list of Datalog body atoms/conditions joined by comma in the caller.
+    Returns a list of IQL body atoms/conditions joined by comma in the caller.
     """
     if isinstance(expr, Comparison):
         return [_compile_comparison(expr, env)]
@@ -205,7 +205,7 @@ def compile_bool_expr(expr: BoolExpr, env: _VarEnv) -> list[str]:
 
 
 def _compile_comparison(comp: Comparison, env: _VarEnv) -> str:
-    """Compile a single comparison to Datalog."""
+    """Compile a single comparison to IQL."""
     # Check for join condition: Column == Column → unify variables
     if (
         comp.op == "="
@@ -220,7 +220,7 @@ def _compile_comparison(comp: Comparison, env: _VarEnv) -> str:
 
 
 def _compile_in(expr: InExpr | NegatedIn, env: _VarEnv, *, negated: bool) -> str:
-    """Compile in_() / negated in_() to Datalog."""
+    """Compile in_() / negated in_() to IQL."""
     src_var = compile_expr(expr.column, env)
     assert isinstance(expr.target_column, AstColumn)
     tgt_col = expr.target_column
@@ -237,7 +237,7 @@ def _compile_in(expr: InExpr | NegatedIn, env: _VarEnv, *, negated: bool) -> str
 
 
 def _compile_match(match: MatchExpr, env: _VarEnv) -> str:
-    """Compile a MatchExpr to a Datalog body atom."""
+    """Compile a MatchExpr to an IQL body atom."""
     parts = []
     for col_name, source_expr in match.bindings.items():
         var = compile_expr(source_expr, env)
@@ -273,8 +273,8 @@ def compile_schema(relation_cls: type[Relation]) -> str:
     parts = []
     for col in columns:
         tp = col_types[col]
-        dl_type = python_type_to_datalog(tp)
-        parts.append(f"{col}: {dl_type}")
+        iql_type = python_type_to_iql(tp)
+        parts.append(f"{col}: {iql_type}")
 
     return f"+{name}({', '.join(parts)})"
 
@@ -383,7 +383,7 @@ def compile_query(
     offset: int | None = None,
     computed: dict[str, Expr] | None = None,
 ) -> str | list[str]:
-    """Compile a query to Datalog.
+    """Compile a query to IQL.
 
     Returns a single string, or a list of strings if OR conditions require splitting.
     """
@@ -640,7 +640,7 @@ def compile_rule(
     *,
     persistent: bool = True,
 ) -> str:
-    """Compile a rule definition to Datalog.
+    """Compile a rule definition to IQL.
 
     persistent=True  → +reachable(Src, Dst) <- edge(Src, Dst)
     persistent=False →  reachable(Src, Dst) <- edge(Src, Dst)

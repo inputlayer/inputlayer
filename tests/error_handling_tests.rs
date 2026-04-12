@@ -1,6 +1,6 @@
 //! Tests for error handling: no input should crash the server.
 
-use inputlayer::{Config, DatalogEngine, StorageEngine, Tuple, Value};
+use inputlayer::{Config, IQLEngine, StorageEngine, Tuple, Value};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use tempfile::TempDir;
@@ -14,8 +14,8 @@ fn create_test_storage() -> (StorageEngine, TempDir) {
     (storage, temp)
 }
 
-fn create_engine() -> DatalogEngine {
-    DatalogEngine::new()
+fn create_engine() -> IQLEngine {
+    IQLEngine::new()
 }
 
 // Parser Error Handling (no panics)
@@ -185,7 +185,7 @@ fn test_query_undefined_relation_returns_error() {
     let (storage, _temp) = create_test_storage();
     storage.create_knowledge_graph("test").unwrap();
 
-    // Querying an undefined relation with a free variable is unsafe in Datalog
+    // Querying an undefined relation with a free variable is "unsafe" in IQL
     // The variable X in ?undefined_relation(X) doesn't appear in any positive body atom
     let result = storage.execute_query_on("test", "?undefined_relation(X)");
     // Should return error because the query is unsafe (unbound variable in head)
@@ -357,7 +357,7 @@ fn test_invalid_meta_commands_return_error() {
 fn test_load_nonexistent_file_returns_error() {
     let mut engine = create_engine();
 
-    let result = engine.execute(".load /nonexistent/path/file.idl");
+    let result = engine.execute(".load /nonexistent/path/file.iql");
     assert!(
         result.is_err(),
         "Loading non-existent file should return error"

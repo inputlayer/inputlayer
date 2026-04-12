@@ -8,9 +8,9 @@ Store embeddings alongside structured data. Query by cosine, euclidean, or dot-p
 
 Vectors are arrays of floating-point numbers, typically embeddings from ML models:
 
-```datalog
+```iql
 // Store document embeddings
-+document(1, "Introduction to Datalog", [0.1, 0.2, 0.3, 0.4])
++document(1, "Introduction to IQL", [0.1, 0.2, 0.3, 0.4])
 +document(2, "Vector Similarity", [0.15, 0.25, 0.28, 0.42])
 +document(3, "Graph Databases", [0.8, 0.1, 0.05, 0.05])
 ```
@@ -19,7 +19,7 @@ Vectors are arrays of floating-point numbers, typically embeddings from ML model
 
 Declare vector columns in your schema:
 
-```datalog
+```iql
 +document(id: int, title: string, embedding: vector)
 ```
 
@@ -33,7 +33,7 @@ InputLayer supports 4 distance metrics:
 
 L2 distance - straight-line distance in vector space:
 
-```datalog
+```iql
 ? document(Id1, _, V1), document(Id2, _, V2),
    Id1 < Id2,
    Dist = euclidean(V1, V2)
@@ -43,7 +43,7 @@ L2 distance - straight-line distance in vector space:
 
 Angular distance (1 - cosine similarity) - ignores magnitude:
 
-```datalog
+```iql
 ? document(Id1, _, V1), document(Id2, _, V2),
    Id1 < Id2,
    Dist = cosine(V1, V2)
@@ -55,7 +55,7 @@ Angular distance (1 - cosine similarity) - ignores magnitude:
 
 Inner product - higher is more similar:
 
-```datalog
+```iql
 ? document(Id1, _, V1), document(Id2, _, V2),
    Id1 < Id2,
    Score = dot(V1, V2)
@@ -67,7 +67,7 @@ Inner product - higher is more similar:
 
 L1 distance - sum of absolute differences:
 
-```datalog
+```iql
 ? document(Id1, _, V1), document(Id2, _, V2),
    Id1 < Id2,
    Dist = manhattan(V1, V2)
@@ -79,9 +79,9 @@ L1 distance - sum of absolute differences:
 
 Build a document search system:
 
-```datalog
+```iql
 // Store documents with embeddings
-+docs[(1, "Introduction to Datalog", [0.1, 0.2, 0.3]),
++docs[(1, "Introduction to IQL", [0.1, 0.2, 0.3]),
       (2, "Vector Databases", [0.12, 0.22, 0.31]),
       (3, "Graph Theory", [0.8, 0.1, 0.05]),
       (4, "Machine Learning", [0.15, 0.18, 0.28])]
@@ -102,7 +102,7 @@ query_vec([0.11, 0.21, 0.29])
 
 | Id | Title | Dist |
 |---|---|---|
-| 1 | "Introduction to Datalog" | 0.002 |
+| 1 | "Introduction to IQL" | 0.002 |
 | 2 | "Vector Databases" | 0.003 |
 | 4 | "Machine Learning" | 0.015 |
 
@@ -116,7 +116,7 @@ query_vec([0.11, 0.21, 0.29])
 
 Convert to unit vector (length 1):
 
-```datalog
+```iql
 ? document(Id, _, V),
    NormV = normalize(V)
 ```
@@ -125,7 +125,7 @@ Convert to unit vector (length 1):
 
 Get the number of elements:
 
-```datalog
+```iql
 ? document(Id, _, V),
    Dim = vec_dim(V)
 ```
@@ -134,7 +134,7 @@ Get the number of elements:
 
 Element-wise addition:
 
-```datalog
+```iql
 ? v1([1.0, 2.0, 3.0]), v2([0.5, 0.5, 0.5]),
    Sum = vec_add(V1, V2)  // [1.5, 2.5, 3.5]
 ```
@@ -143,7 +143,7 @@ Element-wise addition:
 
 Multiply by scalar:
 
-```datalog
+```iql
 ? v([1.0, 2.0, 3.0]),
    Scaled = vec_scale(V, 2.0)  // [2.0, 4.0, 6.0]
 ```
@@ -158,7 +158,7 @@ For approximate nearest neighbor search on large datasets:
 
 Hash vectors into buckets:
 
-```datalog
+```iql
 ? document(Id, _, V),
    Bucket = lsh_bucket(V, 0, 8)  // table 0, 8 hyperplanes
 ```
@@ -167,7 +167,7 @@ Hash vectors into buckets:
 
 Get multiple candidate buckets to check:
 
-```datalog
+```iql
 ? query_vec(QV),
    Buckets = lsh_probes(QV, 0, 8, 3)  // 3 probe levels
 ```
@@ -176,7 +176,7 @@ Get multiple candidate buckets to check:
 
 Full multi-probe search:
 
-```datalog
+```iql
 +candidates(Id, Dist) <-
     query_vec(QV),
     Probes = lsh_multi_probe(QV, 0, 8, 3),
@@ -194,7 +194,7 @@ Reduce memory by 75% using 8-bit quantization:
 
 ### Quantize Vectors
 
-```datalog
+```iql
 // Linear quantization (uniform distribution)
 +quantized(Id, quantize_linear(V)) <- document(Id, _, V)
 
@@ -206,7 +206,7 @@ Reduce memory by 75% using 8-bit quantization:
 
 Convert back to float:
 
-```datalog
+```iql
 ? quantized(Id, QV),
    V = dequantize(QV)
 ```
@@ -215,7 +215,7 @@ Convert back to float:
 
 Direct computation on quantized vectors:
 
-```datalog
+```iql
 ? quantized(Id1, QV1), quantized(Id2, QV2),
    Dist = euclidean_int8(QV1, QV2)
 
@@ -228,7 +228,7 @@ Direct computation on quantized vectors:
 
 Complete example for item recommendations:
 
-```datalog
+```iql
 // Item embeddings (from your ML model)
 +items[(1, "Blue T-Shirt", [0.2, 0.8, 0.1, 0.3]),
        (2, "Red Dress", [0.25, 0.75, 0.15, 0.35]),
@@ -280,7 +280,7 @@ For large datasets (>10K vectors):
 
 Use `hnsw_nearest()` in query bodies to perform fast approximate nearest-neighbor search:
 
-```datalog
+```iql
 // Find 5 nearest neighbors
 ? hnsw_nearest("doc_idx", [0.1, 0.2, 0.3], 5, Id, Dist)
 
@@ -303,13 +303,13 @@ Use `hnsw_nearest()` in query bodies to perform fast approximate nearest-neighbo
 
 For millions of vectors, quantize to Int8:
 
-```datalog
+```iql
 +docs_quantized(Id, Title, quantize_symmetric(V)) <- docs(Id, Title, V)
 ```
 
 ### 4. Filter Before Distance Computation
 
-```datalog
+```iql
 // Filter first, then compute distances
 +similar(Id, Title, Dist) <-
     query_vec(QV),

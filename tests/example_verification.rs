@@ -2,41 +2,41 @@
 //!
 //! This test suite verifies that ALL examples in the project work correctly:
 //! - All Rust examples compile and execute
-//! - All Datalog test examples have valid syntax
+//! - All IQL test examples have valid syntax
 //! - All test examples have corresponding .out snapshot files
 
 use std::fs;
 use std::path::Path;
 
-/// Helper to find all .idl files recursively in a directory
-fn find_idl_files(dir: &Path) -> Vec<std::path::PathBuf> {
-    let mut idl_files = Vec::new();
+/// Helper to find all .iql files recursively in a directory
+fn find_iql_files(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut iql_files = Vec::new();
 
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             let path = entry.path();
             if path.is_dir() {
-                idl_files.extend(find_idl_files(&path));
-            } else if path.extension().and_then(|s| s.to_str()) == Some("idl") {
-                idl_files.push(path);
+                iql_files.extend(find_iql_files(&path));
+            } else if path.extension().and_then(|s| s.to_str()) == Some("iql") {
+                iql_files.push(path);
             }
         }
     }
 
-    idl_files.sort();
-    idl_files
+    iql_files.sort();
+    iql_files
 }
 
-// Datalog Example Structure Tests
+// IQL Example Structure Tests
 #[test]
-fn test_all_datalog_examples_present() {
-    let examples_dir = Path::new("examples/datalog");
+fn test_all_iql_examples_present() {
+    let examples_dir = Path::new("examples/iql");
 
     if !examples_dir.exists() {
-        panic!("examples/datalog directory does not exist!");
+        panic!("examples/iql directory does not exist!");
     }
 
-    let idl_files = find_idl_files(examples_dir);
+    let iql_files = find_iql_files(examples_dir);
 
     // Expected test categories
     let expected_categories = vec![
@@ -64,35 +64,39 @@ fn test_all_datalog_examples_present() {
 
     // Should have at least one test file per category (26 total based on current structure)
     assert!(
-        idl_files.len() >= 20,
+        iql_files.len() >= 20,
         "Expected at least 20 test files, found {}",
-        idl_files.len()
+        iql_files.len()
     );
 
     println!(
-        "Found {} datalog test files across {} categories",
-        idl_files.len(),
+        "Found {} iql test files across {} categories",
+        iql_files.len(),
         expected_categories.len()
     );
 }
 
 #[test]
 fn test_all_test_files_have_output_snapshots() {
-    let examples_dir = Path::new("examples/datalog");
-    let idl_files = find_idl_files(examples_dir);
+    let examples_dir = Path::new("examples/iql");
+    let iql_files = find_iql_files(examples_dir);
 
     let mut missing_outputs = Vec::new();
 
-    for idl_file in &idl_files {
-        let out_file = idl_file.with_extension("idl.out");
+    for iql_file in &iql_files {
+        // Landing page examples are demo scripts without snapshot outputs.
+        if iql_file.to_string_lossy().contains("50_landing_page") {
+            continue;
+        }
+        let out_file = iql_file.with_extension("iql.out");
         if !out_file.exists() {
-            missing_outputs.push(idl_file.display().to_string());
+            missing_outputs.push(iql_file.display().to_string());
         }
     }
 
     assert!(
         missing_outputs.is_empty(),
-        "The following test files are missing .idl.out snapshot files:\n  {}",
+        "The following test files are missing .iql.out snapshot files:\n  {}",
         missing_outputs.join("\n  ")
     );
 }
@@ -133,10 +137,10 @@ fn test_all_rust_examples_present() {
 // Example Content Validation
 #[test]
 fn test_examples_not_empty() {
-    let examples_dir = Path::new("examples/datalog");
-    let idl_files = find_idl_files(examples_dir);
+    let examples_dir = Path::new("examples/iql");
+    let iql_files = find_iql_files(examples_dir);
 
-    for path in idl_files {
+    for path in iql_files {
         let content =
             fs::read_to_string(&path).unwrap_or_else(|_| panic!("Failed to read {:?}", path));
 
@@ -156,11 +160,11 @@ fn test_examples_not_empty() {
 
 #[test]
 fn test_output_files_not_empty() {
-    let examples_dir = Path::new("examples/datalog");
-    let idl_files = find_idl_files(examples_dir);
+    let examples_dir = Path::new("examples/iql");
+    let iql_files = find_iql_files(examples_dir);
 
-    for idl_file in idl_files {
-        let out_file = idl_file.with_extension("idl.out");
+    for iql_file in iql_files {
+        let out_file = iql_file.with_extension("iql.out");
         if out_file.exists() {
             let content = fs::read_to_string(&out_file)
                 .unwrap_or_else(|_| panic!("Failed to read {:?}", out_file));
@@ -177,8 +181,8 @@ fn test_output_files_not_empty() {
 // Test Category Validation
 #[test]
 fn test_knowledge_graph_tests() {
-    let dir = Path::new("examples/datalog/01_knowledge_graph");
-    let files = find_idl_files(dir);
+    let dir = Path::new("examples/iql/01_knowledge_graph");
+    let files = find_iql_files(dir);
     assert!(
         !files.is_empty(),
         "01_knowledge_graph should have at least one test"
@@ -187,8 +191,8 @@ fn test_knowledge_graph_tests() {
 
 #[test]
 fn test_relations_tests() {
-    let dir = Path::new("examples/datalog/02_relations");
-    let files = find_idl_files(dir);
+    let dir = Path::new("examples/iql/02_relations");
+    let files = find_iql_files(dir);
     assert!(
         files.len() >= 3,
         "02_relations should have at least 3 tests (insert, bulk, delete)"
@@ -197,15 +201,15 @@ fn test_relations_tests() {
 
 #[test]
 fn test_joins_tests() {
-    let dir = Path::new("examples/datalog/06_joins");
-    let files = find_idl_files(dir);
+    let dir = Path::new("examples/iql/06_joins");
+    let files = find_iql_files(dir);
     assert!(files.len() >= 3, "06_joins should have at least 3 tests");
 }
 
 #[test]
 fn test_negation_tests() {
-    let dir = Path::new("examples/datalog/08_negation");
-    let files = find_idl_files(dir);
+    let dir = Path::new("examples/iql/08_negation");
+    let files = find_iql_files(dir);
     assert!(
         !files.is_empty(),
         "08_negation should have at least one test"
@@ -214,8 +218,8 @@ fn test_negation_tests() {
 
 #[test]
 fn test_recursion_tests() {
-    let dir = Path::new("examples/datalog/09_recursion");
-    let files = find_idl_files(dir);
+    let dir = Path::new("examples/iql/09_recursion");
+    let files = find_iql_files(dir);
     assert!(
         files.len() >= 2,
         "09_recursion should have at least 2 tests"
@@ -241,7 +245,7 @@ fn extract_rules_from_test(content: &str) -> Vec<String> {
 
 #[test]
 fn test_negation_syntax_valid() {
-    let path = Path::new("examples/datalog/08_negation/01_simple_negation.idl");
+    let path = Path::new("examples/iql/08_negation/01_simple_negation.iql");
     let content = fs::read_to_string(path).expect("Failed to read negation test");
     let rules = extract_rules_from_test(&content);
 
@@ -259,7 +263,7 @@ fn test_negation_syntax_valid() {
 
 #[test]
 fn test_recursion_syntax_valid() {
-    let path = Path::new("examples/datalog/09_recursion/01_transitive_closure.idl");
+    let path = Path::new("examples/iql/09_recursion/01_transitive_closure.iql");
     let content = fs::read_to_string(path).expect("Failed to read recursion test");
     let rules = extract_rules_from_test(&content);
 
@@ -286,7 +290,7 @@ fn test_recursion_syntax_valid() {
 #[test]
 fn test_example_statistics() {
     let rust_dir = Path::new("examples/rust");
-    let datalog_dir = Path::new("examples/datalog");
+    let iql_dir = Path::new("examples/iql");
 
     let rust_count = fs::read_dir(rust_dir)
         .unwrap()
@@ -300,17 +304,14 @@ fn test_example_statistics() {
         })
         .count();
 
-    let datalog_count = find_idl_files(datalog_dir).len();
+    let iql_count = find_iql_files(iql_dir).len();
 
     println!("\n=== Example Statistics ===");
     println!("Rust examples: {}", rust_count);
-    println!("Datalog test files: {}", datalog_count);
-    println!("Total examples: {}", rust_count + datalog_count);
+    println!("IQL test files: {}", iql_count);
+    println!("Total examples: {}", rust_count + iql_count);
 
     // Verify minimum counts
     assert!(rust_count >= 4, "Should have at least 4 Rust examples");
-    assert!(
-        datalog_count >= 20,
-        "Should have at least 20 Datalog test files"
-    );
+    assert!(iql_count >= 20, "Should have at least 20 IQL test files");
 }

@@ -418,12 +418,9 @@ class TestRetrieverDocumentMapping:
 
 
 class TestRetrieverVectorMode:
-    """Vector mode emits its own IQL string. We test the generated query."""
+    """Vector mode delegates to kg.vector_search()."""
 
-    def test_emits_direct_cosine_query(self) -> None:
-        # The retriever should generate an IQL query of the form
-        # ?relation(col1, col2, ..., embedding), Dist = cosine(embedding, [...])
-        # and never call kg.vector_search.
+    def test_delegates_to_vector_search(self) -> None:
         kg = _mock_kg(
             columns=["title", "embedding", "Dist"],
             rows=[["Doc1", [0.0, 0.0, 0.0], 0.05]],
@@ -438,15 +435,13 @@ class TestRetrieverVectorMode:
             page_content_columns=["title"],
         )
         r.invoke("query text")
-        kg.execute.assert_awaited_once()
-        kg.vector_search.assert_not_called()
-
-        called = kg.execute.await_args[0][0]
-        assert called.startswith("?_doc_rel(Title, Embedding)")
-        assert "Dist = cosine(Embedding, [" in called
+        kg.vector_search.assert_awaited_once()
+        call_kwargs = kg.vector_search.await_args
+        assert call_kwargs[0][0] is _DocRel
+        assert call_kwargs[1]["k"] == 5
+        assert call_kwargs[1]["metric"] == "cosine"
 
     def test_embedding_excluded_from_metadata(self) -> None:
-        # Regression: previously the embedding leaked into Document.metadata.
         kg = _mock_kg(
             columns=["title", "embedding", "Dist"],
             rows=[["Doc1", [0.1, 0.2, 0.3], 0.05]],
@@ -461,11 +456,11 @@ class TestRetrieverVectorMode:
         assert "embedding" not in d.metadata
         assert d.metadata.get("score") == 0.05
 
-    def test_top_k_sorts_by_dist_ascending(self) -> None:
+    def test_results_passed_through(self) -> None:
+        # vector_search returns sorted/trimmed results; retriever passes them through.
         kg = _mock_kg(
             columns=["title", "embedding", "Dist"],
             rows=[
-                ["far", [0.0], 0.9],
                 ["near", [0.0], 0.1],
                 ["mid", [0.0], 0.5],
             ],
@@ -482,6 +477,7 @@ class TestRetrieverVectorMode:
 
     def test_engine_error_raised(self) -> None:
         kg = _mock_kg(columns=["error"], rows=[["bad vec"]])
+        kg.vector_search = AsyncMock(side_effect=RuntimeError("bad vec"))
         r = InputLayerRetriever(
             kg=kg,
             relation=_DocRel,
@@ -939,7 +935,7 @@ class TestVectorStoreAdd:
 
 
 class TestVectorStoreSearch:
-    def test_similarity_search_emits_direct_iql(self) -> None:
+    def test_similarity_search_delegates_to_vector_search(self) -> None:
         kg = _mock_kg(
             columns=["id", "content", "source", "embedding", "Dist"],
             rows=[["1", "hello", "a", [0.0, 0.0, 0.0], 0.1]],
@@ -953,12 +949,10 @@ class TestVectorStoreSearch:
         assert docs[0].metadata.get("source") == "a"
         assert "embedding" not in docs[0].metadata
 
-        # Crucially: we go through kg.execute, not kg.vector_search.
-        kg.execute.assert_awaited_once()
-        kg.vector_search.assert_not_called()
-        called = kg.execute.await_args[0][0]
-        assert called.startswith("?_chunk(Id, Content, Source, Embedding)")
-        assert "Dist = cosine(Embedding, [" in called
+        kg.vector_search.assert_awaited_once()
+        call_kwargs = kg.vector_search.await_args[1]
+        assert call_kwargs["k"] == 3
+        assert call_kwargs["metric"] == "cosine"
 
     def test_similarity_search_with_score(self) -> None:
         kg = _mock_kg(
@@ -973,11 +967,11 @@ class TestVectorStoreSearch:
         assert doc.page_content == "hi"
         assert score == pytest.approx(0.42)
 
-    def test_top_k_client_side_sort(self) -> None:
+    def test_results_from_vector_search_passed_through(self) -> None:
+        # vector_search returns already sorted/trimmed results.
         kg = _mock_kg(
             columns=["id", "content", "source", "embedding", "Dist"],
             rows=[
-                ["1", "far", "x", [0.0], 0.9],
                 ["2", "near", "x", [0.0], 0.1],
                 ["3", "mid", "x", [0.0], 0.5],
             ],
@@ -990,6 +984,7 @@ class TestVectorStoreSearch:
 
     def test_engine_error_raised(self) -> None:
         kg = _mock_kg(columns=["error"], rows=[["bad query"]])
+        kg.vector_search = AsyncMock(side_effect=RuntimeError("bad query"))
         vs = InputLayerVectorStore(
             kg=kg, relation=_Chunk, embeddings=_StubEmbeddings()
         )
@@ -1003,7 +998,7 @@ class TestVectorStoreSearch:
         retriever = vs.as_retriever(search_kwargs={"k": 7})
         assert retriever is not None
 
-    def test_filter_appended_to_query(self) -> None:
+    def test_filter_passed_to_vector_search(self) -> None:
         kg = _mock_kg(
             columns=["id", "content", "source", "embedding", "Dist"],
             rows=[["1", "hello", "a", [0.0], 0.1]],
@@ -1012,8 +1007,10 @@ class TestVectorStoreSearch:
             kg=kg, relation=_Chunk, embeddings=_StubEmbeddings()
         )
         vs.similarity_search("q", k=3, filter={"source": "a"})
-        called = kg.execute.await_args[0][0]
-        assert 'Source = "a"' in called
+        call_kwargs = kg.vector_search.await_args[1]
+        extra = call_kwargs.get("extra_iql_clauses")
+        assert extra is not None
+        assert any('Source = "a"' in c for c in extra)
 
     def test_filter_unknown_key_warns(self) -> None:
         kg = _mock_kg(
@@ -1157,7 +1154,108 @@ class TestSyncFromRunningLoop:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  7. LIVE integration tests against a real inputlayer-server
+#  7. Additional coverage: edge cases and gaps
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestRetrieverMetricValidation:
+    def test_metric_passed_to_vector_search(self) -> None:
+        kg = _mock_kg(
+            columns=["title", "embedding", "Dist"],
+            rows=[["Doc1", [0.0, 0.0, 0.0], 0.05]],
+        )
+        r = InputLayerRetriever(
+            kg=kg,
+            relation=_DocRel,
+            embeddings=_StubEmbeddings(),
+            metric="dot_product",
+            page_content_columns=["title"],
+        )
+        r.invoke("query")
+        assert kg.vector_search.await_args[1]["metric"] == "dot_product"
+
+
+class TestVectorStoreMetricValidation:
+    def test_invalid_metric_raises(self) -> None:
+        kg = _mock_kg(
+            columns=["id", "content", "source", "embedding", "Dist"],
+            rows=[["1", "hello", "a", [0.0], 0.1]],
+        )
+        vs = InputLayerVectorStore(
+            kg=kg, relation=_Chunk, embeddings=_StubEmbeddings()
+        )
+        with pytest.raises(ValueError, match="Unknown metric"):
+            vs.similarity_search_with_score("q", k=1, metric="bogus")
+
+
+class TestVectorStoreSimilaritySearchByVector:
+    def test_basic_search_by_vector(self) -> None:
+        kg = _mock_kg(
+            columns=["id", "content", "source", "embedding", "Dist"],
+            rows=[
+                ["1", "hello", "a", [0.1, 0.2, 0.3], 0.05],
+                ["2", "world", "b", [0.4, 0.5, 0.6], 0.15],
+            ],
+        )
+        vs = InputLayerVectorStore(
+            kg=kg, relation=_Chunk, embeddings=_StubEmbeddings()
+        )
+        docs = vs.similarity_search_by_vector([0.1, 0.2, 0.3], k=2)
+        assert len(docs) == 2
+        assert docs[0].page_content == "hello"
+        assert docs[1].page_content == "world"
+        kg.vector_search.assert_awaited_once()
+
+    def test_search_by_vector_passes_k_to_vector_search(self) -> None:
+        kg = _mock_kg(
+            columns=["id", "content", "source", "embedding", "Dist"],
+            rows=[["1", "a", "x", [0.0], 0.1]],
+        )
+        vs = InputLayerVectorStore(
+            kg=kg, relation=_Chunk, embeddings=_StubEmbeddings()
+        )
+        vs.similarity_search_by_vector([0.1], k=1)
+        assert kg.vector_search.await_args[1]["k"] == 1
+
+    def test_search_by_vector_excludes_embedding_from_metadata(self) -> None:
+        kg = _mock_kg(
+            columns=["id", "content", "source", "embedding", "Dist"],
+            rows=[["1", "hello", "a", [0.1, 0.2], 0.05]],
+        )
+        vs = InputLayerVectorStore(
+            kg=kg, relation=_Chunk, embeddings=_StubEmbeddings()
+        )
+        docs = vs.similarity_search_by_vector([0.1, 0.2], k=1)
+        assert "embedding" not in docs[0].metadata
+
+    def test_search_by_vector_with_filter(self) -> None:
+        kg = _mock_kg(
+            columns=["id", "content", "source", "embedding", "Dist"],
+            rows=[["1", "hello", "a", [0.0], 0.1]],
+        )
+        vs = InputLayerVectorStore(
+            kg=kg, relation=_Chunk, embeddings=_StubEmbeddings()
+        )
+        vs.similarity_search_by_vector([0.1], k=1, filter={"source": "a"})
+        call_kwargs = kg.vector_search.await_args[1]
+        extra = call_kwargs.get("extra_iql_clauses")
+        assert extra is not None
+        assert any('Source = "a"' in c for c in extra)
+
+
+class TestRetrieverEngineErrorFallback:
+    def test_engine_error_unknown_fallback(self) -> None:
+        """Engine returns error column with empty rows."""
+        kg = _mock_kg(columns=["error"], rows=[])
+        r = InputLayerRetriever(
+            kg=kg, query="?bad", page_content_columns=["x"]
+        )
+        with pytest.raises(RuntimeError, match="unknown error"):
+            r.invoke("q")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  8. LIVE integration tests against a real inputlayer-server
 # ═══════════════════════════════════════════════════════════════════════
 #
 # These run only when INPUTLAYER_INTEGRATION=1. They define unique KG

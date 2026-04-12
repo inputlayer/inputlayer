@@ -18,7 +18,7 @@ A recursive rule references itself in its body. This allows computing things tha
 
 ## Setup
 
-```datalog
+```iql
 .kg create recursion_tutorial
 .kg use recursion_tutorial
 
@@ -41,7 +41,7 @@ Given edges, find all pairs (X, Y) where you can get from X to Y through any pat
 
 You could try explicit path lengths:
 
-```datalog
+```iql
 // Direct edges (length 1)
 +path1(X, Y) <- edge(X, Y)
 
@@ -56,7 +56,7 @@ But this only works for paths up to length 3. What about longer paths?
 
 ### Recursive Solution
 
-```datalog
+```iql
 // Base case: direct edges are paths
 +reachable(X, Y) <- edge(X, Y)
 
@@ -65,7 +65,7 @@ But this only works for paths up to length 3. What about longer paths?
 ```
 
 Query:
-```datalog
+```iql
 ?reachable(1, X)
 ```
 
@@ -105,7 +105,7 @@ InputLayer evaluates recursive rules using *fixpoint iteration*:
 
 ### Left Recursion (Preferred)
 
-```datalog
+```iql
 +reach_left(X, Y) <- edge(X, Y)
 +reach_left(X, Z) <- reach_left(X, Y), edge(Y, Z)
 ```
@@ -114,7 +114,7 @@ The recursive call is on the **left** side of the join.
 
 ### Right Recursion
 
-```datalog
+```iql
 +reach_right(X, Y) <- edge(X, Y)
 +reach_right(X, Z) <- edge(X, Y), reach_right(Y, Z)
 ```
@@ -127,7 +127,7 @@ The recursive call is on the **right** side.
 
 Rules can reference each other:
 
-```datalog
+```iql
 // Odd-length paths from node 1
 +odd_path(X) <- edge(1, X)
 +odd_path(X) <- even_path(Y), edge(Y, X)
@@ -142,7 +142,7 @@ These rules depend on each other and are computed together.
 
 ### Example 1: Ancestor/Descendant
 
-```datalog
+```iql
 // Family tree
 +parent[(1, 2), (1, 3), (2, 4), (2, 5), (3, 6)]
 // 1 is parent of 2, 3; 2 is parent of 4, 5; 3 is parent of 6
@@ -153,7 +153,7 @@ These rules depend on each other and are computed together.
 ```
 
 Query: Who are person 1's descendants?
-```datalog
+```iql
 ?ancestor(1, Desc)
 ```
 
@@ -163,7 +163,7 @@ Result: 4, 5, 6 (grandchildren) plus 2, 3 (children)
 
 Find all pairs at the same generation level:
 
-```datalog
+```iql
 // Root nodes (no parents)
 +root(X) <- node(X), !parent(_, X)
 
@@ -179,7 +179,7 @@ Find all pairs at the same generation level:
 
 Compute shortest path distances:
 
-```datalog
+```iql
 // Direct edges have distance 1
 +distance(X, Y, 1) <- edge(X, Y)
 
@@ -202,7 +202,7 @@ Compute shortest path distances:
 
 Find which nodes are in the same connected component:
 
-```datalog
+```iql
 // Symmetric edges for undirected graph
 +sym_edge(X, Y) <- edge(X, Y)
 +sym_edge(X, Y) <- edge(Y, X)
@@ -217,7 +217,7 @@ Find which nodes are in the same connected component:
 
 Classic manufacturing example - compute all parts needed:
 
-```datalog
+```iql
 // Part containment: component(assembly, part, quantity)
 +component[(1, 2, 1), (1, 3, 2), (2, 4, 3), (3, 4, 1), (3, 5, 2)]
 
@@ -232,7 +232,7 @@ Classic manufacturing example - compute all parts needed:
 
 ### Counting Path Lengths
 
-```datalog
+```iql
 // Count number of paths of each length
 +path_count(Src, Dst, Len, count<Path>) <-
   path_with_length(Src, Dst, Len, Path)
@@ -242,7 +242,7 @@ Classic manufacturing example - compute all parts needed:
 
 Total quantity of each part needed (with multipliers):
 
-```datalog
+```iql
 // Direct quantity needed
 +qty(Asm, Part, Qty) <- component(Asm, Part, Qty)
 
@@ -260,14 +260,14 @@ Total quantity of each part needed (with multipliers):
 
 ### Pattern 1: Transitive Closure
 
-```datalog
+```iql
 +closure(X, Y) <- base_relation(X, Y)
 +closure(X, Z) <- closure(X, Y), base_relation(Y, Z)
 ```
 
 ### Pattern 2: Reflexive-Transitive Closure
 
-```datalog
+```iql
 +rt_closure(X, X) <- domain(X)  // Reflexive: X reaches itself
 +rt_closure(X, Y) <- base_relation(X, Y)
 +rt_closure(X, Z) <- rt_closure(X, Y), base_relation(Y, Z)
@@ -275,7 +275,7 @@ Total quantity of each part needed (with multipliers):
 
 ### Pattern 3: Inductive Definition
 
-```datalog
+```iql
 // Base case
 +inductive(0, "base")
 
@@ -288,7 +288,7 @@ Total quantity of each part needed (with multipliers):
 
 ### Pattern 4: Graph Algorithms
 
-```datalog
+```iql
 // Node with maximum reachability
 +reach_count(X, count<Y>) <- reachable(X, Y)
 +max_reach(max<Count>) <- reach_count(_, Count)
@@ -299,7 +299,7 @@ Total quantity of each part needed (with multipliers):
 
 ### Check Intermediate Results
 
-```datalog
+```iql
 // Query the recursive relation directly
 ?reachable(X, Y)
 
@@ -312,7 +312,7 @@ count_reachable(count<X>) <- reachable(X, _)
 
 For debugging, you can create bounded versions:
 
-```datalog
+```iql
 +reach1(X, Y) <- edge(X, Y)
 +reach2(X, Y) <- reach1(X, Y)
 +reach2(X, Z) <- reach1(X, Y), edge(Y, Z)

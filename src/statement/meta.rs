@@ -1002,9 +1002,9 @@ mod tests {
 
     #[test]
     fn test_parse_load_command() {
-        let cmd = parse_meta_command(".load file.idl").unwrap();
+        let cmd = parse_meta_command(".load file.iql").unwrap();
         if let MetaCommand::Load { path, mode } = cmd {
-            assert_eq!(path, "file.idl");
+            assert_eq!(path, "file.iql");
             assert_eq!(mode, LoadMode::Default);
         } else {
             panic!("Expected Load");
@@ -1013,9 +1013,9 @@ mod tests {
 
     #[test]
     fn test_parse_load_with_replace() {
-        let cmd = parse_meta_command(".load rules.idl --replace").unwrap();
+        let cmd = parse_meta_command(".load rules.iql --replace").unwrap();
         if let MetaCommand::Load { path, mode } = cmd {
-            assert_eq!(path, "rules.idl");
+            assert_eq!(path, "rules.iql");
             assert_eq!(mode, LoadMode::Replace);
         } else {
             panic!("Expected Load with Replace");
@@ -1024,9 +1024,9 @@ mod tests {
 
     #[test]
     fn test_parse_load_with_merge() {
-        let cmd = parse_meta_command(".load data.idl --merge").unwrap();
+        let cmd = parse_meta_command(".load data.iql --merge").unwrap();
         if let MetaCommand::Load { path, mode } = cmd {
-            assert_eq!(path, "data.idl");
+            assert_eq!(path, "data.iql");
             assert_eq!(mode, LoadMode::Merge);
         } else {
             panic!("Expected Load with Merge");

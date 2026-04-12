@@ -12,7 +12,7 @@ This is one of InputLayer's core differentiators: while similarity searches expl
 
 Before diving into derivation proofs, you can inspect how a query will execute:
 
-```datalog
+```iql
 .debug ?reachable(1, X)
 ```
 
@@ -22,7 +22,7 @@ This shows the compilation pipeline (AST, IR, optimizations) without running the
 
 The `.why` command builds a proof tree for every result of a query:
 
-```datalog
+```iql
 // Define some data and rules
 +edge[(1, 2), (2, 3), (3, 4)]
 +reachable(X, Y) <- edge(X, Y)
@@ -66,7 +66,7 @@ Each proof node is one of:
 
 For aggregations with many contributing tuples, use `.why full` to enumerate all contributors:
 
-```datalog
+```iql
 .why full ?department_count(Dept, Count)
 ```
 
@@ -74,7 +74,7 @@ For aggregations with many contributing tuples, use `.why full` to enumerate all
 
 When an expected fact is missing, `.why_not` explains which rule condition failed:
 
-```datalog
+```iql
 +edge[(1, 2), (3, 4)]
 +path(X, Z) <- edge(X, Y), edge(Y, Z)
 

@@ -34,7 +34,7 @@ make integration-test   # cargo test --all-features --test '*'
 
 ### Tier 3: Snapshot Tests (E2E)
 
-~995 Datalog scripts in `examples/datalog/` organized across 33 categories. Each `.idl` file has a corresponding `.idl.out` file with expected output. The test runner starts a server, executes each script via the client binary, and compares actual output against the snapshot.
+~995 IQL scripts in `examples/iql/` organized across 33 categories. Each `.iql` file has a corresponding `.iql.out` file with expected output. The test runner starts a server, executes each script via the client binary, and compares actual output against the snapshot.
 
 ```bash
 make e2e-test                              # Run all (parallel, 4 jobs)
@@ -51,7 +51,7 @@ Options:
 | `-f PATTERN` | Filter tests by grep pattern (e.g., `recursion`, `06_joins\|08_negation`) |
 | `-j N` | Parallel jobs (default: 4, use 1 for sequential) |
 | `-v` | Verbose mode with full diffs (forces sequential) |
-| `-u` | Update mode  - regenerate `.idl.out` files |
+| `-u` | Update mode  - regenerate `.iql.out` files |
 
 Environment variables:
 | Variable | Default | Description |
@@ -123,15 +123,15 @@ Source-to-category mapping:
 
 | Target | Description |
 |--------|-------------|
-| `make e2e-update` | Regenerate all snapshot `.idl.out` files |
+| `make e2e-update` | Regenerate all snapshot `.iql.out` files |
 | `make flush-dev` | Delete `./data` folder to reset server state |
 | `make release VERSION=x.x.x` | Create release branch, bump version, push |
 
 ## Writing Snapshot Tests
 
-Each snapshot test is a `.idl` file in `examples/datalog/<category>/`:
+Each snapshot test is a `.iql` file in `examples/iql/<category>/`:
 
-```datalog
+```iql
 // Test: Descriptive Name
 // Description: What this test verifies
 
@@ -151,8 +151,8 @@ Each snapshot test is a `.idl` file in `examples/datalog/<category>/`:
 Rules:
 1. **Unique KG names**  - append `_n<category_number>t<file_number>` suffix (e.g., `_n08t01`) to prevent parallel test collisions.
 2. **Always clean up**  - switch back to `default` and drop your KG at the end.
-3. **File naming**  - `<number>_<description>.idl` (e.g., `01_simple_negation.idl`). Numbers must be unique within a category.
-4. **Generate snapshots**  - run `./scripts/run_snapshot_tests.sh -u -f <category>` to create the `.idl.out` file, then verify the output is correct.
+3. **File naming**  - `<number>_<description>.iql` (e.g., `01_simple_negation.iql`). Numbers must be unique within a category.
+4. **Generate snapshots**  - run `./scripts/run_snapshot_tests.sh -u -f <category>` to create the `.iql.out` file, then verify the output is correct.
 
 ## Test Categories
 

@@ -1,0 +1,10 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+
+> .load examples/iql/nonexistent_file_that_does_not_exist.iql
+Loading file: examples/iql/nonexistent_file_that_does_not_exist.iql
+Failed to read script 'examples/iql/nonexistent_file_that_does_not_exist.iql': No such file or directory (os error 2)

@@ -1,6 +1,6 @@
 //! Handler for `InputLayer`
 //!
-//! Core business logic for Datalog queries and data operations, used by the HTTP/WebSocket API.
+//! Core business logic for IQL queries and data operations, used by the HTTP/WebSocket API.
 //! Uses `parking_lot::RwLock` (no poisoning) and `AtomicU64` (lock-free counters).
 //!
 //! # Error handling
@@ -2147,7 +2147,7 @@ impl Handler {
             .await
     }
 
-    /// Execute a Datalog program and return results.
+    /// Execute an IQL program and return results.
     pub async fn query_program(
         &self,
         knowledge_graph: Option<String>,
@@ -2356,7 +2356,7 @@ impl Handler {
 }
 
 impl QueryJob {
-    /// Execute a Datalog program synchronously on the current thread.
+    /// Execute an IQL program synchronously on the current thread.
     /// Called from `Handler::query_program` via `tokio::task::spawn_blocking`
     /// so that Tokio worker threads are never blocked by DD computation.
     fn execute(
@@ -4415,7 +4415,7 @@ impl Handler {
         // All other statements (meta commands, inserts, deletes, persistent rules)
         // must go through query_program() directly because query_program_with_session()
         // prepends session rules and sends to the query engine, which breaks
-        // non-query input (e.g., ".kg use default" is not a valid Datalog atom).
+        // non-query input (e.g., ".kg use default" is not a valid IQL atom).
         // Note: SessionRule and Fact are already intercepted above and stored
         // in the SessionManager, so they never reach this point.
         let is_query = trimmed.starts_with('?');
@@ -4586,7 +4586,7 @@ impl Handler {
 /// Transform `?shorthand` query syntax into a `__query__(...) <- ...` rule.
 ///
 /// This enables the shorthand `?relation(X, Y)` syntax that the REPL and
-/// WebSocket API use, converting it to a proper Datalog rule before execution.
+/// WebSocket API use, converting it to a proper IQL rule before execution.
 /// Returns the original text unchanged if it's not a `?shorthand` query.
 ///
 /// Also extracts `:asc`/`:desc` sort annotations from query head variables,
@@ -4758,17 +4758,17 @@ fn join_continuation_lines(program: &str) -> String {
     result.join("\n")
 }
 
-/// Format a rule as Datalog text (uses Rule's Display impl)
+/// Format a rule as IQL text (uses Rule's Display impl)
 fn format_rule_text(rule: &crate::ast::Rule) -> String {
     rule.to_string()
 }
 
-/// Format a body predicate as Datalog text (uses BodyPredicate's Display impl)
+/// Format a body predicate as IQL text (uses BodyPredicate's Display impl)
 fn format_body_pred(pred: &crate::ast::BodyPredicate) -> String {
     pred.to_string()
 }
 
-/// Format a term as Datalog text (uses Term's Display impl)
+/// Format a term as IQL text (uses Term's Display impl)
 fn format_term(term: &Term) -> String {
     term.to_string()
 }
@@ -5335,7 +5335,7 @@ mod tests {
     #[test]
     fn test_debug_query_simple() {
         let (handler, _tmp) = handler_with_kg("debug_test_kg");
-        // debug_query takes a Datalog rule, not a ?query
+        // debug_query takes an IQL rule, not a ?query
         let result = handler.debug_query(
             Some("debug_test_kg".to_string()),
             "__q__(X, Y) <- edge(X, Y)".to_string(),
@@ -5592,7 +5592,7 @@ mod tests {
         handler
             .session_insert_ephemeral(&sid, "data", vec![Tuple::new(vec![Value::Int64(2)])])
             .expect("ephemeral insert failed");
-        // query_program_with_session takes raw Datalog rules, not ?shorthand
+        // query_program_with_session takes raw IQL rules, not ?shorthand
         let result = handler
             .query_program_with_session(&sid, "__q__(X) <- data(X)".to_string())
             .await
@@ -5636,7 +5636,7 @@ mod tests {
         handler
             .session_add_rule(&sid, rule, rule_text.to_string())
             .expect("session add rule failed");
-        // query_program_with_session takes raw Datalog rules, not ?shorthand
+        // query_program_with_session takes raw IQL rules, not ?shorthand
         let result = handler
             .query_program_with_session(&sid, "__q__(X, Y) <- doubled(X, Y)".to_string())
             .await
@@ -6322,9 +6322,9 @@ mod tests {
     #[tokio::test]
     async fn test_query_program_invalid_syntax() {
         let (handler, _tmp) = make_test_handler();
-        // Invalid Datalog syntax
+        // Invalid IQL syntax
         let result = handler
-            .query_program(None, "not valid datalog !!!".to_string())
+            .query_program(None, "not valid IQL !!!".to_string())
             .await;
         // Should not crash - either returns error or empty
         // (parser resilience)
@@ -6596,7 +6596,7 @@ mod tests {
     #[test]
     fn test_extract_predicate_vars_negated_skipped() {
         // Negated atoms should NOT contribute variables to the query head.
-        // A variable only appearing in a negated body atom is "unsafe" in Datalog.
+        // A variable only appearing in a negated body atom is ""unsafe" in IQL.
         use crate::ast::{Atom, BodyPredicate};
         let atom = Atom::new("banned".to_string(), vec![Term::Variable("Z".to_string())]);
         let pred = BodyPredicate::Negated(atom);
@@ -7393,7 +7393,7 @@ mod tests {
 
     #[test]
     fn test_extract_column_names_parse_failure_fallback() {
-        let names = extract_column_names_from_query("this is not valid datalog!!!", 3);
+        let names = extract_column_names_from_query("this is not valid IQL!!!", 3);
         assert_eq!(names, vec!["col0", "col1", "col2"]);
     }
 
@@ -7892,7 +7892,7 @@ fn extract_predicate_vars(pred: &crate::ast::BodyPredicate, head_vars: &mut Vec<
         crate::ast::BodyPredicate::Negated(_) => {
             // Do NOT extract variables from negated atoms into the query head.
             // A variable that appears only in a negated body atom is "unsafe"
-            // in Datalog - it cannot be safely projected into the head.
+            // in IQL - it cannot be safely projected into the head.
         }
         crate::ast::BodyPredicate::Comparison(left, _, right) => {
             extract_term_vars(left, head_vars);
@@ -7915,7 +7915,7 @@ fn extract_predicate_vars(pred: &crate::ast::BodyPredicate, head_vars: &mut Vec<
     }
 }
 
-/// Extract the query relation name from a Datalog query string.
+/// Extract the query relation name from an IQL query string.
 ///
 /// Handles both `?relation(X, Y)` shorthand and `__query__(X, Y) <- relation(X, Y)` forms.
 fn extract_query_relation(query: &str) -> Option<String> {

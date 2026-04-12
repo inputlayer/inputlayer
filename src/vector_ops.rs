@@ -1,6 +1,6 @@
 //! Vector Operations Module
 //!
-//! High-performance vector operations for similarity search in Datalog.
+//! High-performance vector operations for similarity search in IQL.
 //! Includes distance functions, LSH hashing, and vector utilities.
 //!
 //! # Performance Considerations

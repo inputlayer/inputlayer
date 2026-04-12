@@ -35,7 +35,7 @@ Current knowledge graph: default
 
 ## 3. Add Some Data
 
-```datalog
+```iql
 +person[("alice", 30), ("bob", 25), ("charlie", 35)]
 ```
 
@@ -46,7 +46,7 @@ Inserted 3 fact(s) into 'person'.
 
 ## 4. Query the Data
 
-```datalog
+```iql
 ?person(Name, Age)
 ```
 
@@ -62,7 +62,7 @@ Output:
 
 ## 5. Add a Filter
 
-```datalog
+```iql
 ?person(Name, Age), Age > 28
 ```
 
@@ -77,7 +77,7 @@ Output:
 
 ## 6. Create a Rule
 
-```datalog
+```iql
 +senior(Name) <- person(Name, Age), Age >= 30
 ```
 
@@ -86,7 +86,7 @@ Output:
 Rule 'senior' registered.
 ```
 
-```datalog
+```iql
 ?senior(X)
 ```
 
@@ -101,7 +101,7 @@ Output:
 
 ## 7. Use Aggregation
 
-```datalog
+```iql
 +average_age(avg<Age>) <- person(_, Age)
 ```
 
@@ -110,7 +110,7 @@ Output:
 Rule 'average_age' registered.
 ```
 
-```datalog
+```iql
 ?average_age(X)
 ```
 

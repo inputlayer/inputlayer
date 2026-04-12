@@ -28,7 +28,7 @@ With an HNSW index:
 
 ### Simple Example
 
-```datalog
+```iql
 // Create a documents table with embeddings
 +documents(id: int, title: string, embedding: vector)
 
@@ -175,7 +175,7 @@ hnsw_nearest("index_name", QueryVec, K, IdVar, DistVar [, EfSearch])
 
 ### Examples
 
-```datalog
+```iql
 // Find 5 nearest documents to a literal query vector
 ? hnsw_nearest("doc_emb_idx", [0.11, 0.21, 0.29], 5, Id, Dist)
 
@@ -323,7 +323,7 @@ Rebuild if:
 
 For large initial loads, create the index first:
 
-```datalog
+```iql
 .index create my_idx on docs(emb)
 
 // Then bulk insert
@@ -363,7 +363,7 @@ Higher dimensions = more memory, slower search.
 3. No vectors in relation
 
 **Debug**:
-```datalog
+```iql
 .index stats my_idx
 ? documents(Id, _, V)  // Check if data exists
 ```
@@ -376,7 +376,7 @@ Higher dimensions = more memory, slower search.
 3. Many tombstones
 
 **Solutions**:
-```datalog
+```iql
 // Check metric matches embedding type
 .index stats my_idx
 

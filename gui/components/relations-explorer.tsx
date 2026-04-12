@@ -14,7 +14,7 @@ import {
 import { cn } from "@/lib/utils"
 import { EmptyState } from "@/components/empty-state"
 import { useDebounce } from "@/hooks/use-debounce"
-import type { Relation, View } from "@/lib/datalog-store"
+import type { Relation, View } from "@/lib/iql-store"
 
 interface RelationsExplorerProps {
   relations: Relation[]

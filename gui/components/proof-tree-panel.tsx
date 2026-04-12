@@ -18,9 +18,9 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { useDatalogStore } from "@/lib/datalog-store"
+import { useIQLStore } from "@/lib/iql-store"
 import { cn } from "@/lib/utils"
-import type { QueryResult } from "@/lib/datalog-store"
+import type { QueryResult } from "@/lib/iql-store"
 import type { WsProofTree, WsProofNode, JsonValue } from "@/lib/ws-types"
 
 // ── Error Boundary ────────────────────────────────────────────────
@@ -290,7 +290,7 @@ function ProofTreePanelInner({ query, result }: ProofTreePanelProps) {
         setLoading(false)
         return
       }
-      const response = await (useDatalogStore.getState().executeInternalQuery(`.why ${queryLine}`))
+      const response = await (useIQLStore.getState().executeInternalQuery(`.why ${queryLine}`))
       if (response.status === "error") {
         setError(response.error ?? "Failed to compute proof tree")
       } else {
@@ -316,7 +316,7 @@ function ProofTreePanelInner({ query, result }: ProofTreePanelProps) {
 
     // Export uses .why full for complete, verifiable proof trees
     try {
-      const fullResponse = await useDatalogStore.getState().executeInternalQuery(`.why full ${queryLine}`)
+      const fullResponse = await useIQLStore.getState().executeInternalQuery(`.why full ${queryLine}`)
       const exportGraphs = fullResponse?.proofTrees ?? graphs
       if (!exportGraphs) return
       const blob = new Blob([JSON.stringify(exportGraphs, null, 2)], { type: "application/json" })

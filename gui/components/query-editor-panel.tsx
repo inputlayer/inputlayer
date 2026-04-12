@@ -6,7 +6,7 @@ import { useState, useRef, useCallback, useMemo, useEffect, useSyncExternalStore
 import { Play, Copy, Check, Trash2, Square, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { useDatalogStore } from "@/lib/datalog-store"
+import { useIQLStore } from "@/lib/iql-store"
 import { AutocompletePopup } from "@/components/autocomplete-popup"
 import { KeyboardShortcutsDialog } from "@/components/keyboard-shortcuts-dialog"
 import { getCompletions, getCursorCoordinates, type CompletionItem } from "@/lib/autocomplete"
@@ -45,7 +45,7 @@ const STATEMENT_COLORS: Record<NonNullable<StatementType>, string> = {
 
 export function QueryEditorPanel({ onExecute, onCancel, isExecuting, errorLines }: QueryEditorPanelProps) {
   const isMac = useSyncExternalStore(subscribePlatform, getIsMac, getIsMacServer)
-  const { editorContent, setEditorContent, selectedKnowledgeGraph, relations, views } = useDatalogStore()
+  const { editorContent, setEditorContent, selectedKnowledgeGraph, relations, views } = useIQLStore()
   const [query, setQuery] = useState(() => editorContent || "")
   const [copied, setCopied] = useState(false)
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 })

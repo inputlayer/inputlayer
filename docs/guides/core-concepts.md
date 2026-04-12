@@ -10,7 +10,7 @@ InputLayer uses **pure multiset semantics** by default, where the **entire tuple
 
 Without an explicit schema, tuples are identified by all their values:
 
-```datalog
+```iql
 +person("alice", 30)     // Insert tuple ("alice", 30)
 +person("alice", 31)     // Insert different tuple ("alice", 31)
 ```
@@ -33,7 +33,7 @@ Schemas define the structure and constraints for relations.
 
 Declare a schema using typed arguments:
 
-```datalog
+```iql
 +person(id: int, name: string, age: int)
 ```
 
@@ -43,7 +43,7 @@ Declare a schema using typed arguments:
 
 When you know the exact tuple to delete:
 
-```datalog
+```iql
 -person("alice", 30)
 +person("alice", 31)
 ```
@@ -52,7 +52,7 @@ When you know the exact tuple to delete:
 
 When you don't know all column values, use a conditional delete:
 
-```datalog
+```iql
 // Delete alice regardless of age
 -person("alice", Age) <- person("alice", Age)
 +person("alice", 31)
@@ -62,7 +62,7 @@ When you don't know all column values, use a conditional delete:
 
 Combine delete and insert in one atomic operation:
 
-```datalog
+```iql
 -person(Name, OldAge), +person(Name, NewAge) <-
   person(Name, OldAge),
   Name = "alice",
@@ -75,13 +75,13 @@ This executes at the same logical timestamp, ensuring atomicity.
 
 ### Delete Specific Tuple
 
-```datalog
+```iql
 -edge(1, 2)
 ```
 
 ### Delete All Matching Tuples
 
-```datalog
+```iql
 // Delete all edges from node 5
 -edge(5, Y) <- edge(5, Y)
 
@@ -95,13 +95,13 @@ This executes at the same logical timestamp, ensuring atomicity.
 
 To delete a relation (schema + all data):
 
-```datalog
+```iql
 -person
 ```
 
 **Note**: This only works for relations without data. To delete all data first:
 
-```datalog
+```iql
 -person(X, Y, Z) <- person(X, Y, Z)  // Delete all tuples
 -person                               // Delete relation
 ```
@@ -110,7 +110,7 @@ To delete a relation (schema + all data):
 
 When no schema is declared, it's inferred from the first insert:
 
-```datalog
+```iql
 +person("alice", 30)          // Inferred: person(string, int)
 +person("bob", 25)            // OK: matches inferred schema
 +person("charlie", "young")   // ERROR: type mismatch (string vs int)
@@ -122,7 +122,7 @@ When no schema is declared, it's inferred from the first insert:
 
 Stored in the database catalog:
 
-```datalog
+```iql
 +person(id: int, name: string, age: int)
 ```
 
@@ -130,7 +130,7 @@ Stored in the database catalog:
 
 Session-only, cleared on database switch:
 
-```datalog
+```iql
 temp(x: int, y: int)
 temp(1, 2)
 temp(3, 4)
@@ -148,7 +148,7 @@ Use transient schemas for:
 
 A **view** (derived relation) is identified by its **head predicate name**. A view contains one or more rules:
 
-```datalog
+```iql
 +reachable(X, Y) <- edge(X, Y)                   // Creates view, adds rule 1
 +reachable(X, Y) <- reachable(X, Z), edge(Z, Y)  // Adds rule 2 to same view
 ```
@@ -157,34 +157,34 @@ A **view** (derived relation) is identified by its **head predicate name**. A vi
 
 Delete an entire view with:
 
-```datalog
+```iql
 -reachable
 ```
 
 Individual rule clauses can be removed using `.rule remove`:
 
-```datalog
+```iql
 .rule remove reachable 1   // Remove first clause of 'reachable' rule
 .rule drop reachable       // Remove entire 'reachable' rule (all clauses)
 ```
 
 To completely delete a view:
 
-```datalog
+```iql
 -reachable
 ```
 
 Or use file-based workflow:
 
-```datalog
-.load views/reachable.idl --replace
+```iql
+.load views/reachable.iql --replace
 ```
 
 ### Session Rules
 
 Rules without `+` are transient:
 
-```datalog
+```iql
 temp(X, Y) <- edge(X, Y), X < Y
 ```
 
@@ -195,10 +195,10 @@ Session rules:
 
 ## File-Based Workflow
 
-For complex views with many rules, use `.idl` script files:
+For complex views with many rules, use `.iql` script files:
 
-```datalog
-// views/reachable.idl
+```iql
+// views/reachable.iql
 +reachable(X, Y) <- edge(X, Y)
 +reachable(X, Y) <- reachable(X, Z), edge(Z, Y)
 ```
@@ -207,18 +207,18 @@ For complex views with many rules, use `.idl` script files:
 
 | Mode | Syntax | Behavior |
 |------|--------|----------|
-| **Default** | `.load file.idl` | Error if any name already exists |
-| **Replace** | `.load file.idl --replace` | Delete existing, then load |
-| **Merge** | `.load file.idl --merge` | Add rules to existing views |
+| **Default** | `.load file.iql` | Error if any name already exists |
+| **Replace** | `.load file.iql --replace` | Delete existing, then load |
+| **Merge** | `.load file.iql --merge` | Add rules to existing views |
 
 ### Example Workflow
 
-```datalog
+```iql
 // Initial load
-.load views/access_control.idl
+.load views/access_control.iql
 
 // After modifying the file, reload with replace
-.load views/access_control.idl --replace
+.load views/access_control.iql --replace
 ```
 
 ## Best Practices
@@ -227,13 +227,13 @@ For complex views with many rules, use `.idl` script files:
 
 Explicit schemas catch type errors early:
 
-```datalog
+```iql
 +employee(id: int, name: string, salary: float)
 ```
 
 ### 2. Use Conditional Deletes for Unknown Values
 
-```datalog
+```iql
 // Update all employees in a department
 -employee(Id, OldDept, Name), +employee(Id, "Engineering", Name) <-
   employee(Id, OldDept, Name),
@@ -246,16 +246,16 @@ Keep rule definitions in version-controlled files:
 
 ```
 views/
-  access_control.idl
-  graph_analysis.idl
-  reporting.idl
+  access_control.iql
+  graph_analysis.iql
+  reporting.iql
 ```
 
 ### 4. Use Persistent Rules for Automatic Materialization
 
 Persistent rules are automatically materialized and updated when base data changes:
 
-```datalog
+```iql
 // Session rules compute fresh each query:
 reachable(X, Y) <- edge(X, Y)
 reachable(X, Y) <- reachable(X, Z), edge(Z, Y)

@@ -28,10 +28,10 @@ class Session:
         if isinstance(facts, list):
             if not facts:
                 return
-            datalog = compile_bulk_insert(type(facts[0]), facts, persistent=False)
+            iql = compile_bulk_insert(type(facts[0]), facts, persistent=False)
         else:
-            datalog = compile_insert(facts, persistent=False)
-        await self._conn.execute(datalog)
+            iql = compile_insert(facts, persistent=False)
+        await self._conn.execute(iql)
 
     async def define_rules(self, *targets: type[Derived]) -> None:
         """Define session-scoped rules (no + prefix)."""
@@ -41,7 +41,7 @@ class Session:
             head_name = Relation._resolve_name(target)
             head_columns = Relation._get_columns(target)
             for clause in target.rules:
-                datalog = compile_rule(
+                iql = compile_rule(
                     head_name,
                     head_columns,
                     clause.select_map,
@@ -49,7 +49,7 @@ class Session:
                     clause.condition,
                     persistent=False,
                 )
-                await self._conn.execute(datalog)
+                await self._conn.execute(iql)
 
     async def list_rules(self) -> list[str]:
         """List session rules."""

@@ -30,7 +30,7 @@ See `docs/reference/functions.md` Section 7 for full reference.
 
 Top-K selection with ordering support:
 
-```datalog
+```iql
 +top_scores(top_k<3, Name, Score:desc>) <- scores(Name, Score)
 ```
 
@@ -44,7 +44,7 @@ Variants: `top_k`, `top_k_threshold`, `within_radius`.
 
 All builtin functions (vector, math, string, temporal) now work in rule heads via computed head variables:
 
-```datalog
+```iql
 // Compute and store similarities
 +similarity(Id1, Id2, Score) <-
     embedding(Id1, V1), embedding(Id2, V2),
@@ -66,7 +66,7 @@ All builtin functions (vector, math, string, temporal) now work in rule heads vi
 
 Load data from external file formats:
 
-```datalog
+```iql
 .load users.json as user
 .load sales.parquet as sale
 .load events.csv as event
@@ -119,7 +119,7 @@ To add a new built-in function:
 3. Add IR variant to `BuiltinFunction` in `src/ir/mod.rs`
 4. Add conversion in `src/ir_builder/mod.rs`
 5. Add evaluation logic in `src/code_generator/mod.rs`
-6. Add tests in `examples/datalog/` with snapshot
+6. Add tests in `examples/iql/` with snapshot
 7. Update `docs/reference/functions.md`
 
 ---
@@ -129,7 +129,7 @@ To add a new built-in function:
 ### v0.1.0 (Current)
 - 55 builtin functions (vector, temporal, math, string, LSH, quantization)
 - Functions work in rule heads via computed head variables
-- HNSW vector indexes with full Datalog query integration (`hnsw_nearest` builtin)
+- HNSW vector indexes with full IQL query integration (`hnsw_nearest` builtin)
 - Count distinct aggregate (`count_distinct`)
 - TopK, TopKThreshold, WithinRadius aggregates
 - 3,085 unit tests + 1,119 snapshot tests = 4,204 total (as of 2026-02-24)
@@ -143,7 +143,7 @@ To add a new built-in function:
   - Relation drop, rule drop by prefix, clear by prefix
   - TLS deployment support
 - WAL-based persistence with configurable durability
-- Basic Datalog operations
+- Basic IQL operations
 - Persistent and session rules
 - Aggregations (count, sum, min, max, avg)
 - Vector distance functions

@@ -450,7 +450,7 @@ rules = await kg.list_rules()
 for r in rules:
     print(f"{r.name}: {r.clause_count} clause(s)")
 
-# View a rule's compiled Datalog definition
+# View a rule's compiled IQL definition
 clauses = await kg.rule_definition("reachable")
 for clause in clauses:
     print(clause)

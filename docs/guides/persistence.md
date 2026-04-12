@@ -196,7 +196,7 @@ Compaction consolidates history and reclaims space.
 
 ### Manual Compaction
 
-```datalog
+```iql
 .compact
 ```
 
@@ -308,7 +308,7 @@ Shows:
 
 ### Check Shard Info
 
-```datalog
+```iql
 .rel
 ```
 

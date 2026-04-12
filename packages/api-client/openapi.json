@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "InputLayer API",
-    "description": "REST API for InputLayer Datalog Database",
+    "description": "REST API for InputLayer IQL Database",
     "contact": {
       "name": "InputLayer Team",
       "url": "https://inputlayer.io"
@@ -578,7 +578,7 @@
         "tags": [
           "queries"
         ],
-        "summary": "Execute a Datalog query",
+        "summary": "Execute a IQL query",
         "operationId": "execute_query",
         "requestBody": {
           "content": {
@@ -828,7 +828,7 @@
           },
           "query": {
             "type": "string",
-            "description": "The Datalog query to execute"
+            "description": "The IQL query to execute"
           },
           "timeout_ms": {
             "type": "integer",

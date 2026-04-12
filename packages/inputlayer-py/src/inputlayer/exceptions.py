@@ -7,8 +7,12 @@ class InputLayerError(Exception):
     """Base exception for all InputLayer errors."""
 
 
-class ConnectionError(InputLayerError):
+class InputLayerConnectionError(InputLayerError):
     """Failed to connect or lost connection to the server."""
+
+
+# Backward-compatible alias (shadows the builtin, kept for existing code).
+ConnectionError = InputLayerConnectionError
 
 
 class AuthenticationError(InputLayerError):
@@ -58,8 +62,12 @@ class QueryError(InputLayerError):
         return base
 
 
-class PermissionError(InputLayerError):
+class InputLayerPermissionError(InputLayerError):
     """Insufficient permissions for the requested operation."""
+
+
+# Backward-compatible alias (shadows the builtin, kept for existing code).
+PermissionError = InputLayerPermissionError
 
 
 class KnowledgeGraphNotFoundError(InputLayerError):

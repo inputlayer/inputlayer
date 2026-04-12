@@ -2,11 +2,11 @@ import fs from "node:fs"
 import path from "node:path"
 import type { AdminClient } from "./admin-client.js"
 
-/** List of demo knowledge graphs to seed. Each maps to a seeds/<name>.idl file. */
+/** List of demo knowledge graphs to seed. Each maps to a seeds/<name>.iql file. */
 const DEMO_KGS = ["default", "flights", "rules_vectors", "retraction", "incremental", "provenance"]
 
 /**
- * Parse an .idl file into executable statements.
+ * Parse an .iql file into executable statements.
  * Splits on blank lines (statement separator) and strips comments.
  * Multi-line statements (e.g. +fact[(...),\n  (...)]) are joined.
  */
@@ -69,7 +69,7 @@ async function isSeeded(adminClient: AdminClient, kgName: string, seedsDir: stri
     // Check that at least the first relation from the seed file exists.
     // The "default" KG is auto-created by InputLayer with 0 user relations,
     // so just checking .rel length isn't enough.
-    const filePath = path.join(seedsDir, `${kgName}.idl`)
+    const filePath = path.join(seedsDir, `${kgName}.iql`)
     if (!fs.existsSync(filePath)) return false
     const content = fs.readFileSync(filePath, "utf-8")
     const match = content.match(/^\+(\w+)\(/m)
@@ -83,14 +83,14 @@ async function isSeeded(adminClient: AdminClient, kgName: string, seedsDir: stri
 }
 
 /**
- * Seed a single knowledge graph from its .idl file.
+ * Seed a single knowledge graph from its .iql file.
  */
 async function seedKg(
   adminClient: AdminClient,
   kgName: string,
   seedsDir: string
 ): Promise<void> {
-  const filePath = path.join(seedsDir, `${kgName}.idl`)
+  const filePath = path.join(seedsDir, `${kgName}.iql`)
 
   if (!fs.existsSync(filePath)) {
     console.warn(`[seeder] seed file not found: ${filePath}`)

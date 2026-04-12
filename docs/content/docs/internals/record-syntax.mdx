@@ -10,7 +10,7 @@ InputLayer supports record types as a way to document the structure of data. Rec
 
 ### 1.1 Simple Type Aliases
 
-```datalog
+```iql
 type Email: string
 type UserId: int
 type Score: int
@@ -20,7 +20,7 @@ These declare type aliases that can be used in schema declarations for documenta
 
 ### 1.2 Record Types
 
-```datalog
+```iql
 type User: {
     id:      int,
     name:    string,
@@ -34,7 +34,7 @@ A **record type** `{ f1 : t1, ..., fn : tn }` documents the structure of a relat
 
 Schemas are declared using the `+` prefix with typed columns:
 
-```datalog
+```iql
 +user(id: int, name: string, email: string)
 ```
 
@@ -47,7 +47,7 @@ This declares a 3-ary relation with typed columns. The schema enables:
 
 You can reference declared types in schemas:
 
-```datalog
+```iql
 type Email: string
 type UserId: int
 
@@ -58,7 +58,7 @@ type UserId: int
 
 ### 3.1 Inserting Facts
 
-```datalog
+```iql
 // Single fact
 +user(1, "Alice", "alice@example.com")
 
@@ -68,7 +68,7 @@ type UserId: int
 
 ### 3.2 Persistent Rules
 
-```datalog
+```iql
 +admin_email(Email) <-
     user(_, _, Email),
     admin(Email)
@@ -76,7 +76,7 @@ type UserId: int
 
 ### 3.3 Queries
 
-```datalog
+```iql
 ?user(Id, Name, Email)
 ?user(1, Name, _)
 ```
@@ -89,7 +89,7 @@ The following features are documented for future implementation:
 
 **Planned syntax** (not yet implemented):
 
-```datalog
+```iql
 type User: { id: int, name: string, email: string }
 
 // Would desugar to: +user(id: int, name: string, email: string).
@@ -100,7 +100,7 @@ type User: { id: int, name: string, email: string }
 
 **Planned syntax** (not yet implemented):
 
-```datalog
+```iql
 +user(id = 1, name = "Alice", email = "alice@example.com")
 ```
 
@@ -110,7 +110,7 @@ Would desugar to positional form based on schema order.
 
 **Planned syntax** (not yet implemented):
 
-```datalog
+```iql
 +user({ id = 1, name = "Alice", email = "alice@example.com" })
 ```
 
@@ -118,7 +118,7 @@ Would desugar to positional form based on schema order.
 
 **Planned syntax** (not yet implemented):
 
-```datalog
+```iql
 admin_email(e) <-
     user({ id: _, name: _, email: e }),
     admin(e)
@@ -136,7 +136,7 @@ admin_email(e) <-
 
 Use explicit positional schemas and facts:
 
-```datalog
+```iql
 // Declare schema
 +user(id: int, name: string, email: string)
 

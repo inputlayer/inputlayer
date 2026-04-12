@@ -20,15 +20,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import type { Relation } from "@/lib/datalog-store"
-import { useDatalogStore } from "@/lib/datalog-store"
+import type { Relation } from "@/lib/iql-store"
+import { useIQLStore } from "@/lib/iql-store"
 
 interface RelationDetailPanelProps {
   relation: Relation
 }
 
 export function RelationDetailPanel({ relation }: RelationDetailPanelProps) {
-  const { loadRelationData, deleteRelation } = useDatalogStore()
+  const { loadRelationData, deleteRelation } = useIQLStore()
   const [copied, setCopied] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)

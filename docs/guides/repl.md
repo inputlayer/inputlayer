@@ -31,7 +31,7 @@ Manage your knowledge graphs:
 | `.kg drop <name>` | Delete a knowledge graph (cannot drop current) |
 
 **Examples:**
-```datalog
+```iql
 .kg create myproject
 .kg use myproject
 .kg list
@@ -48,7 +48,7 @@ Inspect base facts:
 | `.rel <name>` | Show schema and sample data for a relation |
 
 **Examples:**
-```datalog
+```iql
 .rel
 .rel edge
 .rel employee
@@ -68,7 +68,7 @@ Manage persistent rules:
 | `.rule edit <name> <n> <clause>` | Replace clause #n |
 
 **Examples:**
-```datalog
+```iql
 .rule                           // List all rules
 .rule path                      // Query the 'path' rule
 .rule def path                  // Show path's definition
@@ -88,7 +88,7 @@ Manage transient session rules:
 | `.session drop <n>` | Remove session rule #n |
 
 **Examples:**
-```datalog
+```iql
 temp(X) <- edge(1, X)    // Add session rule
 .session                   // List session rules
 .session drop 1            // Remove first rule
@@ -101,15 +101,15 @@ Load and execute InputLayer files:
 
 | Command | Description |
 |---------|-------------|
-| `.load <file>` | Execute a .idl file |
+| `.load <file>` | Execute a .iql file |
 | `.load <file> --replace` | Replace existing rules |
 | `.load <file> --merge` | Merge with existing rules |
 
 **Examples:**
-```datalog
-.load schema.idl
-.load rules.idl --replace
-.load additional_data.idl --merge
+```iql
+.load schema.iql
+.load rules.iql --replace
+.load additional_data.iql --merge
 ```
 
 ### System Commands
@@ -125,7 +125,7 @@ Load and execute InputLayer files:
 
 ### Insert Facts (`+`)
 
-```datalog
+```iql
 // Single fact
 +edge(1, 2)
 
@@ -138,7 +138,7 @@ Load and execute InputLayer files:
 
 ### Delete Facts (`-`)
 
-```datalog
+```iql
 // Single fact
 -edge(1, 2)
 
@@ -151,7 +151,7 @@ Load and execute InputLayer files:
 
 ### Updates (Delete then Insert)
 
-```datalog
+```iql
 // First delete old value
 -counter(1, 0)
 // Then insert new value
@@ -160,7 +160,7 @@ Load and execute InputLayer files:
 
 ### Persistent Rules (`+head <- body`)
 
-```datalog
+```iql
 // Simple rule
 +adult(Name, Age) <- person(Name, Age), Age >= 18
 
@@ -174,14 +174,14 @@ Load and execute InputLayer files:
 
 ### Session Rules (`head <- body`)
 
-```datalog
+```iql
 // Transient rule (no + prefix)
 temp_result(X, Y) <- edge(X, Y), X < Y
 ```
 
 ### Queries (`?`)
 
-```datalog
+```iql
 // Simple query
 ?edge(1, X)
 
@@ -194,7 +194,7 @@ temp_result(X, Y) <- edge(X, Y), X < Y
 
 ### Schema Declarations
 
-```datalog
+```iql
 // Typed schema
 +employee(id: int, name: string, dept: string)
 +user(id: int, name: string, email: string)
@@ -206,7 +206,7 @@ temp_result(X, Y) <- edge(X, Y), X < Y
 
 Statements can span multiple lines. They're executed when you type the final `.`:
 
-```datalog
+```iql
 +complex_rule(X, Y, Z) <-
   first_condition(X, A),
   second_condition(A, Y),
@@ -217,7 +217,7 @@ Statements can span multiple lines. They're executed when you type the final `.`
 
 ### Comments
 
-```datalog
+```iql
 // Single line comment (Prolog style - preferred)
 +edge(1, 2)  // Inline comment
 
@@ -245,7 +245,7 @@ Results: 5 rows
 
 Use `_` to ignore columns:
 
-```datalog
+```iql
 // Get all source nodes (ignore target)
 ?edge(X, _)
 
@@ -257,10 +257,10 @@ temp(count<X>) <- edge(X, _)
 
 ### 1. Exploratory Analysis
 
-```datalog
+```iql
 .kg create exploration
 .kg use exploration
-.load data.idl
+.load data.iql
 .rel                          // See what data exists
 ?some_relation(X, Y)       // Explore
 temp(X) <- complex_query...   // Session rule for analysis
@@ -269,7 +269,7 @@ temp(X) <- complex_query...   // Session rule for analysis
 
 ### 2. Building a Schema
 
-```datalog
+```iql
 .kg create production
 .kg use production
 
@@ -278,8 +278,8 @@ temp(X) <- complex_query...   // Session rule for analysis
 +order(id: int, user_id: int, amount: float)
 
 // Load data
-.load users.idl
-.load orders.idl
+.load users.iql
+.load orders.iql
 
 // Verify
 .rel user
@@ -288,7 +288,7 @@ temp(X) <- complex_query...   // Session rule for analysis
 
 ### 3. Defining Business Rules
 
-```datalog
+```iql
 // Define persistent rules
 +high_value_customer(UserId) <-
   order(_, UserId, Amount),
@@ -310,7 +310,7 @@ temp(X) <- complex_query...   // Session rule for analysis
 
 ### 4. Iterating on Rules
 
-```datalog
+```iql
 // First attempt
 +path(X, Y) <- edge(X, Y)
 

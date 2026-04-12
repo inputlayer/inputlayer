@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import warnings
 from collections.abc import Callable
 from typing import Any
@@ -16,7 +17,9 @@ from langchain_core.retrievers import BaseRetriever
 from pydantic import Field, model_validator
 
 from inputlayer._sync import run_sync
-from inputlayer.integrations.langchain.params import bind_params, iql_literal
+from inputlayer.integrations.langchain.params import bind_params
+
+logger = logging.getLogger(__name__)
 
 
 class InputLayerRetriever(BaseRetriever):
@@ -137,6 +140,7 @@ class InputLayerRetriever(BaseRetriever):
             raise RuntimeError("Retriever has neither a relation nor a query")
         params = self._resolve_params(user_query)
         compiled = bind_params(self.query, params)
+        logger.debug("IQL retriever query: %s", compiled)
         result = await self.kg.execute(compiled)
         if result.columns == ["error"]:
             msg = result.rows[0][0] if result.rows else "unknown error"
@@ -154,61 +158,38 @@ class InputLayerRetriever(BaseRetriever):
     # ── Vector mode ──────────────────────────────────────────────────
 
     async def _vector_documents(self, user_query: str) -> list[Document]:
-        """Execute vector search by emitting IQL directly.
-
-        We do not call ``kg.vector_search`` because that helper currently
-        produces a query form the engine does not accept; instead we
-        compose ``?relation(...), Dist = cosine(Vec, [...])`` ourselves
-        and rank client-side. This keeps the contract clean while we
-        wait for the SDK helper to be fixed upstream.
-        """
+        """Execute vector search via ``kg.vector_search()``."""
         if self.embeddings is None:
             raise RuntimeError("Vector retriever has no embeddings instance")
 
         from inputlayer.relation import Relation
 
         rel = self.relation
-        rel_name = Relation._resolve_name(rel)
         cols = Relation._get_columns(rel)
         vec_col = self._resolve_vector_column(cols)
 
         vec = await self.embeddings.aembed_query(user_query)
-        vec_lit = iql_literal([float(v) for v in vec])
-
-        # IQL variables must be capitalized (lowercase atoms are constants).
-        cap = {c: c[:1].upper() + c[1:] for c in cols}
-        vec_var = cap[vec_col]
-
-        iql = (
-            f"?{rel_name}({', '.join(cap[c] for c in cols)}), "
-            f"Dist = {self._distance_fn()}({vec_var}, {vec_lit})"
+        result = await self.kg.vector_search(
+            rel,
+            [float(v) for v in vec],
+            column=vec_col,
+            k=self.k,
+            metric=self.metric,
         )
-        result = await self.kg.execute(iql)
-        if result.columns == ["error"]:
-            raise RuntimeError(
-                f"InputLayer rejected vector query: "
-                f"{result.rows[0][0] if result.rows else 'unknown error'}"
-            )
-
-        # Sort ascending by Dist (closer = better) and take top-k.
-        if "Dist" in result.columns:
-            dist_idx = result.columns.index("Dist")
-            ranked = sorted(result.rows, key=lambda r: r[dist_idx])[: self.k]
-        else:
-            ranked = result.rows[: self.k]
 
         # Hide the vector column from auto-metadata so we don't leak the
         # raw embedding into Document.metadata. Promote the synthetic
         # "Dist" column to the score (unless caller already set one).
         hidden = {vec_col}
         score_override = self.score_column or "Dist"
-        # Vector mode emits its own IQL using capitalized variable names,
-        # so the engine returns capitalized columns. Suppress the case
-        # warning since the case mismatch is expected and user-controlled
-        # ``page_content_columns`` will normally be lowercase.
+        # vector_search uses capitalized variable names in the IQL it
+        # emits, so the engine returns capitalized columns. Suppress the
+        # case warning since the case mismatch is expected and
+        # user-controlled ``page_content_columns`` will normally be
+        # lowercase.
         return self._to_documents(
             result.columns,
-            ranked,
+            result.rows,
             hidden_columns=hidden,
             score_override=score_override,
             suppress_case_warnings=True,
@@ -229,14 +210,6 @@ class InputLayerRetriever(BaseRetriever):
             f"Relation {Relation._resolve_name(self.relation)} has no Vector column; "
             f"set `vector_column` explicitly."
         )
-
-    def _distance_fn(self) -> str:
-        return {
-            "cosine": "cosine",
-            "euclidean": "euclidean",
-            "dot": "dot",
-            "dot_product": "dot",
-        }.get(self.metric, "cosine")
 
     # ── Result mapping ───────────────────────────────────────────────
 

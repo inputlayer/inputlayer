@@ -43,21 +43,21 @@ op          ::= '=' | '!=' | '<' | '<=' | '>' | '>='
 ### Literals
 
 #### Integers
-```datalog
+```iql
 42        // Decimal
 -17       // Negative
 0         // Zero
 ```
 
 #### Floats
-```datalog
+```iql
 3.14      // Decimal float
 -0.5      // Negative float
 1.0e10    // Scientific notation
 ```
 
 #### Strings
-```datalog
+```iql
 "hello"           // Basic string
 "hello world"     // With spaces
 "line1\nline2"    // Escape sequences
@@ -73,14 +73,14 @@ op          ::= '=' | '!=' | '<' | '<=' | '>' | '>='
 | `\"` | Quote |
 
 #### Vectors
-```datalog
+```iql
 [1.0, 2.0, 3.0]           // Float vector
 [0.1, 0.2, 0.3, 0.4]      // Embedding
 ```
 
 ### Comments
 
-```datalog
+```iql
 // Single line comment
 
 /* Multi-line
@@ -96,14 +96,14 @@ op          ::= '=' | '!=' | '<' | '<=' | '>' | '>='
 Insert base data into relations.
 
 **Single fact:**
-```datalog
+```iql
 +edge(1, 2)
 +person("alice", 30)
 +location("NYC", 40.7, -74.0)
 ```
 
 **Bulk insert:**
-```datalog
+```iql
 +edge[(1, 2), (2, 3), (3, 4), (4, 5)]
 +person[("alice", 30), ("bob", 25), ("carol", 35)]
 ```
@@ -113,12 +113,12 @@ Insert base data into relations.
 Remove base data from relations.
 
 **Single fact:**
-```datalog
+```iql
 -edge(1, 2)
 ```
 
 **Conditional delete (based on another relation):**
-```datalog
+```iql
 // Delete all edges where source node is in the 'banned' relation
 -edge(X, Y) <- banned(X)
 
@@ -135,7 +135,7 @@ Remove base data from relations.
 
 Define derived relations that persist across sessions.
 
-```datalog
+```iql
 // Simple derivation
 +adult(Name, Age) <- person(Name, Age), Age >= 18
 
@@ -159,7 +159,7 @@ Define derived relations that persist across sessions.
 
 Transient rules that exist only for the current session.
 
-```datalog
+```iql
 // Not persisted
 temp(X, Y) <- edge(X, Y), X < Y
 debug(X) <- some_complex_condition(X)
@@ -169,7 +169,7 @@ debug(X) <- some_complex_condition(X)
 
 Ask questions about the data.
 
-```datalog
+```iql
 // Simple query
 ? edge(X, Y)
 
@@ -187,7 +187,7 @@ Ask questions about the data.
 
 Define typed schemas for relations.
 
-```datalog
+```iql
 // Basic schema
 +employee(id: int, name: string, dept: string)
 
@@ -214,7 +214,7 @@ Define typed schemas for relations.
 
 ### Arithmetic
 
-```datalog
+```iql
 +computed(X, Y) <- input(A, B), X = A + B, Y = A * B
 ```
 
@@ -228,7 +228,7 @@ Define typed schemas for relations.
 
 ### Comparison
 
-```datalog
+```iql
 ? person(Name, Age), Age >= 18, Age < 65
 ```
 
@@ -247,7 +247,7 @@ Define typed schemas for relations.
 
 InputLayer provides built-in vector distance and similarity functions:
 
-```datalog
+```iql
 // Compute cosine similarity between embeddings
 ? embedding(Id1, V1), embedding(Id2, V2), Id1 < Id2,
    Sim = cosine(V1, V2), Sim > 0.9
@@ -272,7 +272,7 @@ Compute aggregate values over groups.
 
 ### Syntax
 
-```datalog
+```iql
 +result(GroupBy1, GroupBy2, agg<AggColumn>) <-
   source(GroupBy1, GroupBy2, AggColumn, _)
 ```
@@ -291,7 +291,7 @@ Variables in the head that are not aggregated become group-by columns.
 
 ### Examples
 
-```datalog
+```iql
 // Count per group
 +city_count(City, count<Id>) <- person(Id, _, _, City)
 
@@ -312,7 +312,7 @@ Express "does not exist" conditions.
 
 ### Syntax
 
-```datalog
+```iql
 !atom(args)     // Negated atom
 ```
 
@@ -323,7 +323,7 @@ Express "does not exist" conditions.
 
 ### Examples
 
-```datalog
+```iql
 // People without purchases
 +non_buyer(Id, Name) <-
   person(Id, Name, _, _),
@@ -338,7 +338,7 @@ Express "does not exist" conditions.
 
 ### Invalid (Unsafe)
 
-```datalog
+```iql
 // WRONG - X only appears in negation
 +bad(X) <- !some_rel(X)
 
@@ -352,7 +352,7 @@ Commands that control the REPL environment.
 
 ### Knowledge Graph Commands
 
-```datalog
+```iql
 .kg                     // Show current knowledge graph
 .kg list                // List all knowledge graphs
 .kg create <name>       // Create knowledge graph
@@ -362,7 +362,7 @@ Commands that control the REPL environment.
 
 ### Relation Commands
 
-```datalog
+```iql
 .rel                    // List relations with data
 .rel <name>             // Show schema and sample data
 .rel drop <name>        // Drop a relation and its data
@@ -370,7 +370,7 @@ Commands that control the REPL environment.
 
 ### Rule Commands
 
-```datalog
+```iql
 .rule                   // List all rules
 .rule <name>            // Query a rule
 .rule def <name>        // Show rule definition
@@ -382,7 +382,7 @@ Commands that control the REPL environment.
 
 ### Session Commands
 
-```datalog
+```iql
 .session                // List session rules
 .session clear          // Clear all session rules
 .session drop <n>       // Remove session rule #n
@@ -390,13 +390,13 @@ Commands that control the REPL environment.
 
 ### File Commands
 
-```datalog
-.load <file>            // Execute a .idl file
+```iql
+.load <file>            // Execute a .iql file
 ```
 
 ### Index Commands
 
-```datalog
+```iql
 .index                  // List all indexes
 .index list             // List all indexes (explicit)
 .index create <name> on <relation>(<column>) [options]
@@ -407,7 +407,7 @@ Commands that control the REPL environment.
 
 ### User & Auth Commands
 
-```datalog
+```iql
 .user list              // List all users
 .user create <name> <password> <role>  // Create user
 .user drop <name>       // Delete user
@@ -423,7 +423,7 @@ Commands that control the REPL environment.
 
 ### System Commands
 
-```datalog
+```iql
 .status                 // System status
 .compact                // Compact storage
 .debug <query>        // Show query plan
@@ -436,7 +436,7 @@ Commands that control the REPL environment.
 
 ### Basic Pattern
 
-```datalog
+```iql
 // Base case
 +derived(X, Y) <- base(X, Y)
 
@@ -446,14 +446,14 @@ Commands that control the REPL environment.
 
 ### Transitive Closure
 
-```datalog
+```iql
 +reachable(X, Y) <- edge(X, Y)
 +reachable(X, Z) <- reachable(X, Y), edge(Y, Z)
 ```
 
 ### Mutual Recursion
 
-```datalog
+```iql
 +odd(X) <- edge(Start, X), start(Start)
 +odd(X) <- even(Y), edge(Y, X)
 +even(X) <- odd(Y), edge(Y, X)
@@ -468,7 +468,7 @@ Commands that control the REPL environment.
 
 ### Social Network
 
-```datalog
+```iql
 // Schema
 +person(id: int, name: string, age: int)
 +follows(follower: int, followed: int)
@@ -492,7 +492,7 @@ Commands that control the REPL environment.
 
 ### Graph Analysis
 
-```datalog
+```iql
 // Transitive closure
 +path(X, Y) <- edge(X, Y)
 +path(X, Z) <- path(X, Y), edge(Y, Z)
@@ -515,7 +515,7 @@ Commands that control the REPL environment.
 
 ### Bill of Materials
 
-```datalog
+```iql
 // Part hierarchy
 +contains(assembly: int, part: int, qty: int)
 
@@ -542,10 +542,10 @@ int, float, string, vector
 
 ## File Format
 
-InputLayer files use the `.idl` extension and contain valid InputLayer statements:
+InputLayer files use the `.iql` extension and contain valid InputLayer statements:
 
-```datalog
-// my_program.idl
+```iql
+// my_program.iql
 
 // Schema declarations
 +node(id: int, label: string)
@@ -561,6 +561,6 @@ InputLayer files use the `.idl` extension and contain valid InputLayer statement
 ```
 
 Load with:
-```datalog
-.load my_program.idl
+```iql
+.load my_program.iql
 ```

@@ -24,7 +24,7 @@ inputlayer>
 
 Every InputLayer program runs in a knowledge graph. Let's create one:
 
-```datalog
+```iql
 .kg create social
 ```
 
@@ -35,7 +35,7 @@ Switched to knowledge graph: social
 ```
 
 You can verify with:
-```datalog
+```iql
 .kg
 ```
 
@@ -48,7 +48,7 @@ Current knowledge graph: social
 
 Facts are the base data in your knowledge graph. Let's add some "follows" relationships:
 
-```datalog
+```iql
 +follows(1, 2)
 ```
 
@@ -59,7 +59,7 @@ Inserted 1 fact into 'follows'
 
 Let's add more facts using bulk insert:
 
-```datalog
+```iql
 +follows[(2, 3), (3, 4), (1, 3)]
 ```
 
@@ -72,7 +72,7 @@ Inserted 3 facts into 'follows'
 
 Use `?` to query data:
 
-```datalog
+```iql
 ?follows(1, X)
 ```
 
@@ -89,7 +89,7 @@ This shows everyone that user 1 directly follows.
 
 Rules derive new data from existing facts. Let's define "reachable" - who can you reach through any chain of follows?
 
-```datalog
+```iql
 +reachable(X, Y) <- follows(X, Y)
 ```
 
@@ -102,7 +102,7 @@ This says: "X can reach Y if X follows Y directly."
 
 But we also want transitive reachability. Add another clause:
 
-```datalog
+```iql
 +reachable(X, Z) <- follows(X, Y), reachable(Y, Z)
 ```
 
@@ -117,7 +117,7 @@ This says: "X can reach Z if X follows someone Y who can reach Z."
 
 Now query the derived relation:
 
-```datalog
+```iql
 ?reachable(1, X)
 ```
 
@@ -135,7 +135,7 @@ User 1 can reach users 2, 3, and 4! Even though user 1 doesn't directly follow u
 
 See what rules are defined:
 
-```datalog
+```iql
 .rule
 ```
 
@@ -147,7 +147,7 @@ Rules:
 
 See the rule definition:
 
-```datalog
+```iql
 .rule def reachable
 ```
 
@@ -163,13 +163,13 @@ Clauses:
 
 Add a new follows relationship:
 
-```datalog
+```iql
 +follows(4, 5)
 ```
 
 Now query reachable again:
 
-```datalog
+```iql
 ?reachable(1, X)
 ```
 
@@ -188,7 +188,7 @@ User 1 can now reach user 5! InputLayer automatically recomputed the derived rel
 
 Here's everything we did in one script:
 
-```datalog
+```iql
 // Create and use knowledge graph
 .kg create social
 .kg use social
@@ -204,15 +204,15 @@ Here's everything we did in one script:
 ?reachable(1, X)
 ```
 
-You can save this to a file `social.idl` and run it:
+You can save this to a file `social.iql` and run it:
 
 ```bash
-inputlayer-client < social.idl
+inputlayer-client < social.iql
 ```
 
 Or use the `.load` command:
-```datalog
-.load social.idl
+```iql
+.load social.iql
 ```
 
 ## Key Takeaways
@@ -225,7 +225,7 @@ Or use the `.load` command:
 
 ## What's Different from SQL?
 
-| SQL | InputLayer (Datalog) |
+| SQL | InputLayer (IQL) |
 |-----|---------------------|
 | `INSERT INTO follows VALUES (1, 2)` | `+follows(1, 2)` |
 | `CREATE VIEW` (limited recursion) | `+rule(...) <- body` (full recursion) |

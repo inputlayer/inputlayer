@@ -67,10 +67,35 @@ class KnowledgeGraphSync:
     def query(self, *select: Any, **kwargs: Any) -> ResultSet:
         return run_sync(self._kg.query(*select, **kwargs))
 
+    def query_stream(
+        self, *select: Any, batch_size: int = 1000, **kwargs: Any
+    ) -> list[list]:
+        """Synchronous version of query_stream. Returns all batches as a list."""
+        async def _collect() -> list[list]:
+            batches = []
+            async for batch in self._kg.query_stream(
+                *select, batch_size=batch_size, **kwargs
+            ):
+                batches.append(batch)
+            return batches
+        return run_sync(_collect())
+
     def vector_search(
-        self, relation: type[Relation], query_vec: list[float], **kwargs: Any
+        self,
+        relation: type[Relation],
+        query_vec: list[float],
+        *,
+        column: str | None = None,
+        k: int | None = None,
+        radius: float | None = None,
+        metric: str = "cosine",
+        extra_iql_clauses: list[str] | None = None,
     ) -> ResultSet:
-        return run_sync(self._kg.vector_search(relation, query_vec, **kwargs))
+        return run_sync(self._kg.vector_search(
+            relation, query_vec,
+            column=column, k=k, radius=radius,
+            metric=metric, extra_iql_clauses=extra_iql_clauses,
+        ))
 
     def define_rules(self, *targets: Any) -> None:
         run_sync(self._kg.define_rules(*targets))
@@ -86,6 +111,9 @@ class KnowledgeGraphSync:
 
     def drop_rule_clause(self, name: str | type, index: int) -> None:
         run_sync(self._kg.drop_rule_clause(name, index))
+
+    def edit_rule_clause(self, name: str | type, index: int, clause: Any) -> None:
+        run_sync(self._kg.edit_rule_clause(name, index, clause))
 
     def clear_rule(self, name: str | type) -> None:
         run_sync(self._kg.clear_rule(name))
@@ -138,8 +166,8 @@ class KnowledgeGraphSync:
     def clear_prefix(self, prefix: str) -> ClearResult:
         return run_sync(self._kg.clear_prefix(prefix))
 
-    def execute(self, datalog: str) -> ResultSet:
-        return run_sync(self._kg.execute(datalog))
+    def execute(self, iql: str) -> ResultSet:
+        return run_sync(self._kg.execute(iql))
 
 
 class InputLayerSync:

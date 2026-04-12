@@ -1,9 +1,9 @@
-//! Schema validation for Datalog relations: typed columns,
+//! Schema validation for IQL relations: typed columns,
 //! arity checking, and all-or-nothing insert semantics.
 //!
 //! ## Example Schema Declaration
 //!
-//! ```datalog
+//! ```iql
 //! +User(id: symbol, name: string, age: int).
 //! ```
 
@@ -18,7 +18,7 @@ use std::fmt;
 pub use catalog::SchemaCatalog;
 pub use validator::{ValidationEngine, ValidationError, Violation};
 
-/// Schema type in Datalog syntax
+/// Schema type in IQL syntax
 /// Maps to internal `DataType` enum
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SchemaType {

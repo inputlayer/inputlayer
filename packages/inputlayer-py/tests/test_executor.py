@@ -39,11 +39,11 @@ class MockKG:
         self.commands: list[str] = []
         self._query_results = query_results or {}
 
-    def execute(self, datalog: str) -> MockResult:
-        self.commands.append(datalog)
+    def execute(self, iql: str) -> MockResult:
+        self.commands.append(iql)
         # Check for query patterns to return mock results
         for pattern, rows in self._query_results.items():
-            if pattern in datalog:
+            if pattern in iql:
                 return MockResult(rows=rows)
         return MockResult()
 

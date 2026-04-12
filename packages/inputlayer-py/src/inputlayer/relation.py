@@ -35,7 +35,7 @@ class _RelationMeta(ModelMetaclass):
 
 
 def _resolve_name(cls: type) -> str:
-    """Get the Datalog relation name for a Relation subclass."""
+    """Get the IQL relation name for a Relation subclass."""
     rn = getattr(cls, "__relation_name__", None)
     if rn is not None:
         return rn
@@ -66,7 +66,7 @@ class Relation(BaseModel, metaclass=_RelationMeta):
 
     @classmethod
     def _resolve_name(cls, relation_cls: type[Relation] | None = None) -> str:
-        """Get the Datalog relation name for a Relation subclass."""
+        """Get the IQL relation name for a Relation subclass."""
         target = relation_cls or cls
         return _resolve_name(target)
 

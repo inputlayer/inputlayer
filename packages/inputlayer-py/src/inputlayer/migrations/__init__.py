@@ -13,7 +13,7 @@ from inputlayer.migrations.operations import (
     DropRule,
     Operation,
     ReplaceRule,
-    RunDatalog,
+    RunIQL,
     operation_from_dict,
 )
 from inputlayer.migrations.state import ModelState
@@ -45,7 +45,7 @@ __all__ = [
     "ReplaceRule",
     "CreateIndex",
     "DropIndex",
-    "RunDatalog",
+    "RunIQL",
     "Operation",
     "operation_from_dict",
 ]

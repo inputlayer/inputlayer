@@ -259,9 +259,9 @@ uv run python -m examples.langchain.runner --all
 
 | # | Example | Description |
 |---|---------|-------------|
-| 1 | Retriever + Datalog | Join queries with `{input}` placeholder |
+| 1 | Retriever + IQL | Join queries with `{input}` placeholder |
 | 2 | Vector search | Cosine similarity with distance filter |
-| 3 | Tool for agents | Raw Datalog + template mode |
+| 3 | Tool for agents | Raw IQL + template mode |
 | 4 | LCEL chain | Full retriever \| prompt \| llm \| parser pipeline |
 | 5 | KG building | Extract facts from documents with LLM |
 | 6 | Explainable RAG | `.why()` proof trees + `.why_not()` explanations |
@@ -274,7 +274,7 @@ uv run python -m examples.langchain.runner --all
 | 13 | Guardrails | Policy rules block unsafe content |
 | 14 | GraphRAG | Entity extraction + community detection |
 | 15 | Semantic caching | Cache LLM responses, topic-based matching |
-| 16 | Recommendation engine | Collaborative filtering via Datalog |
+| 16 | Recommendation engine | Collaborative filtering via IQL rules |
 | 17 | Data lineage | Source attribution + conflict detection |
 
 Requires a running InputLayer server and optionally LM Studio (or any OpenAI-compatible server) for LLM examples.
@@ -359,7 +359,7 @@ The autodetector diffs your current Python models against the last migration's s
 | `revoke_access(username)` | Revoke per-KG access |
 | `list_acl()` | List access control entries |
 | `explain(*select, ...)` | Show query plan without executing |
-| `execute(datalog)` | Execute raw Datalog |
+| `execute(iql)` | Execute raw IQL |
 | `status()` | Get server status |
 | `compact()` | Trigger storage compaction |
 

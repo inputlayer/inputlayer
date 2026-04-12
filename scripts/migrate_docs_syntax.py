@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Migrate documentation from old Datalog syntax to new InputLayer syntax.
+"""Migrate documentation from old IQL syntax to new InputLayer syntax.
 
 Old syntax:  :- , ?- , % comments, .dl, trailing dots on statements
-New syntax:  <- , ? , // comments, .idl, no trailing dots
+New syntax:  <- , ? , // comments, .iql, no trailing dots
 
 Usage:
   python3 scripts/migrate_docs_syntax.py --dry-run     # Preview changes
@@ -16,9 +16,9 @@ import os
 from pathlib import Path
 
 
-def is_datalog_code_block(fence_lang: str) -> bool:
-    """Check if a code fence language is a Datalog-like block."""
-    return fence_lang.strip().lower() in ("datalog", "prolog", "")
+def is_iql_code_block(fence_lang: str) -> bool:
+    """Check if a code fence language is a IQL-like block."""
+    return fence_lang.strip().lower() in ("iql", "prolog", "")
 
 
 def migrate_code_line(line: str, in_ebnf: bool) -> str:
@@ -32,17 +32,17 @@ def migrate_code_line(line: str, in_ebnf: bool) -> str:
     # Don't touch lines that are purely comments (already migrated or meta commands)
     stripped = line.strip()
     if stripped.startswith("//"):
-        # But still migrate .dl → .idl in comments
-        return re.sub(r'\.dl\b', '.idl', line)
+        # But still migrate .dl → .iql in comments
+        return re.sub(r'\.dl\b', '.iql', line)
     if stripped.startswith("."):
         # Meta commands - update .dl references and % comments
-        line = re.sub(r'\.dl\b', '.idl', line)
+        line = re.sub(r'\.dl\b', '.iql', line)
         # Also convert % comments on meta command lines
         code_with_spacing, comment_part = split_code_and_comment(line)
         if comment_part is not None:
             code_trimmed = code_with_spacing.rstrip()
             trailing_ws = code_with_spacing[len(code_trimmed):]
-            comment_part = re.sub(r'\.dl\b', '.idl', comment_part)
+            comment_part = re.sub(r'\.dl\b', '.iql', comment_part)
             return code_trimmed + trailing_ws + '//' + comment_part
         return line
 
@@ -75,11 +75,11 @@ def migrate_code_line(line: str, in_ebnf: bool) -> str:
     code_trimmed = remove_trailing_dot(code_trimmed)
 
     # Replace .dl file references
-    code_trimmed = re.sub(r'\.dl\b', '.idl', code_trimmed)
+    code_trimmed = re.sub(r'\.dl\b', '.iql', code_trimmed)
 
     # Reassemble with comment (now using //)
     if comment_part is not None:
-        comment_part = re.sub(r'\.dl\b', '.idl', comment_part)
+        comment_part = re.sub(r'\.dl\b', '.iql', comment_part)
         return code_trimmed + trailing_ws + '//' + comment_part
     else:
         return code_trimmed
@@ -156,7 +156,7 @@ def replace_outside_strings(line: str, old: str, new: str) -> str:
 
 
 def remove_trailing_dot(line: str) -> str:
-    """Remove trailing dot from Datalog statements.
+    """Remove trailing dot from IQL statements.
 
     Preserves dots in:
     - Meta commands (.kg, .rel, .rule, .session, .load, etc.)
@@ -196,10 +196,10 @@ def remove_trailing_dot(line: str) -> str:
 
 def migrate_prose_line(line: str) -> str:
     """Migrate prose (non-code) lines."""
-    # Replace .dl file extension references (but not in URLs or paths that are already .idl)
+    # Replace .dl file extension references (but not in URLs or paths that are already .iql)
     # Match patterns like: .dl extension, .dl file, .dl format, *.dl, file.dl
-    line = re.sub(r'`\.dl`', '`.idl`', line)
-    line = re.sub(r'\.dl\b(?!\.)(?!l)', '.idl', line)
+    line = re.sub(r'`\.dl`', '`.iql`', line)
+    line = re.sub(r'\.dl\b(?!\.)(?!l)', '.iql', line)
 
     # Replace inline code with old syntax
     # `?- body.` → `?body`
@@ -231,8 +231,8 @@ def migrate_inline_code(line: str) -> str:
             # Remove trailing dot from statement-like code
             if code.endswith('.') and not code.startswith('.') and not re.search(r'\d\.$', code):
                 code = code[:-1]
-            # .dl → .idl
-            code = re.sub(r'\.dl\b', '.idl', code)
+            # .dl → .iql
+            code = re.sub(r'\.dl\b', '.iql', code)
             result.append('`')
             result.append(code)
             result.append('`')
@@ -272,16 +272,16 @@ def migrate_file(filepath: str, dry_run: bool = False) -> tuple:
                 code_fence_lang = fence_lang
                 in_ebnf = fence_lang.lower() == 'ebnf'
 
-                # Change ```prolog to ```datalog
+                # Change ```prolog to ```iql
                 if fence_lang.lower() == 'prolog':
-                    line = line.replace('prolog', 'datalog')
+                    line = line.replace('prolog', 'iql')
                     changes += 1
 
                 new_lines.append(line)
                 continue
 
         if in_code_block:
-            if is_datalog_code_block(code_fence_lang) or in_ebnf:
+            if is_iql_code_block(code_fence_lang) or in_ebnf:
                 new_line = migrate_code_line(line, in_ebnf)
             else:
                 new_line = line

@@ -1,4 +1,4 @@
-"""Built-in functions that compile to Datalog function calls.
+"""Built-in functions that compile to IQL function calls.
 
 Each function returns a FuncCall AST node (an Expr) that the compiler
 serialises as ``func_name(arg1, arg2, ...)``.
@@ -277,7 +277,7 @@ def hnsw_nearest(
 ) -> FuncCall:
     """Direct HNSW nearest-neighbor search.
 
-    Datalog: hnsw_nearest("idx", [0.1, 0.2], 10, Id, Dist)
+    IQL: hnsw_nearest("idx", [0.1, 0.2], 10, Id, Dist)
     """
     args: list[Expr] = [Literal(index_name), _e(query_vec), Literal(k)]
     if ef_search is not None:

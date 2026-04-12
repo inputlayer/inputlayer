@@ -17,7 +17,7 @@ The problem isn't the data - it was there. The problem is that the answer to "ca
 
 Line 4 needs Operator Kim. Line 5 needs Operator Lee. Both are qualified through a shared safety certification. That certification is backed by training Kim completed in January.
 
-```datalog
+```iql
 // Which lines need which operators
 +requires[("line_4", "operator_kim"), ("line_5", "operator_lee")]
 
@@ -39,7 +39,7 @@ A four-level dependency chain: line depends on operator, operator depends on cer
 
 Something is available if everything it depends on is also available. This is recursive - it follows the chain from training up to production line, at any depth.
 
-```datalog
+```iql
 +available(X) <- training_completed(X)
 +available(X) <- valid_certification(X, Dep), available(Dep)
 +available(X) <- qualified_by(X, Dep), available(Dep)
@@ -52,7 +52,7 @@ Training completion is the base case. Everything else is available if its depend
 
 ## Everything is available
 
-```datalog
+```iql
 ?available(X)
 ```
 
@@ -78,11 +78,11 @@ Six things are available. The engine traced the full chain: training exists, so 
 
 One fact removed. Kim's January training expires.
 
-```datalog
+```iql
 -training_completed("training_jan_2026")
 ```
 
-```datalog
+```iql
 ?available(X)
 ```
 
@@ -98,12 +98,12 @@ Everything collapsed. Training gone, certification invalid, both operators unqua
 
 Kim completes new safety training in March.
 
-```datalog
+```iql
 +training_completed[("training_mar_2026")]
 +valid_certification[("cert_safety", "training_mar_2026")]
 ```
 
-```datalog
+```iql
 ?available(X)
 ```
 
@@ -127,7 +127,7 @@ Both lines are back. The new training fact propagated up through the entire depe
 
 ## The proof trail
 
-```datalog
+```iql
 .why ?available("line_4")
 ```
 

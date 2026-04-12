@@ -1,7 +1,7 @@
 "use client"
 
 import { type ReactNode, useEffect } from "react"
-import { useDatalogStore } from "@/lib/datalog-store"
+import { useIQLStore } from "@/lib/iql-store"
 import { ConnectionScreen } from "@/components/connection-screen"
 import { SplashScreen } from "@/components/splash-screen"
 import { Header } from "@/components/header"
@@ -16,7 +16,7 @@ interface AppShellProps {
 }
 
 export function AppShell({ children, requireConnection = true }: AppShellProps) {
-  const { connection, isInitialized, isRestoringSession, initFromStorage } = useDatalogStore()
+  const { connection, isInitialized, isRestoringSession, initFromStorage } = useIQLStore()
 
   // Try to restore session from localStorage on mount
   useEffect(() => {

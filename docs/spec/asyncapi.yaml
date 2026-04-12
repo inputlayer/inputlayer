@@ -36,7 +36,7 @@ info:
 
     ## Raw Text Protocol
 
-    The `execute` message accepts any valid Datalog statement or meta command as raw text.
+    The `execute` message accepts any valid IQL statement or meta command as raw text.
     The server parses and executes it, returning structured results.
 
   license:
@@ -128,9 +128,9 @@ operations:
     action: send
     channel:
       $ref: '#/channels/ws'
-    summary: Execute a Datalog statement or meta command
+    summary: Execute a IQL statement or meta command
     description: |
-      Send any valid Datalog statement or meta command as raw text.
+      Send any valid IQL statement or meta command as raw text.
 
       **Supported statement types:**
       - `+relation[(v1, v2), ...]` - Insert persistent facts
@@ -258,7 +258,7 @@ components:
     Execute:
       name: execute
       title: Execute Command
-      summary: Execute any Datalog statement or meta command
+      summary: Execute any IQL statement or meta command
       contentType: application/json
       payload:
         $ref: '#/components/schemas/ExecuteRequest'
@@ -373,7 +373,7 @@ components:
         program:
           type: string
           description: |
-            Any valid Datalog statement or meta command as raw text.
+            Any valid IQL statement or meta command as raw text.
             Examples: "+edge[(1,2)]", "?edge(X,Y)", ".kg list", ".rule list"
       examples:
         - type: execute
