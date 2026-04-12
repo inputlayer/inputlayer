@@ -3,6 +3,7 @@
 import asyncio
 
 from examples.langchain._common import *
+from inputlayer.integrations.langchain.params import iql_literal
 
 
 async def run(kg):
@@ -62,13 +63,10 @@ async def run(kg):
     ]
 
     for q, a, ts in cached:
-        eq = q.replace('"', '\\"')
-        ea = a.replace('"', '\\"')
-        await kg.execute(f'+llm_cache("{eq}", "{ea}", {ts})')
+        await kg.execute(f"+llm_cache({iql_literal(q)}, {iql_literal(a)}, {ts})")
 
     for q, t in topics:
-        eq = q.replace('"', '\\"')
-        await kg.execute(f'+cache_topic("{eq}", "{t}")')
+        await kg.execute(f"+cache_topic({iql_literal(q)}, {iql_literal(t)})")
 
     subheader("Step 1: Cache populated")
     print(f"  {DIM}{len(cached)} cached responses, {len(topics)} topic tags{RESET}")
@@ -95,9 +93,9 @@ async def run(kg):
 
     # Topic match — new question about transformers
     new_q = "How do transformers handle long sequences?"
-    await kg.execute(f'+cache_topic("{new_q}", "transformers")')
+    await kg.execute(f"+cache_topic({iql_literal(new_q)}, {iql_literal('transformers')})")
 
-    r = await kg.execute(f'?cache_topic_hit("{new_q}", CachedQ, Answer, Topic)')
+    r = await kg.execute(f"?cache_topic_hit({iql_literal(new_q)}, CachedQ, Answer, Topic)")
     print(f'\n  {WHITE}Topic: "{new_q}"{RESET}')
     if r.rows:
         seen = set()
@@ -125,8 +123,7 @@ async def run(kg):
     hits = 0
     misses = 0
     for q in queries:
-        eq = q.replace('"', '\\"')
-        r = await kg.execute(f'?cache_exact_hit("{eq}", Answer)')
+        r = await kg.execute(f"?cache_exact_hit({iql_literal(q)}, Answer)")
         if r.rows:
             hits += 1
             print(f'  {GREEN}HIT{RESET}  "{q}"')

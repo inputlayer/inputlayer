@@ -3,6 +3,7 @@
 import asyncio
 
 from examples.langchain._common import *
+from inputlayer.integrations.langchain.params import iql_literal
 
 
 async def run(kg):
@@ -30,7 +31,7 @@ async def run(kg):
     ]
 
     for topic, reason, severity in blocked:
-        await kg.execute(f'+blocked_topic("{topic}", "{reason}", "{severity}")')
+        await kg.execute(f"+blocked_topic({iql_literal(topic)}, {iql_literal(reason)}, {iql_literal(severity)})")
 
     # Required disclaimers
     disclaimers = [
@@ -40,8 +41,7 @@ async def run(kg):
     ]
 
     for topic, disc in disclaimers:
-        escaped = disc.replace('"', '\\"')
-        await kg.execute(f'+required_disclaimer("{topic}", "{escaped}")')
+        await kg.execute(f"+required_disclaimer({iql_literal(topic)}, {iql_literal(disc)})")
 
     # PII patterns
     pii = [
@@ -52,7 +52,7 @@ async def run(kg):
     ]
 
     for name, example in pii:
-        await kg.execute(f'+pii_pattern("{name}", "{example}")')
+        await kg.execute(f"+pii_pattern({iql_literal(name)}, {iql_literal(example)})")
 
     # ── Content to check (simulating LLM outputs) ────────────────────
 
@@ -72,8 +72,7 @@ async def run(kg):
     ]
 
     for oid, text in outputs:
-        escaped = text.replace('"', '\\"')
-        await kg.execute(f'+output_content({oid}, "{escaped}")')
+        await kg.execute(f"+output_content({oid}, {iql_literal(text)})")
 
     # Topic classifications (in production, the LLM classifies these)
     topic_tags = [
@@ -87,7 +86,7 @@ async def run(kg):
     ]
 
     for cid, topic in topic_tags:
-        await kg.execute(f'+output_topic({cid}, "{topic}")')
+        await kg.execute(f"+output_topic({cid}, {iql_literal(topic)})")
 
     # PII detection
     await kg.execute('+output_contains_pii(6, "credit_card")')
@@ -167,23 +166,14 @@ async def run(kg):
 
     # ── Step 3: LLM rewrites blocked content safely ──────────────────
 
-    base_url = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
-    model = os.environ.get("LLM_MODEL", "deepseek/deepseek-r1-0528-qwen3-8b")
-
-    try:
-        import httpx
-
-        resp = httpx.get(f"{base_url}/models", timeout=2)
-        resp.raise_for_status()
-    except Exception:
+    if not check_llm():
         print(f"\n{DIM}  No LLM — skipping rewrite step.{RESET}")
         return
 
     from langchain_core.output_parsers import StrOutputParser
     from langchain_core.prompts import ChatPromptTemplate
-    from langchain_openai import ChatOpenAI
 
-    llm = ChatOpenAI(base_url=base_url, api_key="lm-studio", model=model, temperature=0)
+    llm = get_llm()
 
     # Pick a blocked output and ask the LLM to rewrite safely
     blocked_output = next((text for oid, text in outputs if oid in violation_ids), None)

@@ -9,6 +9,7 @@ This is the same pattern used by httpx.Client and playwright.
 from __future__ import annotations
 
 import asyncio
+import atexit
 import logging
 import threading
 from collections.abc import Coroutine
@@ -55,6 +56,11 @@ class _LoopThread:
 
     def run(self, coro: Coroutine[Any, Any, T]) -> T:
         """Submit a coroutine to the background loop and block until done."""
+        if threading.current_thread() is self._thread:
+            raise RuntimeError(
+                "Cannot call run_sync from the background event loop thread "
+                "- use 'await' instead. This would deadlock."
+            )
         loop = self._ensure_running()
         future = asyncio.run_coroutine_threadsafe(coro, loop)
         return future.result(timeout=self._timeout)
@@ -85,6 +91,7 @@ class _LoopThread:
 
 
 _default_thread = _LoopThread()
+atexit.register(_default_thread.shutdown)
 
 
 def run_sync(coro: Coroutine[Any, Any, T]) -> T:

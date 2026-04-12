@@ -116,6 +116,8 @@ async def run(kg):
 
     subheader("Step 2: Proof tree — how does frank report to grace?")
 
+    # NOTE: using _conn.execute to access raw proof_trees which aren't
+    # exposed on the public ResultSet yet.
     raw = await kg._conn.execute('.why ?chain_of_command("frank", "grace")')
     trees = raw.proof_trees or []
 
@@ -133,23 +135,14 @@ async def run(kg):
 
     # ── Step 4: LLM analyzes the org graph ───────────────────────────
 
-    base_url = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
-    model = os.environ.get("LLM_MODEL", "deepseek/deepseek-r1-0528-qwen3-8b")
-
-    try:
-        import httpx
-
-        resp = httpx.get(f"{base_url}/models", timeout=2)
-        resp.raise_for_status()
-    except Exception:
+    if not check_llm():
         print(f"\n{DIM}  No LLM server detected — skipping LLM step.{RESET}")
         return
 
     from langchain_core.output_parsers import StrOutputParser
     from langchain_core.prompts import ChatPromptTemplate
-    from langchain_openai import ChatOpenAI
 
-    llm = ChatOpenAI(base_url=base_url, api_key="lm-studio", model=model, temperature=0)
+    llm = get_llm()
 
     # Build context from derived facts
     chain_lines = []

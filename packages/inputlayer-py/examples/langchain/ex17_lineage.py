@@ -3,6 +3,7 @@
 import asyncio
 
 from examples.langchain._common import *
+from inputlayer.integrations.langchain.params import iql_literal
 
 
 async def run(kg):
@@ -36,7 +37,7 @@ async def run(kg):
     ]
 
     for sid, name, stype, rel in sources:
-        await kg.execute(f'+data_source({sid}, "{name}", "{stype}", "{rel}")')
+        await kg.execute(f"+data_source({sid}, {iql_literal(name)}, {iql_literal(stype)}, {iql_literal(rel)})")
 
     # ── Facts with source attribution ────────────────────────────────
 
@@ -55,8 +56,7 @@ async def run(kg):
     ]
 
     for cid, subj, pred, obj, src in claims:
-        escaped_obj = obj.replace('"', '\\"')
-        await kg.execute(f'+sourced_claim({cid}, "{subj}", "{pred}", "{escaped_obj}", {src})')
+        await kg.execute(f"+sourced_claim({cid}, {iql_literal(subj)}, {iql_literal(pred)}, {iql_literal(obj)}, {src})")
 
     # ── Lineage rules ────────────────────────────────────────────────
 
@@ -145,23 +145,14 @@ async def run(kg):
 
     # ── Step 4: LLM audit report ─────────────────────────────────────
 
-    base_url = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
-    model = os.environ.get("LLM_MODEL", "deepseek/deepseek-r1-0528-qwen3-8b")
-
-    try:
-        import httpx
-
-        resp = httpx.get(f"{base_url}/models", timeout=2)
-        resp.raise_for_status()
-    except Exception:
+    if not check_llm():
         print(f"\n{DIM}  No LLM — skipping audit report.{RESET}")
         return
 
     from langchain_core.output_parsers import StrOutputParser
     from langchain_core.prompts import ChatPromptTemplate
-    from langchain_openai import ChatOpenAI
 
-    llm = ChatOpenAI(base_url=base_url, api_key="lm-studio", model=model, temperature=0)
+    llm = get_llm()
 
     # Build audit context
     context_parts = ["Data lineage audit:\n"]

@@ -13,32 +13,15 @@ async def run(kg):
     """
     header("LCEL chain with LLM", 4)
 
-    base_url = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
-    model = os.environ.get("LLM_MODEL", "deepseek/deepseek-r1-0528-qwen3-8b")
-
-    # Check if LM Studio (or compatible server) is running
-    try:
-        import httpx
-
-        resp = httpx.get(f"{base_url}/models", timeout=2)
-        resp.raise_for_status()
-        print(f"\n{DIM}  LLM server detected at {base_url}{RESET}")
-        print(f"{DIM}  Model: {model}{RESET}")
-    except Exception:
-        print(f"\n{DIM}  No LLM server detected at {base_url} — skipping.{RESET}")
+    if not check_llm():
+        print(f"\n{DIM}  No LLM server detected — skipping.{RESET}")
         print(f"{DIM}  Start LM Studio and load a model, or set LLM_BASE_URL/LLM_MODEL.{RESET}")
         return
 
     from langchain_core.output_parsers import StrOutputParser
     from langchain_core.prompts import ChatPromptTemplate
-    from langchain_openai import ChatOpenAI
 
-    llm = ChatOpenAI(
-        base_url=base_url,
-        api_key="lm-studio",
-        model=model,
-        temperature=0.7,
-    )
+    llm = get_llm()
 
     retriever = InputLayerRetriever(
         kg=kg,

@@ -3,6 +3,7 @@
 import asyncio
 
 from examples.langchain._common import *
+from inputlayer.integrations.langchain.params import iql_literal
 
 
 async def _insert_hallucination_claims(kg):
@@ -18,7 +19,9 @@ async def _insert_hallucination_claims(kg):
 
     subheader("Claims to verify (hardcoded)")
     for cid, subj, pred, obj in claims:
-        await kg.execute(f'+llm_claim({cid}, "{subj}", "{pred}", "{obj}")')
+        await kg.execute(
+            f"+llm_claim({cid}, {iql_literal(subj)}, {iql_literal(pred)}, {iql_literal(obj)})"
+        )
         print(f"  {DIM}claim {cid}:{RESET} {subj} {DIM}{pred}{RESET} {obj}")
 
     subheader("IQL rules verify claims (instant)")
@@ -87,8 +90,9 @@ async def run(kg):
     ]
 
     for subj, pred, obj in facts:
-        escaped = obj.replace('"', '\\"')
-        await kg.execute(f'+ground_truth("{subj}", "{pred}", "{escaped}")')
+        await kg.execute(
+            f"+ground_truth({iql_literal(subj)}, {iql_literal(pred)}, {iql_literal(obj)})"
+        )
 
     # ── Claims extracted from LLM output ─────────────────────────────
 
@@ -116,15 +120,7 @@ async def run(kg):
 
     # ── Step 1: Generate an LLM answer ───────────────────────────────
 
-    base_url = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
-    model = os.environ.get("LLM_MODEL", "deepseek/deepseek-r1-0528-qwen3-8b")
-
-    try:
-        import httpx
-
-        resp = httpx.get(f"{base_url}/models", timeout=2)
-        resp.raise_for_status()
-    except Exception:
+    if not check_llm():
         print(f"\n{DIM}  No LLM — using hardcoded claims.{RESET}")
         await _insert_hallucination_claims(kg)
         await _show_grounding_results(kg)
@@ -132,11 +128,10 @@ async def run(kg):
 
     from langchain_core.output_parsers import StrOutputParser
     from langchain_core.prompts import ChatPromptTemplate
-    from langchain_openai import ChatOpenAI
     from pydantic import BaseModel
     from pydantic import Field as PydanticField
 
-    llm = ChatOpenAI(base_url=base_url, api_key="lm-studio", model=model, temperature=0.7)
+    llm = get_llm()
 
     # Ask the LLM a question it might hallucinate on
     question = (
@@ -174,8 +169,10 @@ async def run(kg):
     )
 
     for i, c in enumerate(extracted.claims):
-        escaped_obj = c.object.replace('"', '\\"')
-        await kg.execute(f'+llm_claim({i + 1}, "{c.subject}", "{c.predicate}", "{escaped_obj}")')
+        await kg.execute(
+            f"+llm_claim({i + 1}, {iql_literal(c.subject)}, "
+            f"{iql_literal(c.predicate)}, {iql_literal(c.object)})"
+        )
         print(f"  {DIM}claim {i + 1}:{RESET} {c.subject} {DIM}{c.predicate}{RESET} {c.object}")
 
     # ── Step 3: IQL rules verify claims ──────────────────────────

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -32,6 +33,26 @@ from inputlayer.integrations.langchain.params import bind_params, iql_literal
 from inputlayer.relation import Relation
 
 logger = logging.getLogger(__name__)
+
+# ── Read-only guard ─────────────────────────────────────────────────
+
+# Patterns that indicate a write or DDL operation in IQL.
+_WRITE_RE = re.compile(
+    r"^\s*[+\-]"           # fact assertion (+) or retraction (-)
+    r"|^\s*\.(drop|create|load|save)\b",  # DDL dot-commands
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _check_read_only(query: str) -> None:
+    """Raise ``ValueError`` if *query* looks like a write/DDL statement."""
+    if _WRITE_RE.search(query):
+        raise ValueError(
+            "Query rejected by read_only guard - it appears to contain a "
+            "write or DDL operation. Set read_only=False on the tool if "
+            "mutations are intentional."
+        )
+
 
 # ── Scalar type detection ────────────────────────────────────────────
 
@@ -75,8 +96,24 @@ class InputLayerIQLTool(BaseTool):
         description="Optional IQL template with :input placeholder",
     )
     max_rows: int = Field(default=50, description="Maximum rows to return")
+    read_only: bool = Field(
+        default=True,
+        description=(
+            "When True (default), reject queries that attempt writes or DDL. "
+            "Set to False only if the agent is trusted to mutate the KG."
+        ),
+    )
 
     model_config = {"arbitrary_types_allowed": True}  # noqa: RUF012
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.read_only and self.query_template is None:
+            logger.warning(
+                "InputLayerIQLTool instantiated in open mode with "
+                "read_only=False - the agent can execute arbitrary "
+                "writes and DDL against the knowledge graph."
+            )
 
     def _run(
         self,
@@ -94,6 +131,9 @@ class InputLayerIQLTool(BaseTool):
             compiled = bind_params(self.query_template, {"input": query})
         else:
             compiled = query
+
+        if self.read_only:
+            _check_read_only(compiled)
 
         logger.debug("IQL tool query: %s", compiled)
         result = await self.kg.execute(compiled)

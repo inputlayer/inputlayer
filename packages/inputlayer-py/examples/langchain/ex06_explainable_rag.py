@@ -97,6 +97,8 @@ async def run(kg):
 
     subheader("Step 1: Query with proof trees (.why)")
 
+    # NOTE: using _conn.execute to access raw proof_trees which aren't
+    # exposed on the public ResultSet yet.
     raw_result = await kg._conn.execute(".why ?team_expert(Person, Team, Skill)")
     rows = raw_result.rows
     proof_trees = raw_result.proof_trees or []
@@ -117,23 +119,14 @@ async def run(kg):
 
     # ── Step 2: Feed results + provenance to the LLM ────────────────
 
-    base_url = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
-    model = os.environ.get("LLM_MODEL", "deepseek/deepseek-r1-0528-qwen3-8b")
-
-    try:
-        import httpx
-
-        resp = httpx.get(f"{base_url}/models", timeout=2)
-        resp.raise_for_status()
-    except Exception:
+    if not check_llm():
         print(f"\n{DIM}  No LLM server detected — skipping LLM step.{RESET}")
         return
 
     from langchain_core.output_parsers import StrOutputParser
     from langchain_core.prompts import ChatPromptTemplate
-    from langchain_openai import ChatOpenAI
 
-    llm = ChatOpenAI(base_url=base_url, api_key="lm-studio", model=model, temperature=0)
+    llm = get_llm()
 
     # Build context with proof trees
     context_lines = []
@@ -175,6 +168,7 @@ async def run(kg):
 
     subheader("Step 3: .why_not — why isn't dave an ML expert?")
 
+    # NOTE: using _conn.execute to access structured why_not result.
     why_not_query = '.why_not team_expert("dave", "frontend", "machine-learning")'
     why_not_result = await kg._conn.execute(why_not_query)
 

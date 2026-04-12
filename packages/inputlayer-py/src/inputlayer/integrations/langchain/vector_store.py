@@ -38,6 +38,22 @@ def _resolve_metric(metric: str) -> str:
     return fn
 
 
+def _distance_to_relevance(dist: float, metric: str) -> float:
+    """Convert a distance/score value to a [0, 1]-ish relevance score.
+
+    Each metric family has its own range, so a single ``1 - dist``
+    only works for cosine.
+    """
+    if metric == "dot":
+        # Dot-product is already a similarity (higher = more similar).
+        return float(dist)
+    if metric == "euclidean":
+        # Euclidean distance is unbounded; squash into (0, 1].
+        return 1.0 / (1.0 + dist)
+    # cosine distance is in [0, 2]; similarity = 1 - distance.
+    return 1.0 - dist
+
+
 class InputLayerVectorStore(VectorStore):
     """LangChain VectorStore backed by an InputLayer Relation.
 
@@ -278,7 +294,7 @@ class InputLayerVectorStore(VectorStore):
         """Run vector similarity via ``kg.vector_search()``."""
         from inputlayer.integrations.langchain.params import iql_literal
 
-        _resolve_metric(metric)  # validate early
+        metric = _resolve_metric(metric)
 
         # Build optional metadata filter clauses.
         cols = Relation._get_columns(self._relation)
@@ -341,11 +357,12 @@ class InputLayerVectorStore(VectorStore):
         Cosine math runs client-side because the engine returns the raw
         embedding column for each candidate row.
         """
+        metric = _resolve_metric(kwargs.get("metric", "cosine"))
         query_vec = await self._embeddings.aembed_query(query)
         candidates = await self._fetch_candidates_with_vectors(
             query_vec,
             k=fetch_k,
-            metric=kwargs.get("metric", "cosine"),
+            metric=metric,
             filter=filter,
         )
         if not candidates:
@@ -360,7 +377,7 @@ class InputLayerVectorStore(VectorStore):
             best_score = -float("inf")
             for idx in remaining:
                 _, dist, vec = candidates[idx]
-                relevance = 1.0 - dist  # cosine similarity
+                relevance = _distance_to_relevance(dist, metric)
                 if not selected:
                     diversity_pen = 0.0
                 else:
@@ -393,7 +410,7 @@ class InputLayerVectorStore(VectorStore):
         """
         from inputlayer.integrations.langchain.params import iql_literal
 
-        _resolve_metric(metric)  # validate early
+        metric = _resolve_metric(metric)
 
         cols = Relation._get_columns(self._relation)
         cap = {c: c[:1].upper() + c[1:] for c in cols}
@@ -436,7 +453,7 @@ class InputLayerVectorStore(VectorStore):
 
         out: list[tuple[Document, float, list[float]]] = []
         docs_and_scores = self._rows_to_documents(result.columns, result.rows)
-        for (doc, score), row in zip(docs_and_scores, result.rows, strict=False):
+        for (doc, score), row in zip(docs_and_scores, result.rows, strict=True):
             vec = list(row[vec_col_idx]) if vec_col_idx is not None else []
             out.append((doc, score, vec))
         return out

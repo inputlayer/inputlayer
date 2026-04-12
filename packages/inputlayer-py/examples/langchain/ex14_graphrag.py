@@ -1,8 +1,10 @@
 """GraphRAG -- entity graph from documents."""
 
 import asyncio
+from collections import deque
 
 from examples.langchain._common import *
+from inputlayer.integrations.langchain.params import iql_literal
 
 
 async def run(kg):
@@ -57,35 +59,19 @@ async def run(kg):
     ]
 
     for cid, source, text in chunks:
-        escaped = text.replace('"', '\\"')
-        await kg.execute(f'+doc_chunk({cid}, "{source}", "{escaped}")')
+        await kg.execute(
+            f"+doc_chunk({cid}, {iql_literal(source)}, {iql_literal(text)})"
+        )
 
     subheader("Step 1: Extract entities and relationships")
 
-    base_url = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
-    model = os.environ.get("LLM_MODEL", "deepseek/deepseek-r1-0528-qwen3-8b")
-
-    has_llm = False
-    try:
-        import httpx
-
-        resp = httpx.get(f"{base_url}/models", timeout=2)
-        resp.raise_for_status()
-        has_llm = True
-    except Exception:
-        pass
+    has_llm = check_llm()
 
     if has_llm:
-        from langchain_openai import ChatOpenAI
         from pydantic import BaseModel
         from pydantic import Field as PydanticField
 
-        llm = ChatOpenAI(
-            base_url=base_url,
-            api_key="lm-studio",
-            model=model,
-            temperature=0,
-        )
+        llm = get_llm()
 
         class Entity(BaseModel):
             name: str = PydanticField(description="Entity name (lowercase)")
@@ -127,12 +113,14 @@ async def run(kg):
             )
 
         for name, kind, doc_id in all_entities:
-            n = name.replace('"', '\\"')
-            await kg.execute(f'+kg_entity("{n}", "{kind}", {doc_id})')
+            await kg.execute(
+                f"+kg_entity({iql_literal(name)}, {iql_literal(kind)}, {doc_id})"
+            )
         for src, rel, dst, doc_id in all_rels:
-            s = src.replace('"', '\\"')
-            d = dst.replace('"', '\\"')
-            await kg.execute(f'+kg_relationship("{s}", "{rel}", "{d}", {doc_id})')
+            await kg.execute(
+                f"+kg_relationship({iql_literal(src)}, {iql_literal(rel)}, "
+                f"{iql_literal(dst)}, {doc_id})"
+            )
     else:
         # Hardcoded extraction fallback
         entities = [
@@ -172,9 +160,14 @@ async def run(kg):
             ("mlflow", "supports", "kubeflow", 4),
         ]
         for name, kind, doc_id in entities:
-            await kg.execute(f'+kg_entity("{name}", "{kind}", {doc_id})')
+            await kg.execute(
+                f"+kg_entity({iql_literal(name)}, {iql_literal(kind)}, {doc_id})"
+            )
         for s, r, d, doc_id in rels:
-            await kg.execute(f'+kg_relationship("{s}", "{r}", "{d}", {doc_id})')
+            await kg.execute(
+                f"+kg_relationship({iql_literal(s)}, {iql_literal(r)}, "
+                f"{iql_literal(d)}, {doc_id})"
+            )
         print(f"  {DIM}Hardcoded: {len(entities)} entities, {len(rels)} relationships{RESET}")
 
     # ── Community detection rules ────────────────────────────────────
@@ -214,9 +207,9 @@ async def run(kg):
         if node in visited:
             continue
         community: set[str] = set()
-        queue = [node]
+        queue = deque([node])
         while queue:
-            current = queue.pop(0)
+            current = queue.popleft()
             if current in visited:
                 continue
             visited.add(current)

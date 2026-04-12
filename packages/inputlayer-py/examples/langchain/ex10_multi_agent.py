@@ -3,6 +3,7 @@
 import asyncio
 
 from examples.langchain._common import *
+from inputlayer.integrations.langchain.params import iql_literal
 
 
 async def _insert_hardcoded_claims(kg):
@@ -20,7 +21,10 @@ async def _insert_hardcoded_claims(kg):
 
     subheader("Step 2: Researcher claims (hardcoded)")
     for cid, subj, pred, obj, conf in claims:
-        await kg.execute(f'+claim({cid}, "article", "{subj}", "{pred}", "{obj}", {conf})')
+        await kg.execute(
+            f"+claim({cid}, {iql_literal('article')}, {iql_literal(subj)}, "
+            f"{iql_literal(pred)}, {iql_literal(obj)}, {conf})"
+        )
         print(
             f"  {GREEN}{subj}{RESET} {DIM}{pred}{RESET} {CYAN}{obj}{RESET} {DIM}conf={conf}{RESET}"
         )
@@ -104,33 +108,25 @@ async def run(kg):
     ]
 
     for subj, pred, obj in known_facts:
-        escaped_obj = obj.replace('"', '\\"')
-        await kg.execute(f'+known_fact("{subj}", "{pred}", "{escaped_obj}")')
+        await kg.execute(
+            f"+known_fact({iql_literal(subj)}, {iql_literal(pred)}, {iql_literal(obj)})"
+        )
 
     subheader("Step 1: Ground truth loaded")
     print(f"  {DIM}{len(known_facts)} known facts in the KG{RESET}")
 
     # ── Agent 1: Researcher — extract claims from an article ─────────
 
-    base_url = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
-    model = os.environ.get("LLM_MODEL", "deepseek/deepseek-r1-0528-qwen3-8b")
-
-    try:
-        import httpx
-
-        resp = httpx.get(f"{base_url}/models", timeout=2)
-        resp.raise_for_status()
-    except Exception:
+    if not check_llm():
         print(f"\n{DIM}  No LLM server — using hardcoded claims.{RESET}")
         await _insert_hardcoded_claims(kg)
         await _show_results(kg)
         return
 
-    from langchain_openai import ChatOpenAI
     from pydantic import BaseModel
     from pydantic import Field as PydanticField
 
-    llm = ChatOpenAI(base_url=base_url, api_key="lm-studio", model=model, temperature=0)
+    llm = get_llm()
 
     article = (
         "Python was created by Guido van Rossum and first released in 1991. "
@@ -165,8 +161,8 @@ async def run(kg):
 
     for i, c in enumerate(extracted.claims):
         await kg.execute(
-            f'+claim({i + 1}, "article", "{c.subject}", '
-            f'"{c.predicate}", "{c.object}", {c.confidence})'
+            f"+claim({i + 1}, {iql_literal('article')}, {iql_literal(c.subject)}, "
+            f"{iql_literal(c.predicate)}, {iql_literal(c.object)}, {c.confidence})"
         )
         status = f"{DIM}conf={c.confidence}{RESET}"
         print(

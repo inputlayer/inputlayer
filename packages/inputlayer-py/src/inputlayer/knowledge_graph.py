@@ -154,6 +154,18 @@ class DebugResult:
     iql: str
     plan: str
 
+    def __getattr__(self, name: str) -> Any:
+        if name == "datalog":
+            import warnings
+
+            warnings.warn(
+                "DebugResult.datalog is deprecated, use .iql instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return self.iql
+        raise AttributeError(f"{type(self).__name__!r} has no attribute {name!r}")
+
 
 @dataclass(frozen=True)
 class ServerStatus:

@@ -3,6 +3,7 @@
 import asyncio
 
 from examples.langchain._common import *
+from inputlayer.integrations.langchain.params import iql_literal
 
 
 async def run(kg):
@@ -38,10 +39,8 @@ async def run(kg):
     ]
 
     for doc_id, title, content, clearance in docs:
-        escaped_title = title.replace('"', '\\"')
-        escaped_content = content.replace('"', '\\"')
         await kg.execute(
-            f'+classified_doc({doc_id}, "{escaped_title}", "{escaped_content}", "{clearance}")'
+            f"+classified_doc({doc_id}, {iql_literal(title)}, {iql_literal(content)}, {iql_literal(clearance)})"
         )
 
     # ── Users with roles ─────────────────────────────────────────────
@@ -54,7 +53,7 @@ async def run(kg):
     ]
 
     for username, role in users:
-        await kg.execute(f'+acl_user("{username}", "{role}")')
+        await kg.execute(f"+acl_user({iql_literal(username)}, {iql_literal(role)})")
 
     # ── Clearance hierarchy ──────────────────────────────────────────
 
@@ -72,7 +71,7 @@ async def run(kg):
     ]
 
     for role, level in grants:
-        await kg.execute(f'+clearance_grants("{role}", "{level}")')
+        await kg.execute(f"+clearance_grants({iql_literal(role)}, {iql_literal(level)})")
 
     # The access control query joins three relations in InputLayer Query Language:
     #   classified_doc(Id, Title, Content, Clr),
@@ -83,7 +82,7 @@ async def run(kg):
     def _acl_query(username: str) -> str:
         return (
             f"?classified_doc(Id, Title, Content, Clr), "
-            f'acl_user("{username}", Role), '
+            f"acl_user({iql_literal(username)}, Role), "
             f"clearance_grants(Role, Clr)"
         )
 
@@ -157,23 +156,14 @@ async def run(kg):
 
     # ── Step 4: LLM answers using only visible docs ──────────────────
 
-    base_url = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
-    model = os.environ.get("LLM_MODEL", "deepseek/deepseek-r1-0528-qwen3-8b")
-
-    try:
-        import httpx
-
-        resp = httpx.get(f"{base_url}/models", timeout=2)
-        resp.raise_for_status()
-    except Exception:
+    if not check_llm():
         print(f"\n{DIM}  No LLM server detected — skipping LLM step.{RESET}")
         return
 
     from langchain_core.output_parsers import StrOutputParser
     from langchain_core.prompts import ChatPromptTemplate
-    from langchain_openai import ChatOpenAI
 
-    llm = ChatOpenAI(base_url=base_url, api_key="lm-studio", model=model, temperature=0)
+    llm = get_llm()
 
     prompt = ChatPromptTemplate.from_template(
         "You are a corporate assistant. You can ONLY use the documents "

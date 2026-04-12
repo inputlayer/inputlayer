@@ -25,6 +25,7 @@ In both cases the original text is preserved verbatim.
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any
 
@@ -57,6 +58,11 @@ def iql_literal(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (int, float)):
+        if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+            raise ValueError(
+                f"Cannot bind {value!r} as an IQL literal - "
+                "IQL does not support infinity or NaN."
+            )
         return repr(value)
     if isinstance(value, str):
         escaped = value.replace("\\", "\\\\").replace('"', '\\"')

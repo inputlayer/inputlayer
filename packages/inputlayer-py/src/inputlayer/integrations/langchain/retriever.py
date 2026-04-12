@@ -21,6 +21,8 @@ from inputlayer.integrations.langchain.params import bind_params
 
 logger = logging.getLogger(__name__)
 
+_CONTENT_DEFAULT = object()  # sentinel to distinguish "not set" from explicit ["content"]
+
 
 class InputLayerRetriever(BaseRetriever):
     """Retrieve documents from an InputLayer KnowledgeGraph.
@@ -80,9 +82,9 @@ class InputLayerRetriever(BaseRetriever):
         description="Name of the placeholder filled with the invoke() argument",
     )
     params: dict[str, Any] | Callable[[str], dict[str, Any]] | None = None
-    page_content_columns: list[str] = Field(
-        default_factory=lambda: ["content"],
-        description="Column(s) to concatenate as page_content",
+    page_content_columns: list[str] | None = Field(
+        default=None,
+        description="Column(s) to concatenate as page_content (defaults to ['content'])",
     )
     metadata_columns: list[str] = Field(
         default_factory=list,
@@ -119,7 +121,7 @@ class InputLayerRetriever(BaseRetriever):
         *,
         run_manager: CallbackManagerForRetrieverRun,
     ) -> list[Document]:
-        return run_sync(self._aget_relevant_documents(query, run_manager=run_manager))
+        return run_sync(self._do_retrieve(query))
 
     # ── Async path (native) ──────────────────────────────────────────
 
@@ -127,8 +129,11 @@ class InputLayerRetriever(BaseRetriever):
         self,
         query: str,
         *,
-        run_manager: AsyncCallbackManagerForRetrieverRun | CallbackManagerForRetrieverRun,
+        run_manager: AsyncCallbackManagerForRetrieverRun,
     ) -> list[Document]:
+        return await self._do_retrieve(query)
+
+    async def _do_retrieve(self, query: str) -> list[Document]:
         if self.relation is not None:
             return await self._vector_documents(query)
         return await self._iql_documents(query)
@@ -150,9 +155,11 @@ class InputLayerRetriever(BaseRetriever):
     def _resolve_params(self, user_query: str) -> dict[str, Any]:
         if callable(self.params):
             return self.params(user_query)
-        out: dict[str, Any] = {self.input_param: user_query}
+        out: dict[str, Any] = {}
         if isinstance(self.params, dict):
             out.update(self.params)
+        # input_param always wins over static params.
+        out[self.input_param] = user_query
         return out
 
     # ── Vector mode ──────────────────────────────────────────────────
@@ -239,8 +246,9 @@ class InputLayerRetriever(BaseRetriever):
             return None
 
         resolved_content: list[str] = []
-        explicit_content = self.page_content_columns != ["content"]
-        for c in self.page_content_columns:
+        content_cols = self.page_content_columns if self.page_content_columns is not None else ["content"]
+        explicit_content = self.page_content_columns is not None
+        for c in content_cols:
             actual = resolve(c, "page_content_columns")
             if actual is None:
                 if explicit_content:

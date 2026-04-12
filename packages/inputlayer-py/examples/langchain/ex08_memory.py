@@ -3,6 +3,7 @@
 import asyncio
 
 from examples.langchain._common import *
+from inputlayer.integrations.langchain.params import iql_literal
 
 
 async def run(kg):
@@ -114,16 +115,15 @@ async def run(kg):
     subheader("Step 1: Insert conversation as facts")
 
     for msg_id, role, content in conversation:
-        escaped = content.replace('"', '\\"')
-        await kg.execute(f'+chat_message({msg_id}, "{role}", "{escaped}")')
+        await kg.execute(f"+chat_message({msg_id}, {iql_literal(role)}, {iql_literal(content)})")
 
     for msg_id, topics in turn_topics.items():
         for topic in topics:
-            await kg.execute(f'+topic_mention({msg_id}, "{topic}")')
+            await kg.execute(f"+topic_mention({msg_id}, {iql_literal(topic)})")
 
     for msg_id, entities in turn_entities.items():
         for entity, kind in entities:
-            await kg.execute(f'+entity_mention({msg_id}, "{entity}", "{kind}")')
+            await kg.execute(f"+entity_mention({msg_id}, {iql_literal(entity)}, {iql_literal(kind)})")
 
     print(f"\n  {GREEN}Inserted {len(conversation)} messages,")
     topic_count = sum(len(t) for t in turn_topics.values())
@@ -157,23 +157,14 @@ async def run(kg):
 
     # ── Step 3: Context-aware response using derived facts ───────────
 
-    base_url = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
-    model = os.environ.get("LLM_MODEL", "deepseek/deepseek-r1-0528-qwen3-8b")
-
-    try:
-        import httpx
-
-        resp = httpx.get(f"{base_url}/models", timeout=2)
-        resp.raise_for_status()
-    except Exception:
+    if not check_llm():
         print(f"\n{DIM}  No LLM server detected — skipping LLM step.{RESET}")
         return
 
     from langchain_core.output_parsers import StrOutputParser
     from langchain_core.prompts import ChatPromptTemplate
-    from langchain_openai import ChatOpenAI
 
-    llm = ChatOpenAI(base_url=base_url, api_key="lm-studio", model=model, temperature=0)
+    llm = get_llm()
 
     # Build context from derived facts (NOT raw message history)
     r = await kg.execute("?relevant_history(Id, Role, Content, Topic)")

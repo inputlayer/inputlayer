@@ -13,22 +13,13 @@ async def run(kg):
     """
     header("KG building — extract facts from documents", 5)
 
-    base_url = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
-    model = os.environ.get("LLM_MODEL", "deepseek/deepseek-r1-0528-qwen3-8b")
-
-    try:
-        import httpx
-
-        resp = httpx.get(f"{base_url}/models", timeout=2)
-        resp.raise_for_status()
-    except Exception:
-        print(f"\n{DIM}  No LLM server detected at {base_url} — skipping.{RESET}")
+    if not check_llm():
+        print(f"\n{DIM}  No LLM server detected — skipping.{RESET}")
         return
 
-    from langchain_openai import ChatOpenAI
     from pydantic import Field as PydanticField
 
-    llm = ChatOpenAI(base_url=base_url, api_key="lm-studio", model=model, temperature=0)
+    llm = get_llm()
 
     # ── Define extraction schema (Pydantic model for structured output) ──
 
