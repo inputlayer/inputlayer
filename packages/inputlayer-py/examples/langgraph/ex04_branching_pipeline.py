@@ -132,7 +132,7 @@ async def route_by_type(state: dict[str, Any]) -> str:
 
     # Store classification in KG
     kg = state["kg"]
-    await kg.execute(f'+doc_classification({doc["id"]}, "{doc_type}")')
+    await kg.execute(f'+doc_classification({doc["id"]}, "{escape_iql(doc_type)}")')
 
     routes = {
         "email": "process_email",

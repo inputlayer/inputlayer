@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -14,7 +14,7 @@ def kg_router(
     branches: dict[str, str],
     default: str = "end",
     kg_key: str = "kg",
-) -> Callable[[dict[str, Any]], Any]:
+) -> Callable[[dict[str, Any]], Coroutine[Any, Any, str]]:
     """Create a LangGraph conditional edge function driven by IQL queries.
 
     Each branch maps a target node name to an IQL query. Branches are

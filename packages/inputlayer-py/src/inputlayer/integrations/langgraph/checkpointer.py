@@ -171,7 +171,13 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
         """Persist a checkpoint."""
         await self.setup()
 
-        thread_id = config["configurable"]["thread_id"]
+        try:
+            thread_id = config["configurable"]["thread_id"]
+        except KeyError:
+            raise KeyError(
+                "InputLayerCheckpointer.aput requires config['configurable']['thread_id']. "
+                "Pass config={'configurable': {'thread_id': 'your-thread-id'}} to ainvoke()."
+            ) from None
         checkpoint_id = checkpoint["id"]
         parent_id = config["configurable"].get("checkpoint_id", "")
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
@@ -210,8 +216,15 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
         """
         await self.setup()
 
-        thread_id = config["configurable"]["thread_id"]
-        checkpoint_id = config["configurable"]["checkpoint_id"]
+        try:
+            thread_id = config["configurable"]["thread_id"]
+            checkpoint_id = config["configurable"]["checkpoint_id"]
+        except KeyError as exc:
+            raise KeyError(
+                f"InputLayerCheckpointer.aput_writes requires config['configurable'][{exc}]. "
+                "Ensure your graph was compiled with this checkpointer and that "
+                "config includes thread_id and checkpoint_id."
+            ) from None
 
         # Nothing to write - don't touch existing writes for this checkpoint
         if not writes:
@@ -243,7 +256,13 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
         """Retrieve a checkpoint by config."""
         await self.setup()
 
-        thread_id = config["configurable"]["thread_id"]
+        try:
+            thread_id = config["configurable"]["thread_id"]
+        except KeyError:
+            raise KeyError(
+                "InputLayerCheckpointer.aget_tuple requires config['configurable']['thread_id']. "
+                "Pass config={'configurable': {'thread_id': 'your-thread-id'}}."
+            ) from None
         checkpoint_id = config["configurable"].get("checkpoint_id")
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
 
@@ -325,7 +344,13 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
         if config is None:
             return
 
-        thread_id = config["configurable"]["thread_id"]
+        try:
+            thread_id = config["configurable"]["thread_id"]
+        except KeyError:
+            raise KeyError(
+                "InputLayerCheckpointer.alist requires config['configurable']['thread_id']. "
+                "Pass config={'configurable': {'thread_id': 'your-thread-id'}}."
+            ) from None
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
 
         r = await self._exec(
@@ -367,9 +392,8 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
             metadata = _unpack(self.serde, str(row[-2]))
 
             # Apply metadata filter
-            if filter:
-                if not all(metadata.get(k) == v for k, v in filter.items()):
-                    continue
+            if filter and not all(metadata.get(k) == v for k, v in filter.items()):
+                continue
 
             pending_writes = _parse_writes(
                 self.serde, writes_by_ckpt.get(checkpoint_id, [])

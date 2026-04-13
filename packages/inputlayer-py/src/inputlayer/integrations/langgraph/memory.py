@@ -32,7 +32,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from typing import Any
 
 from inputlayer._sync import run_sync
@@ -126,7 +126,8 @@ class InputLayerMemory:
             # not exceptions. Exceptions here mean connection/auth problems.
             # If any step raises, don't mark setup as done so the next call retries.
             for ddl in [
-                "+memory_turn(thread_id: string, turn_id: int, role: string, content: string, ts: int)",
+                "+memory_turn("
+                "thread_id: string, turn_id: int, role: string, content: string, ts: int)",
                 "+memory_topic(thread_id: string, turn_id: int, topic: string)",
             ]:
                 await self.kg.execute(ddl)
@@ -321,29 +322,45 @@ class InputLayerMemory:
         *,
         state_key: str = "new_message",
         thread_key: str = "thread_id",
-    ) -> Callable[[dict[str, Any]], Any]:
+        strict: bool = False,
+    ) -> Callable[[dict[str, Any]], Coroutine[Any, Any, dict[str, Any]]]:
         """Create a LangGraph node that stores a message from state.
 
-        Reads ``state[thread_key]`` for the thread ID (warns if missing,
-        falls back to ``"default"``). Reads ``state[state_key]`` for the
-        message, which must be a ``dict`` with ``"role"`` and ``"content"``
-        keys. Logs a warning if the message is not a dict (e.g., a
-        LangChain ``AIMessage`` object was passed instead).
+        Reads ``state[thread_key]`` for the thread ID. Reads ``state[state_key]``
+        for the message, which must be a ``dict`` with ``"role"`` and ``"content"``
+        keys. Logs a warning if the message is not a dict (e.g., a LangChain
+        ``AIMessage`` object was passed instead).
+
+        Args:
+            state_key: State key for the message dict to store.
+            thread_key: State key for the thread ID string.
+            strict: If ``True``, raises ``ValueError`` when ``thread_key`` is
+                missing from state. If ``False`` (default), logs a warning and
+                falls back to ``thread_id="default"``. **Set ``strict=True`` in
+                production** to prevent all sessions without a thread ID from
+                silently sharing the same memory pool.
 
         Usage::
 
-            graph.add_node("store", memory.store_node())
+            graph.add_node("store", memory.store_node(strict=True))
         """
         memory = self
 
         async def _node(state: dict[str, Any]) -> dict[str, Any]:
             thread_id = state.get(thread_key)
             if not thread_id:
+                if strict:
+                    raise ValueError(
+                        f"InputLayerMemory.store_node: '{thread_key}' not found in state. "
+                        f"Add state['{thread_key}'] = '<conversation-id>' to your graph state, "
+                        "or use strict=False to fall back to a shared default thread."
+                    )
                 logger.warning(
                     "InputLayerMemory.store_node: '%s' not found in state. "
                     "Falling back to thread_id='default'. All agents without "
                     "an explicit thread_id will share the same memory pool. "
-                    "Set state['%s'] to a unique ID per conversation.",
+                    "Set state['%s'] to a unique ID per conversation, or use "
+                    "strict=True to raise an error instead.",
                     thread_key,
                     thread_key,
                 )
@@ -381,26 +398,41 @@ class InputLayerMemory:
         *,
         state_key: str = "context",
         thread_key: str = "thread_id",
-    ) -> Callable[[dict[str, Any]], Any]:
+        strict: bool = False,
+    ) -> Callable[[dict[str, Any]], Coroutine[Any, Any, dict[str, Any]]]:
         """Create a LangGraph node that recalls context into state.
 
-        Reads ``state[thread_key]`` for the thread ID (warns if missing,
-        falls back to ``"default"`` - all sessions without a thread ID share
-        the same memory pool, so always set ``thread_key`` in production).
-        Writes the recall result dict to ``state[state_key]``.
+        Reads ``state[thread_key]`` for the thread ID. Writes the recall result
+        dict to ``state[state_key]``.
+
+        Args:
+            state_key: State key to write the recalled context dict into.
+            thread_key: State key for the thread ID string.
+            strict: If ``True``, raises ``ValueError`` when ``thread_key`` is
+                missing from state. If ``False`` (default), logs a warning and
+                falls back to ``thread_id="default"``. **Set ``strict=True`` in
+                production** to prevent all sessions without a thread ID from
+                silently sharing the same memory pool.
 
         Usage::
 
-            graph.add_node("recall", memory.recall_node())
+            graph.add_node("recall", memory.recall_node(strict=True))
         """
         memory = self
 
         async def _node(state: dict[str, Any]) -> dict[str, Any]:
             thread_id = state.get(thread_key)
             if not thread_id:
+                if strict:
+                    raise ValueError(
+                        f"InputLayerMemory.recall_node: '{thread_key}' not found in state. "
+                        f"Add state['{thread_key}'] = '<conversation-id>' to your graph state, "
+                        "or use strict=False to fall back to a shared default thread."
+                    )
                 logger.warning(
                     "InputLayerMemory.recall_node: '%s' not found in state. "
-                    "Falling back to thread_id='default'.",
+                    "Falling back to thread_id='default'. Use strict=True to "
+                    "raise an error instead.",
                     thread_key,
                 )
                 thread_id = "default"

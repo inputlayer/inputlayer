@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from typing import Any, Literal
 
 from inputlayer.integrations.langgraph._utils import escape_iql
@@ -15,7 +15,7 @@ def kg_node(
     operation: Literal["query", "insert", "delete"] = "query",
     state_key: str = "results",
     kg_key: str = "kg",
-) -> Callable[[dict[str, Any]], Any]:
+) -> Callable[[dict[str, Any]], Coroutine[Any, Any, dict[str, Any]]]:
     """Create a LangGraph node that queries or mutates the KnowledgeGraph.
 
     The returned async function has the signature ``(state) -> partial_state``
@@ -125,4 +125,4 @@ def kg_node(
 
 
 # Re-export so callers can do: from inputlayer.integrations.langgraph import escape_iql
-__all__ = ["kg_node", "escape_iql"]
+__all__ = ["escape_iql", "kg_node"]
