@@ -21,9 +21,6 @@ from inputlayer.integrations.langchain.params import bind_params
 
 logger = logging.getLogger(__name__)
 
-_CONTENT_DEFAULT = object()  # sentinel to distinguish "not set" from explicit ["content"]
-
-
 class InputLayerRetriever(BaseRetriever):
     """Retrieve documents from an InputLayer KnowledgeGraph.
 

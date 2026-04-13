@@ -1544,3 +1544,174 @@ class TestLiveStructuredTools:
                 assert cats == ["db", "ml"]
             finally:
                 await il.drop_knowledge_graph(kg_name)
+
+
+# ── 7. Tests for new safety features ──────────────────────────────────
+
+
+class TestReadOnlyGuard:
+    """Tests for the read_only guard on InputLayerIQLTool."""
+
+    def test_check_read_only_blocks_assertion(self) -> None:
+        from inputlayer.integrations.langchain.tool import _check_read_only
+
+        with pytest.raises(ValueError, match="read_only guard"):
+            _check_read_only("+fact(1, 2, 3)")
+
+    def test_check_read_only_blocks_retraction(self) -> None:
+        from inputlayer.integrations.langchain.tool import _check_read_only
+
+        with pytest.raises(ValueError, match="read_only guard"):
+            _check_read_only("-fact(1, 2, 3)")
+
+    def test_check_read_only_blocks_drop(self) -> None:
+        from inputlayer.integrations.langchain.tool import _check_read_only
+
+        with pytest.raises(ValueError, match="read_only guard"):
+            _check_read_only(".drop my_relation")
+
+    def test_check_read_only_blocks_create(self) -> None:
+        from inputlayer.integrations.langchain.tool import _check_read_only
+
+        with pytest.raises(ValueError, match="read_only guard"):
+            _check_read_only(".create my_relation")
+
+    def test_check_read_only_allows_queries(self) -> None:
+        from inputlayer.integrations.langchain.tool import _check_read_only
+
+        _check_read_only("?fact(X, Y)")
+        _check_read_only("?a(X), b(X, Y)")
+        _check_read_only(".why ?fact(X)")
+
+    @pytest.mark.asyncio
+    async def test_tool_read_only_rejects_write(self) -> None:
+        kg = _mock_kg(["x"], [[1]])
+        tool = InputLayerIQLTool(kg=kg, read_only=True)
+        with pytest.raises(ValueError, match="read_only guard"):
+            await tool._arun("+fact(1, 2, 3)")
+
+    @pytest.mark.asyncio
+    async def test_tool_read_only_false_allows_write(self) -> None:
+        kg = _mock_kg(["x"], [[1]])
+        tool = InputLayerIQLTool(kg=kg, read_only=False)
+        result = await tool._arun("+fact(1, 2, 3)")
+        assert result  # should not raise
+
+    @pytest.mark.asyncio
+    async def test_tool_read_only_allows_queries(self) -> None:
+        kg = _mock_kg(["x"], [[1]])
+        tool = InputLayerIQLTool(kg=kg, read_only=True)
+        result = await tool._arun("?fact(X, Y)")
+        assert result
+
+
+class TestDistanceToRelevance:
+    """Tests for _distance_to_relevance metric conversion."""
+
+    def test_cosine(self) -> None:
+        from inputlayer.integrations.langchain.vector_store import (
+            _distance_to_relevance,
+        )
+
+        assert _distance_to_relevance(0.0, "cosine") == 1.0
+        assert _distance_to_relevance(0.3, "cosine") == pytest.approx(0.7)
+        assert _distance_to_relevance(1.0, "cosine") == 0.0
+
+    def test_euclidean(self) -> None:
+        from inputlayer.integrations.langchain.vector_store import (
+            _distance_to_relevance,
+        )
+
+        assert _distance_to_relevance(0.0, "euclidean") == 1.0
+        assert _distance_to_relevance(1.0, "euclidean") == pytest.approx(0.5)
+        assert _distance_to_relevance(9.0, "euclidean") == pytest.approx(0.1)
+
+    def test_dot(self) -> None:
+        from inputlayer.integrations.langchain.vector_store import (
+            _distance_to_relevance,
+        )
+
+        assert _distance_to_relevance(0.8, "dot") == 0.8
+        assert _distance_to_relevance(-0.5, "dot") == -0.5
+
+
+class TestIqlLiteralEdgeCases:
+    """Tests for inf/nan rejection in iql_literal."""
+
+    def test_rejects_inf(self) -> None:
+        with pytest.raises(ValueError, match="infinity or NaN"):
+            iql_literal(float("inf"))
+
+    def test_rejects_neg_inf(self) -> None:
+        with pytest.raises(ValueError, match="infinity or NaN"):
+            iql_literal(float("-inf"))
+
+    def test_rejects_nan(self) -> None:
+        with pytest.raises(ValueError, match="infinity or NaN"):
+            iql_literal(float("nan"))
+
+    def test_normal_floats_pass(self) -> None:
+        assert iql_literal(3.14) == "3.14"
+        assert iql_literal(0.0) == "0.0"
+        assert iql_literal(-1.5) == "-1.5"
+
+    def test_rejects_inf_in_list(self) -> None:
+        with pytest.raises(ValueError, match="infinity or NaN"):
+            iql_literal([1.0, float("inf")])
+
+    def test_rejects_nan_in_list(self) -> None:
+        with pytest.raises(ValueError, match="infinity or NaN"):
+            iql_literal([float("nan"), 2.0])
+
+
+class TestResolveParamsOrdering:
+    """Tests that input_param is not silently overwritten by static params."""
+
+    @pytest.mark.asyncio
+    async def test_input_param_wins_over_static_params(self) -> None:
+        kg = _mock_kg(["title"], [["ML Basics"]])
+        retriever = InputLayerRetriever(
+            kg=kg,
+            query='?docs(T), topic(:input), min_score(:min)',
+            params={"input": "should_be_overwritten", "min": 0.5},
+        )
+        params = retriever._resolve_params("actual_query")
+        assert params["input"] == "actual_query"
+        assert params["min"] == 0.5
+
+    @pytest.mark.asyncio
+    async def test_callable_params_not_affected(self) -> None:
+        kg = _mock_kg(["title"], [["ML Basics"]])
+        retriever = InputLayerRetriever(
+            kg=kg,
+            query='?docs(T), topic(:input)',
+            params=lambda q: {"input": q, "extra": 42},
+        )
+        params = retriever._resolve_params("my_query")
+        assert params["input"] == "my_query"
+        assert params["extra"] == 42
+
+
+class TestDebugResultDeprecation:
+    """Tests for the DebugResult.datalog deprecation alias."""
+
+    def test_datalog_alias_returns_iql(self) -> None:
+        import warnings
+
+        from inputlayer.knowledge_graph import DebugResult
+
+        dr = DebugResult(iql="?test(X)", plan="plan text")
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            val = dr.datalog
+        assert val == "?test(X)"
+        assert len(w) == 1
+        assert issubclass(w[0].category, DeprecationWarning)
+        assert "deprecated" in str(w[0].message).lower()
+
+    def test_unknown_attr_raises(self) -> None:
+        from inputlayer.knowledge_graph import DebugResult
+
+        dr = DebugResult(iql="?test(X)", plan="plan text")
+        with pytest.raises(AttributeError, match="no_such_field"):
+            dr.no_such_field

@@ -675,3 +675,28 @@ def test_input_layer_sync_user_management() -> None:
         mock_client.list_users.assert_awaited_once()
         mock_client.drop_user.assert_awaited_once_with("alice")
         assert users == []
+
+
+# ── Re-entrancy guard ──────────────────────────────────────────────────
+
+
+@pytest.mark.filterwarnings("ignore::RuntimeWarning")
+def test_run_sync_from_loop_thread_raises() -> None:
+    """Calling run_sync from the background loop thread must raise,
+    not deadlock."""
+    from inputlayer._sync import _LoopThread
+
+    lt = _LoopThread()
+    error_holder: list[Exception] = []
+
+    async def try_reentrant() -> None:
+        try:
+            lt.run(asyncio.sleep(0))
+        except RuntimeError as e:
+            error_holder.append(e)
+
+    lt.run(try_reentrant())
+    lt.shutdown()
+
+    assert len(error_holder) == 1
+    assert "deadlock" in str(error_holder[0]).lower()

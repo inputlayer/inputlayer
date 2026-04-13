@@ -137,11 +137,16 @@ class InputLayer:
         """Drop a knowledge graph and all its data.
 
         The server rejects dropping the currently active KG, so we
-        switch to ``default`` first if needed.
+        switch to ``default`` first if needed. Both commands run under
+        a single lock hold to prevent another coroutine from switching
+        the KG between the use-default and the drop.
         """
         if self._conn.current_kg == name:
-            await self._conn.execute(".kg use default")
-        await self._conn.execute(f".kg drop {name}")
+            results = await self._conn.execute_sequence(
+                [".kg use default", f".kg drop {name}"]
+            )
+        else:
+            await self._conn.execute(f".kg drop {name}")
         self._kgs.pop(name, None)
 
     # ── User management ───────────────────────────────────────────────

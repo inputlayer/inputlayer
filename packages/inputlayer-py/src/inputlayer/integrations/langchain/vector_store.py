@@ -283,6 +283,35 @@ class InputLayerVectorStore(VectorStore):
 
         return run_sync(_go())
 
+    def _build_filter_clauses(
+        self,
+        filter: dict[str, Any] | None,
+        *,
+        context: str = "similarity_search",
+    ) -> list[str] | None:
+        """Build IQL filter clauses from a metadata filter dict.
+
+        Returns ``None`` (not ``[]``) when there are no clauses, matching
+        the ``extra_iql_clauses`` API of ``kg.vector_search()``.
+        """
+        if not filter:
+            return None
+        from inputlayer.integrations.langchain.params import iql_literal
+
+        cols = Relation._get_columns(self._relation)
+        cap = {c: c[:1].upper() + c[1:] for c in cols}
+        clauses: list[str] = []
+        for key, value in filter.items():
+            if key not in cap:
+                warnings.warn(
+                    f"{context} filter key {key!r} is not a column "
+                    f"of {self._relation.__name__}; ignoring.",
+                    stacklevel=5,
+                )
+                continue
+            clauses.append(f"{cap[key]} = {iql_literal(value)}")
+        return clauses or None
+
     async def _search_by_vector(
         self,
         embedding: list[float],
@@ -292,34 +321,15 @@ class InputLayerVectorStore(VectorStore):
         filter: dict[str, Any] | None = None,
     ) -> list[tuple[Document, float]]:
         """Run vector similarity via ``kg.vector_search()``."""
-        from inputlayer.integrations.langchain.params import iql_literal
-
         metric = _resolve_metric(metric)
-
-        # Build optional metadata filter clauses.
-        cols = Relation._get_columns(self._relation)
-        cap = {c: c[:1].upper() + c[1:] for c in cols}
-        filter_clauses: list[str] = []
-        if filter:
-            for key, value in filter.items():
-                if key not in cap:
-                    warnings.warn(
-                        f"similarity_search filter key {key!r} is not a column "
-                        f"of {self._relation.__name__}; ignoring.",
-                        stacklevel=4,
-                    )
-                    continue
-                filter_clauses.append(f"{cap[key]} = {iql_literal(value)}")
-
         result = await self._kg.vector_search(
             self._relation,
             [float(v) for v in embedding],
             column=self._vector_field,
             k=k,
             metric=metric,
-            extra_iql_clauses=filter_clauses or None,
+            extra_iql_clauses=self._build_filter_clauses(filter),
         )
-
         return self._rows_to_documents(result.columns, result.rows)
 
     # ── Maximal Marginal Relevance ───────────────────────────────────
@@ -407,33 +417,18 @@ class InputLayerVectorStore(VectorStore):
         MMR needs the actual embeddings, which the public document path
         deliberately strips. We use ``kg.vector_search()`` then extract
         the vector column from each row before mapping to Documents.
+
+        Expects *metric* to be already resolved (canonical form).
         """
-        from inputlayer.integrations.langchain.params import iql_literal
-
-        metric = _resolve_metric(metric)
-
-        cols = Relation._get_columns(self._relation)
-        cap = {c: c[:1].upper() + c[1:] for c in cols}
-        filter_clauses: list[str] = []
-        if filter:
-            for key, value in filter.items():
-                if key not in cap:
-                    warnings.warn(
-                        f"max_marginal_relevance_search filter key {key!r} "
-                        f"is not a column of {self._relation.__name__}; "
-                        f"ignoring.",
-                        stacklevel=4,
-                    )
-                    continue
-                filter_clauses.append(f"{cap[key]} = {iql_literal(value)}")
-
         result = await self._kg.vector_search(
             self._relation,
             [float(v) for v in embedding],
             column=self._vector_field,
             k=k,
             metric=metric,
-            extra_iql_clauses=filter_clauses or None,
+            extra_iql_clauses=self._build_filter_clauses(
+                filter, context="max_marginal_relevance_search"
+            ),
         )
 
         # Find the vector column index in the result.
@@ -454,7 +449,8 @@ class InputLayerVectorStore(VectorStore):
         out: list[tuple[Document, float, list[float]]] = []
         docs_and_scores = self._rows_to_documents(result.columns, result.rows)
         for (doc, score), row in zip(docs_and_scores, result.rows, strict=True):
-            vec = list(row[vec_col_idx]) if vec_col_idx is not None else []
+            raw = row[vec_col_idx] if vec_col_idx is not None else None
+            vec = list(raw) if raw is not None else []
             out.append((doc, score, vec))
         return out
 
@@ -561,7 +557,7 @@ class InputLayerVectorStore(VectorStore):
             return schema_lookup.get(col.lower(), col)
 
         for row in rows:
-            row_dict = dict(zip(columns, row, strict=False))
+            row_dict = dict(zip(columns, row, strict=True))
             content = str(row_dict.get(content_col, ""))
             metadata: dict[str, Any] = {}
             for k, v in row_dict.items():
@@ -587,7 +583,7 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     dot = 0.0
     na = 0.0
     nb = 0.0
-    for x, y in zip(a, b, strict=False):
+    for x, y in zip(a, b, strict=True):
         dot += x * y
         na += x * x
         nb += y * y

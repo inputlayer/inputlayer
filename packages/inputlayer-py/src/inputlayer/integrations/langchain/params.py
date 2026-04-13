@@ -74,6 +74,12 @@ def iql_literal(value: Any) -> str:
             raise ValueError(
                 f"List parameters must contain only numbers, got {value!r}"
             )
+        for v in value:
+            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                raise ValueError(
+                    f"Cannot bind {v!r} in list as an IQL literal - "
+                    "IQL does not support infinity or NaN."
+                )
         return "[" + ", ".join(repr(float(v)) for v in value) + "]"
     raise TypeError(
         f"Cannot bind {type(value).__name__} as an IQL literal: {value!r}"

@@ -3,6 +3,7 @@
 import asyncio
 
 from examples.langchain._common import *
+from inputlayer.integrations.langchain.params import iql_literal
 
 
 async def run(kg):
@@ -36,7 +37,7 @@ async def run(kg):
     ]
 
     for role, mn, mx in bands:
-        await kg.execute(f'+salary_band("{role}", {mn}, {mx})')
+        await kg.execute(f'+salary_band({iql_literal(role)}, {mn}, {mx})')
 
     # ── Department constraints ───────────────────────────────────────
 
@@ -65,7 +66,7 @@ async def run(kg):
     ]
 
     for name, role, salary, dept, year in employees:
-        await kg.execute(f'+staff("{name}", "{role}", {salary}, "{dept}", {year})')
+        await kg.execute(f'+staff({iql_literal(name)}, {iql_literal(role)}, {salary}, {iql_literal(dept)}, {year})')
 
     subheader("Data loaded")
     print(f"  {DIM}{len(employees)} employees, {len(bands)} salary bands{RESET}")

@@ -145,7 +145,7 @@ InputLayer is a knowledge graph engine with recursive IQL, incremental maintenan
 - `.session` / `.session clear` - session rule management
 - `.index list` / `.index create <name> on <rel>(<col>) [metric cosine]` - HNSW vector index management
 - `.index stats <name>` / `.index rebuild <name>` / `.index drop <name>`
-- `.load <file.iql>` - execute an IDL script file
+- `.load <file.iql>` - execute an IQL script file
 - `.status` - system status
 - `.compact` - compact storage
 
@@ -335,7 +335,7 @@ impl AgentManager {
 /// Looks for ```iql or ```iql code blocks, or lines starting with ? or .why
 fn extract_suggested_query(response: &str) -> Option<String> {
     // Look for fenced code blocks
-    for marker in ["```iql", "```iql", "```"] {
+    for marker in ["```iql", "```datalog", "```"] {
         if let Some(start) = response.find(marker) {
             let code_start = start + marker.len();
             if let Some(end) = response[code_start..].find("```") {

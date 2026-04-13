@@ -25,7 +25,7 @@ async def run(kg):
 
     retriever = InputLayerRetriever(
         kg=kg,
-        query='?article(Id, Title, Content, "{input}", Emb)',
+        query='?article(Id, Title, Content, :input, Emb)',
         page_content_columns=["Content"],
         metadata_columns=["Title"],
     )

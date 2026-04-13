@@ -56,7 +56,7 @@ async def run(kg):
     # ── Step 1: Extract structured facts with LLM ────────────────────
 
     subheader("Step 1: LLM extracts structured facts")
-    print(f"{DIM}  Model: {model}{RESET}\n")
+    print(f"{DIM}  Model: {llm.model_name}{RESET}\n")
 
     structured_llm = llm.with_structured_output(ExtractedArticles)
     extracted = structured_llm.invoke(
@@ -94,9 +94,9 @@ async def run(kg):
     inserted_ids = await vs.aadd_texts(texts=texts, metadatas=metadatas, ids=ids)
     print(f"  {GREEN}Persisted {len(inserted_ids)} documents through the vector store{RESET}")
 
-    # ── Step 4: Verify — query the KG for the new articles ───────────
+    # ── Step 3: Verify — query the KG for the new articles ───────────
 
-    subheader("Step 4: Verify — query new articles from KG")
+    subheader("Step 3: Verify — query new articles from KG")
 
     result = await kg.execute("?article(Id, Title, Content, Category, Emb), Id >= 100")
     print()

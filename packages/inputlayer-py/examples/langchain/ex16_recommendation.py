@@ -3,6 +3,7 @@
 import asyncio
 
 from examples.langchain._common import *
+from inputlayer.integrations.langchain.params import iql_literal
 
 
 async def run(kg):
@@ -52,9 +53,9 @@ async def run(kg):
     ]
 
     for user, item, score in ratings:
-        await kg.execute(f'+user_rating("{user}", "{item}", {score})')
+        await kg.execute(f'+user_rating({iql_literal(user)}, {iql_literal(item)}, {score})')
     for name, cat in items:
-        await kg.execute(f'+item_info("{name}", "{cat}")')
+        await kg.execute(f'+item_info({iql_literal(name)}, {iql_literal(cat)})')
 
     # ── Rules ────────────────────────────────────────────────────────
 
@@ -82,7 +83,7 @@ async def run(kg):
     subheader("Step 1: Similar users (shared high ratings)")
 
     for user in ["alice", "bob", "carol", "dave"]:
-        r = await kg.execute(f'?similar_users("{user}", Other, SharedItem)')
+        r = await kg.execute(f'?similar_users({iql_literal(user)}, Other, SharedItem)')
         others: dict[str, list[str]] = {}
         for row in r.rows:
             others.setdefault(row[1], []).append(row[2])
@@ -96,9 +97,9 @@ async def run(kg):
 
     subheader("Step 2: Recommendations for alice")
 
-    r = await kg.execute('?raw_recommendation("alice", Item, Via, Score)')
+    r = await kg.execute(f'?raw_recommendation({iql_literal("alice")}, Item, Via, Score)')
     # Deduplicate and filter out items alice already rated
-    r_alice = await kg.execute('?user_rating("alice", Item, Score)')
+    r_alice = await kg.execute(f'?user_rating({iql_literal("alice")}, Item, Score)')
     alice_items = {row[0] for row in r_alice.rows}
 
     recs: dict[str, list[str]] = {}
@@ -109,7 +110,7 @@ async def run(kg):
 
     print()
     for item, recommenders in sorted(recs.items()):
-        r_info = await kg.execute(f'?item_info("{item}", Category)')
+        r_info = await kg.execute(f'?item_info({iql_literal(item)}, Category)')
         cat = r_info.rows[0][1] if r_info.rows else "?"
         print(
             f"  {GREEN}{item}{RESET} {DIM}[{cat}]{RESET} — "

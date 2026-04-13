@@ -262,17 +262,18 @@ class KnowledgeGraph:
         self._conn = connection
         self._session = Session(connection)
 
+    def _kg_preamble(self) -> str | None:
+        """Return a KG-switch command if the connection isn't on this KG, else None."""
+        if self._conn.current_kg == self._name:
+            return None
+        return f".kg use {self._name}"
+
     async def _ensure_current(self) -> None:
-        """Make sure the connection is bound to this KG before running ops.
+        """Make sure the connection is bound to this KG.
 
-        ``il.knowledge_graph(name)`` returns a handle without switching
-        the server-side current KG, so every operation must verify the
-        binding. This method is a no-op when the connection is already
-        on the right KG.
-
-        If the KG does not exist yet, we create it first (the server's
-        ``auto_create_knowledge_graphs`` defaults to ``false``, so
-        ``.kg use <name>`` alone would fail for a brand-new KG).
+        Used by operations that need the KG to exist but don't go through
+        ``_execute`` (rare). Most callers should use ``_execute`` which
+        handles KG switching atomically via ``execute_with_preamble``.
         """
         if self._conn.current_kg == self._name:
             return
@@ -285,9 +286,40 @@ class KnowledgeGraph:
                 raise QueryError(msg, query=f".kg use {self._name}")
 
     async def _execute(self, iql: str) -> Any:
-        """Execute a statement, switching to this KG first if needed."""
-        await self._ensure_current()
-        return await self._conn.execute(iql)
+        """Execute a statement, switching to this KG first if needed.
+
+        The KG switch and the statement are sent under a single lock hold
+        on the Connection so that no other coroutine can interleave and
+        change the active KG between the switch and the command.
+
+        If the KG doesn't exist yet, it is auto-created (the full
+        create+use+execute sequence runs under one lock hold).
+        """
+        preamble = self._kg_preamble()
+        if preamble is None:
+            # Already on the right KG - single command, no preamble needed.
+            return await self._conn.execute(iql)
+
+        # Need to switch KG. Use execute_sequence for atomicity so that
+        # auto-create can be handled within the same lock hold.
+        async with self._conn._execute_lock:
+            # Step 1: try to switch to this KG.
+            use_result = await self._conn._send_and_recv(preamble)
+            if use_result.switched_kg:
+                self._conn._current_kg = use_result.switched_kg
+            elif use_result.columns == ["error"]:
+                msg = use_result.rows[0][0] if use_result.rows else ""
+                if "not found" in msg.lower():
+                    # Auto-create the KG and retry the switch.
+                    await self._conn._send_and_recv(f".kg create {self._name}")
+                    use_result = await self._conn._send_and_recv(preamble)
+                    if use_result.switched_kg:
+                        self._conn._current_kg = use_result.switched_kg
+                else:
+                    raise QueryError(msg, query=preamble)
+
+            # Step 2: execute the actual command.
+            return await self._conn._send_and_recv(iql)
 
     @property
     def name(self) -> str:
