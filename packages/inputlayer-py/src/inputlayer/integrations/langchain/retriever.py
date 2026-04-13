@@ -292,7 +292,7 @@ class InputLayerRetriever(BaseRetriever):
 
         docs: list[Document] = []
         for row in rows:
-            row_dict = dict(zip(columns, row, strict=False))
+            row_dict = dict(zip(columns, row, strict=True))
 
             content_parts: list[str] = []
             for col in resolved_content:

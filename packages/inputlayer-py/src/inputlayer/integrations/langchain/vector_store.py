@@ -64,6 +64,14 @@ class InputLayerVectorStore(VectorStore):
 
     Optional metadata fields are stored as plain columns.
 
+    .. note::
+
+        Embedding calls (``add_texts``, ``similarity_search``, etc.) delegate
+        to the ``Embeddings`` instance you provide.  If the embedding provider
+        hangs or is slow, those calls block indefinitely.  Configure timeouts
+        on the provider itself, e.g.
+        ``OpenAIEmbeddings(timeout=30, max_retries=2)``.
+
     Usage::
 
         class Chunk(Relation):
@@ -105,6 +113,13 @@ class InputLayerVectorStore(VectorStore):
         self._id_field = id_field
 
         cols = Relation._get_column_types(relation)
+        col_names = list(cols.keys())
+        if any(not c or not c.isidentifier() for c in col_names):
+            bad = [c for c in col_names if not c or not c.isidentifier()]
+            raise ValueError(
+                f"Relation {relation.__name__} has invalid column name(s) "
+                f"{bad!r}; column names must be non-empty Python identifiers."
+            )
         if content_field not in cols:
             raise ValueError(
                 f"Relation {relation.__name__} has no field {content_field!r}; "
@@ -198,12 +213,14 @@ class InputLayerVectorStore(VectorStore):
                 if k not in self._metadata_fields and k != self._id_field
             ]
             if unknown:
-                warnings.warn(
-                    f"Document {i}: metadata key(s) {unknown} not present in "
-                    f"relation {self._relation.__name__}; values will be dropped. "
-                    f"Add columns to the Relation or remove the keys to silence "
-                    f"this warning.",
-                    stacklevel=2,
+                logger.warning(
+                    "Document %d: metadata key(s) %s not present in "
+                    "relation %s; values will be dropped. "
+                    "Add columns to the Relation or remove the keys to "
+                    "silence this warning.",
+                    i,
+                    unknown,
+                    self._relation.__name__,
                 )
 
             payload: dict[str, Any] = {
@@ -439,11 +456,12 @@ class InputLayerVectorStore(VectorStore):
                 break
 
         if vec_col_idx is None:
-            warnings.warn(
+            raise ValueError(
                 f"Could not find vector column {self._vector_field!r} in "
-                f"result columns {result.columns!r}; MMR diversity scoring "
-                f"will have no effect.",
-                stacklevel=2,
+                f"result columns {result.columns!r}. MMR requires the raw "
+                f"vectors to compute diversity. Check that your Relation "
+                f"schema includes the vector column and that the engine "
+                f"returns it in query results."
             )
 
         out: list[tuple[Document, float, list[float]]] = []

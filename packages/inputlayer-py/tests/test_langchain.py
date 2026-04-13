@@ -909,13 +909,19 @@ class TestVectorStoreAdd:
         ids = vs.add_texts(["hello"], metadatas=[{"source": "a"}])
         assert len(ids[0]) > 0
 
-    def test_unknown_metadata_key_warns(self) -> None:
+    def test_unknown_metadata_key_warns(self, caplog: pytest.LogCaptureFixture) -> None:
         kg = _mock_kg()
         vs = InputLayerVectorStore(
             kg=kg, relation=_Chunk, embeddings=_StubEmbeddings()
         )
-        with pytest.warns(UserWarning, match="not present in relation"):
+        import logging
+
+        logger_name = "inputlayer.integrations.langchain.vector_store"
+        with caplog.at_level(logging.WARNING, logger=logger_name):
             vs.add_texts(["x"], metadatas=[{"source": "a", "bogus": 42}])
+        assert any(
+            "not present in relation" in r.message for r in caplog.records
+        )
 
     def test_missing_required_metadata_raises(self) -> None:
         kg = _mock_kg()

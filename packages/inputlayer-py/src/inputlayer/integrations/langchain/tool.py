@@ -273,6 +273,12 @@ def _make_relation_runner(
     """
     rel_name = Relation._resolve_name(relation)
     all_cols = Relation._get_columns(relation)
+    if any(not c or not c.isidentifier() for c in all_cols):
+        bad = [c for c in all_cols if not c or not c.isidentifier()]
+        raise ValueError(
+            f"Relation {rel_name} has invalid column name(s) {bad!r}; "
+            f"column names must be non-empty Python identifiers."
+        )
     cap = {c: c[:1].upper() + c[1:] for c in all_cols}
     var_list = ", ".join(cap[c] for c in all_cols)
 
@@ -375,6 +381,12 @@ def _hashable(v: Any) -> Any:
         return tuple(_hashable(x) for x in v)
     if isinstance(v, dict):
         return tuple(sorted((k, _hashable(x)) for k, x in v.items()))
+    if isinstance(v, set):
+        return frozenset(_hashable(x) for x in v)
+    try:
+        hash(v)
+    except TypeError:
+        return str(v)
     return v
 
 
