@@ -137,6 +137,13 @@ class InputLayerIQLTool(BaseTool):
 
         logger.debug("IQL tool query: %s", compiled)
         result = await self.kg.execute(compiled)
+        if result.columns == ["error"]:
+            msg = (
+                result.rows[0][0]
+                if result.rows and len(result.rows[0]) > 0
+                else "unknown error"
+            )
+            return f"Error: {msg}"
         return _format_result(result, self.max_rows)
 
 
@@ -359,8 +366,12 @@ def _make_relation_runner(
             if len(merged_rows) >= max_rows + 1:
                 break
 
-        # Wrap merged rows in a synthetic ResultSet-like object.
-        return _format_result(_FakeResult(merged_columns, merged_rows), max_rows)
+        was_truncated = len(merged_rows) > max_rows
+        capped = merged_rows[:max_rows]
+        fake = _FakeResult(merged_columns, capped)
+        if was_truncated:
+            fake.row_count = max_rows + 1
+        return _format_result(fake, max_rows)
 
     run.__name__ = f"search_{rel_name}"
     run.parse_clauses = parse_clauses  # type: ignore[attr-defined]
@@ -403,18 +414,10 @@ def _format_result(result: Any, max_rows: int) -> str:
         return "[]"
 
     rows = result.rows[:max_rows]
-    columns = result.columns
-    payload = []
-    for row in rows:
-        if len(row) != len(columns):
-            logger.warning(
-                "Row length (%d) does not match column count (%d); "
-                "truncating to shorter. Columns: %r",
-                len(row), len(columns), columns,
-            )
-        payload.append(
-            {col: _jsonify(val) for col, val in zip(columns, row, strict=False)}
-        )
+    payload = [
+        {col: _jsonify(val) for col, val in zip(result.columns, row, strict=True)}
+        for row in rows
+    ]
 
     total = getattr(result, "row_count", len(result.rows)) or len(result.rows)
     if total > max_rows:
