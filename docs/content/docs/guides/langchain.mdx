@@ -1,0 +1,441 @@
+# LangChain Integration
+
+Most retrieval pipelines work in one direction: embed a question, find similar chunks, hand them to an LLM. That works when the answer lives inside a single document. But the moment your application needs to combine facts from different sources, enforce access rules, or explain why a particular result was returned, plain similarity search runs out of road.
+
+InputLayer's LangChain integration gives you a way to add structured reasoning to any LangChain chain or agent. You can start with a standard vector store (embed, search, retrieve) and layer in joins across relations, derived rules that the engine keeps up to date, and provenance traces that show the LLM exactly how a conclusion was reached. Everything plugs into LangChain's standard interfaces, so your existing chains, agents, and LCEL pipelines work without modification.
+
+This guide walks through the integration from first install to reasoning-powered retrieval. No prior Datalog or IQL experience required.
+
+## Installation
+
+```bash
+pip install inputlayer-client-dev[langchain]
+```
+
+This pulls in `langchain-core` alongside the InputLayer SDK. You'll also need an embeddings provider (like `langchain-openai`) and a running InputLayer server.
+
+## Part 1: Vector store basics
+
+The simplest starting point is the vector store. If you've used any LangChain vector store before, this will feel familiar - define a schema, add documents, search by similarity.
+
+### Defining your schema
+
+InputLayer stores data in typed relations (think: tables with a schema). Each column has a type, and one column holds the vector embedding. Here's a minimal document schema:
+
+```python
+from inputlayer import Relation, Vector
+
+class Chunk(Relation):
+    id: str          # unique identifier for each document
+    content: str     # the text content
+    source: str      # where the document came from
+    embedding: Vector # the vector embedding (dimension inferred from your embedder)
+```
+
+This tells InputLayer what shape your data has. The `Vector` column is where embeddings live. The rest are metadata you can filter on later.
+
+### Creating the store and adding documents
+
+Connect to InputLayer, register the schema, and create the vector store:
+
+```python
+import asyncio
+from inputlayer import InputLayer
+from inputlayer.integrations.langchain import InputLayerVectorStore
+from langchain_openai import OpenAIEmbeddings
+
+async def main():
+    async with InputLayer("ws://localhost:8080/ws", username="admin", password="admin") as il:
+        kg = il.knowledge_graph("docs")
+        await kg.define(Chunk)
+
+        # Create a vector store backed by the Chunk relation.
+        vs = InputLayerVectorStore(
+            kg=kg,
+            relation=Chunk,
+            embeddings=OpenAIEmbeddings(model="text-embedding-3-small"),
+        )
+
+        # Add some documents. The store embeds the text and persists everything.
+        await vs.aadd_texts(
+            texts=[
+                "LangChain is a framework for building LLM applications.",
+                "InputLayer is a streaming reasoning layer for AI.",
+            ],
+            metadatas=[
+                {"source": "langchain.com"},
+                {"source": "inputlayer.ai"},
+            ],
+            ids=["doc1", "doc2"],
+        )
+
+        # Search by meaning, not keywords.
+        docs = await vs.asimilarity_search("what is langchain", k=2)
+        for d in docs:
+            print(f"{d.metadata['source']} - {d.page_content}")
+            # langchain.com - LangChain is a framework for building LLM applications.
+            # inputlayer.ai - InputLayer is a streaming reasoning layer for AI.
+
+asyncio.run(main())
+```
+
+The store handles embedding, persistence, and retrieval. You hand it text and metadata, it gives you back LangChain `Document` objects ranked by similarity.
+
+### Plugging into a chain
+
+Because `InputLayerVectorStore` implements LangChain's standard `VectorStore` interface, it works anywhere a vector store is expected. The most common pattern is converting it into a retriever and wiring it into an LCEL chain:
+
+```python
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
+
+retriever = vs.as_retriever(search_kwargs={"k": 5})
+prompt = ChatPromptTemplate.from_template(
+    "Answer the question based on the context below.\n\n"
+    "Context:\n{context}\n\n"
+    "Question: {question}"
+)
+llm = ChatOpenAI(model="gpt-4o-mini")
+
+chain = (
+    {"context": retriever, "question": lambda x: x}
+    | prompt
+    | llm
+    | StrOutputParser()
+)
+
+answer = await chain.ainvoke("what is langchain")
+print(answer)
+```
+
+That's a complete RAG pipeline: user question goes in, relevant documents are retrieved from InputLayer, the LLM synthesizes an answer.
+
+### Filtering by metadata
+
+You can narrow search results by passing a `filter` dict. Each key is a column name, each value is matched with equality:
+
+```python
+docs = await vs.asimilarity_search(
+    "what is langchain",
+    k=3,
+    filter={"source": "langchain.com"},
+)
+```
+
+If you pass a column name that doesn't exist, the store logs a warning and ignores it rather than silently returning empty results.
+
+### Diversity with MMR
+
+When your top-k results are all near-duplicates (common with chunked documents), maximal marginal relevance helps. It balances relevance against diversity, so the LLM sees a broader slice of your data:
+
+```python
+docs = await vs.amax_marginal_relevance_search(
+    "what is langchain",
+    k=4,              # final number of documents
+    fetch_k=20,       # candidate pool size
+    lambda_mult=0.5,  # 0.0 = max diversity, 1.0 = pure relevance
+)
+```
+
+### Deleting documents
+
+Remove documents by id. Passing `ids=None` is a no-op - the store won't accidentally drop everything:
+
+```python
+await vs.adelete(ids=["doc1", "doc2"])
+```
+
+## Part 2: Retrieval with structure
+
+Vector similarity is powerful, but sometimes you need more precision. Maybe you want to retrieve articles that match a user's interests, or join documents with access control rules, or combine similarity scores with business logic. That's where the IQL retriever comes in.
+
+IQL (InputLayer Query Language) lets you express joins and filters as structured queries. The retriever handles parameter binding and escaping so user input is always safe, the same way parameterized SQL prevents injection.
+
+### Your first IQL retriever
+
+Imagine you have two relations: articles with content, and a mapping of which users are interested in which categories. You want a retriever that, given a username, returns only articles in categories that user cares about.
+
+In plain English: "find articles where the article's category matches one of this user's interests."
+
+```python
+from inputlayer.integrations.langchain import InputLayerRetriever
+
+retriever = InputLayerRetriever(
+    kg=kg,
+    query=(
+        # Read this as: "find articles and user interests where the
+        # category matches, and the user is whoever we pass in."
+        "?article(Id, Title, Content, Category, Emb), "
+        "user_interest(:input, Category)"
+    ),
+    page_content_columns=["content"],
+    metadata_columns=["title", "category"],
+)
+```
+
+The `:input` placeholder is where the user's query goes. When you invoke the retriever, the value gets safely escaped and substituted:
+
+```python
+# Find articles in categories that alice is interested in.
+docs = await retriever.ainvoke("alice")
+
+for d in docs:
+    print(f"[{d.metadata['category']}] {d.metadata['title']}")
+    # [ml] Introduction to Neural Networks
+    # [ml] Transformer Architecture Explained
+```
+
+The capital letters in the query (`Id`, `Title`, `Content`, etc.) are IQL variables - they match columns from the relation. The lowercase `article` and `user_interest` are the relation names. The join happens because both use the same `Category` variable - InputLayer finds rows where the values match.
+
+### Multiple parameters
+
+For queries with more than one input, pass a `params` callable that receives the user's query and returns a dict:
+
+```python
+retriever = InputLayerRetriever(
+    kg=kg,
+    query="?article(Id, Title, Content, Cat, Emb), score(Content) > :min, user_interest(:user, Cat)",
+    params=lambda q: {"user": q, "min": 0.5},
+)
+```
+
+Or a static dict for fixed parameters:
+
+```python
+retriever = InputLayerRetriever(
+    kg=kg,
+    query="?article(Id, Title, Content, Cat, Emb), category(:cat, Cat)",
+    params={"cat": "machine-learning"},
+    input_param="cat",  # which placeholder to fill with the invoke argument
+)
+```
+
+### Vector mode on the retriever
+
+If you don't need joins and just want similarity search through the retriever interface, point it at a relation with an embeddings instance:
+
+```python
+retriever = InputLayerRetriever(
+    kg=kg,
+    relation=Chunk,
+    embeddings=OpenAIEmbeddings(),
+    k=10,
+    metric="cosine",  # also: euclidean, dot
+    page_content_columns=["content"],
+    metadata_columns=["source"],
+)
+
+docs = await retriever.ainvoke("what is langchain")
+```
+
+This is equivalent to `vs.as_retriever()` but gives you direct control over column mapping and metric selection.
+
+## Part 3: Giving tools to an agent
+
+When you're building an agent that needs to look things up in your knowledge graph, you don't want the LLM writing raw queries. `tools_from_relations` generates typed tools from your schema - the LLM sees structured arguments (department, salary range, etc.) and the tool handles the query internally.
+
+```python
+from inputlayer.integrations.langchain import tools_from_relations
+
+class Employee(Relation):
+    id: int
+    name: str
+    department: str
+    salary: float
+
+tools = tools_from_relations(kg, [Employee])
+```
+
+This produces a tool called `search_employee` with typed arguments for each column. String and numeric columns get equality filters. Numeric columns also get `min_<col>` and `max_<col>` for ranges. The LLM can call it like this:
+
+```
+search_employee(department="eng", min_salary=120000)
+```
+
+And the tool returns a JSON array of matching rows:
+
+```json
+[
+  {"id": 1, "name": "Alice", "department": "eng", "salary": 150000.0},
+  {"id": 3, "name": "Charlie", "department": "eng", "salary": 130000.0}
+]
+```
+
+Wire the tools into any LangChain agent:
+
+```python
+from langchain.agents import create_tool_calling_agent, AgentExecutor
+from langchain_core.prompts import ChatPromptTemplate
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a helpful HR assistant. Use the search tools to answer questions."),
+    ("human", "{input}"),
+    ("placeholder", "{agent_scratchpad}"),
+])
+
+agent = create_tool_calling_agent(llm, tools, prompt)
+executor = AgentExecutor(agent=agent, tools=tools)
+
+result = await executor.ainvoke({"input": "Who in engineering makes over 120k?"})
+print(result["output"])
+```
+
+The agent decides which filters to apply based on the question. It never sees or writes IQL - it just fills in typed arguments and reads JSON back.
+
+### Raw IQL tool (escape hatch)
+
+For analyst-style agents that need full query flexibility, `InputLayerIQLTool` lets the agent write IQL directly. By default it runs in read-only mode, rejecting any writes or schema changes:
+
+```python
+from inputlayer.integrations.langchain import InputLayerIQLTool
+
+tool = InputLayerIQLTool(
+    kg=kg,
+    description=(
+        "Query the knowledge graph using InputLayer Query Language. "
+        "Schema: employee(id, name, department, salary), "
+        "department(name, budget)."
+    ),
+)
+```
+
+You can also lock it to a template so the agent only provides the search term:
+
+```python
+tool = InputLayerIQLTool(
+    kg=kg,
+    name="find_by_department",
+    description="Find employees in a department.",
+    query_template="?employee(Id, Name, Dept, Salary), Dept = :input",
+)
+```
+
+## Part 4: Reasoning-powered retrieval
+
+This is where InputLayer's integration becomes fundamentally different from a standard vector store. InputLayer can derive new facts from existing ones using rules, and the LangChain integration lets you retrieve those derived facts alongside their proof traces.
+
+### Derived relations
+
+Say you want to flag employees whose salary falls outside their department's band. Instead of writing that logic in Python every time you query, you define it as a rule that InputLayer maintains automatically:
+
+```python
+from typing import ClassVar
+from inputlayer import Derived, From
+
+class SalaryAnomaly(Derived):
+    name: str
+    salary: float
+    band_max: float
+    rules: ClassVar[list] = [
+        From(Employee, SalaryBand)
+            .where(lambda e, b: (e.department == b.department) & (e.salary > b.max_salary))
+            .select(name=Employee.name, salary=Employee.salary, band_max=SalaryBand.max_salary),
+    ]
+
+await kg.define_rules(SalaryAnomaly)
+```
+
+Now `SalaryAnomaly` updates itself whenever employee data or salary bands change. You can query it with the same retriever or tool patterns from earlier - the derived relation works just like a regular one.
+
+### Explainability with .why()
+
+When your application needs to show its reasoning - compliance, audit, debugging - InputLayer can return proof trees alongside results. The retriever passes these to the LLM so it can cite specific facts in its answer:
+
+```python
+# Query with provenance: not just the result, but why it was derived.
+result = await kg.execute("?salary_anomaly(Name, Salary, BandMax)")
+for row in result.rows:
+    print(f"{row[0]} earns {row[1]}, band max is {row[2]}")
+
+# Ask: why was this row derived?
+proof = await kg.why("salary_anomaly", row)
+# Returns the chain of base facts that produced this conclusion.
+```
+
+You can feed the proof tree into an LLM prompt so the model can explain the anomaly in natural language while citing the specific facts that support the conclusion. The LLM isn't guessing - it's reading a structured derivation.
+
+### Why this matters for agents
+
+The combination of structured retrieval, derived rules, and provenance changes what an LLM-powered system can do reliably:
+
+- **Access-controlled RAG**: Join documents with user clearance levels in the query itself. Different users get different results from the same retriever, enforced by the engine rather than application code.
+- **Multi-hop reasoning**: Define recursive rules (e.g., transitive closure over a reporting hierarchy) and let the LLM read pre-computed derived facts instead of trying to traverse a graph itself.
+- **Hallucination detection**: Extract claims from LLM output, store them as facts, and let IQL rules cross-reference each claim against ground truth to flag which ones are grounded and which aren't.
+- **Fact-checking agents**: Two agents share a knowledge graph. One writes claims, the other's rules instantly classify them as verified or contradicted.
+
+The 17 runnable examples in the repository demonstrate each of these patterns end-to-end.
+
+## Safe parameter binding
+
+The `bind_params` helper underpins both the retriever and the IQL tool. You can also use it directly for any IQL string:
+
+```python
+from inputlayer.integrations.langchain import bind_params
+
+iql = bind_params(
+    "?docs(T, C), search(:q, T, C), score(T) > :min",
+    {"q": "machine learning", "min": 0.5},
+)
+# Result: '?docs(T, C), search("machine learning", T, C), score(T) > 0.5'
+```
+
+Strings are quoted and escaped. Numbers, booleans, and lists are rendered as IQL literals. Placeholders inside string literals or `//` comments are left alone. Missing placeholders raise `KeyError`. This is the IQL equivalent of parameterized SQL - user input never becomes raw query text.
+
+## Sync and async
+
+Every class in the integration works in both sync and async contexts. The sync path routes through a background event loop thread (the same pattern `httpx` uses), so calls like `vs.add_texts(...)` work inside Jupyter notebooks, FastAPI routes, and LangGraph nodes without event loop conflicts.
+
+In async code, prefer the `a`-prefixed methods (`aadd_texts`, `asimilarity_search`, `ainvoke`) and call `await kg.define(Relation)` before constructing the store. The `ensure_schema=True` constructor flag exists for pure-sync code paths only.
+
+## Running the examples
+
+Seventeen runnable examples live in `packages/inputlayer-py/examples/langchain/`. The first three work without an LLM - they're a good way to verify the integration is wired up correctly:
+
+```bash
+cd packages/inputlayer-py
+
+# Run the non-LLM examples
+uv run python -m examples.langchain.runner 1 2 3
+
+# Run everything (requires an LLM endpoint)
+uv run python -m examples.langchain.runner --all
+```
+
+| # | What it demonstrates |
+|---|---|
+| 1 | Parameterized IQL retriever joining articles with user interests |
+| 2 | Vector similarity search with embedded queries |
+| 3 | Structured tools generated from relation schemas |
+| 4 | Full LCEL chain: retriever, prompt, LLM, parser |
+| 5 | Building a knowledge graph from documents (LLM extracts facts) |
+| 6 | Explainable RAG with `.why()` proof trees |
+| 7 | Multi-hop reasoning with recursive rules |
+| 8 | Conversational memory stored as facts |
+| 9 | Access-controlled RAG with clearance-based filtering |
+| 10 | Multi-agent fact-checking with shared knowledge graph |
+| 11 | Anomaly detection with salary band rules |
+| 12 | Hallucination detection against ground truth |
+| 13 | Content guardrails enforced before the LLM |
+| 14 | GraphRAG with community detection |
+| 15 | Semantic caching of LLM responses |
+| 16 | Collaborative filtering recommendations |
+| 17 | Data lineage with source reliability tracking |
+
+## Verification
+
+The integration ships with both mocked unit tests and live integration tests against a real server:
+
+```bash
+make python-test-live      # unit + live integration tests
+make python-test-examples  # examples 1, 2, 3 against a live server
+```
+
+CI runs both on every push and pull request.
+
+## Known limitations
+
+- **Vector top-k is computed client-side.** The vector store retrieves all matching rows with their distance score, then sorts and slices in Python. Fine for typical RAG workloads (hundreds of thousands of vectors), not suitable for tens of millions. Server-side top-k through the HNSW index path is on the roadmap.
+- **MMR diversity uses cosine only.** Other metrics work for the initial similarity fetch, but the diversity penalty in `max_marginal_relevance_search` is always cosine.
+- **Structured tools support equality, IN-list, and numeric range filters.** No substring or regex - the engine doesn't have those builtins yet. Use the vector store for free-text search.
+- **`InputLayerVectorStore.from_texts` requires `kg=` and `relation=` keyword arguments.** This breaks the standard LangChain `cls.from_texts(texts, embedding)` idiom, but the alternative (an opaque Pydantic error) is worse. The constructor raises a clear `ValueError` explaining what's needed.

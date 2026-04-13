@@ -17,8 +17,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import type { View, Relation } from "@/lib/datalog-store"
-import { useDatalogStore } from "@/lib/datalog-store"
+import type { View, Relation } from "@/lib/iql-store"
+import { useIQLStore } from "@/lib/iql-store"
 import { highlightToHtml } from "@/lib/syntax-highlight"
 import { ViewDataTab } from "@/components/view-data-tab"
 import { ViewGraphTab } from "@/components/view-graph-tab"
@@ -32,7 +32,7 @@ interface ViewDetailPanelProps {
 }
 
 export function ViewDetailPanel({ view, relations, onNavigate }: ViewDetailPanelProps) {
-  const { loadViewData, dropRule } = useDatalogStore()
+  const { loadViewData, dropRule } = useIQLStore()
   const [copied, setCopied] = useState(false)
   const [showDropConfirm, setShowDropConfirm] = useState(false)
   const [isDropping, setIsDropping] = useState(false)
@@ -71,7 +71,7 @@ export function ViewDetailPanel({ view, relations, onNavigate }: ViewDetailPanel
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = `${view.name}.dl`
+    a.download = `${view.name}.iql`
     a.click()
     URL.revokeObjectURL(url)
   }

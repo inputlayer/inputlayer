@@ -17,7 +17,7 @@ The challenge isn't knowing that a port is closed. It's knowing, within millisec
 
 Three suppliers. Supplier A and B ship through Shanghai. Supplier C ships through Busan. They feed four orders. Two of those orders have SLA penalty clauses.
 
-```datalog
+```iql
 // Suppliers and their shipping ports
 +ships_via[("supplier_a", "shanghai"), ("supplier_b", "shanghai"), ("supplier_c", "busan")]
 
@@ -40,7 +40,7 @@ Three suppliers. Supplier A and B ship through Shanghai. Supplier C ships throug
 
 Three rules, each one step in the cascade. A supplier is disrupted if its port is closed. An order is at risk if its supplier is disrupted. An SLA is triggered if an at-risk order has a penalty clause.
 
-```datalog
+```iql
 +supplier_disrupted(Sup) <- ships_via(Sup, Port), port_status(Port, "closed")
 +order_at_risk(Order) <- supplies(Sup, Order), supplier_disrupted(Sup)
 +sla_triggered(Order, Customer, Penalty) <- order_at_risk(Order), has_sla(Order, Customer, Penalty)
@@ -50,7 +50,7 @@ Three rules, each one step in the cascade. A supplier is disrupted if its port i
 
 ## Everything is fine
 
-```datalog
+```iql
 ?supplier_disrupted(X)
 ```
 
@@ -66,14 +66,14 @@ No disruptions. All ports are open. All orders are on track.
 
 One fact changes.
 
-```datalog
+```iql
 -port_status("shanghai", "open")
 +port_status[("shanghai", "closed")]
 ```
 
 The cascade propagates through the entire graph:
 
-```datalog
+```iql
 ?supplier_disrupted(X)
 ```
 
@@ -87,7 +87,7 @@ The cascade propagates through the entire graph:
 2 rows
 ```
 
-```datalog
+```iql
 ?order_at_risk(X)
 ```
 
@@ -102,7 +102,7 @@ The cascade propagates through the entire graph:
 3 rows
 ```
 
-```datalog
+```iql
 ?sla_triggered(Order, Customer, Penalty)
 ```
 
@@ -124,12 +124,12 @@ One fact change. Two suppliers disrupted, three orders at risk, two SLA penaltie
 
 Supplier A reroutes to Busan.
 
-```datalog
+```iql
 -ships_via("supplier_a", "shanghai")
 +ships_via[("supplier_a", "busan")]
 ```
 
-```datalog
+```iql
 ?sla_triggered(Order, Customer, Penalty)
 ```
 
@@ -148,7 +148,7 @@ Supplier A recovered. Orders 101 and 102 are no longer at risk. Globex's SLA pen
 
 ## The proof trail
 
-```datalog
+```iql
 .why ?order_at_risk("order_103")
 ```
 

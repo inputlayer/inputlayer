@@ -25,13 +25,13 @@ cargo run --release --bin inputlayer-server
 Run the demo in another:
 
 ```bash
-cargo run --bin inputlayer-client -- --script examples/retail/printer-ink.idl
+cargo run --bin inputlayer-client -- --script examples/retail/printer-ink.iql
 ```
 
 Or run the demo and drop into the REPL to explore interactively:
 
 ```bash
-cargo run --bin inputlayer-client -- --script examples/retail/printer-ink.idl --repl
+cargo run --bin inputlayer-client -- --script examples/retail/printer-ink.iql --repl
 ```
 
 ## What to look for

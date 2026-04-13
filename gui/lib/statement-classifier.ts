@@ -9,7 +9,7 @@ export type StatementType =
   | "schema"
   | "comment"
 
-/** Classify each line of a Datalog program by statement type. */
+/** Classify each line of a IQL program by statement type. */
 export function classifyLines(text: string): (StatementType | null)[] {
   const lines = text.split("\n")
   const result: (StatementType | null)[] = []

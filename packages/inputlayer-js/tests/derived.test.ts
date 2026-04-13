@@ -39,8 +39,8 @@ describe('from() builder', () => {
       dst: Edge.col('dst'),
     });
 
-    const datalog = compileRule('reachable', ['src', 'dst'], clause);
-    expect(datalog).toBe('+reachable(Src, Dst) <- edge(Src, Dst)');
+    const iql = compileRule('reachable', ['src', 'dst'], clause);
+    expect(iql).toBe('+reachable(Src, Dst) <- edge(Src, Dst)');
   });
 
   it('integrates with recursive rule', () => {
@@ -53,10 +53,10 @@ describe('from() builder', () => {
         dst: Edge.col('dst'),
       });
 
-    const datalog = compileRule('reachable', ['src', 'dst'], clause);
+    const iql = compileRule('reachable', ['src', 'dst'], clause);
     // Should have both body relations and shared variable for the join
-    expect(datalog).toContain('reachable(');
-    expect(datalog).toContain('edge(');
-    expect(datalog).toContain('<-');
+    expect(iql).toContain('reachable(');
+    expect(iql).toContain('edge(');
+    expect(iql).toContain('<-');
   });
 });

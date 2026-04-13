@@ -1,4 +1,4 @@
-//! `InputLayer` Client Binary - WebSocket-based Datalog Client
+//! `InputLayer` Client Binary - WebSocket-based IQL Client
 //!
 //! Interactive client for `InputLayer` that connects to the server via WebSocket.
 //! All commands (queries, inserts, meta commands) are sent as raw text through
@@ -13,8 +13,8 @@
 //! # Connect to remote server
 //! cargo run --bin inputlayer-client -- --server http://192.168.1.100:8080
 //!
-//! # Execute a Datalog script
-//! cargo run --bin inputlayer-client -- --script examples/datalog/basic/same_component.idl
+//! # Execute an IQL script
+//! cargo run --bin inputlayer-client -- --script examples/iql/basic/same_component.iql
 //! ```
 
 use inputlayer::statement::{parse_statement, MetaCommand, Statement};
@@ -569,9 +569,7 @@ fn parse_args() -> Args {
                 print_usage();
                 std::process::exit(0);
             }
-            arg if arg.to_ascii_lowercase().ends_with(".idl")
-                || arg.to_ascii_lowercase().ends_with(".dl") =>
-            {
+            arg if arg.to_ascii_lowercase().ends_with(".iql") => {
                 result.script = Some(arg.to_string());
                 i += 1;
             }
@@ -592,10 +590,10 @@ fn parse_args() -> Args {
 }
 
 fn print_usage() {
-    println!("InputLayer Datalog Client (WebSocket)");
+    println!("InputLayer IQL Client (WebSocket)");
     println!();
     println!("USAGE:");
-    println!("  inputlayer-client [OPTIONS] [SCRIPT.idl]");
+    println!("  inputlayer-client [OPTIONS] [SCRIPT.iql]");
     println!();
     println!("OPTIONS:");
     println!("  -k, --api-key <KEY>   API key for authentication (or set INPUTLAYER_API_KEY)");
@@ -614,7 +612,7 @@ fn print_usage() {
     println!("EXAMPLES:");
     println!("  inputlayer-client -k <api-key>                    # Connect with API key");
     println!("  inputlayer-client --server http://10.0.0.5:8080   # Connect to remote server");
-    println!("  inputlayer-client script.idl                      # Execute script");
+    println!("  inputlayer-client script.iql                      # Execute script");
 }
 
 // ── Main ────────────────────────────────────────────────────────
@@ -897,7 +895,7 @@ async fn run_repl(state: &mut ReplState) -> Result<(), Box<dyn std::error::Error
             Ok(rl) => rl,
             Err(_) => return,
         };
-        rl.set_helper(Some(inputlayer::syntax::highlight::DatalogHelper::new()));
+        rl.set_helper(Some(inputlayer::syntax::highlight::IQLHelper::new()));
         if history_clone.exists() {
             let _ = rl.load_history(&history_clone);
         }

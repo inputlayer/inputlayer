@@ -8,7 +8,7 @@ This guide covers common errors and how to resolve them.
 
 **Cause**: Missing period at end of statement.
 
-```datalog
+```iql
 // Wrong
 +edge(1, 2)
 
@@ -20,7 +20,7 @@ This guide covers common errors and how to resolve them.
 
 **Cause**: Relation names must start with lowercase.
 
-```datalog
+```iql
 // Wrong
 +Edge(1, 2)
 
@@ -32,7 +32,7 @@ This guide covers common errors and how to resolve them.
 
 **Cause**: Rule syntax error.
 
-```datalog
+```iql
 // Wrong - missing :-
 +path(X, Y) edge(X, Y)
 
@@ -44,7 +44,7 @@ This guide covers common errors and how to resolve them.
 
 **Cause**: Mismatched parentheses.
 
-```datalog
+```iql
 // Wrong
 +edge((1, 2)
 
@@ -58,7 +58,7 @@ This guide covers common errors and how to resolve them.
 
 **Cause**: Value doesn't match schema.
 
-```datalog
+```iql
 // If schema is: +person(id: int, name: string)
 
 // Wrong
@@ -72,7 +72,7 @@ This guide covers common errors and how to resolve them.
 
 **Cause**: Using 1.0 where 1 is expected.
 
-```datalog
+```iql
 // Wrong (if relation expects int)
 +score(1.0)
 
@@ -86,7 +86,7 @@ This guide covers common errors and how to resolve them.
 
 **Cause**: Querying a relation that doesn't exist.
 
-```datalog
+```iql
 ?nonexistent(X)
 // Error: Unknown relation 'nonexistent'
 ```
@@ -100,7 +100,7 @@ This guide covers common errors and how to resolve them.
 
 **Cause**: Variable in rule head not used in body.
 
-```datalog
+```iql
 // Wrong - Z is not in the body
 +path(X, Z) <- edge(X, Y)
 
@@ -112,7 +112,7 @@ This guide covers common errors and how to resolve them.
 
 **Cause**: Variable only appears in negation or constraint.
 
-```datalog
+```iql
 // Wrong - X only appears in negation
 +orphan(X) <- !parent(_, X)
 
@@ -126,7 +126,7 @@ This guide covers common errors and how to resolve them.
 
 **Cause**: Negation through recursion.
 
-```datalog
+```iql
 // Wrong - circular negation
 +a(X) <- b(X)
 +b(X) <- !a(X)  // Error: a depends on not-a
@@ -138,7 +138,7 @@ This guide covers common errors and how to resolve them.
 
 **Cause**: Infinite recursion or very deep recursion.
 
-```datalog
+```iql
 // Potential issue - unbounded generation
 +nums(0)
 +nums(N) <- nums(M), N = M + 1  // Never terminates!
@@ -146,7 +146,7 @@ This guide covers common errors and how to resolve them.
 
 **Solution**: Add termination conditions.
 
-```datalog
+```iql
 +nums(0)
 +nums(N) <- nums(M), N = M + 1, N < 100  // Bounded
 ```
@@ -157,14 +157,14 @@ This guide covers common errors and how to resolve them.
 
 **Cause**: Trying to use a non-existent knowledge graph.
 
-```datalog
+```iql
 .kg use nonexistent
 // Error: Knowledge graph 'nonexistent' not found
 ```
 
 **Solution**: Create it first.
 
-```datalog
+```iql
 .kg create mykg
 .kg use mykg
 ```
@@ -175,7 +175,7 @@ This guide covers common errors and how to resolve them.
 
 **Solution**: Switch to another knowledge graph first.
 
-```datalog
+```iql
 .kg use default
 .kg drop mykg
 ```
@@ -192,7 +192,7 @@ This guide covers common errors and how to resolve them.
 
 **Cause**: Trying to query/drop a rule that doesn't exist.
 
-```datalog
+```iql
 .rule drop nonexistent
 // Error: Rule 'nonexistent' not found
 ```
@@ -211,7 +211,7 @@ This guide covers common errors and how to resolve them.
 
 **Cause**: Using a variable in the head without aggregating or grouping.
 
-```datalog
+```iql
 // Wrong - Name appears but isn't grouped
 +total(Name, sum<Amount>) <- purchase(_, Amount)
 
@@ -267,7 +267,7 @@ chmod 755 ~/.inputlayer/data
 **Solutions**:
 
 1. **Add constraints early**:
-   ```datalog
+   ```iql
    // Slow - filters after join
    ?huge_table1(X, Y), huge_table2(Y, Z), X < 10
 
@@ -276,7 +276,7 @@ chmod 755 ~/.inputlayer/data
    ```
 
 2. **Check for Cartesian products**:
-   ```datalog
+   ```iql
    // Bad - no shared variables = cross product
    ?table1(X), table2(Y)
 
@@ -285,7 +285,7 @@ chmod 755 ~/.inputlayer/data
    ```
 
 3. **Limit results**:
-   ```datalog
+   ```iql
    // For exploration, check small sample first
    ?huge_relation(X, Y), X < 10
    ```
@@ -308,7 +308,7 @@ RUST_LOG=debug inputlayer-client
 
 ### Check System Status
 
-```datalog
+```iql
 .status
 ```
 
@@ -341,5 +341,5 @@ tail -f ~/.inputlayer/logs/inputlayer.log
 ## Still Stuck?
 
 1. Check the [Cheatsheet](../reference/syntax-cheatsheet.md) for correct syntax
-2. Look at [Examples](../../examples/datalog/README.md) for working patterns
+2. Look at [Examples](../../examples/iql/README.md) for working patterns
 3. Report issues at: https://github.com/inputlayer/inputlayer/issues

@@ -33,7 +33,7 @@ Error: Undefined relation 'foo'
 
 The relation doesn't exist. Insert facts or check spelling:
 
-```datalog
+```iql
 +foo(1, 2)        // Creates relation
 ?foo(X, Y)      // Now works
 ```
@@ -46,7 +46,7 @@ Error: Arity mismatch for 'edge': expected 2, got 3
 
 You provided the wrong number of columns:
 
-```datalog
+```iql
 +edge(1, 2)       // edge has 2 columns
 +edge(1, 2, 3)    // ERROR: 3 values for 2-column relation
 ```
@@ -59,7 +59,7 @@ Error: Type mismatch: expected int, got string
 
 Value types don't match the schema:
 
-```datalog
+```iql
 +person(name: string, age: int)
 +person(30, "alice")   // ERROR: reversed types
 ```
@@ -72,7 +72,7 @@ Error: Cannot insert into view 'path'
 
 You can't insert facts into a derived relation (view):
 
-```datalog
+```iql
 +path(X, Y) <- edge(X, Y)   // path is a view
 +path(1, 2)                  // ERROR: can't insert into view
 ```
@@ -87,7 +87,7 @@ Error: Unsafe variable 'X' in rule head
 
 All head variables must appear in a positive body literal:
 
-```datalog
+```iql
 // BAD: X not bound in body
 +bad(X) <- edge(A, B)
 
@@ -103,7 +103,7 @@ Error: Variable 'X' in negation not bound by positive literal
 
 Variables in negations must also appear in positive literals:
 
-```datalog
+```iql
 // BAD: X only in negation
 +bad(X) <- !excluded(X)
 
@@ -119,7 +119,7 @@ Error: Circular negation detected
 
 A relation can't negatively depend on itself:
 
-```datalog
+```iql
 // BAD: a depends on !a
 +a(X) <- b(X), !a(X)
 
@@ -137,7 +137,7 @@ Error: Division by zero
 
 Check your data for zero divisors:
 
-```datalog
+```iql
 // May error if Y = 0
 +ratio(X, R) <- data(X, Y), R = X / Y
 
@@ -191,7 +191,7 @@ Error: Aggregation variable 'X' not found in body
 
 The aggregated variable must appear in the rule body:
 
-```datalog
+```iql
 // BAD: Z not in body
 +bad(sum<Z>) <- data(X, Y)
 

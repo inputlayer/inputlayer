@@ -9,12 +9,12 @@ InputLayer supports 9 aggregation functions for computing summary values over gr
 Count the number of results.
 
 **Syntax:**
-```datalog
+```iql
 count<Variable>
 ```
 
 **Example:**
-```datalog
+```iql
 // Count all users
 +user_count(count<Id>) <- user(Id, _)
 
@@ -31,12 +31,12 @@ count<Variable>
 Count distinct values of a variable.
 
 **Syntax:**
-```datalog
+```iql
 count_distinct<Variable>
 ```
 
 **Example:**
-```datalog
+```iql
 // Count unique departments
 +unique_depts(count_distinct<Dept>) <- user(_, _, Dept)
 ```
@@ -50,12 +50,12 @@ count_distinct<Variable>
 Sum numeric values.
 
 **Syntax:**
-```datalog
+```iql
 sum<Variable>
 ```
 
 **Example:**
-```datalog
+```iql
 // Total salary per department
 +dept_salary(Dept, sum<Salary>) <- employee(_, _, Dept, Salary)
 ```
@@ -69,12 +69,12 @@ sum<Variable>
 Find minimum value.
 
 **Syntax:**
-```datalog
+```iql
 min<Variable>
 ```
 
 **Example:**
-```datalog
+```iql
 // Lowest price per category
 +min_price(Category, min<Price>) <- product(_, Category, Price)
 ```
@@ -88,12 +88,12 @@ min<Variable>
 Find maximum value.
 
 **Syntax:**
-```datalog
+```iql
 max<Variable>
 ```
 
 **Example:**
-```datalog
+```iql
 // Highest score per game
 +high_score(Game, max<Score>) <- scores(_, Game, Score)
 ```
@@ -107,12 +107,12 @@ max<Variable>
 Compute average of numeric values.
 
 **Syntax:**
-```datalog
+```iql
 avg<Variable>
 ```
 
 **Example:**
-```datalog
+```iql
 // Average rating per product
 +avg_rating(Product, avg<Rating>) <- reviews(_, Product, Rating)
 ```
@@ -128,7 +128,7 @@ avg<Variable>
 Select the top K results ordered by a variable.
 
 **Syntax:**
-```datalog
+```iql
 top_k<K, PassThrough..., OrderVariable>        // Ascending order (lowest K)
 top_k<K, PassThrough..., OrderVariable:desc>   // Descending order (highest K)
 ```
@@ -140,7 +140,7 @@ top_k<K, PassThrough..., OrderVariable:desc>   // Descending order (highest K)
 - `desc` - Optional suffix on OrderVariable for descending order
 
 **Example:**
-```datalog
+```iql
 // Top 10 highest scores
 +top_scores(top_k<10, Name, Score:desc>) <- scores(Name, Score)
 
@@ -160,7 +160,7 @@ top_k<K, PassThrough..., OrderVariable:desc>   // Descending order (highest K)
 Select top K results, but only if they meet a minimum threshold.
 
 **Syntax:**
-```datalog
+```iql
 top_k_threshold<K, Threshold, PassThrough..., OrderVariable>        // Ascending
 top_k_threshold<K, Threshold, PassThrough..., OrderVariable:desc>   // Descending
 ```
@@ -173,7 +173,7 @@ top_k_threshold<K, Threshold, PassThrough..., OrderVariable:desc>   // Descendin
 - `desc` - Optional suffix on OrderVariable for descending order
 
 **Example:**
-```datalog
+```iql
 // Top 10 products, but only if rating >= 4.0
 +top_rated(top_k_threshold<10, 4.0, Product, Rating:desc>) <-
     reviews(Product, Rating)
@@ -194,7 +194,7 @@ top_k_threshold<K, Threshold, PassThrough..., OrderVariable:desc>   // Descendin
 Return all results within a distance threshold (range query).
 
 **Syntax:**
-```datalog
+```iql
 within_radius<MaxDistance, PassThrough..., DistanceVariable>
 ```
 
@@ -204,7 +204,7 @@ within_radius<MaxDistance, PassThrough..., DistanceVariable>
 - `DistanceVariable` - Variable containing the distance
 
 **Example:**
-```datalog
+```iql
 // All vectors within distance 0.3
 +nearby(within_radius<0.3, Id, Dist>) <-
     query_vec(QV),
@@ -228,7 +228,7 @@ within_radius<MaxDistance, PassThrough..., DistanceVariable>
 
 Variables in the head that are NOT aggregated become grouping keys:
 
-```datalog
+```iql
 // Group by Department, aggregate Salary
 +dept_stats(Dept, sum<Salary>, avg<Salary>) <-
     employee(_, _, Dept, Salary)
@@ -238,7 +238,7 @@ Variables in the head that are NOT aggregated become grouping keys:
 
 Multiple aggregations can be combined in one rule:
 
-```datalog
+```iql
 +stats(count<Id>, min<Value>, max<Value>, avg<Value>) <-
     data(Id, Value)
 ```
@@ -247,7 +247,7 @@ Multiple aggregations can be combined in one rule:
 
 Aggregations work with filter conditions:
 
-```datalog
+```iql
 // Only count active users
 +active_count(count<Id>) <- user(Id, Active), Active = true
 

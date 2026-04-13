@@ -79,7 +79,7 @@ class TestFromModels:
         assert "reachable" in state.rules
         assert len(state.rules["reachable"]) == 2
 
-    def test_derived_rule_is_compiled_datalog(self):
+    def test_derived_rule_is_compiled_iql(self):
         state = ModelState.from_models(derived=[Reachable])
         clauses = state.rules["reachable"]
         # First clause: base case from Edge

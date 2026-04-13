@@ -256,14 +256,14 @@ Every operation knows how to go forward and backward, making all migrations full
 | `ReplaceRule(name, old, new)` | Drops old clauses, adds new | Drops new clauses, adds old |
 | `CreateIndex(name, ...)` | Creates HNSW index | Drops the index |
 | `DropIndex(name, ...)` | Drops the index | Recreates with stored params |
-| `RunDatalog(forward, backward)` | Runs custom forward commands | Runs custom backward commands |
+| `RunIQL(forward, backward)` | Runs custom forward commands | Runs custom backward commands |
 
 ### Custom Operations
 
-For anything not covered by the built-in operations, use `RunDatalog` to run arbitrary Datalog commands:
+For anything not covered by the built-in operations, use `RunIQL` to run arbitrary IQL commands:
 
 ```python
-ops.RunDatalog(
+ops.RunIQL(
     forward=["+edge[(1,2), (2,3), (3,4)]"],
     backward=["-edge(X, Y) <- edge(X, Y)"],
 )
@@ -276,7 +276,7 @@ This is useful for seeding data, running one-off transformations, or anything th
 When you run `il makemigrations`, here's what happens:
 
 1. **Discovery** - the tool imports your models module and finds all `Relation` subclasses, `Derived` subclasses, and `HnswIndex` instances
-2. **Current state** - it builds a `ModelState` snapshot from your Python classes, converting types and compiling rules to Datalog
+2. **Current state** - it builds a `ModelState` snapshot from your Python classes, converting types and compiling rules to IQL
 3. **Previous state** - it loads the `state` dict from your latest migration file (or starts from empty)
 4. **Diff** - it compares the two states and generates the minimal set of operations
 5. **Ordering** - operations are ordered to respect dependencies: new relations first (so rules can reference them), then rules, then dropped relations, then indexes

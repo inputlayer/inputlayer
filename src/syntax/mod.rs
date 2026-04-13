@@ -1,6 +1,6 @@
-//! Syntax highlighting for InputLayer Datalog.
+//! Syntax highlighting for InputLayer IQL.
 //!
-//! Uses a PEG grammar (`datalog.pest`) to tokenize input into classified spans,
+//! Uses a PEG grammar (`iql.pest`) to tokenize input into classified spans,
 //! then maps each span to ANSI terminal colors for REPL highlighting.
 //!
 //! The `.pest` grammar file is a reusable artifact that can also drive
@@ -13,8 +13,8 @@ use pest_derive::Parser;
 use std::ops::Range;
 
 #[derive(Parser)]
-#[grammar = "syntax/datalog.pest"]
-struct DatalogTokenizer;
+#[grammar = "syntax/iql.pest"]
+struct IQLTokenizer;
 
 /// Token classification for syntax highlighting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,12 +78,12 @@ pub struct Token {
     pub span: Range<usize>,
 }
 
-/// Tokenize a line of Datalog input into classified spans.
+/// Tokenize a line of IQL input into classified spans.
 ///
 /// On parse failure (partial/malformed input), returns the entire input
 /// as a single `Unknown` token so highlighting degrades gracefully.
 pub fn tokenize(input: &str) -> Vec<Token> {
-    let pairs = match DatalogTokenizer::parse(Rule::line, input) {
+    let pairs = match IQLTokenizer::parse(Rule::line, input) {
         Ok(pairs) => pairs,
         Err(_) => {
             return vec![Token {

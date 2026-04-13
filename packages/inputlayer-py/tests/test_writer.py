@@ -9,7 +9,7 @@ from inputlayer.migrations.operations import (
     DropRelation,
     DropRule,
     ReplaceRule,
-    RunDatalog,
+    RunIQL,
 )
 from inputlayer.migrations.writer import generate_migration
 
@@ -101,10 +101,10 @@ class TestOperationRendering:
         assert '"l2"' in content
         assert "m=32" in content
 
-    def test_run_datalog(self):
-        ops = [RunDatalog(forward=["+x(1)"], backward=["-x(1)"])]
+    def test_run_iql(self):
+        ops = [RunIQL(forward=["+x(1)"], backward=["-x(1)"])]
         _, content = generate_migration(1, ops, {}, [])
-        assert "ops.RunDatalog" in content
+        assert "ops.RunIQL" in content
 
     def test_multiple_operations(self):
         ops = [

@@ -1,4 +1,4 @@
-use inputlayer::{DatalogEngine, OptimizationConfig};
+use inputlayer::{IQLEngine, OptimizationConfig};
 
 fn main() {
     let base_query = "path2(x, z) <- edge(x, y), edge(y, z)";
@@ -13,7 +13,7 @@ fn main() {
         enable_boolean_specialization: false,
         enable_magic_sets: false,
     };
-    let mut engine = DatalogEngine::with_config(config_none);
+    let mut engine = IQLEngine::with_config(config_none);
     engine.add_fact("edge", edges.clone());
     let results = engine.execute(base_query).expect("execution failed");
     println!("  Results: {results:?}");
@@ -27,7 +27,7 @@ fn main() {
         enable_boolean_specialization: false,
         enable_magic_sets: false,
     };
-    let mut engine = DatalogEngine::with_config(config_jp);
+    let mut engine = IQLEngine::with_config(config_jp);
     engine.add_fact("edge", edges.clone());
     let results = engine.execute(base_query).expect("execution failed");
     println!("  Results: {results:?}");
@@ -41,7 +41,7 @@ fn main() {
         enable_boolean_specialization: false,
         enable_magic_sets: false,
     };
-    let mut engine = DatalogEngine::with_config(config_sip);
+    let mut engine = IQLEngine::with_config(config_sip);
     engine.add_fact("edge", edges.clone());
     let results = engine.execute(base_query).expect("execution failed");
     println!("  Results: {results:?}");
@@ -55,7 +55,7 @@ fn main() {
         enable_boolean_specialization: false,
         enable_magic_sets: false,
     };
-    let mut engine = DatalogEngine::with_config(config_ss);
+    let mut engine = IQLEngine::with_config(config_ss);
     engine.add_fact("edge", edges.clone());
     let results = engine.execute(base_query).expect("execution failed");
     println!("  Results: {results:?}");
@@ -69,7 +69,7 @@ fn main() {
         enable_boolean_specialization: true,
         enable_magic_sets: false,
     };
-    let mut engine = DatalogEngine::with_config(config_bs);
+    let mut engine = IQLEngine::with_config(config_bs);
     engine.add_fact("edge", edges.clone());
     let results = engine.execute(base_query).expect("execution failed");
     println!("  Results: {results:?}");

@@ -1,17 +1,17 @@
 //! End-to-end pipeline tests: Parser -> IR -> Optimizer -> Codegen.
 
-use inputlayer::DatalogEngine;
+use inputlayer::IQLEngine;
 
 #[test]
 fn test_engine_initialization() {
-    let engine = DatalogEngine::new();
+    let engine = IQLEngine::new();
     assert!(engine.program().is_none());
     assert_eq!(engine.ir_nodes().len(), 0);
 }
 
 #[test]
 fn test_add_multiple_relations() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
     engine.add_fact("label", vec![(1, 10), (2, 20), (3, 30)]);
@@ -23,7 +23,7 @@ fn test_add_multiple_relations() {
 
 #[test]
 fn test_simple_scan_query() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     // Add base facts
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
@@ -42,7 +42,7 @@ fn test_simple_scan_query() {
 
 #[test]
 fn test_projection_query() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
@@ -60,7 +60,7 @@ fn test_projection_query() {
 
 #[test]
 fn test_join_query() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     // Create a simple graph: 1->2->3
     engine.add_fact("edge", vec![(1, 2), (2, 3)]);
@@ -78,7 +78,7 @@ fn test_join_query() {
 
 #[test]
 fn test_self_join() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     engine.add_fact("edge", vec![(1, 1), (2, 2), (3, 4)]);
 
@@ -95,7 +95,7 @@ fn test_self_join() {
 
 #[test]
 fn test_parse_with_comments() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     engine.add_fact("edge", vec![(1, 2), (2, 3)]);
 
@@ -114,7 +114,7 @@ fn test_parse_with_comments() {
 
 #[test]
 fn test_multiple_rules() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
@@ -150,7 +150,7 @@ fn test_multiple_rules() {
 
 #[test]
 fn test_safety_validation() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     // Unsafe rule: z appears in head but not in body
     let program = "result(X, Z) <- edge(X, Y)";
@@ -163,7 +163,7 @@ fn test_safety_validation() {
 
 #[test]
 fn test_empty_relation() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     // No facts added
     let program = "result(X, Y) <- edge(X, Y)";
@@ -176,7 +176,7 @@ fn test_empty_relation() {
 
 #[test]
 fn test_catalog_schema_inference() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     // Add facts - catalog should track schema
     engine.add_fact("edge", vec![(1, 2), (2, 3)]);
@@ -190,7 +190,7 @@ fn test_catalog_schema_inference() {
 
 #[test]
 fn test_optimization_removes_identity_projection() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     engine.add_fact("edge", vec![(1, 2), (2, 3)]);
 
@@ -211,7 +211,7 @@ fn test_optimization_removes_identity_projection() {
 
 #[test]
 fn test_large_dataset() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     // Create a larger dataset
     let mut edges = Vec::new();
@@ -230,7 +230,7 @@ fn test_large_dataset() {
 
 #[test]
 fn test_triangles_query() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     // Create a triangle: 1->2, 2->3, 3->1
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 1)]);
@@ -246,7 +246,7 @@ fn test_triangles_query() {
 
 #[test]
 fn test_parse_simple_rule() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     let program = "result(X, Y) <- edge(X, Y)";
 
@@ -299,7 +299,7 @@ fn test_optimization_config() {
         enable_magic_sets: false,
     };
 
-    let engine = DatalogEngine::with_config(config.clone());
+    let engine = IQLEngine::with_config(config.clone());
     assert_eq!(engine.config().enable_join_planning, true);
     assert_eq!(engine.config().enable_subplan_sharing, false);
 }
@@ -307,7 +307,7 @@ fn test_optimization_config() {
 // Negation (Antijoin) Tests
 #[test]
 fn test_simple_negation() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     // All employees
     engine.add_fact(
@@ -347,7 +347,7 @@ fn test_simple_negation() {
 
 #[test]
 fn test_negation_with_join() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     // Employees with department
     engine.add_fact(
@@ -399,8 +399,8 @@ fn test_negation_with_join() {
 #[test]
 fn test_negation_on_view() {
     // Test case: negation where the negated relation is another rule's result (a view)
-    // This mimics the failing snapshot test 06_negation_self_relation.idl
-    let mut engine = DatalogEngine::new();
+    // This mimics the failing snapshot test 06_negation_self_relation.iql
+    let mut engine = IQLEngine::new();
 
     // Base relation: edges in a graph
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (1, 3), (2, 4)]);
@@ -461,13 +461,13 @@ fn test_negation_on_view() {
 
 #[test]
 fn test_sip_four_way_join() {
-    use inputlayer::{DatalogEngine, OptimizationConfig, Tuple, Value};
+    use inputlayer::{IQLEngine, OptimizationConfig, Tuple, Value};
 
     let config = OptimizationConfig {
         enable_sip_rewriting: true,
         ..OptimizationConfig::default()
     };
-    let mut engine = DatalogEngine::with_config(config);
+    let mut engine = IQLEngine::with_config(config);
 
     engine.add_tuples(
         "users",
@@ -512,13 +512,13 @@ fn test_sip_four_way_join() {
 
 #[test]
 fn test_sip_self_join() {
-    use inputlayer::{DatalogEngine, OptimizationConfig, Tuple, Value};
+    use inputlayer::{IQLEngine, OptimizationConfig, Tuple, Value};
 
     let config = OptimizationConfig {
         enable_sip_rewriting: true,
         ..OptimizationConfig::default()
     };
-    let mut engine = DatalogEngine::with_config(config);
+    let mut engine = IQLEngine::with_config(config);
 
     engine.add_tuples(
         "edge",
@@ -629,7 +629,7 @@ fn test_boolean_diff_produces_same_results_join() {
 #[test]
 fn test_boolean_diff_full_pipeline() {
     // Execute same query with boolean specialization enabled (default)
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
     let mut results = engine.execute("path(X, Y) <- edge(X, Y)").unwrap();
@@ -642,7 +642,7 @@ fn test_boolean_diff_full_pipeline() {
 /// Verify Boolean diff works for recursive transitive closure
 #[test]
 fn test_boolean_diff_transitive_closure() {
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
     let mut results = engine
@@ -723,7 +723,7 @@ fn test_boolean_selection_for_set_queries() {
 fn test_recursive_shortest_path_min_aggregation() {
     use inputlayer::{Tuple, Value};
 
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     // Weighted directed graph:
     //   1 --5--> 2 --3--> 3 --2--> 4
@@ -767,7 +767,7 @@ fn test_recursive_shortest_path_min_aggregation() {
 fn test_recursive_widest_path_max_aggregation() {
     use inputlayer::{Tuple, Value};
 
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     // Bandwidth graph:
     //   1 --10--> 2 --5--> 3

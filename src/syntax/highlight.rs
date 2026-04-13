@@ -1,6 +1,6 @@
-//! Rustyline `Highlighter` integration for Datalog syntax highlighting.
+//! Rustyline `Highlighter` integration for IQL syntax highlighting.
 //!
-//! Provides `DatalogHelper` which plugs into rustyline's `Editor` to
+//! Provides `IQLHelper` which plugs into rustyline's `Editor` to
 //! color-code REPL input as the user types.
 
 use std::borrow::Cow;
@@ -16,24 +16,24 @@ use super::{semanticize, tokenize, TokenKind};
 const RESET: &str = "\x1b[0m";
 const PROMPT_COLOR: &str = "\x1b[1;32m"; // bold green
 
-/// Rustyline helper that provides syntax highlighting for Datalog input.
-pub struct DatalogHelper;
+/// Rustyline helper that provides syntax highlighting for IQL input.
+pub struct IQLHelper;
 
-impl Default for DatalogHelper {
+impl Default for IQLHelper {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl DatalogHelper {
+impl IQLHelper {
     pub fn new() -> Self {
         Self
     }
 }
 
-impl Helper for DatalogHelper {}
+impl Helper for IQLHelper {}
 
-impl Completer for DatalogHelper {
+impl Completer for IQLHelper {
     type Candidate = String;
 
     fn complete(
@@ -46,7 +46,7 @@ impl Completer for DatalogHelper {
     }
 }
 
-impl Hinter for DatalogHelper {
+impl Hinter for IQLHelper {
     type Hint = String;
 
     fn hint(&self, _line: &str, _pos: usize, _ctx: &Context<'_>) -> Option<Self::Hint> {
@@ -54,13 +54,13 @@ impl Hinter for DatalogHelper {
     }
 }
 
-impl Validator for DatalogHelper {
+impl Validator for IQLHelper {
     fn validate(&self, _ctx: &mut ValidationContext<'_>) -> Result<ValidationResult> {
         Ok(ValidationResult::Valid(None))
     }
 }
 
-impl Highlighter for DatalogHelper {
+impl Highlighter for IQLHelper {
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
         if line.is_empty() {
             return Cow::Borrowed(line);
@@ -133,14 +133,14 @@ mod tests {
 
     #[test]
     fn test_highlight_empty_line() {
-        let h = DatalogHelper::new();
+        let h = IQLHelper::new();
         let result = h.highlight("", 0);
         assert_eq!(result.as_ref(), "");
     }
 
     #[test]
     fn test_highlight_produces_ansi() {
-        let h = DatalogHelper::new();
+        let h = IQLHelper::new();
         let result = h.highlight("?edge(X, Y)", 0);
         // Should contain ANSI escape codes
         assert!(result.contains("\x1b["));
@@ -150,7 +150,7 @@ mod tests {
 
     #[test]
     fn test_highlight_prompt_with_kg() {
-        let h = DatalogHelper::new();
+        let h = IQLHelper::new();
         let result = h.highlight_prompt("mydb> ", false);
         assert!(result.contains(PROMPT_COLOR));
         assert!(result.contains(RESET));
@@ -159,20 +159,20 @@ mod tests {
 
     #[test]
     fn test_highlight_prompt_without_kg() {
-        let h = DatalogHelper::new();
+        let h = IQLHelper::new();
         let result = h.highlight_prompt("inputlayer> ", false);
         assert!(result.contains(PROMPT_COLOR));
     }
 
     #[test]
     fn test_highlight_char_returns_true() {
-        let h = DatalogHelper::new();
+        let h = IQLHelper::new();
         assert!(h.highlight_char("test", 0, false));
     }
 
     #[test]
     fn test_highlight_preserves_text_content() {
-        let h = DatalogHelper::new();
+        let h = IQLHelper::new();
         let input = "?edge(X, Y)";
         let result = h.highlight(input, 0);
         // Strip ANSI codes and verify text is preserved
@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_highlight_body_distinct_from_head() {
-        let h = DatalogHelper::new();
+        let h = IQLHelper::new();
         let result = h.highlight("+path(X, Z) <- edge(X, Y)", 0);
         let result_str = result.as_ref();
         // Head identifier "path" uses bright white (\x1b[97m)
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn test_highlight_insert_statement() {
-        let h = DatalogHelper::new();
+        let h = IQLHelper::new();
         let result = h.highlight("+edge(1, 2)", 0);
         let stripped = strip_ansi(&result);
         assert_eq!(stripped, "+edge(1, 2)");
@@ -226,7 +226,7 @@ mod tests {
 
     #[test]
     fn test_highlight_meta_command() {
-        let h = DatalogHelper::new();
+        let h = IQLHelper::new();
         let result = h.highlight(".rel", 0);
         let stripped = strip_ansi(&result);
         assert_eq!(stripped, ".rel");
@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn test_highlight_delete_statement() {
-        let h = DatalogHelper::new();
+        let h = IQLHelper::new();
         let result = h.highlight("-edge(1, 2)", 0);
         let stripped = strip_ansi(&result);
         assert_eq!(stripped, "-edge(1, 2)");
@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn test_highlight_string_literal() {
-        let h = DatalogHelper::new();
+        let h = IQLHelper::new();
         let result = h.highlight("+name(\"alice\")", 0);
         let stripped = strip_ansi(&result);
         assert_eq!(stripped, "+name(\"alice\")");
@@ -250,7 +250,7 @@ mod tests {
 
     #[test]
     fn test_highlight_numbers() {
-        let h = DatalogHelper::new();
+        let h = IQLHelper::new();
         let result = h.highlight("+data(42, 3.14)", 0);
         let stripped = strip_ansi(&result);
         assert_eq!(stripped, "+data(42, 3.14)");
@@ -258,13 +258,13 @@ mod tests {
 
     #[test]
     fn test_highlight_prompt_no_bracket() {
-        let h = DatalogHelper::new();
+        let h = IQLHelper::new();
         let result = h.highlight_prompt("plain", false);
         assert_eq!(result.as_ref(), "plain");
     }
 
     #[test]
-    fn test_datalog_helper_default() {
-        let _h = DatalogHelper::default();
+    fn test_iql_helper_default() {
+        let _h = IQLHelper::default();
     }
 }

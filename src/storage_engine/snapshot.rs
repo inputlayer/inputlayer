@@ -12,7 +12,7 @@
 
 use crate::ast::Rule;
 use crate::value::Tuple;
-use crate::DatalogEngine;
+use crate::IQLEngine;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -159,10 +159,10 @@ impl KnowledgeGraphSnapshot {
 
     /// Execute a query against this snapshot
     ///
-    /// Creates a fresh `DatalogEngine` with the snapshot's data.
+    /// Creates a fresh `IQLEngine` with the snapshot's data.
     /// The snapshot is immutable so this is thread-safe without locks.
     pub fn execute(&self, program: &str) -> Result<Vec<(i32, i32)>, String> {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.set_num_workers(self.num_workers);
         engine.set_max_result_rows(self.max_result_rows);
         engine.set_max_query_cost(self.max_query_cost);
@@ -187,7 +187,7 @@ impl KnowledgeGraphSnapshot {
 
     /// Execute a query returning arbitrary-arity tuples
     pub fn execute_tuples(&self, program: &str) -> Result<Vec<Tuple>, String> {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.input_tuples.clone_from(&self.input_tuples);
         engine.set_shared_input(Arc::clone(&self.input_tuples));
         engine.set_num_workers(self.num_workers);
@@ -265,7 +265,7 @@ impl KnowledgeGraphSnapshot {
             format!("{}{}", self.rule_prefix, program)
         };
 
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.set_num_workers(self.num_workers);
         engine.set_max_result_rows(self.max_result_rows);
         engine.set_max_query_cost(self.max_query_cost);
@@ -313,7 +313,7 @@ impl KnowledgeGraphSnapshot {
         let start = Instant::now();
         let session_fact_count = session_facts.len();
         // Create a fresh engine with cloned data
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.set_num_workers(self.num_workers);
         engine.set_max_result_rows(self.max_result_rows);
         engine.set_max_query_cost(self.max_query_cost);
@@ -376,7 +376,7 @@ impl KnowledgeGraphSnapshot {
     ) -> Result<(Vec<Tuple>, Option<crate::execution::TimingBreakdown>), String> {
         let start = Instant::now();
         let session_fact_count = session_facts.len();
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.set_num_workers(self.num_workers);
         engine.set_max_result_rows(self.max_result_rows);
         engine.set_max_query_cost(self.max_query_cost);
@@ -422,8 +422,8 @@ impl KnowledgeGraphSnapshot {
         result
     }
 
-    /// Configure HNSW search on a DatalogEngine if available.
-    fn configure_hnsw(&self, engine: &mut DatalogEngine) {
+    /// Configure HNSW search on a IQLEngine if available.
+    fn configure_hnsw(&self, engine: &mut IQLEngine) {
         if let Some(ref search_fn) = self.hnsw_search_fn {
             let f = Arc::clone(search_fn);
             engine.set_hnsw_search_fn(Box::new(move |idx, query, k, ef| f(idx, query, k, ef)));

@@ -1,4 +1,4 @@
-//! Statement Parser for Datalog-Native Syntax
+//! Statement Parser for IQL-Native Syntax
 //!
 //! Parses meta commands (`.kg`, `.rel`, `.rule`, `.help`, etc.), data ops (`+`/`-`),
 //! type/schema declarations, rules (persistent `+` and session), and queries (`?-`).
@@ -599,9 +599,9 @@ mod tests {
 
     #[test]
     fn test_parse_load_command() {
-        let stmt = parse_statement(".load file.dl").unwrap();
+        let stmt = parse_statement(".load file.iql").unwrap();
         if let Statement::Meta(MetaCommand::Load { path, mode }) = stmt {
-            assert_eq!(path, "file.dl");
+            assert_eq!(path, "file.iql");
             assert_eq!(mode, LoadMode::Default);
         } else {
             panic!("Expected Load, got {:?}", stmt);
@@ -610,9 +610,9 @@ mod tests {
 
     #[test]
     fn test_parse_load_with_replace() {
-        let stmt = parse_statement(".load views.dl --replace").unwrap();
+        let stmt = parse_statement(".load views.iql --replace").unwrap();
         if let Statement::Meta(MetaCommand::Load { path, mode }) = stmt {
-            assert_eq!(path, "views.dl");
+            assert_eq!(path, "views.iql");
             assert_eq!(mode, LoadMode::Replace);
         } else {
             panic!("Expected Load with Replace, got {:?}", stmt);
@@ -621,9 +621,9 @@ mod tests {
 
     #[test]
     fn test_parse_load_with_merge() {
-        let stmt = parse_statement(".load data.dl --merge").unwrap();
+        let stmt = parse_statement(".load data.iql --merge").unwrap();
         if let Statement::Meta(MetaCommand::Load { path, mode }) = stmt {
-            assert_eq!(path, "data.dl");
+            assert_eq!(path, "data.iql");
             assert_eq!(mode, LoadMode::Merge);
         } else {
             panic!("Expected Load with Merge, got {:?}", stmt);

@@ -1,6 +1,6 @@
 # Python SDK
 
-InputLayer ships a Python Object-Logic Mapper (OLM) that lets you define schemas, insert data, run queries, and manage rules using pure Python - no Datalog syntax required. The OLM compiles Python expressions into Datalog over WebSocket.
+InputLayer ships a Python Object-Logic Mapper (OLM) that lets you define schemas, insert data, run queries, and manage rules using pure Python - no IQL syntax required. The OLM compiles Python expressions into IQL over WebSocket.
 
 ## Installation
 
@@ -66,7 +66,7 @@ await kg.define(Employee, Document)
 
 ### Supported Types
 
-| Python Type | Datalog Type | Description |
+| Python Type | IQL Type | Description |
 |-------------|-------------|-------------|
 | `int` | `int` | 64-bit integer |
 | `float` | `float` | 64-bit floating point |
@@ -238,7 +238,7 @@ The migration system provides Django-style schema versioning: generate numbered 
 
 ### Why Migrations?
 
-Without migrations, `define()` and `define_rules()` fire Datalog commands blindly:
+Without migrations, `define()` and `define_rules()` fire IQL commands blindly:
 - No idempotency - calling `define_rules()` twice duplicates clauses
 - No rollback - can't revert a bad deploy
 - No state tracking - no record of what's deployed
@@ -329,7 +329,7 @@ class M(Migration):
 | `ReplaceRule(name, old, new)` | Drop + new clauses | Drop + old clauses |
 | `CreateIndex(name, ...)` | `.index create` | `.index drop` |
 | `DropIndex(name, ...)` | `.index drop` | `.index create` |
-| `RunDatalog(fwd, bwd)` | Custom commands | Custom commands |
+| `RunIQL(fwd, bwd)` | Custom commands | Custom commands |
 
 ### Programmatic Usage
 

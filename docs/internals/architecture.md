@@ -31,7 +31,7 @@ InputLayer is an incremental database engine built on Differential Dataflow (DD)
 │  │                        KnowledgeGraph                                    │ │
 │  │                                                                          │ │
 │  │  ┌────────────────────┐  ┌────────────────────┐  ┌───────────────────┐  │ │
-│  │  │   DatalogEngine    │  │    RuleCatalog     │  │  DDComputation    │  │ │
+│  │  │   IQLEngine    │  │    RuleCatalog     │  │  DDComputation    │  │ │
 │  │  │                    │  │                    │  │   (Optional)      │  │ │
 │  │  │ input_tuples:      │  │ rules: HashMap     │  │                   │  │ │
 │  │  │   HashMap<String,  │  │ catalog.json       │  │ InputSessions     │  │ │
@@ -86,7 +86,7 @@ pub struct StorageEngine {
 ```rust
 pub struct KnowledgeGraph {
     name: String,
-    engine: DatalogEngine,
+    engine: IQLEngine,
     rule_catalog: RuleCatalog,
     schema_catalog: SchemaCatalog,  // Per-KG schema isolation
     snapshot: ArcSwap<KnowledgeGraphSnapshot>,
@@ -96,7 +96,7 @@ pub struct KnowledgeGraph {
 ```
 
 **Key Features**:
-- **DatalogEngine**: Holds base relation data (`input_tuples`, private with accessors)
+- **IQLEngine**: Holds base relation data (`input_tuples`, private with accessors)
 - **RuleCatalog**: Persistent rule storage with stratification validation
 - **SchemaCatalog**: Per-KG schema validation (isolated from other KGs)
 - **Snapshot**: Lock-free point-in-time consistent views via ArcSwap
@@ -257,7 +257,7 @@ KnowledgeGraphSnapshot.execute_with_session_facts()
     │   ├─► Session rules
     │   └─► Query
     │
-    └─► DatalogEngine.execute_tuples()
+    └─► IQLEngine.execute_tuples()
         │
         └─► CodeGenerator with num_workers config
     │
@@ -356,7 +356,7 @@ pub fn execute_with_session_facts(
 
 ### 5.1 Persistent Rules (`+` prefix)
 
-```datalog
+```iql
 +path(X, Y) <- edge(X, Y)
 +path(X, Z) <- path(X, Y), edge(Y, Z)
 ```
@@ -369,7 +369,7 @@ pub fn execute_with_session_facts(
 
 ### 5.2 Session Rules (no prefix)
 
-```datalog
+```iql
 reachable_from(Y) <- path(1, Y)
 ?reachable_from(X)
 ```
@@ -439,7 +439,7 @@ unsafe impl Abomonation for Value {
 
 ### 6.3 AST Display Implementations
 
-All AST types implement `Display` for consistent Datalog text formatting:
+All AST types implement `Display` for consistent IQL text formatting:
 
 ```rust
 impl Display for Term { ... }      // Variables, constants, aggregates, etc.
@@ -749,7 +749,7 @@ This node filters `input` to keep only tuples whose key columns exist in `filter
 
 | File | Purpose |
 |------|---------|
-| `src/lib.rs` | DatalogEngine, public API |
+| `src/lib.rs` | IQLEngine, public API |
 | `src/ast/mod.rs` | AST types with Display implementations |
 | `src/value/mod.rs` | Value, Tuple, Abomonation |
 | `src/storage_engine/mod.rs` | StorageEngine, KnowledgeGraph |

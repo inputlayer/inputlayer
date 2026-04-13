@@ -5,7 +5,7 @@
 //! ## Usage
 //!
 //! ```bash
-//! cargo run --bin datalog-repl
+//! cargo run --bin inputlayer-repl
 //! ```
 //!
 //! Then enter programs or commands:
@@ -13,7 +13,7 @@
 //! - `.query <query>` - Execute a query
 //! - `.quit` - Exit
 
-use inputlayer::DatalogEngine;
+use inputlayer::IQLEngine;
 use std::io::{self, Write};
 
 fn main() {
@@ -25,7 +25,7 @@ fn main() {
     println!("  .help             - Show this help");
     println!("  .quit             - Exit\n");
 
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     // Add some example data
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (4, 5)]);
@@ -55,7 +55,7 @@ fn main() {
         if input.starts_with(".help") {
             println!("\nCommands:");
             println!("  .facts <relation> - Add facts");
-            println!("  .query <datalog>  - Execute query");
+            println!("  .query <iql>  - Execute query");
             println!("  .help             - Show help");
             println!("  .quit             - Exit\n");
             continue;

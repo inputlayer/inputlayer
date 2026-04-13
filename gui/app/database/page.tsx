@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { AppShell } from "@/components/app-shell"
-import { useDatalogStore, type KnowledgeGraph } from "@/lib/datalog-store"
+import { useIQLStore, type KnowledgeGraph } from "@/lib/iql-store"
 import {
   Database,
   Plus,
@@ -40,7 +40,7 @@ import {
 import { cn } from "@/lib/utils"
 
 export default function KnowledgeGraphPage() {
-  const { knowledgeGraphs, setKnowledgeGraphs, selectedKnowledgeGraph, loadKnowledgeGraph, createKnowledgeGraph, deleteKnowledgeGraph, refreshCurrentKnowledgeGraph } = useDatalogStore()
+  const { knowledgeGraphs, setKnowledgeGraphs, selectedKnowledgeGraph, loadKnowledgeGraph, createKnowledgeGraph, deleteKnowledgeGraph, refreshCurrentKnowledgeGraph } = useIQLStore()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)

@@ -1,7 +1,7 @@
 /**
- * Syntax highlighting tokenizer for InputLayer Datalog.
+ * Syntax highlighting tokenizer for InputLayer IQL.
  *
- * Port of the PEG grammar in src/syntax/datalog.pest to a JS regex-based
+ * Port of the PEG grammar in src/syntax/iql.pest to a JS regex-based
  * tokenizer.  Produces classified spans that can be rendered as colored
  * HTML in the editor overlay.
  */
@@ -34,7 +34,7 @@ export interface Token {
   text: string
 }
 
-// ── Keyword sets (from datalog.pest) ───────────────────────────────────
+// ── Keyword sets (from iql.pest) ───────────────────────────────────
 
 const AGGREGATES = new Set([
   "count_distinct", "count", "sum", "avg",
@@ -154,7 +154,7 @@ function classify(match: string, inBody: boolean): TokenKind {
 
 // ── Public API ─────────────────────────────────────────────────────────
 
-/** Tokenize a string of Datalog input into classified spans. */
+/** Tokenize a string of IQL input into classified spans. */
 export function tokenize(input: string): Token[] {
   const tokens: Token[] = []
   let inBody = false

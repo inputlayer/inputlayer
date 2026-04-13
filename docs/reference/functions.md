@@ -14,7 +14,7 @@ InputLayer provides 55 builtin functions for vector operations, temporal process
 - 55/55 functions have full test coverage
 - 127+ unit tests in `vector_ops.rs`
 - 60+ unit tests in `temporal_ops.rs`
-- Snapshot tests in `examples/datalog/`
+- Snapshot tests in `examples/iql/`
 
 ---
 
@@ -40,7 +40,7 @@ Distance functions for f32 vectors. All return `Float64`.
 
 Euclidean (L2) distance between two vectors.
 
-```datalog
+```iql
 // Syntax
 D = euclidean(V1, V2)
 
@@ -61,7 +61,7 @@ similar(Id1, Id2, Dist) <-
 
 **Aliases**: `euclidean_distance`
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_euclidean_distance`, snapshot `16_vectors/01_euclidean_distance.idl`
+**Tests**: `test_euclidean_distance`, snapshot `16_vectors/01_euclidean_distance.iql`
 
 ---
 
@@ -69,7 +69,7 @@ similar(Id1, Id2, Dist) <-
 
 Cosine distance (1 - cosine similarity) between two vectors.
 
-```datalog
+```iql
 // Syntax
 D = cosine(V1, V2)
 
@@ -90,7 +90,7 @@ similar_docs(Id1, Id2) <-
 **Note**: Returns 0 for identical directions, 1 for orthogonal, 2 for opposite directions.
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_cosine_distance`, snapshot `16_vectors/02_cosine_distance.idl`
+**Tests**: `test_cosine_distance`, snapshot `16_vectors/02_cosine_distance.iql`
 
 ---
 
@@ -98,7 +98,7 @@ similar_docs(Id1, Id2) <-
 
 Dot product of two vectors.
 
-```datalog
+```iql
 // Syntax
 Score = dot(V1, V2)
 
@@ -116,7 +116,7 @@ relevance(QueryId, DocId, Score) <-
 | **Returns** | Float64 | Dot product |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_dot_product`, snapshot `16_vectors/03_dot_product.idl`
+**Tests**: `test_dot_product`, snapshot `16_vectors/03_dot_product.iql`
 
 ---
 
@@ -124,7 +124,7 @@ relevance(QueryId, DocId, Score) <-
 
 Manhattan (L1) distance between two vectors. Good for sparse vectors.
 
-```datalog
+```iql
 // Syntax
 D = manhattan(V1, V2)
 
@@ -143,7 +143,7 @@ nearby(Id1, Id2) <-
 | **Returns** | Float64 | Manhattan distance (>= 0) |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_manhattan_distance`, snapshot `16_vectors/04_manhattan_distance.idl`
+**Tests**: `test_manhattan_distance`, snapshot `16_vectors/04_manhattan_distance.iql`
 
 ---
 
@@ -155,7 +155,7 @@ Operations for manipulating vectors.
 
 Normalize vector to unit length.
 
-```datalog
+```iql
 // Syntax
 Normalized = normalize(V)
 
@@ -173,7 +173,7 @@ normalized_embedding(Id, NormV) <-
 **Note**: Returns zero vector if input is zero vector.
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_normalize`, `test_normalize_zero`, snapshot `16_vectors/07_normalize.idl`
+**Tests**: `test_normalize`, `test_normalize_zero`, snapshot `16_vectors/07_normalize.iql`
 
 ---
 
@@ -181,7 +181,7 @@ normalized_embedding(Id, NormV) <-
 
 Get the dimension (length) of a float32 vector.
 
-```datalog
+```iql
 // Syntax
 Dim = vec_dim(V)
 
@@ -198,7 +198,7 @@ valid_embedding(Id, V) <-
 | **Returns** | Int64 | Number of dimensions |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: snapshot `16_vectors/05_vec_operations.idl`
+**Tests**: snapshot `16_vectors/05_vec_operations.iql`
 
 ---
 
@@ -206,7 +206,7 @@ valid_embedding(Id, V) <-
 
 Element-wise addition of two vectors.
 
-```datalog
+```iql
 // Syntax
 Sum = vec_add(V1, V2)
 
@@ -226,7 +226,7 @@ combined(Id, SumV) <-
 **Note**: Vectors must have same dimension.
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_vector_add`, snapshot `16_vectors/08_vec_add.idl`
+**Tests**: `test_vector_add`, snapshot `16_vectors/08_vec_add.iql`
 
 ---
 
@@ -234,7 +234,7 @@ combined(Id, SumV) <-
 
 Scale vector by a scalar value.
 
-```datalog
+```iql
 // Syntax
 Scaled = vec_scale(V, S)
 
@@ -252,7 +252,7 @@ weighted(Id, ScaledV) <-
 | **Returns** | Vector (f32) | Scaled vector |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_vector_scale`, snapshot `16_vectors/09_vec_scale.idl`
+**Tests**: `test_vector_scale`, snapshot `16_vectors/09_vec_scale.iql`
 
 ---
 
@@ -264,7 +264,7 @@ Functions for approximate nearest neighbor search.
 
 Compute LSH bucket ID for a float32 vector.
 
-```datalog
+```iql
 // Syntax
 Bucket = lsh_bucket(V, TableIdx, NumHyperplanes)
 
@@ -285,7 +285,7 @@ lsh_index(Id, Table, Bucket) <-
 **Note**: More hyperplanes = more buckets = higher precision but lower recall.
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_lsh_bucket_*` (6 tests), snapshot `31_lsh/01_lsh_bucket.idl`
+**Tests**: `test_lsh_bucket_*` (6 tests), snapshot `31_lsh/01_lsh_bucket.iql`
 
 ---
 
@@ -293,7 +293,7 @@ lsh_index(Id, Table, Bucket) <-
 
 Generate multi-probe sequence for a bucket by Hamming distance.
 
-```datalog
+```iql
 // Syntax
 Probes = lsh_probes(Bucket, NumHyperplanes, NumProbes)
 
@@ -311,7 +311,7 @@ probe_buckets(OrigBucket, Probes) <-
 | **Returns** | Vector | Probe bucket IDs |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_lsh_probes_*` (8 tests), snapshot `31_lsh/02_lsh_probes.idl`
+**Tests**: `test_lsh_probes_*` (8 tests), snapshot `31_lsh/02_lsh_probes.iql`
 
 ---
 
@@ -319,7 +319,7 @@ probe_buckets(OrigBucket, Probes) <-
 
 Compute LSH bucket and probes in one call for float32 vectors.
 
-```datalog
+```iql
 // Syntax
 Buckets = lsh_multi_probe(V, TableIdx, NumHyperplanes, NumProbes)
 ```
@@ -333,7 +333,7 @@ Buckets = lsh_multi_probe(V, TableIdx, NumHyperplanes, NumProbes)
 | **Returns** | Vector | Bucket IDs to probe |
 
 **Implementation**: `src/code_generator/mod.rs`
-**Tests**: `test_lsh_multi_probe_*` (4 tests), snapshot `31_lsh/03_lsh_multi_probe.idl`
+**Tests**: `test_lsh_multi_probe_*` (4 tests), snapshot `31_lsh/03_lsh_multi_probe.iql`
 
 ---
 
@@ -345,7 +345,7 @@ Functions for int8 vector quantization (memory-efficient storage).
 
 Linear quantization: maps [min, max] to [-128, 127].
 
-```datalog
+```iql
 // Syntax
 QV = quantize_linear(V)
 
@@ -361,7 +361,7 @@ compressed(Id, QV) <-
 | **Returns** | VectorInt8 | Quantized vector |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_quantize_linear_basic`, snapshot `30_quantization/01_quantize_linear.idl`
+**Tests**: `test_quantize_linear_basic`, snapshot `30_quantization/01_quantize_linear.iql`
 
 ---
 
@@ -369,7 +369,7 @@ compressed(Id, QV) <-
 
 Symmetric quantization: maps [-max_abs, max_abs] to [-127, 127], preserving zero.
 
-```datalog
+```iql
 QV = quantize_symmetric(V)
 ```
 
@@ -381,7 +381,7 @@ QV = quantize_symmetric(V)
 **Note**: Better preserves zero values; recommended for normalized vectors.
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_quantize_symmetric_basic`, snapshot `30_quantization/02_quantize_symmetric.idl`
+**Tests**: `test_quantize_symmetric_basic`, snapshot `30_quantization/02_quantize_symmetric.iql`
 
 ---
 
@@ -389,7 +389,7 @@ QV = quantize_symmetric(V)
 
 Convert int8 vector back to f32.
 
-```datalog
+```iql
 FV = dequantize(QV)
 ```
 
@@ -401,7 +401,7 @@ FV = dequantize(QV)
 **Note**: Lossy conversion - original precision not fully recovered.
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_dequantize_basic`, snapshot `30_quantization/03_dequantize.idl`
+**Tests**: `test_dequantize_basic`, snapshot `30_quantization/03_dequantize.iql`
 
 ---
 
@@ -409,7 +409,7 @@ FV = dequantize(QV)
 
 Dequantize with explicit scale factor.
 
-```datalog
+```iql
 FV = dequantize_scaled(QV, Scale)
 ```
 
@@ -420,7 +420,7 @@ FV = dequantize_scaled(QV, Scale)
 | **Returns** | Vector (f32) | Dequantized vector |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_dequantize_with_scale`, snapshot `30_quantization/04_dequantize_scaled.idl`
+**Tests**: `test_dequantize_with_scale`, snapshot `30_quantization/04_dequantize_scaled.iql`
 
 ---
 
@@ -434,7 +434,7 @@ Direct computation on int8 values for maximum speed.
 
 Euclidean distance for int8 vectors.
 
-```datalog
+```iql
 D = euclidean_int8(QV1, QV2)
 ```
 
@@ -445,7 +445,7 @@ D = euclidean_int8(QV1, QV2)
 | **Returns** | Float64 | Euclidean distance |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_euclidean_distance_int8_*` (3 tests), snapshot `30_quantization/05_euclidean_int8.idl`
+**Tests**: `test_euclidean_distance_int8_*` (3 tests), snapshot `30_quantization/05_euclidean_int8.iql`
 
 ---
 
@@ -453,7 +453,7 @@ D = euclidean_int8(QV1, QV2)
 
 Cosine distance for int8 vectors.
 
-```datalog
+```iql
 D = cosine_int8(QV1, QV2)
 ```
 
@@ -464,7 +464,7 @@ D = cosine_int8(QV1, QV2)
 | **Returns** | Float64 | Cosine distance [0, 2] |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_cosine_distance_int8_*` (3 tests), snapshot `30_quantization/06_cosine_int8.idl`
+**Tests**: `test_cosine_distance_int8_*` (3 tests), snapshot `30_quantization/06_cosine_int8.iql`
 
 ---
 
@@ -472,7 +472,7 @@ D = cosine_int8(QV1, QV2)
 
 Dot product for int8 vectors.
 
-```datalog
+```iql
 Score = dot_int8(QV1, QV2)
 ```
 
@@ -483,7 +483,7 @@ Score = dot_int8(QV1, QV2)
 | **Returns** | Float64 | Dot product |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_dot_product_int8`, snapshot `30_quantization/07_dot_int8.idl`
+**Tests**: `test_dot_product_int8`, snapshot `30_quantization/07_dot_int8.iql`
 
 ---
 
@@ -491,7 +491,7 @@ Score = dot_int8(QV1, QV2)
 
 Manhattan distance for int8 vectors.
 
-```datalog
+```iql
 D = manhattan_int8(QV1, QV2)
 ```
 
@@ -502,7 +502,7 @@ D = manhattan_int8(QV1, QV2)
 | **Returns** | Float64 | Manhattan distance |
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_manhattan_distance_int8`, snapshot `30_quantization/08_manhattan_int8.idl`
+**Tests**: `test_manhattan_distance_int8`, snapshot `30_quantization/08_manhattan_int8.iql`
 
 ---
 
@@ -514,7 +514,7 @@ Functions for time-based queries and temporal reasoning.
 
 Get current Unix timestamp in milliseconds.
 
-```datalog
+```iql
 Now = time_now()
 ```
 
@@ -524,7 +524,7 @@ Now = time_now()
 | **Returns** | Int64 | Unix timestamp (milliseconds) |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_time_now_returns_reasonable_value`, snapshot `29_temporal/01_time_now.idl`
+**Tests**: `test_time_now_returns_reasonable_value`, snapshot `29_temporal/01_time_now.iql`
 
 ---
 
@@ -532,7 +532,7 @@ Now = time_now()
 
 Compute difference between two timestamps.
 
-```datalog
+```iql
 Diff = time_diff(T1, T2)
 ```
 
@@ -543,7 +543,7 @@ Diff = time_diff(T1, T2)
 | **Returns** | Int64 | Difference (t1 - t2) in milliseconds |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_time_diff_*` (4 tests), snapshot `29_temporal/02_time_diff.idl`
+**Tests**: `test_time_diff_*` (4 tests), snapshot `29_temporal/02_time_diff.iql`
 
 ---
 
@@ -551,7 +551,7 @@ Diff = time_diff(T1, T2)
 
 Add duration to timestamp.
 
-```datalog
+```iql
 NewTime = time_add(Ts, DurationMs)
 ```
 
@@ -562,7 +562,7 @@ NewTime = time_add(Ts, DurationMs)
 | **Returns** | Int64 | New timestamp |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_time_add_*` (3 tests), snapshot `29_temporal/03_time_add_sub.idl`
+**Tests**: `test_time_add_*` (3 tests), snapshot `29_temporal/03_time_add_sub.iql`
 
 ---
 
@@ -570,7 +570,7 @@ NewTime = time_add(Ts, DurationMs)
 
 Subtract duration from timestamp.
 
-```datalog
+```iql
 NewTime = time_sub(Ts, DurationMs)
 ```
 
@@ -581,7 +581,7 @@ NewTime = time_sub(Ts, DurationMs)
 | **Returns** | Int64 | New timestamp |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_time_sub_*` (2 tests), snapshot `29_temporal/03_time_add_sub.idl`
+**Tests**: `test_time_sub_*` (2 tests), snapshot `29_temporal/03_time_add_sub.iql`
 
 ---
 
@@ -589,7 +589,7 @@ NewTime = time_sub(Ts, DurationMs)
 
 Exponential time decay. Formula: `0.5^(age/half_life)`.
 
-```datalog
+```iql
 Weight = time_decay(Ts, Now, HalfLifeMs)
 ```
 
@@ -603,7 +603,7 @@ Weight = time_decay(Ts, Now, HalfLifeMs)
 **Note**: Returns 1.0 at ts=now, 0.5 at age=half_life, approaches 0 for old events.
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_time_decay_*` (7 tests), snapshot `29_temporal/04_time_decay.idl`
+**Tests**: `test_time_decay_*` (7 tests), snapshot `29_temporal/04_time_decay.iql`
 
 ---
 
@@ -611,7 +611,7 @@ Weight = time_decay(Ts, Now, HalfLifeMs)
 
 Linear time decay. Formula: `max(0, 1 - age/max_age)`.
 
-```datalog
+```iql
 Weight = time_decay_linear(Ts, Now, MaxAgeMs)
 ```
 
@@ -625,7 +625,7 @@ Weight = time_decay_linear(Ts, Now, MaxAgeMs)
 **Note**: Returns 1.0 at ts=now, 0.5 at age=max_age/2, 0.0 at age>=max_age.
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_time_decay_linear_*` (6 tests), snapshot `29_temporal/05_time_decay_linear.idl`
+**Tests**: `test_time_decay_linear_*` (6 tests), snapshot `29_temporal/05_time_decay_linear.iql`
 
 ---
 
@@ -640,7 +640,7 @@ Check if t1 is before t2.
 | **Returns** | Bool | true if t1 < t2 |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_time_before`, snapshot `29_temporal/06_time_comparisons.idl`
+**Tests**: `test_time_before`, snapshot `29_temporal/06_time_comparisons.iql`
 
 ---
 
@@ -655,7 +655,7 @@ Check if t1 is after t2.
 | **Returns** | Bool | true if t1 > t2 |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_time_after`, snapshot `29_temporal/06_time_comparisons.idl`
+**Tests**: `test_time_after`, snapshot `29_temporal/06_time_comparisons.iql`
 
 ---
 
@@ -671,7 +671,7 @@ Check if timestamp is within range [start, end] (inclusive).
 | **Returns** | Bool | true if start <= ts <= end |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_time_between*` (2 tests), snapshot `29_temporal/06_time_comparisons.idl`
+**Tests**: `test_time_between*` (2 tests), snapshot `29_temporal/06_time_comparisons.iql`
 
 ---
 
@@ -687,7 +687,7 @@ Check if timestamp is within the last duration from now.
 | **Returns** | Bool | true if (now - duration_ms) <= ts <= now |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_within_last_*` (5 tests), snapshot `29_temporal/07_within_last.idl`
+**Tests**: `test_within_last_*` (5 tests), snapshot `29_temporal/07_within_last.iql`
 
 ---
 
@@ -704,7 +704,7 @@ Check if two time intervals overlap.
 | **Returns** | Bool | true if intervals overlap |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_intervals_overlap_*` (5 tests), snapshot `29_temporal/08_intervals_overlap.idl`
+**Tests**: `test_intervals_overlap_*` (5 tests), snapshot `29_temporal/08_intervals_overlap.iql`
 
 ---
 
@@ -721,7 +721,7 @@ Check if interval [s1, e1] fully contains interval [s2, e2].
 | **Returns** | Bool | true if [s1,e1] contains [s2,e2] |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_interval_contains_*` (2 tests), snapshot `29_temporal/09_interval_contains.idl`
+**Tests**: `test_interval_contains_*` (2 tests), snapshot `29_temporal/09_interval_contains.iql`
 
 ---
 
@@ -736,7 +736,7 @@ Get the duration of an interval.
 | **Returns** | Int64 | Duration (end - start) in milliseconds |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_interval_duration_*` (3 tests), snapshot `29_temporal/10_interval_duration.idl`
+**Tests**: `test_interval_duration_*` (3 tests), snapshot `29_temporal/10_interval_duration.iql`
 
 ---
 
@@ -752,7 +752,7 @@ Check if a point is within an interval [start, end] (inclusive).
 | **Returns** | Bool | true if start <= ts <= end |
 
 **Implementation**: `src/temporal_ops.rs`
-**Tests**: `test_point_in_interval_*` (4 tests), snapshot `29_temporal/12_point_in_interval.idl`
+**Tests**: `test_point_in_interval_*` (4 tests), snapshot `29_temporal/12_point_in_interval.iql`
 
 ---
 
@@ -764,7 +764,7 @@ General-purpose math functions. All accept Int64 or Float64 inputs (coerced to f
 
 Generic absolute value. Preserves input type.
 
-```datalog
+```iql
 A = abs(X)
 ```
 
@@ -779,7 +779,7 @@ A = abs(X)
 
 Absolute value of an integer.
 
-```datalog
+```iql
 AbsVal = abs_int64(X)
 ```
 
@@ -792,7 +792,7 @@ AbsVal = abs_int64(X)
 **Note**: Uses saturating arithmetic for `i64::MIN`.
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_abs_i64_*` (4 tests), snapshot `32_math/01_abs_int64.idl`
+**Tests**: `test_abs_i64_*` (4 tests), snapshot `32_math/01_abs_int64.iql`
 
 ---
 
@@ -800,7 +800,7 @@ AbsVal = abs_int64(X)
 
 Absolute value of a float.
 
-```datalog
+```iql
 AbsVal = abs_float64(X)
 ```
 
@@ -812,7 +812,7 @@ AbsVal = abs_float64(X)
 **Aliases**: `abs_f64`
 
 **Implementation**: `src/vector_ops.rs`
-**Tests**: `test_abs_f64_*` (4 tests), snapshot `32_math/02_abs_float64.idl`
+**Tests**: `test_abs_f64_*` (4 tests), snapshot `32_math/02_abs_float64.iql`
 
 ---
 
@@ -820,7 +820,7 @@ AbsVal = abs_float64(X)
 
 Square root.
 
-```datalog
+```iql
 R = sqrt(X)
 ```
 
@@ -839,7 +839,7 @@ R = sqrt(X)
 
 Power function.
 
-```datalog
+```iql
 R = pow(Base, Exp)
 ```
 
@@ -859,7 +859,7 @@ R = pow(Base, Exp)
 
 Natural logarithm (base e).
 
-```datalog
+```iql
 R = log(X)
 ```
 
@@ -879,7 +879,7 @@ R = log(X)
 
 Exponential function (e^x).
 
-```datalog
+```iql
 R = exp(X)
 ```
 
@@ -896,7 +896,7 @@ R = exp(X)
 
 Sine function (radians).
 
-```datalog
+```iql
 R = sin(X)
 ```
 
@@ -913,7 +913,7 @@ R = sin(X)
 
 Cosine function (radians).
 
-```datalog
+```iql
 R = cos(X)
 ```
 
@@ -930,7 +930,7 @@ R = cos(X)
 
 Tangent function (radians).
 
-```datalog
+```iql
 R = tan(X)
 ```
 
@@ -947,7 +947,7 @@ R = tan(X)
 
 Round down to nearest integer.
 
-```datalog
+```iql
 R = floor(X)
 ```
 
@@ -964,7 +964,7 @@ R = floor(X)
 
 Round up to nearest integer.
 
-```datalog
+```iql
 R = ceil(X)
 ```
 
@@ -983,7 +983,7 @@ R = ceil(X)
 
 Sign function. Returns -1, 0, or 1.
 
-```datalog
+```iql
 S = sign(X)
 ```
 
@@ -1007,7 +1007,7 @@ Functions for string manipulation.
 
 Get string length (byte count).
 
-```datalog
+```iql
 L = len(S)
 
 // Example
@@ -1032,7 +1032,7 @@ long_names(Name, L) <-
 
 Convert string to uppercase (Unicode-aware).
 
-```datalog
+```iql
 U = upper(S)
 ```
 
@@ -1051,7 +1051,7 @@ U = upper(S)
 
 Convert string to lowercase (Unicode-aware).
 
-```datalog
+```iql
 L = lower(S)
 ```
 
@@ -1070,7 +1070,7 @@ L = lower(S)
 
 Remove leading and trailing whitespace.
 
-```datalog
+```iql
 T = trim(S)
 ```
 
@@ -1087,7 +1087,7 @@ T = trim(S)
 
 Extract a substring.
 
-```datalog
+```iql
 Sub = substr(S, Start, Len)
 
 // Example - Get first 3 characters
@@ -1114,7 +1114,7 @@ prefix(Name, P) <-
 
 Replace all occurrences of a substring.
 
-```datalog
+```iql
 R = replace(S, Find, Replacement)
 
 // Example
@@ -1138,7 +1138,7 @@ cleaned(R) <-
 
 Concatenate multiple values into a string. Variable arity (2+ arguments).
 
-```datalog
+```iql
 R = concat(S1, S2)
 
 // Example - Build full name
@@ -1167,7 +1167,7 @@ Scalar comparison functions returning the minimum or maximum of two values.
 
 Return the smaller of two values.
 
-```datalog
+```iql
 M = min_val(A, B)
 
 // Example - Clamp to range
@@ -1193,7 +1193,7 @@ clamped(X, C) <-
 
 Return the larger of two values.
 
-```datalog
+```iql
 M = max_val(A, B)
 ```
 
@@ -1289,11 +1289,11 @@ M = max_val(A, B)
 
 | Directory | Tests | Functions Covered |
 |-----------|-------|-------------------|
-| `examples/datalog/16_vectors/` | 17 files | Distance, vector ops |
-| `examples/datalog/29_temporal/` | 19 files | All temporal functions |
-| `examples/datalog/30_quantization/` | 8 files | Quantization, int8 distance |
-| `examples/datalog/31_lsh/` | 5 files | LSH functions |
-| `examples/datalog/31_strings/` | 6+ files | String functions |
-| `examples/datalog/32_math/` | 9+ files | Math functions |
+| `examples/iql/16_vectors/` | 17 files | Distance, vector ops |
+| `examples/iql/29_temporal/` | 19 files | All temporal functions |
+| `examples/iql/30_quantization/` | 8 files | Quantization, int8 distance |
+| `examples/iql/31_lsh/` | 5 files | LSH functions |
+| `examples/iql/31_strings/` | 6+ files | String functions |
+| `examples/iql/32_math/` | 9+ files | Math functions |
 | `src/vector_ops.rs` | 127+ tests | Unit tests |
 | `src/temporal_ops.rs` | 60+ tests | Unit tests |

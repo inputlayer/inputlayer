@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useEffect, useRef, useState, useCallback } from "react"
-import type { View, Relation } from "@/lib/datalog-store"
+import type { View, Relation } from "@/lib/iql-store"
 import { useTheme } from "next-themes"
 import { ZoomIn, ZoomOut, Maximize2 } from "lucide-react"
 import { Button } from "@/components/ui/button"

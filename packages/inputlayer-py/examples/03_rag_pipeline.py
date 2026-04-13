@@ -1,6 +1,7 @@
 """RAG pipeline: vector + structured hybrid search."""
 
 import asyncio
+import os
 
 from inputlayer import HnswIndex, InputLayer, Relation, Vector
 
@@ -13,7 +14,11 @@ class Document(Relation):
 
 
 async def main():
-    async with InputLayer("ws://localhost:8080/ws", username="admin", password="admin") as il:
+    async with InputLayer(
+        os.environ.get("INPUTLAYER_URL", "ws://localhost:8080/ws"),
+        username=os.environ.get("INPUTLAYER_USER", "admin"),
+        password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
+    ) as il:
         kg = il.knowledge_graph("rag")
 
         await kg.define(Document)

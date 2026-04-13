@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING, Protocol
 
 
 class KGExecutor(Protocol):
-    """Minimal interface for executing Datalog commands."""
+    """Minimal interface for executing IQL commands."""
 
-    def execute(self, datalog: str) -> object: ...
+    def execute(self, iql: str) -> object: ...
 
 
 MIGRATION_RELATION = "__inputlayer_migrations__"

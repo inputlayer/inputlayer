@@ -32,7 +32,7 @@ Two independent paths from Alpha to the sanctioned entity. Let's trace what happ
 
 ## Loading facts and defining the rule
 
-```datalog
+```iql
 // The ownership structure
 +owns[("alpha", "beta"), ("alpha", "delta"), ("beta", "gamma"), ("delta", "gamma")]
 
@@ -42,7 +42,7 @@ Two independent paths from Alpha to the sanctioned entity. Let's trace what happ
 
 The rule says: an entity is exposed if it owns a sanctioned entity, or if it owns something that is itself exposed. That second clause is recursive - it follows the chain to any depth, whether it's 2 hops or 20.
 
-```datalog
+```iql
 +exposed(E, S) <- owns(E, S), sanctions_list(S)
 +exposed(E, S) <- owns(E, Mid), exposed(Mid, S)
 ```
@@ -51,7 +51,7 @@ The rule says: an entity is exposed if it owns a sanctioned entity, or if it own
 
 ## Query: is Alpha exposed?
 
-```datalog
+```iql
 ?exposed("alpha", Who)
 ```
 
@@ -72,11 +72,11 @@ Yes. Alpha is exposed to Gamma through two independent ownership paths.
 
 Beta divests its stake in Gamma.
 
-```datalog
+```iql
 -owns("beta", "gamma")
 ```
 
-```datalog
+```iql
 ?exposed("alpha", Who)
 ```
 
@@ -93,11 +93,11 @@ Alpha is still exposed. The path through Delta still supports the flag. If this 
 
 Now Delta also divests.
 
-```datalog
+```iql
 -owns("delta", "gamma")
 ```
 
-```datalog
+```iql
 ?exposed("alpha", Who)
 ```
 
@@ -113,7 +113,7 @@ Both paths are gone. The exposure retracts cleanly. No phantom flag lingering in
 
 When a flag is active, `.why` returns the exact chain of ownership and rules that produced it:
 
-```datalog
+```iql
 .why ?exposed("alpha", Who)
 ```
 
@@ -121,7 +121,7 @@ The proof tree shows: Alpha is exposed to Gamma because Alpha owns Delta, Delta 
 
 When a flag is missing and shouldn't be, `.why_not` identifies exactly which condition failed:
 
-```datalog
+```iql
 .why_not exposed("delta", "gamma")
 ```
 

@@ -10,7 +10,7 @@ from inputlayer.migrations.operations import (
     DropRelation,
     DropRule,
     ReplaceRule,
-    RunDatalog,
+    RunIQL,
     operation_from_dict,
 )
 
@@ -195,29 +195,29 @@ class TestDropIndex:
         assert DropIndex.from_dict(op.to_dict()) == op
 
 
-# ── RunDatalog ───────────────────────────────────────────────────────
+# ── RunIQL ───────────────────────────────────────────────────────
 
 
-class TestRunDatalog:
+class TestRunIQL:
     def test_forward_commands(self):
-        op = RunDatalog(forward=["+x(1)"], backward=["-x(1)"])
+        op = RunIQL(forward=["+x(1)"], backward=["-x(1)"])
         assert op.forward_commands() == ["+x(1)"]
 
     def test_backward_commands(self):
-        op = RunDatalog(forward=["+x(1)"], backward=["-x(1)"])
+        op = RunIQL(forward=["+x(1)"], backward=["-x(1)"])
         assert op.backward_commands() == ["-x(1)"]
 
     def test_describe_singular(self):
-        op = RunDatalog(forward=["cmd"], backward=[])
+        op = RunIQL(forward=["cmd"], backward=[])
         assert "1 custom" in op.describe()
 
     def test_describe_plural(self):
-        op = RunDatalog(forward=["a", "b"], backward=[])
+        op = RunIQL(forward=["a", "b"], backward=[])
         assert "2 custom" in op.describe()
 
     def test_roundtrip(self):
-        op = RunDatalog(forward=["a"], backward=["b"])
-        assert RunDatalog.from_dict(op.to_dict()) == op
+        op = RunIQL(forward=["a"], backward=["b"])
+        assert RunIQL.from_dict(op.to_dict()) == op
 
 
 # ── Registry ─────────────────────────────────────────────────────────
@@ -237,7 +237,7 @@ class TestOperationRegistry:
             ReplaceRule("r", ["old"], ["new"]),
             CreateIndex("i", "r", "c"),
             DropIndex("i", "r", "c"),
-            RunDatalog(forward=["a"], backward=["b"]),
+            RunIQL(forward=["a"], backward=["b"]),
         ]
         for op in ops:
             assert operation_from_dict(op.to_dict()) == op

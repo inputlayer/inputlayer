@@ -1,4 +1,4 @@
-import type { Relation } from "@/lib/datalog-store"
+import type { Relation } from "@/lib/iql-store"
 
 export interface GraphNode {
   data: {

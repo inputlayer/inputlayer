@@ -1,7 +1,7 @@
 {
-  "name": "inputlayer-idl",
-  "displayName": "InputLayer IDL",
-  "description": "Syntax highlighting for InputLayer (.idl/.dl) files",
+  "name": "inputlayer-iql",
+  "displayName": "InputLayer IQL",
+  "description": "Syntax highlighting for InputLayer (.iql) files",
   "version": "0.1.0",
   "publisher": "inputlayer",
   "license": "MIT",
@@ -14,28 +14,27 @@
   "contributes": {
     "languages": [
       {
-        "id": "inputlayer-datalog",
+        "id": "inputlayer-iql",
         "aliases": [
           "InputLayer",
-          "IDL"
+          "IQL"
         ],
         "extensions": [
-          ".idl",
-          ".dl"
+          ".iql"
         ],
         "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
       {
-        "language": "inputlayer-datalog",
-        "scopeName": "source.idl",
-        "path": "./syntaxes/idl.tmLanguage.json"
+        "language": "inputlayer-iql",
+        "scopeName": "source.iql",
+        "path": "./syntaxes/iql.tmLanguage.json"
       }
     ]
   },
   "configurationDefaults": {
-    "[inputlayer-datalog]": {
+    "[inputlayer-iql]": {
       "editor.fontLigatures": "'calt', 'liga'",
       "editor.bracketPairColorization.enabled": true
     }

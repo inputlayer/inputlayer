@@ -11,7 +11,7 @@ Rules define derived relations (views) by computing new facts from existing data
 
 Session rules exist only for your current connection:
 
-```datalog
+```iql
 // Define a session rule
 ancestor(X, Y) <- parent(X, Y)
 ancestor(X, Z) <- ancestor(X, Y), parent(Y, Z)
@@ -39,7 +39,7 @@ Session rules are useful for:
 
 Persistent rules are saved to disk and automatically loaded:
 
-```datalog
+```iql
 // Create a persistent rule (saved)
 +path(X, Y) <- edge(X, Y)
 +path(X, Z) <- path(X, Y), edge(Y, Z)
@@ -54,7 +54,7 @@ Persistent rules are stored in `{data_dir}/{kg}/rules/catalog.json`.
 
 A view can be defined by multiple rules (clauses):
 
-```datalog
+```iql
 // First clause: base case
 +ancestor(X, Y) <- parent(X, Y)
 
@@ -68,7 +68,7 @@ Both clauses define `ancestor`. Results are the union of all matching clauses.
 
 Remove a persistent rule with `-`:
 
-```datalog
+```iql
 -path(X, Y)    // Removes all rules defining 'path'
 ```
 
@@ -94,7 +94,7 @@ head(Variables) <- body
 
 The head is an atom that defines what the rule produces:
 
-```datalog
+```iql
 +path(X, Y) <- edge(X, Y)
 // ^^^^^^^^
 // Head: produces facts for 'path' relation
@@ -106,7 +106,7 @@ The head must use a **lowercase** predicate name.
 
 The body specifies conditions using literals separated by commas (AND):
 
-```datalog
+```iql
 +employee_in_dept(Name, Dept) <- employee(Id, Name), works_in(Id, Dept)
 //                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 //                                Body: both conditions must match
@@ -138,7 +138,7 @@ The body can contain:
 
 Rules can reference themselves (recursion):
 
-```datalog
+```iql
 // Transitive closure - find all reachable nodes
 +reach(X, Y) <- edge(X, Y)
 +reach(X, Z) <- reach(X, Y), edge(Y, Z)
@@ -150,7 +150,7 @@ InputLayer handles recursion automatically. It keeps computing until no new fact
 
 Rules can reference each other:
 
-```datalog
+```iql
 +even(0)
 +odd(X) <- even(Y), succ(Y, X)
 +even(X) <- odd(Y), succ(Y, X)
@@ -160,7 +160,7 @@ Rules can reference each other:
 
 All variables in the **head** must appear in a **positive** body literal:
 
-```datalog
+```iql
 // GOOD: X appears in edge(X, Y)
 +start_nodes(X) <- edge(X, Y)
 
@@ -170,7 +170,7 @@ All variables in the **head** must appear in a **positive** body literal:
 
 Variables in **negations** or **comparisons** must also appear in a positive literal:
 
-```datalog
+```iql
 // GOOD: X is bound by edge, then filtered
 +filtered(X) <- edge(X, Y), X > 5
 
@@ -182,13 +182,13 @@ Variables in **negations** or **comparisons** must also appear in a positive lit
 
 ### Filter
 
-```datalog
+```iql
 +adults(Name, Age) <- person(Name, Age), Age >= 18
 ```
 
 ### Join
 
-```datalog
+```iql
 +employee_dept(Name, DeptName) <-
     employee(Id, Name),
     works_in(Id, DeptId),
@@ -197,13 +197,13 @@ Variables in **negations** or **comparisons** must also appear in a positive lit
 
 ### Set Difference
 
-```datalog
+```iql
 +not_in_b(X) <- a(X), !b(X)
 ```
 
 ### Aggregation
 
-```datalog
+```iql
 +dept_count(Dept, count<Id>) <- works_in(Id, Dept)
 ```
 
@@ -211,7 +211,7 @@ Variables in **negations** or **comparisons** must also appear in a positive lit
 
 ### Social Network
 
-```datalog
+```iql
 // Facts
 +follows[(1, 2), (2, 3), (3, 4), (2, 4)]
 
@@ -225,7 +225,7 @@ Variables in **negations** or **comparisons** must also appear in a positive lit
 
 ### Access Control
 
-```datalog
+```iql
 // Facts
 +user_role[("alice", "admin"), ("bob", "viewer")]
 +role_perm[("admin", "read"), ("admin", "write"), ("viewer", "read")]
@@ -239,7 +239,7 @@ Variables in **negations** or **comparisons** must also appear in a positive lit
 
 ### Graph Analysis
 
-```datalog
+```iql
 // Facts
 +edge[(1, 2), (2, 3), (3, 1), (4, 5)]
 

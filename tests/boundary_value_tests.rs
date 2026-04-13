@@ -285,7 +285,7 @@ fn test_tuple_with_all_types() {
     assert_eq!(tuple.get(4), Some(&Value::Bool(true)));
 }
 
-// Note: Engine integration tests removed - they test DatalogEngine query
+// Note: Engine integration tests removed - they test IQLEngine query
 // execution which is already covered by other test files. This file focuses
 // on Value and Tuple boundary conditions.
 // Value Comparison Tests

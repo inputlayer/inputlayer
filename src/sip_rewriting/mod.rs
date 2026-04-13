@@ -10,12 +10,12 @@
 //! ## Example
 //!
 //! Original:
-//! ```datalog
+//! ```iql
 //! result(X, Z) <- R(X, Y), S(Y, Z), T(Z, W).
 //! ```
 //!
 //! After SIP (forward pass):
-//! ```datalog
+//! ```iql
 //! R_sip0f0(X, Y) <- R(X, Y).
 //! S_sip0f1(Y, Z) <- S(Y, Z), R_sip0f0(_, Y).
 //! T_sip0f2(Z, W) <- T(Z, W), S_sip0f1(_, Z).
@@ -41,7 +41,7 @@ pub struct SipStats {
     pub rules_rewritten: usize,
 }
 
-/// SIP (Sideways Information Passing) rewriter for Datalog rules
+/// SIP (Sideways Information Passing) rewriter for IQL rules
 ///
 /// Operates at the AST level, rewriting rules into semijoin reduction chains
 /// before IR building.

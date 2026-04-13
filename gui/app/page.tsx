@@ -2,13 +2,13 @@
 
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { useDatalogStore } from "@/lib/datalog-store"
+import { useIQLStore } from "@/lib/iql-store"
 import { ConnectionScreen } from "@/components/connection-screen"
 import { SplashScreen } from "@/components/splash-screen"
 
 export default function HomePage() {
   const router = useRouter()
-  const { connection, isInitialized, isRestoringSession, initFromStorage } = useDatalogStore()
+  const { connection, isInitialized, isRestoringSession, initFromStorage } = useIQLStore()
 
   useEffect(() => {
     initFromStorage()

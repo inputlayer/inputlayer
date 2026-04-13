@@ -57,7 +57,7 @@ docs/content/
 
 ### Syntax Highlighting
 
-Code blocks with ` ```datalog ` get syntax highlighting via a TextMate grammar at `docs/grammars/datalog.tmLanguage.json`.
+Code blocks with ` ```iql ` get syntax highlighting via a TextMate grammar at `docs/grammars/iql.tmLanguage.json`.
 
 ## Quick Links
 

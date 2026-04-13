@@ -32,7 +32,7 @@ This section contains developer documentation for contributing to InputLayer.
 │  │                      KnowledgeGraph                             │ │
 │  │                                                                 │ │
 │  │  ┌──────────────┐  ┌──────────────┐  ┌───────────────────────┐ │ │
-│  │  │ DatalogEngine │  │ RuleCatalog  │  │    DDComputation      │ │ │
+│  │  │ IQLEngine │  │ RuleCatalog  │  │    DDComputation      │ │ │
 │  │  │              │  │              │  │     (Optional)        │ │ │
 │  │  │ input_tuples │  │ rules        │  │                       │ │ │
 │  │  │ HashMap      │  │ catalog.json │  │ InputSessions         │ │ │
@@ -58,7 +58,7 @@ This section contains developer documentation for contributing to InputLayer.
 
 | File | Purpose |
 |------|---------|
-| `src/lib.rs` | DatalogEngine, public API |
+| `src/lib.rs` | IQLEngine, public API |
 | `src/ast/mod.rs` | AST types, BuiltinFunc, Display |
 | `src/value/mod.rs` | Value, Tuple, Abomonation |
 | `src/storage_engine/mod.rs` | StorageEngine, KnowledgeGraph |
@@ -116,7 +116,7 @@ cargo test
 - **1567 unit tests** across all modules (as of 2026-02-08)
 - **1109 snapshot tests** for end-to-end validation
 
-Tests are organized by category in `examples/datalog/`:
+Tests are organized by category in `examples/iql/`:
 - `01_basics/` - Basic queries
 - `16_vectors/` - Vector operations
 - `29_temporal/` - Temporal functions

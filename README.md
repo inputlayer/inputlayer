@@ -13,7 +13,7 @@ Store facts. Define rules. InputLayer derives the conclusions, keeps them curren
 
 Connecting flights - define direct routes as facts, let InputLayer derive all reachable destinations:
 
-```datalog
+```iql
 // Facts: direct flight routes
 +direct_flight[("New York", "London"), ("London", "Paris"), ("Paris", "Tokyo"), ("Tokyo", "Sydney")]
 
@@ -59,7 +59,7 @@ One fact changes in a 2,000-node graph with 400,000 derived relationships. Input
 
 Run `.why` on any result and get a structured proof tree showing which facts and which rules produced it. Run `.why_not` to see exactly which condition blocked a derivation.
 
-```datalog
+```iql
 .why ?can_reach("New York", "Sydney")
 // [rule] can_reach (clause 1): can_reach(A, C) <- direct_flight(A, B), can_reach(B, C)
 //   [base] direct_flight("New York", "London")

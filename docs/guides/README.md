@@ -37,7 +37,7 @@ Guides from basics to advanced features.
 ## Quick Examples
 
 ### Hello World
-```datalog
+```iql
 // Add some facts
 +person("alice")
 +person("bob")
@@ -47,7 +47,7 @@ Guides from basics to advanced features.
 ```
 
 ### Simple Rule
-```datalog
+```iql
 // Facts
 +parent("alice", "bob")
 +parent("bob", "charlie")
@@ -60,7 +60,7 @@ Guides from basics to advanced features.
 ```
 
 ### Aggregation
-```datalog
+```iql
 +score("alice", 95)
 +score("bob", 87)
 +score("charlie", 92)

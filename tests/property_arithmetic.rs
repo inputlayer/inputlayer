@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use inputlayer::{parser::parse_rule, Catalog, CodeGenerator, IRBuilder, Tuple, Value};
 
-/// Helper function to execute a Datalog rule with 2-column input relations
+/// Helper function to execute a IQL rule with 2-column input relations
 fn execute_two_column_rule(
     data_values: Vec<(i32, i32)>,
     link_values: Vec<(i32, i32)>,

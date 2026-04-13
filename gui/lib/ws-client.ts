@@ -188,7 +188,7 @@ export class WsClient {
     })
   }
 
-  /** Execute a Datalog program or meta command. Returns the result. */
+  /** Execute a IQL program or meta command. Returns the result. */
   execute(program: string, timeoutMs = 30000): Promise<WsResultMessage> {
     return new Promise((resolve, reject) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {

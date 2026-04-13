@@ -7,8 +7,12 @@ class InputLayerError(Exception):
     """Base exception for all InputLayer errors."""
 
 
-class ConnectionError(InputLayerError):
+class InputLayerConnectionError(InputLayerError):
     """Failed to connect or lost connection to the server."""
+
+
+# Backward-compatible alias (shadows the builtin, kept for existing code).
+ConnectionError = InputLayerConnectionError
 
 
 class AuthenticationError(InputLayerError):
@@ -44,8 +48,26 @@ class QueryTimeoutError(InputLayerError):
     """Query exceeded the configured timeout."""
 
 
-class PermissionError(InputLayerError):
+class QueryError(InputLayerError):
+    """Engine rejected a query (parse error, type error, unsafe rule, etc.)."""
+
+    def __init__(self, message: str, *, query: str | None = None) -> None:
+        super().__init__(message)
+        self.query = query
+
+    def __str__(self) -> str:
+        base = super().__str__()
+        if self.query:
+            return f"{base}\n  query: {self.query}"
+        return base
+
+
+class InputLayerPermissionError(InputLayerError):
     """Insufficient permissions for the requested operation."""
+
+
+# Backward-compatible alias (shadows the builtin, kept for existing code).
+PermissionError = InputLayerPermissionError
 
 
 class KnowledgeGraphNotFoundError(InputLayerError):

@@ -1,20 +1,26 @@
-"""InputLayerSync / KnowledgeGraphSync - synchronous wrappers."""
+"""InputLayerSync / KnowledgeGraphSync - synchronous wrappers.
+
+Uses a dedicated background event loop thread so these work safely from
+any context: plain scripts, Jupyter notebooks, FastAPI, LangGraph, etc.
+"""
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any, Callable, Iterator
+from collections.abc import Callable
+from typing import Any
 
+from inputlayer._sync import run_sync
 from inputlayer.auth import AclEntry, ApiKeyInfo, UserInfo
 from inputlayer.client import InputLayer
 from inputlayer.index import HnswIndex
 from inputlayer.knowledge_graph import (
     ClearResult,
-    DeleteResult,
     DebugResult,
+    DeleteResult,
     IndexInfo,
     IndexStats,
     InsertResult,
+    KnowledgeGraph,
     RelationDescription,
     RelationInfo,
     RuleInfo,
@@ -26,25 +32,11 @@ from inputlayer.relation import Relation
 from inputlayer.result import ResultSet
 
 
-def _get_or_create_loop() -> asyncio.AbstractEventLoop:
-    """Get or create an event loop for sync wrappers."""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_closed():
-            raise RuntimeError("closed")
-        return loop
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        return loop
-
-
 class KnowledgeGraphSync:
     """Synchronous wrapper around KnowledgeGraph."""
 
-    def __init__(self, kg: Any, loop: asyncio.AbstractEventLoop) -> None:
+    def __init__(self, kg: KnowledgeGraph) -> None:
         self._kg = kg
-        self._loop = loop
 
     @property
     def name(self) -> str:
@@ -52,104 +44,130 @@ class KnowledgeGraphSync:
 
     @property
     def session(self) -> Any:
-        return self._kg.session  # TODO: SessionSync wrapper
+        return self._kg.session
 
     def define(self, *relations: type[Relation]) -> None:
-        self._loop.run_until_complete(self._kg.define(*relations))
+        run_sync(self._kg.define(*relations))
 
     def relations(self) -> list[RelationInfo]:
-        return self._loop.run_until_complete(self._kg.relations())
+        return run_sync(self._kg.relations())
 
     def describe(self, relation: type[Relation] | str) -> RelationDescription:
-        return self._loop.run_until_complete(self._kg.describe(relation))
+        return run_sync(self._kg.describe(relation))
 
     def drop_relation(self, relation: type[Relation] | str) -> None:
-        self._loop.run_until_complete(self._kg.drop_relation(relation))
+        run_sync(self._kg.drop_relation(relation))
 
     def insert(self, facts: Any, data: Any = None) -> InsertResult:
-        return self._loop.run_until_complete(self._kg.insert(facts, data=data))
+        return run_sync(self._kg.insert(facts, data=data))
 
-    def delete(self, facts: Any, *, where: Callable | None = None) -> DeleteResult:
-        return self._loop.run_until_complete(self._kg.delete(facts, where=where))
+    def delete(self, facts: Any, *, where: Callable[..., Any] | None = None) -> DeleteResult:
+        return run_sync(self._kg.delete(facts, where=where))
 
     def query(self, *select: Any, **kwargs: Any) -> ResultSet:
-        return self._loop.run_until_complete(self._kg.query(*select, **kwargs))
+        return run_sync(self._kg.query(*select, **kwargs))
 
-    def vector_search(self, relation: type[Relation], query_vec: list[float], **kwargs: Any) -> ResultSet:
-        return self._loop.run_until_complete(self._kg.vector_search(relation, query_vec, **kwargs))
+    def query_stream(
+        self, *select: Any, batch_size: int = 1000, **kwargs: Any
+    ) -> list[list]:
+        """Synchronous version of query_stream. Returns all batches as a list."""
+        async def _collect() -> list[list]:
+            batches = []
+            async for batch in self._kg.query_stream(
+                *select, batch_size=batch_size, **kwargs
+            ):
+                batches.append(batch)
+            return batches
+        return run_sync(_collect())
+
+    def vector_search(
+        self,
+        relation: type[Relation],
+        query_vec: list[float],
+        *,
+        column: str | None = None,
+        k: int | None = None,
+        radius: float | None = None,
+        metric: str = "cosine",
+        extra_iql_clauses: list[str] | None = None,
+    ) -> ResultSet:
+        return run_sync(self._kg.vector_search(
+            relation, query_vec,
+            column=column, k=k, radius=radius,
+            metric=metric, extra_iql_clauses=extra_iql_clauses,
+        ))
 
     def define_rules(self, *targets: Any) -> None:
-        self._loop.run_until_complete(self._kg.define_rules(*targets))
+        run_sync(self._kg.define_rules(*targets))
 
     def list_rules(self) -> list[RuleInfo]:
-        return self._loop.run_until_complete(self._kg.list_rules())
+        return run_sync(self._kg.list_rules())
 
     def rule_definition(self, name: str | type) -> list[str]:
-        return self._loop.run_until_complete(self._kg.rule_definition(name))
+        return run_sync(self._kg.rule_definition(name))
 
     def drop_rule(self, name: str | type) -> None:
-        self._loop.run_until_complete(self._kg.drop_rule(name))
+        run_sync(self._kg.drop_rule(name))
 
     def drop_rule_clause(self, name: str | type, index: int) -> None:
-        self._loop.run_until_complete(self._kg.drop_rule_clause(name, index))
+        run_sync(self._kg.drop_rule_clause(name, index))
+
+    def edit_rule_clause(self, name: str | type, index: int, clause: Any) -> None:
+        run_sync(self._kg.edit_rule_clause(name, index, clause))
 
     def clear_rule(self, name: str | type) -> None:
-        self._loop.run_until_complete(self._kg.clear_rule(name))
+        run_sync(self._kg.clear_rule(name))
 
     def drop_rules_by_prefix(self, prefix: str) -> None:
-        self._loop.run_until_complete(self._kg.drop_rules_by_prefix(prefix))
+        run_sync(self._kg.drop_rules_by_prefix(prefix))
 
     def create_index(self, index: HnswIndex) -> None:
-        self._loop.run_until_complete(self._kg.create_index(index))
+        run_sync(self._kg.create_index(index))
 
     def list_indexes(self) -> list[IndexInfo]:
-        return self._loop.run_until_complete(self._kg.list_indexes())
+        return run_sync(self._kg.list_indexes())
 
     def index_stats(self, name: str) -> IndexStats:
-        return self._loop.run_until_complete(self._kg.index_stats(name))
+        return run_sync(self._kg.index_stats(name))
 
     def drop_index(self, name: str) -> None:
-        self._loop.run_until_complete(self._kg.drop_index(name))
+        run_sync(self._kg.drop_index(name))
 
     def rebuild_index(self, name: str) -> None:
-        self._loop.run_until_complete(self._kg.rebuild_index(name))
+        run_sync(self._kg.rebuild_index(name))
 
     def grant_access(self, username: str, role: str) -> None:
-        self._loop.run_until_complete(self._kg.grant_access(username, role))
+        run_sync(self._kg.grant_access(username, role))
 
     def revoke_access(self, username: str) -> None:
-        self._loop.run_until_complete(self._kg.revoke_access(username))
+        run_sync(self._kg.revoke_access(username))
 
     def list_acl(self) -> list[AclEntry]:
-        return self._loop.run_until_complete(self._kg.list_acl())
+        return run_sync(self._kg.list_acl())
 
     def debug(self, *select: Any, **kwargs: Any) -> DebugResult:
-        return self._loop.run_until_complete(self._kg.debug(*select, **kwargs))
+        return run_sync(self._kg.debug(*select, **kwargs))
 
-    def why(self, *select: Any, full: bool = False, **kwargs: Any) -> "WhyResult":
-        return self._loop.run_until_complete(
-            self._kg.why(*select, full=full, **kwargs)
-        )
+    def why(self, *select: Any, full: bool = False, **kwargs: Any) -> WhyResult:
+        return run_sync(self._kg.why(*select, full=full, **kwargs))
 
-    def why_not(self, relation: type, **values: Any) -> "WhyNotResult":
-        return self._loop.run_until_complete(
-            self._kg.why_not(relation, **values)
-        )
+    def why_not(self, relation: type, **values: Any) -> WhyNotResult:
+        return run_sync(self._kg.why_not(relation, **values))
 
     def compact(self) -> None:
-        self._loop.run_until_complete(self._kg.compact())
+        run_sync(self._kg.compact())
 
     def status(self) -> ServerStatus:
-        return self._loop.run_until_complete(self._kg.status())
+        return run_sync(self._kg.status())
 
     def load(self, path: str, *, mode: str | None = None) -> None:
-        self._loop.run_until_complete(self._kg.load(path, mode=mode))
+        run_sync(self._kg.load(path, mode=mode))
 
     def clear_prefix(self, prefix: str) -> ClearResult:
-        return self._loop.run_until_complete(self._kg.clear_prefix(prefix))
+        return run_sync(self._kg.clear_prefix(prefix))
 
-    def execute(self, datalog: str) -> ResultSet:
-        return self._loop.run_until_complete(self._kg.execute(datalog))
+    def execute(self, iql: str) -> ResultSet:
+        return run_sync(self._kg.execute(iql))
 
 
 class InputLayerSync:
@@ -167,7 +185,6 @@ class InputLayerSync:
         max_reconnect_attempts: int = 10,
         initial_kg: str | None = None,
     ) -> None:
-        self._loop = _get_or_create_loop()
         self._client = InputLayer(
             url,
             username=username,
@@ -180,10 +197,10 @@ class InputLayerSync:
         )
 
     def connect(self) -> None:
-        self._loop.run_until_complete(self._client.connect())
+        run_sync(self._client.connect())
 
     def close(self) -> None:
-        self._loop.run_until_complete(self._client.close())
+        run_sync(self._client.close())
 
     def __enter__(self) -> InputLayerSync:
         self.connect()
@@ -210,34 +227,34 @@ class InputLayerSync:
 
     def knowledge_graph(self, name: str, *, create: bool = True) -> KnowledgeGraphSync:
         kg = self._client.knowledge_graph(name, create=create)
-        return KnowledgeGraphSync(kg, self._loop)
+        return KnowledgeGraphSync(kg)
 
     def list_knowledge_graphs(self) -> list[str]:
-        return self._loop.run_until_complete(self._client.list_knowledge_graphs())
+        return run_sync(self._client.list_knowledge_graphs())
 
     def drop_knowledge_graph(self, name: str) -> None:
-        self._loop.run_until_complete(self._client.drop_knowledge_graph(name))
+        run_sync(self._client.drop_knowledge_graph(name))
 
     def create_user(self, username: str, password: str, role: str = "viewer") -> None:
-        self._loop.run_until_complete(self._client.create_user(username, password, role))
+        run_sync(self._client.create_user(username, password, role))
 
     def drop_user(self, username: str) -> None:
-        self._loop.run_until_complete(self._client.drop_user(username))
+        run_sync(self._client.drop_user(username))
 
     def set_password(self, username: str, new_password: str) -> None:
-        self._loop.run_until_complete(self._client.set_password(username, new_password))
+        run_sync(self._client.set_password(username, new_password))
 
     def set_role(self, username: str, role: str) -> None:
-        self._loop.run_until_complete(self._client.set_role(username, role))
+        run_sync(self._client.set_role(username, role))
 
     def list_users(self) -> list[UserInfo]:
-        return self._loop.run_until_complete(self._client.list_users())
+        return run_sync(self._client.list_users())
 
     def create_api_key(self, label: str) -> str:
-        return self._loop.run_until_complete(self._client.create_api_key(label))
+        return run_sync(self._client.create_api_key(label))
 
     def list_api_keys(self) -> list[ApiKeyInfo]:
-        return self._loop.run_until_complete(self._client.list_api_keys())
+        return run_sync(self._client.list_api_keys())
 
     def revoke_api_key(self, label: str) -> None:
-        self._loop.run_until_complete(self._client.revoke_api_key(label))
+        run_sync(self._client.revoke_api_key(label))

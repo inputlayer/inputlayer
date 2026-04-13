@@ -9,8 +9,10 @@ Write Python. No query syntax required. The OLM compiles typed Python classes in
 ```bash
 pip install inputlayer-client-dev
 
-# With pandas DataFrame support
-pip install inputlayer-client-dev[pandas]
+# With extras
+pip install inputlayer-client-dev[pandas]      # DataFrame support
+pip install inputlayer-client-dev[langchain]   # LangChain integration
+pip install inputlayer-client-dev[all]         # everything
 ```
 
 Requirements: Python 3.10+ and a running InputLayer server.
@@ -180,6 +182,103 @@ def on_update(event):
     print(f"{event.count} new readings")
 ```
 
+## LangChain Integration
+
+```bash
+pip install inputlayer-client-dev[langchain]
+```
+
+The full integration guide lives at [docs/guides/langchain](../../docs/content/docs/guides/langchain.mdx). Highlights:
+
+### Vector store
+
+Drop-in `langchain_core.vectorstores.VectorStore` backed by an InputLayer `Relation`. Embeds documents through any LangChain `Embeddings` instance, supports metadata filters, deletion, and `as_retriever()`:
+
+```python
+from inputlayer import Relation, Vector
+from inputlayer.integrations.langchain import InputLayerVectorStore
+from langchain_openai import OpenAIEmbeddings
+
+class Chunk(Relation):
+    id: str
+    content: str
+    source: str
+    embedding: Vector
+
+await kg.define(Chunk)
+vs = InputLayerVectorStore(kg=kg, relation=Chunk, embeddings=OpenAIEmbeddings())
+await vs.aadd_texts(["..."], metadatas=[{"source": "wiki"}], ids=["doc1"])
+docs = await vs.asimilarity_search("query", k=5, filter={"source": "wiki"})
+```
+
+### Retriever
+
+`InputLayerRetriever` runs in vector mode (with an `Embeddings` instance) or in InputLayer Query Language mode with safe `:input` parameter binding:
+
+```python
+from inputlayer.integrations.langchain import InputLayerRetriever
+
+retriever = InputLayerRetriever(
+    kg=kg,
+    query="?article(I, T, C, Cat, E), user_interest(:input, Cat)",
+    page_content_columns=["content"],
+    metadata_columns=["title", "category"],
+)
+result = await retriever.ainvoke("alice")
+```
+
+### Structured agent tools
+
+`tools_from_relations` generates one `StructuredTool` per `Relation` with typed equality, range, and IN-list filters. The LLM never has to write IQL:
+
+```python
+from inputlayer.integrations.langchain import tools_from_relations
+tools = tools_from_relations(kg, [Employee, Article])
+agent = create_tool_calling_agent(llm, tools, prompt)
+```
+
+For agents that genuinely need raw IQL access, `InputLayerIQLTool` is the escape hatch. All components support both sync (`invoke`) and async (`ainvoke`) and are safe to use inside Jupyter, FastAPI, and LangGraph.
+
+### Examples
+
+See [`examples/langchain/`](examples/langchain/) — 17 examples covering AI/LLM integration patterns:
+
+```bash
+# List all examples
+uv run python -m examples.langchain.runner --list
+
+# Run specific examples
+uv run python -m examples.langchain.runner 1 3 9
+
+# Run a range
+uv run python -m examples.langchain.runner 1-5
+
+# Run all
+uv run python -m examples.langchain.runner --all
+```
+
+| # | Example | Description |
+|---|---------|-------------|
+| 1 | Retriever + IQL | Join queries with `{input}` placeholder |
+| 2 | Vector search | Cosine similarity with distance filter |
+| 3 | Tool for agents | Raw IQL + template mode |
+| 4 | LCEL chain | Full retriever \| prompt \| llm \| parser pipeline |
+| 5 | KG building | Extract facts from documents with LLM |
+| 6 | Explainable RAG | `.why()` proof trees + `.why_not()` explanations |
+| 7 | Multi-hop reasoning | Transitive closure over org graph |
+| 8 | Conversational memory | Chat turns as facts, rules derive context |
+| 9 | Access-controlled RAG | Clearance-based document filtering via rules |
+| 10 | Multi-agent | Researcher + fact-checker with shared KG |
+| 11 | Anomaly detection | Salary band rules flag violations |
+| 12 | Hallucination detection | Ground LLM claims against KG facts |
+| 13 | Guardrails | Policy rules block unsafe content |
+| 14 | GraphRAG | Entity extraction + community detection |
+| 15 | Semantic caching | Cache LLM responses, topic-based matching |
+| 16 | Recommendation engine | Collaborative filtering via IQL rules |
+| 17 | Data lineage | Source attribution + conflict detection |
+
+Requires a running InputLayer server and optionally LM Studio (or any OpenAI-compatible server) for LLM examples.
+
 ## Sync Client
 
 For scripts, notebooks, and non-async contexts:
@@ -260,7 +359,7 @@ The autodetector diffs your current Python models against the last migration's s
 | `revoke_access(username)` | Revoke per-KG access |
 | `list_acl()` | List access control entries |
 | `explain(*select, ...)` | Show query plan without executing |
-| `execute(datalog)` | Execute raw Datalog |
+| `execute(iql)` | Execute raw IQL |
 | `status()` | Get server status |
 | `compact()` | Trigger storage compaction |
 
@@ -334,13 +433,16 @@ See the [`examples/`](examples/) directory:
 | `08_session_rules.py` | Ad-hoc ephemeral views |
 | `09_access_control.py` | User/ACL management |
 | `10_migrations.py` | Django-style schema versioning |
+| `langchain/` | 17 LangChain integration examples (see above) |
 
 ## Development
 
 ```bash
 cd packages/inputlayer-py
-pip install -e ".[dev]"
-python -m pytest tests/ -v
+uv sync --extra dev
+uv run pytest tests/ -v
+uv run ruff check src/ tests/
+uv run mypy src/inputlayer/
 ```
 
 ## License

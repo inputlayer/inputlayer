@@ -1,4 +1,4 @@
-use inputlayer::{DatalogEngine, OptimizationConfig};
+use inputlayer::{IQLEngine, OptimizationConfig};
 
 fn main() {
     let query = "path2(x, z) <- edge(x, y), edge(y, z)";
@@ -13,7 +13,7 @@ fn main() {
         enable_boolean_specialization: false,
         enable_magic_sets: false,
     };
-    let mut engine = DatalogEngine::with_config(config);
+    let mut engine = IQLEngine::with_config(config);
     engine.add_fact("edge", edges.clone());
     engine.parse(query).expect("failed to parse query");
     engine.build_ir(false).expect("failed to build IR");
@@ -30,7 +30,7 @@ fn main() {
         enable_boolean_specialization: false,
         enable_magic_sets: false,
     };
-    let mut engine2 = DatalogEngine::with_config(config);
+    let mut engine2 = IQLEngine::with_config(config);
     engine2.add_fact("edge", edges.clone());
     engine2.parse(query).expect("failed to parse query");
     engine2.build_ir(false).expect("failed to build IR");

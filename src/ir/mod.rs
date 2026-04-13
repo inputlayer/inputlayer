@@ -1,4 +1,4 @@
-//! IR types for Datalog query plans, shared across all optimization passes.
+//! IR types for IQL query plans, shared across all optimization passes.
 
 use crate::ast::{ArithExpr, ComparisonOp};
 use std::collections::{HashMap, HashSet};
@@ -2001,7 +2001,7 @@ mod tests {
 
     // Integration / Complex Scenario Tests
     #[test]
-    fn test_datalog_negation_pattern() {
+    fn test_iql_negation_pattern() {
         // Pattern: unreachable(x) <- node(x), !reachable(x).
         let nodes = IRNode::Scan {
             relation: "node".to_string(),
@@ -2027,7 +2027,7 @@ mod tests {
     }
 
     #[test]
-    fn test_datalog_aggregation_pattern() {
+    fn test_iql_aggregation_pattern() {
         // Pattern: result(x, count<y>) <- data(x, y).
         let data = IRNode::Scan {
             relation: "data".to_string(),

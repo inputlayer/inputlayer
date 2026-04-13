@@ -29,7 +29,7 @@ class ModelState:
         """Build state by introspecting Python model classes."""
         from inputlayer.compiler import compile_rule
         from inputlayer.relation import Relation as RelBase
-        from inputlayer.types import python_type_to_datalog
+        from inputlayer.types import python_type_to_iql
 
         state = cls()
 
@@ -39,7 +39,7 @@ class ModelState:
             cols = RelBase._get_columns(rel_cls)
             col_types = RelBase._get_column_types(rel_cls)
             state.relations[name] = [
-                (col, python_type_to_datalog(col_types[col])) for col in cols
+                (col, python_type_to_iql(col_types[col])) for col in cols
             ]
 
         # Process derived relations (schema + rules)
@@ -48,14 +48,14 @@ class ModelState:
             cols = RelBase._get_columns(der_cls)
             col_types = RelBase._get_column_types(der_cls)
             state.relations[name] = [
-                (col, python_type_to_datalog(col_types[col])) for col in cols
+                (col, python_type_to_iql(col_types[col])) for col in cols
             ]
 
-            # Compile each rule clause to Datalog
+            # Compile each rule clause to IQL
             compiled_clauses = []
             head_columns = cols
             for clause in der_cls.rules:
-                datalog = compile_rule(
+                iql = compile_rule(
                     name,
                     head_columns,
                     clause.select_map,
@@ -63,7 +63,7 @@ class ModelState:
                     clause.condition,
                     persistent=True,
                 )
-                compiled_clauses.append(datalog)
+                compiled_clauses.append(iql)
             state.rules[name] = compiled_clauses
 
         # Process indexes

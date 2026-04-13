@@ -28,7 +28,7 @@ Type .help for commands, .quit to exit
 
 ## 3. Add Some Data
 
-```datalog
+```iql
 > +person("alice", 30)
 OK
 
@@ -41,7 +41,7 @@ OK
 
 ## 4. Query the Data
 
-```datalog
+```iql
 > ?person(Name, Age)
 ┌─────────┬─────┐
 │ Name    │ Age │
@@ -55,7 +55,7 @@ OK
 
 ## 5. Add a Filter
 
-```datalog
+```iql
 > ?person(Name, Age), Age > 28
 ┌─────────┬─────┐
 │ Name    │ Age │
@@ -68,7 +68,7 @@ OK
 
 ## 6. Create a Rule
 
-```datalog
+```iql
 > +senior(Name) <- person(Name, Age), Age >= 30
 OK
 
@@ -84,7 +84,7 @@ OK
 
 ## 7. Use Aggregation
 
-```datalog
+```iql
 > ?avg<Age> <- person(_, Age)
 ┌─────┐
 │ avg │

@@ -1,4 +1,4 @@
-"""Aggregation functions that compile to Datalog aggregates."""
+"""Aggregation functions that compile to IQL aggregates."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def _to_expr(col: ColumnProxy | Expr) -> Expr:
 def count(column: ColumnProxy | type[Relation] | None = None) -> AggExpr:
     """Count rows. If a column is given, counts non-null values.
 
-    Datalog: count<Var>
+    IQL: count<Var>
     """
     if column is None or (isinstance(column, type)):
         # count(*) - needs at least one column from the body
@@ -31,7 +31,7 @@ def count(column: ColumnProxy | type[Relation] | None = None) -> AggExpr:
 def count_distinct(column: ColumnProxy) -> AggExpr:
     """Count distinct values.
 
-    Datalog: count_distinct<Var>
+    IQL: count_distinct<Var>
     """
     return AggExpr(func="count_distinct", column=_to_expr(column))
 
@@ -39,7 +39,7 @@ def count_distinct(column: ColumnProxy) -> AggExpr:
 def sum_(column: ColumnProxy) -> AggExpr:
     """Sum numeric values.
 
-    Datalog: sum<Var>
+    IQL: sum<Var>
     """
     return AggExpr(func="sum", column=_to_expr(column))
 
@@ -47,7 +47,7 @@ def sum_(column: ColumnProxy) -> AggExpr:
 def min_(column: ColumnProxy) -> AggExpr:
     """Minimum value.
 
-    Datalog: min<Var>
+    IQL: min<Var>
     """
     return AggExpr(func="min", column=_to_expr(column))
 
@@ -55,7 +55,7 @@ def min_(column: ColumnProxy) -> AggExpr:
 def max_(column: ColumnProxy) -> AggExpr:
     """Maximum value.
 
-    Datalog: max<Var>
+    IQL: max<Var>
     """
     return AggExpr(func="max", column=_to_expr(column))
 
@@ -63,7 +63,7 @@ def max_(column: ColumnProxy) -> AggExpr:
 def avg(column: ColumnProxy) -> AggExpr:
     """Average value.
 
-    Datalog: avg<Var>
+    IQL: avg<Var>
     """
     return AggExpr(func="avg", column=_to_expr(column))
 
@@ -76,7 +76,7 @@ def top_k(
 ) -> AggExpr:
     """Top-K aggregation with ordering.
 
-    Datalog: top_k<k, Passthrough..., OrderCol:desc>
+    IQL: top_k<k, Passthrough..., OrderCol:desc>
     """
     return AggExpr(
         func="top_k",
@@ -96,7 +96,7 @@ def top_k_threshold(
 ) -> AggExpr:
     """Top-K with threshold aggregation.
 
-    Datalog: top_k_threshold<k, threshold, Passthrough..., OrderCol:desc>
+    IQL: top_k_threshold<k, threshold, Passthrough..., OrderCol:desc>
     """
     return AggExpr(
         func="top_k_threshold",
@@ -115,7 +115,7 @@ def within_radius(
 ) -> AggExpr:
     """Within-radius aggregation.
 
-    Datalog: within_radius<r, Passthrough..., DistCol:asc>
+    IQL: within_radius<r, Passthrough..., DistCol:asc>
     """
     return AggExpr(
         func="within_radius",

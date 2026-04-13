@@ -77,14 +77,14 @@ export const MdxComponents: Components = {
   ),
 
   code: ({ className, children, ...props }) => {
-    // Fenced code blocks get a className like "language-datalog"
+    // Fenced code blocks get a className like "language-iql"
     const isBlock = className?.startsWith("language-")
     if (isBlock) {
       const raw = String(children).replace(/\n$/, "")
       const lang = className!.replace("language-", "")
 
-      // Use our custom Datalog tokenizer
-      if (lang === "datalog") {
+      // Use our custom IQL tokenizer
+      if (lang === "iql") {
         const html = highlightToHtml(raw)
         return (
           <code

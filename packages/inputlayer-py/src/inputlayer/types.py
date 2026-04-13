@@ -1,4 +1,4 @@
-"""InputLayer type system - Python types that map to Datalog storage types."""
+"""InputLayer type system - Python types that map to IQL storage types."""
 
 from __future__ import annotations
 
@@ -156,7 +156,7 @@ class Timestamp(int):
         )
 
 
-# Map Python types to InputLayer Datalog type names
+# Map Python types to InputLayer IQL type names
 # Order matters: more specific types first (bool before int, Timestamp before int)
 TYPE_MAP: dict[type, str] = {
     bool: "bool",
@@ -169,8 +169,8 @@ TYPE_MAP: dict[type, str] = {
 }
 
 
-def python_type_to_datalog(tp: type) -> str:
-    """Convert a Python type annotation to its InputLayer Datalog type string.
+def python_type_to_iql(tp: type) -> str:
+    """Convert a Python type annotation to its InputLayer IQL type string.
 
     Handles Vector[N], VectorInt8[N], and plain types.
     """

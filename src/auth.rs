@@ -1,6 +1,6 @@
 //! Authentication and Role-Based Access Control (RBAC)
 //!
-//! Provides role-based authorization for all Datalog operations,
+//! Provides role-based authorization for all IQL operations,
 //! password hashing (argon2id), and API key management (SHA-256).
 
 use crate::statement::{MetaCommand, Statement};

@@ -215,7 +215,7 @@ export function TimingDisplay({ tb, executionTimeMs, rowCount }: {
           <span className="text-2xl font-bold font-mono tabular-nums">{formatUs(tb.total_us)}</span>
           <span className="text-xs text-muted-foreground ml-1.5">
             engine
-            <Tip>Time inside the Datalog engine: parse, rewrite, optimize, and execute.</Tip>
+            <Tip>Time inside the IQL engine: parse, rewrite, optimize, and execute.</Tip>
           </span>
         </div>
         {rowCount !== undefined && (

@@ -1,9 +1,9 @@
 //! Simple Query Example
 //!
-//! Demonstrates basic scanning and filtering with the Datalog engine.
+//! Demonstrates basic scanning and filtering with the IQL engine.
 //! Shows the full pipeline: Parser → IR Builder → Optimizer → Code Generator
 
-use inputlayer::DatalogEngine;
+use inputlayer::IQLEngine;
 use std::collections::HashSet;
 
 fn to_set(results: Vec<(i32, i32)>) -> HashSet<(i32, i32)> {
@@ -14,7 +14,7 @@ fn main() {
     println!("=== Simple Query Example ===\n");
 
     // Create engine
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     // Add some base facts: edges in a graph
     println!("Adding base facts (edges):");

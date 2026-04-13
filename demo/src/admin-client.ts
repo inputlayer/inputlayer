@@ -182,7 +182,7 @@ export class AdminClient {
     }, delay)
   }
 
-  /** Execute a Datalog program or meta command, return result rows. */
+  /** Execute a IQL program or meta command, return result rows. */
   async execute(program: string, timeoutMs = 15000): Promise<unknown[][]> {
     if (!this.ws || !this.authenticated) {
       await this.connect()

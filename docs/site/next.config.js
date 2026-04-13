@@ -1,7 +1,7 @@
 const fs = require('fs')
 const path = require('path')
 
-const grammarPath = path.resolve(__dirname, '../grammars/datalog.tmLanguage.json')
+const grammarPath = path.resolve(__dirname, '../grammars/iql.tmLanguage.json')
 
 const withNextra = require('nextra')({
   theme: 'nextra-theme-docs',
@@ -12,17 +12,17 @@ const withNextra = require('nextra')({
       getHighlighter: async (options) => {
         const { getHighlighter } = await import('shiki')
 
-        // Load custom Datalog grammar
-        const datalogGrammar = JSON.parse(fs.readFileSync(grammarPath, 'utf-8'))
+        // Load custom IQL grammar
+        const iqlGrammar = JSON.parse(fs.readFileSync(grammarPath, 'utf-8'))
 
         const highlighter = await getHighlighter({
           ...options,
           langs: [
             ...(options.langs || []),
             {
-              id: 'datalog',
-              scopeName: 'source.datalog',
-              ...datalogGrammar,
+              id: 'iql',
+              scopeName: 'source.iql',
+              ...iqlGrammar,
             },
           ],
         })

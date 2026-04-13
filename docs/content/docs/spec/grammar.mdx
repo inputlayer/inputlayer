@@ -10,7 +10,7 @@ InputLayer programs are UTF-8 encoded text. You can use Unicode characters in st
 
 Spaces, tabs, and newlines separate tokens. Extra whitespace is ignored:
 
-```datalog
+```iql
 +edge(1, 2)           // Fine
 +edge( 1 , 2 )        // Also fine
 +edge(1,2)            // Also fine
@@ -18,7 +18,7 @@ Spaces, tabs, and newlines separate tokens. Extra whitespace is ignored:
 
 Whitespace inside strings is preserved:
 
-```datalog
+```iql
 +message("hello world")  // String contains space
 ```
 
@@ -26,7 +26,7 @@ Whitespace inside strings is preserved:
 
 Two styles of comments are supported:
 
-```datalog
+```iql
 // Line comment: everything after // is ignored
 
 /* Block comment:
@@ -37,7 +37,7 @@ Two styles of comments are supported:
 ```
 
 Comments cannot be nested:
-```datalog
+```iql
 /* outer /* inner */ still in outer? */  // Error!
 ```
 
@@ -128,7 +128,7 @@ Predicates (relation names) must start with a lowercase letter.
 
 ## Extensions
 
-InputLayer extends standard Datalog with:
+InputLayer's IQL extends standard IQL with:
 
 - **Aggregations** - count, sum, min, max, avg, top_k
 - **Vectors** - Array literals and 55 builtin functions

@@ -1,6 +1,6 @@
 //! Parquet Storage Format Implementation
 //!
-//! Provides efficient columnar storage for Datalog relations using Apache Parquet format.
+//! Provides efficient columnar storage for IQL relations using Apache Parquet format.
 //! Parquet offers:
 //! - 10x compression vs CSV
 //! - Fast columnar reads

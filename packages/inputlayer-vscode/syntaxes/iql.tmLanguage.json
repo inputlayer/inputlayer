@@ -1,0 +1,313 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "InputLayer IQL",
+  "scopeName": "source.iql",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#meta-commands" },
+    { "include": "#type-record-declaration" },
+    { "include": "#schema-column" },
+    { "include": "#sort-order" },
+    { "include": "#rule-body" },
+    { "include": "#query-marker" },
+    { "include": "#operator-prefix" },
+    { "include": "#negation" },
+    { "include": "#comparison-operators" },
+    { "include": "#numbers" },
+    { "include": "#aggregates" },
+    { "include": "#builtin-functions" },
+    { "include": "#keywords" },
+    { "include": "#wildcard" },
+    { "include": "#variables" },
+    { "include": "#head-identifiers" },
+    { "include": "#arithmetic-operators" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.iql",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.iql",
+          "begin": "/\\*",
+          "end": "\\*/",
+          "patterns": [
+            { "include": "#comments" }
+          ]
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.iql",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.iql",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "meta-commands": {
+      "patterns": [
+        {
+          "match": "^\\s*(\\.kg)\\s+(create|list|use|drop)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.meta.iql" },
+            "2": { "name": "keyword.control.meta.subcommand.iql" }
+          }
+        },
+        {
+          "match": "^\\s*(\\.rule)\\s+(list|drop|remove|def|clear|edit)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.meta.iql" },
+            "2": { "name": "keyword.control.meta.subcommand.iql" }
+          }
+        },
+        {
+          "match": "^\\s*(\\.session)\\s+(clear|drop)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.meta.iql" },
+            "2": { "name": "keyword.control.meta.subcommand.iql" }
+          }
+        },
+        {
+          "match": "^\\s*(\\.index)\\s+(list|create|drop|stats|rebuild)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.meta.iql" },
+            "2": { "name": "keyword.control.meta.subcommand.iql" }
+          }
+        },
+        {
+          "name": "keyword.control.meta.iql",
+          "match": "^\\s*\\.(kg|rel|rule|session|index|load|compact|status|help|quit|exit|q|\\?)\\b"
+        }
+      ]
+    },
+    "type-record-declaration": {
+      "begin": "\\b(type)\\s+([A-Z_][A-Za-z0-9_]*)\\s*(:)\\s*(\\{)",
+      "beginCaptures": {
+        "1": { "name": "storage.type.keyword.iql" },
+        "2": { "name": "entity.name.type.iql" },
+        "3": { "name": "punctuation.separator.colon.iql" },
+        "4": { "name": "punctuation.brace.open.iql" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.brace.close.iql" }
+      },
+      "name": "meta.type.record.iql",
+      "patterns": [
+        { "include": "#schema-column" },
+        { "include": "#keywords" },
+        { "include": "#punctuation" }
+      ]
+    },
+    "schema-column": {
+      "patterns": [
+        {
+          "match": "\\b([a-z][A-Za-z0-9_]*)\\s*(:)\\s*(integer|int|i32|i64|float|double|f64|number|symbol|string|str|text|boolean|bool|timestamp|datetime|time|vector|embedding|vec|any|list)\\b",
+          "captures": {
+            "1": { "name": "variable.other.member.iql" },
+            "2": { "name": "punctuation.separator.colon.iql" },
+            "3": { "name": "storage.type.iql" }
+          }
+        }
+      ]
+    },
+    "sort-order": {
+      "patterns": [
+        {
+          "match": ":(desc|asc)\\b",
+          "captures": {
+            "0": { "name": "keyword.other.sort-order.iql" }
+          }
+        }
+      ]
+    },
+    "rule-body": {
+      "begin": "<-",
+      "beginCaptures": {
+        "0": { "name": "keyword.control.arrow.iql" }
+      },
+      "end": "(?=^\\s*[?+\\-.])|(?=^\\s*$)|(?=^[a-z])",
+      "name": "meta.rule.body.iql",
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#sort-order" },
+        { "include": "#negation" },
+        { "include": "#comparison-operators" },
+        { "include": "#numbers" },
+        { "include": "#aggregates" },
+        { "include": "#builtin-functions" },
+        { "include": "#keywords" },
+        { "include": "#wildcard" },
+        { "include": "#variables" },
+        { "include": "#body-identifiers" },
+        { "include": "#arithmetic-operators" },
+        { "include": "#punctuation" }
+      ]
+    },
+    "query-marker": {
+      "patterns": [
+        {
+          "name": "keyword.control.query.iql",
+          "match": "\\?(?=[A-Za-z])"
+        }
+      ]
+    },
+    "operator-prefix": {
+      "patterns": [
+        {
+          "name": "keyword.control.mutation.iql",
+          "match": "^\\s*[+\\-](?=[a-z\"\\[])"
+        }
+      ]
+    },
+    "negation": {
+      "patterns": [
+        {
+          "name": "keyword.control.negation.iql",
+          "match": "!(?=[A-Za-z])"
+        }
+      ]
+    },
+    "comparison-operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.comparison.iql",
+          "match": ">=|<=|!=|[<>=]"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.iql",
+          "match": "\\b[0-9]+\\.[0-9]+(?:[eE][+\\-]?[0-9]+)?\\b"
+        },
+        {
+          "name": "constant.numeric.integer.iql",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "aggregates": {
+      "patterns": [
+        {
+          "name": "support.function.aggregate.iql",
+          "match": "\\b(count_distinct|count|sum|avg|top_k_threshold|top_k|within_radius|min|max)\\b"
+        }
+      ]
+    },
+    "builtin-functions": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.iql",
+          "match": "\\b(euclidean_int8|euclidean|cosine_int8|cosine|dot_int8|dot|manhattan_int8|manhattan|normalize|vec_dim|vec_add|vec_scale|quantize_linear|quantize_symmetric|dequantize_scaled|dequantize|lsh_multi_probe|lsh_bucket|lsh_probes|hnsw_nearest|time_decay_linear|time_decay|time_diff|time_add|time_sub|time_now|time_before|time_after|time_between|within_last|intervals_overlap|interval_contains|interval_duration|point_in_interval|abs_int64|abs_float64|abs|sqrt|pow|log|exp|sin|cos|tan|floor|ceil|sign|min_val|max_val|len|upper|lower|trim|substr|replace|concat)\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "constant.language.boolean.iql",
+          "match": "\\b(true|false)\\b"
+        },
+        {
+          "name": "storage.type.iql",
+          "match": "\\b(type|int|string|bool|float|list)\\b"
+        }
+      ]
+    },
+    "wildcard": {
+      "patterns": [
+        {
+          "name": "variable.language.wildcard.iql",
+          "match": "\\b_\\b"
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "name": "variable.parameter.iql",
+          "match": "\\b[A-Z_][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "head-identifiers": {
+      "patterns": [
+        {
+          "name": "entity.name.function.iql",
+          "match": "\\b[a-z][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "body-identifiers": {
+      "patterns": [
+        {
+          "name": "entity.name.tag.iql",
+          "match": "\\b[a-z][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "arithmetic-operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.arithmetic.iql",
+          "match": "[+\\-*/]"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.parenthesis.open.iql",
+          "match": "\\("
+        },
+        {
+          "name": "punctuation.parenthesis.close.iql",
+          "match": "\\)"
+        },
+        {
+          "name": "punctuation.bracket.open.iql",
+          "match": "\\["
+        },
+        {
+          "name": "punctuation.bracket.close.iql",
+          "match": "\\]"
+        },
+        {
+          "name": "punctuation.brace.open.iql",
+          "match": "\\{"
+        },
+        {
+          "name": "punctuation.brace.close.iql",
+          "match": "\\}"
+        },
+        {
+          "name": "punctuation.separator.comma.iql",
+          "match": ","
+        },
+        {
+          "name": "punctuation.accessor.dot.iql",
+          "match": "\\."
+        },
+        {
+          "name": "punctuation.separator.colon.iql",
+          "match": ":"
+        }
+      ]
+    }
+  }
+}

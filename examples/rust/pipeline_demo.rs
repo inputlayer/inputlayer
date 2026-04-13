@@ -1,19 +1,19 @@
 //! Pipeline Demonstration
 //!
-//! This example demonstrates each stage of the Datalog pipeline:
+//! This example demonstrates each stage of the IQL pipeline:
 //! 1. Parsing (source text → AST)
 //! 2. IR Building (AST → IR with catalog)
 //! 3. Optimization (IR → optimized IR)
 //! 4. Code Generation & Execution (IR → Differential Dataflow → results)
 
-use inputlayer::{DatalogEngine, IRNode};
+use inputlayer::{IQLEngine, IRNode};
 
 fn main() {
-    println!("=== Datalog Pipeline Demonstration ===\n");
+    println!("=== IQL Pipeline Demonstration ===\n");
     println!("This example shows each stage of the query processing pipeline.\n");
 
     // Create engine and add base data
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     println!("Step 0: Adding Base Facts");
     println!("-------------------------");
@@ -25,13 +25,13 @@ fn main() {
     }
     println!();
 
-    // Define the Datalog program
+    // Define the IQL program
     let program = "
         % Find 2-hop paths where starting node > 1
         result(x, z) :- edge(x, y), edge(y, z), x > 1.
     ";
 
-    println!("Datalog Program:");
+    println!("IQL Program:");
     println!("----------------");
     println!("{}", program.trim());
     println!();

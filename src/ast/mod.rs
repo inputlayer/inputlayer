@@ -1,6 +1,6 @@
-//! # Datalog AST - Abstract Syntax Tree Types
+//! # IQL AST - Abstract Syntax Tree Types
 //!
-//! Abstract Syntax Tree types for Datalog programs.
+//! Abstract Syntax Tree types for IQL programs.
 //! Used across multiple modules for parsing and semantic analysis.
 //!
 //! ## Builders
@@ -14,7 +14,7 @@ use std::collections::HashSet;
 pub mod builders;
 
 // Core AST Types
-/// Aggregation function types for Datalog
+/// Aggregation function types for IQL
 ///
 /// Note: Does not implement Hash or Eq because `TopKThreshold` and `WithinRadius`
 /// contain f64 fields which don't implement these traits.
@@ -705,12 +705,12 @@ impl AggregateFunc {
     }
 }
 
-/// Represents a variable or constant in Datalog
+/// Represents a variable or constant in IQL
 #[derive(Debug, Clone, PartialEq)]
 pub enum Term {
     Variable(String), // e.g., "x", "y", "z"
     Constant(i64),    // e.g., 42, 100
-    Placeholder,      // For parser - represents "_" in Datalog
+    Placeholder,      // For parser - represents "_" in IQL
     /// Aggregation term: `count<x>`, `sum<y>`, `min<z>`, `max<z>`, `avg<z>`
     Aggregate(AggregateFunc, String), // (function, variable_name)
     /// Arithmetic expression term: `d + 1`, `x * y`, etc.
@@ -1042,7 +1042,7 @@ impl BodyPredicate {
     }
 }
 
-/// Represents a single Datalog rule
+/// Represents a single IQL rule
 #[derive(Debug, Clone)]
 pub struct Rule {
     pub head: Atom,
@@ -1245,7 +1245,7 @@ impl Rule {
     }
 }
 
-/// Represents a complete Datalog program
+/// Represents a complete IQL program
 #[derive(Debug, Clone)]
 pub struct Program {
     pub rules: Vec<Rule>,
@@ -1342,7 +1342,7 @@ impl Default for Program {
     }
 }
 
-// Display Implementations for Datalog Formatting
+// Display Implementations for IQL Formatting
 impl ArithOp {
     /// Return numeric precedence: higher value = binds tighter.
     fn precedence(&self) -> u8 {

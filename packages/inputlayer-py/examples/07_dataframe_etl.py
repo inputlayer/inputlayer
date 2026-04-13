@@ -1,6 +1,7 @@
 """DataFrame ETL: load from pandas, export back to pandas."""
 
 import asyncio
+import os
 
 import pandas as pd
 
@@ -15,7 +16,11 @@ class Product(Relation):
 
 
 async def main():
-    async with InputLayer("ws://localhost:8080/ws", username="admin", password="admin") as il:
+    async with InputLayer(
+        os.environ.get("INPUTLAYER_URL", "ws://localhost:8080/ws"),
+        username=os.environ.get("INPUTLAYER_USER", "admin"),
+        password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
+    ) as il:
         kg = il.knowledge_graph("etl")
 
         await kg.define(Product)

@@ -88,7 +88,7 @@ fn format_panic_payload(payload: Box<dyn std::any::Any + Send>) -> String {
 /// `FLOAT_EQ_TOLERANCE` (~2.2e-16) is far too tight for practical use - values that
 /// differ by normal floating-point rounding (e.g. `0.1 + 0.2`) would compare
 /// as unequal. 1e-10 is tight enough for 64-bit precision while tolerating
-/// accumulated rounding in typical Datalog arithmetic.
+/// accumulated rounding in typical IQL arithmetic.
 const FLOAT_EQ_TOLERANCE: f64 = 1e-10;
 
 /// Iteration counter type for recursive scopes

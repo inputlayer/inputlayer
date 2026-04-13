@@ -118,7 +118,7 @@ export class KnowledgeGraphApi {
  * Query API methods
  */
 export class QueryApi {
-  /** Execute a Datalog query */
+  /** Execute a IQL query */
   async execute(params: {
     query: string;
     knowledgeGraph: string;

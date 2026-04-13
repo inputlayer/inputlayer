@@ -42,7 +42,7 @@ In Detailed mode, you also get `optimizer_detail` (iteration count, rules vs fus
 
 Here's a typical workflow for identifying a bottleneck. Start by inserting some data and defining a recursive rule:
 
-```datalog
+```iql
 +edge[(1, 2), (2, 3), (3, 4), (4, 5)]
 +tc(X, Y) <- edge(X, Y)
 +tc(X, Y) <- tc(X, Z), edge(Z, Y)
@@ -82,7 +82,7 @@ In the Explorer, clicking a view and opening the **Performance** tab shows timin
 - **Timing** - full stage breakdown and per-rule detail
 - **Inputs** - dependency graph showing which base relations feed the view, their fact counts, and recent mutations
 - **Query Plan** - the optimizer pipeline trace
-- **Rule** - the Datalog definition
+- **Rule** - the IQL definition
 
 ## SDK Access
 
@@ -140,7 +140,7 @@ Note: in the Python SDK, `timing_breakdown` is a `dict[str, Any]`, so fields are
 
 The `.why` and `.why_not` commands also carry timing breakdowns that separate query execution from proof/explanation work:
 
-```datalog
+```iql
 .why ?tc(1, 3)
 ```
 

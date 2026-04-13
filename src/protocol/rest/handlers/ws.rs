@@ -109,7 +109,7 @@ enum WsResponse {
 ///
 /// ### Client → Server Messages
 ///
-/// **Query** - Execute a Datalog query in the session context:
+/// **Query** - Execute an IQL query in the session context:
 /// ```json
 /// {"type": "query", "query": "?edge(X, Y)"}
 /// ```
@@ -654,7 +654,7 @@ enum GlobalWsRequest {
     Login { username: String, password: String },
     /// Authenticate with an API key
     Authenticate { api_key: String },
-    /// Execute any Datalog statement or meta command as raw text
+    /// Execute any IQL statement or meta command as raw text
     Execute { program: String },
     /// Keep-alive ping
     Ping,
@@ -738,7 +738,7 @@ enum GlobalWsResponse {
 ///
 /// ## Client → Server Messages
 ///
-/// **Execute** - Send any Datalog statement or meta command as raw text:
+/// **Execute** - Send any IQL statement or meta command as raw text:
 /// ```json
 /// {"type": "execute", "program": "+edge(1,2)."}
 /// {"type": "execute", "program": "?edge(X,Y)"}

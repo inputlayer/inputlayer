@@ -28,7 +28,7 @@ With an HNSW index:
 
 ### Simple Example
 
-```datalog
+```iql
 // Create a documents table with embeddings
 +documents(id: int, title: string, embedding: vector)
 
@@ -165,7 +165,7 @@ Indexes are used automatically when you perform vector similarity searches. The 
 
 ### Automatic Index Usage
 
-```datalog
+```iql
 // Query vector (from your embedding model)
 query_vec([0.11, 0.21, 0.29])
 
@@ -183,7 +183,7 @@ query_vec([0.11, 0.21, 0.29])
 The `hnsw_nearest` builtin queries an HNSW index directly, returning the k nearest neighbors with their distances.
 
 **Syntax:**
-```datalog
+```iql
 hnsw_nearest("index_name", QueryVec, K, IdVar, DistVar)
 hnsw_nearest("index_name", QueryVec, K, IdVar, DistVar, EfSearch)
 ```
@@ -199,23 +199,23 @@ hnsw_nearest("index_name", QueryVec, K, IdVar, DistVar, EfSearch)
 | `EfSearch` | Optional search beam width override (higher = better recall, slower) |
 
 **Example - basic nearest neighbor search:**
-```datalog
+```iql
 ?hnsw_nearest("doc_emb_idx", [0.1, 0.2, 0.3, 0.4], 10, Id, Distance)
 ```
 
 **Example - using a query vector from a relation:**
-```datalog
+```iql
 ?query_embedding(QV), hnsw_nearest("doc_emb_idx", QV, 5, Id, Dist)
 ```
 
 **Example - joining results with the base relation:**
-```datalog
+```iql
 ?hnsw_nearest("doc_emb_idx", [0.1, 0.2, 0.3, 0.4], 10, Id, Dist),
   documents(Id, Title, _)
 ```
 
 **Example - with custom ef_search for higher recall:**
-```datalog
+```iql
 ?hnsw_nearest("doc_emb_idx", [0.1, 0.2, 0.3, 0.4], 10, Id, Dist, 200)
 ```
 
@@ -234,7 +234,7 @@ If multiple indexes exist on the same column, the one matching the distance func
 .index create idx_l2 on docs(emb) metric l2
 ```
 
-```datalog
+```iql
 // Uses idx_cosine (matches cosine distance function)
 ?docs(Id, _, V), D = cosine([0.1, 0.2], V)
 

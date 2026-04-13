@@ -1,12 +1,12 @@
-//! # `InputLayer` Datalog Engine
+//! # `InputLayer` IQL Engine
 //!
-//! Datalog engine built on Differential Dataflow.
+//! IQL engine built on Differential Dataflow.
 //!
 //! ## Pipeline Architecture
 //!
 //! ### Complete Pipeline
 //! ```text
-//! Datalog Source Code
+//! IQL Source Code
 //!     |
 //! [Parser (M04)]                -> AST
 //!     |
@@ -35,16 +35,16 @@
 //!     |-- Multiple Knowledge Graphs (namespace isolation)
 //!     |-- Parquet Persistence
 //!     |-- Parallel Query Execution (Rayon)
-//!     `-- Each Knowledge Graph -> DatalogEngine instance
+//!     `-- Each Knowledge Graph -> IQLEngine instance
 //! ```
 //!
 //! ## Usage
 //!
 //! ### Basic Query Execution
 //! ```rust
-//! use inputlayer::DatalogEngine;
+//! use inputlayer::IQLEngine;
 //!
-//! let mut engine = DatalogEngine::new();
+//! let mut engine = IQLEngine::new();
 //!
 //! // Define base facts
 //! engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
@@ -86,7 +86,7 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `parser` | Datalog -> AST |
+//! | `parser` | IQL -> AST |
 //! | `ir_builder` | AST -> IR |
 //! | `optimizer` | Basic IR optimizations |
 //! | `join_planning` | Join order optimization |
@@ -123,11 +123,11 @@ mod ir_builder; // AST -> IR construction
 mod join_planning; // Join order optimization
 mod magic_sets; // Magic Sets demand-driven rewriting for recursive queries
 mod optimizer; // Basic IR optimizations
-pub mod parser; // Datalog parsing & AST construction
+pub mod parser; // IQL parsing & AST construction
 pub mod rule_catalog; // Rule catalog for persistent rules
 pub mod semiring_types; // Diff type abstraction: BooleanDiff, MinDiff, MaxDiff
 mod sip_rewriting; // AST-level semijoin reduction
-pub mod statement; // Datalog-native statement parser
+pub mod statement; // IQL-native statement parser
 mod subplan_sharing; // Common subexpression elimination
 pub mod syntax; // PEG-based syntax highlighting for REPL
 
@@ -330,8 +330,8 @@ impl Default for OptimizationConfig {
     }
 }
 
-/// Main Datalog engine that orchestrates the entire pipeline
-pub struct DatalogEngine {
+/// Main IQL engine that orchestrates the entire pipeline
+pub struct IQLEngine {
     /// Input data for base relations (`relation_name` -> tuples)
     /// Supports arbitrary arity tuples with mixed types (int, float, string, vector)
     /// Use `input_tuples()` and `input_tuples_mut()` for access.
@@ -390,10 +390,10 @@ pub struct DatalogEngine {
     timing_mode: execution::TimingMode,
 }
 
-impl DatalogEngine {
+impl IQLEngine {
     /// Default optimization config.
     pub fn new() -> Self {
-        DatalogEngine {
+        IQLEngine {
             input_tuples: HashMap::new(),
             program: None,
             ir_nodes: Vec::new(),
@@ -412,9 +412,9 @@ impl DatalogEngine {
         }
     }
 
-    /// Create a new Datalog engine with custom optimization configuration
+    /// Create a new IQL engine with custom optimization configuration
     pub fn with_config(config: OptimizationConfig) -> Self {
-        DatalogEngine {
+        IQLEngine {
             input_tuples: HashMap::new(),
             program: None,
             ir_nodes: Vec::new(),
@@ -522,9 +522,9 @@ impl DatalogEngine {
     ///
     /// # Example
     /// ```rust
-    /// use inputlayer::DatalogEngine;
+    /// use inputlayer::IQLEngine;
     ///
-    /// let mut engine = DatalogEngine::new();
+    /// let mut engine = IQLEngine::new();
     /// engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
     /// ```
     pub fn add_fact(&mut self, relation: &str, data: Vec<(i32, i32)>) {
@@ -546,9 +546,9 @@ impl DatalogEngine {
     ///
     /// # Example
     /// ```rust
-    /// use inputlayer::{DatalogEngine, Tuple, Value};
+    /// use inputlayer::{IQLEngine, Tuple, Value};
     ///
-    /// let mut engine = DatalogEngine::new();
+    /// let mut engine = IQLEngine::new();
     /// engine.add_tuples("edge", vec![
     ///     Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
     ///     Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
@@ -583,9 +583,9 @@ impl DatalogEngine {
         self.input_tuples.insert(relation.to_string(), tuples);
     }
 
-    /// Parse a Datalog program string into AST
+    /// Parse an IQL program string into AST
     ///
-    /// Converts Datalog source code into an Abstract Syntax Tree.
+    /// Converts IQL source code into an Abstract Syntax Tree.
     /// Also performs safety validation, recursion detection, and stratification.
     ///
     /// ## Pipeline Steps
@@ -1920,7 +1920,7 @@ impl DatalogEngine {
     }
 }
 
-impl Default for DatalogEngine {
+impl Default for IQLEngine {
     fn default() -> Self {
         Self::new()
     }
@@ -1933,14 +1933,14 @@ mod tests {
 
     #[test]
     fn test_engine_creation() {
-        let engine = DatalogEngine::new();
+        let engine = IQLEngine::new();
         assert!(engine.program().is_none());
         assert_eq!(engine.ir_nodes().len(), 0);
     }
 
     #[test]
     fn test_add_facts() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
         assert_eq!(engine.input_tuples.len(), 1);
@@ -1949,7 +1949,7 @@ mod tests {
 
     #[test]
     fn test_simple_query() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
         // Execute simple query - this demonstrates the API
@@ -1973,7 +1973,7 @@ mod tests {
     fn test_self_join_with_different_string_constants() {
         // Regression test: self-join with different string constants must
         // correctly filter each side independently and not produce Cartesian products.
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_tuples(
             "events",
             vec![
@@ -2017,7 +2017,7 @@ mod tests {
         // Regression test: self-join with different integer constants must
         // correctly filter each side independently (not produce empty result or Cartesian).
         // Pattern: common(A) <- ancestor(8, A), ancestor(10, A)
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         // Ancestors: 8 has ancestors {4, 2, 1}, 10 has ancestors {6, 3, 1}
         engine.add_tuples(
             "ancestor",
@@ -2053,7 +2053,7 @@ mod tests {
         //   descendant(2, X) <- parent(X, 2)
         //   descendant(2, X) <- parent(X, Y), descendant(2, Y)
         //   __query__(_c0, X) <- descendant(_c0, X), _c0 = 2
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_tuples(
             "parent",
             vec![
@@ -2106,14 +2106,14 @@ mod tests {
             enable_boolean_specialization: false,
             enable_magic_sets: false,
         };
-        let engine = DatalogEngine::with_config(config.clone());
+        let engine = IQLEngine::with_config(config.clone());
         assert!(!engine.config().enable_join_planning);
         assert!(!engine.config().enable_sip_rewriting);
     }
 
     #[test]
     fn test_set_config() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         assert!(engine.config().enable_join_planning);
 
         let config = OptimizationConfig {
@@ -2129,7 +2129,7 @@ mod tests {
 
     #[test]
     fn test_set_num_workers() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.set_num_workers(4);
         // Workers must be at least 1
         engine.set_num_workers(0);
@@ -2138,7 +2138,7 @@ mod tests {
 
     #[test]
     fn test_add_tuple_single() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_tuple("node", Tuple::new(vec![Value::Int64(42)]));
         engine.add_tuple("node", Tuple::new(vec![Value::Int64(99)]));
 
@@ -2149,13 +2149,13 @@ mod tests {
 
     #[test]
     fn test_get_relation_nonexistent() {
-        let engine = DatalogEngine::new();
+        let engine = IQLEngine::new();
         assert!(engine.get_relation("nonexistent").is_none());
     }
 
     #[test]
     fn test_input_tuples_accessors() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
 
         assert_eq!(engine.input_tuples().len(), 1);
@@ -2167,7 +2167,7 @@ mod tests {
 
     #[test]
     fn test_parse_detects_recursion() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2), (2, 3)]);
 
         // Non-recursive
@@ -2176,7 +2176,7 @@ mod tests {
         assert!(!engine.strata().is_empty());
 
         // Recursive
-        let mut engine2 = DatalogEngine::new();
+        let mut engine2 = IQLEngine::new();
         engine2.add_fact("edge", vec![(1, 2), (2, 3)]);
         engine2
             .parse("path(X, Y) <- edge(X, Y)\npath(X, Z) <- path(X, Y), edge(Y, Z)")
@@ -2186,7 +2186,7 @@ mod tests {
 
     #[test]
     fn test_parse_unsafe_rule_rejected() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         let result = engine.parse("result(X, Y) <- edge(X, _)");
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -2195,7 +2195,7 @@ mod tests {
 
     #[test]
     fn test_execute_with_negation() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_tuples(
             "node",
             vec![
@@ -2214,7 +2214,7 @@ mod tests {
 
     #[test]
     fn test_execute_with_arithmetic() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_tuples(
             "data",
             vec![
@@ -2238,7 +2238,7 @@ mod tests {
 
     #[test]
     fn test_execute_all_rules() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2), (2, 3)]);
 
         let results = engine
@@ -2249,7 +2249,7 @@ mod tests {
 
     #[test]
     fn test_execute_with_trace() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2), (2, 3)]);
 
         let (results, trace) = engine
@@ -2261,7 +2261,7 @@ mod tests {
 
     #[test]
     fn test_debug() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
 
         let trace = engine.debug("path(X, Y) <- edge(X, Y)").unwrap();
@@ -2270,13 +2270,13 @@ mod tests {
 
     #[test]
     fn test_default_engine() {
-        let engine = DatalogEngine::default();
+        let engine = IQLEngine::default();
         assert!(engine.program().is_none());
     }
 
     #[test]
     fn test_execute_multiple_rules() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_tuples(
             "edge",
             vec![
@@ -2294,7 +2294,7 @@ mod tests {
 
     #[test]
     fn test_execute_string_data() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_tuples(
             "person",
             vec![
@@ -2311,7 +2311,7 @@ mod tests {
 
     #[test]
     fn test_get_optimization_config() {
-        let engine = DatalogEngine::new();
+        let engine = IQLEngine::new();
         let config = engine.get_optimization_config();
         assert!(config.enable_join_planning);
     }
@@ -2320,7 +2320,7 @@ mod tests {
     fn test_sip_equijoin_multikey_column_order() {
         // Regression test: SIP rewrites the rule body, join planner may reorder
         // sides, but the output column order must match the head declaration.
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_tuples(
             "orders",
             vec![
@@ -2380,12 +2380,12 @@ mod tests {
     }
 
     // =========================================================================
-    // Additional DatalogEngine Coverage Tests
+    // Additional IQLEngine Coverage Tests
     // =========================================================================
 
     #[test]
     fn test_build_ir_without_parse_fails() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         let result = engine.build_ir(false);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("No program parsed"));
@@ -2393,7 +2393,7 @@ mod tests {
 
     #[test]
     fn test_execute_ir_tuples_direct() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_tuples(
             "data",
             vec![
@@ -2412,7 +2412,7 @@ mod tests {
 
     #[test]
     fn test_execute_ir_binary_direct() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2), (3, 4)]);
 
         let ir = IRNode::Scan {
@@ -2443,7 +2443,7 @@ mod tests {
         };
 
         let mut scans = Vec::new();
-        DatalogEngine::collect_scan_relations(&ir, &mut scans);
+        IQLEngine::collect_scan_relations(&ir, &mut scans);
         assert!(scans.contains(&"edge".to_string()));
         assert!(scans.contains(&"node".to_string()));
         assert_eq!(scans.len(), 2);
@@ -2469,14 +2469,14 @@ mod tests {
         };
 
         let mut scans = Vec::new();
-        DatalogEngine::collect_scan_relations(&ir, &mut scans);
+        IQLEngine::collect_scan_relations(&ir, &mut scans);
         // "a" should appear only once (dedup)
         assert_eq!(scans.len(), 2);
     }
 
     #[test]
     fn test_topological_sort_single_node() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
         engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
         engine.build_ir(false).unwrap();
@@ -2488,7 +2488,7 @@ mod tests {
 
     #[test]
     fn test_topological_sort_dependency_chain() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_tuples(
             "edge",
             vec![Tuple::new(vec![Value::Int64(1), Value::Int64(2)])],
@@ -2511,7 +2511,7 @@ mod tests {
 
     #[test]
     fn test_detect_recursion_info_nonrecursive() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
         engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
         engine.build_ir(false).unwrap();
@@ -2524,14 +2524,14 @@ mod tests {
 
     #[test]
     fn test_execute_tuples_parse_error() {
-        let mut engine = DatalogEngine::new();
-        let result = engine.execute_tuples("this is not valid datalog @@!!");
+        let mut engine = IQLEngine::new();
+        let result = engine.execute_tuples("this is not valid IQL @@!!");
         assert!(result.is_err());
     }
 
     #[test]
     fn test_execute_all_with_trace() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2), (2, 3)]);
 
         let (results, trace) = engine
@@ -2550,7 +2550,7 @@ mod tests {
             enable_boolean_specialization: false,
             enable_magic_sets: false,
         };
-        let mut engine = DatalogEngine::with_config(config);
+        let mut engine = IQLEngine::with_config(config);
         engine.add_tuples(
             "edge",
             vec![
@@ -2565,7 +2565,7 @@ mod tests {
 
     #[test]
     fn test_add_tuples_empty() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_tuples("empty_rel", vec![]);
         // Schema should default to arity 2
         assert!(engine.catalog().has_relation("empty_rel"));
@@ -2574,7 +2574,7 @@ mod tests {
 
     #[test]
     fn test_add_tuples_registers_schema() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_tuples(
             "triple",
             vec![Tuple::new(vec![
@@ -2588,7 +2588,7 @@ mod tests {
 
     #[test]
     fn test_execute_simple_query_reversed_projection() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2), (3, 4)]);
 
         let results = engine.execute_simple_query("edge", vec![1, 0]).unwrap();
@@ -2600,14 +2600,14 @@ mod tests {
 
     #[test]
     fn test_execute_simple_query_nonexistent_relation() {
-        let engine = DatalogEngine::new();
+        let engine = IQLEngine::new();
         let results = engine.execute_simple_query("missing", vec![0, 1]).unwrap();
         assert!(results.is_empty());
     }
 
     #[test]
     fn test_multiworker_execution() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.set_num_workers(2);
         engine.add_tuples(
             "data",
@@ -2624,7 +2624,7 @@ mod tests {
 
     #[test]
     fn test_program_accessor_after_parse() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
         engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
 
@@ -2635,7 +2635,7 @@ mod tests {
 
     #[test]
     fn test_ir_nodes_accessor_after_build() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
         engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
         engine.build_ir(false).unwrap();
@@ -2646,7 +2646,7 @@ mod tests {
 
     #[test]
     fn test_execute_with_comparison() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_tuples(
             "score",
             vec![
@@ -2666,7 +2666,7 @@ mod tests {
 
     #[test]
     fn test_execute_binary_returns_pairs() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2), (3, 4)]);
         let results = engine.execute("result(X, Y) <- edge(X, Y)").unwrap();
         assert_eq!(results.len(), 2);
@@ -2674,7 +2674,7 @@ mod tests {
 
     #[test]
     fn test_build_ir_success() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
         engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
         assert!(engine.build_ir(false).is_ok());
@@ -2683,7 +2683,7 @@ mod tests {
 
     #[test]
     fn test_optimize_ir_after_build() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
         engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
         engine.build_ir(false).unwrap();
@@ -2693,14 +2693,14 @@ mod tests {
     #[test]
     fn test_optimize_ir_empty_noop() {
         // optimize_ir on empty ir_nodes is a no-op (maps over empty vec)
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         let result = engine.optimize_ir(false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_execute_all_rules_multiple() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2), (3, 4)]);
         // Execute two rules separately (parser handles one rule per call)
         let r1 = engine.execute_all_rules("r1(X, Y) <- edge(X, Y)").unwrap();
@@ -2711,7 +2711,7 @@ mod tests {
 
     #[test]
     fn test_execute_with_trace_has_ast() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
         let (results, trace) = engine
             .execute_with_trace("result(X, Y) <- edge(X, Y)")
@@ -2722,7 +2722,7 @@ mod tests {
 
     #[test]
     fn test_set_num_workers_value() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.set_num_workers(4);
         // Verify it doesn't panic and engine still works
         engine.add_fact("edge", vec![(1, 2)]);
@@ -2732,7 +2732,7 @@ mod tests {
 
     #[test]
     fn test_get_optimization_config_accessors() {
-        let engine = DatalogEngine::new();
+        let engine = IQLEngine::new();
         let config = engine.get_optimization_config();
         assert!(config.enable_join_planning);
     }
@@ -2741,7 +2741,7 @@ mod tests {
     fn test_config_with_join_planning_disabled() {
         let mut config = OptimizationConfig::default();
         config.enable_join_planning = false;
-        let mut engine = DatalogEngine::with_config(config);
+        let mut engine = IQLEngine::with_config(config);
         engine.add_fact("edge", vec![(1, 2)]);
         let results = engine.execute("result(X, Y) <- edge(X, Y)").unwrap();
         assert_eq!(results.len(), 1);
@@ -2751,7 +2751,7 @@ mod tests {
     fn test_config_with_sip_disabled() {
         let mut config = OptimizationConfig::default();
         config.enable_sip_rewriting = false;
-        let mut engine = DatalogEngine::with_config(config);
+        let mut engine = IQLEngine::with_config(config);
         engine.add_fact("edge", vec![(1, 2)]);
         let results = engine.execute("result(X, Y) <- edge(X, Y)").unwrap();
         assert_eq!(results.len(), 1);
@@ -2761,7 +2761,7 @@ mod tests {
     fn test_config_with_subplan_sharing_disabled() {
         let mut config = OptimizationConfig::default();
         config.enable_subplan_sharing = false;
-        let mut engine = DatalogEngine::with_config(config);
+        let mut engine = IQLEngine::with_config(config);
         engine.add_fact("edge", vec![(1, 2)]);
         let results = engine.execute("result(X, Y) <- edge(X, Y)").unwrap();
         assert_eq!(results.len(), 1);
@@ -2771,7 +2771,7 @@ mod tests {
     fn test_config_with_boolean_specialization_disabled() {
         let mut config = OptimizationConfig::default();
         config.enable_boolean_specialization = false;
-        let mut engine = DatalogEngine::with_config(config);
+        let mut engine = IQLEngine::with_config(config);
         engine.add_fact("edge", vec![(1, 2)]);
         let results = engine.execute("result(X, Y) <- edge(X, Y)").unwrap();
         assert_eq!(results.len(), 1);
@@ -2779,7 +2779,7 @@ mod tests {
 
     #[test]
     fn test_get_relation_after_add() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("data", vec![(1, 2)]);
         let rel = engine.get_relation("data");
         assert!(rel.is_some());
@@ -2788,7 +2788,7 @@ mod tests {
 
     #[test]
     fn test_input_tuples_mut_direct_modification() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("data", vec![(1, 2)]);
         let tuples = engine.input_tuples_mut();
         tuples
@@ -2800,24 +2800,24 @@ mod tests {
 
     #[test]
     fn test_execute_parse_error() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         let result = engine.execute("@#$%^INVALID");
         assert!(result.is_err());
     }
 
     #[test]
     fn test_debug_produces_trace() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
         let trace = engine.debug("result(X, Y) <- edge(X, Y)").unwrap();
         assert!(trace.ast.is_some());
     }
 
-    // === HNSW Datalog integration tests (#20) ===
+    // === HNSW IQL integration tests (#20) ===
 
     #[test]
     fn test_hnsw_nearest_query_with_search_fn() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
 
         // Register a mock HNSW search function
         engine.set_hnsw_search_fn(Box::new(
@@ -2845,7 +2845,7 @@ mod tests {
 
     #[test]
     fn test_hnsw_nearest_joins_with_base_relation() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
 
         // Base relation: doc(id, title)
         engine.add_tuple(
@@ -2881,7 +2881,7 @@ mod tests {
 
     #[test]
     fn test_hnsw_nearest_no_search_fn_errors() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
 
         // No HNSW search function registered - should error
         let result =
@@ -2892,7 +2892,7 @@ mod tests {
 
     #[test]
     fn test_hnsw_nearest_index_not_found_errors() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
 
         // Search function that returns error for unknown index
         engine.set_hnsw_search_fn(Box::new(
@@ -2910,7 +2910,7 @@ mod tests {
 
     #[test]
     fn test_hnsw_nearest_empty_results() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
 
         engine.set_hnsw_search_fn(Box::new(
             |_idx: &str, _q: &[f32], _k: usize, _ef: Option<usize>| Ok(vec![]),
@@ -2924,7 +2924,7 @@ mod tests {
 
     #[test]
     fn test_no_hnsw_in_query_no_search_fn_is_ok() {
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2), (2, 3)]);
 
         // No HNSW search function, but query doesn't use hnsw_nearest - should be fine
@@ -2937,7 +2937,7 @@ mod tests {
     #[test]
     fn test_magic_sets_tc_chain() {
         // Linear chain: 1→2→3→...→20
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         let edges: Vec<Tuple> = (1..20)
             .map(|i| Tuple::new(vec![Value::Int64(i), Value::Int64(i + 1)]))
             .collect();
@@ -2955,7 +2955,7 @@ mod tests {
     #[test]
     fn test_magic_sets_tc_matches_unbound() {
         // Verify magic sets produces same results as unbound query (just filtered)
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         let edges = vec![
             Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
             Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
@@ -2980,7 +2980,7 @@ mod tests {
             .collect();
 
         // Bound query: reach(1, Y)
-        let mut engine2 = DatalogEngine::new();
+        let mut engine2 = IQLEngine::new();
         engine2.add_tuples("edge", edges);
         let bound_program = "\
             reach(X, Y) <- edge(X, Y)\n\
@@ -3010,7 +3010,7 @@ mod tests {
             enable_magic_sets: false,
             ..Default::default()
         };
-        let mut engine = DatalogEngine::with_config(config);
+        let mut engine = IQLEngine::with_config(config);
         let edges = vec![
             Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
             Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
@@ -3028,7 +3028,7 @@ mod tests {
     #[test]
     fn test_magic_sets_unbound_unchanged() {
         // Unbound query should not be rewritten
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         let edges = vec![
             Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
             Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
@@ -3048,7 +3048,7 @@ mod tests {
     fn test_magic_sets_both_bound() {
         // ?reach(1, 3) - point query. Magic sets restricts to reach(1, *),
         // the _c1 = 3 filter is applied post-hoc by the __query__ rule.
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         let edges = vec![
             Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
             Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
@@ -3067,7 +3067,7 @@ mod tests {
     #[test]
     fn test_magic_sets_string_constants() {
         // Recursive relation with string keys
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         engine.add_tuples(
             "link",
             vec![
@@ -3093,7 +3093,7 @@ mod tests {
     #[test]
     fn test_magic_sets_with_sip() {
         // Both SIP and Magic Sets active - no conflicts
-        let mut engine = DatalogEngine::new();
+        let mut engine = IQLEngine::new();
         let edges = vec![
             Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
             Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
@@ -3122,7 +3122,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
 
         let handle = std::thread::spawn(move || {
-            let mut engine = DatalogEngine::new();
+            let mut engine = IQLEngine::new();
             engine.add_tuples(
                 "data",
                 vec![

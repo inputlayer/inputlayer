@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useDebounce } from "@/hooks/use-debounce"
-import type { Relation } from "@/lib/datalog-store"
+import type { Relation } from "@/lib/iql-store"
 import type { GraphStats } from "@/lib/graph-utils"
 
 interface GraphSidebarProps {

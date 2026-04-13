@@ -71,6 +71,7 @@ class Connection:
 
         self._dispatcher = NotificationDispatcher()
         self._recv_task: asyncio.Task | None = None
+        self._execute_lock = asyncio.Lock()
 
     # ── Properties ────────────────────────────────────────────────────
 
@@ -124,8 +125,11 @@ class Connection:
         await self._authenticate()
         self._connected = True
 
-        # Start background receiver for notifications
-        self._recv_task = asyncio.create_task(self._receive_loop())
+        # NOTE: _receive_loop is NOT started automatically because it races
+        # with execute() for WebSocket messages. Notifications are handled
+        # inline during _read_result() instead. The loop can be started
+        # manually for idle notification listening if needed:
+        #   self._recv_task = asyncio.create_task(self._receive_loop())
 
     async def close(self) -> None:
         """Close the connection gracefully."""
@@ -174,14 +178,62 @@ class Connection:
     async def execute(self, program: str) -> ResultResponse:
         """Send a program/command and wait for the result.
 
-        Transparently assembles streamed results (result_start → chunks → result_end).
+        Transparently assembles streamed results (result_start -> chunks -> result_end).
+
+        The lock serializes the entire send+recv cycle so that concurrent
+        coroutines on the same event loop cannot interleave their messages
+        on the shared WebSocket (the protocol has no request-ID multiplexing).
         """
         if not self._connected or not self._ws:
             raise ConnectionError("Not connected")
 
+        async with self._execute_lock:
+            return await self._send_and_recv(program)
+
+    async def execute_with_preamble(
+        self,
+        preamble: str | None,
+        program: str,
+    ) -> ResultResponse:
+        """Execute *program* atomically, optionally sending *preamble* first.
+
+        Both the preamble (typically a KG switch) and the program are
+        sent under a single lock hold, so no other coroutine can
+        interleave and change server-side state between them.
+        """
+        if not self._connected or not self._ws:
+            raise ConnectionError("Not connected")
+
+        async with self._execute_lock:
+            if preamble is not None:
+                result = await self._send_and_recv(preamble)
+                if result.switched_kg:
+                    self._current_kg = result.switched_kg
+            return await self._send_and_recv(program)
+
+    async def execute_sequence(self, programs: list[str]) -> list[ResultResponse]:
+        """Execute multiple programs atomically under a single lock hold.
+
+        Used for compound operations (aggregate query setup/run/cleanup,
+        OR-split queries, etc.) where interleaving would corrupt state.
+        """
+        if not self._connected or not self._ws:
+            raise ConnectionError("Not connected")
+
+        async with self._execute_lock:
+            results = []
+            for program in programs:
+                result = await self._send_and_recv(program)
+                if result.switched_kg:
+                    self._current_kg = result.switched_kg
+                results.append(result)
+            return results
+
+    async def _send_and_recv(self, program: str) -> ResultResponse:
+        """Send a single program and read its result. Caller must hold the lock."""
+        assert self._ws is not None
         msg = ExecuteMessage(program=program)
         await self._ws.send(msg.to_json())
-
         return await self._read_result()
 
     async def _read_result(self) -> ResultResponse:
@@ -312,4 +364,5 @@ class Connection:
         """Send a keep-alive ping."""
         if not self._ws:
             raise ConnectionError("Not connected")
-        await self._ws.send(PingMessage().to_json())
+        async with self._execute_lock:
+            await self._ws.send(PingMessage().to_json())

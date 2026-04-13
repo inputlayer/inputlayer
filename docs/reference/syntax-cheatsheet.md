@@ -1,6 +1,6 @@
-# InputLayer Datalog Cheatsheet
+# InputLayer IQL Cheatsheet
 
-A unified Datalog-native syntax for InputLayer, designed for intuitive data manipulation and querying.
+A unified IQL-native syntax for InputLayer, designed for intuitive data manipulation and querying.
 
 ## Quick Reference
 
@@ -16,7 +16,7 @@ A unified Datalog-native syntax for InputLayer, designed for intuitive data mani
 | Term | Description |
 |------|-------------|
 | **Fact** | Base data stored in a relation (e.g., `+edge(1, 2)`) |
-| **Rule** | Derived relation defined by a Datalog rule (persistent) |
+| **Rule** | Derived relation defined by a IQL rule (persistent) |
 | **Session Rule** | Transient rule that exists only for current session |
 | **Schema** | Type definition for a relation's columns |
 | **Query** | One-shot question against facts and rules |
@@ -54,7 +54,7 @@ Meta commands start with `.` and control the system:
 .index stats <name>  Show index statistics
 .index rebuild <name>  Rebuild an index
 
-.load <file>         Load and execute a .idl file
+.load <file>         Load and execute a .iql file
 .compact             Compact WAL and consolidate batch files
 .status              Show system status
 .help                Show this help
@@ -76,31 +76,31 @@ Options: `type <hnsw>`, `metric <cosine|euclidean|dot_product|manhattan>`, `m <N
 ### Insert Facts (`+`)
 
 Single fact:
-```datalog
+```iql
 +edge(1, 2)
 ```
 
 Bulk insert:
-```datalog
+```iql
 +edge[(1, 2), (2, 3), (3, 4)]
 ```
 
 ### Delete Facts (`-`)
 
 Single fact:
-```datalog
+```iql
 -edge(1, 2)
 ```
 
 Conditional delete (query-based):
-```datalog
+```iql
 -edge(X, Y) <- edge(X, Y), X > 5
 ```
 
 ### Updates (Delete then Insert)
 
 To update data, delete the old value then insert the new:
-```datalog
+```iql
 // Delete old value
 -counter(1, 0)
 // Insert new value
@@ -112,23 +112,23 @@ To update data, delete the old value then insert the new:
 Persistent rules are saved to disk and incrementally maintained by Differential Dataflow.
 
 Simple rule:
-```datalog
+```iql
 +path(X, Y) <- edge(X, Y)
 ```
 
 Recursive rule (transitive closure):
-```datalog
+```iql
 +path(X, Y) <- edge(X, Y)
 +path(X, Z) <- path(X, Y), edge(Y, Z)
 ```
 
 Rule with filter:
-```datalog
+```iql
 +adult(Name, Age) <- person(Name, Age), Age >= 18
 ```
 
 Rule with computed head variable:
-```datalog
+```iql
 +doubled(X, Y) <- nums(X), Y = X * 2
 ```
 
@@ -138,17 +138,17 @@ Rules are saved to `{kg_dir}/rules/catalog.json` and automatically loaded on kno
 
 Session rules are executed immediately but not persisted. They're useful for ad-hoc analysis:
 
-```datalog
+```iql
 result(X, Y) <- edge(X, Y), X < Y
 ```
 
 Session rules can reference persistent rules:
-```datalog
+```iql
 reachable_from_one(X) <- path(1, X)
 ```
 
 Multiple session rules accumulate and evaluate together:
-```datalog
+```iql
 foo(X, Y) <- bar(X, Y)
 foo(X, Z) <- foo(X, Y), foo(Y, Z)  // Adds to previous rule
 ```
@@ -158,17 +158,17 @@ foo(X, Z) <- foo(X, Y), foo(Y, Z)  // Adds to previous rule
 Query a relation or rule:
 
 Simple query:
-```datalog
+```iql
 ?edge(1, X)
 ```
 
 Query with constraints:
-```datalog
+```iql
 ?person(Name, Age), Age > 30
 ```
 
 Query a derived relation:
-```datalog
+```iql
 ?path(1, X)
 ```
 
@@ -176,14 +176,14 @@ Query a derived relation:
 
 Define typed relations:
 
-```datalog
+```iql
 +employee(id: int, name: string, dept_id: int)
 +user(id: int, email: string, name: string)
 ```
 
 ## Aggregations
 
-```datalog
+```iql
 +total_sales(Dept, sum<Amount>) <- sales(Dept, _, Amount)
 +employee_count(Dept, count<Id>) <- employee(Id, _, Dept)
 +max_salary(Dept, max<Salary>) <- employee(_, Salary, Dept)
@@ -194,14 +194,14 @@ Define typed relations:
 Supported aggregates: `count`, `sum`, `min`, `max`, `avg`, `count_distinct`, `top_k`, `top_k_threshold`.
 
 ### TopK Example
-```datalog
+```iql
 +top_scores(top_k<3, Name, Score:desc>) <- scores(Name, Score)
 ```
 
 ## Builtin Functions
 
 ### Distance Functions
-```datalog
+```iql
 Dist = euclidean(V1, V2)    // Euclidean (L2) distance
 Dist = cosine(V1, V2)       // Cosine distance (1 - similarity)
 Score = dot(V1, V2)         // Dot product
@@ -210,7 +210,7 @@ Dist = hamming(A, B)        // Hamming distance (bitwise)
 ```
 
 ### Vector Operations
-```datalog
+```iql
 NormV = normalize(V)        // Unit vector
 Dim = vec_dim(V)            // Vector dimension
 Sum = vec_add(V1, V2)       // Element-wise addition
@@ -218,7 +218,7 @@ Scaled = vec_scale(V, S)    // Scalar multiplication
 ```
 
 ### Math Functions
-```datalog
+```iql
 A = abs(X)                  // Absolute value
 R = sqrt(X)                 // Square root
 R = pow(Base, Exp)          // Power
@@ -233,7 +233,7 @@ S = sign(X)                 // Sign (-1, 0, 1)
 ```
 
 ### String Functions
-```datalog
+```iql
 L = len(S)                  // String length
 U = upper(S)                // To uppercase
 L = lower(S)                // To lowercase
@@ -244,7 +244,7 @@ R = concat(S1, S2)          // Concatenate
 ```
 
 ### Temporal Functions
-```datalog
+```iql
 Now = time_now()            // Current Unix timestamp (ms)
 Diff = time_diff(T1, T2)   // Timestamp difference
 New = time_add(Ts, Dur)     // Add duration
@@ -253,7 +253,7 @@ W = time_decay(Ts, Now, HL) // Exponential decay
 ```
 
 ### Scalar Min/Max
-```datalog
+```iql
 M = min_val(A, B)           // Smaller of two values
 M = max_val(A, B)           // Larger of two values
 ```
@@ -262,7 +262,7 @@ See [functions.md](functions.md) for the complete reference (55 functions).
 
 ## Vector Operations Example
 
-```datalog
+```iql
 // Insert vectors
 +vectors[(1, [1.0, 0.0, 0.0]), (2, [0.0, 1.0, 0.0])]
 
@@ -281,7 +281,7 @@ See [functions.md](functions.md) for the complete reference (55 functions).
 
 ### Social Graph
 
-```datalog
+```iql
 // Create knowledge graph
 .kg create social
 .kg use social
@@ -299,7 +299,7 @@ See [functions.md](functions.md) for the complete reference (55 functions).
 
 ### Access Control (RBAC)
 
-```datalog
+```iql
 .kg create acl
 .kg use acl
 
@@ -318,7 +318,7 @@ See [functions.md](functions.md) for the complete reference (55 functions).
 
 ### Policy-First RAG
 
-```datalog
+```iql
 .kg create rag
 .kg use rag
 
@@ -358,7 +358,7 @@ Storage Engine       ->  Multi-knowledge-graph management
        |
 Rule Catalog         ->  Persistent rule definitions (JSON)
        |
-Datalog Engine       ->  DD-based execution
+IQL Engine       ->  DD-based execution
        |
 Persist Layer        ->  WAL + batched Parquet storage
 ```

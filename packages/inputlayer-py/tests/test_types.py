@@ -8,7 +8,7 @@ from inputlayer.types import (
     Timestamp,
     Vector,
     VectorInt8,
-    python_type_to_datalog,
+    python_type_to_iql,
 )
 
 
@@ -100,32 +100,32 @@ class TestTimestamp:
 
 class TestTypeMap:
     def test_int(self):
-        assert python_type_to_datalog(int) == "int"
+        assert python_type_to_iql(int) == "int"
 
     def test_float(self):
-        assert python_type_to_datalog(float) == "float"
+        assert python_type_to_iql(float) == "float"
 
     def test_str(self):
-        assert python_type_to_datalog(str) == "string"
+        assert python_type_to_iql(str) == "string"
 
     def test_bool(self):
-        assert python_type_to_datalog(bool) == "bool"
+        assert python_type_to_iql(bool) == "bool"
 
     def test_timestamp(self):
-        assert python_type_to_datalog(Timestamp) == "timestamp"
+        assert python_type_to_iql(Timestamp) == "timestamp"
 
     def test_vector(self):
-        assert python_type_to_datalog(Vector) == "vector"
+        assert python_type_to_iql(Vector) == "vector"
 
     def test_vector_dim(self):
-        assert python_type_to_datalog(Vector[128]) == "vector[128]"
+        assert python_type_to_iql(Vector[128]) == "vector[128]"
 
     def test_vector_int8(self):
-        assert python_type_to_datalog(VectorInt8) == "vector_int8"
+        assert python_type_to_iql(VectorInt8) == "vector_int8"
 
     def test_vector_int8_dim(self):
-        assert python_type_to_datalog(VectorInt8[64]) == "vector_int8[64]"
+        assert python_type_to_iql(VectorInt8[64]) == "vector_int8[64]"
 
     def test_unsupported(self):
         with pytest.raises(TypeError):
-            python_type_to_datalog(dict)
+            python_type_to_iql(dict)

@@ -15,6 +15,7 @@
   "configuration": "Configuration",
   "rest-api": "REST API",
   "python-sdk": "Python SDK",
+  "langchain": "LangChain Integration",
   "js-sdk": "JavaScript / TypeScript SDK",
   "deployment": "Deployment",
   "authentication": "Authentication",

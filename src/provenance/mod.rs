@@ -2,7 +2,7 @@
 //!
 //! Explains why derived facts exist (proof trees) and why expected facts
 //! are absent (negative explanations). Core data model for explainable
-//! derivations in the Datalog engine.
+//! derivations in the IQL engine.
 
 pub mod backward_chaining;
 pub mod proof_tree;

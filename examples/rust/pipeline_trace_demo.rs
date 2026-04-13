@@ -5,7 +5,7 @@
 //!
 //! This is extremely valuable for students to understand how the engine works!
 
-use inputlayer::DatalogEngine;
+use inputlayer::IQLEngine;
 
 fn main() {
     println!("\n🔍 InputLayer Pipeline Trace Demo\n");
@@ -26,7 +26,7 @@ fn example_1_simple_with_optimization() {
     println!("Example 1: Simple Query with Identity Map (will be optimized)");
     println!("═══════════════════════════════════════════════════════════\n");
 
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     // Add base facts
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4), (4, 5)]);
@@ -53,7 +53,7 @@ fn example_2_join_query() {
     println!("Example 2: Join Query (2-hop paths)");
     println!("═══════════════════════════════════════════════════════════\n");
 
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     // Add base facts - a simple path
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
@@ -78,7 +78,7 @@ fn example_3_complex_query() {
     println!("Example 3: Complex Query with Filters");
     println!("═══════════════════════════════════════════════════════════\n");
 
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     // Add base facts
     engine.add_fact("data", vec![(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]);

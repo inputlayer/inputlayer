@@ -6,7 +6,7 @@
 
 Timestamps in InputLayer are Unix milliseconds (64-bit integers):
 
-```datalog
+```iql
 // Store events with timestamps
 +events(1, "login", 1704067200000)      // 2024-01-01 00:00:00 UTC
 +events(2, "purchase", 1704153600000)   // 2024-01-02 00:00:00 UTC
@@ -31,7 +31,7 @@ Timestamps in InputLayer are Unix milliseconds (64-bit integers):
 
 Get the current timestamp:
 
-```datalog
+```iql
 ?Now = time_now()
 ```
 
@@ -41,7 +41,7 @@ Get the current timestamp:
 
 Calculate the difference between two timestamps:
 
-```datalog
+```iql
 ?events(Id1, _, T1), events(Id2, _, T2),
    Id1 < Id2,
    Diff = time_diff(T1, T2)
@@ -53,7 +53,7 @@ Calculate the difference between two timestamps:
 
 Add duration to a timestamp:
 
-```datalog
+```iql
 // Calculate when session expires (24 hours after login)
 +session_expires(UserId, time_add(LoginTime, 86400000)) <-
     login_events(UserId, LoginTime)
@@ -65,7 +65,7 @@ Add duration to a timestamp:
 
 Subtract duration from a timestamp:
 
-```datalog
+```iql
 // Find the timestamp 1 hour ago
 ?Now = time_now(),
    OneHourAgo = time_sub(Now, 3600000)
@@ -79,7 +79,7 @@ Subtract duration from a timestamp:
 
 Check if t1 is before t2:
 
-```datalog
+```iql
 // Find events that happened before a cutoff
 +old_events(Id, Type) <-
     events(Id, Type, Ts),
@@ -93,7 +93,7 @@ Check if t1 is before t2:
 
 Check if t1 is after t2:
 
-```datalog
+```iql
 // Find events after a specific date
 +recent_events(Id, Type) <-
     events(Id, Type, Ts),
@@ -107,7 +107,7 @@ Check if t1 is after t2:
 
 Check if a timestamp falls within a range:
 
-```datalog
+```iql
 // Find events within a time window
 +in_window(Id, Type) <-
     events(Id, Type, Ts),
@@ -122,7 +122,7 @@ Check if a timestamp falls within a range:
 
 Check if a timestamp is within a duration of a reference time:
 
-```datalog
+```iql
 // Find events from the last 24 hours
 +recent(Id, Type) <-
     events(Id, Type, Ts),
@@ -144,7 +144,7 @@ Time decay functions weight recent events more heavily than older ones.
 
 Exponential decay based on half-life:
 
-```datalog
+```iql
 // Score events with exponential decay (half-life = 7 days)
 +event_score(Id, Type, time_decay(Ts, Now, 604800000)) <-
     events(Id, Type, Ts),
@@ -168,7 +168,7 @@ Exponential decay based on half-life:
 
 Linear decay that reaches zero at max_age:
 
-```datalog
+```iql
 // Score events with linear decay (max age = 30 days)
 +event_score(Id, Type, time_decay_linear(Ts, Now, 2592000000)) <-
     events(Id, Type, Ts),
@@ -198,7 +198,7 @@ Interval functions help with scheduling, calendar analysis, and time-range queri
 
 Calculate the duration of an interval:
 
-```datalog
+```iql
 +meeting(1, "Standup", 1704114000000, 1704115800000)  // 30 min meeting
 
 ?meeting(Id, Name, Start, End),
@@ -211,7 +211,7 @@ Calculate the duration of an interval:
 
 Check if a timestamp falls within an interval:
 
-```datalog
+```iql
 // Check if current time is during business hours
 +during_business_hours(true) <-
     Now = time_now(),
@@ -226,7 +226,7 @@ Check if a timestamp falls within an interval:
 
 Check if two intervals overlap:
 
-```datalog
+```iql
 // Find conflicting meetings
 +conflict(M1, M2) <-
     meeting(M1, _, S1, E1),
@@ -243,7 +243,7 @@ Check if two intervals overlap:
 
 Check if interval 1 fully contains interval 2:
 
-```datalog
+```iql
 // Find meetings that fit entirely within a time block
 +fits_in_block(MeetingId) <-
     meeting(MeetingId, _, MStart, MEnd),
@@ -259,7 +259,7 @@ Check if interval 1 fully contains interval 2:
 
 ### Event Stream Analysis
 
-```datalog
+```iql
 // Store user activity events
 +activity[(1, "alice", "view", 1704067200000),
           (2, "bob", "click", 1704070800000),
@@ -277,7 +277,7 @@ Check if interval 1 fully contains interval 2:
 
 ### Time-Decayed Recommendations
 
-```datalog
+```iql
 // User interactions with items
 +interactions[(101, 1, "view", 1704067200000),
               (101, 2, "purchase", 1704153600000),
@@ -300,7 +300,7 @@ Check if interval 1 fully contains interval 2:
 
 ### Session Detection
 
-```datalog
+```iql
 // Detect sessions (gaps > 30 minutes = new session)
 +page_views[(1, "alice", "/home", 1704067200000),
             (2, "alice", "/products", 1704067500000),
@@ -319,7 +319,7 @@ Check if interval 1 fully contains interval 2:
 
 ### Meeting Scheduler
 
-```datalog
+```iql
 // Existing meetings
 +meetings[(1, "Team Sync", 1704114000000, 1704117600000),
           (2, "1:1", 1704121200000, 1704123000000),

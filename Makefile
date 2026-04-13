@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test python-test-live python-test-examples js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -295,7 +295,7 @@ integration-test:
 e2e-test:
 	./scripts/run_snapshot_tests.sh
 
-# Regenerate snapshot .idl.out files (sequential mode)
+# Regenerate snapshot .iql.out files (sequential mode)
 e2e-update:
 	./scripts/run_snapshot_tests.sh --update
 
@@ -307,8 +307,80 @@ test-affected:
 snapshot-test: e2e-test
 
 # Tier 4: Python SDK tests (inputlayer-py package)
+#
+# All Python make targets use `uv run --extra dev` so optional extras
+# (langchain-core, langchain-openai, pandas) are always available in
+# an isolated venv. CI must install uv before invoking these targets.
 python-test:
-	cd packages/inputlayer-py && python -m pytest tests/ -v
+	cd packages/inputlayer-py && uv run --extra dev pytest tests/ -v
+
+# python-test-live runs the full Python suite including the live
+# integration tests under tests/test_langchain.py::TestLive*. Requires
+# the release server binary. Starts the server, sets up unique data
+# dir, runs the tests with INPUTLAYER_INTEGRATION=1, then stops the
+# server. Used by CI to keep the langchain integration honest.
+# Build without gui-build so CI doesn't need Node.js. The server runs
+# headless for integration tests.
+python-test-live:
+	@cargo build --all-features --release
+	@DATA_DIR=$$(mktemp -d -t il-py-live-XXXXXX); \
+	rm -rf $$DATA_DIR && mkdir -p $$DATA_DIR; \
+	echo "[python-test-live] data dir: $$DATA_DIR"; \
+	lsof -ti :8080 | xargs -r kill -9 2>/dev/null || true; \
+	INPUTLAYER_ADMIN_PASSWORD=admin ./target/release/inputlayer-server \
+		--data-dir $$DATA_DIR --port 8080 \
+		> /tmp/il_python_live_server.log 2>&1 & \
+	SERVER_PID=$$!; \
+	echo "[python-test-live] server pid: $$SERVER_PID"; \
+	for i in 1 2 3 4 5 6 7 8 9 10; do \
+		if curl -sf http://127.0.0.1:8080/health > /dev/null 2>&1; then \
+			echo "[python-test-live] server is ready"; \
+			break; \
+		fi; \
+		sleep 0.5; \
+	done; \
+	cd packages/inputlayer-py && \
+		INPUTLAYER_INTEGRATION=1 \
+		INPUTLAYER_TEST_SERVER=ws://localhost:8080/ws \
+		INPUTLAYER_URL=ws://localhost:8080/ws \
+		INPUTLAYER_USER=admin \
+		INPUTLAYER_PASSWORD=admin \
+		uv run --extra dev pytest \
+			tests/test_langchain.py tests/test_integration.py -v; \
+	TEST_EXIT=$$?; \
+	cd - > /dev/null; \
+	kill $$SERVER_PID 2>/dev/null || true; \
+	wait $$SERVER_PID 2>/dev/null || true; \
+	rm -rf $$DATA_DIR; \
+	exit $$TEST_EXIT
+
+# python-test-examples runs the langchain examples that don't require
+# an LLM (1, 2, 3) end-to-end against a live server. Catches example
+# regressions that the unit tests cannot.
+python-test-examples:
+	@cargo build --all-features --release
+	@DATA_DIR=$$(mktemp -d -t il-py-ex-XXXXXX); \
+	rm -rf $$DATA_DIR && mkdir -p $$DATA_DIR; \
+	lsof -ti :8080 | xargs -r kill -9 2>/dev/null || true; \
+	INPUTLAYER_ADMIN_PASSWORD=admin ./target/release/inputlayer-server \
+		--data-dir $$DATA_DIR --port 8080 \
+		> /tmp/il_python_examples_server.log 2>&1 & \
+	SERVER_PID=$$!; \
+	for i in 1 2 3 4 5 6 7 8 9 10; do \
+		if curl -sf http://127.0.0.1:8080/health > /dev/null 2>&1; then break; fi; \
+		sleep 0.5; \
+	done; \
+	cd packages/inputlayer-py && \
+		INPUTLAYER_URL=ws://localhost:8080/ws \
+		INPUTLAYER_USER=admin \
+		INPUTLAYER_PASSWORD=admin \
+		uv run --extra dev python -m examples.langchain.runner 1 2 3; \
+	TEST_EXIT=$$?; \
+	cd - > /dev/null; \
+	kill $$SERVER_PID 2>/dev/null || true; \
+	wait $$SERVER_PID 2>/dev/null || true; \
+	rm -rf $$DATA_DIR; \
+	exit $$TEST_EXIT
 
 # Tier 5: JS/TS SDK tests (inputlayer-js package)
 js-test:

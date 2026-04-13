@@ -6,7 +6,7 @@ Queries retrieve data from InputLayer. They return matching facts without modify
 
 Queries start with `?`:
 
-```datalog
+```iql
 ?edge(X, Y)
 ```
 
@@ -23,7 +23,7 @@ body  ::= literal ("," literal)* ;
 
 Query all facts in a relation:
 
-```datalog
+```iql
 ?edge(X, Y)
 ```
 
@@ -41,7 +41,7 @@ Result:
 
 Fix one column to filter results:
 
-```datalog
+```iql
 // Edges starting from node 1
 ?edge(1, Y)
 ```
@@ -58,7 +58,7 @@ Result:
 
 Query with all constants to check if a fact exists:
 
-```datalog
+```iql
 ?edge(1, 2)
 ```
 
@@ -68,7 +68,7 @@ If the fact exists, you get a result with the constant values as columns. If it 
 
 Use `_` (wildcard) to ignore columns you don't need:
 
-```datalog
+```iql
 // Get all source nodes (ignore destination)
 ?edge(X, _)
 ```
@@ -89,7 +89,7 @@ Result:
 
 Filter results with comparison operators:
 
-```datalog
+```iql
 ?person(Name, Age), Age > 25
 ```
 
@@ -97,7 +97,7 @@ Filter results with comparison operators:
 
 Combine conditions with commas (AND):
 
-```datalog
+```iql
 ?person(Name, Age), Age >= 18, Age <= 65
 ```
 
@@ -105,7 +105,7 @@ Combine conditions with commas (AND):
 
 Find facts that don't match a pattern:
 
-```datalog
+```iql
 // People who are not managers
 ?employee(Id, Name), !manager(Id)
 ```
@@ -116,7 +116,7 @@ Find facts that don't match a pattern:
 
 Join two relations:
 
-```datalog
+```iql
 ?employee(Id, Name), works_in(Id, DeptId), department(DeptId, DeptName)
 ```
 
@@ -126,7 +126,7 @@ This finds employees with their department names.
 
 Join a relation with itself:
 
-```datalog
+```iql
 // Find pairs where A follows B and B follows A (mutual follows)
 ?follows(A, B), follows(B, A), A < B
 ```
@@ -137,7 +137,7 @@ The `A < B` avoids duplicate pairs.
 
 Query derived relations (views) the same way as base relations:
 
-```datalog
+```iql
 // Define a rule
 +path(X, Y) <- edge(X, Y)
 +path(X, Z) <- path(X, Y), edge(Y, Z)
@@ -152,7 +152,7 @@ Query derived relations (views) the same way as base relations:
 
 Compute values in queries:
 
-```datalog
+```iql
 ?product(Name, Price, Qty), Total = Price * Qty
 ```
 
@@ -160,7 +160,7 @@ Compute values in queries:
 
 Compute distances or similarities:
 
-```datalog
+```iql
 ?vectors(Id1, V1), vectors(Id2, V2),
    Id1 < Id2,
    Dist = euclidean(V1, V2)
@@ -170,7 +170,7 @@ Compute distances or similarities:
 
 For aggregations, define a rule first then query it:
 
-```datalog
+```iql
 +dept_count(Dept, count<Id>) <- works_in(Id, Dept)
 ?dept_count(Dept, Count)
 ```
@@ -196,7 +196,7 @@ No results.
 
 ### Simple Lookup
 
-```datalog
+```iql
 +person[("alice", 30), ("bob", 25), ("charlie", 35)]
 
 ?person("alice", Age)
@@ -212,7 +212,7 @@ Result:
 
 ### Filtered Search
 
-```datalog
+```iql
 +employee[(1, "alice", 75000), (2, "bob", 65000), (3, "charlie", 80000)]
 
 ?employee(Id, Name, Salary), Salary > 70000
@@ -229,7 +229,7 @@ Result:
 
 ### Complex Query
 
-```datalog
+```iql
 // Data
 +follows[(1, 2), (2, 3), (3, 1), (2, 1)]
 
@@ -248,7 +248,7 @@ Result:
 
 ### Query with Aggregation
 
-```datalog
+```iql
 +sales[("north", 100), ("north", 200), ("south", 150)]
 
 // Define aggregation rule

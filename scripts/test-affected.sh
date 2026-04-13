@@ -53,9 +53,9 @@ for file in $CHANGED; do
             CATEGORIES="$CATEGORIES 09_recursion 06_joins 18_advanced_patterns" ;;
         src/subplan_sharing/*)
             CATEGORIES="$CATEGORIES 06_joins 09_recursion 18_advanced_patterns" ;;
-        examples/datalog/*)
+        examples/iql/*)
             # Test file changed - run that specific category
-            category=$(echo "$file" | sed 's|examples/datalog/\([^/]*\)/.*|\1|')
+            category=$(echo "$file" | sed 's|examples/iql/\([^/]*\)/.*|\1|')
             CATEGORIES="$CATEGORIES $category" ;;
         scripts/run_snapshot_tests.sh)
             # Test runner changed - run all

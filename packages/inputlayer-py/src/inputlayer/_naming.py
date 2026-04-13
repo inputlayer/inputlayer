@@ -1,4 +1,4 @@
-"""Naming convention utilities: CamelCase ↔ snake_case, column → Datalog variable."""
+"""Naming convention utilities: CamelCase ↔ snake_case, column → IQL variable."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def snake_to_camel(name: str) -> str:
 
 
 def column_to_variable(column_name: str) -> str:
-    """Convert a snake_case column name to a Datalog variable (Capitalized).
+    """Convert a snake_case column name to an IQL variable (Capitalized).
 
     Examples:
         id -> Id

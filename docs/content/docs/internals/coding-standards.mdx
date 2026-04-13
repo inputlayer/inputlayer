@@ -294,7 +294,7 @@ if rule.body.is_empty() {
 **All public items must have doc comments.**
 
 ```rust
-/// Parse a Datalog statement from source text.
+/// Parse an IQL statement from source text.
 ///
 /// # Arguments
 ///
@@ -345,7 +345,7 @@ match persist_to_disk() {
 
 ```
 src/
-+-- lib.rs                    # DatalogEngine, public API
++-- lib.rs                    # IQLEngine, public API
 +-- main.rs                   # Server binary
 +-- config.rs                 # TOML configuration
 +-- catalog.rs                # System catalog
@@ -355,7 +355,7 @@ src/
 |   +-- mod.rs                # IRNode, IRExpression, BuiltinFunction
 +-- ir_builder/               # AST to IR conversion
 |   +-- mod.rs
-+-- parser/                   # Datalog parser
++-- parser/                   # IQL parser
 |   +-- mod.rs                # Lexer + recursive descent parser
 +-- statement/                # Statement parsing
 |   +-- mod.rs                # Statement enum
@@ -464,10 +464,10 @@ fn test_aggregation_empty_group_returns_zero() { ... }
 **Use for complex output that's hard to assert programmatically.**
 
 ```
-examples/datalog/
+examples/iql/
 +-- 01_basics/
-|   +-- 01_simple_query.idl      # Input
-|   +-- 01_simple_query.idl.out  # Expected output
+|   +-- 01_simple_query.iql      # Input
+|   +-- 01_simple_query.iql.out  # Expected output
 ```
 
 Update snapshots with:
@@ -658,7 +658,7 @@ Before submitting code, verify:
 3. Add conversion in `src/ir_builder/mod.rs`
 4. Add code generation in `src/code_generator/mod.rs`
 5. Add tests in appropriate test file
-6. Add snapshot test in `examples/datalog/`
+6. Add snapshot test in `examples/iql/`
 
 ### Adding a New Built-in Function
 

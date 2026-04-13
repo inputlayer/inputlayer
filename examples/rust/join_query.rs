@@ -1,9 +1,9 @@
 //! Join Query Example
 //!
-//! Demonstrates join operations in the Datalog engine.
+//! Demonstrates join operations in the IQL engine.
 //! Shows how multiple relations can be joined together.
 
-use inputlayer::DatalogEngine;
+use inputlayer::IQLEngine;
 use std::collections::HashSet;
 
 fn to_set(results: Vec<(i32, i32)>) -> HashSet<(i32, i32)> {
@@ -14,7 +14,7 @@ fn main() {
     println!("=== Join Query Example ===\n");
 
     // Create engine
-    let mut engine = DatalogEngine::new();
+    let mut engine = IQLEngine::new();
 
     // Add edge relation: represents a directed graph
     println!("Adding edge relation:");
@@ -83,7 +83,7 @@ fn main() {
 
     // Example 4: Bidirectional edges
     println!("Example 4: Find bidirectional edges");
-    let mut engine2 = DatalogEngine::new();
+    let mut engine2 = IQLEngine::new();
     let edges_bi = vec![(1, 2), (2, 1), (2, 3), (4, 5), (5, 4)];
     println!("Adding edges:");
     for (src, dst) in &edges_bi {
@@ -107,7 +107,7 @@ fn main() {
 
     // Example 5: Triangle detection
     println!("Example 5: Triangle detection");
-    let mut engine3 = DatalogEngine::new();
+    let mut engine3 = IQLEngine::new();
     let edges_tri = vec![(1, 2), (2, 3), (3, 1), (4, 5), (5, 6)];
     println!("Adding edges (contains triangle 1-2-3):");
     for (src, dst) in &edges_tri {

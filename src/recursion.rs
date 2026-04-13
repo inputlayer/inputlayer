@@ -1,10 +1,10 @@
 //! # Recursion Support
 //!
 //! Recursion detection, dependency graphs, SCC detection (Tarjan's), and stratification
-//! for Datalog programs. Handles both positive recursion and stratified negation.
+//! for IQL programs. Handles both positive recursion and stratified negation.
 //!
 //! A rule is recursive if its head relation appears in its body:
-//! ```datalog
+//! ```iql
 //! tc(x, z) <- tc(x, y), edge(y, z).
 //! ```
 //!
@@ -398,7 +398,7 @@ impl StratificationResult {
 /// ## Example
 ///
 /// For unreachable nodes:
-/// ```datalog
+/// ```iql
 /// reach(x) <- source(x).             // Stratum 0
 /// reach(y) <- reach(x), edge(x, y).  // Stratum 0 (recursive)
 /// unreachable(x) <- node(x), !reach(x). // Stratum 1 (negates reach)
@@ -540,7 +540,7 @@ pub fn stratify_with_negation(program: &Program) -> StratificationResult {
 /// ## Example
 ///
 /// For transitive closure:
-/// ```datalog
+/// ```iql
 /// tc(x, y) <- edge(x, y).           // Stratum 0 (base case)
 /// tc(x, z) <- tc(x, y), edge(y, z). // Stratum 0 (recursive - same SCC)
 /// result(x, y) <- tc(x, y).         // Stratum 1 (depends on tc)

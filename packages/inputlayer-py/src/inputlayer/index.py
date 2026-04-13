@@ -27,8 +27,8 @@ class HnswIndex:
     ef_construction: int = 100
     ef_search: int = 50
 
-    def to_datalog(self) -> str:
-        """Compile this index definition to a Datalog meta command."""
+    def to_iql(self) -> str:
+        """Compile this index definition to an IQL meta command."""
         from inputlayer.relation import Relation
 
         rel_name = Relation._resolve_name(self.relation)

@@ -13,15 +13,10 @@ import pytest
 from inputlayer import (
     Derived,
     From,
-    HnswIndex,
     InputLayer,
     Relation,
-    ResultSet,
-    Timestamp,
     Vector,
     count,
-    functions,
-    sum_,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -86,6 +81,10 @@ class TestSchema:
         kg = client.knowledge_graph("test_schema_py")
         try:
             await kg.define(Edge)
+            # `.rel` only surfaces relations after at least one row exists
+            # in storage; defining the schema is necessary but not
+            # sufficient. Insert a sentinel row before listing.
+            await kg.insert([Edge(src=1, dst=2)])
             rels = await kg.relations()
             names = [r.name for r in rels]
             assert "edge" in names
@@ -160,12 +159,15 @@ class TestDelete:
         try:
             await kg.define(Employee)
             await kg.insert([
-                Employee(id=1, name="Alice", department="eng", salary=120000.0, active=True),
-                Employee(id=2, name="Bob", department="hr", salary=90000.0, active=True),
+                Employee(id=1, name="Alice", department="eng",
+                         salary=120000.0, active=True),
+                Employee(id=2, name="Bob", department="hr",
+                         salary=90000.0, active=True),
             ])
             await kg.delete(Employee, where=lambda e: e.department == "hr")
             result = await kg.query(Employee)
             assert len(result) == 1
+            assert result.rows[0][1] == "Alice"
         finally:
             await client.drop_knowledge_graph("test_delete_py")
 

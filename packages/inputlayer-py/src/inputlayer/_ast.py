@@ -1,4 +1,4 @@
-"""Internal AST nodes for expression trees compiled to Datalog."""
+"""Internal AST nodes for expression trees compiled to IQL."""
 
 from __future__ import annotations
 
@@ -93,7 +93,7 @@ class Comparison(BoolExpr):
 
 @dataclass(frozen=True)
 class And(BoolExpr):
-    """Logical AND of two conditions (Datalog comma)."""
+    """Logical AND of two conditions (IQL comma)."""
     left: BoolExpr
     right: BoolExpr
 
@@ -107,7 +107,7 @@ class Or(BoolExpr):
 
 @dataclass(frozen=True)
 class Not(BoolExpr):
-    """Negation: !relation(X, Y) in Datalog."""
+    """Negation: !relation(X, Y) in IQL."""
     operand: BoolExpr
 
 

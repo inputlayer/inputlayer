@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useRef, useEffect } from "react"
 import { History, Bot, Clock, Search, X, ChevronRight, CheckCircle2, XCircle, Play, Send, Loader2, Sparkles } from "lucide-react"
-import { useDatalogStore } from "@/lib/datalog-store"
+import { useIQLStore } from "@/lib/iql-store"
 import { formatDistanceToNow } from "date-fns"
 import { cn } from "@/lib/utils"
 import { formatTime } from "@/lib/ui-utils"
@@ -42,7 +42,7 @@ interface QuerySidebarProps {
 
 export function QuerySidebar({ onSelectQuery, onLoadQuery, pendingExample, onPendingExampleHandled }: QuerySidebarProps) {
   const [activeTab, setActiveTab] = useState<"agent" | "history">("agent")
-  const { queryHistory, executeQuery, setEditorContent } = useDatalogStore()
+  const { queryHistory, executeQuery, setEditorContent } = useIQLStore()
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -95,7 +95,7 @@ export function QuerySidebar({ onSelectQuery, onLoadQuery, pendingExample, onPen
 const agentStateCache: { example: string | null; messages: ChatMessage[] } = { example: null, messages: [] }
 
 function AgentPanel({ onSelectQuery, pendingExample, onPendingExampleHandled }: { onSelectQuery: (query: string) => void; pendingExample?: string | null; onPendingExampleHandled?: () => void }) {
-  const { executeQuery, executeInternalQuery, setEditorContent, loadExample, createKnowledgeGraph, deleteKnowledgeGraph, loadKnowledgeGraph, username } = useDatalogStore()
+  const { executeQuery, executeInternalQuery, setEditorContent, loadExample, createKnowledgeGraph, deleteKnowledgeGraph, loadKnowledgeGraph, username } = useIQLStore()
   const [messages, setMessages] = useState<ChatMessage[]>(agentStateCache.messages)
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)

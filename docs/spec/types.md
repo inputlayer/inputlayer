@@ -18,7 +18,7 @@ InputLayer supports several data types for constants.
 
 64-bit signed integers:
 
-```datalog
+```iql
 42
 -17
 0
@@ -37,7 +37,7 @@ integer ::= "-"? [0-9]+ ;
 
 64-bit floating-point numbers:
 
-```datalog
+```iql
 3.14
 -0.5
 0.0
@@ -55,7 +55,7 @@ float ::= "-"? [0-9]+ "." [0-9]+ ( ("e" | "E") "-"? [0-9]+ )? ;
 
 UTF-8 text enclosed in double quotes:
 
-```datalog
+```iql
 "hello"
 "Alice Smith"
 "with spaces and punctuation!"
@@ -72,7 +72,7 @@ UTF-8 text enclosed in double quotes:
 | `\t` | Tab |
 | `\r` | Carriage return |
 
-```datalog
+```iql
 +"She said \"hello\""
 +"Line 1\nLine 2"
 +"Path: C:\\Users\\alice"
@@ -89,7 +89,7 @@ escape ::= '\\' ( '"' | '\\' | 'n' | 't' | 'r' ) ;
 
 Boolean true or false:
 
-```datalog
+```iql
 true
 false
 ```
@@ -104,7 +104,7 @@ boolean ::= "true" | "false" ;
 
 Arrays of floating-point numbers:
 
-```datalog
+```iql
 [1.0, 2.0, 3.0]
 [0.5, -0.5]
 []                  // Empty vector
@@ -112,7 +112,7 @@ Arrays of floating-point numbers:
 
 Vectors are used for embeddings and similarity search:
 
-```datalog
+```iql
 +vectors(1, [1.0, 0.0, 0.0])
 +vectors(2, [0.0, 1.0, 0.0])
 
@@ -130,13 +130,13 @@ vector ::= "[" ( float ( "," float )* )? "]" ;
 
 Unix timestamps in milliseconds since epoch (1970-01-01 00:00:00 UTC):
 
-```datalog
+```iql
 1704067200000           // 2024-01-01 00:00:00 UTC
 ```
 
 Timestamps are used with temporal functions:
 
-```datalog
+```iql
 +events(1, 1704067200000)
 +events(2, 1704153600000)
 
@@ -150,7 +150,7 @@ Timestamps are stored as 64-bit integers internally.
 
 ### Schema Declaration
 
-```datalog
+```iql
 +event_log(id: int, occurred_at: timestamp, message: string)
 ```
 
@@ -160,7 +160,7 @@ Aliases: `timestamp`, `time`, `datetime`
 
 Symbols are interned strings optimized for frequent comparisons (like identifiers or tags):
 
-```datalog
+```iql
 +user(1, "alice", "admin")     // "admin" as string
 ```
 
@@ -168,7 +168,7 @@ Symbols are interned strings optimized for frequent comparisons (like identifier
 
 Use the `symbol` type when a column contains a small set of repeated values:
 
-```datalog
+```iql
 +user(id: int, name: string, role: symbol)
 ```
 
@@ -185,7 +185,7 @@ InputLayer performs limited automatic type coercion:
 | Integer | Float | Yes (in arithmetic) |
 | Others | Any | No |
 
-```datalog
+```iql
 // Integer + Float = Float
 ?data(X, Y), Z = X + 3.14  // X (int) coerced to float
 ```
@@ -194,7 +194,7 @@ InputLayer performs limited automatic type coercion:
 
 When declaring schemas, use these type names:
 
-```datalog
+```iql
 +employee(
     id: int,
     name: string,
@@ -217,14 +217,14 @@ When declaring schemas, use these type names:
 
 ### Mixed Types
 
-```datalog
+```iql
 +product(1, "Widget", 19.99, true)
 +product(2, "Gadget", 29.99, false)
 ```
 
 ### Vectors for Similarity
 
-```datalog
+```iql
 +embedding[(1, [0.1, 0.2, 0.3]), (2, [0.2, 0.3, 0.4])]
 
 ?embedding(Id1, V1), embedding(Id2, V2),
@@ -235,7 +235,7 @@ When declaring schemas, use these type names:
 
 ### String Comparisons
 
-```datalog
+```iql
 +person[("alice", "engineering"), ("bob", "sales")]
 
 ?person(Name, Dept), Dept = "engineering"

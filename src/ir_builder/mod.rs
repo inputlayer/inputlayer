@@ -1,6 +1,6 @@
 //! # IR Builder
 //!
-//! AST -> IR conversion. Builds `IRNode` trees from Datalog rules:
+//! AST -> IR conversion. Builds `IRNode` trees from IQL rules:
 //! Scan for base relations, Join with key inference from shared variables,
 //! Filter from body predicates, Map for projections.
 //!
@@ -15,7 +15,7 @@
 //!
 //! # Implementation
 //!
-//! Takes Datalog rules (AST) and converts them to intermediate representation (IR)
+//! Takes IQL rules (AST) and converts them to intermediate representation (IR)
 //! suitable for optimization and code generation.
 
 use crate::ast::{Atom, BodyPredicate, BuiltinFunc, ComparisonOp, Rule, Term};
