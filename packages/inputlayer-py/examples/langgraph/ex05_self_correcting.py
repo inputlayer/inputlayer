@@ -1,11 +1,11 @@
 """Self-correcting agent: LLM generates, KG rules validate, loop fixes.
 
-An LLM generates an API specification. Datalog rules automatically
-validate it — checking for missing auth, invalid methods, naming
+An LLM generates an API specification. Rules automatically
+validate it, checking for missing auth, invalid methods, naming
 conventions, etc. If violations are found, the LLM gets the specific
 rule violations and regenerates. The loop continues until rules pass.
 
-The key insight: validation is DECLARATIVE (Datalog rules), not
+The key insight: validation is DECLARATIVE (rules), not
 imperative (Python if/else) or probabilistic (ask another LLM).
 Rules are deterministic, explainable, and editable without code changes.
 """
@@ -154,7 +154,7 @@ async def validate_spec(state: dict[str, Any]) -> dict[str, Any]:
     if violations:
         print(f"\n  {RED}Violations found ({len(violations)}):{RESET}")
         for v in violations:
-            print(f"    {RED}x{RESET} {v['name']}: {YELLOW}{v['rule']}{RESET} — {v['description']}")
+            print(f"    {RED}x{RESET} {v['name']}: {YELLOW}{v['rule']}{RESET}: {v['description']}")
     else:
         print(f"\n  {GREEN}All validation rules pass!{RESET}")
 
@@ -235,7 +235,7 @@ async def run():
         # ── Build graph ──────────────────────────────────────────────
 
         step(2, "Build self-correction loop")
-        print(f"{DIM}  generate → validate → [valid: accept | invalid: regenerate]{RESET}")
+        print(f"{DIM}  generate -> validate -> [valid: accept | invalid: regenerate]{RESET}")
 
         graph = StateGraph(SpecState)
         graph.add_node("generate", generate_spec)

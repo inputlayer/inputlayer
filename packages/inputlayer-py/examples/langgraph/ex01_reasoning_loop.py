@@ -1,6 +1,6 @@
-"""Reasoning loop: search → accumulate facts → rules check → loop or answer.
+"""Reasoning loop: search -> accumulate facts -> rules check -> loop or answer.
 
-The KG accumulates facts across iterations. Datalog rules derive when
+The KG accumulates facts across iterations. Rules derive when
 enough context has been gathered. The kg_router checks these derived
 facts to decide whether to loop or produce a final answer.
 
@@ -139,7 +139,7 @@ async def synthesize_answer(state: dict[str, Any]) -> dict[str, Any]:
             }
         )
     else:
-        answer = "Summary: " + "; ".join(f"{t} — {c}" for t, c in list(facts.items())[:4])
+        answer = "Summary: " + "; ".join(f"{t}: {c}" for t, c in list(facts.items())[:4])
 
     return {"answer": answer}
 
@@ -171,7 +171,7 @@ async def run():
         await kg.execute("+research_fact(topic: string, content: string)")
 
         # Rule: enough_context when we have 4+ distinct topics
-        # We can't count in Datalog directly, but we can check for
+        # We can't count directly, but we can check for
         # specific combinations. Let's use a simpler approach:
         # enough_context fires when we have facts on 4 specific topics.
         await kg.execute(
@@ -182,8 +182,8 @@ async def run():
         )
 
         step(1, "Build the reasoning graph")
-        print(f"{DIM}  Nodes: plan_search → gather_facts → [loop or answer]{RESET}")
-        print(f"{DIM}  Router: enough_context(X) → answer, else → loop{RESET}")
+        print(f"{DIM}  Nodes: plan_search -> gather_facts -> [loop or answer]{RESET}")
+        print(f"{DIM}  Router: enough_context(X) -> answer, else -> loop{RESET}")
         print(f"{DIM}  Max 3 iterations as safety limit{RESET}")
 
         # ── Build the graph ──────────────────────────────────────────

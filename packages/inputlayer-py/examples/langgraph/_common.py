@@ -95,7 +95,7 @@ async def connect() -> tuple[InputLayer, Any]:
         password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
     )
     await il.connect()
-    return il, None  # no shared KG — each example sets up its own
+    return il, None  # no shared KG. Each example sets up its own
 
 
 async def cleanup(il: InputLayer, kg_name: str = "") -> None:

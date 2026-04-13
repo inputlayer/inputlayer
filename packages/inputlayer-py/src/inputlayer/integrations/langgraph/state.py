@@ -1,4 +1,4 @@
-"""InputLayerState — TypedDict with KG handle for LangGraph state."""
+"""InputLayerState: TypedDict with KG handle for LangGraph state."""
 
 from __future__ import annotations
 
@@ -19,5 +19,5 @@ class InputLayerState(TypedDict, total=False):
     Nodes created by ``kg_node()`` read it automatically.
     """
 
-    kg: Any  # KnowledgeGraph handle — typed as Any for flexibility
+    kg: Any  # KnowledgeGraph handle, typed as Any for flexibility
     results: list[Any]

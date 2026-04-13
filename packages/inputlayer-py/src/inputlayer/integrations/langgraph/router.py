@@ -1,4 +1,4 @@
-"""kg_router — conditional edge routing based on Datalog query results."""
+"""kg_router: conditional edge routing based on IQL query results."""
 
 from __future__ import annotations
 
@@ -12,14 +12,14 @@ def kg_router(
     default: str = "end",
     kg_key: str = "kg",
 ) -> Callable[[dict[str, Any]], Any]:
-    """Create a LangGraph conditional edge function driven by Datalog queries.
+    """Create a LangGraph conditional edge function driven by IQL queries.
 
-    Each branch maps a target node name to a Datalog query. The first branch
+    Each branch maps a target node name to an IQL query. The first branch
     whose query returns non-empty results wins. If no branch matches, the
     ``default`` is returned.
 
-    This lets the KG's derived facts control the graph's execution path —
-    routing decisions are declarative Datalog rules, not imperative Python.
+    This lets the KG's derived facts control the graph's execution path.
+    Routing decisions are declarative rules, not imperative Python.
 
     Usage::
 
@@ -33,7 +33,7 @@ def kg_router(
         )
         graph.add_conditional_edges("reason", route)
 
-    **Parameterized branches** — queries can reference state values by using
+    **Parameterized branches.** Queries can reference state values by using
     a callable instead of a string::
 
         route = kg_router(
@@ -44,7 +44,7 @@ def kg_router(
         )
 
     Args:
-        branches: Mapping of ``{target_node: datalog_query}``. Queries can be
+        branches: Mapping of ``{target_node: iql_query}``. Queries can be
             strings or callables ``(state) -> str``.
         default: Node to route to if no branch matches.
         kg_key: State key where the KnowledgeGraph handle lives.

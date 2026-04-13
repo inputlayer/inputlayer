@@ -1,10 +1,10 @@
 """Streaming aggregation: metrics arrive, rules detect threshold breaches.
 
 Simulates a monitoring system where metrics stream in continuously.
-Datalog rules check each metric against defined thresholds. When
+Rules check each metric against defined thresholds. When
 breaches are detected, the router triggers alert/remediation nodes.
 
-Shows: real-time analytics with rule-driven triggers — the KG acts
+Shows: real-time analytics with rule-driven triggers. The KG acts
 as a streaming policy engine.
 """
 
@@ -290,7 +290,7 @@ async def run():
         thresholds = [
             ("api", "error_rate", 5),
             ("api", "latency_p99", 500),
-            ("api", "rps", 500),  # minimum, not max — but we'll treat as max for simplicity
+            ("api", "rps", 500),  # minimum, not max, but we'll treat as max for simplicity
             ("db", "connections", 90),
             ("db", "query_time_ms", 100),
             ("cache", "hit_rate", 70),  # inverted: below threshold is bad
@@ -326,8 +326,8 @@ async def run():
 
         step(2, "Build monitoring pipeline")
         print(
-            f"{DIM}  ingest → check_breaches → "
-            f"[breach: alert → loop | ok: loop | done: report]{RESET}"
+            f"{DIM}  ingest -> check_breaches -> "
+            f"[breach: alert -> loop | ok: loop | done: report]{RESET}"
         )
 
         graph = StateGraph(MonitorState)

@@ -1,12 +1,12 @@
 """Event correlation: rules detect incidents from event patterns.
 
 Simulates a stream of system events (logs, alerts, metrics). Events
-are inserted as facts. Datalog rules correlate events across components
+are inserted as facts. Rules correlate events across components
 and time to detect incidents (e.g., "deploy followed by error spike
 on the same service = failed deploy").
 
-Shows pattern matching across accumulated events — impossible with
-flat state, natural with Datalog rules.
+Shows pattern matching across accumulated events. Impossible with
+flat state, natural with rules.
 """
 
 import asyncio
@@ -109,7 +109,7 @@ async def ingest_events(state: dict[str, Any]) -> dict[str, Any]:
 
 
 async def check_patterns(state: dict[str, Any]) -> dict[str, Any]:
-    """Check for incidents derived by Datalog rules."""
+    """Check for incidents derived by rules."""
     kg = state["kg"]
 
     r = await kg.execute("?incident(Type, Component, Description)")
@@ -276,16 +276,16 @@ async def run():
         )
 
         step(1, "Correlation rules defined")
-        print(f"{DIM}  deploy + error → failed_deploy{RESET}")
-        print(f"{DIM}  multi-component errors → cascade{RESET}")
-        print(f"{DIM}  warn + error → escalation{RESET}")
-        print(f"{DIM}  pager alert → critical incident{RESET}")
-        print(f"{DIM}  error + recovery → resolved{RESET}")
+        print(f"{DIM}  deploy + error -> failed_deploy{RESET}")
+        print(f"{DIM}  multi-component errors -> cascade{RESET}")
+        print(f"{DIM}  warn + error -> escalation{RESET}")
+        print(f"{DIM}  pager alert -> critical incident{RESET}")
+        print(f"{DIM}  error + recovery -> resolved{RESET}")
 
         # ── Build graph ──────────────────────────────────────────────
 
         step(2, "Build event processing pipeline")
-        print(f"{DIM}  ingest_batch → check_patterns → [more batches? loop : summarize]{RESET}")
+        print(f"{DIM}  ingest_batch -> check_patterns -> [more batches? loop : summarize]{RESET}")
 
         graph = StateGraph(EventState)
         graph.add_node("ingest", ingest_events)

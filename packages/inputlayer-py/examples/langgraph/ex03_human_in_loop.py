@@ -84,7 +84,7 @@ async def classify_action(state: dict[str, Any]) -> str:
     if r.rows:
         level = r.rows[0][3]
         reason = r.rows[0][4]
-        print(f"  {YELLOW}Risk: {level} — {reason}{RESET}")
+        print(f"  {YELLOW}Risk: {level}: {reason}{RESET}")
         if level == "high":
             return "needs_approval"
         return "auto_approve"
@@ -170,7 +170,7 @@ async def run():
             '+spending_limit[("purchase", 10000), ("subscription", 5000), ("transfer", 25000)]'
         )
 
-        # Rule: over spending limit → high risk
+        # Rule: over spending limit -> high risk
         await kg.execute(
             '+risk_flag(Type, Amount, Target, "high", "Over spending limit") <- '
             "pending_action(Type, Desc, Amount, Target), "
@@ -179,7 +179,7 @@ async def run():
 
         step(1, "Policy rules defined")
         print(f"{DIM}  spending_limit: purchase=$10K, subscription=$5K, transfer=$25K{RESET}")
-        print(f"{DIM}  risk_flag: amount > limit → high risk → needs approval{RESET}")
+        print(f"{DIM}  risk_flag: amount > limit -> high risk -> needs approval{RESET}")
 
         # ── Define actions to process ────────────────────────────────
 
@@ -219,7 +219,7 @@ async def run():
         # ── Build graph ──────────────────────────────────────────────
 
         step(2, "Build the approval workflow graph")
-        print(f"{DIM}  pick_action → classify → [safe: execute | risky: review] → loop{RESET}")
+        print(f"{DIM}  pick_action -> classify -> [safe: execute | risky: review] -> loop{RESET}")
 
         graph = StateGraph(ActionState)
         graph.add_node("pick", pick_next_action)

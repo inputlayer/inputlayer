@@ -1,4 +1,4 @@
-"""kg_node — factory for LangGraph-compatible KG query/mutation nodes."""
+"""kg_node: factory for LangGraph-compatible KG query/mutation nodes."""
 
 from __future__ import annotations
 
@@ -27,14 +27,14 @@ def kg_node(
         )
         graph.add_node("search", search)
 
-    **Parameterized query** — the query can be a callable that reads state::
+    **Parameterized query.** The query can be a callable that reads state::
 
         search = kg_node(
             query=lambda s: f'?article(Id, T, C, "{s["category"]}", E)',
             state_key="articles",
         )
 
-    **Insert mode** — reads data from state and inserts into the KG::
+    **Insert mode.** Reads data from state and inserts into the KG::
 
         store = kg_node(
             relation=Finding,
@@ -43,7 +43,7 @@ def kg_node(
         )
 
     Args:
-        query: Datalog query string, or a callable ``(state) -> str``.
+        query: IQL query string, or a callable ``(state) -> str``.
         relation: Relation class for insert/delete operations.
         operation: One of "query", "insert", "delete".
         state_key: State key to read from (insert/delete) or write to (query).

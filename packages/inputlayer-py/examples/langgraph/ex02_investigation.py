@@ -2,7 +2,7 @@
 
 An investigation agent receives a question. It queries the KG for what's
 known, identifies missing information, gathers it from sources, inserts
-new facts, and lets Datalog rules derive conclusions. The router checks
+new facts, and lets rules derive conclusions. The router checks
 derived conclusions to decide the next step.
 
 Shows incremental fact accumulation with rule-driven decision making.
@@ -70,7 +70,7 @@ EVIDENCE_DB: dict[str, list[tuple[str, str, str]]] = {
 
 
 async def assess_situation(state: dict[str, Any]) -> dict[str, Any]:
-    """Initial assessment — check what evidence areas exist."""
+    """Initial assessment, check what evidence areas exist."""
     kg = state["kg"]
 
     r = await kg.execute("?evidence(Person, Type, Detail)")
@@ -253,7 +253,7 @@ async def run():
         )
 
         step(1, "Build the investigation graph")
-        print(f"{DIM}  assess → gather → analyze → [more sources? loop : conclude]{RESET}")
+        print(f"{DIM}  assess -> gather -> analyze -> [more sources? loop : conclude]{RESET}")
         print(f"{DIM}  Rules detect: suspicious_pattern, high_risk{RESET}")
 
         # ── Build the graph ──────────────────────────────────────────

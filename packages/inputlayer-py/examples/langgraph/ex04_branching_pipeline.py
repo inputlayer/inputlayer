@@ -300,7 +300,7 @@ async def run():
         await kg.execute("+urgent_item(doc_id: int, item_type: string, subject: string)")
 
         step(1, "Build the branching pipeline")
-        print(f"{DIM}  pick_doc → classify → [email|code|ticket|report] → loop → summarize{RESET}")
+        print(f"{DIM}  pick_doc -> classify -> [email|code|ticket|report] -> loop -> summarize{RESET}")
 
         # ── Build graph ──────────────────────────────────────────────
 

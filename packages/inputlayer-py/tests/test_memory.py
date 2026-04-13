@@ -19,24 +19,24 @@ class MockMemoryKG:
     topics: list[tuple[str, int, str]] = field(default_factory=list)
     executed: list[str] = field(default_factory=list)
 
-    async def execute(self, datalog: str) -> ResultSet:
-        self.executed.append(datalog)
+    async def execute(self, iql: str) -> ResultSet:
+        self.executed.append(iql)
 
-        # Schema / rule definitions — no-op
-        if ":" in datalog and datalog.startswith("+memory_"):
+        # Schema / rule definitions, no-op
+        if ":" in iql and iql.startswith("+memory_"):
             return ResultSet(columns=[], rows=[])
-        if datalog.startswith("+active_topic") and "<-" in datalog:
+        if iql.startswith("+active_topic") and "<-" in iql:
             return ResultSet(columns=[], rows=[])
-        if datalog.startswith("+relevant_turn") and "<-" in datalog:
+        if iql.startswith("+relevant_turn") and "<-" in iql:
             return ResultSet(columns=[], rows=[])
-        if datalog.startswith("+topic_thread") and "<-" in datalog:
+        if iql.startswith("+topic_thread") and "<-" in iql:
             return ResultSet(columns=[], rows=[])
 
         # Insert memory_turn
-        if datalog.startswith("+memory_turn("):
+        if iql.startswith("+memory_turn("):
             m = re.match(
                 r'\+memory_turn\("([^"]*)", (\d+), "([^"]*)", "((?:[^"\\]|\\.)*)", (\d+)\)',
-                datalog,
+                iql,
             )
             if m:
                 thread_id = m.group(1)
@@ -48,15 +48,15 @@ class MockMemoryKG:
             return ResultSet(columns=[], rows=[])
 
         # Insert memory_topic
-        if datalog.startswith("+memory_topic("):
-            m = re.match(r'\+memory_topic\("([^"]*)", (\d+), "([^"]*)"\)', datalog)
+        if iql.startswith("+memory_topic("):
+            m = re.match(r'\+memory_topic\("([^"]*)", (\d+), "([^"]*)"\)', iql)
             if m:
                 self.topics.append((m.group(1), int(m.group(2)), m.group(3)))
             return ResultSet(columns=[], rows=[])
 
         # Query active_topic
-        if datalog.startswith("?active_topic("):
-            thread_id = self._extract_thread(datalog)
+        if iql.startswith("?active_topic("):
+            thread_id = self._extract_thread(iql)
             seen = set()
             rows = []
             for t in self.topics:
@@ -66,8 +66,8 @@ class MockMemoryKG:
             return ResultSet(columns=["thread_id", "topic"], rows=rows)
 
         # Query memory_turn
-        if datalog.startswith("?memory_turn("):
-            thread_id = self._extract_thread(datalog)
+        if iql.startswith("?memory_turn("):
+            thread_id = self._extract_thread(iql)
             rows = [[t[0], t[1], t[2], t[3], t[4]] for t in self.turns if t[0] == thread_id]
             return ResultSet(
                 columns=["thread_id", "turn_id", "role", "content", "ts"],
@@ -75,8 +75,8 @@ class MockMemoryKG:
             )
 
         # Query relevant_turn
-        if datalog.startswith("?relevant_turn("):
-            thread_id = self._extract_thread(datalog)
+        if iql.startswith("?relevant_turn("):
+            thread_id = self._extract_thread(iql)
             rows = []
             for turn in self.turns:
                 if turn[0] != thread_id:
@@ -90,8 +90,8 @@ class MockMemoryKG:
             )
 
         # Query topic_thread
-        if datalog.startswith("?topic_thread("):
-            thread_id = self._extract_thread(datalog)
+        if iql.startswith("?topic_thread("):
+            thread_id = self._extract_thread(iql)
             thread_topics = {t[2] for t in self.topics if t[0] == thread_id}
             rows = []
             topic_list = sorted(thread_topics)
@@ -102,8 +102,8 @@ class MockMemoryKG:
 
         return ResultSet(columns=[], rows=[])
 
-    def _extract_thread(self, datalog: str) -> str:
-        m = re.search(r'"([^"]+)"', datalog)
+    def _extract_thread(self, iql: str) -> str:
+        m = re.search(r'"([^"]+)"', iql)
         return m.group(1) if m else ""
 
 
@@ -358,3 +358,39 @@ class TestTopicExtraction:
         mem = InputLayerMemory(kg=kg)
         await mem.astore("t", "user", "Hello there")
         assert len(kg.topics) == 0
+
+
+class TestEscaping:
+    async def test_thread_id_with_quotes(self) -> None:
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        await mem.astore('thread-"special"', "user", "Hello Python")
+        # Filter out schema DDL (contains ":") to get only data inserts
+        insert_calls = [
+            c for c in kg.executed
+            if c.startswith("+memory_turn(") and ":" not in c.split("(", 1)[1]
+        ]
+        assert len(insert_calls) == 1
+        assert r'thread-\"special\"' in insert_calls[0]
+
+    async def test_role_with_backslash(self) -> None:
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        await mem.astore("t", "user\\admin", "Hello")
+        insert_calls = [
+            c for c in kg.executed
+            if c.startswith("+memory_turn(") and ":" not in c.split("(", 1)[1]
+        ]
+        assert len(insert_calls) == 1
+        assert "user\\\\admin" in insert_calls[0]
+
+    async def test_topic_with_quotes(self) -> None:
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        await mem.astore("t", "user", "Hello", topics=['say "hi"'])
+        topic_calls = [
+            c for c in kg.executed
+            if c.startswith("+memory_topic(") and ":" not in c.split("(", 1)[1]
+        ]
+        assert len(topic_calls) == 1
+        assert r'say \"hi\"' in topic_calls[0]

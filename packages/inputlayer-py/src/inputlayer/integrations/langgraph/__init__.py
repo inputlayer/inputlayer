@@ -2,7 +2,7 @@
 
 Provides:
 - kg_node: Factory for KG query/mutation graph nodes
-- kg_router: Conditional edge routing based on Datalog queries
+- kg_router: Conditional edge routing based on IQL queries
 - InputLayerState: TypedDict mixin with KG handle
 - InputLayerCheckpointer: BaseCheckpointSaver backed by an InputLayer KG
 - InputLayerMemory: Semantic long-term memory backed by a KG

@@ -1,4 +1,4 @@
-"""Tests for inputlayer.integrations.langgraph — nodes, router, state."""
+"""Tests for inputlayer.integrations.langgraph, nodes, router, state."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def _mock_kg(
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  kg_node — query mode
+#  kg_node - query mode
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -87,7 +87,7 @@ class TestKgNodeQuery:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  kg_node — insert mode
+#  kg_node - insert mode
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -142,7 +142,7 @@ class TestKgNodeInsert:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  kg_node — delete mode
+#  kg_node - delete mode
 # ═══════════════════════════════════════════════════════════════════════
 
 

@@ -1,6 +1,6 @@
 """Resumable graph: persist state in InputLayer, resume after interruption.
 
-Demonstrates InputLayerCheckpointer — a LangGraph BaseCheckpointSaver
+Demonstrates InputLayerCheckpointer: a LangGraph BaseCheckpointSaver
 backed by an InputLayer KG. The graph runs to a checkpoint, the process
 "crashes" (we abandon the graph), and then a new graph instance resumes
 from the persisted state.
@@ -33,7 +33,7 @@ from langgraph.graph import END, StateGraph
 
 
 class WorkflowState(TypedDict, total=False):
-    """Plain TypedDict — checkpoint state must be msgpack-serializable,
+    """Plain TypedDict. Checkpoint state must be msgpack-serializable,
     so we don't put the KG handle in here. The checkpointer accesses
     its own KG via self.kg, not via state.
     """
@@ -158,7 +158,7 @@ async def run() -> None:
         step(4, "Process B starts and resumes from checkpoint")
         print(f"\n  {WHITE}Process B starts (new graph instance):{RESET}")
 
-        # Build a brand new graph instance — same checkpointer
+        # Build a brand new graph instance, same checkpointer
         app2 = build_graph(checkpointer)
 
         # Resuming: pass None as input, the checkpointer loads state
@@ -178,7 +178,7 @@ async def run() -> None:
         async for tup in checkpointer.alist(config):
             all_checkpoints.append(tup)
         print(f"  {DIM}{len(all_checkpoints)} total checkpoints across both runs{RESET}")
-        print(f"  {DIM}This is the audit trail — you can resume from ANY of these{RESET}")
+        print(f"  {DIM}This is the audit trail. You can resume from ANY of these{RESET}")
 
         # ── Cleanup ──────────────────────────────────────────────────
 

@@ -1,8 +1,8 @@
 """Tool selection via rules: KG decides which tool to use, not the LLM.
 
-The KG stores tool capabilities and question categories. Datalog rules
+The KG stores tool capabilities and question categories. Rules
 match questions to the best tool based on capability scores. The router
-dispatches to the selected tool node — deterministic, explainable,
+dispatches to the selected tool node. Deterministic, explainable,
 and editable without changing code.
 
 Shows: KG as an intelligent tool router for complex agent systems.
@@ -187,14 +187,14 @@ async def classify_and_select(state: dict[str, Any]) -> dict[str, Any]:
         strength = best[2]
         print(f'\n  {WHITE}Q: "{question}"{RESET}')
         print(
-            f"  {DIM}Categories: {', '.join(categories)} → "
+            f"  {DIM}Categories: {', '.join(categories)} -> "
             f"Best tool: {CYAN}{tool}{RESET} "
             f"(strength: {strength}){RESET}"
         )
     else:
         tool = "default"
         print(f'\n  {WHITE}Q: "{question}"{RESET}')
-        print(f"  {DIM}No matching tool — using fallback{RESET}")
+        print(f"  {DIM}No matching tool, using fallback{RESET}")
 
     return {
         "current_question": question,
@@ -256,8 +256,8 @@ async def summarize_results(state: dict[str, Any]) -> dict[str, Any]:
         r = await kg.execute(f'?question_type("{escaped_q}", Category)')
         cats = [row[1] for row in r.rows]
         print(
-            f'    "{a["question"][:40]}..." → '
-            f"{DIM}{', '.join(cats)}{RESET} → "
+            f'    "{a["question"][:40]}..." -> '
+            f"{DIM}{', '.join(cats)}{RESET} -> "
             f"{tool_colors.get(a['tool'], DIM)}{a['tool']}{RESET}"
         )
 

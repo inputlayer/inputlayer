@@ -3,7 +3,7 @@
 A multi-turn conversation where:
 1. Each message is stored as a fact in the KG
 2. Topics are auto-extracted per turn
-3. Datalog rules derive: active topics, relevant context, topic threads
+3. Rules derive: active topics, relevant context, topic threads
 4. The recall_node injects derived context into the graph state
 5. The LLM uses this derived context (not raw history) for its response
 
@@ -80,7 +80,7 @@ async def run() -> None:
         # ── Step 1: Replay conversation into memory ──────────────────
 
         step(1, "Store conversation turns")
-        print(f"{DIM}  {len(CONVERSATION)} turns → KG facts + auto topic extraction{RESET}\n")
+        print(f"{DIM}  {len(CONVERSATION)} turns -> KG facts + auto topic extraction{RESET}\n")
 
         for role, content in CONVERSATION:
             await memory.astore("chat-1", role, content)
@@ -94,7 +94,7 @@ async def run() -> None:
 
         # ── Step 2: Show derived context ─────────────────────────────
 
-        step(2, "Recall derived context (computed by Datalog rules)")
+        step(2, "Recall derived context (computed by rules)")
 
         ctx = await memory.arecall("chat-1")
 
@@ -104,7 +104,7 @@ async def run() -> None:
 
         print(f"\n  {WHITE}Related topic pairs:{RESET}")
         for pair in ctx["related_topics"]:
-            print(f"    {YELLOW}{pair[0]}{RESET} ↔ {YELLOW}{pair[1]}{RESET}")
+            print(f"    {YELLOW}{pair[0]}{RESET} <-> {YELLOW}{pair[1]}{RESET}")
 
         print(f"\n  {WHITE}Relevant turns by topic:{RESET}")
         for topic, turns in sorted(ctx["relevant"].items()):
@@ -168,12 +168,12 @@ async def run() -> None:
 
         app = graph.compile()
 
-        # Ask a new question — the memory context will include all
+        # Ask a new question. The memory context will include all
         # the derived topics and relevant history
         new_question = "What about deploying the whole thing with Docker and Kubernetes?"
 
         print(f"\n  {WHITE}New question:{RESET} {new_question}")
-        print(f"{DIM}  Graph: recall → respond → store{RESET}")
+        print(f"{DIM}  Graph: recall -> respond -> store{RESET}")
 
         result = await app.ainvoke(
             {

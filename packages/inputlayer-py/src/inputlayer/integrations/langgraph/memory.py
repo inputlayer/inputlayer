@@ -1,8 +1,8 @@
-"""InputLayerMemory — semantic long-term memory for LangGraph agents.
+"""InputLayerMemory: semantic long-term memory for LangGraph agents.
 
-Stores conversation turns as facts in a KG. Datalog rules automatically
+Stores conversation turns as facts in a KG. Rules automatically
 derive active topics, relevant context, and conversation threads.
-Unlike raw chat history, the recalled context is DERIVED — rules decide
+Unlike raw chat history, the recalled context is DERIVED. Rules decide
 what's relevant, not just vector similarity or recency.
 
 Usage::
@@ -52,6 +52,11 @@ _TOPIC_KEYWORDS: dict[str, list[str]] = {
 }
 
 
+def _escape(s: str) -> str:
+    """Escape a string for an IQL literal."""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def _extract_topics(text: str) -> list[str]:
     """Extract topics from text using keyword matching."""
     text_lower = text.lower()
@@ -65,13 +70,13 @@ def _extract_topics(text: str) -> list[str]:
 class InputLayerMemory:
     """Semantic memory backed by an InputLayer KnowledgeGraph.
 
-    Stores conversation turns and derived context. Datalog rules
+    Stores conversation turns and derived context. Rules
     automatically compute:
 
-    - **active_topic(ThreadId, Topic)** — topics mentioned in this thread
-    - **relevant_turn(ThreadId, TurnId, Role, Content, Topic)** —
+    - **active_topic(ThreadId, Topic)**: topics mentioned in this thread
+    - **relevant_turn(ThreadId, TurnId, Role, Content, Topic)**:
       turns that mention an active topic (cross-referenced)
-    - **topic_thread(ThreadId, TopicA, TopicB)** — pairs of topics
+    - **topic_thread(ThreadId, TopicA, TopicB)**: pairs of topics
       discussed in the same thread (conversation themes)
 
     Args:
@@ -103,14 +108,14 @@ class InputLayerMemory:
             "+active_topic(ThreadId, Topic) <- memory_topic(ThreadId, TurnId, Topic)"
         )
 
-        # Rule: relevant turns — turns that share an active topic
+        # Rule: relevant turns. Turns that share an active topic
         await self.kg.execute(
             "+relevant_turn(ThreadId, TurnId, Role, Content, Topic) <- "
             "memory_turn(ThreadId, TurnId, Role, Content, Ts), "
             "memory_topic(ThreadId, TurnId, Topic)"
         )
 
-        # Rule: topic threads — pairs of topics discussed together
+        # Rule: topic threads. Pairs of topics discussed together
         await self.kg.execute(
             "+topic_thread(ThreadId, TopicA, TopicB) <- "
             "memory_topic(ThreadId, TurnIdA, TopicA), "
@@ -150,9 +155,8 @@ class InputLayerMemory:
         turn_id = self._turn_counter
         ts = time.time_ns()
 
-        escaped_content = content.replace("\\", "\\\\").replace('"', '\\"')
         await self.kg.execute(
-            f'+memory_turn("{thread_id}", {turn_id}, "{role}", "{escaped_content}", {ts})'
+            f'+memory_turn("{_escape(thread_id)}", {turn_id}, "{_escape(role)}", "{_escape(content)}", {ts})'
         )
 
         # Extract and store topics
@@ -160,7 +164,7 @@ class InputLayerMemory:
             topics = _extract_topics(content)
 
         for topic in topics:
-            await self.kg.execute(f'+memory_topic("{thread_id}", {turn_id}, "{topic}")')
+            await self.kg.execute(f'+memory_topic("{_escape(thread_id)}", {turn_id}, "{_escape(topic)}")')
 
         return turn_id
 
@@ -195,11 +199,11 @@ class InputLayerMemory:
         }
 
         # Active topics
-        r = await self.kg.execute(f'?active_topic("{thread_id}", Topic)')
+        r = await self.kg.execute(f'?active_topic("{_escape(thread_id)}", Topic)')
         result["topics"] = sorted({str(row[-1]) for row in r.rows})
 
         # Recent turns (all turns, sorted by turn_id desc)
-        r = await self.kg.execute(f'?memory_turn("{thread_id}", TurnId, Role, Content, Ts)')
+        r = await self.kg.execute(f'?memory_turn("{_escape(thread_id)}", TurnId, Role, Content, Ts)')
         turns = sorted(r.rows, key=lambda row: row[-1], reverse=True)
         for row in turns[: self.max_recent]:
             result["recent"].append(
@@ -211,7 +215,7 @@ class InputLayerMemory:
             )
 
         # Relevant turns grouped by topic
-        r = await self.kg.execute(f'?relevant_turn("{thread_id}", TurnId, Role, Content, Topic)')
+        r = await self.kg.execute(f'?relevant_turn("{_escape(thread_id)}", TurnId, Role, Content, Topic)')
         by_topic: dict[str, list[dict[str, Any]]] = {}
         for row in r.rows:
             topic = str(row[-1])
@@ -224,7 +228,7 @@ class InputLayerMemory:
         result["relevant"] = by_topic
 
         # Related topic pairs
-        r = await self.kg.execute(f'?topic_thread("{thread_id}", TopicA, TopicB)')
+        r = await self.kg.execute(f'?topic_thread("{_escape(thread_id)}", TopicA, TopicB)')
         seen: set[tuple[str, str]] = set()
         for row in r.rows:
             a, b = sorted([str(row[-2]), str(row[-1])])

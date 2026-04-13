@@ -1,6 +1,6 @@
 """Tests for inputlayer.integrations.langgraph.checkpointer.
 
-Uses an in-memory mock KG that simulates basic Datalog insert/query
+Uses an in-memory mock KG that simulates basic IQL insert/query
 semantics for the two relations the checkpointer uses.
 """
 
@@ -22,7 +22,7 @@ class _BoundString(str):
 
 
 class _Variable(str):
-    """Marker for an unquoted Datalog variable in a query (free variable)."""
+    """Marker for an unquoted IQL variable in a query (free variable)."""
 
 
 # ── Mock KG ──────────────────────────────────────────────────────────
@@ -35,46 +35,46 @@ class MockKG:
     checkpoints: list[tuple] = field(default_factory=list)
     writes: list[tuple] = field(default_factory=list)
 
-    async def execute(self, datalog: str) -> ResultSet:
-        # Schema definitions — no-op
-        if datalog.startswith("+graph_checkpoint(") and ":" in datalog:
+    async def execute(self, iql: str) -> ResultSet:
+        # Schema definitions, no-op
+        if iql.startswith("+graph_checkpoint(") and ":" in iql:
             return ResultSet(columns=["x"], rows=[])
-        if datalog.startswith("+graph_write(") and ":" in datalog:
+        if iql.startswith("+graph_write(") and ":" in iql:
             return ResultSet(columns=["x"], rows=[])
 
         # Insert a graph_checkpoint fact
-        if datalog.startswith("+graph_checkpoint("):
-            args = self._parse_args(datalog)
-            # Strip marker types — store as plain values
+        if iql.startswith("+graph_checkpoint("):
+            args = self._parse_args(iql)
+            # Strip marker types, store as plain values
             args = [str(a) if isinstance(a, _BoundString) else a for a in args]
             self.checkpoints.append(tuple(args))
             return ResultSet(columns=["x"], rows=[])
 
         # Insert a graph_write fact
-        if datalog.startswith("+graph_write("):
-            args = self._parse_args(datalog)
+        if iql.startswith("+graph_write("):
+            args = self._parse_args(iql)
             args = [str(a) if isinstance(a, _BoundString) else a for a in args]
             self.writes.append(tuple(args))
             return ResultSet(columns=["x"], rows=[])
 
         # Query graph_checkpoint
-        if datalog.startswith("?graph_checkpoint("):
-            return self._query_checkpoints(datalog)
+        if iql.startswith("?graph_checkpoint("):
+            return self._query_checkpoints(iql)
 
         # Query graph_write
-        if datalog.startswith("?graph_write("):
-            return self._query_writes(datalog)
+        if iql.startswith("?graph_write("):
+            return self._query_writes(iql)
 
         return ResultSet(columns=["x"], rows=[])
 
-    def _parse_args(self, datalog: str) -> list:
+    def _parse_args(self, iql: str) -> list:
         """Extract argument values from a fact insertion."""
         # Match +relation(arg1, arg2, ...)
-        m = re.match(r"\+\w+\((.*)\)$", datalog)
+        m = re.match(r"\+\w+\((.*)\)$", iql)
         if not m:
             return []
         args_str = m.group(1)
-        # Naive split — assumes no commas inside strings (we control encoding)
+        # Naive split, assumes no commas inside strings (we control encoding)
         args: list[Any] = []
         depth = 0
         current = ""
@@ -111,9 +111,9 @@ class MockKG:
             except ValueError:
                 return _Variable(s)
 
-    def _query_checkpoints(self, datalog: str) -> ResultSet:
+    def _query_checkpoints(self, iql: str) -> ResultSet:
         """Match query against stored checkpoints."""
-        body = datalog[len("?graph_checkpoint("):].rstrip(")")
+        body = iql[len("?graph_checkpoint("):].rstrip(")")
         parts = self._parse_args("+graph_checkpoint(" + body + ")")
 
         # Bound values are _BoundString; free variables are _Variable
@@ -141,8 +141,8 @@ class MockKG:
         )
         return ResultSet(columns=cols, rows=rows)
 
-    def _query_writes(self, datalog: str) -> ResultSet:
-        body = datalog[len("?graph_write("):].rstrip(")")
+    def _query_writes(self, iql: str) -> ResultSet:
+        body = iql[len("?graph_write("):].rstrip(")")
         parts = self._parse_args("+graph_write(" + body + ")")
         thread_id = str(parts[0]) if isinstance(parts[0], _BoundString) else None
         checkpoint_id = (
@@ -266,7 +266,7 @@ class TestPutWrites:
             task_id="task-1",
         )
 
-        # Get back — pending_writes should include both
+        # Get back. pending_writes should include both
         tup = await cp.aget_tuple(config)
         assert tup is not None
         assert len(tup.pending_writes) == 2

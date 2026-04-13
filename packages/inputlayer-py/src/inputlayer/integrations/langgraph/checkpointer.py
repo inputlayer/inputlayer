@@ -1,4 +1,4 @@
-"""InputLayerCheckpointer — LangGraph BaseCheckpointSaver backed by InputLayer.
+"""InputLayerCheckpointer: LangGraph BaseCheckpointSaver backed by InputLayer.
 
 Stores graph checkpoints as facts in a KG, allowing graph executions
 to be persisted and resumed across processes/restarts.
@@ -47,7 +47,7 @@ from inputlayer._sync import run_sync
 
 
 def _b64_encode(data: bytes) -> str:
-    """Encode bytes as base64 string for safe Datalog string storage."""
+    """Encode bytes as base64 string for safe IQL string storage."""
     return base64.b64encode(data).decode("ascii")
 
 
@@ -57,7 +57,7 @@ def _b64_decode(data: str) -> bytes:
 
 
 def _escape(s: str) -> str:
-    """Escape a string for Datalog literal."""
+    """Escape a string for an IQL literal."""
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
@@ -78,18 +78,18 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
         self.kg = kg
         self._setup_done = False
 
-    async def _exec(self, datalog: str) -> Any:
+    async def _exec(self, iql: str) -> Any:
         """Thin wrapper around kg.execute().
 
         Concurrent safety is handled by the underlying Connection's
-        internal lock — multiple coroutines can call this safely.
+        internal lock. Multiple coroutines can call this safely.
         """
-        return await self.kg.execute(datalog)
+        return await self.kg.execute(iql)
 
     async def setup(self) -> None:
         """Create the checkpoint relations if they don't exist.
 
-        Idempotent — safe to call multiple times.
+        Idempotent. Safe to call multiple times.
         """
         if self._setup_done:
             return
@@ -202,7 +202,7 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
             return None
 
         # Pick the latest by timestamp (last column).
-        # Parse from the end of the row — works whether the server
+        # Parse from the end of the row. Works whether the server
         # includes bound columns in the result or strips them.
         # Column order: thread_id, checkpoint_id, parent_id, blob, metadata, ts
         row = max(r.rows, key=lambda r: r[-1])
@@ -224,7 +224,7 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
             f'?graph_write("{_escape(thread_id)}", '
             f'"{_escape(actual_id)}", TaskId, Idx, Channel, Blob)'
         )
-        # Sort by task_id, idx — parse from end of row for resilience
+        # Sort by task_id, idx. Parse from end of row for resilience
         sorted_writes = sorted(r_writes.rows, key=lambda r: (r[-4], r[-3]))
         for w_row in sorted_writes:
             task_id = str(w_row[-4])
@@ -287,7 +287,7 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
             sorted_rows = sorted_rows[:limit]
 
         for row in sorted_rows:
-            # Parse from end of row — server may include bound thread_id
+            # Parse from end of row. Server may include bound thread_id
             checkpoint_id = str(row[-5])
             parent_id = str(row[-4])
             blob_packed = str(row[-3])

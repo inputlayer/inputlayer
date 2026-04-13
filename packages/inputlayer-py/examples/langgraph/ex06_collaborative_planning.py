@@ -1,11 +1,11 @@
 """Collaborative planning: multiple experts contribute, rules detect conflicts.
 
 Three expert nodes (engineer, product, security) each propose steps for
-a project plan. Datalog rules detect conflicts between steps (dependency
+a project plan. Rules detect conflicts between steps (dependency
 violations, resource conflicts, scheduling issues). The router blocks
 until all conflicts are resolved.
 
-Shows the KG as a coordination layer between agents — they don't talk
+Shows the KG as a coordination layer between agents. They don't talk
 to each other directly, they write facts and rules reconcile them.
 """
 
@@ -111,7 +111,7 @@ async def security_expert(state: dict[str, Any]) -> dict[str, Any]:
 
 
 async def detect_conflicts(state: dict[str, Any]) -> dict[str, Any]:
-    """Check for conflicts detected by Datalog rules."""
+    """Check for conflicts detected by rules."""
     kg = state["kg"]
 
     r = await kg.execute("?schedule_conflict(Step, TeamA, StartA, TeamB, StartB)")
@@ -145,7 +145,7 @@ async def detect_conflicts(state: dict[str, Any]) -> dict[str, Any]:
         for c in all_conflicts:
             print(f"    {RED}!{RESET} {c['step']}: {c['detail']}")
     else:
-        print(f"\n  {GREEN}No conflicts — plan is consistent!{RESET}")
+        print(f"\n  {GREEN}No conflicts, plan is consistent!{RESET}")
 
     return {"conflicts": all_conflicts}
 
@@ -160,7 +160,7 @@ async def resolve_conflicts(state: dict[str, Any]) -> dict[str, Any]:
     # Simple resolution: for schedule conflicts, take the later date
     # For dependency issues, push the step back
     for c in conflicts:
-        print(f"    {DIM}Noted: {c['step']} — {c['detail']}{RESET}")
+        print(f"    {DIM}Noted: {c['step']}: {c['detail']}{RESET}")
         # In production, would adjust timing in the KG here
         # For this demo, conflicts are noted and passed through
 
@@ -275,7 +275,7 @@ async def run():
 
         step(2, "Build collaborative planning graph")
         print(
-            f"{DIM}  [eng + product + security] → detect_conflicts → [resolve or finalize]{RESET}"
+            f"{DIM}  [eng + product + security] -> detect_conflicts -> [resolve or finalize]{RESET}"
         )
 
         graph = StateGraph(PlanState)

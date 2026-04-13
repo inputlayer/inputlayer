@@ -1,18 +1,23 @@
-# Beyond Chat History: Using Datalog Rules as Agent Memory
+---
+title: "Beyond Chat History: Using Rules as Agent Memory"
+date: "2026-04-10"
+category: "Integrations"
+excerpt: "Vector similarity finds textually similar messages. But relevance in a conversation is often logical, not textual. Rules give your agent memory that reasons about what matters."
+---
 
-Most AI agent memory systems work the same way: stuff messages into a vector store, retrieve the top-k most similar when you need context. It works — until it doesn't.
+# Beyond Chat History: Using Rules as Agent Memory
 
-Vector similarity finds **textually similar** messages. But relevance in a conversation is often **logical**, not textual. When a user says "I'm building an ML pipeline in Python" in turn 1 and "the training step is slow" in turn 5, those messages are deeply related — even though the texts share almost no words. A vector retriever might miss this connection entirely.
+Your LangGraph agent needs memory that goes beyond finding similar text. When your user says "I'm building an ML pipeline in Python" in turn 1 and "the training step is slow" in turn 5, those messages are deeply connected, even though they share almost no words. A retrieval system based on text similarity might miss this entirely.
 
-What if your memory system could **reason** about what's relevant instead of just pattern-matching?
+What if your agent's memory could **reason** about what's relevant instead of just pattern-matching?
 
 ## The idea: facts + rules = derived memory
 
-[InputLayer](https://github.com/inputlayer/inputlayer) is a Datalog database engine — it stores facts and evaluates rules over them. When you insert new facts, rules fire automatically to derive conclusions. No batch jobs, no re-indexing.
+[InputLayer](https://github.com/inputlayer/inputlayer) is an incremental reasoning engine. It stores facts and evaluates rules over them. When you insert new facts, rules fire automatically to derive conclusions. No batch jobs, no re-indexing.
 
-We built `InputLayerMemory`, a memory component for [LangGraph](https://github.com/langchain-ai/langgraph) agents that stores conversation turns as **facts** and uses **Datalog rules** to derive what's relevant.
+We built `InputLayerMemory`, a memory component for [LangGraph](https://github.com/langchain-ai/langgraph) agents that stores conversation turns as **facts** and uses **rules** to derive what's relevant.
 
-The schema is minimal — two base relations:
+The schema is minimal. Two base relations:
 
 ```
 memory_turn(thread_id, turn_id, role, content, timestamp)
@@ -21,28 +26,28 @@ memory_topic(thread_id, turn_id, topic)
 
 And three rules that derive context automatically:
 
-```prolog
-% Active topics: what this conversation is about
-active_topic(ThreadId, Topic) ←
+```
+// Active topics: what this conversation is about
+active_topic(ThreadId, Topic) <-
     memory_topic(ThreadId, _, Topic).
 
-% Relevant turns: messages cross-referenced by topic
-relevant_turn(ThreadId, TurnId, Role, Content, Topic) ←
+// Relevant turns: messages cross-referenced by topic
+relevant_turn(ThreadId, TurnId, Role, Content, Topic) <-
     memory_turn(ThreadId, TurnId, Role, Content, _),
     memory_topic(ThreadId, TurnId, Topic).
 
-% Topic threads: which topics are discussed together
-topic_thread(ThreadId, TopicA, TopicB) ←
+// Topic threads: which topics are discussed together
+topic_thread(ThreadId, TopicA, TopicB) <-
     memory_topic(ThreadId, _, TopicA),
     memory_topic(ThreadId, _, TopicB),
-    TopicA ≠ TopicB.
+    TopicA != TopicB.
 ```
 
-That's it. These rules create a **live knowledge graph** of the conversation. When you add a new turn, the rules fire instantly — no re-computation needed.
+That's it. These rules create a **live knowledge graph** of the conversation. When you add a new turn, the rules fire instantly. No re-computation needed.
 
 ## A conversation in action
 
-Let's trace what happens during a real conversation. A user is building an ML pipeline and asking for help:
+Let's trace what happens during a real conversation. You're building an ML pipeline and asking for help:
 
 | Turn | Role | Message |
 |------|------|---------|
@@ -67,9 +72,9 @@ memory_topic("chat-1", 5, "api")
 
 ### What gets derived (automatically)
 
-The moment those facts are inserted, the rules fire. Here's what the KG now knows:
+The moment those facts are inserted, the rules fire. Here's what the KG has derived:
 
-**Active topics** — the conversation spans 4 areas:
+**Active topics.** The conversation spans 4 areas:
 ```
 active_topic("chat-1", "api")
 active_topic("chat-1", "ml")
@@ -77,7 +82,7 @@ active_topic("chat-1", "performance")
 active_topic("chat-1", "python")
 ```
 
-**Relevant turns** — messages cross-referenced by topic:
+**Relevant turns.** Messages cross-referenced by topic:
 ```
 relevant_turn("chat-1", 1, "user", "I'm building an ML...", "ml")
 relevant_turn("chat-1", 1, "user", "I'm building an ML...", "python")
@@ -89,29 +94,29 @@ relevant_turn("chat-1", 5, "user", "Trouble with REST API", "api")
 
 Notice: turn 1 appears under **both** "ml" and "python". Turn 3 appears under both "ml" and "performance". The rules handle the cross-referencing automatically.
 
-**Topic threads** — which topics are connected:
+**Topic threads.** Which topics are connected:
 ```
-topic_thread("chat-1", "ml", "python")       ← turn 1 mentions both
-topic_thread("chat-1", "ml", "performance")  ← turn 3 mentions both
-topic_thread("chat-1", "python", "performance")  ← via shared thread
+topic_thread("chat-1", "ml", "python")          // turn 1 mentions both
+topic_thread("chat-1", "ml", "performance")     // turn 3 mentions both
+topic_thread("chat-1", "python", "performance") // via shared thread
 ...
 ```
 
 ### The "aha" moment
 
-Now the user asks: **"What about deploying with Docker and Kubernetes?"**
+Now you ask: **"What about deploying with Docker and Kubernetes?"**
 
-Before generating a response, the agent calls `memory.recall("chat-1")`. The derived context tells it:
+Before generating a response, your agent calls `memory.recall("chat-1")`. The derived context tells it:
 
 1. **Active topics**: ml, python, performance, api, devops (the new one)
 2. **Topic connections**: devops is now connected to every prior topic through the shared thread
-3. **Relevant turns**: the ML training discussion (turns 1, 3, 4) and the API discussion (turn 5) are both relevant — because deployment touches both
+3. **Relevant turns**: the ML training discussion (turns 1, 3, 4) and the API discussion (turn 5) are both relevant, because deployment touches both
 
-A vector retriever would search for messages similar to "Docker and Kubernetes" and probably return nothing useful from this conversation. The rule-derived memory returns the full context: **the user is deploying an ML pipeline (Python, training on GPUs) with an API layer, and now wants to containerize it**.
+The rule-derived memory returns the full context: **you're deploying an ML pipeline (Python, training on GPUs) with an API layer, and now you want to containerize it**. The connection between "Docker" and your earlier ML/API discussion comes from the rules, not from text similarity.
 
 ## The proof tree: explainable memory
 
-Here's something no vector store can do. You can ask InputLayer **why** a particular turn is relevant:
+You can ask InputLayer **why** a particular turn is relevant:
 
 ```
 .why ?relevant_turn("chat-1", 3, Role, Content, "performance")
@@ -125,7 +130,7 @@ relevant_turn("chat-1", 3, "user", "Training is slow...", "performance")
 └── because memory_topic("chat-1", 3, "performance")
 ```
 
-This is the derivation chain — a structured explanation of **why** this memory is relevant. Feed this to the LLM and it can cite its reasoning: *"Based on your earlier mention of slow training (turn 3), here's how Docker can help with GPU access..."*
+This is the derivation chain, a structured explanation of **why** this memory is relevant. Feed this to your LLM and it can cite its reasoning: *"Based on your earlier mention of slow training (turn 3), here's how Docker can help with GPU access..."*
 
 ![Proof tree in the InputLayer GUI showing the derivation chain for relevant_turn](proof-tree-screenshot.png)
 
@@ -150,69 +155,45 @@ graph.add_edge("store", END)
 ```
 
 Each turn through the graph:
-1. **recall** → queries the KG for derived context (topics, relevant turns, connections)
-2. **respond** → the LLM uses that context to generate a response
-3. **store** → the new message becomes a fact, rules fire, context updates
+1. **recall** -> queries the KG for derived context (topics, relevant turns, connections)
+2. **respond** -> your LLM uses that context to generate a response
+3. **store** -> the new message becomes a fact, rules fire, context updates
 
-The `recall_node` and `store_node` are LangGraph-compatible node functions — they read from and write to the graph state automatically.
-
-## Vector memory vs rule memory
-
-| | Buffer Memory | Vector Memory | Rule Memory (InputLayer) |
-|---|---|---|---|
-| **What it stores** | Raw messages | Embeddings | Facts |
-| **How it retrieves** | Last N messages | Cosine similarity | Datalog rules |
-| **Cross-referencing** | None | None | Automatic (topic joins) |
-| **Explainability** | N/A | N/A | `.why()` proof trees |
-| **What it misses** | Old context | Logical connections | Nothing — rules are complete |
-| **Scales how** | Truncate | ANN index | Incremental rule evaluation |
-| **Adding capabilities** | Write code | Train embeddings | Add Datalog rules |
-
-The last row is the key difference. Want to track "user preferences"? With vector memory, you'd fine-tune an embedding model or build a classifier. With InputLayer, you write a rule:
-
-```prolog
-user_preference(ThreadId, Topic) ←
-    memory_topic(ThreadId, TurnIdA, Topic),
-    memory_topic(ThreadId, TurnIdB, Topic),
-    TurnIdA ≠ TurnIdB.
-% If a topic appears in 2+ turns, it's a preference
-```
-
-That rule starts working immediately — no training, no deployment, no batch job.
+The `recall_node` and `store_node` are LangGraph-compatible node functions. They read from and write to the graph state automatically.
 
 ## Extending the ontology
 
-The base ontology (turns + topics → derived context) is a starting point. Here are rules you could add:
+The base ontology (turns + topics -> derived context) is a starting point. Here are rules you could add:
 
-**Unresolved questions** — questions the user asked that never got a follow-up:
+**Unresolved questions.** Questions you asked that never got a follow-up:
 
-```prolog
-unresolved(ThreadId, TurnId, Content) ←
+```
+unresolved(ThreadId, TurnId, Content) <-
     memory_turn(ThreadId, TurnId, "user", Content, _),
-    ¬memory_turn(ThreadId, NextTurn, "assistant", _, _),
+    ~memory_turn(ThreadId, NextTurn, "assistant", _, _),
     NextTurn > TurnId.
 ```
 
-**Conversation phases** — detect when the topic shifts:
+**Conversation phases.** Detect when the topic shifts:
 
-```prolog
-topic_shift(ThreadId, TurnId, OldTopic, NewTopic) ←
+```
+topic_shift(ThreadId, TurnId, OldTopic, NewTopic) <-
     memory_topic(ThreadId, TurnId, NewTopic),
     memory_topic(ThreadId, PrevTurn, OldTopic),
     TurnId = PrevTurn + 1,
-    OldTopic ≠ NewTopic.
+    OldTopic != NewTopic.
 ```
 
-**Sentiment tracking** — if you extract sentiment as a topic:
+**Sentiment tracking.** If you extract sentiment as a topic:
 
-```prolog
-frustrated_user(ThreadId) ←
+```
+frustrated_user(ThreadId) <-
     memory_topic(ThreadId, TurnA, "frustrated"),
     memory_topic(ThreadId, TurnB, "frustrated"),
-    TurnA ≠ TurnB.
+    TurnA != TurnB.
 ```
 
-Each new rule extends the memory's reasoning capability without touching the application code. The `recall()` method automatically picks up derived facts from any rule.
+Each new rule extends your memory's reasoning capability without touching application code. The `recall()` method automatically picks up derived facts from any rule.
 
 ## Try it yourself
 
@@ -238,6 +219,6 @@ The full example with a LangGraph agent is at [`examples/langgraph/ex11_memory.p
 
 ---
 
-*InputLayer is an open-source incremental Datalog database engine that combines vector similarity search with logical reasoning. It's built in Rust, speaks WebSocket, and has Python SDKs for LangChain and LangGraph.*
+*InputLayer is an open-source incremental reasoning engine that combines vector similarity search with logical reasoning. It's built in Rust, speaks WebSocket, and has Python SDKs for LangChain and LangGraph.*
 
-*[GitHub](https://github.com/inputlayer/inputlayer) · [Documentation](https://inputlayer.ai/)
+*[GitHub](https://github.com/inputlayer/inputlayer) · [Documentation](https://inputlayer.ai/)*
