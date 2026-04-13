@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Literal
 
+from inputlayer.integrations.langgraph._utils import escape_iql
+
 
 def kg_node(
     *,
@@ -27,10 +29,13 @@ def kg_node(
         )
         graph.add_node("search", search)
 
-    **Parameterized query.** The query can be a callable that reads state::
+    **Parameterized query.** The query can be a callable that reads state.
+    Always escape user-supplied values with ``escape_iql()``::
+
+        from inputlayer.integrations.langgraph import escape_iql
 
         search = kg_node(
-            query=lambda s: f'?article(Id, T, C, "{s["category"]}", E)',
+            query=lambda s: f'?article(Id, T, C, "{escape_iql(s["category"])}", E)',
             state_key="articles",
         )
 
@@ -47,7 +52,8 @@ def kg_node(
         relation: Relation class for insert/delete operations.
         operation: One of "query", "insert", "delete".
         state_key: State key to read from (insert/delete) or write to (query).
-        kg_key: State key where the KnowledgeGraph handle lives.
+        kg_key: State key where the KnowledgeGraph handle lives. Must be
+            present in state when the node executes.
 
     Returns:
         An async function compatible with ``StateGraph.add_node()``.
@@ -58,6 +64,13 @@ def kg_node(
         raise ValueError(f"Must provide 'relation' for {operation} operations")
 
     async def _node(state: dict[str, Any]) -> dict[str, Any]:
+        if kg_key not in state:
+            raise KeyError(
+                f"kg_node requires state['{kg_key}'] to be a KnowledgeGraph handle, "
+                f"but '{kg_key}' was not found in state. "
+                f"Add the KG handle to your state dict or change kg_key= to match "
+                f"the key you're using."
+            )
         kg = state[kg_key]
 
         if operation == "query":
@@ -73,12 +86,14 @@ def kg_node(
 
         elif operation == "insert":
             data = state.get(state_key)
-            if data is None:
+            if not data:
                 return {}
-            if isinstance(data, list) and data:
+            if isinstance(data, list):
                 if isinstance(data[0], dict):
+                    # List of plain dicts: insert via (relation_class, list_of_dicts)
                     await kg.insert(relation, data)
                 else:
+                    # List of Relation instances: insert directly, relation param unused
                     await kg.insert(data)
             elif isinstance(data, dict):
                 await kg.insert(relation, data)
@@ -107,3 +122,7 @@ def kg_node(
     _node.__qualname__ = f"kg_{label}"
 
     return _node
+
+
+# Re-export so callers can do: from inputlayer.integrations.langgraph import escape_iql
+__all__ = ["kg_node", "escape_iql"]

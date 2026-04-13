@@ -98,7 +98,7 @@ __all__ = [
     "DebugResult",
     "DeleteResult",
     "Derived",
-    "ExplainResult",
+
     "From",
     # Index
     "HnswIndex",

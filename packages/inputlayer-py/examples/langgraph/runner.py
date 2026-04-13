@@ -45,7 +45,7 @@ EXAMPLES = [
     ("ex11_memory", "Semantic memory with derived context"),
 ]
 
-LLM_EXAMPLES = {1, 2, 5, 7, 9, 10}
+LLM_EXAMPLES = {1, 2, 5, 7, 8, 9, 11}
 
 
 def print_menu() -> None:

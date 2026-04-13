@@ -2,8 +2,8 @@
 
 Stores conversation turns as facts in a KG. Rules automatically
 derive active topics, relevant context, and conversation threads.
-Unlike raw chat history, the recalled context is DERIVED. Rules decide
-what's relevant, not just vector similarity or recency.
+The recalled context is DERIVED: rules compute what's relevant
+based on shared topics and conversation structure.
 
 Usage::
 
@@ -12,14 +12,15 @@ Usage::
     memory = InputLayerMemory(kg=kg)
     await memory.setup()
 
-    # Store a turn
+    # Store a turn (topics auto-extracted from content)
     await memory.astore("thread-1", "user", "I need help with ML in Python")
 
-    # Rules derive topics, relevant context, etc.
+    # Or provide topics explicitly (recommended for production - use an LLM)
+    await memory.astore("thread-1", "user", "...", topics=["ml", "python"])
 
-    # Recall context for the next turn
+    # Recall context derived by rules
     context = await memory.arecall("thread-1")
-    # Returns: {"topics": [...], "recent": [...], "related": [...]}
+    # Returns: {"topics": [...], "recent": [...], "relevant": {...}, "related_topics": [...]}
 
     # Use as LangGraph nodes
     graph.add_node("recall", memory.recall_node(state_key="context"))
@@ -28,15 +29,21 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import time
 from collections.abc import Callable
 from typing import Any
 
 from inputlayer._sync import run_sync
+from inputlayer.integrations.langgraph._utils import escape_iql
+
+logger = logging.getLogger(__name__)
 
 # ── Topic keywords for simple extraction ─────────────────────────────
-# In production, you'd use an LLM for this. These keywords demonstrate
-# the pattern without requiring an LLM dependency.
+# NOTE: This keyword list is a demo-quality extractor only. In production,
+# replace this with an LLM call by passing explicit `topics=` to astore().
+# The keyword list is intentionally simple and will miss many real messages.
 
 _TOPIC_KEYWORDS: dict[str, list[str]] = {
     "python": ["python", "pip", "django", "flask", "pandas", "numpy"],
@@ -52,13 +59,12 @@ _TOPIC_KEYWORDS: dict[str, list[str]] = {
 }
 
 
-def _escape(s: str) -> str:
-    """Escape a string for an IQL literal."""
-    return s.replace("\\", "\\\\").replace('"', '\\"')
-
-
 def _extract_topics(text: str) -> list[str]:
-    """Extract topics from text using keyword matching."""
+    """Extract topics from text using keyword matching.
+
+    Production note: this is keyword-based and will miss most real messages.
+    Pass explicit ``topics=`` to ``astore()`` and use an LLM extractor instead.
+    """
     text_lower = text.lower()
     topics = []
     for topic, keywords in _TOPIC_KEYWORDS.items():
@@ -70,63 +76,116 @@ def _extract_topics(text: str) -> list[str]:
 class InputLayerMemory:
     """Semantic memory backed by an InputLayer KnowledgeGraph.
 
-    Stores conversation turns and derived context. Rules
-    automatically compute:
+    Stores conversation turns and derived context. Rules automatically compute:
 
     - **active_topic(ThreadId, Topic)**: topics mentioned in this thread
     - **relevant_turn(ThreadId, TurnId, Role, Content, Topic)**:
-      turns that mention an active topic (cross-referenced)
+      turns that mention an active topic (cross-referenced by topic)
     - **topic_thread(ThreadId, TopicA, TopicB)**: pairs of topics
-      discussed in the same thread (conversation themes)
+      discussed together in the same thread
+
+    Thread safety: a single instance can be shared across coroutines.
+    ``setup()`` is guarded by a lock; ``astore()`` uses a per-thread lock
+    to ensure turn IDs are sequential within each thread.
+
+    Process restart safety: the turn counter is initialized from the KG
+    on the first store for each thread, so IDs continue correctly after
+    a restart rather than resetting to 1.
 
     Args:
         kg: An InputLayer KnowledgeGraph handle.
-        max_recent: Number of recent turns to include in recall.
+        max_recent: Number of recent turns to include in recall (default 10).
     """
 
     def __init__(self, kg: Any, *, max_recent: int = 10) -> None:
         self.kg = kg
         self.max_recent = max_recent
         self._setup_done = False
-        self._turn_counter = 0
+        self._setup_lock = asyncio.Lock()
+        self._turn_counters: dict[str, int] = {}
+        self._counter_lock = asyncio.Lock()
 
     # ── Setup ────────────────────────────────────────────────────────
 
     async def setup(self) -> None:
-        """Create memory relations and rules (idempotent)."""
+        """Create memory relations and rules (idempotent, concurrency-safe).
+
+        Safe to call from multiple coroutines simultaneously. The first
+        caller runs the DDL; subsequent callers return immediately.
+        Ignores "already exists" errors so re-running setup is harmless.
+        """
         if self._setup_done:
             return
 
-        # Schema
-        await self.kg.execute(
-            "+memory_turn(thread_id: string, turn_id: int, role: string, content: string, ts: int)"
-        )
-        await self.kg.execute("+memory_topic(thread_id: string, turn_id: int, topic: string)")
+        async with self._setup_lock:
+            if self._setup_done:  # re-check after acquiring lock
+                return
 
-        # Rule: active topics per thread
-        await self.kg.execute(
-            "+active_topic(ThreadId, Topic) <- memory_topic(ThreadId, TurnId, Topic)"
-        )
+            # Run each DDL/rule and track whether anything raised a real error.
+            # Server-side "already exists" responses come back as ResultSet rows,
+            # not exceptions. Exceptions here mean connection/auth problems.
+            # If any step raises, don't mark setup as done so the next call retries.
+            for ddl in [
+                "+memory_turn(thread_id: string, turn_id: int, role: string, content: string, ts: int)",
+                "+memory_topic(thread_id: string, turn_id: int, topic: string)",
+            ]:
+                await self.kg.execute(ddl)
 
-        # Rule: relevant turns. Turns that share an active topic
-        await self.kg.execute(
-            "+relevant_turn(ThreadId, TurnId, Role, Content, Topic) <- "
-            "memory_turn(ThreadId, TurnId, Role, Content, Ts), "
-            "memory_topic(ThreadId, TurnId, Topic)"
-        )
+            for rule in [
+                "+active_topic(ThreadId, Topic) <- memory_topic(ThreadId, TurnId, Topic)",
+                (
+                    "+relevant_turn(ThreadId, TurnId, Role, Content, Topic) <- "
+                    "memory_turn(ThreadId, TurnId, Role, Content, Ts), "
+                    "memory_topic(ThreadId, TurnId, Topic)"
+                ),
+                (
+                    "+topic_thread(ThreadId, TopicA, TopicB) <- "
+                    "memory_topic(ThreadId, TurnIdA, TopicA), "
+                    "memory_topic(ThreadId, TurnIdB, TopicB), "
+                    "TopicA != TopicB"
+                ),
+            ]:
+                await self.kg.execute(rule)
 
-        # Rule: topic threads. Pairs of topics discussed together
-        await self.kg.execute(
-            "+topic_thread(ThreadId, TopicA, TopicB) <- "
-            "memory_topic(ThreadId, TurnIdA, TopicA), "
-            "memory_topic(ThreadId, TurnIdB, TopicB), "
-            "TopicA != TopicB"
-        )
-
-        self._setup_done = True
+            # Only mark done after ALL steps complete. If the server was down,
+            # the exception propagated above and this line is never reached,
+            # so the next call will retry the full setup.
+            self._setup_done = True
 
     def setup_sync(self) -> None:
         run_sync(self.setup())
+
+    def __repr__(self) -> str:
+        kg_name = getattr(self.kg, "name", repr(self.kg))
+        return (
+            f"InputLayerMemory(kg={kg_name!r}, "
+            f"max_recent={self.max_recent}, "
+            f"setup_done={self._setup_done}, "
+            f"threads={list(self._turn_counters.keys())})"
+        )
+
+    # ── Internal: turn counter ───────────────────────────────────────
+
+    async def _next_turn_id(self, thread_id: str) -> int:
+        """Return the next turn_id for a thread, initializing from the KG if needed.
+
+        Initializes the counter from the stored max turn_id on the first call
+        for each thread, so the counter resumes correctly after a process restart.
+        Guarded by a lock so concurrent callers get distinct IDs.
+        """
+        async with self._counter_lock:
+            if thread_id not in self._turn_counters:
+                # Query the KG for the current max turn_id for this thread
+                r = await self.kg.execute(
+                    f'?memory_turn("{escape_iql(thread_id)}", TurnId, Role, Content, Ts)'
+                )
+                if r.rows:
+                    self._turn_counters[thread_id] = max(int(row[-4]) for row in r.rows)
+                else:
+                    self._turn_counters[thread_id] = 0
+
+            self._turn_counters[thread_id] += 1
+            return self._turn_counters[thread_id]
 
     # ── Store ────────────────────────────────────────────────────────
 
@@ -144,27 +203,30 @@ class InputLayerMemory:
             thread_id: Conversation thread identifier.
             role: "user", "assistant", or "system".
             content: The message content.
-            topics: Explicit topics. If None, auto-extracted from content.
+            topics: Explicit topic list. If None, auto-extracted via keyword
+                matching. **For production use, pass topics extracted by an LLM.**
 
         Returns:
-            The turn_id assigned to this turn.
+            The turn_id assigned to this turn (1-based, sequential per thread,
+            continues correctly across process restarts).
         """
         await self.setup()
 
-        self._turn_counter += 1
-        turn_id = self._turn_counter
+        turn_id = await self._next_turn_id(thread_id)
         ts = time.time_ns()
 
         await self.kg.execute(
-            f'+memory_turn("{_escape(thread_id)}", {turn_id}, "{_escape(role)}", "{_escape(content)}", {ts})'
+            f'+memory_turn("{escape_iql(thread_id)}", {turn_id}, '
+            f'"{escape_iql(role)}", "{escape_iql(content)}", {ts})'
         )
 
-        # Extract and store topics
         if topics is None:
             topics = _extract_topics(content)
 
         for topic in topics:
-            await self.kg.execute(f'+memory_topic("{_escape(thread_id)}", {turn_id}, "{_escape(topic)}")')
+            await self.kg.execute(
+                f'+memory_topic("{escape_iql(thread_id)}", {turn_id}, "{escape_iql(topic)}")'
+            )
 
         return turn_id
 
@@ -184,10 +246,14 @@ class InputLayerMemory:
         """Recall derived context for a thread.
 
         Returns a dict with:
-        - topics: list of active topics
-        - recent: list of recent turns [{role, content, turn_id}]
-        - relevant: list of turns grouped by topic
-        - related_topics: pairs of topics discussed together
+
+        - **topics** (list[str]): active topics, sorted alphabetically
+        - **recent** (list[dict]): recent turns newest-first,
+          each ``{"turn_id", "role", "content"}``
+        - **relevant** (dict[str, list[dict]]): turns grouped by topic,
+          each turn ``{"turn_id", "role", "content"}``
+        - **related_topics** (list[tuple[str, str]]): deduplicated pairs of
+          topics that co-occur in this thread
         """
         await self.setup()
 
@@ -199,36 +265,42 @@ class InputLayerMemory:
         }
 
         # Active topics
-        r = await self.kg.execute(f'?active_topic("{_escape(thread_id)}", Topic)')
+        r = await self.kg.execute(f'?active_topic("{escape_iql(thread_id)}", Topic)')
         result["topics"] = sorted({str(row[-1]) for row in r.rows})
 
-        # Recent turns (all turns, sorted by turn_id desc)
-        r = await self.kg.execute(f'?memory_turn("{_escape(thread_id)}", TurnId, Role, Content, Ts)')
-        turns = sorted(r.rows, key=lambda row: row[-1], reverse=True)
+        # Recent turns sorted by turn_id descending (canonical ordering)
+        r = await self.kg.execute(
+            f'?memory_turn("{escape_iql(thread_id)}", TurnId, Role, Content, Ts)'
+        )
+        turns = sorted(r.rows, key=lambda row: int(row[-4]), reverse=True)
         for row in turns[: self.max_recent]:
             result["recent"].append(
                 {
-                    "turn_id": row[-4],
+                    "turn_id": int(row[-4]),
                     "role": str(row[-3]),
                     "content": str(row[-2]),
                 }
             )
 
         # Relevant turns grouped by topic
-        r = await self.kg.execute(f'?relevant_turn("{_escape(thread_id)}", TurnId, Role, Content, Topic)')
+        r = await self.kg.execute(
+            f'?relevant_turn("{escape_iql(thread_id)}", TurnId, Role, Content, Topic)'
+        )
         by_topic: dict[str, list[dict[str, Any]]] = {}
         for row in r.rows:
             topic = str(row[-1])
             turn = {
-                "turn_id": row[-4],
+                "turn_id": int(row[-4]),
                 "role": str(row[-3]),
                 "content": str(row[-2]),
             }
             by_topic.setdefault(topic, []).append(turn)
         result["relevant"] = by_topic
 
-        # Related topic pairs
-        r = await self.kg.execute(f'?topic_thread("{_escape(thread_id)}", TopicA, TopicB)')
+        # Related topic pairs (deduplicated, order-independent)
+        r = await self.kg.execute(
+            f'?topic_thread("{escape_iql(thread_id)}", TopicA, TopicB)'
+        )
         seen: set[tuple[str, str]] = set()
         for row in r.rows:
             a, b = sorted([str(row[-2]), str(row[-1])])
@@ -252,8 +324,11 @@ class InputLayerMemory:
     ) -> Callable[[dict[str, Any]], Any]:
         """Create a LangGraph node that stores a message from state.
 
-        Expects state[state_key] to be a dict with 'role' and 'content',
-        and state[thread_key] to be the thread id.
+        Reads ``state[thread_key]`` for the thread ID (warns if missing,
+        falls back to ``"default"``). Reads ``state[state_key]`` for the
+        message, which must be a ``dict`` with ``"role"`` and ``"content"``
+        keys. Logs a warning if the message is not a dict (e.g., a
+        LangChain ``AIMessage`` object was passed instead).
 
         Usage::
 
@@ -262,14 +337,39 @@ class InputLayerMemory:
         memory = self
 
         async def _node(state: dict[str, Any]) -> dict[str, Any]:
-            msg = state.get(state_key)
-            thread_id = state.get(thread_key, "default")
-            if msg and isinstance(msg, dict):
-                await memory.astore(
-                    thread_id,
-                    msg.get("role", "user"),
-                    msg.get("content", ""),
+            thread_id = state.get(thread_key)
+            if not thread_id:
+                logger.warning(
+                    "InputLayerMemory.store_node: '%s' not found in state. "
+                    "Falling back to thread_id='default'. All agents without "
+                    "an explicit thread_id will share the same memory pool. "
+                    "Set state['%s'] to a unique ID per conversation.",
+                    thread_key,
+                    thread_key,
                 )
+                thread_id = "default"
+
+            msg = state.get(state_key)
+            if msg is None:
+                return {}
+            if not isinstance(msg, dict):
+                logger.warning(
+                    "InputLayerMemory.store_node: expected state['%s'] to be a "
+                    "dict with 'role' and 'content' keys, got %s. "
+                    "If you are using LangChain message objects (HumanMessage, "
+                    "AIMessage), convert them with msg.dict() or pass "
+                    "{'role': msg.type, 'content': msg.content} instead. "
+                    "This message was NOT stored.",
+                    state_key,
+                    type(msg).__name__,
+                )
+                return {}
+
+            await memory.astore(
+                thread_id,
+                msg.get("role", "user"),
+                msg.get("content", ""),
+            )
             return {}
 
         _node.__name__ = "memory_store"
@@ -284,7 +384,10 @@ class InputLayerMemory:
     ) -> Callable[[dict[str, Any]], Any]:
         """Create a LangGraph node that recalls context into state.
 
-        Writes the recall result to state[state_key].
+        Reads ``state[thread_key]`` for the thread ID (warns if missing,
+        falls back to ``"default"`` - all sessions without a thread ID share
+        the same memory pool, so always set ``thread_key`` in production).
+        Writes the recall result dict to ``state[state_key]``.
 
         Usage::
 
@@ -293,7 +396,15 @@ class InputLayerMemory:
         memory = self
 
         async def _node(state: dict[str, Any]) -> dict[str, Any]:
-            thread_id = state.get(thread_key, "default")
+            thread_id = state.get(thread_key)
+            if not thread_id:
+                logger.warning(
+                    "InputLayerMemory.recall_node: '%s' not found in state. "
+                    "Falling back to thread_id='default'.",
+                    thread_key,
+                )
+                thread_id = "default"
+
             context = await memory.arecall(thread_id)
             return {state_key: context}
 

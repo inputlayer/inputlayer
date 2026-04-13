@@ -27,7 +27,7 @@ from examples.langgraph._common import (
 )
 
 from inputlayer import InputLayer
-from inputlayer.integrations.langgraph import InputLayerState, kg_router
+from inputlayer.integrations.langgraph import InputLayerState, escape_iql, kg_router
 from langgraph.graph import END, StateGraph
 
 # ── State ────────────────────────────────────────────────────────────
@@ -103,8 +103,7 @@ async def gather_facts(state: dict[str, Any]) -> dict[str, Any]:
 
     for term in terms:
         content = knowledge.get(term, f"General info about {term}.")
-        escaped = content.replace('"', '\\"')
-        await kg.execute(f'+research_fact("{term}", "{escaped}")')
+        await kg.execute(f'+research_fact("{escape_iql(term)}", "{escape_iql(content)}")')
         print(f"  {GREEN}+{RESET} {CYAN}{term}{RESET}: {DIM}{content}{RESET}")
 
     # Rule: we have enough context when we have 4+ facts

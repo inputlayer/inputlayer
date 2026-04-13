@@ -28,7 +28,7 @@ from examples.langgraph._common import (
 )
 
 from inputlayer import InputLayer
-from inputlayer.integrations.langgraph import InputLayerState
+from inputlayer.integrations.langgraph import InputLayerState, escape_iql
 from langgraph.graph import END, StateGraph
 
 # ── State ────────────────────────────────────────────────────────────
@@ -173,7 +173,7 @@ async def classify_and_select(state: dict[str, Any]) -> dict[str, Any]:
         categories.append("general")
 
     # Insert classification into KG
-    escaped_q = question.replace('"', '\\"')
+    escaped_q = escape_iql(question)
     for cat in categories:
         await kg.execute(f'+question_type("{escaped_q}", "{cat}")')
 
@@ -252,7 +252,7 @@ async def summarize_results(state: dict[str, Any]) -> dict[str, Any]:
     # Show provenance: why was each tool selected?
     print(f"\n  {WHITE}Selection provenance:{RESET}")
     for a in answers:
-        escaped_q = a["question"].replace('"', '\\"')
+        escaped_q = escape_iql(a["question"])
         r = await kg.execute(f'?question_type("{escaped_q}", Category)')
         cats = [row[1] for row in r.rows]
         print(

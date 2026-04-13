@@ -27,7 +27,7 @@ from examples.langgraph._common import (
 )
 
 from inputlayer import InputLayer
-from inputlayer.integrations.langgraph import InputLayerState
+from inputlayer.integrations.langgraph import InputLayerState, escape_iql
 from langgraph.graph import END, StateGraph
 
 # ── State ────────────────────────────────────────────────────────────
@@ -101,8 +101,7 @@ async def gather_evidence(state: dict[str, Any]) -> dict[str, Any]:
 
     # Insert evidence from this source
     for person, etype, detail in EVIDENCE_DB.get(source, []):
-        escaped = detail.replace('"', '\\"')
-        await kg.execute(f'+evidence("{person}", "{etype}", "{escaped}")')
+        await kg.execute(f'+evidence("{escape_iql(person)}", "{escape_iql(etype)}", "{escape_iql(detail)}")')
         flag = (
             RED
             if etype
@@ -119,7 +118,7 @@ async def gather_evidence(state: dict[str, Any]) -> dict[str, Any]:
             f"    {flag}{'!' if flag == RED else 'ok'}{RESET} {person}: {DIM}{detail[:60]}{RESET}"
         )
 
-    await kg.execute(f'+source_checked("{source}")')
+    await kg.execute(f'+source_checked("{escape_iql(source)}")')
 
     return {"phase": "gathering"}
 

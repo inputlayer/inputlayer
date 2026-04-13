@@ -2,14 +2,14 @@
 title: "Beyond Chat History: Using Rules as Agent Memory"
 date: "2026-04-10"
 category: "Integrations"
-excerpt: "Vector similarity finds textually similar messages. But relevance in a conversation is often logical, not textual. Rules give your agent memory that reasons about what matters."
+excerpt: "Every conversation accumulates history. The real challenge is knowing which parts of that history matter for the next response. Rules give your agent memory that reasons about relevance instead of guessing."
 ---
 
 # Beyond Chat History: Using Rules as Agent Memory
 
-Your LangGraph agent needs memory that goes beyond finding similar text. When your user says "I'm building an ML pipeline in Python" in turn 1 and "the training step is slow" in turn 5, those messages are deeply connected, even though they share almost no words. A retrieval system based on text similarity might miss this entirely.
+Building agents that hold multi-turn conversations surfaces a tricky problem: which parts of the conversation history are actually relevant to the next response? The last few messages are easy. But a question in turn 7 might connect back to a constraint mentioned in turn 1, and the logical relationship between those two turns has nothing to do with how similar the words are.
 
-What if your agent's memory could **reason** about what's relevant instead of just pattern-matching?
+[InputLayer](https://github.com/inputlayer/inputlayer) gives you a way to reason about this. You store conversation turns as facts, write rules that derive connections between them, and ask the knowledge graph what's relevant before generating each response. The rules fire automatically as new facts arrive, keeping derived context up to date without any manual bookkeeping.
 
 ## The idea: facts + rules = derived memory
 
@@ -43,7 +43,7 @@ topic_thread(ThreadId, TopicA, TopicB) <-
     TopicA != TopicB.
 ```
 
-That's it. These rules create a **live knowledge graph** of the conversation. When you add a new turn, the rules fire instantly. No re-computation needed.
+That's it. These rules create a **live knowledge graph** of the conversation. When you add a new turn, InputLayer incrementally updates only the conclusions affected by the new facts. No full recomputation, no stale results.
 
 ## A conversation in action
 
@@ -94,11 +94,11 @@ relevant_turn("chat-1", 5, "user", "Trouble with REST API", "api")
 
 Notice: turn 1 appears under **both** "ml" and "python". Turn 3 appears under both "ml" and "performance". The rules handle the cross-referencing automatically.
 
-**Topic threads.** Which topics are connected:
+**Topic threads.** Which topics co-occur in the same conversation:
 ```
-topic_thread("chat-1", "ml", "python")          // turn 1 mentions both
-topic_thread("chat-1", "ml", "performance")     // turn 3 mentions both
-topic_thread("chat-1", "python", "performance") // via shared thread
+topic_thread("chat-1", "ml", "python")          // both in turn 1
+topic_thread("chat-1", "ml", "performance")     // both in turn 3
+topic_thread("chat-1", "python", "performance") // co-occur across turns
 ...
 ```
 
@@ -109,10 +109,10 @@ Now you ask: **"What about deploying with Docker and Kubernetes?"**
 Before generating a response, your agent calls `memory.recall("chat-1")`. The derived context tells it:
 
 1. **Active topics**: ml, python, performance, api, devops (the new one)
-2. **Topic connections**: devops is now connected to every prior topic through the shared thread
+2. **Topic connections**: devops is now connected to every prior topic through the conversation graph
 3. **Relevant turns**: the ML training discussion (turns 1, 3, 4) and the API discussion (turn 5) are both relevant, because deployment touches both
 
-The rule-derived memory returns the full context: **you're deploying an ML pipeline (Python, training on GPUs) with an API layer, and now you want to containerize it**. The connection between "Docker" and your earlier ML/API discussion comes from the rules, not from text similarity.
+The rule-derived memory returns the full context: you're deploying an ML pipeline (Python, training on GPUs) with an API layer, and now you want to containerize it. The rules connected "Docker" to the earlier ML/API discussion because devops topics co-occur with all the prior ones in this thread.
 
 ## The proof tree: explainable memory
 
@@ -132,26 +132,34 @@ relevant_turn("chat-1", 3, "user", "Training is slow...", "performance")
 
 This is the derivation chain, a structured explanation of **why** this memory is relevant. Feed this to your LLM and it can cite its reasoning: *"Based on your earlier mention of slow training (turn 3), here's how Docker can help with GPU access..."*
 
-![Proof tree in the InputLayer GUI showing the derivation chain for relevant_turn](proof-tree-screenshot.png)
-
-## Code: 10 lines to add memory to a LangGraph
+## Code: adding memory to a LangGraph agent
 
 ```python
+from inputlayer import InputLayer
 from inputlayer.integrations.langgraph import InputLayerMemory
 from langgraph.graph import StateGraph, END
+from typing import TypedDict, Any
 
-memory = InputLayerMemory(kg=kg)
-await memory.setup()
+class ChatState(TypedDict, total=False):
+    thread_id: str
+    new_message: dict
+    context: dict
+    response: str
 
-graph = StateGraph(ChatState)
-graph.add_node("recall", memory.recall_node(state_key="context"))
-graph.add_node("respond", respond_fn)
-graph.add_node("store", memory.store_node(state_key="new_message"))
+async with InputLayer("ws://localhost:8080/ws", username="admin", password="...") as il:
+    kg = il.knowledge_graph("my_agent")
+    memory = InputLayerMemory(kg=kg)
+    await memory.setup()
 
-graph.set_entry_point("recall")
-graph.add_edge("recall", "respond")
-graph.add_edge("respond", "store")
-graph.add_edge("store", END)
+    graph = StateGraph(ChatState)
+    graph.add_node("recall", memory.recall_node(state_key="context"))
+    graph.add_node("respond", respond_fn)
+    graph.add_node("store", memory.store_node(state_key="new_message"))
+
+    graph.set_entry_point("recall")
+    graph.add_edge("recall", "respond")
+    graph.add_edge("respond", "store")
+    graph.add_edge("store", END)
 ```
 
 Each turn through the graph:
@@ -168,10 +176,16 @@ The base ontology (turns + topics -> derived context) is a starting point. Here 
 **Unresolved questions.** Questions you asked that never got a follow-up:
 
 ```
+// First, find turns that already have a follow-up assistant response
+has_response(ThreadId, TurnId) <-
+    memory_turn(ThreadId, TurnId, "user", _, _),
+    memory_turn(ThreadId, NextTurn, "assistant", _, _),
+    NextTurn > TurnId.
+
+// Unresolved: user turns with no follow-up response
 unresolved(ThreadId, TurnId, Content) <-
     memory_turn(ThreadId, TurnId, "user", Content, _),
-    ~memory_turn(ThreadId, NextTurn, "assistant", _, _),
-    NextTurn > TurnId.
+    ~has_response(ThreadId, TurnId).
 ```
 
 **Conversation phases.** Detect when the topic shifts:
@@ -198,14 +212,14 @@ Each new rule extends your memory's reasoning capability without touching applic
 ## Try it yourself
 
 ```bash
-pip install inputlayer-client-dev[langgraph]
+pip install inputlayer-client-dev langgraph
 ```
 
 ```python
 from inputlayer import InputLayer
 from inputlayer.integrations.langgraph import InputLayerMemory
 
-async with InputLayer("ws://localhost:8080/ws", ...) as il:
+async with InputLayer("ws://localhost:8080/ws", username="admin", password="...") as il:
     kg = il.knowledge_graph("my_agent")
     memory = InputLayerMemory(kg=kg)
     await memory.setup()
@@ -219,6 +233,6 @@ The full example with a LangGraph agent is at [`examples/langgraph/ex11_memory.p
 
 ---
 
-*InputLayer is an open-source incremental reasoning engine that combines vector similarity search with logical reasoning. It's built in Rust, speaks WebSocket, and has Python SDKs for LangChain and LangGraph.*
+*InputLayer is an open-source incremental reasoning engine built in Rust. It speaks WebSocket and has Python SDKs for LangChain and LangGraph.*
 
 *[GitHub](https://github.com/inputlayer/inputlayer) · [Documentation](https://inputlayer.ai/)*

@@ -5,8 +5,9 @@ are inserted as facts. Rules correlate events across components
 and time to detect incidents (e.g., "deploy followed by error spike
 on the same service = failed deploy").
 
-Shows pattern matching across accumulated events. Impossible with
-flat state, natural with rules.
+Shows pattern matching across accumulated events. As events arrive,
+rules derive incidents automatically - each new fact triggers
+re-evaluation of all correlations without any manual bookkeeping.
 """
 
 import asyncio
@@ -30,7 +31,7 @@ from examples.langgraph._common import (
 )
 
 from inputlayer import InputLayer
-from inputlayer.integrations.langgraph import InputLayerState
+from inputlayer.integrations.langgraph import InputLayerState, escape_iql
 from langgraph.graph import END, StateGraph
 
 # ── State ────────────────────────────────────────────────────────────
@@ -98,9 +99,8 @@ async def ingest_events(state: dict[str, Any]) -> dict[str, Any]:
     print(f"\n  {WHITE}Batch {batch_idx + 1}/{len(EVENT_BATCHES)}:{RESET}")
 
     for evt_id, component, severity, evt_type, message in batch:
-        escaped = message.replace('"', '\\"')
         await kg.execute(
-            f'+event({evt_id}, "{component}", "{severity}", "{evt_type}", "{escaped}")'
+            f'+event({evt_id}, "{escape_iql(component)}", "{escape_iql(severity)}", "{escape_iql(evt_type)}", "{escape_iql(message)}")'
         )
         color = SEVERITY_COLORS.get(severity, DIM)
         print(f"    {color}{severity:5s}{RESET} {CYAN}{component:15s}{RESET} {DIM}{message}{RESET}")

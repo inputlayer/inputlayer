@@ -5,9 +5,10 @@ validate it, checking for missing auth, invalid methods, naming
 conventions, etc. If violations are found, the LLM gets the specific
 rule violations and regenerates. The loop continues until rules pass.
 
-The key insight: validation is DECLARATIVE (rules), not
-imperative (Python if/else) or probabilistic (ask another LLM).
-Rules are deterministic, explainable, and editable without code changes.
+The key insight: validation is DECLARATIVE. Rules define what's valid
+and fire automatically as facts are inserted. When a rule fires, the
+violation is self-describing - no extra logging or exception handling
+needed. Rules are editable without touching application code.
 """
 
 import asyncio
@@ -30,7 +31,7 @@ from examples.langgraph._common import (
 )
 
 from inputlayer import InputLayer
-from inputlayer.integrations.langgraph import InputLayerState
+from inputlayer.integrations.langgraph import InputLayerState, escape_iql
 from langgraph.graph import END, StateGraph
 
 # ── State ────────────────────────────────────────────────────────────
@@ -129,7 +130,8 @@ async def generate_spec(state: dict[str, Any]) -> dict[str, Any]:
     # Insert into KG
     for ep in endpoints:
         await kg.execute(
-            f'+api_endpoint("{ep["name"]}", "{ep["method"]}", "{ep["path"]}", "{ep["auth"]}")'
+            f'+api_endpoint("{escape_iql(ep["name"])}", "{escape_iql(ep["method"])}", '
+            f'"{escape_iql(ep["path"])}", "{escape_iql(ep["auth"])}")'
         )
 
     print(f"\n  {WHITE}Generated spec (attempt {iteration + 1}):{RESET}")
@@ -216,16 +218,13 @@ async def run():
             'Method != "GET"'
         )
 
-        # Rule 2: endpoint names must be snake_case (no uppercase)
-        # We detect uppercase by checking for common patterns
+        # Rule 2: endpoint names must be snake_case (no uppercase letters)
+        # lower(Name) != Name is true whenever Name contains any uppercase character
         await kg.execute(
             '+spec_violation(Name, "naming_convention", '
             '"Name contains uppercase (must be snake_case)") <- '
             "api_endpoint(Name, Method, Path, Auth), "
-            'Name != "get_users", Name != "create_user", '
-            'Name != "delete_user", Name != "update_user", '
-            'Name != "get_health", Name != "list_items", '
-            'Name != "get_item", Name != "search"'
+            "lower(Name) != Name"
         )
 
         step(1, "Validation rules defined")

@@ -26,7 +26,7 @@ from examples.langgraph._common import (
 )
 
 from inputlayer import InputLayer
-from inputlayer.integrations.langgraph import InputLayerState
+from inputlayer.integrations.langgraph import InputLayerState, escape_iql
 from langgraph.graph import END, StateGraph
 
 # ── State ────────────────────────────────────────────────────────────
@@ -152,8 +152,8 @@ async def process_email(state: dict[str, Any]) -> dict[str, Any]:
     body = doc["body"]
     sender = doc.get("from", "unknown")
 
-    escaped_subj = doc["subject"].replace('"', '\\"')
-    await kg.execute(f'+email_fact({doc["id"]}, "sender", "{sender}")')
+    escaped_subj = escape_iql(doc["subject"])
+    await kg.execute(f'+email_fact({doc["id"]}, "sender", "{escape_iql(sender)}")')
     await kg.execute(f'+email_fact({doc["id"]}, "subject", "{escaped_subj}")')
 
     # Simple number extraction
@@ -161,7 +161,7 @@ async def process_email(state: dict[str, Any]) -> dict[str, Any]:
 
     numbers = re.findall(r"\$[\d.]+[MKB]?", body)
     for num in numbers:
-        await kg.execute(f'+email_fact({doc["id"]}, "amount_mentioned", "{num}")')
+        await kg.execute(f'+email_fact({doc["id"]}, "amount_mentioned", "{escape_iql(num)}")')
 
     processed = state.get("processed", 0) + 1
     print(f"    {DIM}Extracted: sender={sender}, {len(numbers)} amounts{RESET}")
@@ -175,9 +175,9 @@ async def process_code(state: dict[str, Any]) -> dict[str, Any]:
     kg = state["kg"]
 
     author = doc.get("author", "unknown")
-    escaped_subj = doc["subject"].replace('"', '\\"')
+    escaped_subj = escape_iql(doc["subject"])
 
-    await kg.execute(f'+code_review_fact({doc["id"]}, "author", "{author}")')
+    await kg.execute(f'+code_review_fact({doc["id"]}, "author", "{escape_iql(author)}")')
     await kg.execute(f'+code_review_fact({doc["id"]}, "title", "{escaped_subj}")')
 
     # Detect keywords
@@ -185,7 +185,7 @@ async def process_code(state: dict[str, Any]) -> dict[str, Any]:
     body_lower = doc["body"].lower()
     for kw in keywords:
         if kw in body_lower:
-            await kg.execute(f'+code_review_fact({doc["id"]}, "topic", "{kw}")')
+            await kg.execute(f'+code_review_fact({doc["id"]}, "topic", "{escape_iql(kw)}")')
 
     processed = state.get("processed", 0) + 1
     print(f"    {DIM}Extracted: author={author}{RESET}")
@@ -199,9 +199,9 @@ async def process_ticket(state: dict[str, Any]) -> dict[str, Any]:
     kg = state["kg"]
 
     priority = doc.get("priority", "normal")
-    escaped_subj = doc["subject"].replace('"', '\\"')
+    escaped_subj = escape_iql(doc["subject"])
 
-    await kg.execute(f'+ticket_fact({doc["id"]}, "priority", "{priority}")')
+    await kg.execute(f'+ticket_fact({doc["id"]}, "priority", "{escape_iql(priority)}")')
     await kg.execute(f'+ticket_fact({doc["id"]}, "subject", "{escaped_subj}")')
 
     # Flag critical tickets
@@ -220,9 +220,9 @@ async def process_report(state: dict[str, Any]) -> dict[str, Any]:
     kg = state["kg"]
 
     author = doc.get("author", "unknown")
-    escaped_subj = doc["subject"].replace('"', '\\"')
+    escaped_subj = escape_iql(doc["subject"])
 
-    await kg.execute(f'+report_fact({doc["id"]}, "author", "{author}")')
+    await kg.execute(f'+report_fact({doc["id"]}, "author", "{escape_iql(author)}")')
     await kg.execute(f'+report_fact({doc["id"]}, "title", "{escaped_subj}")')
 
     processed = state.get("processed", 0) + 1

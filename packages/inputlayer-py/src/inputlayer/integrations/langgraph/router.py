@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def kg_router(
@@ -14,9 +17,14 @@ def kg_router(
 ) -> Callable[[dict[str, Any]], Any]:
     """Create a LangGraph conditional edge function driven by IQL queries.
 
-    Each branch maps a target node name to an IQL query. The first branch
-    whose query returns non-empty results wins. If no branch matches, the
-    ``default`` is returned.
+    Each branch maps a target node name to an IQL query. Branches are
+    evaluated in insertion order (Python dict ordering, guaranteed since
+    Python 3.7). The first branch whose query returns non-empty results
+    wins. If no branch matches, ``default`` is returned.
+
+    Exceptions from individual branch queries are caught and logged as
+    warnings; that branch is skipped and evaluation continues to the next.
+    This prevents a single failing query from crashing the entire graph.
 
     This lets the KG's derived facts control the graph's execution path.
     Routing decisions are declarative rules, not imperative Python.
@@ -34,20 +42,24 @@ def kg_router(
         graph.add_conditional_edges("reason", route)
 
     **Parameterized branches.** Queries can reference state values by using
-    a callable instead of a string::
+    a callable instead of a string. Always escape user-supplied values::
+
+        from inputlayer.integrations.langgraph import escape_iql
 
         route = kg_router(
             branches={
-                "found": lambda s: f'?result("{s["query"]}", X)',
+                "found": lambda s: f'?result("{escape_iql(s["query"])}", X)',
                 "not_found": "?empty_result(X)",
             },
         )
 
     Args:
         branches: Mapping of ``{target_node: iql_query}``. Queries can be
-            strings or callables ``(state) -> str``.
+            strings or callables ``(state) -> str``. Evaluated in insertion
+            order; first match wins.
         default: Node to route to if no branch matches.
-        kg_key: State key where the KnowledgeGraph handle lives.
+        kg_key: State key where the KnowledgeGraph handle lives. Must be
+            present in state when the router executes.
 
     Returns:
         An async function compatible with ``add_conditional_edges()``.
@@ -56,13 +68,28 @@ def kg_router(
         raise ValueError("Must provide at least one branch")
 
     async def _router(state: dict[str, Any]) -> str:
+        if kg_key not in state:
+            raise KeyError(
+                f"kg_router requires state['{kg_key}'] to be a KnowledgeGraph handle, "
+                f"but '{kg_key}' was not found in state. "
+                f"Add the KG handle to your state dict or change kg_key= to match "
+                f"the key you're using."
+            )
         kg = state[kg_key]
 
         for target, query in branches.items():
-            q = query(state) if callable(query) else query
-            result = await kg.execute(q)
-            if result.rows:
-                return target
+            try:
+                q = query(state) if callable(query) else query
+                result = await kg.execute(q)
+                if result.rows:
+                    return target
+            except Exception as exc:
+                logger.warning(
+                    "kg_router: branch %r query raised %s: %s - skipping to next branch",
+                    target,
+                    type(exc).__name__,
+                    exc,
+                )
 
         return default
 

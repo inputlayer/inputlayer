@@ -28,7 +28,7 @@ from examples.langgraph._common import (
 )
 
 from inputlayer import InputLayer
-from inputlayer.integrations.langgraph import InputLayerState
+from inputlayer.integrations.langgraph import InputLayerState, escape_iql
 from langgraph.graph import END, StateGraph
 
 # ── State ────────────────────────────────────────────────────────────
@@ -99,12 +99,12 @@ async def ingest_metrics(state: dict[str, Any]) -> dict[str, Any]:
     print(f"\n  {WHITE}T={ts}: Ingesting {len(batch)} metrics{RESET}")
 
     for metric_ts, component, name, value in batch:
-        await kg.execute(f'+metric({metric_ts}, "{component}", "{name}", {value})')
+        await kg.execute(f'+metric({metric_ts}, "{escape_iql(component)}", "{escape_iql(name)}", {value})')
 
     # Show current values
     for _metric_ts, component, name, value in batch:
         # Check if this metric has a threshold
-        r = await kg.execute(f'?threshold("{component}", "{name}", Max)')
+        r = await kg.execute(f'?threshold("{escape_iql(component)}", "{escape_iql(name)}", Max)')
         if r.rows:
             max_val = r.rows[0][2]
             if value > max_val:
@@ -297,7 +297,7 @@ async def run():
         ]
 
         for comp, name, max_val in thresholds:
-            await kg.execute(f'+threshold("{comp}", "{name}", {max_val})')
+            await kg.execute(f'+threshold("{escape_iql(comp)}", "{escape_iql(name)}", {max_val})')
 
         # ── Rules ────────────────────────────────────────────────────
 

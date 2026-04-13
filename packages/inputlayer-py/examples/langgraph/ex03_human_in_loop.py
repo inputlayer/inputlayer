@@ -25,7 +25,7 @@ from examples.langgraph._common import (
 )
 
 from inputlayer import InputLayer
-from inputlayer.integrations.langgraph import InputLayerState
+from inputlayer.integrations.langgraph import InputLayerState, escape_iql
 from langgraph.graph import END, StateGraph
 
 # ── State ────────────────────────────────────────────────────────────
@@ -57,10 +57,9 @@ async def pick_next_action(state: dict[str, Any]) -> dict[str, Any]:
 
     # Classify this action in the KG
     kg = state["kg"]
-    escaped = action["description"].replace('"', '\\"')
     await kg.execute(
-        f'+pending_action("{action["type"]}", "{escaped}", '
-        f'{action["amount"]}, "{action["target"]}")'
+        f'+pending_action("{escape_iql(action["type"])}", "{escape_iql(action["description"])}", '
+        f'{action["amount"]}, "{escape_iql(action["target"])}")'
     )
 
     return {"current_action": action, "action_index": idx + 1}
@@ -75,9 +74,9 @@ async def classify_action(state: dict[str, Any]) -> str:
         return "done"
 
     # Check if this action triggers any risk rules
-    a_type = action["type"]
+    a_type = escape_iql(action["type"])
     amount = action["amount"]
-    target = action["target"]
+    target = escape_iql(action["target"])
 
     r = await kg.execute(f'?risk_flag("{a_type}", {amount}, "{target}", Level, Reason)')
 

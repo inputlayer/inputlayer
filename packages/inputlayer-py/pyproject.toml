@@ -17,8 +17,9 @@ dependencies = [
 [project.optional-dependencies]
 pandas = ["pandas>=1.5"]
 langchain = ["langchain-core>=0.3"]
+langgraph = ["langgraph>=0.2", "langchain-core>=0.3", "langchain-openai>=0.2"]
 all = [
-    "inputlayer-client-dev[pandas,langchain]",
+    "inputlayer-client-dev[pandas,langchain,langgraph]",
 ]
 dev = [
     "pytest>=7.0",
@@ -50,6 +51,7 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 "examples/langchain/ex*.py" = ["F405", "F403"]
+"examples/langgraph/ex*.py" = ["F405", "F403"]
 
 [tool.mypy]
 python_version = "3.10"

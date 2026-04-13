@@ -8,6 +8,7 @@ Provides:
 - InputLayerMemory: Semantic long-term memory backed by a KG
 """
 
+from inputlayer.integrations.langgraph._utils import escape_iql
 from inputlayer.integrations.langgraph.checkpointer import InputLayerCheckpointer
 from inputlayer.integrations.langgraph.memory import InputLayerMemory
 from inputlayer.integrations.langgraph.nodes import kg_node
@@ -18,6 +19,7 @@ __all__ = [
     "InputLayerCheckpointer",
     "InputLayerMemory",
     "InputLayerState",
+    "escape_iql",
     "kg_node",
     "kg_router",
 ]

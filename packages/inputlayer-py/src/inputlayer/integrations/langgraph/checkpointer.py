@@ -27,6 +27,7 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import time
 from collections.abc import AsyncIterator, Iterator, Sequence
@@ -44,6 +45,7 @@ from langgraph.checkpoint.serde.base import SerializerProtocol
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from inputlayer._sync import run_sync
+from inputlayer.integrations.langgraph._utils import escape_iql
 
 
 def _b64_encode(data: bytes) -> str:
@@ -56,9 +58,36 @@ def _b64_decode(data: str) -> bytes:
     return base64.b64decode(data.encode("ascii"))
 
 
-def _escape(s: str) -> str:
-    """Escape a string for an IQL literal."""
-    return s.replace("\\", "\\\\").replace('"', '\\"')
+def _pack(serde: SerializerProtocol, obj: Any) -> str:
+    """Serialize obj and pack as 'type|base64blob'."""
+    type_, blob = serde.dumps_typed(obj)
+    return f"{type_}|{_b64_encode(blob)}"
+
+
+def _unpack(serde: SerializerProtocol, packed: str) -> Any:
+    """Unpack 'type|base64blob' and deserialize."""
+    type_, b64 = packed.split("|", 1)
+    return serde.loads_typed((type_, _b64_decode(b64)))
+
+
+def _parse_writes(
+    serde: SerializerProtocol,
+    rows: list[Any],
+) -> list[tuple[str, str, Any]]:
+    """Parse graph_write rows into (task_id, channel, value) triples.
+
+    Rows are expected to have columns:
+    thread_id, checkpoint_id, task_id, idx, channel, blob
+    Parsed from the end of the row for resilience to bound-column inclusion.
+    """
+    sorted_rows = sorted(rows, key=lambda r: (str(r[-4]), int(r[-3])))
+    result = []
+    for row in sorted_rows:
+        task_id = str(row[-4])
+        channel = str(row[-2])
+        value = _unpack(serde, str(row[-1]))
+        result.append((task_id, channel, value))
+    return result
 
 
 class InputLayerCheckpointer(BaseCheckpointSaver[str]):
@@ -66,6 +95,19 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
 
     Persists graph state as facts so that graph executions can be
     resumed across processes, restarts, and machines.
+
+    Thread safety: ``setup()`` is guarded by a lock; the underlying
+    KnowledgeGraph connection serializes commands, so concurrent
+    ``aput``/``aget_tuple`` calls are safe.
+
+    LangGraph protocol compliance:
+    - ``aput`` / ``put``: persist a checkpoint
+    - ``aput_writes`` / ``put_writes``: persist intermediate writes,
+      deleting any previous writes for the same (thread, checkpoint, task)
+      to prevent duplicates on retry
+    - ``aget_tuple`` / ``get_tuple``: retrieve latest or specific checkpoint
+    - ``alist`` / ``list``: list checkpoints with full ``before`` filtering,
+      ``filter`` support, ``limit``, and ``pending_writes`` populated
     """
 
     def __init__(
@@ -77,39 +119,47 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
         super().__init__(serde=serde or JsonPlusSerializer())
         self.kg = kg
         self._setup_done = False
+        self._setup_lock = asyncio.Lock()
 
     async def _exec(self, iql: str) -> Any:
-        """Thin wrapper around kg.execute().
-
-        Concurrent safety is handled by the underlying Connection's
-        internal lock. Multiple coroutines can call this safely.
-        """
+        """Execute IQL against the KG."""
         return await self.kg.execute(iql)
 
     async def setup(self) -> None:
         """Create the checkpoint relations if they don't exist.
 
-        Idempotent. Safe to call multiple times.
+        Idempotent and concurrency-safe. The first caller runs the DDL;
+        simultaneous callers wait and return once it completes.
         """
         if self._setup_done:
             return
 
-        # Best-effort schema creation; if relations exist, the server
-        # returns an error which we silently ignore.
-        for ddl in [
-            "+graph_checkpoint(thread_id: string, checkpoint_id: string, "
-            "parent_id: string, blob: string, metadata: string, ts: int)",
-            "+graph_write(thread_id: string, checkpoint_id: string, "
-            "task_id: string, idx: int, channel: string, blob: string)",
-        ]:
-            await self._exec(ddl)
+        async with self._setup_lock:
+            if self._setup_done:
+                return
 
-        self._setup_done = True
+            # No try/except: exceptions here mean the server is unreachable.
+            # Don't mark setup as done so the next operation retries cleanly.
+            # Server-side "already exists" responses come back as ResultSet rows,
+            # not exceptions, so they don't need to be caught here.
+            for ddl in [
+                "+graph_checkpoint(thread_id: string, checkpoint_id: string, "
+                "parent_id: string, blob: string, metadata: string, ts: int)",
+                "+graph_write(thread_id: string, checkpoint_id: string, "
+                "task_id: string, idx: int, channel: string, blob: string)",
+            ]:
+                await self._exec(ddl)
+
+            self._setup_done = True
 
     def setup_sync(self) -> None:
         run_sync(self.setup())
 
-    # ── Async API (native) ───────────────────────────────────────────
+    def __repr__(self) -> str:
+        kg_name = getattr(self.kg, "name", repr(self.kg))
+        return f"InputLayerCheckpointer(kg={kg_name!r}, setup_done={self._setup_done})"
+
+    # ── Async API ────────────────────────────────────────────────────
 
     async def aput(
         self,
@@ -124,28 +174,24 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
         thread_id = config["configurable"]["thread_id"]
         checkpoint_id = checkpoint["id"]
         parent_id = config["configurable"].get("checkpoint_id", "")
+        checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
 
-        # Serialize checkpoint and metadata
-        type_, blob = self.serde.dumps_typed(checkpoint)
-        meta_type, meta_blob = self.serde.dumps_typed(metadata)
-
-        # Pack type + blob together so we can reconstruct on read
-        packed_blob = f"{type_}|{_b64_encode(blob)}"
-        packed_meta = f"{meta_type}|{_b64_encode(meta_blob)}"
+        packed_blob = _pack(self.serde, checkpoint)
+        packed_meta = _pack(self.serde, metadata)
 
         await self._exec(
-            f'+graph_checkpoint("{_escape(thread_id)}", '
-            f'"{_escape(checkpoint_id)}", '
-            f'"{_escape(parent_id)}", '
-            f'"{_escape(packed_blob)}", '
-            f'"{_escape(packed_meta)}", '
+            f'+graph_checkpoint("{escape_iql(thread_id)}", '
+            f'"{escape_iql(checkpoint_id)}", '
+            f'"{escape_iql(parent_id)}", '
+            f'"{escape_iql(packed_blob)}", '
+            f'"{escape_iql(packed_meta)}", '
             f"{time.time_ns()})"
         )
 
         return {
             "configurable": {
                 "thread_id": thread_id,
-                "checkpoint_ns": config["configurable"].get("checkpoint_ns", ""),
+                "checkpoint_ns": checkpoint_ns,
                 "checkpoint_id": checkpoint_id,
             }
         }
@@ -157,22 +203,37 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
         task_id: str,
         task_path: str = "",
     ) -> None:
-        """Persist intermediate writes for a checkpoint."""
+        """Persist intermediate writes for a checkpoint.
+
+        Deletes any existing writes for this (thread, checkpoint, task)
+        before inserting so that retries don't accumulate duplicate rows.
+        """
         await self.setup()
 
         thread_id = config["configurable"]["thread_id"]
         checkpoint_id = config["configurable"]["checkpoint_id"]
 
+        # Nothing to write - don't touch existing writes for this checkpoint
+        if not writes:
+            return
+
+        # Delete existing writes for this task to prevent duplicates on retry
+        await self._exec(
+            f'-graph_write(ThreadId, CkptId, TaskId, Idx, Channel, Blob) <- '
+            f'ThreadId = "{escape_iql(thread_id)}", '
+            f'CkptId = "{escape_iql(checkpoint_id)}", '
+            f'TaskId = "{escape_iql(task_id)}"'
+        )
+
         for idx, (channel, value) in enumerate(writes):
-            type_, blob = self.serde.dumps_typed(value)
-            packed = f"{type_}|{_b64_encode(blob)}"
+            packed = _pack(self.serde, value)
             await self._exec(
-                f'+graph_write("{_escape(thread_id)}", '
-                f'"{_escape(checkpoint_id)}", '
-                f'"{_escape(task_id)}", '
+                f'+graph_write("{escape_iql(thread_id)}", '
+                f'"{escape_iql(checkpoint_id)}", '
+                f'"{escape_iql(task_id)}", '
                 f"{idx}, "
-                f'"{_escape(channel)}", '
-                f'"{_escape(packed)}")'
+                f'"{escape_iql(channel)}", '
+                f'"{escape_iql(packed)}")'
             )
 
     async def aget_tuple(
@@ -184,60 +245,41 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
 
         thread_id = config["configurable"]["thread_id"]
         checkpoint_id = config["configurable"].get("checkpoint_id")
+        checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
 
         if checkpoint_id:
-            # Get a specific checkpoint
             r = await self._exec(
-                f'?graph_checkpoint("{_escape(thread_id)}", '
-                f'"{_escape(checkpoint_id)}", ParentId, Blob, Metadata, Ts)'
+                f'?graph_checkpoint("{escape_iql(thread_id)}", '
+                f'"{escape_iql(checkpoint_id)}", ParentId, Blob, Metadata, Ts)'
             )
         else:
-            # Get the latest checkpoint for this thread
             r = await self._exec(
-                f'?graph_checkpoint("{_escape(thread_id)}", '
+                f'?graph_checkpoint("{escape_iql(thread_id)}", '
                 f"CheckpointId, ParentId, Blob, Metadata, Ts)"
             )
 
         if not r.rows:
             return None
 
-        # Pick the latest by timestamp (last column).
-        # Parse from the end of the row. Works whether the server
-        # includes bound columns in the result or strips them.
-        # Column order: thread_id, checkpoint_id, parent_id, blob, metadata, ts
-        row = max(r.rows, key=lambda r: r[-1])
-        meta_packed = str(row[-2])
-        blob_packed = str(row[-3])
+        # Pick the latest by timestamp (last column)
+        row = max(r.rows, key=lambda r: int(r[-1]))
         parent_id = str(row[-4])
         actual_id = checkpoint_id if checkpoint_id else str(row[-5])
 
-        # Unpack and deserialize
-        type_, b64_blob = blob_packed.split("|", 1)
-        checkpoint = self.serde.loads_typed((type_, _b64_decode(b64_blob)))
+        checkpoint = _unpack(self.serde, str(row[-3]))
+        metadata = _unpack(self.serde, str(row[-2]))
 
-        meta_type, meta_b64 = meta_packed.split("|", 1)
-        metadata = self.serde.loads_typed((meta_type, _b64_decode(meta_b64)))
-
-        # Get pending writes for this checkpoint
-        pending_writes: list[tuple[str, str, Any]] = []
+        # Fetch pending writes for this checkpoint
         r_writes = await self._exec(
-            f'?graph_write("{_escape(thread_id)}", '
-            f'"{_escape(actual_id)}", TaskId, Idx, Channel, Blob)'
+            f'?graph_write("{escape_iql(thread_id)}", '
+            f'"{escape_iql(actual_id)}", TaskId, Idx, Channel, Blob)'
         )
-        # Sort by task_id, idx. Parse from end of row for resilience
-        sorted_writes = sorted(r_writes.rows, key=lambda r: (r[-4], r[-3]))
-        for w_row in sorted_writes:
-            task_id = str(w_row[-4])
-            channel = str(w_row[-2])
-            packed = str(w_row[-1])
-            w_type, w_b64 = packed.split("|", 1)
-            value = self.serde.loads_typed((w_type, _b64_decode(w_b64)))
-            pending_writes.append((task_id, channel, value))
+        pending_writes = _parse_writes(self.serde, r_writes.rows)
 
         new_config: RunnableConfig = {
             "configurable": {
                 "thread_id": thread_id,
-                "checkpoint_ns": config["configurable"].get("checkpoint_ns", ""),
+                "checkpoint_ns": checkpoint_ns,
                 "checkpoint_id": actual_id,
             }
         }
@@ -247,7 +289,7 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
             parent_config = {
                 "configurable": {
                     "thread_id": thread_id,
-                    "checkpoint_ns": config["configurable"].get("checkpoint_ns", ""),
+                    "checkpoint_ns": checkpoint_ns,
                     "checkpoint_id": parent_id,
                 }
             }
@@ -268,41 +310,75 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
         before: RunnableConfig | None = None,
         limit: int | None = None,
     ) -> AsyncIterator[CheckpointTuple]:
-        """List checkpoints for a thread."""
+        """List checkpoints for a thread, newest first.
+
+        Args:
+            config: Must contain ``configurable.thread_id``.
+            filter: Metadata field filters. Each key/value must match the
+                checkpoint's metadata exactly (checked after deserialization).
+            before: If given, only return checkpoints with a timestamp
+                strictly before this checkpoint's timestamp.
+            limit: Maximum number of checkpoints to return.
+        """
         await self.setup()
 
         if config is None:
             return
 
         thread_id = config["configurable"]["thread_id"]
+        checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
 
         r = await self._exec(
-            f'?graph_checkpoint("{_escape(thread_id)}", CheckpointId, ParentId, Blob, Metadata, Ts)'
+            f'?graph_checkpoint("{escape_iql(thread_id)}", '
+            f"CheckpointId, ParentId, Blob, Metadata, Ts)"
         )
 
-        # Sort by ts descending (newest first)
-        sorted_rows = sorted(r.rows, key=lambda r: r[-1], reverse=True)
+        # Sort newest first
+        sorted_rows = sorted(r.rows, key=lambda r: int(r[-1]), reverse=True)
 
-        if limit:
-            sorted_rows = sorted_rows[:limit]
+        # Resolve the 'before' timestamp cutoff
+        if before is not None:
+            before_id = before["configurable"].get("checkpoint_id")
+            if before_id:
+                r_before = await self._exec(
+                    f'?graph_checkpoint("{escape_iql(thread_id)}", '
+                    f'"{escape_iql(before_id)}", _, _, _, Ts)'
+                )
+                if r_before.rows:
+                    cutoff_ts = int(r_before.rows[0][-1])
+                    sorted_rows = [row for row in sorted_rows if int(row[-1]) < cutoff_ts]
 
+        # Fetch all writes for this thread at once (one query, not N)
+        r_all_writes = await self._exec(
+            f'?graph_write("{escape_iql(thread_id)}", '
+            f"CheckpointId, TaskId, Idx, Channel, Blob)"
+        )
+        writes_by_ckpt: dict[str, list[Any]] = {}
+        for w_row in r_all_writes.rows:
+            ckpt_id = str(w_row[-5])
+            writes_by_ckpt.setdefault(ckpt_id, []).append(w_row)
+
+        count = 0
         for row in sorted_rows:
-            # Parse from end of row. Server may include bound thread_id
             checkpoint_id = str(row[-5])
             parent_id = str(row[-4])
-            blob_packed = str(row[-3])
-            meta_packed = str(row[-2])
 
-            type_, b64_blob = blob_packed.split("|", 1)
-            checkpoint = self.serde.loads_typed((type_, _b64_decode(b64_blob)))
+            checkpoint = _unpack(self.serde, str(row[-3]))
+            metadata = _unpack(self.serde, str(row[-2]))
 
-            meta_type, meta_b64 = meta_packed.split("|", 1)
-            metadata = self.serde.loads_typed((meta_type, _b64_decode(meta_b64)))
+            # Apply metadata filter
+            if filter:
+                if not all(metadata.get(k) == v for k, v in filter.items()):
+                    continue
+
+            pending_writes = _parse_writes(
+                self.serde, writes_by_ckpt.get(checkpoint_id, [])
+            )
 
             ckpt_config: RunnableConfig = {
                 "configurable": {
                     "thread_id": thread_id,
-                    "checkpoint_ns": "",
+                    "checkpoint_ns": checkpoint_ns,
                     "checkpoint_id": checkpoint_id,
                 }
             }
@@ -312,7 +388,7 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
                 parent_config = {
                     "configurable": {
                         "thread_id": thread_id,
-                        "checkpoint_ns": "",
+                        "checkpoint_ns": checkpoint_ns,
                         "checkpoint_id": parent_id,
                     }
                 }
@@ -322,10 +398,14 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
                 checkpoint=checkpoint,
                 metadata=metadata,
                 parent_config=parent_config,
-                pending_writes=[],
+                pending_writes=pending_writes,
             )
 
-    # ── Sync API (via run_sync bridge) ───────────────────────────────
+            count += 1
+            if limit is not None and count >= limit:
+                return
+
+    # ── Sync API ─────────────────────────────────────────────────────
 
     def put(
         self,
@@ -362,5 +442,4 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
                 results.append(tup)
             return results
 
-        items = run_sync(_collect())
-        yield from items
+        yield from run_sync(_collect())

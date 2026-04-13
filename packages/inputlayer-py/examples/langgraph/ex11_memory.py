@@ -83,12 +83,14 @@ async def run() -> None:
         print(f"{DIM}  {len(CONVERSATION)} turns -> KG facts + auto topic extraction{RESET}\n")
 
         for role, content in CONVERSATION:
-            await memory.astore("chat-1", role, content)
-            # Show extracted topics
-            from inputlayer.integrations.langgraph.memory import _extract_topics
-
-            topics = _extract_topics(content)
-            topic_str = f" {MAGENTA}[{', '.join(topics)}]{RESET}" if topics else ""
+            turn_id = await memory.astore("chat-1", role, content)
+            # Recall immediately after storing to show which topics were derived
+            ctx = await memory.arecall("chat-1")
+            turn_topics = [
+                t for t, turns in ctx["relevant"].items()
+                if any(tr["turn_id"] == turn_id for tr in turns)
+            ]
+            topic_str = f" {MAGENTA}[{', '.join(sorted(turn_topics))}]{RESET}" if turn_topics else ""
             color = GREEN if role == "user" else DIM
             print(f"  {color}{role:10s}{RESET} {content[:60]}{topic_str}")
 
@@ -168,9 +170,10 @@ async def run() -> None:
 
         app = graph.compile()
 
-        # Ask a new question. The memory context will include all
-        # the derived topics and relevant history
-        new_question = "What about deploying the whole thing with Docker and Kubernetes?"
+        # Ask a new question that wasn't in the replayed conversation.
+        # The memory already contains the full history above; this new
+        # question will be stored as an additional turn after the recall.
+        new_question = "How do I set up GPU passthrough in Docker for the training job?"
 
         print(f"\n  {WHITE}New question:{RESET} {new_question}")
         print(f"{DIM}  Graph: recall -> respond -> store{RESET}")

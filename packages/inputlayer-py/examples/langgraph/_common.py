@@ -63,16 +63,28 @@ def success(text: str) -> None:
     print(f"\n{GREEN}{BOLD}  {text}{RESET}\n")
 
 
+_llm_available: bool | None = None
+
+
 def check_llm() -> bool:
+    """Check if an LLM server is reachable. Result is cached after first call.
+
+    Note: makes a synchronous HTTP request on first call. Cached so that
+    repeated calls within the same process don't block the event loop again.
+    """
+    global _llm_available
+    if _llm_available is not None:
+        return _llm_available
     base_url = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
     try:
         import httpx
 
         resp = httpx.get(f"{base_url}/models", timeout=2)
         resp.raise_for_status()
-        return True
+        _llm_available = True
     except Exception:
-        return False
+        _llm_available = False
+    return _llm_available
 
 
 def get_llm() -> Any:
