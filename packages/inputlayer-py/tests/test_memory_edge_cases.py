@@ -124,6 +124,14 @@ class TestStrictMode:
         assert result == {}
         assert len(kg.turns) == 0
 
+    async def test_store_node_strict_non_dict_raises(self) -> None:
+        """Strict mode must raise TypeError for non-dict messages."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        node = mem.store_node(strict=True)
+        with pytest.raises(TypeError, match="dict"):
+            await node({"thread_id": "t", "new_message": "plain string"})
+
     async def test_process_restart_counter_resumes_from_kg(self) -> None:
         """Turn counter must resume from KG state, not reset to 1 after restart."""
         kg = MockMemoryKG()

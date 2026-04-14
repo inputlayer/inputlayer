@@ -5,8 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable, Coroutine
 from typing import Any, Literal
 
-from inputlayer.integrations.langgraph._utils import escape_iql
-
 
 def kg_node(
     *,
@@ -136,4 +134,4 @@ def kg_node(
 
 
 # Re-export so callers can do: from inputlayer.integrations.langgraph import escape_iql
-__all__ = ["escape_iql", "kg_node"]
+__all__ = ["kg_node"]

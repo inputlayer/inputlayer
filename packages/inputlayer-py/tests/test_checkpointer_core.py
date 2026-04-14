@@ -169,6 +169,75 @@ class TestPutWritesDeduplication:
         assert tup.parent_config["configurable"]["checkpoint_id"] == "ckpt-1"
 
 
+class TestTimeout:
+    async def test_exec_timeout_raises(self) -> None:
+        """_exec must raise TimeoutError when KG operation exceeds timeout."""
+        import asyncio
+
+        async def slow_execute(iql: str) -> None:
+            await asyncio.sleep(10)
+
+        kg = AsyncMock()
+        kg.execute = slow_execute
+        cp = InputLayerCheckpointer(kg=kg, kg_timeout=0.01)
+        cp._setup_done = True
+
+        with pytest.raises(TimeoutError, match="timed out"):
+            await cp._exec("?test(X)")
+
+    def test_sync_setup(self) -> None:
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        cp.setup_sync()
+        assert cp._setup_done is True
+
+
+class TestPrune:
+    async def test_prune_removes_old_checkpoints(self) -> None:
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        for i in range(5):
+            await cp.aput(
+                make_config("thread-1"),
+                make_checkpoint(f"ckpt-{i}"),
+                {"source": "input", "step": i, "writes": {}, "parents": {}},
+                {},
+            )
+        removed = await cp.aprune("thread-1", keep_last=2)
+        assert removed == 3
+
+    async def test_prune_noop_when_under_limit(self) -> None:
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        await cp.aput(
+            make_config("thread-1"),
+            make_checkpoint("ckpt-1"),
+            {"source": "input", "step": 0, "writes": {}, "parents": {}},
+            {},
+        )
+        removed = await cp.aprune("thread-1", keep_last=10)
+        assert removed == 0
+
+    async def test_prune_invalid_keep_last_raises(self) -> None:
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        with pytest.raises(ValueError, match="keep_last"):
+            await cp.aprune("thread-1", keep_last=0)
+
+    def test_sync_prune(self) -> None:
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        for i in range(5):
+            cp.put(
+                make_config("thread-1"),
+                make_checkpoint(f"ckpt-{i}"),
+                {"source": "input", "step": i, "writes": {}, "parents": {}},
+                {},
+            )
+        removed = cp.prune("thread-1", keep_last=2)
+        assert removed == 3
+
+
 class TestSyncBridge:
     def test_sync_put_and_get(self) -> None:
         kg = MockKG()

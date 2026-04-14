@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from langgraph.checkpoint.base import Checkpoint, CheckpointMetadata, empty_checkpoint
+from langgraph.checkpoint.base import Checkpoint, empty_checkpoint
 
 from inputlayer.result import ResultSet
 
