@@ -30,6 +30,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import time
 from collections.abc import Callable, Coroutine
@@ -39,6 +40,23 @@ from inputlayer._sync import run_sync
 from inputlayer.integrations.langgraph._utils import escape_iql
 
 logger = logging.getLogger(__name__)
+
+
+def _b64e(s: str) -> str:
+    """Encode a string as base64 for safe IQL string storage.
+
+    The IQL parser does not unescape string literals (``\\"`` stays as
+    two characters, not a single quote). Base64 avoids this entirely:
+    the encoded value contains only alphanumeric chars, ``+``, ``/``,
+    and ``=``, which need no escaping.
+    """
+    return base64.b64encode(s.encode("utf-8")).decode("ascii")
+
+
+def _b64d(s: str) -> str:
+    """Decode a base64-encoded string back to the original."""
+    return base64.b64decode(s.encode("ascii")).decode("utf-8")
+
 
 # ── Topic keywords for simple extraction ─────────────────────────────
 # NOTE: This keyword list is a demo-quality extractor only. In production,
@@ -102,12 +120,24 @@ class InputLayerMemory:
         self.kg = kg
         self.max_recent = max_recent
         self._setup_done = False
-        self._setup_lock = asyncio.Lock()
+        self._setup_lock: asyncio.Lock | None = None
         self._turn_counters: dict[str, int] = {}
         self._thread_locks: dict[str, asyncio.Lock] = {}
-        self._thread_locks_guard = asyncio.Lock()
+        self._thread_locks_guard: asyncio.Lock | None = None
 
     # ── Setup ────────────────────────────────────────────────────────
+
+    def _get_setup_lock(self) -> asyncio.Lock:
+        """Lazily create the setup lock in the current event loop."""
+        if self._setup_lock is None:
+            self._setup_lock = asyncio.Lock()
+        return self._setup_lock
+
+    def _get_thread_locks_guard(self) -> asyncio.Lock:
+        """Lazily create the thread-locks guard in the current event loop."""
+        if self._thread_locks_guard is None:
+            self._thread_locks_guard = asyncio.Lock()
+        return self._thread_locks_guard
 
     async def setup(self) -> None:
         """Create memory relations and rules (idempotent, concurrency-safe).
@@ -119,7 +149,7 @@ class InputLayerMemory:
         if self._setup_done:
             return
 
-        async with self._setup_lock:
+        async with self._get_setup_lock():
             if self._setup_done:  # re-check after acquiring lock
                 return
 
@@ -171,7 +201,7 @@ class InputLayerMemory:
 
     async def _get_thread_lock(self, thread_id: str) -> asyncio.Lock:
         """Get or create a per-thread lock (creating is guarded by a guard lock)."""
-        async with self._thread_locks_guard:
+        async with self._get_thread_locks_guard():
             if thread_id not in self._thread_locks:
                 self._thread_locks[thread_id] = asyncio.Lock()
             return self._thread_locks[thread_id]
@@ -227,18 +257,27 @@ class InputLayerMemory:
         turn_id = await self._next_turn_id(thread_id)
         ts = time.time_ns()
 
+        # Content and role are base64-encoded because the IQL parser does not
+        # unescape string literals (e.g. \" stays as two characters). Base64
+        # ensures lossless round-trip for arbitrary content.
         await self.kg.execute(
             f'+memory_turn("{escape_iql(thread_id)}", {turn_id}, '
-            f'"{escape_iql(role)}", "{escape_iql(content)}", {ts})'
+            f'"{_b64e(role)}", "{_b64e(content)}", {ts})'
         )
 
         if topics is None:
             topics = _extract_topics(content)
 
-        for topic in topics:
-            await self.kg.execute(
-                f'+memory_topic("{escape_iql(thread_id)}", {turn_id}, "{escape_iql(topic)}")'
-            )
+        if topics:
+            # Note: with a single KG connection these are serialized by the
+            # connection lock, but asyncio.gather expresses concurrent intent
+            # and is ready for connection pooling.
+            await asyncio.gather(*(
+                self.kg.execute(
+                    f'+memory_topic("{escape_iql(thread_id)}", {turn_id}, "{escape_iql(topic)}")'
+                )
+                for topic in topics
+            ))
 
         return turn_id
 
@@ -269,57 +308,56 @@ class InputLayerMemory:
         """
         await self.setup()
 
-        result: dict[str, Any] = {
-            "topics": [],
-            "recent": [],
-            "relevant": {},
-            "related_topics": [],
-        }
+        escaped = escape_iql(thread_id)
+
+        # Run all four independent queries concurrently. With a single KG
+        # connection these are serialized by the connection lock, but
+        # asyncio.gather expresses the intent and is ready for pooling.
+        r_topics, r_turns, r_relevant, r_related = await asyncio.gather(
+            self.kg.execute(f'?active_topic("{escaped}", Topic)'),
+            self.kg.execute(f'?memory_turn("{escaped}", TurnId, Role, Content, Ts)'),
+            self.kg.execute(f'?relevant_turn("{escaped}", TurnId, Role, Content, Topic)'),
+            self.kg.execute(f'?topic_thread("{escaped}", TopicA, TopicB)'),
+        )
+
+        result: dict[str, Any] = {}
 
         # Active topics
-        r = await self.kg.execute(f'?active_topic("{escape_iql(thread_id)}", Topic)')
-        result["topics"] = sorted({str(row[-1]) for row in r.rows})
+        result["topics"] = sorted({str(row[-1]) for row in r_topics.rows})
 
         # Recent turns sorted by turn_id descending (canonical ordering)
-        r = await self.kg.execute(
-            f'?memory_turn("{escape_iql(thread_id)}", TurnId, Role, Content, Ts)'
-        )
-        turns = sorted(r.rows, key=lambda row: int(row[-4]), reverse=True)
-        for row in turns[: self.max_recent]:
-            result["recent"].append(
-                {
-                    "turn_id": int(row[-4]),
-                    "role": str(row[-3]),
-                    "content": str(row[-2]),
-                }
-            )
+        turns = sorted(r_turns.rows, key=lambda row: int(row[-4]), reverse=True)
+        result["recent"] = [
+            {
+                "turn_id": int(row[-4]),
+                "role": _b64d(str(row[-3])),
+                "content": _b64d(str(row[-2])),
+            }
+            for row in turns[: self.max_recent]
+        ]
 
         # Relevant turns grouped by topic
-        r = await self.kg.execute(
-            f'?relevant_turn("{escape_iql(thread_id)}", TurnId, Role, Content, Topic)'
-        )
         by_topic: dict[str, list[dict[str, Any]]] = {}
-        for row in r.rows:
+        for row in r_relevant.rows:
             topic = str(row[-1])
             turn = {
                 "turn_id": int(row[-4]),
-                "role": str(row[-3]),
-                "content": str(row[-2]),
+                "role": _b64d(str(row[-3])),
+                "content": _b64d(str(row[-2])),
             }
             by_topic.setdefault(topic, []).append(turn)
         result["relevant"] = by_topic
 
         # Related topic pairs (deduplicated, order-independent)
-        r = await self.kg.execute(
-            f'?topic_thread("{escape_iql(thread_id)}", TopicA, TopicB)'
-        )
         seen: set[tuple[str, str]] = set()
-        for row in r.rows:
+        related: list[tuple[str, str]] = []
+        for row in r_related.rows:
             a, b = sorted([str(row[-2]), str(row[-1])])
             pair = (a, b)
             if pair not in seen:
                 seen.add(pair)
-                result["related_topics"].append(pair)
+                related.append(pair)
+        result["related_topics"] = related
 
         return result
 

@@ -6,6 +6,11 @@ import logging
 from collections.abc import Callable, Coroutine
 from typing import Any
 
+from inputlayer.exceptions import (
+    AuthenticationError,
+    InputLayerConnectionError,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,9 +27,11 @@ def kg_router(
     Python 3.7). The first branch whose query returns non-empty results
     wins. If no branch matches, ``default`` is returned.
 
-    Exceptions from individual branch queries are caught and logged as
-    warnings; that branch is skipped and evaluation continues to the next.
-    This prevents a single failing query from crashing the entire graph.
+    Query-level exceptions (``ValueError``, ``RuntimeError``, etc.) are
+    caught, logged as warnings, and the branch is skipped. Connection and
+    authentication errors (``InputLayerConnectionError``,
+    ``AuthenticationError``, ``ConnectionError``, ``OSError``) are re-raised
+    immediately since they indicate systemic failures, not bad queries.
 
     This lets the KG's derived facts control the graph's execution path.
     Routing decisions are declarative rules, not imperative Python.
@@ -83,6 +90,10 @@ def kg_router(
                 result = await kg.execute(q)
                 if result.rows:
                     return target
+            except (InputLayerConnectionError, AuthenticationError, ConnectionError, OSError):
+                # Connection/auth failures are systemic. Re-raise so the
+                # graph surfaces the error instead of silently misrouting.
+                raise
             except Exception as exc:
                 logger.warning(
                     "kg_router: branch %r query raised %s: %s - skipping to next branch",

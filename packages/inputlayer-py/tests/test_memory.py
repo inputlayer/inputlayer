@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import re
 from dataclasses import dataclass, field
 
@@ -9,6 +10,11 @@ import pytest
 
 from inputlayer.integrations.langgraph import InputLayerMemory
 from inputlayer.result import ResultSet
+
+
+def _b64e(s: str) -> str:
+    """Helper: base64-encode a string (matches memory.py's _b64e)."""
+    return base64.b64encode(s.encode("utf-8")).decode("ascii")
 
 # ── Mock KG ──────────────────────────────────────────────────────────
 
@@ -153,8 +159,9 @@ class TestStore:
         assert turn_id == 1
         assert len(kg.turns) == 1
         assert kg.turns[0][0] == "thread-1"
-        assert kg.turns[0][2] == "user"
-        assert kg.turns[0][3] == "Hello world"
+        # Role and content are base64-encoded in storage
+        assert kg.turns[0][2] == _b64e("user")
+        assert kg.turns[0][3] == _b64e("Hello world")
 
     async def test_store_auto_extracts_topics(self) -> None:
         kg = MockMemoryKG()
@@ -191,16 +198,14 @@ class TestStore:
         assert id2 == 2
         assert id3 == 3
 
-    async def test_store_escapes_special_chars(self) -> None:
+    async def test_store_base64_encodes_content(self) -> None:
         kg = MockMemoryKG()
         mem = InputLayerMemory(kg=kg)
-        await mem.astore(
-            "t",
-            "user",
-            'She said "hello" and used a \\ backslash',
-        )
+        content = 'She said "hello" and used a \\ backslash'
+        await mem.astore("t", "user", content)
         assert len(kg.turns) == 1
-        assert '"hello"' in kg.turns[0][3]
+        # Content is base64-encoded in storage
+        assert kg.turns[0][3] == _b64e(content)
 
     def test_store_sync(self) -> None:
         kg = MockMemoryKG()
@@ -324,7 +329,7 @@ class TestNodeFactories:
         }
         await node(state)
         assert len(kg.turns) == 1
-        assert kg.turns[0][3] == "Test message"
+        assert kg.turns[0][3] == _b64e("Test message")
 
     async def test_store_node_no_message(self) -> None:
         kg = MockMemoryKG()
@@ -391,10 +396,10 @@ class TestTopicExtraction:
 
 class TestEscaping:
     async def test_thread_id_with_quotes(self) -> None:
+        """Thread IDs still use escape_iql (they're identifiers, not content)."""
         kg = MockMemoryKG()
         mem = InputLayerMemory(kg=kg)
         await mem.astore('thread-"special"', "user", "Hello Python")
-        # Filter out schema DDL (contains ":") to get only data inserts
         insert_calls = [
             c for c in kg.executed
             if c.startswith("+memory_turn(") and ":" not in c.split("(", 1)[1]
@@ -402,18 +407,8 @@ class TestEscaping:
         assert len(insert_calls) == 1
         assert r'thread-\"special\"' in insert_calls[0]
 
-    async def test_role_with_backslash(self) -> None:
-        kg = MockMemoryKG()
-        mem = InputLayerMemory(kg=kg)
-        await mem.astore("t", "user\\admin", "Hello")
-        insert_calls = [
-            c for c in kg.executed
-            if c.startswith("+memory_turn(") and ":" not in c.split("(", 1)[1]
-        ]
-        assert len(insert_calls) == 1
-        assert "user\\\\admin" in insert_calls[0]
-
     async def test_topic_with_quotes(self) -> None:
+        """Topics still use escape_iql (they're identifiers, not content)."""
         kg = MockMemoryKG()
         mem = InputLayerMemory(kg=kg)
         await mem.astore("t", "user", "Hello", topics=['say "hi"'])
@@ -424,40 +419,45 @@ class TestEscaping:
         assert len(topic_calls) == 1
         assert r'say \"hi\"' in topic_calls[0]
 
-    async def test_special_chars_round_trip(self) -> None:
-        """Store with special chars in thread_id and content, then recall and verify."""
+    async def test_content_base64_round_trip(self) -> None:
+        """Content with special chars must survive base64 encode/decode round-trip."""
         kg = MockMemoryKG()
         mem = InputLayerMemory(kg=kg)
         thread_id = 'user-"alice"'
         content = 'She said "hello\\world"\nand left'
         await mem.astore(thread_id, "user", content, topics=["test"])
 
-        # Verify the mock parsed and stored the unescaped values correctly
         assert len(kg.turns) == 1
         assert kg.turns[0][0] == thread_id
-        assert kg.turns[0][3] == content
+        # Content is base64-encoded in storage
+        assert kg.turns[0][3] == _b64e(content)
 
-        # Round-trip: recall should find the data
+        # Round-trip: recall decodes base64 back to original
         ctx = await mem.arecall(thread_id)
         assert len(ctx["recent"]) == 1
         assert ctx["recent"][0]["content"] == content
+        assert ctx["recent"][0]["role"] == "user"
         assert "test" in ctx["topics"]
 
-    async def test_backslash_n_vs_newline_round_trip(self) -> None:
-        r"""Literal backslash+n (\n) must not become a newline on round-trip.
-
-        escape_iql turns \ into \\ and \n into \\n.  A naive sequential
-        unescape would turn \\n back into \n (newline) instead of \+n.
-        The single-pass regex in _unescape handles this correctly.
-        """
+    async def test_backslash_n_round_trip(self) -> None:
+        r"""Literal backslash+n (\n) must survive round-trip via base64."""
         kg = MockMemoryKG()
         mem = InputLayerMemory(kg=kg)
-        # Literal backslash followed by 'n', NOT a newline
         content = "path\\name"
         await mem.astore("t", "user", content, topics=["test"])
 
         assert len(kg.turns) == 1
-        assert kg.turns[0][3] == content  # must be backslash + n, not newline
+        assert kg.turns[0][3] == _b64e(content)
+
+        ctx = await mem.arecall("t")
+        assert ctx["recent"][0]["content"] == content
+
+    async def test_unicode_content_round_trip(self) -> None:
+        """Unicode content must survive base64 round-trip."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        content = "caf\u00e9 \U0001f600 \u4e16\u754c"
+        await mem.astore("t", "user", content)
 
         ctx = await mem.arecall("t")
         assert ctx["recent"][0]["content"] == content

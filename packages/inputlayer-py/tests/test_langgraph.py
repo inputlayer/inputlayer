@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import builtins
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from inputlayer.integrations.langgraph import InputLayerState, escape_iql, kg_node, kg_router
 from inputlayer.result import ResultSet
+
+# InputLayer shadows the builtin ConnectionError. Alias the builtin for tests.
+builtins_ConnectionError = builtins.__dict__["ConnectionError"]
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -557,3 +561,109 @@ class TestEscapeIql:
     def test_all_control_chars_in_one_string(self) -> None:
         result = escape_iql('\\"test\n\r\t\x00')
         assert result == '\\\\\\"test\\n\\r\\t\\0'
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Router: connection error propagation
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestKgRouterConnectionErrors:
+    async def test_connection_error_is_not_swallowed(self) -> None:
+        """Python builtin ConnectionError must propagate."""
+        kg = MagicMock()
+        # Use Python's builtin ConnectionError (not InputLayer's)
+        kg.execute = AsyncMock(side_effect=builtins_ConnectionError("server down"))
+
+        router = kg_router(
+            branches={"a": "?test(X)"},
+            default="fallback",
+        )
+
+        with pytest.raises(builtins_ConnectionError, match="server down"):
+            await router({"kg": kg})
+
+    async def test_inputlayer_connection_error_is_not_swallowed(self) -> None:
+        """InputLayerConnectionError must propagate, not be silently skipped."""
+        from inputlayer.exceptions import InputLayerConnectionError
+
+        kg = MagicMock()
+        kg.execute = AsyncMock(
+            side_effect=InputLayerConnectionError("websocket closed")
+        )
+
+        router = kg_router(
+            branches={"a": "?test(X)"},
+            default="fallback",
+        )
+
+        with pytest.raises(InputLayerConnectionError, match="websocket closed"):
+            await router({"kg": kg})
+
+    async def test_auth_error_is_not_swallowed(self) -> None:
+        """AuthenticationError must propagate."""
+        from inputlayer.exceptions import AuthenticationError
+
+        kg = MagicMock()
+        kg.execute = AsyncMock(side_effect=AuthenticationError("bad token"))
+
+        router = kg_router(
+            branches={"a": "?test(X)"},
+            default="fallback",
+        )
+
+        with pytest.raises(AuthenticationError, match="bad token"):
+            await router({"kg": kg})
+
+    async def test_os_error_is_not_swallowed(self) -> None:
+        """OSError (network failures) must propagate."""
+        kg = MagicMock()
+        kg.execute = AsyncMock(side_effect=OSError("network unreachable"))
+
+        router = kg_router(
+            branches={"a": "?test(X)"},
+            default="fallback",
+        )
+
+        with pytest.raises(OSError, match="network unreachable"):
+            await router({"kg": kg})
+
+    async def test_query_error_still_skipped(self) -> None:
+        """Non-connection errors (ValueError, RuntimeError) should still be skipped."""
+        kg = MagicMock()
+        kg.execute = AsyncMock(
+            side_effect=[
+                ValueError("bad query syntax"),
+                ResultSet(columns=["x"], rows=[["ok"]]),
+            ]
+        )
+
+        router = kg_router(
+            branches={
+                "bad": "?broken(X)",
+                "good": "?works(X)",
+            },
+        )
+
+        result = await router({"kg": kg})
+        assert result == "good"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Node: type validation for insert
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestKgNodeInsertTypeValidation:
+    async def test_insert_unsupported_type_raises(self) -> None:
+        """Passing a string/int/etc should raise TypeError, not silently fail."""
+        from inputlayer.relation import Relation
+
+        class Emp(Relation):
+            name: str
+
+        kg = _mock_kg()
+        node = kg_node(relation=Emp, operation="insert", state_key="data")
+
+        with pytest.raises(TypeError, match="must be a dict"):
+            await node({"kg": kg, "data": "not a dict or relation"})

@@ -66,8 +66,13 @@ def _pack(serde: SerializerProtocol, obj: Any) -> str:
 
 def _unpack(serde: SerializerProtocol, packed: str) -> Any:
     """Unpack 'type|base64blob' and deserialize."""
-    type_, b64 = packed.split("|", 1)
-    return serde.loads_typed((type_, _b64_decode(b64)))
+    parts = packed.split("|", 1)
+    if len(parts) != 2:
+        raise ValueError(
+            f"Corrupted checkpoint data: expected 'type|base64blob' format, "
+            f"got {packed[:80]!r}{'...' if len(packed) > 80 else ''}"
+        )
+    return serde.loads_typed((parts[0], _b64_decode(parts[1])))
 
 
 def _parse_writes(
@@ -76,9 +81,9 @@ def _parse_writes(
 ) -> list[tuple[str, str, Any]]:
     """Parse graph_write rows into (task_id, channel, value) triples.
 
-    Rows are expected to have columns:
-    thread_id, checkpoint_id, task_id, idx, channel, blob
-    Parsed from the end of the row for resilience to bound-column inclusion.
+    Rows are sorted by (task_id, idx) to match LangGraph's expected ordering.
+    Columns are parsed from the end of each row for resilience to
+    bound-column inclusion by the query engine.
     """
     sorted_rows = sorted(rows, key=lambda r: (str(r[-4]), int(r[-3])))
     result = []
@@ -119,11 +124,17 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
         super().__init__(serde=serde or JsonPlusSerializer())
         self.kg = kg
         self._setup_done = False
-        self._setup_lock = asyncio.Lock()
+        self._setup_lock: asyncio.Lock | None = None
 
     async def _exec(self, iql: str) -> Any:
         """Execute IQL against the KG."""
         return await self.kg.execute(iql)
+
+    def _get_setup_lock(self) -> asyncio.Lock:
+        """Lazily create the setup lock in the current event loop."""
+        if self._setup_lock is None:
+            self._setup_lock = asyncio.Lock()
+        return self._setup_lock
 
     async def setup(self) -> None:
         """Create the checkpoint relations if they don't exist.
@@ -134,7 +145,7 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
         if self._setup_done:
             return
 
-        async with self._setup_lock:
+        async with self._get_setup_lock():
             if self._setup_done:
                 return
 
@@ -240,16 +251,20 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
             f'TaskId = "{escape_iql(task_id)}"'
         )
 
-        for idx, (channel, value) in enumerate(writes):
-            packed = _pack(self.serde, value)
-            await self._exec(
+        # Note: asyncio.gather expresses concurrent intent. With a single KG
+        # connection the execute lock serializes these, but the code is ready
+        # for connection pooling or multiplexed protocols.
+        await asyncio.gather(*(
+            self._exec(
                 f'+graph_write("{escape_iql(thread_id)}", '
                 f'"{escape_iql(checkpoint_id)}", '
                 f'"{escape_iql(task_id)}", '
                 f"{idx}, "
                 f'"{escape_iql(channel)}", '
-                f'"{escape_iql(packed)}")'
+                f'"{escape_iql(_pack(self.serde, value))}")'
             )
+            for idx, (channel, value) in enumerate(writes)
+        ))
 
     async def aget_tuple(
         self,
@@ -366,17 +381,16 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
         # Sort newest first
         sorted_rows = sorted(r.rows, key=lambda row: int(row[-1]), reverse=True)
 
-        # Resolve the 'before' timestamp cutoff
+        # Resolve the 'before' timestamp cutoff from the already-fetched rows
         if before is not None:
             before_id = before["configurable"].get("checkpoint_id")
             if before_id:
-                r_before = await self._exec(
-                    f'?graph_checkpoint("{escape_iql(thread_id)}", '
-                    f'"{escape_iql(checkpoint_ns)}", '
-                    f'"{escape_iql(before_id)}", _, _, _, Ts)'
-                )
-                if r_before.rows:
-                    cutoff_ts = int(r_before.rows[0][-1])
+                cutoff_ts = None
+                for row in sorted_rows:
+                    if str(row[-5]) == before_id:
+                        cutoff_ts = int(row[-1])
+                        break
+                if cutoff_ts is not None:
                     sorted_rows = [row for row in sorted_rows if int(row[-1]) < cutoff_ts]
 
         # Fetch all writes for this thread at once (one query, not N)
@@ -435,6 +449,80 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
             if limit is not None and count >= limit:
                 return
 
+    # ── Maintenance ──────────────────────────────────────────────────
+
+    async def aprune(
+        self,
+        thread_id: str,
+        *,
+        checkpoint_ns: str = "",
+        keep_last: int = 10,
+    ) -> int:
+        """Remove old checkpoints and their writes, keeping the most recent ones.
+
+        Checkpoints accumulate indefinitely. Call this periodically for
+        long-running threads to prevent unbounded storage growth.
+
+        Args:
+            thread_id: The thread to prune.
+            checkpoint_ns: Namespace to prune within (default ``""`` for the
+                parent graph). Subgraph checkpoints use a different namespace,
+                so pruning is scoped per-namespace to avoid accidentally
+                deleting subgraph state.
+            keep_last: Number of most recent checkpoints to keep (default 10).
+
+        Returns:
+            Number of checkpoints removed.
+        """
+        await self.setup()
+
+        if keep_last < 1:
+            raise ValueError("keep_last must be >= 1")
+
+        r = await self._exec(
+            f'?graph_checkpoint("{escape_iql(thread_id)}", '
+            f'"{escape_iql(checkpoint_ns)}", '
+            f"CheckpointId, ParentId, Blob, Metadata, Ts)"
+        )
+
+        if len(r.rows) <= keep_last:
+            return 0
+
+        # Sort newest-first, identify rows to prune
+        sorted_rows = sorted(r.rows, key=lambda row: int(row[-1]), reverse=True)
+        to_prune = sorted_rows[keep_last:]
+
+        for row in to_prune:
+            ckpt_id = str(row[-5])
+
+            # Delete the checkpoint
+            await self._exec(
+                f'-graph_checkpoint(ThreadId, Ns, CkptId, P, B, M, T) <- '
+                f'ThreadId = "{escape_iql(thread_id)}", '
+                f'Ns = "{escape_iql(checkpoint_ns)}", '
+                f'CkptId = "{escape_iql(ckpt_id)}"'
+            )
+
+            # Delete associated writes
+            await self._exec(
+                f'-graph_write(ThreadId, CkptId, TaskId, Idx, Channel, Blob) <- '
+                f'ThreadId = "{escape_iql(thread_id)}", '
+                f'CkptId = "{escape_iql(ckpt_id)}"'
+            )
+
+        return len(to_prune)
+
+    def prune(
+        self,
+        thread_id: str,
+        *,
+        checkpoint_ns: str = "",
+        keep_last: int = 10,
+    ) -> int:
+        return run_sync(self.aprune(
+            thread_id, checkpoint_ns=checkpoint_ns, keep_last=keep_last,
+        ))
+
     # ── Sync API ─────────────────────────────────────────────────────
 
     def put(
@@ -466,10 +554,21 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
         before: RunnableConfig | None = None,
         limit: int | None = None,
     ) -> Iterator[CheckpointTuple]:
-        async def _collect() -> list[CheckpointTuple]:
-            results = []
-            async for tup in self.alist(config, filter=filter, before=before, limit=limit):
-                results.append(tup)
-            return results
+        # Collect in the background loop and yield one at a time.
+        # We must collect because the async iterator is tied to the
+        # background event loop and can't be driven from the calling thread.
+        results: list[CheckpointTuple] = run_sync(self._alist_collect(
+            config, filter=filter, before=before, limit=limit,
+        ))
+        yield from results
 
-        yield from run_sync(_collect())
+    async def _alist_collect(
+        self,
+        config: RunnableConfig | None,
+        *,
+        filter: dict[str, Any] | None = None,
+        before: RunnableConfig | None = None,
+        limit: int | None = None,
+    ) -> list[CheckpointTuple]:
+        """Collect alist results into a list (used by sync list())."""
+        return [tup async for tup in self.alist(config, filter=filter, before=before, limit=limit)]

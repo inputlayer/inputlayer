@@ -302,7 +302,7 @@ class KnowledgeGraph:
 
         # Need to switch KG. Use execute_sequence for atomicity so that
         # auto-create can be handled within the same lock hold.
-        async with self._conn._execute_lock:
+        async with self._conn._get_execute_lock():
             # Step 1: try to switch to this KG.
             use_result = await self._conn._send_and_recv(preamble)
             if use_result.switched_kg:

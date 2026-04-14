@@ -54,7 +54,7 @@ def print_menu() -> None:
 
     llm_available = check_llm()
     llm_status = f"{GREEN}available{RESET}" if llm_available else f"{RED}not detected{RESET}"
-    print(f"  {DIM}LLM server: {llm_status}{DIM}{RESET}\n")
+    print(f"  {DIM}LLM server: {llm_status}{RESET}\n")
 
     for i, (_, title) in enumerate(EXAMPLES, 1):
         needs_llm = i in LLM_EXAMPLES
@@ -94,15 +94,22 @@ async def run_examples(numbers: list[int]) -> None:
     failed = 0
     t0 = time.time()
 
+    llm_available = check_llm()
+
     for num in numbers:
         module_name, title = EXAMPLES[num - 1]
+
+        if num in LLM_EXAMPLES and not llm_available:
+            print(f"\n  {YELLOW}SKIP example {num} ({title}): LLM server not available{RESET}")
+            continue
+
         try:
             mod = importlib.import_module(f"examples.langgraph.{module_name}")
             await mod.run()
             passed += 1
         except Exception as e:
             failed += 1
-            print(f"\n  {RED}ERROR in example {num} ({title}): {e}{RESET}")
+            print(f"\n  {RED}ERROR in example {num} ({title}): {type(e).__name__}: {e}{RESET}")
 
     elapsed = time.time() - t0
 

@@ -355,7 +355,6 @@ def compile_conditional_delete(
     # Build a variable environment that maps columns to X0, X1, ...
     env = _VarEnv()
     for i, col in enumerate(columns):
-        AstColumn(name, col)
         key = f"{name}.{col}"
         env._map[key] = vars_[i]
 

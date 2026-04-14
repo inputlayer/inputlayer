@@ -283,30 +283,48 @@ async def run():
             # ── Schema ───────────────────────────────────────────────────
 
             await kg.execute("+metric(ts: int, component: string, name: string, value: int)")
-            await kg.execute("+threshold(component: string, metric_name: string, max_val: int)")
+            await kg.execute("+max_threshold(component: string, metric_name: string, max_val: int)")
+            await kg.execute("+min_threshold(component: string, metric_name: string, min_val: int)")
 
             # ── Thresholds ───────────────────────────────────────────────
-
-            thresholds = [
+            # Upper-bound thresholds: breach when value EXCEEDS the limit
+            max_thresholds = [
                 ("api", "error_rate", 5),
                 ("api", "latency_p99", 500),
-                ("api", "rps", 500),  # minimum, not max, but we'll treat as max for simplicity
                 ("db", "connections", 90),
                 ("db", "query_time_ms", 100),
-                ("cache", "hit_rate", 70),  # inverted: below threshold is bad
             ]
+            for comp, name, max_val in max_thresholds:
+                await kg.execute(
+                    f'+max_threshold("{escape_iql(comp)}", "{escape_iql(name)}", {max_val})'
+                )
 
-            for comp, name, max_val in thresholds:
-                await kg.execute(f'+threshold("{escape_iql(comp)}", "{escape_iql(name)}", {max_val})')
+            # Lower-bound thresholds: breach when value DROPS BELOW the limit
+            min_thresholds = [
+                ("api", "rps", 500),
+                ("cache", "hit_rate", 70),
+            ]
+            for comp, name, min_val in min_thresholds:
+                await kg.execute(
+                    f'+min_threshold("{escape_iql(comp)}", "{escape_iql(name)}", {min_val})'
+                )
 
             # ── Rules ────────────────────────────────────────────────────
 
-            # Breach: metric exceeds threshold
+            # Breach: metric exceeds upper-bound threshold
             await kg.execute(
-                "+breach(Ts, Component, Name, Value, Max) <- "
+                "+breach(Ts, Component, Name, Value, Limit) <- "
                 "metric(Ts, Component, Name, Value), "
-                "threshold(Component, Name, Max), "
-                "Value > Max"
+                "max_threshold(Component, Name, Limit), "
+                "Value > Limit"
+            )
+
+            # Breach: metric drops below lower-bound threshold
+            await kg.execute(
+                "+breach(Ts, Component, Name, Value, Limit) <- "
+                "metric(Ts, Component, Name, Value), "
+                "min_threshold(Component, Name, Limit), "
+                "Value < Limit"
             )
 
             # Cascade: breaches on multiple components at same timestamp
@@ -318,8 +336,10 @@ async def run():
             )
 
             step(1, "Thresholds and rules defined")
-            for comp, name, max_val in thresholds:
-                print(f"  {DIM}{comp}.{name} <= {max_val}{RESET}")
+            for comp, name, max_val in max_thresholds:
+                print(f"  {DIM}{comp}.{name} <= {max_val} (upper bound){RESET}")
+            for comp, name, min_val in min_thresholds:
+                print(f"  {DIM}{comp}.{name} >= {min_val} (lower bound){RESET}")
             print(f"{DIM}  Rules: breach, cascade_alert{RESET}")
 
             # ── Build graph ──────────────────────────────────────────────

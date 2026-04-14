@@ -63,7 +63,7 @@ class ResultSet:
 
     def to_dicts(self) -> list[dict[str, Any]]:
         """Convert all rows to list of dicts."""
-        return [dict(zip(self.columns, row, strict=False)) for row in self.rows]
+        return [dict(zip(self.columns, row, strict=True)) for row in self.rows]
 
     def to_tuples(self) -> list[tuple[Any, ...]]:
         """Convert all rows to list of tuples."""
@@ -84,8 +84,15 @@ class ResultSet:
         """Convert a row to a typed object or SimpleNamespace."""
         if self._relation_cls is not None:
             try:
-                kwargs = dict(zip(self.columns, row, strict=False))
+                kwargs = dict(zip(self.columns, row, strict=True))
                 return self._relation_cls(**kwargs)
             except Exception:
                 pass
-        return SimpleNamespace(**dict(zip(self.columns, row, strict=False)))
+        try:
+            return SimpleNamespace(**dict(zip(self.columns, row, strict=True)))
+        except ValueError:
+            # Column/row length mismatch. Fall back to non-strict so the
+            # caller gets a partial object instead of a crash. The mismatch
+            # is almost certainly a server-side bug; to_dicts() will raise
+            # for the same data if the caller needs strict validation.
+            return SimpleNamespace(**dict(zip(self.columns, row, strict=False)))

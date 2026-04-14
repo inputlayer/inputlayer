@@ -92,16 +92,22 @@ def kg_node(
                 return {}
             if isinstance(data, list):
                 if isinstance(data[0], dict):
-                    # List of plain dicts: insert via (relation_class, list_of_dicts)
                     await kg.insert(relation, data)
                 else:
-                    # List of Relation instances: insert directly, relation param unused
                     await kg.insert(data)
             elif isinstance(data, dict):
                 await kg.insert(relation, data)
-            else:
-                # Single Relation instance: wrap in list for kg.insert
+            elif hasattr(data, "__class__") and (
+                hasattr(data.__class__, "model_fields") or hasattr(data.__class__, "__fields__")
+            ):
+                # Single Relation/pydantic instance
                 await kg.insert([data])
+            else:
+                raise TypeError(
+                    f"kg_node insert: state['{state_key}'] must be a dict, list of dicts, "
+                    f"Relation instance, or list of Relation instances, "
+                    f"got {type(data).__name__}"
+                )
             return {}
 
         elif operation == "delete":

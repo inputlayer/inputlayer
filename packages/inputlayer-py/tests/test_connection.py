@@ -289,10 +289,15 @@ class TestConnectionLockSerialization:
         assert call_log[3].startswith("recv:")
 
     @pytest.mark.asyncio
-    async def test_execute_lock_exists(self) -> None:
+    async def test_execute_lock_lazy_init(self) -> None:
         conn = Connection("ws://localhost:8080/ws")
-        assert hasattr(conn, "_execute_lock")
-        assert isinstance(conn._execute_lock, asyncio.Lock)
+        # Lock starts as None (lazy init for cross-event-loop safety)
+        assert conn._execute_lock is None
+        # First call to _get_execute_lock() creates it
+        lock = conn._get_execute_lock()
+        assert isinstance(lock, asyncio.Lock)
+        # Subsequent calls return the same lock
+        assert conn._get_execute_lock() is lock
 
 
 class TestExecuteWithPreamble:

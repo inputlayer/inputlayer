@@ -71,8 +71,18 @@ class Connection:
 
         self._dispatcher = NotificationDispatcher()
         self._recv_task: asyncio.Task | None = None
-        self._execute_lock = asyncio.Lock()
+        self._execute_lock: asyncio.Lock | None = None
 
+
+    def _get_execute_lock(self) -> asyncio.Lock:
+        """Lazily create the execute lock in the current event loop.
+
+        Created on first use rather than in __init__ so the Connection
+        can be constructed outside an async context (the common case).
+        """
+        if self._execute_lock is None:
+            self._execute_lock = asyncio.Lock()
+        return self._execute_lock
 
     # ── Properties ────────────────────────────────────────────────────
 
@@ -184,7 +194,7 @@ class Connection:
         if not self._connected or not self._ws:
             raise ConnectionError("Not connected")
 
-        async with self._execute_lock:
+        async with self._get_execute_lock():
             return await self._send_and_recv(program)
 
     async def execute_with_preamble(
@@ -201,7 +211,7 @@ class Connection:
         if not self._connected or not self._ws:
             raise ConnectionError("Not connected")
 
-        async with self._execute_lock:
+        async with self._get_execute_lock():
             if preamble is not None:
                 result = await self._send_and_recv(preamble)
                 if result.switched_kg:
@@ -217,7 +227,7 @@ class Connection:
         if not self._connected or not self._ws:
             raise ConnectionError("Not connected")
 
-        async with self._execute_lock:
+        async with self._get_execute_lock():
             results = []
             for program in programs:
                 result = await self._send_and_recv(program)
@@ -361,5 +371,5 @@ class Connection:
         """Send a keep-alive ping."""
         if not self._ws:
             raise ConnectionError("Not connected")
-        async with self._execute_lock:
+        async with self._get_execute_lock():
             await self._ws.send(PingMessage().to_json())

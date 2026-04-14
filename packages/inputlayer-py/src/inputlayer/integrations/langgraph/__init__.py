@@ -4,8 +4,10 @@ Provides:
 - kg_node: Factory for KG query/mutation graph nodes
 - kg_router: Conditional edge routing based on IQL queries
 - InputLayerState: TypedDict mixin with KG handle
-- InputLayerCheckpointer: BaseCheckpointSaver backed by an InputLayer KG
+- InputLayerCheckpointer: Checkpoint persistence backed by an InputLayer KG,
+  with ``aprune()``/``prune()`` for storage management
 - InputLayerMemory: Semantic long-term memory backed by a KG
+- escape_iql: String escaping for safe IQL interpolation
 """
 
 from inputlayer.integrations.langgraph._utils import escape_iql

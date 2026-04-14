@@ -58,6 +58,11 @@ class MockKG:
             self.writes.append(tuple(args))
             return ResultSet(columns=["x"], rows=[])
 
+        # Conditional delete for graph_checkpoint (prune)
+        if iql.startswith("-graph_checkpoint(") and "<-" in iql:
+            self._delete_checkpoints(iql)
+            return ResultSet(columns=["x"], rows=[])
+
         # Conditional delete for graph_write (deduplication in aput_writes)
         # Syntax: -graph_write(T, C, TaskId, I, Ch, B) <- T = "...", C = "...", TaskId = "..."
         if iql.startswith("-graph_write(") and "<-" in iql:
@@ -144,19 +149,23 @@ class MockKG:
                 continue
             if checkpoint_id and ckpt[2] != checkpoint_id:
                 continue
-            # Project: simulate the server dropping all bound leading columns
+            # Project: simulate the server dropping bound leading columns
             if checkpoint_id:
-                # Both thread_id, checkpoint_ns, checkpoint_id bound -> return from parent_id on
+                # thread_id, checkpoint_ns, checkpoint_id all bound -> return from parent_id on
                 rows.append(list(ckpt[3:]))
-            else:
+            elif checkpoint_ns is not None:
                 # thread_id and checkpoint_ns bound -> return from checkpoint_id on
                 rows.append(list(ckpt[2:]))
+            else:
+                # Only thread_id bound -> return from checkpoint_ns on
+                rows.append(list(ckpt[1:]))
 
-        cols = (
-            ["parent_id", "blob", "metadata", "ts"]
-            if checkpoint_id
-            else ["checkpoint_id", "parent_id", "blob", "metadata", "ts"]
-        )
+        if checkpoint_id:
+            cols = ["parent_id", "blob", "metadata", "ts"]
+        elif checkpoint_ns is not None:
+            cols = ["checkpoint_id", "parent_id", "blob", "metadata", "ts"]
+        else:
+            cols = ["checkpoint_ns", "checkpoint_id", "parent_id", "blob", "metadata", "ts"]
         return ResultSet(columns=cols, rows=rows)
 
     def _query_writes(self, iql: str) -> ResultSet:
@@ -188,6 +197,28 @@ class MockKG:
             cols = ["checkpoint_id", "task_id", "idx", "channel", "blob"]
 
         return ResultSet(columns=cols, rows=rows)
+
+    def _delete_checkpoints(self, iql: str) -> None:
+        """Handle -graph_checkpoint(...) <- T = "...", Ns = "...", CkptId = "..."."""
+        _STR = r'((?:[^"\\]|\\.)*)'
+        body = iql.split("<-", 1)[1]
+        thread_match = re.search(rf'ThreadId\s*=\s*"{_STR}"', body)
+        ns_match = re.search(rf'Ns\s*=\s*"{_STR}"', body)
+        ckpt_match = re.search(rf'CkptId\s*=\s*"{_STR}"', body)
+
+        thread_id = self._unescape(thread_match.group(1)) if thread_match else None
+        ns = self._unescape(ns_match.group(1)) if ns_match else None
+        ckpt_id = self._unescape(ckpt_match.group(1)) if ckpt_match else None
+
+        self.checkpoints = [
+            c
+            for c in self.checkpoints
+            if not (
+                (thread_id is None or c[0] == thread_id)
+                and (ns is None or c[1] == ns)
+                and (ckpt_id is None or c[2] == ckpt_id)
+            )
+        ]
 
     def _delete_writes(self, iql: str) -> None:
         """Handle -graph_write(...) <- T = "...", C = "...", TaskId = "..."."""
@@ -863,3 +894,181 @@ class TestListFiltering:
         ]
         # Nonexistent before checkpoint means no filtering
         assert len(results) == 3
+
+
+class TestPrune:
+    async def test_prune_removes_old_checkpoints(self) -> None:
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+
+        for i in range(10):
+            await cp.aput(
+                make_config("thread-1"),
+                make_checkpoint(f"ckpt-{i}"),
+                {"source": "input", "step": i, "writes": {}, "parents": {}},
+                {},
+            )
+
+        removed = await cp.aprune("thread-1", keep_last=3)
+        assert removed == 7
+
+        results = [tup async for tup in cp.alist(make_config("thread-1"))]
+        assert len(results) == 3
+        # The 3 most recent should survive
+        ids = {tup.checkpoint["id"] for tup in results}
+        assert "ckpt-9" in ids
+        assert "ckpt-8" in ids
+        assert "ckpt-7" in ids
+
+    async def test_prune_noop_when_under_threshold(self) -> None:
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+
+        for i in range(3):
+            await cp.aput(
+                make_config("thread-1"),
+                make_checkpoint(f"ckpt-{i}"),
+                {"source": "input", "step": i, "writes": {}, "parents": {}},
+                {},
+            )
+
+        removed = await cp.aprune("thread-1", keep_last=5)
+        assert removed == 0
+
+    async def test_prune_also_removes_writes(self) -> None:
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+
+        for i in range(5):
+            await cp.aput(
+                make_config("thread-1"),
+                make_checkpoint(f"ckpt-{i}"),
+                {"source": "input", "step": i, "writes": {}, "parents": {}},
+                {},
+            )
+            await cp.aput_writes(
+                make_config("thread-1", f"ckpt-{i}"),
+                [(f"ch-{i}", f"val-{i}")],
+                task_id=f"task-{i}",
+            )
+
+        await cp.aprune("thread-1", keep_last=2)
+
+        # Only writes for the 2 most recent checkpoints should remain
+        results = [tup async for tup in cp.alist(make_config("thread-1"))]
+        total_writes = sum(len(tup.pending_writes) for tup in results)
+        assert total_writes == 2
+
+    async def test_prune_invalid_keep_last_raises(self) -> None:
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        with pytest.raises(ValueError, match="keep_last must be >= 1"):
+            await cp.aprune("thread-1", keep_last=0)
+
+    def test_prune_sync(self) -> None:
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+
+        for i in range(5):
+            cp.put(
+                make_config("thread-1"),
+                make_checkpoint(f"ckpt-{i}"),
+                {"source": "input", "step": i, "writes": {}, "parents": {}},
+                {},
+            )
+
+        removed = cp.prune("thread-1", keep_last=2)
+        assert removed == 3
+
+
+class TestRepr:
+    def test_repr_includes_kg_name(self) -> None:
+        kg = MockKG()
+        kg.name = "test_kg"
+        cp = InputLayerCheckpointer(kg=kg)
+        r = repr(cp)
+        assert "test_kg" in r
+        assert "setup_done=False" in r
+
+    async def test_repr_after_setup(self) -> None:
+        kg = MockKG()
+        kg.name = "test_kg"
+        cp = InputLayerCheckpointer(kg=kg)
+        await cp.setup()
+        r = repr(cp)
+        assert "setup_done=True" in r
+
+
+class TestConcurrentSetup:
+    async def test_concurrent_setup_is_safe(self) -> None:
+        """Multiple concurrent setup() calls should not duplicate DDL."""
+        import asyncio
+
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+
+        # Run 10 concurrent setup calls
+        await asyncio.gather(*(cp.setup() for _ in range(10)))
+
+        assert cp._setup_done is True
+
+
+class TestUnpackMalformed:
+    def test_unpack_missing_separator_raises(self) -> None:
+        """_unpack must raise ValueError for data without '|' separator."""
+        from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+        from inputlayer.integrations.langgraph.checkpointer import _unpack
+
+        serde = JsonPlusSerializer()
+        with pytest.raises(ValueError, match="Corrupted checkpoint data"):
+            _unpack(serde, "no-pipe-here")
+
+    def test_unpack_empty_string_raises(self) -> None:
+        from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+        from inputlayer.integrations.langgraph.checkpointer import _unpack
+
+        serde = JsonPlusSerializer()
+        with pytest.raises(ValueError, match="Corrupted checkpoint data"):
+            _unpack(serde, "")
+
+
+class TestPruneNamespaceIsolation:
+    async def test_prune_only_affects_specified_namespace(self) -> None:
+        """Pruning the parent namespace must not touch subgraph checkpoints."""
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+
+        def ns_config(ns: str) -> dict:
+            return {"configurable": {"thread_id": "thread-1", "checkpoint_ns": ns}}
+
+        # Add 5 checkpoints in parent namespace
+        for i in range(5):
+            await cp.aput(
+                ns_config(""),
+                make_checkpoint(f"parent-{i}"),
+                {"source": "input", "step": i, "writes": {}, "parents": {}},
+                {},
+            )
+
+        # Add 5 checkpoints in subgraph namespace
+        for i in range(5):
+            await cp.aput(
+                ns_config("subgraph"),
+                make_checkpoint(f"sub-{i}"),
+                {"source": "input", "step": i, "writes": {}, "parents": {}},
+                {},
+            )
+
+        # Prune parent namespace to keep only 2
+        removed = await cp.aprune("thread-1", checkpoint_ns="", keep_last=2)
+        assert removed == 3
+
+        # Subgraph should be untouched (still 5)
+        sub_results = [tup async for tup in cp.alist(ns_config("subgraph"))]
+        assert len(sub_results) == 5
+
+        # Parent should have exactly 2
+        parent_results = [tup async for tup in cp.alist(ns_config(""))]
+        assert len(parent_results) == 2
