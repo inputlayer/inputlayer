@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import threading
 import time
 from collections.abc import Callable, Coroutine
 from typing import Any
@@ -40,6 +41,9 @@ from inputlayer._sync import run_sync
 from inputlayer.integrations.langgraph._utils import escape_iql
 
 logger = logging.getLogger(__name__)
+
+# Default timeout for KG operations (seconds).
+_DEFAULT_KG_TIMEOUT = 30.0
 
 
 def _b64e(s: str) -> str:
@@ -91,6 +95,28 @@ def _extract_topics(text: str) -> list[str]:
     return topics
 
 
+# ── Column indices for memory query results ─────────────────────────
+# memory_turn(thread_id, turn_id, role, content, ts)
+# When thread_id is bound, remaining: TurnId, Role, Content, Ts
+_TURN_ID = -4      # TurnId
+_TURN_ROLE = -3    # Role
+_TURN_CONTENT = -2 # Content
+_TURN_TS = -1      # Ts
+
+# relevant_turn(thread_id, turn_id, role, content, topic)
+_REL_TURN_ID = -4
+_REL_ROLE = -3
+_REL_CONTENT = -2
+_REL_TOPIC = -1
+
+# active_topic(thread_id, topic)
+_TOPIC_VAL = -1
+
+# topic_thread(thread_id, topic_a, topic_b)
+_TOPIC_A = -2
+_TOPIC_B = -1
+
+
 class InputLayerMemory:
     """Semantic memory backed by an InputLayer KnowledgeGraph.
 
@@ -116,9 +142,11 @@ class InputLayerMemory:
         max_recent: Number of recent turns to include in recall (default 10).
         max_tracked_threads: Maximum number of thread IDs to keep in the
             in-memory turn counter and lock caches. When exceeded, the
-            oldest entries are evicted (the KG is the source of truth,
+            oldest idle entries are evicted (the KG is the source of truth,
             so evicted threads simply re-initialize on next access).
             Default 10_000.
+        kg_timeout: Timeout in seconds for individual KG operations
+            (default 30.0). Prevents indefinite hangs.
     """
 
     def __init__(
@@ -127,29 +155,46 @@ class InputLayerMemory:
         *,
         max_recent: int = 10,
         max_tracked_threads: int = 10_000,
+        kg_timeout: float = _DEFAULT_KG_TIMEOUT,
     ) -> None:
         self.kg = kg
         self.max_recent = max_recent
         self._max_tracked_threads = max_tracked_threads
+        self._kg_timeout = kg_timeout
         self._setup_done = False
+        self._setup_lock_guard = threading.Lock()
         self._setup_lock: asyncio.Lock | None = None
         self._turn_counters: dict[str, int] = {}
         self._thread_locks: dict[str, asyncio.Lock] = {}
+        self._thread_locks_guard_sync = threading.Lock()
         self._thread_locks_guard: asyncio.Lock | None = None
+        # Track which thread locks are currently held, so eviction skips them
+        self._active_threads: set[str] = set()
+
+    # ── Internal: KG execution with timeout ─────────────────────────
+
+    async def _exec(self, iql: str) -> Any:
+        """Execute IQL against the KG with a timeout."""
+        return await asyncio.wait_for(
+            self.kg.execute(iql),
+            timeout=self._kg_timeout,
+        )
 
     # ── Setup ────────────────────────────────────────────────────────
 
     def _get_setup_lock(self) -> asyncio.Lock:
-        """Lazily create the setup lock in the current event loop."""
-        if self._setup_lock is None:
-            self._setup_lock = asyncio.Lock()
-        return self._setup_lock
+        """Get or create the setup lock, guarded by a threading.Lock for safety."""
+        with self._setup_lock_guard:
+            if self._setup_lock is None:
+                self._setup_lock = asyncio.Lock()
+            return self._setup_lock
 
     def _get_thread_locks_guard(self) -> asyncio.Lock:
-        """Lazily create the thread-locks guard in the current event loop."""
-        if self._thread_locks_guard is None:
-            self._thread_locks_guard = asyncio.Lock()
-        return self._thread_locks_guard
+        """Get or create the thread-locks guard, guarded by a threading.Lock for safety."""
+        with self._thread_locks_guard_sync:
+            if self._thread_locks_guard is None:
+                self._thread_locks_guard = asyncio.Lock()
+            return self._thread_locks_guard
 
     async def setup(self) -> None:
         """Create memory relations and rules (idempotent, concurrency-safe).
@@ -165,6 +210,8 @@ class InputLayerMemory:
             if self._setup_done:  # re-check after acquiring lock
                 return
 
+            logger.debug("InputLayerMemory: creating memory relations and rules")
+
             # Run each DDL/rule and track whether anything raised a real error.
             # Server-side "already exists" responses come back as ResultSet rows,
             # not exceptions. Exceptions here mean connection/auth problems.
@@ -174,7 +221,7 @@ class InputLayerMemory:
                 "thread_id: string, turn_id: int, role: string, content: string, ts: int)",
                 "+memory_topic(thread_id: string, turn_id: int, topic: string)",
             ]:
-                await self.kg.execute(ddl)
+                await self._exec(ddl)
 
             for rule in [
                 "+active_topic(ThreadId, Topic) <- memory_topic(ThreadId, TurnId, Topic)",
@@ -190,12 +237,13 @@ class InputLayerMemory:
                     "TopicA != TopicB"
                 ),
             ]:
-                await self.kg.execute(rule)
+                await self._exec(rule)
 
             # Only mark done after ALL steps complete. If the server was down,
             # the exception propagated above and this line is never reached,
             # so the next call will retry the full setup.
             self._setup_done = True
+            logger.debug("InputLayerMemory: setup complete")
 
     def setup_sync(self) -> None:
         run_sync(self.setup())
@@ -215,8 +263,11 @@ class InputLayerMemory:
         """Get or create a per-thread lock (creating is guarded by a guard lock).
 
         When the number of tracked threads exceeds ``max_tracked_threads``,
-        the oldest half is evicted. Evicted threads re-initialize their turn
-        counter from the KG on next access, so correctness is preserved.
+        the oldest idle entries are evicted. Evicted threads re-initialize
+        their turn counter from the KG on next access.
+
+        Active threads (currently holding their lock) are never evicted,
+        preventing orphaned waiters.
         """
         async with self._get_thread_locks_guard():
             if thread_id not in self._thread_locks:
@@ -226,41 +277,64 @@ class InputLayerMemory:
             return self._thread_locks[thread_id]
 
     def _evict_oldest_threads(self) -> None:
-        """Evict the oldest half of tracked threads from caches.
+        """Evict the oldest half of idle tracked threads from caches.
 
         Uses dict insertion order (Python 3.7+) as a proxy for age.
+        Threads that are currently active (holding their lock via astore)
+        are skipped to prevent orphaned lock waiters.
+
         The KG remains the source of truth, so evicted threads simply
         re-query on next access.
         """
         keep = self._max_tracked_threads // 2
+        evict_target = len(self._thread_locks) - keep
+        evicted = 0
         keys = list(self._thread_locks.keys())
-        to_evict = keys[:len(keys) - keep]
-        for key in to_evict:
+        for key in keys:
+            if evicted >= evict_target:
+                break
+            # Never evict a thread that is currently active
+            if key in self._active_threads:
+                continue
             self._thread_locks.pop(key, None)
             self._turn_counters.pop(key, None)
+            evicted += 1
+
+        if evicted > 0:
+            logger.debug(
+                "InputLayerMemory: evicted %d idle thread locks (%d remain)",
+                evicted, len(self._thread_locks),
+            )
 
     async def _next_turn_id(self, thread_id: str) -> int:
         """Return the next turn_id for a thread, initializing from the KG if needed.
 
         Initializes the counter from the stored max turn_id on the first call
         for each thread, so the counter resumes correctly after a process restart.
-        Uses a per-thread lock so concurrent calls on different threads don't block
-        each other.
+
+        The per-thread lock ensures that concurrent calls for the same thread
+        are serialized, preventing duplicate turn IDs even during counter
+        initialization from the KG.
         """
         lock = await self._get_thread_lock(thread_id)
         async with lock:
-            if thread_id not in self._turn_counters:
-                # Query the KG for the current max turn_id for this thread
-                r = await self.kg.execute(
-                    f'?memory_turn("{escape_iql(thread_id)}", TurnId, Role, Content, Ts)'
-                )
-                if r.rows:
-                    self._turn_counters[thread_id] = max(int(row[-4]) for row in r.rows)
-                else:
-                    self._turn_counters[thread_id] = 0
+            # Mark this thread as active so eviction skips it
+            self._active_threads.add(thread_id)
+            try:
+                if thread_id not in self._turn_counters:
+                    # Query the KG for the current max turn_id for this thread
+                    r = await self._exec(
+                        f'?memory_turn("{escape_iql(thread_id)}", TurnId, Role, Content, Ts)'
+                    )
+                    if r.rows:
+                        self._turn_counters[thread_id] = max(int(row[_TURN_ID]) for row in r.rows)
+                    else:
+                        self._turn_counters[thread_id] = 0
 
-            self._turn_counters[thread_id] += 1
-            return self._turn_counters[thread_id]
+                self._turn_counters[thread_id] += 1
+                return self._turn_counters[thread_id]
+            finally:
+                self._active_threads.discard(thread_id)
 
     # ── Store ────────────────────────────────────────────────────────
 
@@ -293,7 +367,7 @@ class InputLayerMemory:
         # Content and role are base64-encoded because the IQL parser does not
         # unescape string literals (e.g. \" stays as two characters). Base64
         # ensures lossless round-trip for arbitrary content.
-        await self.kg.execute(
+        await self._exec(
             f'+memory_turn("{escape_iql(thread_id)}", {turn_id}, '
             f'"{_b64e(role)}", "{_b64e(content)}", {ts})'
         )
@@ -302,15 +376,29 @@ class InputLayerMemory:
             topics = _extract_topics(content)
 
         if topics:
-            # Note: with a single KG connection these are serialized by the
-            # connection lock, but asyncio.gather expresses concurrent intent
-            # and is ready for connection pooling.
-            await asyncio.gather(*(
-                self.kg.execute(
-                    f'+memory_topic("{escape_iql(thread_id)}", {turn_id}, "{escape_iql(topic)}")'
+            # Submit all topic inserts concurrently. Use return_exceptions=True
+            # so a single failure doesn't cancel the rest.
+            results = await asyncio.gather(
+                *(
+                    self._exec(
+                        f'+memory_topic("{escape_iql(thread_id)}", {turn_id}, "{escape_iql(topic)}")'
+                    )
+                    for topic in topics
+                ),
+                return_exceptions=True,
+            )
+
+            errors = [r for r in results if isinstance(r, BaseException)]
+            if errors:
+                logger.error(
+                    "InputLayerMemory.astore: %d/%d topic inserts failed for "
+                    "thread=%r turn=%d",
+                    len(errors), len(topics), thread_id, turn_id,
                 )
-                for topic in topics
-            ))
+                raise RuntimeError(
+                    f"astore: {len(errors)}/{len(topics)} topic inserts failed. "
+                    f"First error: {errors[0]}"
+                ) from errors[0]
 
         return turn_id
 
@@ -343,28 +431,27 @@ class InputLayerMemory:
 
         escaped = escape_iql(thread_id)
 
-        # Run all four independent queries concurrently. With a single KG
-        # connection these are serialized by the connection lock, but
-        # asyncio.gather expresses the intent and is ready for pooling.
+        # Run all four independent queries concurrently. These are read-only
+        # so partial failure is acceptable (the exception propagates).
         r_topics, r_turns, r_relevant, r_related = await asyncio.gather(
-            self.kg.execute(f'?active_topic("{escaped}", Topic)'),
-            self.kg.execute(f'?memory_turn("{escaped}", TurnId, Role, Content, Ts)'),
-            self.kg.execute(f'?relevant_turn("{escaped}", TurnId, Role, Content, Topic)'),
-            self.kg.execute(f'?topic_thread("{escaped}", TopicA, TopicB)'),
+            self._exec(f'?active_topic("{escaped}", Topic)'),
+            self._exec(f'?memory_turn("{escaped}", TurnId, Role, Content, Ts)'),
+            self._exec(f'?relevant_turn("{escaped}", TurnId, Role, Content, Topic)'),
+            self._exec(f'?topic_thread("{escaped}", TopicA, TopicB)'),
         )
 
         result: dict[str, Any] = {}
 
         # Active topics
-        result["topics"] = sorted({str(row[-1]) for row in r_topics.rows})
+        result["topics"] = sorted({str(row[_TOPIC_VAL]) for row in r_topics.rows})
 
         # Recent turns sorted by turn_id descending (canonical ordering)
-        turns = sorted(r_turns.rows, key=lambda row: int(row[-4]), reverse=True)
+        turns = sorted(r_turns.rows, key=lambda row: int(row[_TURN_ID]), reverse=True)
         result["recent"] = [
             {
-                "turn_id": int(row[-4]),
-                "role": _b64d(str(row[-3])),
-                "content": _b64d(str(row[-2])),
+                "turn_id": int(row[_TURN_ID]),
+                "role": _b64d(str(row[_TURN_ROLE])),
+                "content": _b64d(str(row[_TURN_CONTENT])),
             }
             for row in turns[: self.max_recent]
         ]
@@ -372,11 +459,11 @@ class InputLayerMemory:
         # Relevant turns grouped by topic
         by_topic: dict[str, list[dict[str, Any]]] = {}
         for row in r_relevant.rows:
-            topic = str(row[-1])
+            topic = str(row[_REL_TOPIC])
             turn = {
-                "turn_id": int(row[-4]),
-                "role": _b64d(str(row[-3])),
-                "content": _b64d(str(row[-2])),
+                "turn_id": int(row[_REL_TURN_ID]),
+                "role": _b64d(str(row[_REL_ROLE])),
+                "content": _b64d(str(row[_REL_CONTENT])),
             }
             by_topic.setdefault(topic, []).append(turn)
         result["relevant"] = by_topic
@@ -385,7 +472,7 @@ class InputLayerMemory:
         seen: set[tuple[str, str]] = set()
         related: list[tuple[str, str]] = []
         for row in r_related.rows:
-            a, b = sorted([str(row[-2]), str(row[-1])])
+            a, b = sorted([str(row[_TOPIC_A]), str(row[_TOPIC_B])])
             pair = (a, b)
             if pair not in seen:
                 seen.add(pair)

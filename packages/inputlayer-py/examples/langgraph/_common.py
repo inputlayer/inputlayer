@@ -37,6 +37,7 @@ __all__ = [
     "connect",
     "get_llm",
     "header",
+    "os",
     "step",
     "subheader",
     "success",
