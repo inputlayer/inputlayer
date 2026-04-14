@@ -114,11 +114,23 @@ class InputLayerMemory:
     Args:
         kg: An InputLayer KnowledgeGraph handle.
         max_recent: Number of recent turns to include in recall (default 10).
+        max_tracked_threads: Maximum number of thread IDs to keep in the
+            in-memory turn counter and lock caches. When exceeded, the
+            oldest entries are evicted (the KG is the source of truth,
+            so evicted threads simply re-initialize on next access).
+            Default 10_000.
     """
 
-    def __init__(self, kg: Any, *, max_recent: int = 10) -> None:
+    def __init__(
+        self,
+        kg: Any,
+        *,
+        max_recent: int = 10,
+        max_tracked_threads: int = 10_000,
+    ) -> None:
         self.kg = kg
         self.max_recent = max_recent
+        self._max_tracked_threads = max_tracked_threads
         self._setup_done = False
         self._setup_lock: asyncio.Lock | None = None
         self._turn_counters: dict[str, int] = {}
@@ -200,11 +212,32 @@ class InputLayerMemory:
     # ── Internal: turn counter ───────────────────────────────────────
 
     async def _get_thread_lock(self, thread_id: str) -> asyncio.Lock:
-        """Get or create a per-thread lock (creating is guarded by a guard lock)."""
+        """Get or create a per-thread lock (creating is guarded by a guard lock).
+
+        When the number of tracked threads exceeds ``max_tracked_threads``,
+        the oldest half is evicted. Evicted threads re-initialize their turn
+        counter from the KG on next access, so correctness is preserved.
+        """
         async with self._get_thread_locks_guard():
             if thread_id not in self._thread_locks:
+                if len(self._thread_locks) >= self._max_tracked_threads:
+                    self._evict_oldest_threads()
                 self._thread_locks[thread_id] = asyncio.Lock()
             return self._thread_locks[thread_id]
+
+    def _evict_oldest_threads(self) -> None:
+        """Evict the oldest half of tracked threads from caches.
+
+        Uses dict insertion order (Python 3.7+) as a proxy for age.
+        The KG remains the source of truth, so evicted threads simply
+        re-query on next access.
+        """
+        keep = self._max_tracked_threads // 2
+        keys = list(self._thread_locks.keys())
+        to_evict = keys[:len(keys) - keep]
+        for key in to_evict:
+            self._thread_locks.pop(key, None)
+            self._turn_counters.pop(key, None)
 
     async def _next_turn_id(self, thread_id: str) -> int:
         """Return the next turn_id for a thread, initializing from the KG if needed.

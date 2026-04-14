@@ -86,10 +86,11 @@ async def generate_spec(state: dict[str, Any]) -> dict[str, Any]:
     violations = state.get("violations", [])
     kg = state["kg"]
 
-    # Clear previous endpoints from KG
+    # Clear previous endpoints from KG (delete all facts, keep the schema)
     if iteration > 0:
-        await kg.execute(".rel drop api_endpoint")
-        await kg.execute("+api_endpoint(name: string, method: string, path: string, auth: string)")
+        await kg.execute(
+            "-api_endpoint(Name, Method, Path, Auth) <- api_endpoint(Name, Method, Path, Auth)"
+        )
 
     if check_llm() and iteration > 0 and violations:
         # Use LLM to fix based on violations

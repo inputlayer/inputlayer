@@ -28,7 +28,6 @@ Usage::
 from __future__ import annotations
 
 import asyncio
-import base64
 import time
 from collections.abc import AsyncIterator, Iterator, Sequence
 from typing import Any
@@ -41,58 +40,15 @@ from langgraph.checkpoint.base import (
     CheckpointMetadata,
     CheckpointTuple,
 )
-from langgraph.checkpoint.serde.base import SerializerProtocol
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from inputlayer._sync import run_sync
+from inputlayer.integrations.langgraph._checkpoint_serde import (
+    pack as _pack,
+    parse_writes as _parse_writes,
+    unpack as _unpack,
+)
 from inputlayer.integrations.langgraph._utils import escape_iql
-
-
-def _b64_encode(data: bytes) -> str:
-    """Encode bytes as base64 string for safe IQL string storage."""
-    return base64.b64encode(data).decode("ascii")
-
-
-def _b64_decode(data: str) -> bytes:
-    """Decode base64 string back to bytes."""
-    return base64.b64decode(data.encode("ascii"))
-
-
-def _pack(serde: SerializerProtocol, obj: Any) -> str:
-    """Serialize obj and pack as 'type|base64blob'."""
-    type_, blob = serde.dumps_typed(obj)
-    return f"{type_}|{_b64_encode(blob)}"
-
-
-def _unpack(serde: SerializerProtocol, packed: str) -> Any:
-    """Unpack 'type|base64blob' and deserialize."""
-    parts = packed.split("|", 1)
-    if len(parts) != 2:
-        raise ValueError(
-            f"Corrupted checkpoint data: expected 'type|base64blob' format, "
-            f"got {packed[:80]!r}{'...' if len(packed) > 80 else ''}"
-        )
-    return serde.loads_typed((parts[0], _b64_decode(parts[1])))
-
-
-def _parse_writes(
-    serde: SerializerProtocol,
-    rows: list[Any],
-) -> list[tuple[str, str, Any]]:
-    """Parse graph_write rows into (task_id, channel, value) triples.
-
-    Rows are sorted by (task_id, idx) to match LangGraph's expected ordering.
-    Columns are parsed from the end of each row for resilience to
-    bound-column inclusion by the query engine.
-    """
-    sorted_rows = sorted(rows, key=lambda r: (str(r[-4]), int(r[-3])))
-    result = []
-    for row in sorted_rows:
-        task_id = str(row[-4])
-        channel = str(row[-2])
-        value = _unpack(serde, str(row[-1]))
-        result.append((task_id, channel, value))
-    return result
 
 
 class InputLayerCheckpointer(BaseCheckpointSaver[str]):
