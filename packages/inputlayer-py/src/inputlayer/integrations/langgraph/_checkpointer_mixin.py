@@ -19,7 +19,7 @@ from langgraph.checkpoint.base import (
 )
 
 from inputlayer._sync import run_sync
-from inputlayer.integrations.langgraph._utils import escape_iql
+from inputlayer.integrations.langgraph._utils import escape_iql, validate_row_length
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +119,8 @@ class _SyncAndMaintenanceMixin:
         if len(r.rows) <= keep_last:
             return 0
 
+        for row in r.rows:
+            validate_row_length(row, 5, "graph_checkpoint", "aprune")
         sorted_rows = sorted(
             r.rows, key=lambda row: int(row[_CKPT_TS]), reverse=True,
         )

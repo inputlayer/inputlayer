@@ -103,7 +103,12 @@ class TestKgNodeInsert:
         data = [{"name": "alice", "dept": "eng"}, {"name": "bob", "dept": "hr"}]
         result = await node({"kg": kg, "new_emps": data})
 
-        kg.insert.assert_awaited_once_with(Emp, data)
+        kg.insert.assert_awaited_once()
+        call_args = kg.insert.call_args
+        assert call_args[0][0] is Emp, "First arg must be the Relation class"
+        assert call_args[0][1] == data, "Second arg must be the exact data list"
+        assert call_args[0][1][0]["name"] == "alice"
+        assert call_args[0][1][1]["dept"] == "hr"
         assert result == {}
 
     async def test_insert_single_dict(self) -> None:
@@ -205,6 +210,9 @@ class TestKgNodeDelete:
         await node({"kg": kg, "to_delete": [emp1, emp2]})
 
         assert kg.delete.await_count == 2
+        deleted = [call.args[0] for call in kg.delete.call_args_list]
+        assert deleted[0].name == "alice"
+        assert deleted[1].name == "bob"
 
     async def test_delete_single_item(self) -> None:
         from inputlayer.relation import Relation

@@ -57,7 +57,7 @@ from inputlayer.integrations.langgraph._checkpoint_serde import (
 from inputlayer.integrations.langgraph._checkpointer_mixin import (
     _SyncAndMaintenanceMixin,
 )
-from inputlayer.integrations.langgraph._utils import escape_iql
+from inputlayer.integrations.langgraph._utils import escape_iql, validate_row_length
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.serde.base import SerializerProtocol
@@ -73,6 +73,10 @@ _CKPT_METADATA = -2
 _CKPT_BLOB = -3
 _CKPT_PARENT_ID = -4
 _CKPT_ID = -5
+# 4 columns when checkpoint_id is bound (ParentId, Blob, Metadata, Ts).
+# 5 columns when checkpoint_id is unbound (adds CheckpointId).
+_MIN_CKPT_ROW_LEN = 4
+_MIN_CKPT_ROW_LEN_WITH_ID = 5
 
 # ── Column indices for graph_write query results ────────────────────
 _WRITE_CKPT_ID = -5
@@ -303,6 +307,9 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
         if not r.rows:
             return None
 
+        min_cols = _MIN_CKPT_ROW_LEN if checkpoint_id else _MIN_CKPT_ROW_LEN_WITH_ID
+        for row in r.rows:
+            validate_row_length(row, min_cols, "graph_checkpoint", "aget_tuple")
         row = max(r.rows, key=lambda row: int(row[_CKPT_TS]))
         parent_id = str(row[_CKPT_PARENT_ID])
         actual_id = (
@@ -374,6 +381,8 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
             f"CheckpointId, ParentId, Blob, Metadata, Ts)"
         )
 
+        for row in r.rows:
+            validate_row_length(row, _MIN_CKPT_ROW_LEN_WITH_ID, "graph_checkpoint", "alist")
         sorted_rows = sorted(
             r.rows, key=lambda row: int(row[_CKPT_TS]), reverse=True,
         )

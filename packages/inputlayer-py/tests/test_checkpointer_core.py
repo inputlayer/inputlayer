@@ -19,7 +19,14 @@ class TestSetup:
         kg.execute = AsyncMock(return_value=ResultSet(columns=[], rows=[]))
         cp = InputLayerCheckpointer(kg=kg)
         await cp.setup()
-        assert kg.execute.await_count >= 2  # graph_checkpoint + graph_write
+        assert kg.execute.await_count == 2
+        executed = [call.args[0] for call in kg.execute.call_args_list]
+        assert any("graph_checkpoint(" in q and "thread_id" in q for q in executed), (
+            f"setup must define graph_checkpoint relation, got: {executed}"
+        )
+        assert any("graph_write(" in q and "thread_id" in q for q in executed), (
+            f"setup must define graph_write relation, got: {executed}"
+        )
 
     async def test_setup_idempotent(self) -> None:
         kg = AsyncMock()
@@ -27,6 +34,7 @@ class TestSetup:
         cp = InputLayerCheckpointer(kg=kg)
         await cp.setup()
         first_count = kg.execute.await_count
+        assert first_count == 2
         await cp.setup()
         assert kg.execute.await_count == first_count
 
@@ -205,6 +213,14 @@ class TestPrune:
             )
         removed = await cp.aprune("thread-1", keep_last=2)
         assert removed == 3
+
+        # Verify exactly which checkpoints survived (most recent two)
+        remaining = [tup async for tup in cp.alist(make_config("thread-1"))]
+        assert len(remaining) == 2
+        remaining_ids = {tup.checkpoint["id"] for tup in remaining}
+        assert remaining_ids == {"ckpt-4", "ckpt-3"}, (
+            f"Expected ckpt-4 and ckpt-3 to survive, got {remaining_ids}"
+        )
 
     async def test_prune_noop_when_under_limit(self) -> None:
         kg = MockKG()
@@ -446,3 +462,43 @@ class TestParseWritesValidation:
         serde = JsonPlusSerializer()
         with pytest.raises(ValueError, match="row 0 has 2 columns"):
             parse_writes(serde, [["a", "b"]])
+
+
+class TestRowLengthValidation:
+    async def test_short_checkpoint_row_raises_on_get_with_id(self) -> None:
+        """aget_tuple with checkpoint_id requires at least 4 columns."""
+        kg = AsyncMock()
+        kg.execute = AsyncMock(
+            return_value=ResultSet(columns=["a", "b"], rows=[["x", "y"]])
+        )
+        cp = InputLayerCheckpointer(kg=kg)
+        cp._setup_done = True
+
+        with pytest.raises(ValueError, match="graph_checkpoint row has 2 columns"):
+            await cp.aget_tuple(make_config("t", "ckpt-1"))
+
+    async def test_short_checkpoint_row_raises_on_get_without_id(self) -> None:
+        """aget_tuple without checkpoint_id requires at least 5 columns."""
+        kg = AsyncMock()
+        kg.execute = AsyncMock(
+            return_value=ResultSet(columns=["a", "b", "c", "d"], rows=[["w", "x", "y", "z"]])
+        )
+        cp = InputLayerCheckpointer(kg=kg)
+        cp._setup_done = True
+
+        with pytest.raises(ValueError, match="graph_checkpoint row has 4 columns"):
+            await cp.aget_tuple(make_config("t"))
+
+    async def test_short_checkpoint_row_raises_on_list(self) -> None:
+        """alist must raise ValueError for rows with too few columns."""
+        kg = AsyncMock()
+        kg.execute = AsyncMock(
+            return_value=ResultSet(columns=["a", "b", "c"], rows=[["x", "y", "z"]])
+        )
+        cp = InputLayerCheckpointer(kg=kg)
+        cp._setup_done = True
+
+        with pytest.raises(ValueError, match="graph_checkpoint row has 3 columns"):
+            results = []
+            async for tup in cp.alist(make_config("t")):
+                results.append(tup)

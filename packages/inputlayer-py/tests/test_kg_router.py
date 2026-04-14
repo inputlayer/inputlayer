@@ -34,6 +34,10 @@ class TestKgRouter:
 
         assert result == "branch_b"
         assert kg.execute.await_count == 2
+        # Verify branch evaluation order: branch_a first, then branch_b
+        queries = [call.args[0] for call in kg.execute.call_args_list]
+        assert queries[0] == "?empty(X)", "branch_a must be evaluated first"
+        assert queries[1] == "?has_data(X)", "branch_b must be evaluated second"
 
     async def test_returns_default_when_no_match(self) -> None:
         kg = MagicMock()
@@ -135,6 +139,10 @@ class TestKgRouterErrors:
 
         assert result == "works"
         assert kg.execute.await_count == 2
+        # Verify the failing branch was tried first
+        queries = [call.args[0] for call in kg.execute.call_args_list]
+        assert queries[0] == "?broken(X)", "failing branch must be tried first"
+        assert queries[1] == "?good(X)", "working branch tried after failure"
 
     async def test_all_branches_fail_returns_default(self) -> None:
         kg = MagicMock()

@@ -12,13 +12,33 @@ class TestSetup:
         kg = MockMemoryKG()
         mem = InputLayerMemory(kg=kg)
         await mem.setup()
-        assert len(kg.executed) >= 5
+        # 2 relation definitions + 3 rules = 5 DDL statements
+        assert len(kg.executed) == 5
+        ddl = kg.executed
+        # Verify the two base relations are defined
+        assert any("memory_turn(" in q and "thread_id" in q for q in ddl), (
+            f"setup must define memory_turn relation, got: {ddl}"
+        )
+        assert any("memory_topic(" in q and "thread_id" in q for q in ddl), (
+            f"setup must define memory_topic relation, got: {ddl}"
+        )
+        # Verify all three derived rules are defined
+        assert any("active_topic(" in q and "<-" in q for q in ddl), (
+            f"setup must define active_topic rule, got: {ddl}"
+        )
+        assert any("relevant_turn(" in q and "<-" in q for q in ddl), (
+            f"setup must define relevant_turn rule, got: {ddl}"
+        )
+        assert any("topic_thread(" in q and "<-" in q for q in ddl), (
+            f"setup must define topic_thread rule, got: {ddl}"
+        )
 
     async def test_setup_idempotent(self) -> None:
         kg = MockMemoryKG()
         mem = InputLayerMemory(kg=kg)
         await mem.setup()
         count = len(kg.executed)
+        assert count == 5
         await mem.setup()
         assert len(kg.executed) == count
 
@@ -257,3 +277,22 @@ class TestTopicExtraction:
         mem = InputLayerMemory(kg=kg)
         await mem.astore("t", "user", "Hello there")
         assert len(kg.topics) == 0
+
+    async def test_no_false_positives(self) -> None:
+        """Generic messages must not extract spurious topics."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        await mem.astore("t", "user", "I went to the store and bought milk")
+        assert len(kg.topics) == 0, (
+            f"Expected no topics for generic message, got: {[t[2] for t in kg.topics]}"
+        )
+
+    async def test_topic_extraction_matches_expected_set(self) -> None:
+        """Verify the exact set of extracted topics, not just that some match."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        await mem.astore("t", "user", "Deploy a Docker container with Python")
+        topics = sorted(t[2] for t in kg.topics)
+        assert topics == ["devops", "python"], (
+            f"Expected exactly ['devops', 'python'], got {topics}"
+        )

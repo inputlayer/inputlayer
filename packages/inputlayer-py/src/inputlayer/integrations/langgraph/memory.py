@@ -39,7 +39,7 @@ from inputlayer.integrations.langgraph._memory_helpers import (
 from inputlayer.integrations.langgraph._memory_helpers import (
     make_store_node as _make_store_node,
 )
-from inputlayer.integrations.langgraph._utils import escape_iql
+from inputlayer.integrations.langgraph._utils import escape_iql, validate_row_length
 
 logger = logging.getLogger(__name__)
 
@@ -62,19 +62,23 @@ _TURN_ID = -4
 _TURN_ROLE = -3
 _TURN_CONTENT = -2
 _TURN_TS = -1
+_MIN_TURN_ROW_LEN = 4
 
 # relevant_turn(thread_id, turn_id, role, content, topic)
 _REL_TURN_ID = -4
 _REL_ROLE = -3
 _REL_CONTENT = -2
 _REL_TOPIC = -1
+_MIN_REL_ROW_LEN = 4
 
 # active_topic(thread_id, topic)
 _TOPIC_VAL = -1
+_MIN_TOPIC_ROW_LEN = 1
 
 # topic_thread(thread_id, topic_a, topic_b)
 _TOPIC_A = -2
 _TOPIC_B = -1
+_MIN_TOPIC_THREAD_ROW_LEN = 2
 
 
 class InputLayerMemory:
@@ -239,6 +243,8 @@ class InputLayerMemory:
                         f"TurnId, Role, Content, Ts)"
                     )
                     if r.rows:
+                        for row in r.rows:
+                            validate_row_length(row, _MIN_TURN_ROW_LEN, "memory_turn", "_next_turn_id")
                         self._turn_counters[thread_id] = max(
                             int(row[_TURN_ID]) for row in r.rows
                         )
@@ -348,6 +354,15 @@ class InputLayerMemory:
 
         r_topics, r_turns, r_relevant, r_related = results
 
+        for row in r_topics.rows:
+            validate_row_length(row, _MIN_TOPIC_ROW_LEN, "active_topic", "arecall")
+        for row in r_turns.rows:
+            validate_row_length(row, _MIN_TURN_ROW_LEN, "memory_turn", "arecall")
+        for row in r_relevant.rows:
+            validate_row_length(row, _MIN_REL_ROW_LEN, "relevant_turn", "arecall")
+        for row in r_related.rows:
+            validate_row_length(row, _MIN_TOPIC_THREAD_ROW_LEN, "topic_thread", "arecall")
+
         result: dict[str, Any] = {}
 
         result["topics"] = sorted(
@@ -399,14 +414,16 @@ class InputLayerMemory:
         *,
         state_key: str = "new_message",
         thread_key: str = "thread_id",
-        strict: bool = False,
+        strict: bool = True,
     ) -> Callable[[dict[str, Any]], Coroutine[Any, Any, dict[str, Any]]]:
         """Create a LangGraph node that stores a message from state.
 
         Args:
             state_key: State key for the message dict to store.
             thread_key: State key for the thread ID string.
-            strict: If True, raises on missing thread_id or non-dict messages.
+            strict: If True (default), raises on missing thread_id or
+                non-dict messages. Set to False to fall back to a shared
+                'default' thread (not recommended for production).
         """
         return _make_store_node(
             self,
@@ -420,14 +437,16 @@ class InputLayerMemory:
         *,
         state_key: str = "context",
         thread_key: str = "thread_id",
-        strict: bool = False,
+        strict: bool = True,
     ) -> Callable[[dict[str, Any]], Coroutine[Any, Any, dict[str, Any]]]:
         """Create a LangGraph node that recalls context into state.
 
         Args:
             state_key: State key to write the recalled context dict into.
             thread_key: State key for the thread ID string.
-            strict: If True, raises on missing thread_id.
+            strict: If True (default), raises on missing thread_id.
+                Set to False to fall back to a shared 'default' thread
+                (not recommended for production).
         """
         return _make_recall_node(
             self,

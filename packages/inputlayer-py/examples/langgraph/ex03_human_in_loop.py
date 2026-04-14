@@ -82,8 +82,8 @@ async def classify_action(state: dict[str, Any]) -> str:
     r = await kg.execute(f'?risk_flag("{a_type}", {amount}, "{target}", Level, Reason)')
 
     if r.rows:
-        level = r.rows[0][3]
-        reason = r.rows[0][4]
+        level = r.rows[0][0]
+        reason = r.rows[0][1]
         print(f"  {YELLOW}Risk: {level}: {reason}{RESET}")
         if level == "high":
             return "needs_approval"

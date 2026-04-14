@@ -95,7 +95,7 @@ class TestStrictMode:
         """Non-strict mode falls back to thread_id='default' with a warning."""
         kg = MockMemoryKG()
         mem = InputLayerMemory(kg=kg)
-        node = mem.store_node()
+        node = mem.store_node(strict=False)
 
         result = await node({"new_message": {"role": "user", "content": "hello"}})
 
@@ -109,17 +109,17 @@ class TestStrictMode:
         mem = InputLayerMemory(kg=kg)
         await mem.astore("default", "user", "Hello Python")
 
-        node = mem.recall_node()
+        node = mem.recall_node(strict=False)
         result = await node({})
 
         assert "context" in result
         assert len(result["context"]["recent"]) == 1
 
     async def test_store_node_non_dict_message_is_skipped(self) -> None:
-        """Non-dict messages (e.g., LangChain objects) must be skipped, not crash."""
+        """Non-dict messages (e.g., LangChain objects) must be skipped in non-strict mode."""
         kg = MockMemoryKG()
         mem = InputLayerMemory(kg=kg)
-        node = mem.store_node()
+        node = mem.store_node(strict=False)
         result = await node({"thread_id": "t", "new_message": "plain string"})
         assert result == {}
         assert len(kg.turns) == 0
