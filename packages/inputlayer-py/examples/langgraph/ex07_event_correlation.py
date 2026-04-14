@@ -242,13 +242,14 @@ async def run():
                 "IdB > IdA"
             )
 
-            # Rule: errors on multiple components = cascade
+            # Rule: errors on multiple components within a close time window = cascade
             await kg.execute(
                 '+incident("cascade", CompA, '
                 '"Errors spreading across components") <- '
                 'event(IdA, CompA, "error", TypeA, MsgA), '
                 'event(IdB, CompB, "error", TypeB, MsgB), '
-                "CompA != CompB"
+                "CompA != CompB, "
+                "IdB >= IdA, IdB - IdA <= 4"
             )
 
             # Rule: warning then error on same component = escalation

@@ -99,7 +99,7 @@ class TestPrune:
                 {},
             )
 
-        removed = await cp.aprune("thread-1", keep_last=3)
+        removed = await cp.prune_thread("thread-1", keep_last=3)
         assert removed == 7
 
         results = [tup async for tup in cp.alist(make_config("thread-1"))]
@@ -121,7 +121,7 @@ class TestPrune:
                 {},
             )
 
-        removed = await cp.aprune("thread-1", keep_last=5)
+        removed = await cp.prune_thread("thread-1", keep_last=5)
         assert removed == 0
 
     async def test_prune_also_removes_writes(self) -> None:
@@ -141,7 +141,7 @@ class TestPrune:
                 task_id=f"task-{i}",
             )
 
-        await cp.aprune("thread-1", keep_last=2)
+        await cp.prune_thread("thread-1", keep_last=2)
 
         results = [tup async for tup in cp.alist(make_config("thread-1"))]
         total_writes = sum(len(tup.pending_writes) for tup in results)
@@ -151,7 +151,7 @@ class TestPrune:
         kg = MockKG()
         cp = InputLayerCheckpointer(kg=kg)
         with pytest.raises(ValueError, match="keep_last must be >= 1"):
-            await cp.aprune("thread-1", keep_last=0)
+            await cp.prune_thread("thread-1", keep_last=0)
 
     def test_prune_sync(self) -> None:
         kg = MockKG()
@@ -194,7 +194,7 @@ class TestPruneNamespaceIsolation:
                 {},
             )
 
-        removed = await cp.aprune("thread-1", checkpoint_ns="", keep_last=2)
+        removed = await cp.prune_thread("thread-1", checkpoint_ns="", keep_last=2)
         assert removed == 3
 
         sub_results = [tup async for tup in cp.alist(ns_config("subgraph"))]

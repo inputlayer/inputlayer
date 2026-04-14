@@ -12,9 +12,17 @@ from typing import Any
 
 from langgraph.checkpoint.serde.base import SerializerProtocol
 
+# ── Shared column index constants ───────────────────────────────────
+# Canonical definitions used by checkpointer.py and _checkpointer_mixin.py.
+CKPT_TS = -1
+CKPT_METADATA = -2
+CKPT_BLOB = -3
+CKPT_PARENT_ID = -4
+CKPT_ID = -5
+
 # Minimum number of columns a graph_write row must have for safe
-# negative-index access: task_id(-4), idx(-3), channel(-2), blob(-1).
-_MIN_WRITE_ROW_LEN = 4
+# negative-index access: task_id(-5), task_path(-4), idx(-3), channel(-2), blob(-1).
+_MIN_WRITE_ROW_LEN = 5
 
 
 def b64_encode(data: bytes) -> str:
@@ -55,8 +63,8 @@ def parse_writes(
     bound-column inclusion by the query engine.
 
     Raises:
-        ValueError: If any row has fewer than 4 columns (task_id, idx,
-            channel, blob).
+        ValueError: If any row has fewer than 5 columns (task_id,
+            task_path, idx, channel, blob).
     """
     for i, row in enumerate(rows):
         if len(row) < _MIN_WRITE_ROW_LEN:
@@ -65,10 +73,10 @@ def parse_writes(
                 f"expected at least {_MIN_WRITE_ROW_LEN}: {row!r}"
             )
 
-    sorted_rows = sorted(rows, key=lambda r: (str(r[-4]), int(r[-3])))
+    sorted_rows = sorted(rows, key=lambda r: (str(r[-5]), int(r[-3])))
     result = []
     for row in sorted_rows:
-        task_id = str(row[-4])
+        task_id = str(row[-5])
         channel = str(row[-2])
         value = unpack(serde, str(row[-1]))
         result.append((task_id, channel, value))

@@ -174,7 +174,7 @@ async def run():
             # specific combinations. Let's use a simpler approach:
             # enough_context fires when we have facts on 4 specific topics.
             await kg.execute(
-                "+enough_context(X) <- "
+                '+enough_context("yes") <- '
                 "research_fact(A, _), research_fact(B, _), "
                 "research_fact(C, _), research_fact(D, _), "
                 "A != B, B != C, C != D, A != C, A != D, B != D"
@@ -190,7 +190,7 @@ async def run():
             # Router: check if KG has derived enough_context
             route = kg_router(
                 branches={
-                    "answer": "?enough_context(X)",
+                    "answer": "?enough_context(Status)",
                 },
                 default="plan",
             )
@@ -249,7 +249,7 @@ async def run():
             for row in r.rows:
                 print(f"  {CYAN}{row[0]}{RESET}: {DIM}{row[1]}{RESET}")
 
-            r = await kg.execute("?enough_context(X)")
+            r = await kg.execute("?enough_context(Status)")
             if r.rows:
                 print(f"\n  {GREEN}enough_context: YES (rule fired){RESET}")
             else:

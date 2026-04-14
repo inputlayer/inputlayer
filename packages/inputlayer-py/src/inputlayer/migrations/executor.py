@@ -41,9 +41,9 @@ def migrate(
 
     for m in migrations:
         if m.name in applied:
+            if target is not None and m.name == target:
+                break
             continue
-        if target is not None and m.name == target:
-            break
 
         apply_migration(kg, m)
         recorder.record_applied(m.name)

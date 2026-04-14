@@ -150,17 +150,44 @@ async def detect_conflicts(state: dict[str, Any]) -> dict[str, Any]:
 
 async def resolve_conflicts(state: dict[str, Any]) -> dict[str, Any]:
     """Resolve conflicts by adjusting the plan."""
+    kg = state["kg"]
     conflicts = state.get("conflicts", [])
     iteration = state.get("iteration", 0)
 
     print(f"\n  {WHITE}Resolving {len(conflicts)} conflict(s)...{RESET}")
 
-    # Simple resolution: for schedule conflicts, take the later date
-    # For dependency issues, push the step back
+    # Fix dependency issues: push steps to start after their dependency ends
+    r = await kg.execute("?dependency_issue(Step, DepStep, StepStart, DepEnd)")
+    for row in r.rows:
+        step_name, dep_step, step_start, dep_end = row[0], row[1], row[2], row[3]
+        new_start = dep_end + 1
+
+        # Find the current plan_step to get its full details for retraction
+        r2 = await kg.execute(
+            f'?plan_step("{escape_iql(step_name)}", {step_start}, End, Team, "{escape_iql(dep_step)}", Desc)'
+        )
+        for ps in r2.rows:
+            end, team, desc = ps[2], ps[3], ps[5]
+            duration = end - step_start
+            new_end = new_start + duration
+
+            # Retract the old step and insert an adjusted one
+            await kg.execute(
+                f'-plan_step("{escape_iql(step_name)}", {step_start}, {end}, '
+                f'"{escape_iql(team)}", "{escape_iql(dep_step)}", "{escape_iql(desc)}")'
+            )
+            await kg.execute(
+                f'+plan_step("{escape_iql(step_name)}", {new_start}, {new_end}, '
+                f'"{escape_iql(team)}", "{escape_iql(dep_step)}", "{escape_iql(desc)}")'
+            )
+            print(
+                f"    {GREEN}Fixed{RESET}: {step_name} ({team}) moved from week {step_start} to {new_start}"
+            )
+
+    # Note schedule conflicts (different teams proposing different timelines)
     for c in conflicts:
-        print(f"    {DIM}Noted: {c['step']}: {c['detail']}{RESET}")
-        # In production, would adjust timing in the KG here
-        # For this demo, conflicts are noted and passed through
+        if "depends on" not in c["detail"]:
+            print(f"    {DIM}Noted: {c['step']}: {c['detail']}{RESET}")
 
     return {"iteration": iteration + 1}
 

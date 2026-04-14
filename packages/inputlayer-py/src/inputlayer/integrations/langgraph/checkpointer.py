@@ -6,7 +6,8 @@ to be persisted and resumed across processes/restarts.
 Schema (created automatically):
     +graph_checkpoint(thread_id, checkpoint_ns, checkpoint_id, parent_id,
                       blob, metadata, ts)
-    +graph_write(thread_id, checkpoint_id, task_id, idx, channel, blob)
+    +graph_write(thread_id, checkpoint_ns, checkpoint_id, task_id,
+                 task_path, idx, channel, blob)
 
 Usage::
 
@@ -46,12 +47,13 @@ from langgraph.checkpoint.base import (
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from inputlayer.integrations.langgraph._checkpoint_serde import (
+    CKPT_BLOB,
+    CKPT_ID,
+    CKPT_METADATA,
+    CKPT_PARENT_ID,
+    CKPT_TS,
     pack as _pack,
-)
-from inputlayer.integrations.langgraph._checkpoint_serde import (
     parse_writes as _parse_writes,
-)
-from inputlayer.integrations.langgraph._checkpoint_serde import (
     unpack as _unpack,
 )
 from inputlayer.integrations.langgraph._checkpointer_mixin import (
@@ -66,20 +68,14 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_KG_TIMEOUT = 30.0
 
-# ── Column indices for graph_checkpoint query results ───────────────
-# Negative indices work regardless of how many columns are bound.
-_CKPT_TS = -1
-_CKPT_METADATA = -2
-_CKPT_BLOB = -3
-_CKPT_PARENT_ID = -4
-_CKPT_ID = -5
 # 4 columns when checkpoint_id is bound (ParentId, Blob, Metadata, Ts).
 # 5 columns when checkpoint_id is unbound (adds CheckpointId).
 _MIN_CKPT_ROW_LEN = 4
 _MIN_CKPT_ROW_LEN_WITH_ID = 5
 
-# ── Column indices for graph_write query results ────────────────────
-_WRITE_CKPT_ID = -5
+# graph_write column indices for alist (6 unbound columns)
+_WRITE_CKPT_ID = -6
+_MIN_WRITE_ROW_LEN_ALIST = 6
 
 
 class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str]):
@@ -141,8 +137,9 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
                 "+graph_checkpoint(thread_id: string, checkpoint_ns: string, "
                 "checkpoint_id: string, parent_id: string, blob: string, "
                 "metadata: string, ts: int)",
-                "+graph_write(thread_id: string, checkpoint_id: string, "
-                "task_id: string, idx: int, channel: string, blob: string)",
+                "+graph_write(thread_id: string, checkpoint_ns: string, "
+                "checkpoint_id: string, task_id: string, task_path: string, "
+                "idx: int, channel: string, blob: string)",
             ]:
                 await self._exec(ddl)
 
@@ -153,6 +150,7 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
         kg_name = getattr(self.kg, "name", repr(self.kg))
         return (
             f"InputLayerCheckpointer(kg={kg_name!r}, "
+            f"kg_timeout={self._kg_timeout}, "
             f"setup_done={self._setup_done})"
         )
 
@@ -211,13 +209,14 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
     ) -> None:
         """Persist intermediate writes for a checkpoint.
 
-        Deletes existing writes for (thread, checkpoint, task) before
+        Deletes existing writes for (thread, ns, checkpoint, task) before
         inserting to prevent duplicates on retry. All writes are submitted
         concurrently; errors are collected and raised together.
 
-        Note: if the insert phase fails after the delete phase, old writes
-        for this task will already be removed. This is intentional: the
-        alternative (inserting first) would create duplicates.
+        Warning: the delete-then-insert is NOT atomic. If the process
+        crashes between delete and insert, writes for this task will be
+        lost. The alternative (insert first) would create duplicates that
+        are harder to recover from.
         """
         await self.setup()
 
@@ -231,13 +230,23 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
                 "Ensure your graph was compiled with this checkpointer and "
                 "that config includes thread_id and checkpoint_id."
             ) from None
+        checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
 
         if not writes:
             return
 
+        logger.debug(
+            "InputLayerCheckpointer.aput_writes: deleting then inserting "
+            "%d writes for thread=%r ns=%r checkpoint=%r task=%r "
+            "(non-atomic: crash between delete and insert loses writes)",
+            len(writes), thread_id, checkpoint_ns, checkpoint_id, task_id,
+        )
+
         await self._exec(
-            f"-graph_write(ThreadId, CkptId, TaskId, Idx, Channel, Blob) <- "
+            f"-graph_write(ThreadId, Ns, CkptId, TaskId, TaskPath, "
+            f"Idx, Channel, Blob) <- "
             f'ThreadId = "{escape_iql(thread_id)}", '
+            f'Ns = "{escape_iql(checkpoint_ns)}", '
             f'CkptId = "{escape_iql(checkpoint_id)}", '
             f'TaskId = "{escape_iql(task_id)}"'
         )
@@ -246,8 +255,10 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
             *(
                 self._exec(
                     f'+graph_write("{escape_iql(thread_id)}", '
+                    f'"{escape_iql(checkpoint_ns)}", '
                     f'"{escape_iql(checkpoint_id)}", '
                     f'"{escape_iql(task_id)}", '
+                    f'"{escape_iql(task_path)}", '
                     f"{idx}, "
                     f'"{escape_iql(channel)}", '
                     f'"{escape_iql(_pack(self.serde, value))}")'
@@ -310,18 +321,19 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
         min_cols = _MIN_CKPT_ROW_LEN if checkpoint_id else _MIN_CKPT_ROW_LEN_WITH_ID
         for row in r.rows:
             validate_row_length(row, min_cols, "graph_checkpoint", "aget_tuple")
-        row = max(r.rows, key=lambda row: int(row[_CKPT_TS]))
-        parent_id = str(row[_CKPT_PARENT_ID])
+        row = max(r.rows, key=lambda row: int(row[CKPT_TS]))
+        parent_id = str(row[CKPT_PARENT_ID])
         actual_id = (
-            checkpoint_id if checkpoint_id is not None else str(row[_CKPT_ID])
+            checkpoint_id if checkpoint_id is not None else str(row[CKPT_ID])
         )
 
-        checkpoint = _unpack(self.serde, str(row[_CKPT_BLOB]))
-        metadata = _unpack(self.serde, str(row[_CKPT_METADATA]))
+        checkpoint = _unpack(self.serde, str(row[CKPT_BLOB]))
+        metadata = _unpack(self.serde, str(row[CKPT_METADATA]))
 
         r_writes = await self._exec(
             f'?graph_write("{escape_iql(thread_id)}", '
-            f'"{escape_iql(actual_id)}", TaskId, Idx, Channel, Blob)'
+            f'"{escape_iql(checkpoint_ns)}", '
+            f'"{escape_iql(actual_id)}", TaskId, TaskPath, Idx, Channel, Blob)'
         )
         pending_writes = _parse_writes(self.serde, r_writes.rows)
 
@@ -349,6 +361,19 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
             metadata=metadata,
             parent_config=parent_config,
             pending_writes=pending_writes,
+        )
+
+    async def adelete_thread(self, thread_id: str) -> None:
+        """Delete all checkpoints and writes for a thread."""
+        await self.setup()
+        await self._exec(
+            f"-graph_checkpoint(ThreadId, Ns, CkptId, P, B, M, T) <- "
+            f'ThreadId = "{escape_iql(thread_id)}"'
+        )
+        await self._exec(
+            f"-graph_write(ThreadId, Ns, CkptId, TaskId, TaskPath, "
+            f"Idx, Channel, Blob) <- "
+            f'ThreadId = "{escape_iql(thread_id)}"'
         )
 
     async def alist(
@@ -384,39 +409,44 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
         for row in r.rows:
             validate_row_length(row, _MIN_CKPT_ROW_LEN_WITH_ID, "graph_checkpoint", "alist")
         sorted_rows = sorted(
-            r.rows, key=lambda row: int(row[_CKPT_TS]), reverse=True,
+            r.rows, key=lambda row: int(row[CKPT_TS]), reverse=True,
         )
 
         if before is not None:
-            before_id = before["configurable"].get("checkpoint_id")
+            before_cfg = before.get("configurable", {}) if isinstance(before, dict) else {}
+            before_id = before_cfg.get("checkpoint_id")
             if before_id:
                 cutoff_ts = None
                 for row in sorted_rows:
-                    if str(row[_CKPT_ID]) == before_id:
-                        cutoff_ts = int(row[_CKPT_TS])
+                    if str(row[CKPT_ID]) == before_id:
+                        cutoff_ts = int(row[CKPT_TS])
                         break
                 if cutoff_ts is not None:
                     sorted_rows = [
                         row for row in sorted_rows
-                        if int(row[_CKPT_TS]) < cutoff_ts
+                        if int(row[CKPT_TS]) < cutoff_ts
                     ]
 
         r_all_writes = await self._exec(
             f'?graph_write("{escape_iql(thread_id)}", '
-            f"CheckpointId, TaskId, Idx, Channel, Blob)"
+            f'"{escape_iql(checkpoint_ns)}", '
+            f"CheckpointId, TaskId, TaskPath, Idx, Channel, Blob)"
         )
         writes_by_ckpt: dict[str, list[Any]] = {}
         for w_row in r_all_writes.rows:
+            validate_row_length(
+                w_row, _MIN_WRITE_ROW_LEN_ALIST, "graph_write", "alist",
+            )
             ckpt_id = str(w_row[_WRITE_CKPT_ID])
             writes_by_ckpt.setdefault(ckpt_id, []).append(w_row)
 
         count = 0
         for row in sorted_rows:
-            checkpoint_id = str(row[_CKPT_ID])
-            parent_id = str(row[_CKPT_PARENT_ID])
+            checkpoint_id = str(row[CKPT_ID])
+            parent_id = str(row[CKPT_PARENT_ID])
 
-            checkpoint = _unpack(self.serde, str(row[_CKPT_BLOB]))
-            metadata = _unpack(self.serde, str(row[_CKPT_METADATA]))
+            checkpoint = _unpack(self.serde, str(row[CKPT_BLOB]))
+            metadata = _unpack(self.serde, str(row[CKPT_METADATA]))
 
             if filter and not all(
                 metadata.get(k) == v for k, v in filter.items()

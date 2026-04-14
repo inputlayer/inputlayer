@@ -63,7 +63,13 @@ class ResultSet:
 
     def to_dicts(self) -> list[dict[str, Any]]:
         """Convert all rows to list of dicts."""
-        return [dict(zip(self.columns, row, strict=True)) for row in self.rows]
+        result = []
+        for row in self.rows:
+            try:
+                result.append(dict(zip(self.columns, row, strict=True)))
+            except ValueError:
+                result.append(dict(zip(self.columns, row, strict=False)))
+        return result
 
     def to_tuples(self) -> list[tuple[Any, ...]]:
         """Convert all rows to list of tuples."""
@@ -93,6 +99,5 @@ class ResultSet:
         except ValueError:
             # Column/row length mismatch. Fall back to non-strict so the
             # caller gets a partial object instead of a crash. The mismatch
-            # is almost certainly a server-side bug; to_dicts() will raise
-            # for the same data if the caller needs strict validation.
+            # is almost certainly a server-side bug.
             return SimpleNamespace(**dict(zip(self.columns, row, strict=False)))

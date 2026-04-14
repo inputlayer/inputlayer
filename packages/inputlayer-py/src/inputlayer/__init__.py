@@ -1,6 +1,5 @@
 """inputlayer - Python Object-Logic Mapper for InputLayer knowledge graph engine."""
 
-# Core types
 # Functions (re-export all)
 from inputlayer import functions
 

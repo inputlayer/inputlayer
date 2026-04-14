@@ -63,8 +63,8 @@ class TestStore:
             "I need help with Python machine learning",
         )
         topic_names = [t[2] for t in kg.topics]
-        assert "python" in topic_names
-        assert "ml" in topic_names
+        assert b64e("python") in topic_names
+        assert b64e("ml") in topic_names
 
     async def test_store_explicit_topics(self) -> None:
         kg = MockMemoryKG()
@@ -76,8 +76,8 @@ class TestStore:
             topics=["custom_topic", "another"],
         )
         topic_names = [t[2] for t in kg.topics]
-        assert "custom_topic" in topic_names
-        assert "another" in topic_names
+        assert b64e("custom_topic") in topic_names
+        assert b64e("another") in topic_names
 
     async def test_store_increments_turn_id(self) -> None:
         kg = MockMemoryKG()
@@ -245,6 +245,24 @@ class TestNodeFactories:
         result = await node({"tid": "t"})
         assert "memory" in result
 
+    async def test_store_node_forwards_topics(self) -> None:
+        """store_node must forward topics from the message dict."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        node = mem.store_node()
+
+        state = {
+            "thread_id": "t",
+            "new_message": {
+                "role": "user",
+                "content": "Test message",
+                "topics": ["custom_topic"],
+            },
+        }
+        await node(state)
+        assert len(kg.topics) == 1
+        assert kg.topics[0][2] == b64e("custom_topic")
+
     async def test_node_names(self) -> None:
         kg = MockMemoryKG()
         mem = InputLayerMemory(kg=kg)
@@ -258,7 +276,7 @@ class TestTopicExtraction:
         mem = InputLayerMemory(kg=kg)
         await mem.astore("t", "user", "How to use pandas in Python?")
         topics = [t[2] for t in kg.topics]
-        assert "python" in topics
+        assert b64e("python") in topics
 
     async def test_multiple_topics(self) -> None:
         kg = MockMemoryKG()
@@ -269,8 +287,8 @@ class TestTopicExtraction:
             "Deploy a machine learning model with Docker and Kubernetes",
         )
         topics = [t[2] for t in kg.topics]
-        assert "ml" in topics
-        assert "devops" in topics
+        assert b64e("ml") in topics
+        assert b64e("devops") in topics
 
     async def test_no_topics(self) -> None:
         kg = MockMemoryKG()
@@ -293,6 +311,6 @@ class TestTopicExtraction:
         mem = InputLayerMemory(kg=kg)
         await mem.astore("t", "user", "Deploy a Docker container with Python")
         topics = sorted(t[2] for t in kg.topics)
-        assert topics == ["devops", "python"], (
-            f"Expected exactly ['devops', 'python'], got {topics}"
+        assert topics == sorted([b64e("devops"), b64e("python")]), (
+            f"Expected exactly devops and python (base64), got {topics}"
         )

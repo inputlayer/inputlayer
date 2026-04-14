@@ -23,9 +23,11 @@ from inputlayer.integrations.langgraph._utils import escape_iql, validate_row_le
 
 logger = logging.getLogger(__name__)
 
-# Column indices needed by aprune (see checkpointer.py for full set).
-_CKPT_TS = -1
-_CKPT_ID = -5
+# Column indices (canonical definitions live in checkpointer.py).
+from inputlayer.integrations.langgraph._checkpoint_serde import (
+    CKPT_ID,
+    CKPT_TS,
+)
 
 
 class _SyncAndMaintenanceMixin:
@@ -88,7 +90,7 @@ class _SyncAndMaintenanceMixin:
 
     # ── Maintenance ──────────────────────────────────────────────────
 
-    async def aprune(
+    async def prune_thread(
         self,
         thread_id: str,
         *,
@@ -96,6 +98,10 @@ class _SyncAndMaintenanceMixin:
         keep_last: int = 10,
     ) -> int:
         """Remove old checkpoints and their writes, keeping the most recent.
+
+        This method is named ``prune_thread`` (not ``aprune``) to avoid
+        conflicting with ``BaseCheckpointSaver.aprune`` which has a
+        different signature.
 
         Args:
             thread_id: The thread to prune.
@@ -120,9 +126,9 @@ class _SyncAndMaintenanceMixin:
             return 0
 
         for row in r.rows:
-            validate_row_length(row, 5, "graph_checkpoint", "aprune")
+            validate_row_length(row, 5, "graph_checkpoint", "prune_thread")
         sorted_rows = sorted(
-            r.rows, key=lambda row: int(row[_CKPT_TS]), reverse=True,
+            r.rows, key=lambda row: int(row[CKPT_TS]), reverse=True,
         )
         to_prune = sorted_rows[keep_last:]
 
@@ -132,7 +138,7 @@ class _SyncAndMaintenanceMixin:
         )
 
         for row in to_prune:
-            ckpt_id = str(row[_CKPT_ID])
+            ckpt_id = str(row[CKPT_ID])
             await self._exec(
                 f"-graph_checkpoint(ThreadId, Ns, CkptId, P, B, M, T) <- "
                 f'ThreadId = "{escape_iql(thread_id)}", '
@@ -140,8 +146,10 @@ class _SyncAndMaintenanceMixin:
                 f'CkptId = "{escape_iql(ckpt_id)}"'
             )
             await self._exec(
-                f"-graph_write(ThreadId, CkptId, TaskId, Idx, Channel, Blob) <- "
+                f"-graph_write(ThreadId, Ns, CkptId, TaskId, TaskPath, "
+                f"Idx, Channel, Blob) <- "
                 f'ThreadId = "{escape_iql(thread_id)}", '
+                f'Ns = "{escape_iql(checkpoint_ns)}", '
                 f'CkptId = "{escape_iql(ckpt_id)}"'
             )
 
@@ -154,7 +162,7 @@ class _SyncAndMaintenanceMixin:
         checkpoint_ns: str = "",
         keep_last: int = 10,
     ) -> int:
-        """Sync wrapper for aprune()."""
-        return run_sync(self.aprune(
+        """Sync wrapper for prune_thread()."""
+        return run_sync(self.prune_thread(
             thread_id, checkpoint_ns=checkpoint_ns, keep_last=keep_last,
         ))

@@ -53,7 +53,12 @@ def _b64e(s: str) -> str:
 
 def _b64d(s: str) -> str:
     """Decode a base64-encoded string back to the original."""
-    return base64.b64decode(s.encode("ascii")).decode("utf-8")
+    try:
+        return base64.b64decode(s.encode("ascii")).decode("utf-8")
+    except Exception as exc:
+        raise ValueError(
+            f"Failed to decode base64 memory data: {s[:40]!r}"
+        ) from exc
 
 
 # ── Column indices for memory query results ─────────────────────────
@@ -189,8 +194,9 @@ class InputLayerMemory:
         return (
             f"InputLayerMemory(kg={kg_name!r}, "
             f"max_recent={self.max_recent}, "
+            f"kg_timeout={self._kg_timeout}, "
             f"setup_done={self._setup_done}, "
-            f"threads={list(self._turn_counters.keys())})"
+            f"tracked_threads={len(self._turn_counters)})"
         )
 
     # ── Internal: turn counter ───────────────────────────────────────
@@ -212,10 +218,17 @@ class InputLayerMemory:
             return self._thread_locks[thread_id]
 
     def _evict_oldest_threads(self) -> None:
-        """Evict the oldest half of idle tracked threads from caches."""
+        """Evict the oldest half of idle tracked threads from caches.
+
+        Skips threads currently in ``_active_threads``. If all threads
+        are active, no eviction occurs (the new thread is still added).
+        """
         keep = self._max_tracked_threads // 2
         evict_target = len(self._thread_locks) - keep
+        if evict_target <= 0:
+            return
         evicted = 0
+        # Iterate oldest-first (dict preserves insertion order)
         keys = list(self._thread_locks.keys())
         for key in keys:
             if evicted >= evict_target:
@@ -231,12 +244,18 @@ class InputLayerMemory:
                 "InputLayerMemory: evicted %d idle thread locks (%d remain)",
                 evicted, len(self._thread_locks),
             )
+        elif evict_target > 0:
+            logger.warning(
+                "InputLayerMemory: eviction requested but all %d threads "
+                "are active. Consider increasing max_tracked_threads.",
+                len(self._thread_locks),
+            )
 
     async def _next_turn_id(self, thread_id: str) -> int:
         """Return the next turn_id, initializing from KG if needed."""
         lock = await self._get_thread_lock(thread_id)
-        async with lock:
-            try:
+        try:
+            async with lock:
                 if thread_id not in self._turn_counters:
                     r = await self._exec(
                         f'?memory_turn("{escape_iql(thread_id)}", '
@@ -253,8 +272,8 @@ class InputLayerMemory:
 
                 self._turn_counters[thread_id] += 1
                 return self._turn_counters[thread_id]
-            finally:
-                self._active_threads.discard(thread_id)
+        finally:
+            self._active_threads.discard(thread_id)
 
     # ── Store ────────────────────────────────────────────────────────
 
@@ -289,9 +308,9 @@ class InputLayerMemory:
                 *(
                     self._exec(
                         f'+memory_topic("{escaped_tid}", '
-                        f'{turn_id}, "{escape_iql(topic)}")'
+                        f'{turn_id}, "{_b64e(topic)}")'
                     )
-                    for topic in topics
+                    for topic in set(topics)
                 ),
                 return_exceptions=True,
             )
@@ -366,7 +385,7 @@ class InputLayerMemory:
         result: dict[str, Any] = {}
 
         result["topics"] = sorted(
-            {str(row[_TOPIC_VAL]) for row in r_topics.rows},
+            {_b64d(str(row[_TOPIC_VAL])) for row in r_topics.rows},
         )
 
         turns = sorted(
@@ -383,7 +402,7 @@ class InputLayerMemory:
 
         by_topic: dict[str, list[dict[str, Any]]] = {}
         for row in r_relevant.rows:
-            topic = str(row[_REL_TOPIC])
+            topic = _b64d(str(row[_REL_TOPIC]))
             turn = {
                 "turn_id": int(row[_REL_TURN_ID]),
                 "role": _b64d(str(row[_REL_ROLE])),
@@ -395,7 +414,7 @@ class InputLayerMemory:
         seen: set[tuple[str, str]] = set()
         related: list[tuple[str, str]] = []
         for row in r_related.rows:
-            a, b = sorted([str(row[_TOPIC_A]), str(row[_TOPIC_B])])
+            a, b = sorted([_b64d(str(row[_TOPIC_A])), _b64d(str(row[_TOPIC_B]))])
             pair = (a, b)
             if pair not in seen:
                 seen.add(pair)

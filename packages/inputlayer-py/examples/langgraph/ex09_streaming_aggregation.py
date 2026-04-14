@@ -105,14 +105,21 @@ async def ingest_metrics(state: dict[str, Any]) -> dict[str, Any]:
     # Show current values
     for _metric_ts, component, name, value in batch:
         # Check if this metric has a threshold
-        r = await kg.execute(f'?threshold("{escape_iql(component)}", "{escape_iql(name)}", Max)')
-        if r.rows:
-            max_val = r.rows[0][2]
+        r_max = await kg.execute(f'?max_threshold("{escape_iql(component)}", "{escape_iql(name)}", Max)')
+        r_min = await kg.execute(f'?min_threshold("{escape_iql(component)}", "{escape_iql(name)}", Min)')
+        if r_max.rows:
+            max_val = r_max.rows[0][2]
             if value > max_val:
                 pct = ((value - max_val) / max_val) * 100
                 print(f"    {RED}{component}.{name} = {value} (>{max_val}, +{pct:.0f}%){RESET}")
             elif value > max_val * 0.8:
                 print(f"    {YELLOW}{component}.{name} = {value} (approaching {max_val}){RESET}")
+            else:
+                print(f"    {GREEN}{component}.{name} = {value}{RESET}")
+        elif r_min.rows:
+            min_val = r_min.rows[0][2]
+            if value < min_val:
+                print(f"    {RED}{component}.{name} = {value} (<{min_val}){RESET}")
             else:
                 print(f"    {GREEN}{component}.{name} = {value}{RESET}")
         else:
@@ -130,7 +137,7 @@ async def check_breaches(state: dict[str, Any]) -> dict[str, Any]:
 
     # Get new breaches (from latest timestamp)
     idx = state.get("batch_index", 1)
-    if idx <= len(METRIC_BATCHES):
+    if 0 < idx <= len(METRIC_BATCHES):
         latest_ts = METRIC_BATCHES[idx - 1][0][0]
         new_breaches = [b for b in breaches if b[0] == latest_ts]
     else:
@@ -161,7 +168,7 @@ async def route_after_check(state: dict[str, Any]) -> str:
     kg = state["kg"]
     idx = state.get("batch_index", 0)
 
-    latest_ts = METRIC_BATCHES[idx - 1][0][0] if idx <= len(METRIC_BATCHES) else 0
+    latest_ts = METRIC_BATCHES[idx - 1][0][0] if 0 < idx <= len(METRIC_BATCHES) else 0
 
     # Check for new breaches at this timestamp
     r = await kg.execute(f"?breach({latest_ts}, Component, Name, Value, Max)")
@@ -182,7 +189,7 @@ async def send_alert(state: dict[str, Any]) -> dict[str, Any]:
     remediations = list(state.get("remediations", []))
 
     idx = state.get("batch_index", 1)
-    latest_ts = METRIC_BATCHES[idx - 1][0][0] if idx <= len(METRIC_BATCHES) else 0
+    latest_ts = METRIC_BATCHES[idx - 1][0][0] if 0 < idx <= len(METRIC_BATCHES) else 0
 
     r = await kg.execute(f"?breach({latest_ts}, Component, Name, Value, Max)")
 

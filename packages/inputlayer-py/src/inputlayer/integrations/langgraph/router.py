@@ -9,6 +9,7 @@ from typing import Any
 from inputlayer.exceptions import (
     AuthenticationError,
     InputLayerConnectionError,
+    QueryError,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,7 +95,9 @@ def kg_router(
                 # Connection/auth failures are systemic. Re-raise so the
                 # graph surfaces the error instead of silently misrouting.
                 raise
-            except Exception as exc:
+            except (QueryError, ValueError, RuntimeError) as exc:
+                # Domain errors from bad queries are skipped (branch doesn't match).
+                # Programming errors (TypeError, AttributeError) propagate.
                 logger.warning(
                     "kg_router: branch %r query raised %s: %s - skipping to next branch",
                     target,

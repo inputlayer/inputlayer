@@ -86,7 +86,10 @@ async def generate_spec(state: dict[str, Any]) -> dict[str, Any]:
     violations = state.get("violations", [])
     kg = state["kg"]
 
-    # Clear previous endpoints from KG (delete all facts, keep the schema)
+    # Clear previous endpoints from KG (delete all facts, keep the schema).
+    # InputLayer's incremental maintenance automatically retracts derived
+    # spec_violation facts when the supporting api_endpoint base facts are
+    # deleted, so we don't need to manually clean up violations here.
     if iteration > 0:
         await kg.execute(
             "-api_endpoint(Name, Method, Path, Auth) <- api_endpoint(Name, Method, Path, Auth)"

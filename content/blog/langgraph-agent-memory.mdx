@@ -2,7 +2,7 @@
 title: "Beyond Chat History: Using Rules as Agent Memory"
 date: "2026-04-10"
 category: "Integrations"
-excerpt: "Every conversation accumulates history. The real challenge is knowing which parts of that history matter for the next response. Rules give your agent memory that reasons about relevance instead of guessing."
+excerpt: "Every conversation accumulates history. The real challenge is knowing which parts of that history matter for the next response. Rules give your agent memory that reasons about relevance instead of relying on recency alone."
 ---
 
 # Beyond Chat History: Using Rules as Agent Memory
@@ -27,16 +27,16 @@ memory_topic(thread_id, turn_id, topic)
 And three rules that derive context automatically:
 
 ```
-// Active topics: what this conversation is about
+% Active topics: what this conversation is about
 active_topic(ThreadId, Topic) <-
     memory_topic(ThreadId, _, Topic)
 
-// Relevant turns: messages cross-referenced by topic
+% Relevant turns: messages cross-referenced by topic
 relevant_turn(ThreadId, TurnId, Role, Content, Topic) <-
     memory_turn(ThreadId, TurnId, Role, Content, _),
     memory_topic(ThreadId, TurnId, Topic)
 
-// Topic threads: which topics are discussed together
+% Topic threads: which topics are discussed together
 topic_thread(ThreadId, TopicA, TopicB) <-
     memory_topic(ThreadId, _, TopicA),
     memory_topic(ThreadId, _, TopicB),
@@ -96,9 +96,9 @@ Notice: turn 1 appears under **both** "ml" and "python". Turn 3 appears under bo
 
 **Topic threads.** Which topics co-occur in the same conversation:
 ```
-topic_thread("chat-1", "ml", "python")          // both in turn 1
-topic_thread("chat-1", "ml", "performance")     // both in turn 3
-topic_thread("chat-1", "python", "performance") // co-occur across turns
+topic_thread("chat-1", "ml", "python")          % ml and python both tagged on turn 1
+topic_thread("chat-1", "ml", "performance")     % ml and performance both tagged on turn 3
+topic_thread("chat-1", "python", "performance") % python and performance both in this thread
 ...
 ```
 
@@ -109,8 +109,8 @@ Now you ask: **"What about deploying with Docker and Kubernetes?"**
 Before generating a response, your agent calls `memory.recall("chat-1")`. The derived context tells it:
 
 1. **Active topics**: ml, python, performance, api, devops (the new one)
-2. **Topic connections**: devops is now connected to every prior topic through the conversation graph
-3. **Relevant turns**: the ML training discussion (turns 1, 3, 4) and the API discussion (turn 5) are both relevant, because deployment touches both
+2. **Topic connections**: devops co-occurs with every prior topic in this thread
+3. **Relevant turns**: the ML training discussion (turns 1, 3, 4) and the API discussion (turn 5) are both relevant, since they share topics with the new message
 
 The rule-derived memory returns the full context: you're deploying an ML pipeline (Python, training on GPUs) with an API layer, and now you want to containerize it. The rules connected "Docker" to the earlier ML/API discussion because devops topics co-occur with all the prior ones in this thread.
 
@@ -176,13 +176,13 @@ The base ontology (turns + topics -> derived context) is a starting point. Here 
 **Unresolved questions.** Questions you asked that never got a follow-up:
 
 ```
-// First, find turns that already have a follow-up assistant response
+% First, find turns that already have a follow-up assistant response
 has_response(ThreadId, TurnId) <-
     memory_turn(ThreadId, TurnId, "user", _, _),
     memory_turn(ThreadId, NextTurn, "assistant", _, _),
     NextTurn > TurnId
 
-// Unresolved: user turns with no follow-up response
+% Unresolved: user turns with no follow-up response
 unresolved(ThreadId, TurnId, Content) <-
     memory_turn(ThreadId, TurnId, "user", Content, _),
     !has_response(ThreadId, TurnId)

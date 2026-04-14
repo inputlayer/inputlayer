@@ -62,7 +62,7 @@ def make_store_node(
 
     async def _node(state: dict[str, Any]) -> dict[str, Any]:
         thread_id = state.get(thread_key)
-        if not thread_id:
+        if thread_id is None or thread_id == "":
             if strict:
                 raise ValueError(
                     f"InputLayerMemory.store_node: '{thread_key}' not found "
@@ -105,10 +105,12 @@ def make_store_node(
             )
             return {}
 
+        topics = msg.get("topics")
         await memory.astore(
             thread_id,
             msg.get("role", "user"),
             msg.get("content", ""),
+            topics=topics,
         )
         return {}
 
@@ -128,7 +130,7 @@ def make_recall_node(
 
     async def _node(state: dict[str, Any]) -> dict[str, Any]:
         thread_id = state.get(thread_key)
-        if not thread_id:
+        if thread_id is None or thread_id == "":
             if strict:
                 raise ValueError(
                     f"InputLayerMemory.recall_node: '{thread_key}' not found "

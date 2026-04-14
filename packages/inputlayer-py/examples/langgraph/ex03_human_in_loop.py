@@ -58,6 +58,8 @@ async def pick_next_action(state: dict[str, Any]) -> dict[str, Any]:
 
     # Classify this action in the KG
     kg = state["kg"]
+    # Clear any existing pending_action facts to avoid accumulation
+    await kg.execute("-pending_action(T, D, A, Tgt) <- pending_action(T, D, A, Tgt)")
     await kg.execute(
         f'+pending_action("{escape_iql(action["type"])}", "{escape_iql(action["description"])}", '
         f'{action["amount"]}, "{escape_iql(action["target"])}")'
@@ -82,8 +84,10 @@ async def classify_action(state: dict[str, Any]) -> str:
     r = await kg.execute(f'?risk_flag("{a_type}", {amount}, "{target}", Level, Reason)')
 
     if r.rows:
-        level = r.rows[0][0]
-        reason = r.rows[0][1]
+        # risk_flag(action_type, amount, target, level, reason)
+        # First 3 cols are bound; level=col[3], reason=col[4]
+        level = r.rows[0][3]
+        reason = r.rows[0][4]
         print(f"  {YELLOW}Risk: {level}: {reason}{RESET}")
         if level == "high":
             return "needs_approval"

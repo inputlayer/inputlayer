@@ -106,6 +106,11 @@ class TestPutWrites:
         channels = [w[1] for w in tup.pending_writes]
         assert "messages" in channels
         assert "count" in channels
+        # Verify task_id is correctly extracted (not task_path)
+        task_ids = [w[0] for w in tup.pending_writes]
+        assert all(tid == "task-1" for tid in task_ids), (
+            f"Expected task_id='task-1' for all writes, got {task_ids}"
+        )
 
 
 class TestPutWritesDeduplication:
@@ -211,7 +216,7 @@ class TestPrune:
                 {"source": "input", "step": i, "writes": {}, "parents": {}},
                 {},
             )
-        removed = await cp.aprune("thread-1", keep_last=2)
+        removed = await cp.prune_thread("thread-1", keep_last=2)
         assert removed == 3
 
         # Verify exactly which checkpoints survived (most recent two)
@@ -231,14 +236,14 @@ class TestPrune:
             {"source": "input", "step": 0, "writes": {}, "parents": {}},
             {},
         )
-        removed = await cp.aprune("thread-1", keep_last=10)
+        removed = await cp.prune_thread("thread-1", keep_last=10)
         assert removed == 0
 
     async def test_prune_invalid_keep_last_raises(self) -> None:
         kg = MockKG()
         cp = InputLayerCheckpointer(kg=kg)
         with pytest.raises(ValueError, match="keep_last"):
-            await cp.aprune("thread-1", keep_last=0)
+            await cp.prune_thread("thread-1", keep_last=0)
 
     def test_sync_prune(self) -> None:
         kg = MockKG()
@@ -420,15 +425,18 @@ class TestRepr:
 
 class TestConcurrentSetup:
     async def test_concurrent_setup_is_safe(self) -> None:
-        """Multiple concurrent setup() calls should not duplicate DDL."""
+        """Multiple concurrent setup() calls should run DDL exactly once."""
         import asyncio
 
-        kg = MockKG()
+        kg = AsyncMock()
+        kg.execute = AsyncMock(return_value=ResultSet(columns=[], rows=[]))
         cp = InputLayerCheckpointer(kg=kg)
 
         await asyncio.gather(*(cp.setup() for _ in range(10)))
 
         assert cp._setup_done is True
+        # DDL should run exactly 2 times (graph_checkpoint + graph_write schemas)
+        assert kg.execute.await_count == 2
 
 
 class TestUnpackMalformed:
@@ -454,14 +462,14 @@ class TestUnpackMalformed:
 
 class TestParseWritesValidation:
     def test_short_row_raises(self) -> None:
-        """Rows with fewer than 4 columns must raise ValueError."""
+        """Rows with fewer than 5 columns must raise ValueError."""
         from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
         from inputlayer.integrations.langgraph._checkpoint_serde import parse_writes
 
         serde = JsonPlusSerializer()
-        with pytest.raises(ValueError, match="row 0 has 2 columns"):
-            parse_writes(serde, [["a", "b"]])
+        with pytest.raises(ValueError, match="row 0 has 3 columns"):
+            parse_writes(serde, [["a", "b", "c"]])
 
 
 class TestRowLengthValidation:
@@ -502,3 +510,55 @@ class TestRowLengthValidation:
             results = []
             async for tup in cp.alist(make_config("t")):
                 results.append(tup)
+
+
+class TestPutWritesErrorAggregation:
+    async def test_partial_write_failure_raises(self) -> None:
+        """If some writes fail, aput_writes must raise with failure count."""
+        call_count = 0
+
+        async def flaky_execute(iql: str) -> ResultSet:
+            nonlocal call_count
+            call_count += 1
+            # Let schema DDL and delete pass, fail on every other insert
+            if iql.startswith("+graph_write(") and ":" not in iql:
+                if call_count % 2 == 0:
+                    raise RuntimeError("simulated failure")
+            return ResultSet(columns=[], rows=[])
+
+        kg = AsyncMock()
+        kg.execute = AsyncMock(side_effect=flaky_execute)
+        cp = InputLayerCheckpointer(kg=kg)
+        cp._setup_done = True
+
+        config = make_config("t", "ckpt-1")
+        writes = [("ch1", "v1"), ("ch2", "v2"), ("ch3", "v3")]
+        with pytest.raises(RuntimeError, match="writes failed"):
+            await cp.aput_writes(config, writes, task_id="task-1")
+
+
+class TestDeleteThread:
+    async def test_delete_thread(self) -> None:
+        """adelete_thread must remove all checkpoints and writes for a thread."""
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+
+        for i in range(3):
+            await cp.aput(
+                make_config("thread-1"),
+                make_checkpoint(f"ckpt-{i}"),
+                {"source": "input", "step": i, "writes": {}, "parents": {}},
+                {},
+            )
+            await cp.aput_writes(
+                make_config("thread-1", f"ckpt-{i}"),
+                [(f"ch-{i}", f"val-{i}")],
+                task_id=f"task-{i}",
+            )
+
+        await cp.adelete_thread("thread-1")
+
+        tup = await cp.aget_tuple(make_config("thread-1"))
+        assert tup is None
+        assert len(kg.checkpoints) == 0
+        assert len(kg.writes) == 0

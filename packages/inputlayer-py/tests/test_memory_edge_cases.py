@@ -23,7 +23,7 @@ class TestEscaping:
         assert r'thread-\"special\"' in insert_calls[0]
 
     async def test_topic_with_quotes(self) -> None:
-        """Topics still use escape_iql (they're identifiers, not content)."""
+        """Topics are base64-encoded, so quotes are safe."""
         kg = MockMemoryKG()
         mem = InputLayerMemory(kg=kg)
         await mem.astore("t", "user", "Hello", topics=['say "hi"'])
@@ -32,7 +32,18 @@ class TestEscaping:
             if c.startswith("+memory_topic(") and ":" not in c.split("(", 1)[1]
         ]
         assert len(topic_calls) == 1
-        assert r'say \"hi\"' in topic_calls[0]
+        # Topic is base64-encoded, should contain the b64 of 'say "hi"'
+        assert b64e('say "hi"') in topic_calls[0]
+
+    async def test_topic_round_trip_with_special_chars(self) -> None:
+        """Topics with special chars must survive base64 round-trip via recall."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        await mem.astore("t", "user", "Hello", topics=['say "hi"', "new\nline"])
+
+        ctx = await mem.arecall("t")
+        assert 'say "hi"' in ctx["topics"]
+        assert "new\nline" in ctx["topics"]
 
     async def test_content_base64_round_trip(self) -> None:
         """Content with special chars must survive base64 encode/decode round-trip."""
@@ -186,6 +197,26 @@ class TestEviction:
 
         # Should have evicted oldest half (2 threads), kept 2 + new = 3
         assert len(mem._thread_locks) <= 3
+
+    async def test_repr(self) -> None:
+        """__repr__ must include kg name and thread count, not raw thread IDs."""
+        kg = MockMemoryKG()
+        kg.name = "test_kg"
+        mem = InputLayerMemory(kg=kg)
+        await mem.astore("t1", "user", "msg")
+        r = repr(mem)
+        assert "test_kg" in r
+        assert "tracked_threads=1" in r
+        # Must NOT expose thread IDs
+        assert "t1" not in r
+
+    def test_setup_sync(self) -> None:
+        """setup_sync must work without an event loop."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        mem.setup_sync()
+        assert mem._setup_done is True
+        assert len(kg.executed) == 5
 
     async def test_evicted_thread_reinitializes_from_kg(self) -> None:
         """Evicted threads must re-query the KG and resume correctly."""

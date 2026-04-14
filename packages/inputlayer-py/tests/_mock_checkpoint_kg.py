@@ -149,29 +149,38 @@ class MockKG:
         return ResultSet(columns=cols, rows=rows)
 
     def _query_writes(self, iql: str) -> ResultSet:
+        # graph_write(thread_id, checkpoint_ns, checkpoint_id, task_id,
+        #             task_path, idx, channel, blob)
         body = iql[len("?graph_write("):].rstrip(")")
         parts = self._parse_args("+graph_write(" + body + ")")
         thread_id = str(parts[0]) if isinstance(parts[0], _BoundString) else None
-        checkpoint_id_bound = (
-            len(parts) > 1 and isinstance(parts[1], _BoundString)
+        checkpoint_ns = (
+            str(parts[1]) if len(parts) > 1 and isinstance(parts[1], _BoundString) else None
         )
-        checkpoint_id = str(parts[1]) if checkpoint_id_bound else None
+        checkpoint_id_bound = (
+            len(parts) > 2 and isinstance(parts[2], _BoundString)
+        )
+        checkpoint_id = str(parts[2]) if checkpoint_id_bound else None
 
         rows = []
         for w in self.writes:
             if thread_id and w[0] != thread_id:
                 continue
-            if checkpoint_id and w[1] != checkpoint_id:
+            if checkpoint_ns is not None and w[1] != checkpoint_ns:
+                continue
+            if checkpoint_id and w[2] != checkpoint_id:
                 continue
             if checkpoint_id_bound:
-                rows.append(list(w[2:]))
+                # Return columns after the 3 bound ones: task_id, task_path, idx, channel, blob
+                rows.append(list(w[3:]))
             else:
-                rows.append(list(w[1:]))
+                # Return columns after the 2 bound ones: checkpoint_id, task_id, task_path, idx, channel, blob
+                rows.append(list(w[2:]))
 
         if checkpoint_id_bound:
-            cols = ["task_id", "idx", "channel", "blob"]
+            cols = ["task_id", "task_path", "idx", "channel", "blob"]
         else:
-            cols = ["checkpoint_id", "task_id", "idx", "channel", "blob"]
+            cols = ["checkpoint_id", "task_id", "task_path", "idx", "channel", "blob"]
 
         return ResultSet(columns=cols, rows=rows)
 
@@ -197,13 +206,17 @@ class MockKG:
         ]
 
     def _delete_writes(self, iql: str) -> None:
+        # graph_write(thread_id, checkpoint_ns, checkpoint_id, task_id,
+        #             task_path, idx, channel, blob)
         _STR = r'((?:[^"\\]|\\.)*)'
         body = iql.split("<-", 1)[1]
         thread_match = re.search(rf'ThreadId\s*=\s*"{_STR}"', body)
+        ns_match = re.search(rf'Ns\s*=\s*"{_STR}"', body)
         ckpt_match = re.search(rf'CkptId\s*=\s*"{_STR}"', body)
         task_match = re.search(rf'TaskId\s*=\s*"{_STR}"', body)
 
         thread_id = self._unescape(thread_match.group(1)) if thread_match else None
+        ns = self._unescape(ns_match.group(1)) if ns_match else None
         ckpt_id = self._unescape(ckpt_match.group(1)) if ckpt_match else None
         task_id = self._unescape(task_match.group(1)) if task_match else None
 
@@ -212,8 +225,9 @@ class MockKG:
             for w in self.writes
             if not (
                 (thread_id is None or w[0] == thread_id)
-                and (ckpt_id is None or w[1] == ckpt_id)
-                and (task_id is None or w[2] == task_id)
+                and (ns is None or w[1] == ns)
+                and (ckpt_id is None or w[2] == ckpt_id)
+                and (task_id is None or w[3] == task_id)
             )
         ]
 

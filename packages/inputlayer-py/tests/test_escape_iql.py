@@ -40,3 +40,30 @@ class TestEscapeIql:
     def test_all_control_chars_in_one_string(self) -> None:
         result = escape_iql('\\"test\n\r\t\x00')
         assert result == '\\\\\\"test\\n\\r\\t\\0'
+
+    def test_bell_char_escaped(self) -> None:
+        assert escape_iql("a\x07b") == "a\\x07b"
+
+    def test_backspace_escaped(self) -> None:
+        assert escape_iql("a\x08b") == "a\\x08b"
+
+    def test_vertical_tab_escaped(self) -> None:
+        assert escape_iql("a\x0bb") == "a\\x0bb"
+
+    def test_form_feed_escaped(self) -> None:
+        assert escape_iql("a\x0cb") == "a\\x0cb"
+
+    def test_escape_char_escaped(self) -> None:
+        assert escape_iql("a\x1bb") == "a\\x1bb"
+
+    def test_single_quotes_passthrough(self) -> None:
+        """Single quotes are safe inside double-quoted IQL strings."""
+        assert escape_iql("it's fine") == "it's fine"
+
+    def test_parentheses_passthrough(self) -> None:
+        assert escape_iql("fn()") == "fn()"
+
+    def test_non_string_raises_type_error(self) -> None:
+        import pytest
+        with pytest.raises(TypeError, match="escape_iql expects a str"):
+            escape_iql(42)  # type: ignore[arg-type]

@@ -119,7 +119,11 @@ def kg_node(
                 await kg.delete(data)
             return {}
 
-        return {}
+        else:
+            raise ValueError(
+                f"kg_node: unknown operation {operation!r}. "
+                f"Expected 'query', 'insert', or 'delete'."
+            )
 
     # Preserve useful metadata for debugging
     label: str = operation
