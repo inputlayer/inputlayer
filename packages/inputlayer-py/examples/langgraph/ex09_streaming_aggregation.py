@@ -9,6 +9,7 @@ as a streaming policy engine.
 """
 
 import asyncio
+import contextlib
 from typing import Any
 
 from examples.langgraph._common import (
@@ -274,105 +275,105 @@ async def run():
         username=os.environ.get("INPUTLAYER_USER", "admin"),
         password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
     ) as il:
-        import contextlib
-
         with contextlib.suppress(Exception):
             await il.drop_knowledge_graph("lg_monitor")
         kg = il.knowledge_graph("lg_monitor")
+        try:
 
-        # ── Schema ───────────────────────────────────────────────────
+            # ── Schema ───────────────────────────────────────────────────
 
-        await kg.execute("+metric(ts: int, component: string, name: string, value: int)")
-        await kg.execute("+threshold(component: string, metric_name: string, max_val: int)")
+            await kg.execute("+metric(ts: int, component: string, name: string, value: int)")
+            await kg.execute("+threshold(component: string, metric_name: string, max_val: int)")
 
-        # ── Thresholds ───────────────────────────────────────────────
+            # ── Thresholds ───────────────────────────────────────────────
 
-        thresholds = [
-            ("api", "error_rate", 5),
-            ("api", "latency_p99", 500),
-            ("api", "rps", 500),  # minimum, not max, but we'll treat as max for simplicity
-            ("db", "connections", 90),
-            ("db", "query_time_ms", 100),
-            ("cache", "hit_rate", 70),  # inverted: below threshold is bad
-        ]
+            thresholds = [
+                ("api", "error_rate", 5),
+                ("api", "latency_p99", 500),
+                ("api", "rps", 500),  # minimum, not max, but we'll treat as max for simplicity
+                ("db", "connections", 90),
+                ("db", "query_time_ms", 100),
+                ("cache", "hit_rate", 70),  # inverted: below threshold is bad
+            ]
 
-        for comp, name, max_val in thresholds:
-            await kg.execute(f'+threshold("{escape_iql(comp)}", "{escape_iql(name)}", {max_val})')
+            for comp, name, max_val in thresholds:
+                await kg.execute(f'+threshold("{escape_iql(comp)}", "{escape_iql(name)}", {max_val})')
 
-        # ── Rules ────────────────────────────────────────────────────
+            # ── Rules ────────────────────────────────────────────────────
 
-        # Breach: metric exceeds threshold
-        await kg.execute(
-            "+breach(Ts, Component, Name, Value, Max) <- "
-            "metric(Ts, Component, Name, Value), "
-            "threshold(Component, Name, Max), "
-            "Value > Max"
-        )
+            # Breach: metric exceeds threshold
+            await kg.execute(
+                "+breach(Ts, Component, Name, Value, Max) <- "
+                "metric(Ts, Component, Name, Value), "
+                "threshold(Component, Name, Max), "
+                "Value > Max"
+            )
 
-        # Cascade: breaches on multiple components at same timestamp
-        await kg.execute(
-            "+cascade_alert(CompA, CompB) <- "
-            "breach(Ts, CompA, NameA, ValA, MaxA), "
-            "breach(Ts, CompB, NameB, ValB, MaxB), "
-            "CompA != CompB"
-        )
+            # Cascade: breaches on multiple components at same timestamp
+            await kg.execute(
+                "+cascade_alert(CompA, CompB) <- "
+                "breach(Ts, CompA, NameA, ValA, MaxA), "
+                "breach(Ts, CompB, NameB, ValB, MaxB), "
+                "CompA != CompB"
+            )
 
-        step(1, "Thresholds and rules defined")
-        for comp, name, max_val in thresholds:
-            print(f"  {DIM}{comp}.{name} <= {max_val}{RESET}")
-        print(f"{DIM}  Rules: breach, cascade_alert{RESET}")
+            step(1, "Thresholds and rules defined")
+            for comp, name, max_val in thresholds:
+                print(f"  {DIM}{comp}.{name} <= {max_val}{RESET}")
+            print(f"{DIM}  Rules: breach, cascade_alert{RESET}")
 
-        # ── Build graph ──────────────────────────────────────────────
+            # ── Build graph ──────────────────────────────────────────────
 
-        step(2, "Build monitoring pipeline")
-        print(
-            f"{DIM}  ingest -> check_breaches -> "
-            f"[breach: alert -> loop | ok: loop | done: report]{RESET}"
-        )
+            step(2, "Build monitoring pipeline")
+            print(
+                f"{DIM}  ingest -> check_breaches -> "
+                f"[breach: alert -> loop | ok: loop | done: report]{RESET}"
+            )
 
-        graph = StateGraph(MonitorState)
-        graph.add_node("ingest", ingest_metrics)
-        graph.add_node("check", check_breaches)
-        graph.add_node("alert", send_alert)
-        graph.add_node("report", generate_report)
+            graph = StateGraph(MonitorState)
+            graph.add_node("ingest", ingest_metrics)
+            graph.add_node("check", check_breaches)
+            graph.add_node("alert", send_alert)
+            graph.add_node("report", generate_report)
 
-        graph.set_entry_point("ingest")
-        graph.add_edge("ingest", "check")
-        graph.add_conditional_edges(
-            "check",
-            route_after_check,
-            {
-                "alert": "alert",
-                "next_batch": "ingest",
-                "report": "report",
-            },
-        )
-        graph.add_conditional_edges(
-            "alert",
-            check_more_batches,
-            {"next_batch": "ingest", "report": "report"},
-        )
-        graph.add_edge("report", END)
+            graph.set_entry_point("ingest")
+            graph.add_edge("ingest", "check")
+            graph.add_conditional_edges(
+                "check",
+                route_after_check,
+                {
+                    "alert": "alert",
+                    "next_batch": "ingest",
+                    "report": "report",
+                },
+            )
+            graph.add_conditional_edges(
+                "alert",
+                check_more_batches,
+                {"next_batch": "ingest", "report": "report"},
+            )
+            graph.add_edge("report", END)
 
-        app = graph.compile()
+            app = graph.compile()
 
-        # ── Run ──────────────────────────────────────────────────────
+            # ── Run ──────────────────────────────────────────────────────
 
-        step(3, f"Process {len(METRIC_BATCHES)} metric batches")
+            step(3, f"Process {len(METRIC_BATCHES)} metric batches")
 
-        await app.ainvoke(
-            {
-                "kg": kg,
-                "batch_index": 0,
-                "total_breaches": 0,
-                "alerts_sent": 0,
-                "remediations": [],
-                "results": [],
-            }
-        )
+            await app.ainvoke(
+                {
+                    "kg": kg,
+                    "batch_index": 0,
+                    "total_breaches": 0,
+                    "alerts_sent": 0,
+                    "remediations": [],
+                }
+            )
 
-        await il.drop_knowledge_graph("lg_monitor")
-        success("Done!")
+            success("Done!")
+        finally:
+            with contextlib.suppress(Exception):
+                await il.drop_knowledge_graph("lg_monitor")
 
 
 if __name__ == "__main__":

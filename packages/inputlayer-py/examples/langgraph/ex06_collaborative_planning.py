@@ -10,6 +10,7 @@ to each other directly, they write facts and rules reconcile them.
 """
 
 import asyncio
+import contextlib
 from typing import Any
 
 from examples.langgraph._common import (
@@ -232,90 +233,90 @@ async def run():
         username=os.environ.get("INPUTLAYER_USER", "admin"),
         password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
     ) as il:
-        import contextlib
-
         with contextlib.suppress(Exception):
             await il.drop_knowledge_graph("lg_planning")
         kg = il.knowledge_graph("lg_planning")
+        try:
 
-        # ── Schema ───────────────────────────────────────────────────
+            # ── Schema ───────────────────────────────────────────────────
 
-        await kg.execute(
-            "+plan_step(name: string, start_week: int, end_week: int, "
-            "team: string, depends_on: string, description: string)"
-        )
+            await kg.execute(
+                "+plan_step(name: string, start_week: int, end_week: int, "
+                "team: string, depends_on: string, description: string)"
+            )
 
-        # ── Conflict detection rules ─────────────────────────────────
+            # ── Conflict detection rules ─────────────────────────────────
 
-        # Rule: same step proposed with different timelines
-        await kg.execute(
-            "+schedule_conflict(Name, TeamA, StartA, TeamB, StartB) <- "
-            "plan_step(Name, StartA, EndA, TeamA, DepA, DescA), "
-            "plan_step(Name, StartB, EndB, TeamB, DepB, DescB), "
-            "TeamA != TeamB, StartA != StartB"
-        )
+            # Rule: same step proposed with different timelines
+            await kg.execute(
+                "+schedule_conflict(Name, TeamA, StartA, TeamB, StartB) <- "
+                "plan_step(Name, StartA, EndA, TeamA, DepA, DescA), "
+                "plan_step(Name, StartB, EndB, TeamB, DepB, DescB), "
+                "TeamA != TeamB, StartA != StartB"
+            )
 
-        # Rule: step starts before its dependency ends
-        await kg.execute(
-            "+dependency_issue(Step, DepStep, StepStart, DepEnd) <- "
-            "plan_step(Step, StepStart, StepEnd, Team, DepStep, Desc), "
-            "plan_step(DepStep, DepStart, DepEnd, DepTeam, DepDep, DepDesc), "
-            "StepStart <= DepEnd, "
-            'DepStep != "none"'
-        )
+            # Rule: step starts before its dependency ends
+            await kg.execute(
+                "+dependency_issue(Step, DepStep, StepStart, DepEnd) <- "
+                "plan_step(Step, StepStart, StepEnd, Team, DepStep, Desc), "
+                "plan_step(DepStep, DepStart, DepEnd, DepTeam, DepDep, DepDesc), "
+                "StepStart <= DepEnd, "
+                'DepStep != "none"'
+            )
 
-        step(1, "Three expert teams will propose plan steps")
-        print(f"  {CYAN}Engineering{RESET} | {MAGENTA}Product{RESET} | {YELLOW}Security{RESET}")
-        print(f"{DIM}  Rules detect: schedule conflicts, dependency violations{RESET}")
+            step(1, "Three expert teams will propose plan steps")
+            print(f"  {CYAN}Engineering{RESET} | {MAGENTA}Product{RESET} | {YELLOW}Security{RESET}")
+            print(f"{DIM}  Rules detect: schedule conflicts, dependency violations{RESET}")
 
-        # ── Build graph ──────────────────────────────────────────────
+            # ── Build graph ──────────────────────────────────────────────
 
-        step(2, "Build collaborative planning graph")
-        print(
-            f"{DIM}  [eng + product + security] -> detect_conflicts -> [resolve or finalize]{RESET}"
-        )
+            step(2, "Build collaborative planning graph")
+            print(
+                f"{DIM}  [eng + product + security] -> detect_conflicts -> [resolve or finalize]{RESET}"
+            )
 
-        graph = StateGraph(PlanState)
-        graph.add_node("engineering", engineering_expert)
-        graph.add_node("product", product_expert)
-        graph.add_node("security", security_expert)
-        graph.add_node("detect", detect_conflicts)
-        graph.add_node("resolve", resolve_conflicts)
-        graph.add_node("finalize", finalize_plan)
+            graph = StateGraph(PlanState)
+            graph.add_node("engineering", engineering_expert)
+            graph.add_node("product", product_expert)
+            graph.add_node("security", security_expert)
+            graph.add_node("detect", detect_conflicts)
+            graph.add_node("resolve", resolve_conflicts)
+            graph.add_node("finalize", finalize_plan)
 
-        # All experts run, then detect conflicts
-        graph.set_entry_point("engineering")
-        graph.add_edge("engineering", "product")
-        graph.add_edge("product", "security")
-        graph.add_edge("security", "detect")
+            # All experts run, then detect conflicts
+            graph.set_entry_point("engineering")
+            graph.add_edge("engineering", "product")
+            graph.add_edge("product", "security")
+            graph.add_edge("security", "detect")
 
-        graph.add_conditional_edges(
-            "detect",
-            route_after_conflict_check,
-            {"resolve": "resolve", "finalize": "finalize"},
-        )
-        graph.add_edge("resolve", "detect")
-        graph.add_edge("finalize", END)
+            graph.add_conditional_edges(
+                "detect",
+                route_after_conflict_check,
+                {"resolve": "resolve", "finalize": "finalize"},
+            )
+            graph.add_edge("resolve", "detect")
+            graph.add_edge("finalize", END)
 
-        app = graph.compile()
+            app = graph.compile()
 
-        # ── Run ──────────────────────────────────────────────────────
+            # ── Run ──────────────────────────────────────────────────────
 
-        step(3, "Execute planning session")
+            step(3, "Execute planning session")
 
-        await app.ainvoke(
-            {
-                "kg": kg,
-                "project": "New product launch",
-                "phase": "start",
-                "conflicts": [],
-                "iteration": 0,
-                "results": [],
-            }
-        )
+            await app.ainvoke(
+                {
+                    "kg": kg,
+                    "project": "New product launch",
+                    "phase": "start",
+                    "conflicts": [],
+                    "iteration": 0,
+                }
+            )
 
-        await il.drop_knowledge_graph("lg_planning")
-        success("Done!")
+            success("Done!")
+        finally:
+            with contextlib.suppress(Exception):
+                await il.drop_knowledge_graph("lg_planning")
 
 
 if __name__ == "__main__":

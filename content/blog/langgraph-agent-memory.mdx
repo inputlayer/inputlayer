@@ -29,18 +29,18 @@ And three rules that derive context automatically:
 ```
 // Active topics: what this conversation is about
 active_topic(ThreadId, Topic) <-
-    memory_topic(ThreadId, _, Topic).
+    memory_topic(ThreadId, _, Topic)
 
 // Relevant turns: messages cross-referenced by topic
 relevant_turn(ThreadId, TurnId, Role, Content, Topic) <-
     memory_turn(ThreadId, TurnId, Role, Content, _),
-    memory_topic(ThreadId, TurnId, Topic).
+    memory_topic(ThreadId, TurnId, Topic)
 
 // Topic threads: which topics are discussed together
 topic_thread(ThreadId, TopicA, TopicB) <-
     memory_topic(ThreadId, _, TopicA),
     memory_topic(ThreadId, _, TopicB),
-    TopicA != TopicB.
+    TopicA != TopicB
 ```
 
 That's it. These rules create a **live knowledge graph** of the conversation. When you add a new turn, InputLayer incrementally updates only the conclusions affected by the new facts. No full recomputation, no stale results.
@@ -180,12 +180,12 @@ The base ontology (turns + topics -> derived context) is a starting point. Here 
 has_response(ThreadId, TurnId) <-
     memory_turn(ThreadId, TurnId, "user", _, _),
     memory_turn(ThreadId, NextTurn, "assistant", _, _),
-    NextTurn > TurnId.
+    NextTurn > TurnId
 
 // Unresolved: user turns with no follow-up response
 unresolved(ThreadId, TurnId, Content) <-
     memory_turn(ThreadId, TurnId, "user", Content, _),
-    ~has_response(ThreadId, TurnId).
+    !has_response(ThreadId, TurnId)
 ```
 
 **Conversation phases.** Detect when the topic shifts:
@@ -195,7 +195,7 @@ topic_shift(ThreadId, TurnId, OldTopic, NewTopic) <-
     memory_topic(ThreadId, TurnId, NewTopic),
     memory_topic(ThreadId, PrevTurn, OldTopic),
     TurnId = PrevTurn + 1,
-    OldTopic != NewTopic.
+    OldTopic != NewTopic
 ```
 
 **Sentiment tracking.** If you extract sentiment as a topic:
@@ -204,7 +204,7 @@ topic_shift(ThreadId, TurnId, OldTopic, NewTopic) <-
 frustrated_user(ThreadId) <-
     memory_topic(ThreadId, TurnA, "frustrated"),
     memory_topic(ThreadId, TurnB, "frustrated"),
-    TurnA != TurnB.
+    TurnA != TurnB
 ```
 
 Each new rule extends your memory's reasoning capability without touching application code. The `recall()` method automatically picks up derived facts from any rule.

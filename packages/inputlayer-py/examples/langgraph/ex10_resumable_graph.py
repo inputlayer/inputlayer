@@ -11,6 +11,7 @@ pauses.
 """
 
 import asyncio
+import contextlib
 from typing import Any, TypedDict
 
 from examples.langgraph._common import (
@@ -104,86 +105,87 @@ async def run() -> None:
         username=os.environ.get("INPUTLAYER_USER", "admin"),
         password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
     ) as il:
-        import contextlib
-
         with contextlib.suppress(Exception):
             await il.drop_knowledge_graph("lg_resumable")
         kg = il.knowledge_graph("lg_resumable")
+        try:
 
-        # ── Setup ────────────────────────────────────────────────────
+            # ── Setup ────────────────────────────────────────────────────
 
-        step(1, "Create checkpointer backed by InputLayer KG")
-        checkpointer = InputLayerCheckpointer(kg=kg)
-        await checkpointer.setup()
-        print(f"  {DIM}Schema created in lg_resumable KG{RESET}")
+            step(1, "Create checkpointer backed by InputLayer KG")
+            checkpointer = InputLayerCheckpointer(kg=kg)
+            await checkpointer.setup()
+            print(f"  {DIM}Schema created in lg_resumable KG{RESET}")
 
-        # ── First run: run partially, then "crash" ───────────────────
+            # ── First run: run partially, then "crash" ───────────────────
 
-        step(2, "Run graph until step 2, then simulate a crash")
+            step(2, "Run graph until step 2, then simulate a crash")
 
-        thread_id = "workflow-001"
-        config = {"configurable": {"thread_id": thread_id}}
+            thread_id = "workflow-001"
+            config = {"configurable": {"thread_id": thread_id}}
 
-        # Build first graph instance with interrupt after step 2
-        # This naturally stops the graph at the checkpoint, simulating
-        # a clean shutdown / paused state.
-        app1 = build_graph(checkpointer, interrupt_after=["two"])
+            # Build first graph instance with interrupt after step 2
+            # This naturally stops the graph at the checkpoint, simulating
+            # a clean shutdown / paused state.
+            app1 = build_graph(checkpointer, interrupt_after=["two"])
 
-        print(f"\n  {WHITE}Process A starts:{RESET}")
-        await app1.ainvoke(
-            {
-                "task": "Generate quarterly report",
-                "steps_done": [],
-                "current_step": 0,
-            },
-            config=config,
-        )
-        print(f"\n  {YELLOW}!! Process A interrupted after step 2 !!{RESET}")
+            print(f"\n  {WHITE}Process A starts:{RESET}")
+            await app1.ainvoke(
+                {
+                    "task": "Generate quarterly report",
+                    "steps_done": [],
+                    "current_step": 0,
+                },
+                config=config,
+            )
+            print(f"\n  {YELLOW}!! Process A interrupted after step 2 !!{RESET}")
 
-        # Show what's in the checkpoint store
-        step(3, "Check what was persisted to the KG")
-        checkpoints = []
-        async for tup in checkpointer.alist(config):
-            checkpoints.append(tup)
-        print(
-            f"  {DIM}{len(checkpoints)} checkpoint(s) stored in KG for thread '{thread_id}'{RESET}"
-        )
-        if checkpoints:
-            latest = checkpoints[0]
-            steps_so_far = latest.checkpoint.get("channel_values", {}).get("steps_done", [])
-            print(f"  {DIM}Latest checkpoint steps: {steps_so_far}{RESET}")
+            # Show what's in the checkpoint store
+            step(3, "Check what was persisted to the KG")
+            checkpoints = []
+            async for tup in checkpointer.alist(config):
+                checkpoints.append(tup)
+            print(
+                f"  {DIM}{len(checkpoints)} checkpoint(s) stored in KG for thread '{thread_id}'{RESET}"
+            )
+            if checkpoints:
+                latest = checkpoints[0]
+                steps_so_far = latest.checkpoint.get("channel_values", {}).get("steps_done", [])
+                print(f"  {DIM}Latest checkpoint steps: {steps_so_far}{RESET}")
 
-        # ── Second run: resume in a fresh graph instance ─────────────
+            # ── Second run: resume in a fresh graph instance ─────────────
 
-        step(4, "Process B starts and resumes from checkpoint")
-        print(f"\n  {WHITE}Process B starts (new graph instance):{RESET}")
+            step(4, "Process B starts and resumes from checkpoint")
+            print(f"\n  {WHITE}Process B starts (new graph instance):{RESET}")
 
-        # Build a brand new graph instance, same checkpointer
-        app2 = build_graph(checkpointer)
+            # Build a brand new graph instance, same checkpointer
+            app2 = build_graph(checkpointer)
 
-        # Resuming: pass None as input, the checkpointer loads state
-        result = await app2.ainvoke(None, config=config)
+            # Resuming: pass None as input, the checkpointer loads state
+            result = await app2.ainvoke(None, config=config)
 
-        # ── Results ──────────────────────────────────────────────────
+            # ── Results ──────────────────────────────────────────────────
 
-        step(5, "Final state after resume")
-        all_steps = result.get("steps_done", [])
-        print(f"\n  {GREEN}Completed {len(all_steps)} steps:{RESET}")
-        for i, s in enumerate(all_steps, 1):
-            print(f"    {GREEN}{i}.{RESET} {s}")
+            step(5, "Final state after resume")
+            all_steps = result.get("steps_done", [])
+            print(f"\n  {GREEN}Completed {len(all_steps)} steps:{RESET}")
+            for i, s in enumerate(all_steps, 1):
+                print(f"    {GREEN}{i}.{RESET} {s}")
 
-        # Show the full checkpoint history
-        step(6, "Full checkpoint history")
-        all_checkpoints = []
-        async for tup in checkpointer.alist(config):
-            all_checkpoints.append(tup)
-        print(f"  {DIM}{len(all_checkpoints)} total checkpoints across both runs{RESET}")
-        print(f"  {DIM}This is the audit trail. You can resume from ANY of these{RESET}")
+            # Show the full checkpoint history
+            step(6, "Full checkpoint history")
+            all_checkpoints = []
+            async for tup in checkpointer.alist(config):
+                all_checkpoints.append(tup)
+            print(f"  {DIM}{len(all_checkpoints)} total checkpoints across both runs{RESET}")
+            print(f"  {DIM}This is the audit trail. You can resume from ANY of these{RESET}")
 
-        # ── Cleanup ──────────────────────────────────────────────────
+            # ── Cleanup ──────────────────────────────────────────────────
 
-        await il.drop_knowledge_graph("lg_resumable")
-        success("Done!")
+            success("Done!")
+        finally:
+            with contextlib.suppress(Exception):
+                await il.drop_knowledge_graph("lg_resumable")
 
 
 if __name__ == "__main__":

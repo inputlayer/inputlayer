@@ -8,6 +8,7 @@ Shows InputLayer as a declarative policy layer for agentic workflows.
 """
 
 import asyncio
+import contextlib
 from typing import Any
 
 from examples.langgraph._common import (
@@ -143,145 +144,145 @@ async def run():
         username=os.environ.get("INPUTLAYER_USER", "admin"),
         password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
     ) as il:
-        import contextlib
-
         with contextlib.suppress(Exception):
             await il.drop_knowledge_graph("lg_hitl")
         kg = il.knowledge_graph("lg_hitl")
+        try:
 
-        # ── Setup policy rules ───────────────────────────────────────
+            # ── Setup policy rules ───────────────────────────────────────
 
-        await kg.execute(
-            "+pending_action(action_type: string, description: string, amount: int, target: string)"
-        )
-        await kg.execute(
-            "+risk_flag(action_type: string, amount: int, "
-            "target: string, level: string, reason: string)"
-        )
-        await kg.execute("+approved_vendor(name: string)")
-        await kg.execute("+spending_limit(action_type: string, max_amount: int)")
+            await kg.execute(
+                "+pending_action(action_type: string, description: string, amount: int, target: string)"
+            )
+            await kg.execute(
+                "+risk_flag(action_type: string, amount: int, "
+                "target: string, level: string, reason: string)"
+            )
+            await kg.execute("+approved_vendor(name: string)")
+            await kg.execute("+spending_limit(action_type: string, max_amount: int)")
 
-        # Policy data
-        await kg.execute(
-            '+approved_vendor[("Acme Corp", ), ("CloudHost Inc", ), ("DataPipe LLC", )]'
-        )
-        await kg.execute(
-            '+spending_limit[("purchase", 10000), ("subscription", 5000), ("transfer", 25000)]'
-        )
+            # Policy data
+            await kg.execute(
+                '+approved_vendor[("Acme Corp", ), ("CloudHost Inc", ), ("DataPipe LLC", )]'
+            )
+            await kg.execute(
+                '+spending_limit[("purchase", 10000), ("subscription", 5000), ("transfer", 25000)]'
+            )
 
-        # Rule: over spending limit -> high risk
-        await kg.execute(
-            '+risk_flag(Type, Amount, Target, "high", "Over spending limit") <- '
-            "pending_action(Type, Desc, Amount, Target), "
-            "spending_limit(Type, MaxAmt), Amount > MaxAmt"
-        )
+            # Rule: over spending limit -> high risk
+            await kg.execute(
+                '+risk_flag(Type, Amount, Target, "high", "Over spending limit") <- '
+                "pending_action(Type, Desc, Amount, Target), "
+                "spending_limit(Type, MaxAmt), Amount > MaxAmt"
+            )
 
-        step(1, "Policy rules defined")
-        print(f"{DIM}  spending_limit: purchase=$10K, subscription=$5K, transfer=$25K{RESET}")
-        print(f"{DIM}  risk_flag: amount > limit -> high risk -> needs approval{RESET}")
+            step(1, "Policy rules defined")
+            print(f"{DIM}  spending_limit: purchase=$10K, subscription=$5K, transfer=$25K{RESET}")
+            print(f"{DIM}  risk_flag: amount > limit -> high risk -> needs approval{RESET}")
 
-        # ── Define actions to process ────────────────────────────────
+            # ── Define actions to process ────────────────────────────────
 
-        actions = [
-            {
-                "type": "purchase",
-                "description": "Office supplies",
-                "amount": 500,
-                "target": "Acme Corp",
-            },
-            {
-                "type": "purchase",
-                "description": "New server hardware",
-                "amount": 25000,
-                "target": "CloudHost Inc",
-            },
-            {
-                "type": "subscription",
-                "description": "Annual SaaS license",
-                "amount": 3000,
-                "target": "DataPipe LLC",
-            },
-            {
-                "type": "transfer",
-                "description": "Vendor payment Q1",
-                "amount": 75000,
-                "target": "External LLC",
-            },
-            {
-                "type": "subscription",
-                "description": "Premium API access",
-                "amount": 8000,
-                "target": "AI Service Co",
-            },
-        ]
+            actions = [
+                {
+                    "type": "purchase",
+                    "description": "Office supplies",
+                    "amount": 500,
+                    "target": "Acme Corp",
+                },
+                {
+                    "type": "purchase",
+                    "description": "New server hardware",
+                    "amount": 25000,
+                    "target": "CloudHost Inc",
+                },
+                {
+                    "type": "subscription",
+                    "description": "Annual SaaS license",
+                    "amount": 3000,
+                    "target": "DataPipe LLC",
+                },
+                {
+                    "type": "transfer",
+                    "description": "Vendor payment Q1",
+                    "amount": 75000,
+                    "target": "External LLC",
+                },
+                {
+                    "type": "subscription",
+                    "description": "Premium API access",
+                    "amount": 8000,
+                    "target": "AI Service Co",
+                },
+            ]
 
-        # ── Build graph ──────────────────────────────────────────────
+            # ── Build graph ──────────────────────────────────────────────
 
-        step(2, "Build the approval workflow graph")
-        print(f"{DIM}  pick_action -> classify -> [safe: execute | risky: review] -> loop{RESET}")
+            step(2, "Build the approval workflow graph")
+            print(f"{DIM}  pick_action -> classify -> [safe: execute | risky: review] -> loop{RESET}")
 
-        graph = StateGraph(ActionState)
-        graph.add_node("pick", pick_next_action)
-        graph.add_node("execute", auto_execute)
-        graph.add_node("review", request_approval)
+            graph = StateGraph(ActionState)
+            graph.add_node("pick", pick_next_action)
+            graph.add_node("execute", auto_execute)
+            graph.add_node("review", request_approval)
 
-        graph.set_entry_point("pick")
-        graph.add_conditional_edges(
-            "pick",
-            classify_action,
-            {
-                "auto_approve": "execute",
-                "needs_approval": "review",
-                "done": END,
-            },
-        )
-        graph.add_conditional_edges(
-            "execute",
-            check_more_actions,
-            {"next": "pick", "done": END},
-        )
-        graph.add_conditional_edges(
-            "review",
-            check_more_actions,
-            {"next": "pick", "done": END},
-        )
+            graph.set_entry_point("pick")
+            graph.add_conditional_edges(
+                "pick",
+                classify_action,
+                {
+                    "auto_approve": "execute",
+                    "needs_approval": "review",
+                    "done": END,
+                },
+            )
+            graph.add_conditional_edges(
+                "execute",
+                check_more_actions,
+                {"next": "pick", "done": END},
+            )
+            graph.add_conditional_edges(
+                "review",
+                check_more_actions,
+                {"next": "pick", "done": END},
+            )
 
-        app = graph.compile()
+            app = graph.compile()
 
-        # ── Run ──────────────────────────────────────────────────────
+            # ── Run ──────────────────────────────────────────────────────
 
-        step(3, f"Process {len(actions)} actions")
+            step(3, f"Process {len(actions)} actions")
 
-        result = await app.ainvoke(
-            {
-                "kg": kg,
-                "actions": actions,
-                "current_action": {},
-                "approved": [],
-                "rejected": [],
-                "executed": [],
-                "action_index": 0,
-                "results": [],
-            }
-        )
+            result = await app.ainvoke(
+                {
+                    "kg": kg,
+                    "actions": actions,
+                    "current_action": {},
+                    "approved": [],
+                    "rejected": [],
+                    "executed": [],
+                    "action_index": 0,
+                }
+            )
 
-        # ── Summary ──────────────────────────────────────────────────
+            # ── Summary ──────────────────────────────────────────────────
 
-        step(4, "Summary")
-        print(f"\n  {GREEN}Auto-executed ({len(result['executed'])}):{RESET}")
-        for a in result["executed"]:
-            print(f"    {GREEN}ok{RESET} {a}")
+            step(4, "Summary")
+            print(f"\n  {GREEN}Auto-executed ({len(result['executed'])}):{RESET}")
+            for a in result["executed"]:
+                print(f"    {GREEN}ok{RESET} {a}")
 
-        print(f"\n  {YELLOW}Approved after review ({len(result['approved'])}):{RESET}")
-        for a in result["approved"]:
-            print(f"    {YELLOW}ok{RESET} {a}")
+            print(f"\n  {YELLOW}Approved after review ({len(result['approved'])}):{RESET}")
+            for a in result["approved"]:
+                print(f"    {YELLOW}ok{RESET} {a}")
 
-        print(f"\n  {RED}Rejected ({len(result['rejected'])}):{RESET}")
-        for a in result["rejected"]:
-            print(f"    {RED}x{RESET} {a}")
+            print(f"\n  {RED}Rejected ({len(result['rejected'])}):{RESET}")
+            for a in result["rejected"]:
+                print(f"    {RED}x{RESET} {a}")
 
-        await il.drop_knowledge_graph("lg_hitl")
-        success("Done!")
+            success("Done!")
+        finally:
+            with contextlib.suppress(Exception):
+                await il.drop_knowledge_graph("lg_hitl")
 
 
 if __name__ == "__main__":

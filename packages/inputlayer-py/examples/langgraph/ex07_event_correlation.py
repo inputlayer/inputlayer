@@ -11,6 +11,7 @@ re-evaluation of all correlations without any manual bookkeeping.
 """
 
 import asyncio
+import contextlib
 from typing import Any
 
 from examples.langgraph._common import (
@@ -218,107 +219,107 @@ async def run():
         username=os.environ.get("INPUTLAYER_USER", "admin"),
         password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
     ) as il:
-        import contextlib
-
         with contextlib.suppress(Exception):
             await il.drop_knowledge_graph("lg_events")
         kg = il.knowledge_graph("lg_events")
+        try:
 
-        # ── Schema ───────────────────────────────────────────────────
+            # ── Schema ───────────────────────────────────────────────────
 
-        await kg.execute(
-            "+event(id: int, component: string, severity: string, "
-            "event_type: string, message: string)"
-        )
+            await kg.execute(
+                "+event(id: int, component: string, severity: string, "
+                "event_type: string, message: string)"
+            )
 
-        # ── Correlation rules ────────────────────────────────────────
+            # ── Correlation rules ────────────────────────────────────────
 
-        # Rule: deploy followed by errors on same component = failed deploy
-        await kg.execute(
-            '+incident("failed_deploy", Component, '
-            '"Deploy followed by errors") <- '
-            'event(IdA, Component, "info", "deploy", MsgA), '
-            'event(IdB, Component, "error", TypeB, MsgB), '
-            "IdB > IdA"
-        )
+            # Rule: deploy followed by errors on same component = failed deploy
+            await kg.execute(
+                '+incident("failed_deploy", Component, '
+                '"Deploy followed by errors") <- '
+                'event(IdA, Component, "info", "deploy", MsgA), '
+                'event(IdB, Component, "error", TypeB, MsgB), '
+                "IdB > IdA"
+            )
 
-        # Rule: errors on multiple components = cascade
-        await kg.execute(
-            '+incident("cascade", CompA, '
-            '"Errors spreading across components") <- '
-            'event(IdA, CompA, "error", TypeA, MsgA), '
-            'event(IdB, CompB, "error", TypeB, MsgB), '
-            "CompA != CompB"
-        )
+            # Rule: errors on multiple components = cascade
+            await kg.execute(
+                '+incident("cascade", CompA, '
+                '"Errors spreading across components") <- '
+                'event(IdA, CompA, "error", TypeA, MsgA), '
+                'event(IdB, CompB, "error", TypeB, MsgB), '
+                "CompA != CompB"
+            )
 
-        # Rule: warning then error on same component = escalation
-        await kg.execute(
-            '+warning_pattern("escalation", Component, '
-            '"Warning escalated to error") <- '
-            'event(IdA, Component, "warn", TypeA, MsgA), '
-            'event(IdB, Component, "error", TypeB, MsgB), '
-            "IdB > IdA"
-        )
+            # Rule: warning then error on same component = escalation
+            await kg.execute(
+                '+warning_pattern("escalation", Component, '
+                '"Warning escalated to error") <- '
+                'event(IdA, Component, "warn", TypeA, MsgA), '
+                'event(IdB, Component, "error", TypeB, MsgB), '
+                "IdB > IdA"
+            )
 
-        # Rule: pager alert = critical incident
-        await kg.execute(
-            '+incident("pager", Component, '
-            '"PagerDuty alert triggered") <- '
-            'event(Id, Component, "alert", "pager", Msg)'
-        )
+            # Rule: pager alert = critical incident
+            await kg.execute(
+                '+incident("pager", Component, '
+                '"PagerDuty alert triggered") <- '
+                'event(Id, Component, "alert", "pager", Msg)'
+            )
 
-        # Rule: recovery event after error = resolved
-        await kg.execute(
-            "+resolved_incident(Component) <- "
-            'event(IdA, Component, "error", TypeA, MsgA), '
-            'event(IdB, Component, "info", "recovery", MsgB), '
-            "IdB > IdA"
-        )
+            # Rule: recovery event after error = resolved
+            await kg.execute(
+                "+resolved_incident(Component) <- "
+                'event(IdA, Component, "error", TypeA, MsgA), '
+                'event(IdB, Component, "info", "recovery", MsgB), '
+                "IdB > IdA"
+            )
 
-        step(1, "Correlation rules defined")
-        print(f"{DIM}  deploy + error -> failed_deploy{RESET}")
-        print(f"{DIM}  multi-component errors -> cascade{RESET}")
-        print(f"{DIM}  warn + error -> escalation{RESET}")
-        print(f"{DIM}  pager alert -> critical incident{RESET}")
-        print(f"{DIM}  error + recovery -> resolved{RESET}")
+            step(1, "Correlation rules defined")
+            print(f"{DIM}  deploy + error -> failed_deploy{RESET}")
+            print(f"{DIM}  multi-component errors -> cascade{RESET}")
+            print(f"{DIM}  warn + error -> escalation{RESET}")
+            print(f"{DIM}  pager alert -> critical incident{RESET}")
+            print(f"{DIM}  error + recovery -> resolved{RESET}")
 
-        # ── Build graph ──────────────────────────────────────────────
+            # ── Build graph ──────────────────────────────────────────────
 
-        step(2, "Build event processing pipeline")
-        print(f"{DIM}  ingest_batch -> check_patterns -> [more batches? loop : summarize]{RESET}")
+            step(2, "Build event processing pipeline")
+            print(f"{DIM}  ingest_batch -> check_patterns -> [more batches? loop : summarize]{RESET}")
 
-        graph = StateGraph(EventState)
-        graph.add_node("ingest", ingest_events)
-        graph.add_node("check", check_patterns)
-        graph.add_node("summarize", summarize_incidents)
+            graph = StateGraph(EventState)
+            graph.add_node("ingest", ingest_events)
+            graph.add_node("check", check_patterns)
+            graph.add_node("summarize", summarize_incidents)
 
-        graph.set_entry_point("ingest")
-        graph.add_edge("ingest", "check")
-        graph.add_conditional_edges(
-            "check",
-            route_events,
-            {"next_batch": "ingest", "summarize": "summarize"},
-        )
-        graph.add_edge("summarize", END)
+            graph.set_entry_point("ingest")
+            graph.add_edge("ingest", "check")
+            graph.add_conditional_edges(
+                "check",
+                route_events,
+                {"next_batch": "ingest", "summarize": "summarize"},
+            )
+            graph.add_edge("summarize", END)
 
-        app = graph.compile()
+            app = graph.compile()
 
-        # ── Run ──────────────────────────────────────────────────────
+            # ── Run ──────────────────────────────────────────────────────
 
-        step(3, "Process event stream (4 batches)")
+            step(3, "Process event stream (4 batches)")
 
-        await app.ainvoke(
-            {
-                "kg": kg,
-                "event_batch": 0,
-                "incidents_found": 0,
-                "summary": "",
-                "results": [],
-            }
-        )
+            await app.ainvoke(
+                {
+                    "kg": kg,
+                    "event_batch": 0,
+                    "incidents_found": 0,
+                    "summary": "",
+                }
+            )
 
-        await il.drop_knowledge_graph("lg_events")
-        success("Done!")
+            success("Done!")
+        finally:
+            with contextlib.suppress(Exception):
+                await il.drop_knowledge_graph("lg_events")
 
 
 if __name__ == "__main__":

@@ -39,7 +39,9 @@ def kg_node(
             state_key="articles",
         )
 
-    **Insert mode.** Reads data from state and inserts into the KG::
+    **Insert mode.** Reads data from state and inserts into the KG.
+    Accepts a list of dicts, list of Relation instances, a single dict,
+    or a single Relation instance::
 
         store = kg_node(
             relation=Finding,
@@ -97,11 +99,14 @@ def kg_node(
                     await kg.insert(data)
             elif isinstance(data, dict):
                 await kg.insert(relation, data)
+            else:
+                # Single Relation instance: wrap in list for kg.insert
+                await kg.insert([data])
             return {}
 
         elif operation == "delete":
             data = state.get(state_key)
-            if data is None:
+            if not data:
                 return {}
             if isinstance(data, list):
                 for item in data:

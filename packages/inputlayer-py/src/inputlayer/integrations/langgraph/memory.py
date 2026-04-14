@@ -86,7 +86,8 @@ class InputLayerMemory:
 
     Thread safety: a single instance can be shared across coroutines.
     ``setup()`` is guarded by a lock; ``astore()`` uses a per-thread lock
-    to ensure turn IDs are sequential within each thread.
+    to ensure turn IDs are sequential within each thread without blocking
+    unrelated threads.
 
     Process restart safety: the turn counter is initialized from the KG
     on the first store for each thread, so IDs continue correctly after
@@ -103,7 +104,8 @@ class InputLayerMemory:
         self._setup_done = False
         self._setup_lock = asyncio.Lock()
         self._turn_counters: dict[str, int] = {}
-        self._counter_lock = asyncio.Lock()
+        self._thread_locks: dict[str, asyncio.Lock] = {}
+        self._thread_locks_guard = asyncio.Lock()
 
     # ── Setup ────────────────────────────────────────────────────────
 
@@ -167,14 +169,23 @@ class InputLayerMemory:
 
     # ── Internal: turn counter ───────────────────────────────────────
 
+    async def _get_thread_lock(self, thread_id: str) -> asyncio.Lock:
+        """Get or create a per-thread lock (creating is guarded by a guard lock)."""
+        async with self._thread_locks_guard:
+            if thread_id not in self._thread_locks:
+                self._thread_locks[thread_id] = asyncio.Lock()
+            return self._thread_locks[thread_id]
+
     async def _next_turn_id(self, thread_id: str) -> int:
         """Return the next turn_id for a thread, initializing from the KG if needed.
 
         Initializes the counter from the stored max turn_id on the first call
         for each thread, so the counter resumes correctly after a process restart.
-        Guarded by a lock so concurrent callers get distinct IDs.
+        Uses a per-thread lock so concurrent calls on different threads don't block
+        each other.
         """
-        async with self._counter_lock:
+        lock = await self._get_thread_lock(thread_id)
+        async with lock:
             if thread_id not in self._turn_counters:
                 # Query the KG for the current max turn_id for this thread
                 r = await self.kg.execute(

@@ -17,7 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 pandas = ["pandas>=1.5"]
 langchain = ["langchain-core>=0.3"]
-langgraph = ["langgraph>=0.2", "langchain-core>=0.3", "langchain-openai>=1.0"]
+langgraph = ["langgraph>=0.2", "langchain-core>=0.3"]
 all = [
     "inputlayer-client-dev[pandas,langchain,langgraph]",
 ]
@@ -27,6 +27,7 @@ dev = [
     "pandas>=1.5",
     "langchain-core>=0.3",
     "langchain-openai>=1.0",
+    "langgraph>=0.2",
     "ruff>=0.8",
     "mypy>=1.13",
 ]

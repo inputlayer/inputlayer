@@ -941,7 +941,12 @@ class KnowledgeGraph:
         result = await self._execute(f".why_not {rel_name}({vals_str})")
         text = "\n".join(str(row[0]) for row in result.rows)
         raw_graphs = getattr(result, "proof_trees", None) or []
-        explanation = ProofTree.from_dict(raw_graphs[0]) if raw_graphs and isinstance(raw_graphs[0], dict) else (raw_graphs[0] if raw_graphs else None)
+        if raw_graphs and isinstance(raw_graphs[0], dict):
+            explanation = ProofTree.from_dict(raw_graphs[0])
+        elif raw_graphs:
+            explanation = raw_graphs[0]
+        else:
+            explanation = None
         return WhyNotResult(text=text, explanation=explanation)
 
     async def compact(self) -> None:

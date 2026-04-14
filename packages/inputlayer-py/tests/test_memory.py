@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+import pytest
+
 from inputlayer.integrations.langgraph import InputLayerMemory
 from inputlayer.result import ResultSet
 
@@ -34,24 +36,28 @@ class MockMemoryKG:
 
         # Insert memory_turn
         if iql.startswith("+memory_turn("):
+            _STR = r'((?:[^"\\]|\\.)*)'  # matches escaped strings like thread-\"x\"
             m = re.match(
-                r'\+memory_turn\("([^"]*)", (\d+), "([^"]*)", "((?:[^"\\]|\\.)*)", (\d+)\)',
+                rf'\+memory_turn\("{_STR}", (\d+), "{_STR}", "{_STR}", (\d+)\)',
                 iql,
             )
             if m:
-                thread_id = m.group(1)
+                thread_id = self._unescape(m.group(1))
                 turn_id = int(m.group(2))
-                role = m.group(3)
-                content = m.group(4).replace('\\"', '"').replace("\\\\", "\\")
+                role = self._unescape(m.group(3))
+                content = self._unescape(m.group(4))
                 ts = int(m.group(5))
                 self.turns.append((thread_id, turn_id, role, content, ts))
             return ResultSet(columns=[], rows=[])
 
         # Insert memory_topic
         if iql.startswith("+memory_topic("):
-            m = re.match(r'\+memory_topic\("([^"]*)", (\d+), "([^"]*)"\)', iql)
+            _STR = r'((?:[^"\\]|\\.)*)'
+            m = re.match(rf'\+memory_topic\("{_STR}", (\d+), "{_STR}"\)', iql)
             if m:
-                self.topics.append((m.group(1), int(m.group(2)), m.group(3)))
+                self.topics.append(
+                    (self._unescape(m.group(1)), int(m.group(2)), self._unescape(m.group(3)))
+                )
             return ResultSet(columns=[], rows=[])
 
         # Query active_topic
@@ -89,22 +95,34 @@ class MockMemoryKG:
                 rows=rows,
             )
 
-        # Query topic_thread
+        # Query topic_thread - returns raw cross-product pairs (like the real
+        # Datalog rule), so the production code's dedup logic is exercised.
         if iql.startswith("?topic_thread("):
             thread_id = self._extract_thread(iql)
-            thread_topics = {t[2] for t in self.topics if t[0] == thread_id}
+            thread_topic_entries = [(t[1], t[2]) for t in self.topics if t[0] == thread_id]
             rows = []
-            topic_list = sorted(thread_topics)
-            for i, a in enumerate(topic_list):
-                for b in topic_list[i + 1 :]:
-                    rows.append([thread_id, a, b])
+            for _, topic_a in thread_topic_entries:
+                for _, topic_b in thread_topic_entries:
+                    if topic_a != topic_b:
+                        rows.append([thread_id, topic_a, topic_b])
             return ResultSet(columns=["thread_id", "topic_a", "topic_b"], rows=rows)
 
         return ResultSet(columns=[], rows=[])
 
     def _extract_thread(self, iql: str) -> str:
-        m = re.search(r'"([^"]+)"', iql)
-        return m.group(1) if m else ""
+        m = re.search(r'"((?:[^"\\]|\\.)*)"', iql)
+        return self._unescape(m.group(1)) if m else ""
+
+    @staticmethod
+    def _unescape(s: str) -> str:
+        r"""Reverse escape_iql using single-pass regex.
+
+        Sequential .replace() can't distinguish \\n (escaped backslash + n)
+        from \n (escaped newline). A single-pass regex handles this correctly
+        by consuming each \X escape exactly once left-to-right.
+        """
+        _MAP = {"\\": "\\", '"': '"', "n": "\n", "r": "\r", "t": "\t", "0": "\0"}
+        return re.sub(r"\\(.)", lambda m: _MAP.get(m.group(1), "\\" + m.group(1)), s)
 
 
 # ── Tests ────────────────────────────────────────────────────────────
@@ -239,6 +257,17 @@ class TestRecall:
         flat = {item for pair in ctx["related_topics"] for item in pair}
         assert "python" in flat
         assert "ml" in flat
+
+    async def test_recall_related_topics_deduplicated(self) -> None:
+        """Multiple turns with the same topic pair must not produce duplicate pairs."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        # Two turns both mentioning python + ml = same topic pair appears twice in raw data
+        await mem.astore("t", "user", "Python ML is great", topics=["python", "ml"])
+        await mem.astore("t", "user", "More Python ML work", topics=["python", "ml"])
+        ctx = await mem.arecall("t")
+        # Dedup: should only have one (ml, python) pair despite two turns
+        assert len(ctx["related_topics"]) == 1
 
     async def test_recall_max_recent(self) -> None:
         kg = MockMemoryKG()
@@ -394,3 +423,127 @@ class TestEscaping:
         ]
         assert len(topic_calls) == 1
         assert r'say \"hi\"' in topic_calls[0]
+
+    async def test_special_chars_round_trip(self) -> None:
+        """Store with special chars in thread_id and content, then recall and verify."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        thread_id = 'user-"alice"'
+        content = 'She said "hello\\world"\nand left'
+        await mem.astore(thread_id, "user", content, topics=["test"])
+
+        # Verify the mock parsed and stored the unescaped values correctly
+        assert len(kg.turns) == 1
+        assert kg.turns[0][0] == thread_id
+        assert kg.turns[0][3] == content
+
+        # Round-trip: recall should find the data
+        ctx = await mem.arecall(thread_id)
+        assert len(ctx["recent"]) == 1
+        assert ctx["recent"][0]["content"] == content
+        assert "test" in ctx["topics"]
+
+    async def test_backslash_n_vs_newline_round_trip(self) -> None:
+        r"""Literal backslash+n (\n) must not become a newline on round-trip.
+
+        escape_iql turns \ into \\ and \n into \\n.  A naive sequential
+        unescape would turn \\n back into \n (newline) instead of \+n.
+        The single-pass regex in _unescape handles this correctly.
+        """
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        # Literal backslash followed by 'n', NOT a newline
+        content = "path\\name"
+        await mem.astore("t", "user", content, topics=["test"])
+
+        assert len(kg.turns) == 1
+        assert kg.turns[0][3] == content  # must be backslash + n, not newline
+
+        ctx = await mem.arecall("t")
+        assert ctx["recent"][0]["content"] == content
+
+
+class TestStrictMode:
+    async def test_store_node_strict_missing_thread_id_raises(self) -> None:
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        node = mem.store_node(strict=True)
+        with pytest.raises(ValueError, match="thread_id"):
+            await node({"new_message": {"role": "user", "content": "hi"}})
+
+    async def test_recall_node_strict_missing_thread_id_raises(self) -> None:
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        node = mem.recall_node(strict=True)
+        with pytest.raises(ValueError, match="thread_id"):
+            await node({})
+
+    async def test_store_node_missing_thread_id_falls_back_to_default(self) -> None:
+        """Non-strict mode falls back to thread_id='default' with a warning."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        node = mem.store_node()  # strict=False is default
+
+        result = await node({"new_message": {"role": "user", "content": "hello"}})
+
+        assert result == {}
+        assert len(kg.turns) == 1
+        assert kg.turns[0][0] == "default"
+
+    async def test_recall_node_missing_thread_id_falls_back_to_default(self) -> None:
+        """Non-strict recall falls back to thread_id='default' with a warning."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        await mem.astore("default", "user", "Hello Python")
+
+        node = mem.recall_node()  # strict=False is default
+        result = await node({})
+
+        assert "context" in result
+        assert len(result["context"]["recent"]) == 1
+
+    async def test_store_node_non_dict_message_is_skipped(self) -> None:
+        """Non-dict messages (e.g., LangChain objects) must be skipped, not crash."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        node = mem.store_node()
+        result = await node({"thread_id": "t", "new_message": "plain string"})
+        assert result == {}
+        assert len(kg.turns) == 0
+
+    async def test_process_restart_counter_resumes_from_kg(self) -> None:
+        """Turn counter must resume from KG state, not reset to 1 after restart."""
+        kg = MockMemoryKG()
+        mem1 = InputLayerMemory(kg=kg)
+        await mem1.astore("t", "user", "first")
+        await mem1.astore("t", "user", "second")
+
+        # Simulate process restart: new instance, same KG
+        mem2 = InputLayerMemory(kg=kg)
+        turn_id = await mem2.astore("t", "user", "third after restart")
+        assert turn_id == 3  # must continue from 2, not restart at 1
+
+    async def test_concurrent_threads_dont_block_each_other(self) -> None:
+        """Per-thread locks must not block unrelated threads."""
+        import asyncio
+
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+
+        results = {}
+
+        async def store_in_thread(thread_id: str, n: int) -> None:
+            for _ in range(n):
+                await mem.astore(thread_id, "user", "msg")
+            ctx = await mem.arecall(thread_id)
+            results[thread_id] = len(ctx["recent"])
+
+        await asyncio.gather(
+            store_in_thread("thread-a", 3),
+            store_in_thread("thread-b", 3),
+            store_in_thread("thread-c", 3),
+        )
+
+        assert results["thread-a"] == 3
+        assert results["thread-b"] == 3
+        assert results["thread-c"] == 3

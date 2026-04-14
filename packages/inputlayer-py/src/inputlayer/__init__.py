@@ -53,8 +53,8 @@ from inputlayer.index import HnswIndex
 from inputlayer.knowledge_graph import (
     ClearResult,
     ColumnInfo,
-    DeleteResult,
     DebugResult,
+    DeleteResult,
     IndexInfo,
     IndexStats,
     InsertResult,

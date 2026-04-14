@@ -65,7 +65,15 @@ def iql_literal(value: Any) -> str:
             )
         return repr(value)
     if isinstance(value, str):
-        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        escaped = (
+            value
+            .replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t")
+            .replace("\x00", "\\0")
+        )
         return f'"{escaped}"'
     if isinstance(value, (list, tuple)):
         if not all(

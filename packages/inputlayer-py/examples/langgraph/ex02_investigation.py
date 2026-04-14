@@ -9,6 +9,7 @@ Shows incremental fact accumulation with rule-driven decision making.
 """
 
 import asyncio
+import contextlib
 from typing import Any
 
 from examples.langgraph._common import (
@@ -211,121 +212,121 @@ async def run():
         username=os.environ.get("INPUTLAYER_USER", "admin"),
         password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
     ) as il:
-        import contextlib
-
         with contextlib.suppress(Exception):
             await il.drop_knowledge_graph("lg_investigation")
         kg = il.knowledge_graph("lg_investigation")
+        try:
 
-        # ── Setup schema and rules ───────────────────────────────────
+            # ── Setup schema and rules ───────────────────────────────────
 
-        await kg.execute("+evidence(person: string, evidence_type: string, detail: string)")
-        await kg.execute("+source_checked(source: string)")
+            await kg.execute("+evidence(person: string, evidence_type: string, detail: string)")
+            await kg.execute("+source_checked(source: string)")
 
-        # Rule: suspicious patterns
-        await kg.execute(
-            '+suspicious_pattern(Person, "large_transaction") <- '
-            'evidence(Person, "large_transaction", Detail)'
-        )
-        await kg.execute(
-            '+suspicious_pattern(Person, "after_hours_access") <- '
-            'evidence(Person, "after_hours_access", Detail)'
-        )
-        await kg.execute(
-            '+suspicious_pattern(Person, "encrypted_communications") <- '
-            'evidence(Person, "encrypted_msg", Detail)'
-        )
-        await kg.execute(
-            '+suspicious_pattern(Person, "data_destruction") <- '
-            'evidence(Person, "deleted_emails", Detail)'
-        )
-        await kg.execute(
-            '+suspicious_pattern(Person, "financial_stress") <- '
-            'evidence(Person, "financial_stress", Detail)'
-        )
+            # Rule: suspicious patterns
+            await kg.execute(
+                '+suspicious_pattern(Person, "large_transaction") <- '
+                'evidence(Person, "large_transaction", Detail)'
+            )
+            await kg.execute(
+                '+suspicious_pattern(Person, "after_hours_access") <- '
+                'evidence(Person, "after_hours_access", Detail)'
+            )
+            await kg.execute(
+                '+suspicious_pattern(Person, "encrypted_communications") <- '
+                'evidence(Person, "encrypted_msg", Detail)'
+            )
+            await kg.execute(
+                '+suspicious_pattern(Person, "data_destruction") <- '
+                'evidence(Person, "deleted_emails", Detail)'
+            )
+            await kg.execute(
+                '+suspicious_pattern(Person, "financial_stress") <- '
+                'evidence(Person, "financial_stress", Detail)'
+            )
 
-        # Rule: high-risk = 2+ suspicious patterns
-        await kg.execute(
-            "+high_risk(Person) <- "
-            "suspicious_pattern(Person, A), "
-            "suspicious_pattern(Person, B), A != B"
-        )
+            # Rule: high-risk = 2+ suspicious patterns
+            await kg.execute(
+                "+high_risk(Person) <- "
+                "suspicious_pattern(Person, A), "
+                "suspicious_pattern(Person, B), A != B"
+            )
 
-        step(1, "Build the investigation graph")
-        print(f"{DIM}  assess -> gather -> analyze -> [more sources? loop : conclude]{RESET}")
-        print(f"{DIM}  Rules detect: suspicious_pattern, high_risk{RESET}")
+            step(1, "Build the investigation graph")
+            print(f"{DIM}  assess -> gather -> analyze -> [more sources? loop : conclude]{RESET}")
+            print(f"{DIM}  Rules detect: suspicious_pattern, high_risk{RESET}")
 
-        # ── Build the graph ──────────────────────────────────────────
+            # ── Build the graph ──────────────────────────────────────────
 
-        # Router: check how many sources we've covered
-        async def route_after_analysis(state: dict[str, Any]) -> str:
-            kg_handle = state["kg"]
-            r = await kg_handle.execute("?source_checked(S)")
-            checked = len(r.rows)
-            total = 4  # financial, access_logs, communications, hr_records
-            print(f"  {DIM}[router] {checked}/{total} sources checked{RESET}")
-            if checked >= total:
-                return "conclude"
-            return "gather"
+            # Router: check how many sources we've covered
+            async def route_after_analysis(state: dict[str, Any]) -> str:
+                kg_handle = state["kg"]
+                r = await kg_handle.execute("?source_checked(S)")
+                checked = len(r.rows)
+                total = 4  # financial, access_logs, communications, hr_records
+                print(f"  {DIM}[router] {checked}/{total} sources checked{RESET}")
+                if checked >= total:
+                    return "conclude"
+                return "gather"
 
-        graph = StateGraph(InvestigationState)
-        graph.add_node("assess", assess_situation)
-        graph.add_node("gather", gather_evidence)
-        graph.add_node("analyze", analyze_patterns)
-        graph.add_node("conclude", produce_conclusion)
+            graph = StateGraph(InvestigationState)
+            graph.add_node("assess", assess_situation)
+            graph.add_node("gather", gather_evidence)
+            graph.add_node("analyze", analyze_patterns)
+            graph.add_node("conclude", produce_conclusion)
 
-        graph.set_entry_point("assess")
-        graph.add_edge("assess", "gather")
-        graph.add_edge("gather", "analyze")
-        graph.add_conditional_edges(
-            "analyze",
-            route_after_analysis,
-            {"conclude": "conclude", "gather": "gather"},
-        )
-        graph.add_edge("conclude", END)
+            graph.set_entry_point("assess")
+            graph.add_edge("assess", "gather")
+            graph.add_edge("gather", "analyze")
+            graph.add_conditional_edges(
+                "analyze",
+                route_after_analysis,
+                {"conclude": "conclude", "gather": "gather"},
+            )
+            graph.add_edge("conclude", END)
 
-        app = graph.compile()
+            app = graph.compile()
 
-        # ── Run ──────────────────────────────────────────────────────
+            # ── Run ──────────────────────────────────────────────────────
 
-        step(2, "Execute investigation")
+            step(2, "Execute investigation")
 
-        result = await app.ainvoke(
-            {
-                "kg": kg,
-                "suspect": "",
-                "phase": "start",
-                "findings": [],
-                "conclusion": "",
-                "results": [],
-            }
-        )
+            result = await app.ainvoke(
+                {
+                    "kg": kg,
+                    "suspect": "",
+                    "phase": "start",
+                    "findings": [],
+                    "conclusion": "",
+                }
+            )
 
-        # ── Results ──────────────────────────────────────────────────
+            # ── Results ──────────────────────────────────────────────────
 
-        step(3, "Investigation results")
+            step(3, "Investigation results")
 
-        r = await kg.execute("?high_risk(Person)")
-        if r.rows:
-            print(f"\n  {RED}High-risk:{RESET}")
-            for row in r.rows:
-                print(f"    {RED}!!{RESET} {row[0]}")
+            r = await kg.execute("?high_risk(Person)")
+            if r.rows:
+                print(f"\n  {RED}High-risk:{RESET}")
+                for row in r.rows:
+                    print(f"    {RED}!!{RESET} {row[0]}")
 
-        r = await kg.execute("?suspicious_pattern(Person, Reason)")
-        if r.rows:
-            print(f"\n  {YELLOW}All suspicious patterns:{RESET}")
-            seen = set()
-            for row in r.rows:
-                key = (row[0], row[1])
-                if key not in seen:
-                    seen.add(key)
-                    print(f"    {YELLOW}!{RESET} {row[0]}: {row[1]}")
+            r = await kg.execute("?suspicious_pattern(Person, Reason)")
+            if r.rows:
+                print(f"\n  {YELLOW}All suspicious patterns:{RESET}")
+                seen = set()
+                for row in r.rows:
+                    key = (row[0], row[1])
+                    if key not in seen:
+                        seen.add(key)
+                        print(f"    {YELLOW}!{RESET} {row[0]}: {row[1]}")
 
-        step(4, "Conclusion")
-        print(f"\n{GREEN}  {result['conclusion'].strip()}{RESET}")
+            step(4, "Conclusion")
+            print(f"\n{GREEN}  {result['conclusion'].strip()}{RESET}")
 
-        await il.drop_knowledge_graph("lg_investigation")
-        success("Done!")
+            success("Done!")
+        finally:
+            with contextlib.suppress(Exception):
+                await il.drop_knowledge_graph("lg_investigation")
 
 
 if __name__ == "__main__":

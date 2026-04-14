@@ -8,6 +8,7 @@ Shows kg_router as an intelligent dispatcher for heterogeneous inputs.
 """
 
 import asyncio
+import contextlib
 from typing import Any
 
 from examples.langgraph._common import (
@@ -284,83 +285,83 @@ async def run():
         username=os.environ.get("INPUTLAYER_USER", "admin"),
         password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
     ) as il:
-        import contextlib
-
         with contextlib.suppress(Exception):
             await il.drop_knowledge_graph("lg_pipeline")
         kg = il.knowledge_graph("lg_pipeline")
+        try:
 
-        # ── Schema ───────────────────────────────────────────────────
+            # ── Schema ───────────────────────────────────────────────────
 
-        await kg.execute("+doc_classification(doc_id: int, doc_type: string)")
-        await kg.execute("+email_fact(doc_id: int, key: string, value: string)")
-        await kg.execute("+code_review_fact(doc_id: int, key: string, value: string)")
-        await kg.execute("+ticket_fact(doc_id: int, key: string, value: string)")
-        await kg.execute("+report_fact(doc_id: int, key: string, value: string)")
-        await kg.execute("+urgent_item(doc_id: int, item_type: string, subject: string)")
+            await kg.execute("+doc_classification(doc_id: int, doc_type: string)")
+            await kg.execute("+email_fact(doc_id: int, key: string, value: string)")
+            await kg.execute("+code_review_fact(doc_id: int, key: string, value: string)")
+            await kg.execute("+ticket_fact(doc_id: int, key: string, value: string)")
+            await kg.execute("+report_fact(doc_id: int, key: string, value: string)")
+            await kg.execute("+urgent_item(doc_id: int, item_type: string, subject: string)")
 
-        step(1, "Build the branching pipeline")
-        print(f"{DIM}  pick_doc -> classify -> [email|code|ticket|report] -> loop -> summarize{RESET}")
+            step(1, "Build the branching pipeline")
+            print(f"{DIM}  pick_doc -> classify -> [email|code|ticket|report] -> loop -> summarize{RESET}")
 
-        # ── Build graph ──────────────────────────────────────────────
+            # ── Build graph ──────────────────────────────────────────────
 
-        graph = StateGraph(PipelineState)
-        graph.add_node("pick", pick_document)
-        graph.add_node("process_email", process_email)
-        graph.add_node("process_code", process_code)
-        graph.add_node("process_ticket", process_ticket)
-        graph.add_node("process_report", process_report)
-        graph.add_node("summarize", summarize_pipeline)
+            graph = StateGraph(PipelineState)
+            graph.add_node("pick", pick_document)
+            graph.add_node("process_email", process_email)
+            graph.add_node("process_code", process_code)
+            graph.add_node("process_ticket", process_ticket)
+            graph.add_node("process_report", process_report)
+            graph.add_node("summarize", summarize_pipeline)
 
-        graph.set_entry_point("pick")
-        graph.add_conditional_edges(
-            "pick",
-            route_by_type,
-            {
-                "process_email": "process_email",
-                "process_code": "process_code",
-                "process_ticket": "process_ticket",
-                "process_report": "process_report",
-                "summarize": "summarize",
-            },
-        )
-
-        for node_name in [
-            "process_email",
-            "process_code",
-            "process_ticket",
-            "process_report",
-        ]:
+            graph.set_entry_point("pick")
             graph.add_conditional_edges(
-                node_name,
-                check_more_docs,
-                {"next": "pick", "summarize": "summarize"},
+                "pick",
+                route_by_type,
+                {
+                    "process_email": "process_email",
+                    "process_code": "process_code",
+                    "process_ticket": "process_ticket",
+                    "process_report": "process_report",
+                    "summarize": "summarize",
+                },
             )
 
-        graph.add_edge("summarize", END)
+            for node_name in [
+                "process_email",
+                "process_code",
+                "process_ticket",
+                "process_report",
+            ]:
+                graph.add_conditional_edges(
+                    node_name,
+                    check_more_docs,
+                    {"next": "pick", "summarize": "summarize"},
+                )
 
-        app = graph.compile()
+            graph.add_edge("summarize", END)
 
-        # ── Run ──────────────────────────────────────────────────────
+            app = graph.compile()
 
-        step(2, f"Process {len(DOCUMENTS)} documents")
+            # ── Run ──────────────────────────────────────────────────────
 
-        result = await app.ainvoke(
-            {
-                "kg": kg,
-                "documents": DOCUMENTS,
-                "doc_index": 0,
-                "current_doc": {},
-                "processed": 0,
-                "results": [],
-            }
-        )
+            step(2, f"Process {len(DOCUMENTS)} documents")
 
-        step(3, "Pipeline complete")
-        print(f"  {GREEN}Processed {result['processed']} documents{RESET}")
+            result = await app.ainvoke(
+                {
+                    "kg": kg,
+                    "documents": DOCUMENTS,
+                    "doc_index": 0,
+                    "current_doc": {},
+                    "processed": 0,
+                }
+            )
 
-        await il.drop_knowledge_graph("lg_pipeline")
-        success("Done!")
+            step(3, "Pipeline complete")
+            print(f"  {GREEN}Processed {result['processed']} documents{RESET}")
+
+            success("Done!")
+        finally:
+            with contextlib.suppress(Exception):
+                await il.drop_knowledge_graph("lg_pipeline")
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ Stores graph checkpoints as facts in a KG, allowing graph executions
 to be persisted and resumed across processes/restarts.
 
 Schema (created automatically):
-    +graph_checkpoint(thread_id, checkpoint_id, parent_id, blob, metadata, ts)
+    +graph_checkpoint(thread_id, checkpoint_ns, checkpoint_id, parent_id, blob, metadata, ts)
     +graph_write(thread_id, checkpoint_id, task_id, idx, channel, blob)
 
 Usage::
@@ -143,8 +143,9 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
             # Server-side "already exists" responses come back as ResultSet rows,
             # not exceptions, so they don't need to be caught here.
             for ddl in [
-                "+graph_checkpoint(thread_id: string, checkpoint_id: string, "
-                "parent_id: string, blob: string, metadata: string, ts: int)",
+                "+graph_checkpoint(thread_id: string, checkpoint_ns: string, "
+                "checkpoint_id: string, parent_id: string, blob: string, "
+                "metadata: string, ts: int)",
                 "+graph_write(thread_id: string, checkpoint_id: string, "
                 "task_id: string, idx: int, channel: string, blob: string)",
             ]:
@@ -187,6 +188,7 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
 
         await self._exec(
             f'+graph_checkpoint("{escape_iql(thread_id)}", '
+            f'"{escape_iql(checkpoint_ns)}", '
             f'"{escape_iql(checkpoint_id)}", '
             f'"{escape_iql(parent_id)}", '
             f'"{escape_iql(packed_blob)}", '
@@ -207,7 +209,7 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
         config: RunnableConfig,
         writes: Sequence[tuple[str, Any]],
         task_id: str,
-        task_path: str = "",
+        task_path: str = "",  # required by BaseCheckpointSaver protocol, unused here
     ) -> None:
         """Persist intermediate writes for a checkpoint.
 
@@ -269,11 +271,13 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
         if checkpoint_id:
             r = await self._exec(
                 f'?graph_checkpoint("{escape_iql(thread_id)}", '
+                f'"{escape_iql(checkpoint_ns)}", '
                 f'"{escape_iql(checkpoint_id)}", ParentId, Blob, Metadata, Ts)'
             )
         else:
             r = await self._exec(
                 f'?graph_checkpoint("{escape_iql(thread_id)}", '
+                f'"{escape_iql(checkpoint_ns)}", '
                 f"CheckpointId, ParentId, Blob, Metadata, Ts)"
             )
 
@@ -281,7 +285,7 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
             return None
 
         # Pick the latest by timestamp (last column)
-        row = max(r.rows, key=lambda r: int(r[-1]))
+        row = max(r.rows, key=lambda row: int(row[-1]))
         parent_id = str(row[-4])
         actual_id = checkpoint_id if checkpoint_id else str(row[-5])
 
@@ -355,11 +359,12 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
 
         r = await self._exec(
             f'?graph_checkpoint("{escape_iql(thread_id)}", '
+            f'"{escape_iql(checkpoint_ns)}", '
             f"CheckpointId, ParentId, Blob, Metadata, Ts)"
         )
 
         # Sort newest first
-        sorted_rows = sorted(r.rows, key=lambda r: int(r[-1]), reverse=True)
+        sorted_rows = sorted(r.rows, key=lambda row: int(row[-1]), reverse=True)
 
         # Resolve the 'before' timestamp cutoff
         if before is not None:
@@ -367,6 +372,7 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
             if before_id:
                 r_before = await self._exec(
                     f'?graph_checkpoint("{escape_iql(thread_id)}", '
+                    f'"{escape_iql(checkpoint_ns)}", '
                     f'"{escape_iql(before_id)}", _, _, _, Ts)'
                 )
                 if r_before.rows:
@@ -445,7 +451,7 @@ class InputLayerCheckpointer(BaseCheckpointSaver[str]):
         config: RunnableConfig,
         writes: Sequence[tuple[str, Any]],
         task_id: str,
-        task_path: str = "",
+        task_path: str = "",  # required by BaseCheckpointSaver protocol, unused here
     ) -> None:
         run_sync(self.aput_writes(config, writes, task_id, task_path))
 

@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 def kg_router(
     *,
-    branches: dict[str, str],
+    branches: dict[str, str | Callable[[dict[str, Any]], str]],
     default: str = "end",
     kg_key: str = "kg",
 ) -> Callable[[dict[str, Any]], Coroutine[Any, Any, str]]:

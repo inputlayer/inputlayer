@@ -12,6 +12,7 @@ is "what matters for the next response."
 """
 
 import asyncio
+import contextlib
 
 # ── State ────────────────────────────────────────────────────────────
 from typing import Any, TypedDict
@@ -68,138 +69,139 @@ async def run() -> None:
         username=os.environ.get("INPUTLAYER_USER", "admin"),
         password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
     ) as il:
-        import contextlib
-
         with contextlib.suppress(Exception):
             await il.drop_knowledge_graph("lg_memory")
         kg = il.knowledge_graph("lg_memory")
+        try:
 
-        memory = InputLayerMemory(kg=kg)
-        await memory.setup()
+            memory = InputLayerMemory(kg=kg)
+            await memory.setup()
 
-        # ── Step 1: Replay conversation into memory ──────────────────
+            # ── Step 1: Replay conversation into memory ──────────────────
 
-        step(1, "Store conversation turns")
-        print(f"{DIM}  {len(CONVERSATION)} turns -> KG facts + auto topic extraction{RESET}\n")
+            step(1, "Store conversation turns")
+            print(f"{DIM}  {len(CONVERSATION)} turns -> KG facts + auto topic extraction{RESET}\n")
 
-        for role, content in CONVERSATION:
-            turn_id = await memory.astore("chat-1", role, content)
-            # Recall immediately after storing to show which topics were derived
+            for role, content in CONVERSATION:
+                turn_id = await memory.astore("chat-1", role, content)
+                # Recall immediately after storing to show which topics were derived
+                ctx = await memory.arecall("chat-1")
+                turn_topics = [
+                    t for t, turns in ctx["relevant"].items()
+                    if any(tr["turn_id"] == turn_id for tr in turns)
+                ]
+                topic_str = f" {MAGENTA}[{', '.join(sorted(turn_topics))}]{RESET}" if turn_topics else ""
+                color = GREEN if role == "user" else DIM
+                print(f"  {color}{role:10s}{RESET} {content[:60]}{topic_str}")
+
+            # ── Step 2: Show derived context ─────────────────────────────
+
+            step(2, "Recall derived context (computed by rules)")
+
             ctx = await memory.arecall("chat-1")
-            turn_topics = [
-                t for t, turns in ctx["relevant"].items()
-                if any(tr["turn_id"] == turn_id for tr in turns)
-            ]
-            topic_str = f" {MAGENTA}[{', '.join(sorted(turn_topics))}]{RESET}" if turn_topics else ""
-            color = GREEN if role == "user" else DIM
-            print(f"  {color}{role:10s}{RESET} {content[:60]}{topic_str}")
 
-        # ── Step 2: Show derived context ─────────────────────────────
+            print(f"\n  {WHITE}Active topics:{RESET}")
+            for topic in ctx["topics"]:
+                print(f"    {CYAN}{topic}{RESET}")
 
-        step(2, "Recall derived context (computed by rules)")
+            print(f"\n  {WHITE}Related topic pairs:{RESET}")
+            for pair in ctx["related_topics"]:
+                print(f"    {YELLOW}{pair[0]}{RESET} <-> {YELLOW}{pair[1]}{RESET}")
 
-        ctx = await memory.arecall("chat-1")
+            print(f"\n  {WHITE}Relevant turns by topic:{RESET}")
+            for topic, turns in sorted(ctx["relevant"].items()):
+                print(f"    {CYAN}{topic}{RESET}:")
+                for t in turns[:2]:  # show max 2 per topic
+                    print(f"      {DIM}[{t['role']}] {t['content'][:50]}...{RESET}")
 
-        print(f"\n  {WHITE}Active topics:{RESET}")
-        for topic in ctx["topics"]:
-            print(f"    {CYAN}{topic}{RESET}")
+            # ── Step 3: Use as LangGraph nodes ───────────────────────────
 
-        print(f"\n  {WHITE}Related topic pairs:{RESET}")
-        for pair in ctx["related_topics"]:
-            print(f"    {YELLOW}{pair[0]}{RESET} <-> {YELLOW}{pair[1]}{RESET}")
+            step(3, "Use recall_node in a LangGraph")
 
-        print(f"\n  {WHITE}Relevant turns by topic:{RESET}")
-        for topic, turns in sorted(ctx["relevant"].items()):
-            print(f"    {CYAN}{topic}{RESET}:")
-            for t in turns[:2]:  # show max 2 per topic
-                print(f"      {DIM}[{t['role']}] {t['content'][:50]}...{RESET}")
+            recall = memory.recall_node(state_key="memory_context")
+            store = memory.store_node(state_key="new_message", thread_key="thread_id")
 
-        # ── Step 3: Use as LangGraph nodes ───────────────────────────
+            async def respond(state: dict[str, Any]) -> dict[str, Any]:
+                """Generate a response using memory context."""
+                ctx = state.get("memory_context", {})
+                msg = state.get("new_message", {})
+                question = msg.get("content", "")
 
-        step(3, "Use recall_node in a LangGraph")
+                topics = ctx.get("topics", [])
+                relevant = ctx.get("relevant", {})
 
-        recall = memory.recall_node(state_key="memory_context")
-        store = memory.store_node(state_key="new_message", thread_key="thread_id")
+                # Build context string from derived facts
+                context_parts = []
+                context_parts.append(f"Active topics: {', '.join(topics)}")
+                for topic, turns in relevant.items():
+                    for t in turns[:1]:
+                        context_parts.append(f"[{topic}] {t['role']}: {t['content'][:60]}")
 
-        async def respond(state: dict[str, Any]) -> dict[str, Any]:
-            """Generate a response using memory context."""
-            ctx = state.get("memory_context", {})
-            msg = state.get("new_message", {})
-            question = msg.get("content", "")
+                context_str = "\n".join(context_parts)
 
-            topics = ctx.get("topics", [])
-            relevant = ctx.get("relevant", {})
+                if check_llm():
+                    from langchain_core.output_parsers import StrOutputParser
+                    from langchain_core.prompts import ChatPromptTemplate
 
-            # Build context string from derived facts
-            context_parts = []
-            context_parts.append(f"Active topics: {', '.join(topics)}")
-            for topic, turns in relevant.items():
-                for t in turns[:1]:
-                    context_parts.append(f"[{topic}] {t['role']}: {t['content'][:60]}")
+                    llm = get_llm()
+                    prompt = ChatPromptTemplate.from_template(
+                        "You are a helpful assistant. Use this context "
+                        "derived from conversation memory:\n\n{context}\n\n"
+                        "Answer the user's question briefly: {question}"
+                    )
+                    chain = prompt | llm | StrOutputParser()
+                    answer = await chain.ainvoke({"context": context_str, "question": question})
+                else:
+                    answer = (
+                        f"Based on topics [{', '.join(topics)}], here's guidance on: {question[:50]}"
+                    )
 
-            context_str = "\n".join(context_parts)
+                return {"response": answer}
 
-            if check_llm():
-                from langchain_core.output_parsers import StrOutputParser
-                from langchain_core.prompts import ChatPromptTemplate
+            graph = StateGraph(ChatState)
+            graph.add_node("recall", recall)
+            graph.add_node("respond", respond)
+            graph.add_node("store", store)
 
-                llm = get_llm()
-                prompt = ChatPromptTemplate.from_template(
-                    "You are a helpful assistant. Use this context "
-                    "derived from conversation memory:\n\n{context}\n\n"
-                    "Answer the user's question briefly: {question}"
-                )
-                chain = prompt | llm | StrOutputParser()
-                answer = await chain.ainvoke({"context": context_str, "question": question})
-            else:
-                answer = (
-                    f"Based on topics [{', '.join(topics)}], here's guidance on: {question[:50]}"
-                )
+            graph.set_entry_point("recall")
+            graph.add_edge("recall", "respond")
+            graph.add_edge("respond", "store")
+            graph.add_edge("store", END)
 
-            return {"response": answer}
+            app = graph.compile()
 
-        graph = StateGraph(ChatState)
-        graph.add_node("recall", recall)
-        graph.add_node("respond", respond)
-        graph.add_node("store", store)
+            # Ask a new question that wasn't in the replayed conversation.
+            # The memory already contains the full history above; this new
+            # question will be stored as an additional turn after the recall.
+            new_question = "How do I set up GPU passthrough in Docker for the training job?"
 
-        graph.set_entry_point("recall")
-        graph.add_edge("recall", "respond")
-        graph.add_edge("respond", "store")
-        graph.add_edge("store", END)
+            print(f"\n  {WHITE}New question:{RESET} {new_question}")
+            print(f"{DIM}  Graph: recall -> respond -> store{RESET}")
 
-        app = graph.compile()
+            result = await app.ainvoke(
+                {
+                    "thread_id": "chat-1",
+                    "new_message": {"role": "user", "content": new_question},
+                    "memory_context": {},
+                    "response": "",
+                }
+            )
 
-        # Ask a new question that wasn't in the replayed conversation.
-        # The memory already contains the full history above; this new
-        # question will be stored as an additional turn after the recall.
-        new_question = "How do I set up GPU passthrough in Docker for the training job?"
+            step(4, "Response (informed by derived memory)")
+            print(f"\n{GREEN}  {result['response'].strip()}{RESET}")
 
-        print(f"\n  {WHITE}New question:{RESET} {new_question}")
-        print(f"{DIM}  Graph: recall -> respond -> store{RESET}")
+            # ── Step 5: Show what the memory looks like after ─────────────
 
-        result = await app.ainvoke(
-            {
-                "thread_id": "chat-1",
-                "new_message": {"role": "user", "content": new_question},
-                "memory_context": {},
-                "response": "",
-            }
-        )
+            step(5, "Memory state after the interaction")
+            final_ctx = await memory.arecall("chat-1")
+            print(f"  Topics: {', '.join(final_ctx['topics'])}")
+            print(f"  Total turns: {len(final_ctx['recent'])}")
+            print(f"  Topic pairs: {len(final_ctx['related_topics'])} connections")
 
-        step(4, "Response (informed by derived memory)")
-        print(f"\n{GREEN}  {result['response'].strip()}{RESET}")
-
-        # ── Step 5: Show what the memory looks like after ─────────────
-
-        step(5, "Memory state after the interaction")
-        final_ctx = await memory.arecall("chat-1")
-        print(f"  Topics: {', '.join(final_ctx['topics'])}")
-        print(f"  Total turns: {len(final_ctx['recent'])}")
-        print(f"  Topic pairs: {len(final_ctx['related_topics'])} connections")
-
-        await il.drop_knowledge_graph("lg_memory")
-        success("Done!")
+            success("Done!")
+        finally:
+            with contextlib.suppress(Exception):
+                await il.drop_knowledge_graph("lg_memory")
 
 
 if __name__ == "__main__":

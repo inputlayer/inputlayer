@@ -12,6 +12,7 @@ needed. Rules are editable without touching application code.
 """
 
 import asyncio
+import contextlib
 from typing import Any
 
 from examples.langgraph._common import (
@@ -198,104 +199,104 @@ async def run():
         username=os.environ.get("INPUTLAYER_USER", "admin"),
         password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
     ) as il:
-        import contextlib
-
         with contextlib.suppress(Exception):
             await il.drop_knowledge_graph("lg_selfcorrect")
         kg = il.knowledge_graph("lg_selfcorrect")
+        try:
 
-        # ── Schema ───────────────────────────────────────────────────
+            # ── Schema ───────────────────────────────────────────────────
 
-        await kg.execute("+api_endpoint(name: string, method: string, path: string, auth: string)")
+            await kg.execute("+api_endpoint(name: string, method: string, path: string, auth: string)")
 
-        # ── Validation rules (the core of this example) ──────────────
+            # ── Validation rules (the core of this example) ──────────────
 
-        # Rule 1: mutating endpoints (POST/PUT/PATCH/DELETE) must have auth
-        await kg.execute(
-            '+spec_violation(Name, "missing_auth", '
-            '"Mutating endpoint without authentication") <- '
-            'api_endpoint(Name, Method, Path, "none"), '
-            'Method != "GET"'
-        )
+            # Rule 1: mutating endpoints (POST/PUT/PATCH/DELETE) must have auth
+            await kg.execute(
+                '+spec_violation(Name, "missing_auth", '
+                '"Mutating endpoint without authentication") <- '
+                'api_endpoint(Name, Method, Path, "none"), '
+                'Method != "GET"'
+            )
 
-        # Rule 2: endpoint names must be snake_case (no uppercase letters)
-        # lower(Name) != Name is true whenever Name contains any uppercase character
-        await kg.execute(
-            '+spec_violation(Name, "naming_convention", '
-            '"Name contains uppercase (must be snake_case)") <- '
-            "api_endpoint(Name, Method, Path, Auth), "
-            "lower(Name) != Name"
-        )
+            # Rule 2: endpoint names must be snake_case (no uppercase letters)
+            # lower(Name) != Name is true whenever Name contains any uppercase character
+            await kg.execute(
+                '+spec_violation(Name, "naming_convention", '
+                '"Name contains uppercase (must be snake_case)") <- '
+                "api_endpoint(Name, Method, Path, Auth), "
+                "lower(Name) != Name"
+            )
 
-        step(1, "Validation rules defined")
-        print(f"{DIM}  Rule 1: POST/PUT/PATCH/DELETE must have bearer auth{RESET}")
-        print(f"{DIM}  Rule 2: Endpoint names must be snake_case{RESET}")
+            step(1, "Validation rules defined")
+            print(f"{DIM}  Rule 1: POST/PUT/PATCH/DELETE must have bearer auth{RESET}")
+            print(f"{DIM}  Rule 2: Endpoint names must be snake_case{RESET}")
 
-        # ── Build graph ──────────────────────────────────────────────
+            # ── Build graph ──────────────────────────────────────────────
 
-        step(2, "Build self-correction loop")
-        print(f"{DIM}  generate -> validate -> [valid: accept | invalid: regenerate]{RESET}")
+            step(2, "Build self-correction loop")
+            print(f"{DIM}  generate -> validate -> [valid: accept | invalid: regenerate]{RESET}")
 
-        graph = StateGraph(SpecState)
-        graph.add_node("generate", generate_spec)
-        graph.add_node("validate", validate_spec)
-        graph.add_node("accept", accept_spec)
-        graph.add_node("give_up", give_up)
+            graph = StateGraph(SpecState)
+            graph.add_node("generate", generate_spec)
+            graph.add_node("validate", validate_spec)
+            graph.add_node("accept", accept_spec)
+            graph.add_node("give_up", give_up)
 
-        graph.set_entry_point("generate")
-        graph.add_edge("generate", "validate")
-        graph.add_conditional_edges(
-            "validate",
-            route_validation,
-            {
-                "accept": "accept",
-                "retry": "generate",
-                "give_up": "give_up",
-            },
-        )
-        graph.add_edge("accept", END)
-        graph.add_edge("give_up", END)
+            graph.set_entry_point("generate")
+            graph.add_edge("generate", "validate")
+            graph.add_conditional_edges(
+                "validate",
+                route_validation,
+                {
+                    "accept": "accept",
+                    "retry": "generate",
+                    "give_up": "give_up",
+                },
+            )
+            graph.add_edge("accept", END)
+            graph.add_edge("give_up", END)
 
-        app = graph.compile()
+            app = graph.compile()
 
-        # ── Run ──────────────────────────────────────────────────────
+            # ── Run ──────────────────────────────────────────────────────
 
-        step(3, "Execute self-correction loop")
+            step(3, "Execute self-correction loop")
 
-        result = await app.ainvoke(
-            {
-                "kg": kg,
-                "task": "Generate a REST API spec for user management",
-                "endpoints": [],
-                "violations": [],
-                "iteration": 0,
-                "max_iterations": 4,
-                "status": "",
-                "results": [],
-            }
-        )
+            result = await app.ainvoke(
+                {
+                    "kg": kg,
+                    "task": "Generate a REST API spec for user management",
+                    "endpoints": [],
+                    "violations": [],
+                    "iteration": 0,
+                    "max_iterations": 4,
+                    "status": "",
+                }
+            )
 
-        # ── Summary ──────────────────────────────────────────────────
+            # ── Summary ──────────────────────────────────────────────────
 
-        step(4, "Final result")
-        print(
-            f"  Status: {GREEN if result['status'] == 'accepted' else RED}{result['status']}{RESET}"
-        )
-        print(f"  Iterations: {result['iteration']}")
+            step(4, "Final result")
+            print(
+                f"  Status: {GREEN if result['status'] == 'accepted' else RED}{result['status']}{RESET}"
+            )
+            print(f"  Iterations: {result['iteration']}")
 
-        if result["status"] == "accepted":
-            print(f"\n  {WHITE}Final API spec:{RESET}")
-            for ep in result["endpoints"]:
-                auth_color = GREEN if ep["auth"] != "none" else DIM
-                print(
-                    f"    {CYAN}{ep['method']:6s}{RESET} "
-                    f"{ep['path']:20s} "
-                    f"{DIM}{ep['name']:20s}{RESET} "
-                    f"auth={auth_color}{ep['auth']}{RESET}"
-                )
+            if result["status"] == "accepted":
+                print(f"\n  {WHITE}Final API spec:{RESET}")
+                for ep in result["endpoints"]:
+                    auth_color = GREEN if ep["auth"] != "none" else DIM
+                    print(
+                        f"    {CYAN}{ep['method']:6s}{RESET} "
+                        f"{ep['path']:20s} "
+                        f"{DIM}{ep['name']:20s}{RESET} "
+                        f"auth={auth_color}{ep['auth']}{RESET}"
+                    )
 
-        await il.drop_knowledge_graph("lg_selfcorrect")
-        success("Done!")
+            success("Done!")
+        finally:
+            with contextlib.suppress(Exception):
+                await il.drop_knowledge_graph("lg_selfcorrect")
 
 
 if __name__ == "__main__":

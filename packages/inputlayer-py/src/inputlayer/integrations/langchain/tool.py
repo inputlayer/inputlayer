@@ -222,7 +222,7 @@ def _relation_to_tool(
                 tp | None,
                 Field(default=None, description=f"Filter rows where {col} <= this value"),
             )
-    args_model: type[BaseModel] = create_model(  # type: ignore[call-overload]
+    args_model: type[BaseModel] = create_model(
         f"{relation.__name__}SearchArgs",
         __config__=ConfigDict(arbitrary_types_allowed=True),
         **fields,

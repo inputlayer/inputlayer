@@ -9,6 +9,7 @@ Shows: KG as an intelligent tool router for complex agent systems.
 """
 
 import asyncio
+import contextlib
 from typing import Any
 
 from examples.langgraph._common import (
@@ -275,111 +276,111 @@ async def run():
         username=os.environ.get("INPUTLAYER_USER", "admin"),
         password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
     ) as il:
-        import contextlib
-
         with contextlib.suppress(Exception):
             await il.drop_knowledge_graph("lg_tools")
         kg = il.knowledge_graph("lg_tools")
+        try:
 
-        # ── Schema ───────────────────────────────────────────────────
+            # ── Schema ───────────────────────────────────────────────────
 
-        await kg.execute("+tool_capability(tool: string, capability: string, strength: int)")
-        await kg.execute("+question_type(question: string, category: string)")
+            await kg.execute("+tool_capability(tool: string, capability: string, strength: int)")
+            await kg.execute("+question_type(question: string, category: string)")
 
-        # ── Tool registry ────────────────────────────────────────────
+            # ── Tool registry ────────────────────────────────────────────
 
-        capabilities = [
-            ("calculator", "math", 10),
-            ("calculator", "conversion", 8),
-            ("search", "factual", 9),
-            ("search", "current_events", 10),
-            ("code_runner", "code", 10),
-            ("code_runner", "math", 7),
-            ("database", "structured_query", 10),
-            ("database", "aggregation", 9),
-        ]
+            capabilities = [
+                ("calculator", "math", 10),
+                ("calculator", "conversion", 8),
+                ("search", "factual", 9),
+                ("search", "current_events", 10),
+                ("code_runner", "code", 10),
+                ("code_runner", "math", 7),
+                ("database", "structured_query", 10),
+                ("database", "aggregation", 9),
+            ]
 
-        for tool, cap, strength in capabilities:
-            await kg.execute(f'+tool_capability("{tool}", "{cap}", {strength})')
+            for tool, cap, strength in capabilities:
+                await kg.execute(f'+tool_capability("{tool}", "{cap}", {strength})')
 
-        # ── Selection rule ───────────────────────────────────────────
+            # ── Selection rule ───────────────────────────────────────────
 
-        await kg.execute(
-            "+best_tool(Question, Tool, Strength) <- "
-            "question_type(Question, Category), "
-            "tool_capability(Tool, Category, Strength)"
-        )
-
-        step(1, "Tool registry and selection rules")
-        print(f"{DIM}  8 capabilities across 4 tools{RESET}")
-        print(
-            f"{DIM}  Rule: best_tool(Q, Tool, Strength) <- "
-            f"question_type(Q, Cat), tool_capability(Tool, Cat, Strength){RESET}"
-        )
-
-        # ── Questions to process ─────────────────────────────────────
-
-        questions = [
-            "Calculate 15 + 27 + 38",
-            "What is the capital of France?",
-            "Write a Python function to sort a list",
-            "What's the weather today?",
-            "What is the total sales revenue for Q1?",
-            "Tell me a joke about programming",
-        ]
-
-        # ── Build graph ──────────────────────────────────────────────
-
-        step(2, f"Process {len(questions)} questions")
-
-        graph = StateGraph(ToolState)
-        graph.add_node("classify", classify_and_select)
-        graph.add_node("calculator", run_calculator)
-        graph.add_node("search", run_search)
-        graph.add_node("code", run_code)
-        graph.add_node("database", run_database)
-        graph.add_node("default", run_default)
-        graph.add_node("summarize", summarize_results)
-
-        graph.set_entry_point("classify")
-        graph.add_conditional_edges(
-            "classify",
-            route_to_tool,
-            {
-                "calculator": "calculator",
-                "search": "search",
-                "code": "code",
-                "database": "database",
-                "default": "default",
-                "summarize": "summarize",
-            },
-        )
-
-        for tool_node in ["calculator", "search", "code", "database", "default"]:
-            graph.add_conditional_edges(
-                tool_node,
-                check_more_questions,
-                {"next": "classify", "summarize": "summarize"},
+            await kg.execute(
+                "+best_tool(Question, Tool, Strength) <- "
+                "question_type(Question, Category), "
+                "tool_capability(Tool, Category, Strength)"
             )
 
-        graph.add_edge("summarize", END)
+            step(1, "Tool registry and selection rules")
+            print(f"{DIM}  8 capabilities across 4 tools{RESET}")
+            print(
+                f"{DIM}  Rule: best_tool(Q, Tool, Strength) <- "
+                f"question_type(Q, Cat), tool_capability(Tool, Cat, Strength){RESET}"
+            )
 
-        app = graph.compile()
+            # ── Questions to process ─────────────────────────────────────
 
-        await app.ainvoke(
-            {
-                "kg": kg,
-                "questions": questions,
-                "question_index": 0,
-                "current_question": "",
-                "selected_tool": "",
-                "answers": [],
-                "results": [],
-            }
-        )
+            questions = [
+                "Calculate 15 + 27 + 38",
+                "What is the capital of France?",
+                "Write a Python function to sort a list",
+                "What's the weather today?",
+                "What is the total sales revenue for Q1?",
+                "Tell me a joke about programming",
+            ]
 
-        await il.drop_knowledge_graph("lg_tools")
-        success("Done!")
+            # ── Build graph ──────────────────────────────────────────────
+
+            step(2, f"Process {len(questions)} questions")
+
+            graph = StateGraph(ToolState)
+            graph.add_node("classify", classify_and_select)
+            graph.add_node("calculator", run_calculator)
+            graph.add_node("search", run_search)
+            graph.add_node("code", run_code)
+            graph.add_node("database", run_database)
+            graph.add_node("default", run_default)
+            graph.add_node("summarize", summarize_results)
+
+            graph.set_entry_point("classify")
+            graph.add_conditional_edges(
+                "classify",
+                route_to_tool,
+                {
+                    "calculator": "calculator",
+                    "search": "search",
+                    "code": "code",
+                    "database": "database",
+                    "default": "default",
+                    "summarize": "summarize",
+                },
+            )
+
+            for tool_node in ["calculator", "search", "code", "database", "default"]:
+                graph.add_conditional_edges(
+                    tool_node,
+                    check_more_questions,
+                    {"next": "classify", "summarize": "summarize"},
+                )
+
+            graph.add_edge("summarize", END)
+
+            app = graph.compile()
+
+            await app.ainvoke(
+                {
+                    "kg": kg,
+                    "questions": questions,
+                    "question_index": 0,
+                    "current_question": "",
+                    "selected_tool": "",
+                    "answers": [],
+                }
+            )
+
+            success("Done!")
+        finally:
+            with contextlib.suppress(Exception):
+                await il.drop_knowledge_graph("lg_tools")
 
 
 if __name__ == "__main__":

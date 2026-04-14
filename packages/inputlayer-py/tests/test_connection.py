@@ -1,5 +1,6 @@
 """Tests for inputlayer.connection - mocked WebSocket connection tests."""
 
+import asyncio
 import json
 from unittest.mock import AsyncMock
 
@@ -200,6 +201,40 @@ class TestConnectionNotifications:
         assert received_events[0].relation == "edge"
 
 
+    def test_failing_callback_does_not_crash_dispatcher(self) -> None:
+        """A callback that raises must be logged but must not stop other callbacks."""
+        from inputlayer.notifications import NotificationDispatcher, NotificationEvent
+
+        dispatcher = NotificationDispatcher()
+        received = []
+
+        dispatcher.on(callback=lambda e: (_ for _ in ()).throw(RuntimeError("boom")))
+        dispatcher.on(callback=lambda e: received.append(e))
+
+        event = NotificationEvent(
+            type="persistent_update", seq=1, timestamp_ms=0, relation="test"
+        )
+        dispatcher.dispatch(event)  # Must not raise
+
+        assert received == [event]  # Second callback still ran
+
+    def test_failing_callback_is_logged(self, caplog) -> None:
+        """A callback exception must be logged via logger.exception."""
+        import logging
+
+        from inputlayer.notifications import NotificationDispatcher, NotificationEvent
+
+        dispatcher = NotificationDispatcher()
+        dispatcher.on(callback=lambda e: 1 / 0)
+
+        event = NotificationEvent(type="persistent_update", seq=1, timestamp_ms=0)
+        with caplog.at_level(logging.ERROR, logger="inputlayer.notifications"):
+            dispatcher.dispatch(event)
+
+        assert any("ZeroDivisionError" in r.message or "raised" in r.message.lower()
+                   for r in caplog.records)
+
+
 class TestConnectionLockSerialization:
     """Verify the execute lock prevents interleaved send/recv."""
 
@@ -241,7 +276,7 @@ class TestConnectionLockSerialization:
         conn._connected = True
 
         # Launch two concurrent executes
-        r1, r2 = await asyncio.gather(
+        await asyncio.gather(
             conn.execute("query_A"),
             conn.execute("query_B"),
         )
@@ -596,7 +631,7 @@ class TestConcurrentMultiKGAtomicity:
         conn._ws = mock_ws
         conn._connected = True
 
-        seq_results, single_result = await asyncio.gather(
+        await asyncio.gather(
             conn.execute_sequence(["cmd_1", "cmd_2", "cmd_3"]),
             conn.execute("cmd_solo"),
         )

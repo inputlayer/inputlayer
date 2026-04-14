@@ -243,7 +243,9 @@ class InputLayerRetriever(BaseRetriever):
             return None
 
         resolved_content: list[str] = []
-        content_cols = self.page_content_columns if self.page_content_columns is not None else ["content"]
+        content_cols = (
+            self.page_content_columns if self.page_content_columns is not None else ["content"]
+        )
         explicit_content = self.page_content_columns is not None
         for c in content_cols:
             actual = resolve(c, "page_content_columns")

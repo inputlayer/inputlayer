@@ -145,7 +145,7 @@ class InputLayer:
         the KG between the use-default and the drop.
         """
         if self._conn.current_kg == name:
-            results = await self._conn.execute_sequence(
+            await self._conn.execute_sequence(
                 [".kg use default", f".kg drop {name}"]
             )
         else:

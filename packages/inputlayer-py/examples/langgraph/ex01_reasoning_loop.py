@@ -9,6 +9,7 @@ WHEN things happen, the KG controls WHAT follows from WHAT.
 """
 
 import asyncio
+import contextlib
 from typing import Any
 
 # Avoid F405 by importing explicitly from _common
@@ -159,107 +160,107 @@ async def run():
         username=os.environ.get("INPUTLAYER_USER", "admin"),
         password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
     ) as il:
-        import contextlib
-
         with contextlib.suppress(Exception):
             await il.drop_knowledge_graph("lg_reasoning")
         kg = il.knowledge_graph("lg_reasoning")
+        try:
 
-        # ── Setup KG schema and rules ────────────────────────────────
+            # ── Setup KG schema and rules ────────────────────────────────
 
-        await kg.execute("+research_fact(topic: string, content: string)")
+            await kg.execute("+research_fact(topic: string, content: string)")
 
-        # Rule: enough_context when we have 4+ distinct topics
-        # We can't count directly, but we can check for
-        # specific combinations. Let's use a simpler approach:
-        # enough_context fires when we have facts on 4 specific topics.
-        await kg.execute(
-            "+enough_context(X) <- "
-            "research_fact(A, _), research_fact(B, _), "
-            "research_fact(C, _), research_fact(D, _), "
-            "A != B, B != C, C != D, A != C, A != D, B != D"
-        )
+            # Rule: enough_context when we have 4+ distinct topics
+            # We can't count directly, but we can check for
+            # specific combinations. Let's use a simpler approach:
+            # enough_context fires when we have facts on 4 specific topics.
+            await kg.execute(
+                "+enough_context(X) <- "
+                "research_fact(A, _), research_fact(B, _), "
+                "research_fact(C, _), research_fact(D, _), "
+                "A != B, B != C, C != D, A != C, A != D, B != D"
+            )
 
-        step(1, "Build the reasoning graph")
-        print(f"{DIM}  Nodes: plan_search -> gather_facts -> [loop or answer]{RESET}")
-        print(f"{DIM}  Router: enough_context(X) -> answer, else -> loop{RESET}")
-        print(f"{DIM}  Max 3 iterations as safety limit{RESET}")
+            step(1, "Build the reasoning graph")
+            print(f"{DIM}  Nodes: plan_search -> gather_facts -> [loop or answer]{RESET}")
+            print(f"{DIM}  Router: enough_context(X) -> answer, else -> loop{RESET}")
+            print(f"{DIM}  Max 3 iterations as safety limit{RESET}")
 
-        # ── Build the graph ──────────────────────────────────────────
+            # ── Build the graph ──────────────────────────────────────────
 
-        # Router: check if KG has derived enough_context
-        route = kg_router(
-            branches={
-                "answer": "?enough_context(X)",
-            },
-            default="plan",
-        )
+            # Router: check if KG has derived enough_context
+            route = kg_router(
+                branches={
+                    "answer": "?enough_context(X)",
+                },
+                default="plan",
+            )
 
-        # Safety: don't loop forever
-        async def iteration_guard(state: dict[str, Any]) -> str:
-            if state.get("iteration", 0) >= state.get("max_iterations", 3):
-                return "max_reached"
-            # Otherwise defer to the KG router
-            return await route(state)
+            # Safety: don't loop forever
+            async def iteration_guard(state: dict[str, Any]) -> str:
+                if state.get("iteration", 0) >= state.get("max_iterations", 3):
+                    return "max_reached"
+                # Otherwise defer to the KG router
+                return await route(state)
 
-        graph = StateGraph(ResearchState)
-        graph.add_node("plan", plan_search)
-        graph.add_node("gather", gather_facts)
-        graph.add_node("answer", synthesize_answer)
-        graph.add_node("max_reached", no_more_iterations)
+            graph = StateGraph(ResearchState)
+            graph.add_node("plan", plan_search)
+            graph.add_node("gather", gather_facts)
+            graph.add_node("answer", synthesize_answer)
+            graph.add_node("max_reached", no_more_iterations)
 
-        graph.set_entry_point("plan")
-        graph.add_edge("plan", "gather")
-        graph.add_conditional_edges(
-            "gather",
-            iteration_guard,
-            {
-                "answer": "answer",
-                "plan": "plan",
-                "max_reached": "max_reached",
-            },
-        )
-        graph.add_edge("answer", END)
-        graph.add_edge("max_reached", END)
+            graph.set_entry_point("plan")
+            graph.add_edge("plan", "gather")
+            graph.add_conditional_edges(
+                "gather",
+                iteration_guard,
+                {
+                    "answer": "answer",
+                    "plan": "plan",
+                    "max_reached": "max_reached",
+                },
+            )
+            graph.add_edge("answer", END)
+            graph.add_edge("max_reached", END)
 
-        app = graph.compile()
+            app = graph.compile()
 
-        # ── Run the graph ────────────────────────────────────────────
+            # ── Run the graph ────────────────────────────────────────────
 
-        step(2, "Execute: researching 'Python programming'")
-        print()
+            step(2, "Execute: researching 'Python programming'")
+            print()
 
-        result = await app.ainvoke(
-            {
-                "kg": kg,
-                "question": "What makes Python a good programming language?",
-                "iteration": 0,
-                "max_iterations": 3,
-                "search_terms": [],
-                "answer": "",
-                "results": [],
-            }
-        )
+            result = await app.ainvoke(
+                {
+                    "kg": kg,
+                    "question": "What makes Python a good programming language?",
+                    "iteration": 0,
+                    "max_iterations": 3,
+                    "search_terms": [],
+                    "answer": "",
+                }
+            )
 
-        step(3, "Final answer")
-        print(f"\n{GREEN}  {result['answer'].strip()}{RESET}")
+            step(3, "Final answer")
+            print(f"\n{GREEN}  {result['answer'].strip()}{RESET}")
 
-        # Show what the KG accumulated
-        step(4, "Accumulated facts in KG")
-        r = await kg.execute("?research_fact(Topic, Content)")
-        for row in r.rows:
-            print(f"  {CYAN}{row[0]}{RESET}: {DIM}{row[1]}{RESET}")
+            # Show what the KG accumulated
+            step(4, "Accumulated facts in KG")
+            r = await kg.execute("?research_fact(Topic, Content)")
+            for row in r.rows:
+                print(f"  {CYAN}{row[0]}{RESET}: {DIM}{row[1]}{RESET}")
 
-        r = await kg.execute("?enough_context(X)")
-        if r.rows:
-            print(f"\n  {GREEN}enough_context: YES (rule fired){RESET}")
-        else:
-            print(f"\n  {YELLOW}enough_context: NO (not enough facts){RESET}")
+            r = await kg.execute("?enough_context(X)")
+            if r.rows:
+                print(f"\n  {GREEN}enough_context: YES (rule fired){RESET}")
+            else:
+                print(f"\n  {YELLOW}enough_context: NO (not enough facts){RESET}")
 
-        print(f"  {DIM}Iterations used: {result['iteration']}{RESET}")
+            print(f"  {DIM}Iterations used: {result['iteration']}{RESET}")
 
-        await il.drop_knowledge_graph("lg_reasoning")
-        success("Done!")
+            success("Done!")
+        finally:
+            with contextlib.suppress(Exception):
+                await il.drop_knowledge_graph("lg_reasoning")
 
 
 if __name__ == "__main__":

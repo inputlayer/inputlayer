@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from inputlayer.integrations.langgraph import InputLayerState, kg_node, kg_router
+from inputlayer.integrations.langgraph import InputLayerState, escape_iql, kg_node, kg_router
 from inputlayer.result import ResultSet
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -136,9 +136,57 @@ class TestKgNodeInsert:
         kg.insert.assert_not_awaited()
         assert result == {}
 
+    async def test_insert_empty_list_is_noop(self) -> None:
+        """Empty list must not trigger a KG insert - same as None."""
+        from inputlayer.relation import Relation
+
+        class Emp(Relation):
+            name: str
+
+        kg = _mock_kg()
+        node = kg_node(relation=Emp, operation="insert", state_key="data")
+
+        result = await node({"kg": kg, "data": []})
+
+        kg.insert.assert_not_awaited()
+        assert result == {}
+
     def test_relation_required_for_insert(self) -> None:
         with pytest.raises(ValueError, match="Must provide 'relation'"):
             kg_node(operation="insert", state_key="data")
+
+    async def test_insert_list_of_relation_instances(self) -> None:
+        from inputlayer.relation import Relation
+
+        class Emp(Relation):
+            name: str
+
+        kg = _mock_kg()
+        emp1 = Emp(name="alice")
+        emp2 = Emp(name="bob")
+        node = kg_node(relation=Emp, operation="insert", state_key="emps")
+
+        result = await node({"kg": kg, "emps": [emp1, emp2]})
+
+        # List of Relation instances: kg.insert(list) called directly
+        kg.insert.assert_awaited_once_with([emp1, emp2])
+        assert result == {}
+
+    async def test_insert_single_relation_instance(self) -> None:
+        from inputlayer.relation import Relation
+
+        class Emp(Relation):
+            name: str
+
+        kg = _mock_kg()
+        emp = Emp(name="alice")
+        node = kg_node(relation=Emp, operation="insert", state_key="new_emp")
+
+        result = await node({"kg": kg, "new_emp": emp})
+
+        # Single Relation instance: wrapped in list for kg.insert
+        kg.insert.assert_awaited_once_with([emp])
+        assert result == {}
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -162,6 +210,21 @@ class TestKgNodeDelete:
 
         assert kg.delete.await_count == 2
 
+    async def test_delete_single_item(self) -> None:
+        from inputlayer.relation import Relation
+
+        class Emp(Relation):
+            name: str
+
+        kg = _mock_kg()
+        emp = Emp(name="alice")
+        node = kg_node(relation=Emp, operation="delete", state_key="to_delete")
+
+        result = await node({"kg": kg, "to_delete": emp})
+
+        kg.delete.assert_awaited_once_with(emp)
+        assert result == {}
+
     async def test_delete_none_is_noop(self) -> None:
         from inputlayer.relation import Relation
 
@@ -174,6 +237,21 @@ class TestKgNodeDelete:
         await node({"kg": kg})
 
         kg.delete.assert_not_awaited()
+
+    async def test_delete_empty_list_is_noop(self) -> None:
+        """Empty list must not trigger any KG deletes - same as None."""
+        from inputlayer.relation import Relation
+
+        class Emp(Relation):
+            name: str
+
+        kg = _mock_kg()
+        node = kg_node(relation=Emp, operation="delete", state_key="data")
+
+        result = await node({"kg": kg, "data": []})
+
+        kg.delete.assert_not_awaited()
+        assert result == {}
 
     def test_relation_required_for_delete(self) -> None:
         with pytest.raises(ValueError, match="Must provide 'relation'"):
@@ -287,7 +365,7 @@ class TestKgRouter:
 
 class TestInputLayerState:
     def test_state_is_typeddict(self) -> None:
-        state: InputLayerState = {"kg": MagicMock(), "results": []}
+        state: InputLayerState = {"kg": MagicMock(), "results": {}}
         assert "kg" in state
         assert "results" in state
 
@@ -298,7 +376,7 @@ class TestInputLayerState:
 
         state: MyState = {
             "kg": MagicMock(),
-            "results": [],
+            "results": {"columns": [], "rows": [], "row_count": 0},
             "question": "hello",
             "answer": "world",
         }
@@ -373,3 +451,109 @@ class TestIntegration:
 
         assert state["employees"]["rows"] == [["alice"]]
         assert state["skills"]["rows"] == [["ml"]]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Error paths
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestKgNodeErrors:
+    async def test_missing_kg_key_raises_with_helpful_message(self) -> None:
+        node = kg_node(query="?test(X)")
+        with pytest.raises(KeyError, match="kg"):
+            await node({})  # no 'kg' in state
+
+    async def test_missing_custom_kg_key_raises(self) -> None:
+        node = kg_node(query="?test(X)", kg_key="my_kg")
+        with pytest.raises(KeyError, match="my_kg"):
+            await node({"kg": MagicMock()})  # 'my_kg' not in state
+
+
+class TestKgRouterErrors:
+    async def test_missing_kg_key_raises_with_helpful_message(self) -> None:
+        router = kg_router(branches={"a": "?test(X)"})
+        with pytest.raises(KeyError, match="kg"):
+            await router({})
+
+    async def test_failing_branch_is_skipped_continues_to_next(self) -> None:
+        """A branch query that raises must be skipped; next branch is tried."""
+        kg = MagicMock()
+        kg.execute = AsyncMock(
+            side_effect=[
+                RuntimeError("server error"),
+                ResultSet(columns=["x"], rows=[["found"]]),
+            ]
+        )
+
+        router = kg_router(
+            branches={
+                "fails": "?broken(X)",
+                "works": "?good(X)",
+            },
+            default="fallback",
+        )
+
+        result = await router({"kg": kg})
+
+        assert result == "works"
+        assert kg.execute.await_count == 2
+
+    async def test_all_branches_fail_returns_default(self) -> None:
+        kg = MagicMock()
+        kg.execute = AsyncMock(side_effect=RuntimeError("down"))
+
+        router = kg_router(
+            branches={"a": "?x(X)", "b": "?y(X)"},
+            default="safe",
+        )
+
+        result = await router({"kg": kg})
+
+        assert result == "safe"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  escape_iql
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestEscapeIql:
+    def test_backslash_escaped_first(self) -> None:
+        # Backslash must be escaped before quote, or the backslash
+        # before a quote would get double-escaped.
+        assert escape_iql('\\') == '\\\\'
+
+    def test_double_quote_escaped(self) -> None:
+        assert escape_iql('"hello"') == '\\"hello\\"'
+
+    def test_backslash_then_quote(self) -> None:
+        # The tricky case: backslash followed by quote
+        assert escape_iql('\\"') == '\\\\\\"'
+
+    def test_newline_escaped(self) -> None:
+        assert escape_iql("line1\nline2") == "line1\\nline2"
+
+    def test_carriage_return_escaped(self) -> None:
+        assert escape_iql("a\rb") == "a\\rb"
+
+    def test_tab_escaped(self) -> None:
+        assert escape_iql("a\tb") == "a\\tb"
+
+    def test_nul_byte_escaped(self) -> None:
+        assert escape_iql("a\x00b") == "a\\0b"
+
+    def test_plain_string_unchanged(self) -> None:
+        assert escape_iql("hello world 123") == "hello world 123"
+
+    def test_unicode_passthrough(self) -> None:
+        # Unicode chars that don't need escaping should pass through unchanged
+        assert escape_iql("cafe\u0301") == "cafe\u0301"
+        assert escape_iql("\U0001f600") == "\U0001f600"
+
+    def test_empty_string(self) -> None:
+        assert escape_iql("") == ""
+
+    def test_all_control_chars_in_one_string(self) -> None:
+        result = escape_iql('\\"test\n\r\t\x00')
+        assert result == '\\\\\\"test\\n\\r\\t\\0'
