@@ -47,7 +47,8 @@ def unpack(serde: SerializerProtocol, packed: str) -> Any:
     if len(parts) != 2:
         raise ValueError(
             f"Corrupted checkpoint data: expected 'type|base64blob' format, "
-            f"got {packed[:80]!r}{'...' if len(packed) > 80 else ''}"
+            f"got {packed[:200]!r}{'...' if len(packed) > 200 else ''} "
+            f"(length={len(packed)})"
         )
     return serde.loads_typed((parts[0], b64_decode(parts[1])))
 

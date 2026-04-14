@@ -19,15 +19,10 @@ from langgraph.checkpoint.base import (
 )
 
 from inputlayer._sync import run_sync
+from inputlayer.integrations.langgraph._checkpoint_serde import CKPT_ID, CKPT_TS
 from inputlayer.integrations.langgraph._utils import escape_iql, validate_row_length
 
 logger = logging.getLogger(__name__)
-
-# Column indices (canonical definitions live in checkpointer.py).
-from inputlayer.integrations.langgraph._checkpoint_serde import (
-    CKPT_ID,
-    CKPT_TS,
-)
 
 
 class _SyncAndMaintenanceMixin:

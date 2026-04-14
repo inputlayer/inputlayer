@@ -83,6 +83,10 @@ def make_store_node(
 
         msg = state.get(state_key)
         if msg is None:
+            logger.debug(
+                "InputLayerMemory.store_node: state['%s'] is None, skipping store.",
+                state_key,
+            )
             return {}
         if not isinstance(msg, dict):
             if strict:

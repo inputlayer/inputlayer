@@ -521,9 +521,8 @@ class TestPutWritesErrorAggregation:
             nonlocal call_count
             call_count += 1
             # Let schema DDL and delete pass, fail on every other insert
-            if iql.startswith("+graph_write(") and ":" not in iql:
-                if call_count % 2 == 0:
-                    raise RuntimeError("simulated failure")
+            if iql.startswith("+graph_write(") and ":" not in iql and call_count % 2 == 0:
+                raise RuntimeError("simulated failure")
             return ResultSet(columns=[], rows=[])
 
         kg = AsyncMock()

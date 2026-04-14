@@ -46,8 +46,11 @@ def validate_row_length(
     returned by the KG query engine.
     """
     if len(row) < min_len:
+        row_repr = repr(row)
+        if len(row_repr) > 200:
+            row_repr = row_repr[:200] + "..."
         raise ValueError(
             f"{relation} row has {len(row)} columns, "
             f"expected at least {min_len} ({context}). "
-            f"Row: {row!r}"
+            f"Row: {row_repr}"
         )

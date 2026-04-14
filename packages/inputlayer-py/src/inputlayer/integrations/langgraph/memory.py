@@ -108,6 +108,15 @@ class InputLayerMemory:
         max_tracked_threads: int = 10_000,
         kg_timeout: float = _DEFAULT_KG_TIMEOUT,
     ) -> None:
+        if max_recent < 1:
+            raise ValueError(
+                f"max_recent must be >= 1, got {max_recent}. "
+                "Set max_recent to the number of recent turns to include in recall."
+            )
+        if max_tracked_threads < 1:
+            raise ValueError(
+                f"max_tracked_threads must be >= 1, got {max_tracked_threads}."
+            )
         self.kg = kg
         self.max_recent = max_recent
         self._max_tracked_threads = max_tracked_threads
@@ -263,7 +272,9 @@ class InputLayerMemory:
                     )
                     if r.rows:
                         for row in r.rows:
-                            validate_row_length(row, _MIN_TURN_ROW_LEN, "memory_turn", "_next_turn_id")
+                            validate_row_length(
+                                row, _MIN_TURN_ROW_LEN, "memory_turn", "_next_turn_id",
+                            )
                         self._turn_counters[thread_id] = max(
                             int(row[_TURN_ID]) for row in r.rows
                         )
