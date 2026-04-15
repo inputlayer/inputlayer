@@ -284,12 +284,12 @@ pandas = [
 [package.metadata]
 requires-dist = [
     { name = "inputlayer-client-dev", extras = ["pandas", "langchain", "langgraph"], marker = "extra == 'all'" },
-    { name = "langchain-core", marker = "extra == 'dev'", specifier = ">=0.3" },
-    { name = "langchain-core", marker = "extra == 'langchain'", specifier = ">=0.3" },
-    { name = "langchain-core", marker = "extra == 'langgraph'", specifier = ">=0.3" },
+    { name = "langchain-core", marker = "extra == 'dev'", specifier = ">=0.3,<2" },
+    { name = "langchain-core", marker = "extra == 'langchain'", specifier = ">=0.3,<2" },
+    { name = "langchain-core", marker = "extra == 'langgraph'", specifier = ">=0.3,<2" },
     { name = "langchain-openai", marker = "extra == 'dev'", specifier = ">=1.0" },
-    { name = "langgraph", marker = "extra == 'dev'", specifier = ">=0.2" },
-    { name = "langgraph", marker = "extra == 'langgraph'", specifier = ">=0.2" },
+    { name = "langgraph", marker = "extra == 'dev'", specifier = ">=0.2,<2" },
+    { name = "langgraph", marker = "extra == 'langgraph'", specifier = ">=0.2,<2" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },
     { name = "pandas", marker = "extra == 'dev'", specifier = ">=1.5" },
     { name = "pandas", marker = "extra == 'pandas'", specifier = ">=1.5" },

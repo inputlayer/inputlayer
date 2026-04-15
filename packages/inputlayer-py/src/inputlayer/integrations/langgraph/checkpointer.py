@@ -248,13 +248,13 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
 
         try:
             thread_id = config["configurable"]["thread_id"]
-        except KeyError:
+        except KeyError as exc:
             raise KeyError(
                 "InputLayerCheckpointer.aput requires "
                 "config['configurable']['thread_id']. "
                 "Pass config={'configurable': {'thread_id': 'your-thread-id'}}"
                 " to ainvoke()."
-            ) from None
+            ) from exc
         checkpoint_id = checkpoint["id"]
         parent_id = config["configurable"].get("checkpoint_id")
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
@@ -309,7 +309,7 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
                 f"config['configurable'][{exc}]. "
                 "Ensure your graph was compiled with this checkpointer and "
                 "that config includes thread_id and checkpoint_id."
-            ) from None
+            ) from exc
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
 
         if not writes:
@@ -372,12 +372,12 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
 
         try:
             thread_id = config["configurable"]["thread_id"]
-        except KeyError:
+        except KeyError as exc:
             raise KeyError(
                 "InputLayerCheckpointer.aget_tuple requires "
                 "config['configurable']['thread_id']. "
                 "Pass config={'configurable': {'thread_id': 'your-id'}}."
-            ) from None
+            ) from exc
         checkpoint_id = config["configurable"].get("checkpoint_id")
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
 
@@ -472,12 +472,12 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
 
         try:
             thread_id = config["configurable"]["thread_id"]
-        except KeyError:
+        except KeyError as exc:
             raise KeyError(
                 "InputLayerCheckpointer.alist requires "
                 "config['configurable']['thread_id']. "
                 "Pass config={'configurable': {'thread_id': 'your-id'}}."
-            ) from None
+            ) from exc
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
 
         r = await self._exec(
