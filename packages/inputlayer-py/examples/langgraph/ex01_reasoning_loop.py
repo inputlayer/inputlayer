@@ -164,7 +164,6 @@ async def run():
             await il.drop_knowledge_graph("lg_reasoning")
         kg = il.knowledge_graph("lg_reasoning")
         try:
-
             # ── Setup KG schema and rules ────────────────────────────────
 
             await kg.execute("+research_fact(topic: string, content: string)")

@@ -100,13 +100,19 @@ async def ingest_metrics(state: dict[str, Any]) -> dict[str, Any]:
     print(f"\n  {WHITE}T={ts}: Ingesting {len(batch)} metrics{RESET}")
 
     for metric_ts, component, name, value in batch:
-        await kg.execute(f'+metric({metric_ts}, "{escape_iql(component)}", "{escape_iql(name)}", {value})')
+        await kg.execute(
+            f'+metric({metric_ts}, "{escape_iql(component)}", "{escape_iql(name)}", {value})'
+        )
 
     # Show current values
     for _metric_ts, component, name, value in batch:
         # Check if this metric has a threshold
-        r_max = await kg.execute(f'?max_threshold("{escape_iql(component)}", "{escape_iql(name)}", Max)')
-        r_min = await kg.execute(f'?min_threshold("{escape_iql(component)}", "{escape_iql(name)}", Min)')
+        r_max = await kg.execute(
+            f'?max_threshold("{escape_iql(component)}", "{escape_iql(name)}", Max)'
+        )
+        r_min = await kg.execute(
+            f'?min_threshold("{escape_iql(component)}", "{escape_iql(name)}", Min)'
+        )
         if r_max.rows:
             max_val = r_max.rows[0][2]
             if value > max_val:
@@ -286,7 +292,6 @@ async def run():
             await il.drop_knowledge_graph("lg_monitor")
         kg = il.knowledge_graph("lg_monitor")
         try:
-
             # ── Schema ───────────────────────────────────────────────────
 
             await kg.execute("+metric(ts: int, component: string, name: string, value: int)")

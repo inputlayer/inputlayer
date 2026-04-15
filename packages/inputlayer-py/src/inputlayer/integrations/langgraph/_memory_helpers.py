@@ -22,14 +22,24 @@ _TOPIC_KEYWORDS: dict[str, list[str]] = {
     "javascript": ["javascript", "typescript", "node", "react", "vue"],
     "ml": ["machine learning", "ml", "model", "training", "neural"],
     "deep_learning": [
-        "deep learning", "cnn", "rnn", "transformer", "bert", "gpt",
+        "deep learning",
+        "cnn",
+        "rnn",
+        "transformer",
+        "bert",
+        "gpt",
     ],
     "data": ["data", "database", "sql", "etl", "pipeline", "spark"],
     "devops": ["docker", "kubernetes", "k8s", "ci/cd", "deploy"],
     "api": ["api", "rest", "graphql", "endpoint", "http"],
     "security": ["security", "auth", "encryption", "vulnerability"],
     "performance": [
-        "performance", "latency", "optimization", "cache", "fast", "slow",
+        "performance",
+        "latency",
+        "optimization",
+        "cache",
+        "fast",
+        "slow",
     ],
 }
 

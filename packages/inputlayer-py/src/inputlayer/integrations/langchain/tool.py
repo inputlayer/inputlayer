@@ -413,7 +413,7 @@ def _format_result(result: Any, max_rows: int) -> str:
                 len(row), len(columns), columns,
             )
         payload.append(
-            {col: _jsonify(val) for col, val in zip(columns, row)}
+            {col: _jsonify(val) for col, val in zip(columns, row, strict=False)}
         )
 
     total = getattr(result, "row_count", len(result.rows)) or len(result.rows)

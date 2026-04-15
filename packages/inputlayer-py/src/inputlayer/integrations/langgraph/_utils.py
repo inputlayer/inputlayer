@@ -12,6 +12,7 @@ __all__ = [
     "DEFAULT_KG_TIMEOUT",
     "b64d",
     "b64e",
+    "check_error_response",
     "escape_iql",
     "validate_row_length",
 ]
@@ -29,9 +30,18 @@ def b64d(s: str) -> str:
     try:
         return base64.b64decode(s.encode("ascii")).decode("utf-8")
     except (binascii.Error, UnicodeDecodeError) as exc:
-        raise ValueError(
-            f"Failed to decode base64 memory data: {s[:40]!r}"
-        ) from exc
+        raise ValueError(f"Failed to decode base64 memory data: {s[:40]!r}") from exc
+
+
+def check_error_response(result: Any, context: str, iql: str) -> None:
+    """Raise RuntimeError if the KG returned an error row instead of data."""
+    if hasattr(result, "columns") and result.columns == ["error"] and result.rows:
+        msg = str(result.rows[0][0]) if result.rows[0] else "unknown error"
+        raise RuntimeError(
+            f"{context}: KG returned an error: {msg}. "
+            f"Query: {iql[:100]}{'...' if len(iql) > 100 else ''}"
+        )
+
 
 # Match ASCII control characters not already handled explicitly
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
@@ -45,9 +55,7 @@ def escape_iql(s: str) -> str:
     first so later replacements don't double-escape.
     """
     if not isinstance(s, str):
-        raise TypeError(
-            f"escape_iql expects a str, got {type(s).__name__}: {s!r}"
-        )
+        raise TypeError(f"escape_iql expects a str, got {type(s).__name__}: {s!r}")
     result = (
         s.replace("\\", "\\\\")
         .replace('"', '\\"')
@@ -58,12 +66,16 @@ def escape_iql(s: str) -> str:
     )
     # Escape remaining ASCII control characters as \xHH
     return _CONTROL_CHARS_RE.sub(
-        lambda m: f"\\x{ord(m.group()):02x}", result,
+        lambda m: f"\\x{ord(m.group()):02x}",
+        result,
     )
 
 
 def validate_row_length(
-    row: Sequence[Any], min_len: int, relation: str, context: str,
+    row: Sequence[Any],
+    min_len: int,
+    relation: str,
+    context: str,
 ) -> None:
     """Raise ValueError if a row has fewer columns than expected.
 

@@ -223,7 +223,6 @@ async def run():
             await il.drop_knowledge_graph("lg_events")
         kg = il.knowledge_graph("lg_events")
         try:
-
             # ── Schema ───────────────────────────────────────────────────
 
             await kg.execute(
@@ -286,7 +285,9 @@ async def run():
             # ── Build graph ──────────────────────────────────────────────
 
             step(2, "Build event processing pipeline")
-            print(f"{DIM}  ingest_batch -> check_patterns -> [more batches? loop : summarize]{RESET}")
+            print(
+                f"{DIM}  ingest_batch -> check_patterns -> [more batches? loop : summarize]{RESET}"
+            )
 
             graph = StateGraph(EventState)
             graph.add_node("ingest", ingest_events)

@@ -114,7 +114,7 @@ class MockKG:
 
     def _query_checkpoints(self, iql: str) -> ResultSet:
         """Match query against stored checkpoints."""
-        body = iql[len("?graph_checkpoint("):].rstrip(")")
+        body = iql[len("?graph_checkpoint(") :].rstrip(")")
         parts = self._parse_args("+graph_checkpoint(" + body + ")")
 
         thread_id = str(parts[0]) if isinstance(parts[0], _BoundString) else None
@@ -151,15 +151,13 @@ class MockKG:
     def _query_writes(self, iql: str) -> ResultSet:
         # graph_write(thread_id, checkpoint_ns, checkpoint_id, task_id,
         #             task_path, idx, channel, blob)
-        body = iql[len("?graph_write("):].rstrip(")")
+        body = iql[len("?graph_write(") :].rstrip(")")
         parts = self._parse_args("+graph_write(" + body + ")")
         thread_id = str(parts[0]) if isinstance(parts[0], _BoundString) else None
         checkpoint_ns = (
             str(parts[1]) if len(parts) > 1 and isinstance(parts[1], _BoundString) else None
         )
-        checkpoint_id_bound = (
-            len(parts) > 2 and isinstance(parts[2], _BoundString)
-        )
+        checkpoint_id_bound = len(parts) > 2 and isinstance(parts[2], _BoundString)
         checkpoint_id = str(parts[2]) if checkpoint_id_bound else None
 
         rows = []
@@ -174,7 +172,7 @@ class MockKG:
                 # Return columns after the 3 bound ones: task_id, task_path, idx, channel, blob
                 rows.append(list(w[3:]))
             else:
-                # Return columns after the 2 bound ones: checkpoint_id, task_id, task_path, idx, channel, blob
+                # Return columns after the 2 bound ones: ckpt_id + task fields
                 rows.append(list(w[2:]))
 
         if checkpoint_id_bound:

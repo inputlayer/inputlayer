@@ -16,11 +16,12 @@ class TestEscaping:
         mem = InputLayerMemory(kg=kg)
         await mem.astore('thread-"special"', "user", "Hello Python")
         insert_calls = [
-            c for c in kg.executed
+            c
+            for c in kg.executed
             if c.startswith("+memory_turn(") and ":" not in c.split("(", 1)[1]
         ]
         assert len(insert_calls) == 1
-        assert r'thread-\"special\"' in insert_calls[0]
+        assert r"thread-\"special\"" in insert_calls[0]
 
     async def test_topic_with_quotes(self) -> None:
         """Topics are base64-encoded, so quotes are safe."""
@@ -28,7 +29,8 @@ class TestEscaping:
         mem = InputLayerMemory(kg=kg)
         await mem.astore("t", "user", "Hello", topics=['say "hi"'])
         topic_calls = [
-            c for c in kg.executed
+            c
+            for c in kg.executed
             if c.startswith("+memory_topic(") and ":" not in c.split("(", 1)[1]
         ]
         assert len(topic_calls) == 1

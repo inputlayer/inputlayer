@@ -39,9 +39,7 @@ class TestRowLengthValidation:
     async def test_short_checkpoint_row_raises_on_get_with_id(self) -> None:
         """aget_tuple with checkpoint_id requires at least 4 columns."""
         kg = AsyncMock()
-        kg.execute = AsyncMock(
-            return_value=ResultSet(columns=["a", "b"], rows=[["x", "y"]])
-        )
+        kg.execute = AsyncMock(return_value=ResultSet(columns=["a", "b"], rows=[["x", "y"]]))
         cp = InputLayerCheckpointer(kg=kg)
         cp._setup_done = True
 
@@ -130,6 +128,7 @@ class TestParseWritesIdxValidation:
         """parse_writes must raise ValueError if idx column is not numeric."""
         serde = JsonPlusSerializer()
         from inputlayer.integrations.langgraph._checkpoint_serde import pack
+
         packed = pack(serde, "value")
         row = ["task-1", "path", "not-a-number", "channel", packed]
         with pytest.raises(ValueError, match="idx column"):
@@ -139,6 +138,7 @@ class TestParseWritesIdxValidation:
         """parse_writes must raise ValueError if idx is None."""
         serde = JsonPlusSerializer()
         from inputlayer.integrations.langgraph._checkpoint_serde import pack
+
         packed = pack(serde, "value")
         row = ["task-1", "path", None, "channel", packed]
         with pytest.raises(ValueError, match="idx column"):

@@ -437,5 +437,3 @@ class TestConcurrentSetup:
         assert cp._setup_done is True
         # DDL should run exactly 2 times (graph_checkpoint + graph_write schemas)
         assert kg.execute.await_count == 2
-
-

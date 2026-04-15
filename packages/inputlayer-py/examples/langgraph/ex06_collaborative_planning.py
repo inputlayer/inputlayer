@@ -78,7 +78,9 @@ async def engineering_expert(state: dict[str, Any]) -> dict[str, Any]:
     print(f"\n  {CYAN}Engineering team proposing...{RESET}")
 
     for name, start, end, team, dep, desc in ENGINEER_STEPS:
-        await kg.execute(f'+plan_step("{escape_iql(name)}", {start}, {end}, "{escape_iql(team)}", "{escape_iql(dep)}", "{escape_iql(desc)}")')
+        await kg.execute(
+            f'+plan_step("{escape_iql(name)}", {start}, {end}, "{escape_iql(team)}", "{escape_iql(dep)}", "{escape_iql(desc)}")'
+        )
         print(f"    {CYAN}+{RESET} {name} (week {start}-{end})")
 
     return {"phase": "proposals_in"}
@@ -90,7 +92,9 @@ async def product_expert(state: dict[str, Any]) -> dict[str, Any]:
     print(f"\n  {MAGENTA}Product team proposing...{RESET}")
 
     for name, start, end, team, dep, desc in PRODUCT_STEPS:
-        await kg.execute(f'+plan_step("{escape_iql(name)}", {start}, {end}, "{escape_iql(team)}", "{escape_iql(dep)}", "{escape_iql(desc)}")')
+        await kg.execute(
+            f'+plan_step("{escape_iql(name)}", {start}, {end}, "{escape_iql(team)}", "{escape_iql(dep)}", "{escape_iql(desc)}")'
+        )
         print(f"    {MAGENTA}+{RESET} {name} (week {start}-{end})")
 
     return {"phase": "proposals_in"}
@@ -102,7 +106,9 @@ async def security_expert(state: dict[str, Any]) -> dict[str, Any]:
     print(f"\n  {YELLOW}Security team proposing...{RESET}")
 
     for name, start, end, team, dep, desc in SECURITY_STEPS:
-        await kg.execute(f'+plan_step("{escape_iql(name)}", {start}, {end}, "{escape_iql(team)}", "{escape_iql(dep)}", "{escape_iql(desc)}")')
+        await kg.execute(
+            f'+plan_step("{escape_iql(name)}", {start}, {end}, "{escape_iql(team)}", "{escape_iql(dep)}", "{escape_iql(desc)}")'
+        )
         print(f"    {YELLOW}+{RESET} {name} (week {start}-{end})")
 
     return {"phase": "proposals_in"}
@@ -264,7 +270,6 @@ async def run():
             await il.drop_knowledge_graph("lg_planning")
         kg = il.knowledge_graph("lg_planning")
         try:
-
             # ── Schema ───────────────────────────────────────────────────
 
             await kg.execute(

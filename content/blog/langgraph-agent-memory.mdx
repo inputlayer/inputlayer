@@ -22,7 +22,7 @@ What if your agent could reason about relevance instead of guessing? You store c
 The schema is minimal. Two base relations hold the raw data:
 
 ```
-memory_turn(thread_id, turn_id, role, content, timestamp)
+memory_turn(thread_id, turn_id, role, content, ts)
 memory_topic(thread_id, turn_id, topic)
 ```
 
@@ -159,7 +159,7 @@ async with InputLayer("ws://localhost:8080/ws", username="admin", password="..."
 
     graph = StateGraph(ChatState)
     graph.add_node("recall", memory.recall_node(state_key="context"))
-    graph.add_node("respond", respond_fn)
+    graph.add_node("respond", respond_fn)  # your LLM response logic
     graph.add_node("store", memory.store_node(state_key="new_message"))
 
     graph.set_entry_point("recall")
@@ -235,7 +235,7 @@ async with InputLayer("ws://localhost:8080/ws", username="admin", password="..."
     print(ctx["topics"])  # ["ml", "python"]
 ```
 
-The full example with a LangGraph agent is at [`examples/langgraph/ex11_memory.py`](https://github.com/inputlayer/inputlayer/tree/main/packages/inputlayer-py/examples/langgraph/ex11_memory.py).
+The full example with a LangGraph agent is at [`examples/langgraph/ex11_memory.py`](https://github.com/inputlayer/inputlayer/blob/main/packages/inputlayer-py/examples/langgraph/ex11_memory.py).
 
 ---
 

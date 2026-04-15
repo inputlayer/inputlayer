@@ -152,7 +152,6 @@ async def run():
             await il.drop_knowledge_graph("lg_hitl")
         kg = il.knowledge_graph("lg_hitl")
         try:
-
             # ── Setup policy rules ───────────────────────────────────────
 
             await kg.execute(
@@ -222,7 +221,9 @@ async def run():
             # ── Build graph ──────────────────────────────────────────────
 
             step(2, "Build the approval workflow graph")
-            print(f"{DIM}  pick_action -> classify -> [safe: execute | risky: review] -> loop{RESET}")
+            print(
+                f"{DIM}  pick_action -> classify -> [safe: execute | risky: review] -> loop{RESET}"
+            )
 
             graph = StateGraph(ActionState)
             graph.add_node("pick", pick_next_action)

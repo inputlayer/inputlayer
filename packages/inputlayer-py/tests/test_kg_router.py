@@ -207,9 +207,7 @@ class TestKgRouterConnectionErrors:
         from inputlayer.exceptions import InputLayerConnectionError
 
         kg = MagicMock()
-        kg.execute = AsyncMock(
-            side_effect=InputLayerConnectionError("websocket closed")
-        )
+        kg.execute = AsyncMock(side_effect=InputLayerConnectionError("websocket closed"))
 
         router = kg_router(
             branches={"a": "?test(X)"},

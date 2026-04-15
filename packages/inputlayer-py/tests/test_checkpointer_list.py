@@ -186,9 +186,7 @@ class TestListFiltering:
             )
 
         before_config = make_config("thread-1", "ckpt-2")
-        results = [
-            tup async for tup in cp.alist(make_config("thread-1"), before=before_config)
-        ]
+        results = [tup async for tup in cp.alist(make_config("thread-1"), before=before_config)]
         ids = {tup.checkpoint["id"] for tup in results}
         assert "ckpt-2" not in ids
         assert len(results) == 2
@@ -207,9 +205,7 @@ class TestListFiltering:
             )
 
         before_config: dict = {"configurable": {"thread_id": "thread-1"}}
-        results = [
-            tup async for tup in cp.alist(make_config("thread-1"), before=before_config)
-        ]
+        results = [tup async for tup in cp.alist(make_config("thread-1"), before=before_config)]
         assert len(results) == 3
 
     async def test_list_before_nonexistent_checkpoint(self) -> None:
@@ -226,7 +222,5 @@ class TestListFiltering:
             )
 
         before_config = make_config("thread-1", "ckpt-nonexistent")
-        results = [
-            tup async for tup in cp.alist(make_config("thread-1"), before=before_config)
-        ]
+        results = [tup async for tup in cp.alist(make_config("thread-1"), before=before_config)]
         assert len(results) == 3

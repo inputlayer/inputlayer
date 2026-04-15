@@ -64,7 +64,7 @@ async def run_calculator(state: dict[str, Any]) -> dict[str, Any]:
         else:
             result = "Cannot compute"
         answer = f"Calculator: {result}"
-    except Exception:
+    except (ValueError, ZeroDivisionError, IndexError):
         answer = "Calculator: error"
 
     answers.append({"question": q, "tool": "calculator", "answer": answer})
@@ -176,7 +176,7 @@ async def classify_and_select(state: dict[str, Any]) -> dict[str, Any]:
     # Insert classification into KG
     escaped_q = escape_iql(question)
     for cat in categories:
-        await kg.execute(f'+question_type("{escaped_q}", "{cat}")')
+        await kg.execute(f'+question_type("{escaped_q}", "{escape_iql(cat)}")')
 
     # Query KG rules for best tool
     r = await kg.execute(f'?best_tool("{escaped_q}", Tool, Strength)')
@@ -280,7 +280,6 @@ async def run():
             await il.drop_knowledge_graph("lg_tools")
         kg = il.knowledge_graph("lg_tools")
         try:
-
             # ── Schema ───────────────────────────────────────────────────
 
             await kg.execute("+tool_capability(tool: string, capability: string, strength: int)")
@@ -300,7 +299,9 @@ async def run():
             ]
 
             for tool, cap, strength in capabilities:
-                await kg.execute(f'+tool_capability("{tool}", "{cap}", {strength})')
+                await kg.execute(
+                    f'+tool_capability("{escape_iql(tool)}", "{escape_iql(cap)}", {strength})'
+                )
 
             # ── Selection rule ───────────────────────────────────────────
 

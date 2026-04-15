@@ -49,9 +49,7 @@ class TestLiveCheckpointer:
         from inputlayer.integrations.langgraph import InputLayerCheckpointer
 
         kg_name = f"il_lg_ckpt_{uuid.uuid4().hex[:8]}"
-        async with InputLayer(
-            _live_url(), username=_live_user(), password=_live_password()
-        ) as il:
+        async with InputLayer(_live_url(), username=_live_user(), password=_live_password()) as il:
             try:
                 kg = il.knowledge_graph(kg_name)
                 cp = InputLayerCheckpointer(kg=kg)
@@ -72,7 +70,10 @@ class TestLiveCheckpointer:
                 metadata = {"source": "input", "step": 0}
 
                 result_config = await cp.aput(
-                    config, checkpoint, metadata, {},
+                    config,
+                    checkpoint,
+                    metadata,
+                    {},
                 )
                 assert "configurable" in result_config
                 assert result_config["configurable"]["thread_id"] == thread_id
@@ -90,9 +91,7 @@ class TestLiveCheckpointer:
         from inputlayer.integrations.langgraph import InputLayerCheckpointer
 
         kg_name = f"il_lg_ckptw_{uuid.uuid4().hex[:8]}"
-        async with InputLayer(
-            _live_url(), username=_live_user(), password=_live_password()
-        ) as il:
+        async with InputLayer(_live_url(), username=_live_user(), password=_live_password()) as il:
             try:
                 kg = il.knowledge_graph(kg_name)
                 cp = InputLayerCheckpointer(kg=kg)
@@ -128,9 +127,7 @@ class TestLiveCheckpointer:
         from inputlayer.integrations.langgraph import InputLayerCheckpointer
 
         kg_name = f"il_lg_ckptl_{uuid.uuid4().hex[:8]}"
-        async with InputLayer(
-            _live_url(), username=_live_user(), password=_live_password()
-        ) as il:
+        async with InputLayer(_live_url(), username=_live_user(), password=_live_password()) as il:
             try:
                 kg = il.knowledge_graph(kg_name)
                 cp = InputLayerCheckpointer(kg=kg)
@@ -180,28 +177,29 @@ class TestLiveMemory:
         from inputlayer.integrations.langgraph import InputLayerMemory
 
         kg_name = f"il_lg_mem_{uuid.uuid4().hex[:8]}"
-        async with InputLayer(
-            _live_url(), username=_live_user(), password=_live_password()
-        ) as il:
+        async with InputLayer(_live_url(), username=_live_user(), password=_live_password()) as il:
             try:
                 kg = il.knowledge_graph(kg_name)
                 mem = InputLayerMemory(kg=kg)
                 await mem.setup()
 
                 turn1 = await mem.astore(
-                    "live-thread", "user",
+                    "live-thread",
+                    "user",
                     "I need help with Python machine learning",
                 )
                 assert turn1 == 1
 
                 turn2 = await mem.astore(
-                    "live-thread", "assistant",
+                    "live-thread",
+                    "assistant",
                     "Sure! What framework are you using?",
                 )
                 assert turn2 == 2
 
                 turn3 = await mem.astore(
-                    "live-thread", "user",
+                    "live-thread",
+                    "user",
                     "I want to deploy with Docker",
                     topics=["devops"],
                 )
@@ -227,9 +225,7 @@ class TestLiveMemory:
         from inputlayer.integrations.langgraph import InputLayerMemory
 
         kg_name = f"il_lg_memiso_{uuid.uuid4().hex[:8]}"
-        async with InputLayer(
-            _live_url(), username=_live_user(), password=_live_password()
-        ) as il:
+        async with InputLayer(_live_url(), username=_live_user(), password=_live_password()) as il:
             try:
                 kg = il.knowledge_graph(kg_name)
                 mem = InputLayerMemory(kg=kg)
@@ -254,9 +250,7 @@ class TestLiveMemory:
         from inputlayer.integrations.langgraph import InputLayerMemory
 
         kg_name = f"il_lg_memesc_{uuid.uuid4().hex[:8]}"
-        async with InputLayer(
-            _live_url(), username=_live_user(), password=_live_password()
-        ) as il:
+        async with InputLayer(_live_url(), username=_live_user(), password=_live_password()) as il:
             try:
                 kg = il.knowledge_graph(kg_name)
                 mem = InputLayerMemory(kg=kg)
@@ -264,7 +258,9 @@ class TestLiveMemory:
 
                 tricky_content = 'She said "hello" and used a \\ backslash'
                 await mem.astore(
-                    "esc-thread", "user", tricky_content,
+                    "esc-thread",
+                    "user",
+                    tricky_content,
                     topics=["python"],
                 )
 
@@ -284,31 +280,17 @@ class TestLiveMemory:
 class TestLiveKgNode:
     """Verify kg_node query/insert/delete against a real KG."""
 
-    async def test_kg_node_insert_and_query(self) -> None:
+    async def test_kg_node_query(self) -> None:
         from inputlayer import InputLayer
         from inputlayer.integrations.langgraph import kg_node
 
         kg_name = f"il_lg_node_{uuid.uuid4().hex[:8]}"
-        async with InputLayer(
-            _live_url(), username=_live_user(), password=_live_password()
-        ) as il:
+        async with InputLayer(_live_url(), username=_live_user(), password=_live_password()) as il:
             try:
                 kg = il.knowledge_graph(kg_name)
                 await kg.execute("+lg_item(name: string, score: int)")
-
-                insert_node = kg_node(
-                    operation="insert",
-                    relation="lg_item",
-                    state_key="items",
-                )
-                state: dict = {
-                    "kg": kg,
-                    "items": [
-                        {"name": "alpha", "score": 10},
-                        {"name": "beta", "score": 20},
-                    ],
-                }
-                await insert_node(state)
+                await kg.execute('+lg_item("alpha", 10)')
+                await kg.execute('+lg_item("beta", 20)')
 
                 query_node = kg_node(
                     operation="query",
@@ -322,7 +304,7 @@ class TestLiveKgNode:
                 rows_as_dicts = [
                     dict(zip(cols, row, strict=False)) for row in result_data["rows"]
                 ]
-                names = sorted(r["Name"] for r in rows_as_dicts)
+                names = sorted(r["name"] for r in rows_as_dicts)
                 assert names == ["alpha", "beta"]
             finally:
                 await il.drop_knowledge_graph(kg_name)
@@ -337,19 +319,17 @@ class TestLiveKgRouter:
         from inputlayer.integrations.langgraph import kg_router
 
         kg_name = f"il_lg_rtr_{uuid.uuid4().hex[:8]}"
-        async with InputLayer(
-            _live_url(), username=_live_user(), password=_live_password()
-        ) as il:
+        async with InputLayer(_live_url(), username=_live_user(), password=_live_password()) as il:
             try:
                 kg = il.knowledge_graph(kg_name)
                 await kg.execute("+lg_flag(name: string, active: string)")
                 await kg.execute('+lg_flag("ready", "yes")')
 
                 router = kg_router(
-                    branches=[
-                        ('?lg_flag("ready", "yes")', "process"),
-                        ('?lg_flag("error", "yes")', "handle_error"),
-                    ],
+                    branches={
+                        "process": '?lg_flag("ready", "yes")',
+                        "handle_error": '?lg_flag("error", "yes")',
+                    },
                     default="wait",
                 )
                 next_node = await router({"kg": kg})

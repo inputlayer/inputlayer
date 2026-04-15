@@ -10,7 +10,7 @@ from inputlayer.integrations.langgraph._utils import validate_row_length
 
 class TestEscapeIql:
     def test_backslash_escaped_first(self) -> None:
-        assert escape_iql('\\') == '\\\\'
+        assert escape_iql("\\") == "\\\\"
 
     def test_double_quote_escaped(self) -> None:
         assert escape_iql('"hello"') == '\\"hello\\"'
@@ -74,17 +74,17 @@ class TestEscapeIql:
         original = 'He said "hello\\world"\nand\tthen\x00left\x07quickly'
         escaped = escape_iql(original)
         assert '\\"' in escaped
-        assert '\\\\' in escaped
-        assert '\\n' in escaped
-        assert '\\t' in escaped
-        assert '\\0' in escaped
-        assert '\\x07' in escaped
+        assert "\\\\" in escaped
+        assert "\\n" in escaped
+        assert "\\t" in escaped
+        assert "\\0" in escaped
+        assert "\\x07" in escaped
         # Verify no raw control chars survive
         for ch in escaped:
             assert ord(ch) >= 0x20, f"Unexpected control char: {ch!r}"
 
     def test_consecutive_backslashes(self) -> None:
-        assert escape_iql('\\\\') == '\\\\\\\\'
+        assert escape_iql("\\\\") == "\\\\\\\\"
 
     def test_quote_at_boundaries(self) -> None:
         assert escape_iql('"') == '\\"'

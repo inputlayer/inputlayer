@@ -126,10 +126,12 @@ class TestMakeStoreNode:
         memory.astore = AsyncMock()
         node = make_store_node(memory, state_key="msg", thread_key="tid", strict=True)
 
-        await node({
-            "tid": "t1",
-            "msg": {"role": "user", "content": "hi", "topics": ["ml"]},
-        })
+        await node(
+            {
+                "tid": "t1",
+                "msg": {"role": "user", "content": "hi", "topics": ["ml"]},
+            }
+        )
 
         memory.astore.assert_awaited_once_with("t1", "user", "hi", topics=["ml"])
 

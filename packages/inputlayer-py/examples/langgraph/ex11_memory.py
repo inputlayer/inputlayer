@@ -73,7 +73,6 @@ async def run() -> None:
             await il.drop_knowledge_graph("lg_memory")
         kg = il.knowledge_graph("lg_memory")
         try:
-
             memory = InputLayerMemory(kg=kg)
             await memory.setup()
 
@@ -87,10 +86,13 @@ async def run() -> None:
                 # Recall immediately after storing to show which topics were derived
                 ctx = await memory.arecall("chat-1")
                 turn_topics = [
-                    t for t, turns in ctx["relevant"].items()
+                    t
+                    for t, turns in ctx["relevant"].items()
                     if any(tr["turn_id"] == turn_id for tr in turns)
                 ]
-                topic_str = f" {MAGENTA}[{', '.join(sorted(turn_topics))}]{RESET}" if turn_topics else ""
+                topic_str = (
+                    f" {MAGENTA}[{', '.join(sorted(turn_topics))}]{RESET}" if turn_topics else ""
+                )
                 color = GREEN if role == "user" else DIM
                 print(f"  {color}{role:10s}{RESET} {content[:60]}{topic_str}")
 
@@ -152,9 +154,7 @@ async def run() -> None:
                     chain = prompt | llm | StrOutputParser()
                     answer = await chain.ainvoke({"context": context_str, "question": question})
                 else:
-                    answer = (
-                        f"Based on topics [{', '.join(topics)}], here's guidance on: {question[:50]}"
-                    )
+                    answer = f"Based on topics [{', '.join(topics)}], here's guidance on: {question[:50]}"
 
                 return {"response": answer}
 

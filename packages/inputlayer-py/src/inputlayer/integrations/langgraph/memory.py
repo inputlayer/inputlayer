@@ -1,16 +1,13 @@
 """InputLayerMemory: semantic long-term memory for LangGraph agents.
 
-Stores conversation turns as facts in a KG. Rules automatically
-derive active topics, relevant context, and conversation threads.
-
-Usage::
+Stores conversation turns as facts in a KG. Rules automatically derive
+active topics, relevant context, and conversation threads. Usage::
 
     memory = InputLayerMemory(kg=kg)
     await memory.setup()
     await memory.astore("thread-1", "user", "I need help with ML in Python")
     context = await memory.arecall("thread-1")
     graph.add_node("recall", memory.recall_node(state_key="context"))
-    graph.add_node("store", memory.store_node(state_key="new_message"))
 """
 
 from __future__ import annotations
@@ -34,6 +31,7 @@ from inputlayer.integrations.langgraph._memory_helpers import (
 )
 from inputlayer.integrations.langgraph._utils import (
     DEFAULT_KG_TIMEOUT,
+    check_error_response,
     escape_iql,
     validate_row_length,
 )
@@ -84,11 +82,8 @@ class InputLayerMemory:
 
     Thread safety: a single instance can be shared across coroutines.
     ``setup()`` is guarded by a lock; ``astore()`` uses per-thread locks.
-
-    ``max_tracked_threads`` is a **soft limit**. If all tracked threads
-    are currently active (holding their per-thread lock), a new thread
-    is still admitted to avoid deadlock, and a warning is logged. The
-    excess entries are evicted once threads become idle.
+    ``max_tracked_threads`` is a soft limit; excess threads are admitted
+    to avoid deadlock (with a warning) and evicted once idle.
     """
 
     def __init__(
@@ -105,9 +100,7 @@ class InputLayerMemory:
                 "Set max_recent to the number of recent turns to include in recall."
             )
         if max_tracked_threads < 1:
-            raise ValueError(
-                f"max_tracked_threads must be >= 1, got {max_tracked_threads}."
-            )
+            raise ValueError(f"max_tracked_threads must be >= 1, got {max_tracked_threads}.")
         self.kg = kg
         self.max_recent = max_recent
         self._max_tracked_threads = max_tracked_threads
@@ -127,7 +120,7 @@ class InputLayerMemory:
     async def _exec(self, iql: str) -> Any:
         """Execute IQL against the KG with a timeout."""
         try:
-            return await asyncio.wait_for(
+            result = await asyncio.wait_for(
                 self.kg.execute(iql),
                 timeout=self._kg_timeout,
             )
@@ -136,6 +129,8 @@ class InputLayerMemory:
                 f"KG operation timed out after {self._kg_timeout}s. "
                 f"Query: {iql[:100]}{'...' if len(iql) > 100 else ''}"
             ) from None
+        check_error_response(result, "InputLayerMemory", iql)
+        return result
 
     # ── Setup ────────────────────────────────────────────────────────
 
@@ -165,14 +160,12 @@ class InputLayerMemory:
             for ddl in [
                 "+memory_turn(thread_id: string, turn_id: int, "
                 "role: string, content: string, ts: int)",
-                "+memory_topic(thread_id: string, turn_id: int, "
-                "topic: string)",
+                "+memory_topic(thread_id: string, turn_id: int, topic: string)",
             ]:
                 await self._exec(ddl)
 
             for rule in [
-                "+active_topic(ThreadId, Topic) <- "
-                "memory_topic(ThreadId, TurnId, Topic)",
+                "+active_topic(ThreadId, Topic) <- memory_topic(ThreadId, TurnId, Topic)",
                 "+relevant_turn(ThreadId, TurnId, Role, Content, Topic) <- "
                 "memory_turn(ThreadId, TurnId, Role, Content, Ts), "
                 "memory_topic(ThreadId, TurnId, Topic)",
@@ -243,7 +236,8 @@ class InputLayerMemory:
         if evicted > 0:
             logger.debug(
                 "InputLayerMemory: evicted %d idle thread locks (%d remain)",
-                evicted, len(self._thread_locks),
+                evicted,
+                len(self._thread_locks),
             )
         elif evict_target > 0:
             logger.warning(
@@ -262,17 +256,17 @@ class InputLayerMemory:
             async with lock:
                 if thread_id not in self._turn_counters:
                     r = await self._exec(
-                        f'?memory_turn("{escape_iql(thread_id)}", '
-                        f"TurnId, Role, Content, Ts)"
+                        f'?memory_turn("{escape_iql(thread_id)}", TurnId, Role, Content, Ts)'
                     )
                     if r.rows:
                         for row in r.rows:
                             validate_row_length(
-                                row, _MIN_TURN_ROW_LEN, "memory_turn", "_next_turn_id",
+                                row,
+                                _MIN_TURN_ROW_LEN,
+                                "memory_turn",
+                                "_next_turn_id",
                             )
-                        self._turn_counters[thread_id] = max(
-                            int(row[_TURN_ID]) for row in r.rows
-                        )
+                        self._turn_counters[thread_id] = max(int(row[_TURN_ID]) for row in r.rows)
                     else:
                         self._turn_counters[thread_id] = 0
 
@@ -292,6 +286,10 @@ class InputLayerMemory:
         topics: list[str] | None = None,
     ) -> int:
         """Store a conversation turn and its topics.
+
+        If ``topics`` is None, a simple keyword extractor runs on
+        ``content``. For production use, pass explicit topics from
+        your own LLM-based extractor.
 
         Returns the turn_id assigned (1-based, sequential per thread).
         """
@@ -317,10 +315,7 @@ class InputLayerMemory:
             escaped_tid = escape_iql(thread_id)
             results = await asyncio.gather(
                 *(
-                    self._exec(
-                        f'+memory_topic("{escaped_tid}", '
-                        f'{turn_id}, "{_b64e(topic)}")'
-                    )
+                    self._exec(f'+memory_topic("{escaped_tid}", {turn_id}, "{_b64e(topic)}")')
                     for topic in set(topics)
                 ),
                 return_exceptions=True,
@@ -329,9 +324,11 @@ class InputLayerMemory:
             errors = [r for r in results if isinstance(r, BaseException)]
             if errors:
                 logger.error(
-                    "InputLayerMemory.astore: %d/%d topic inserts failed "
-                    "for thread=%r turn=%d",
-                    len(errors), len(topics), thread_id, turn_id,
+                    "InputLayerMemory.astore: %d/%d topic inserts failed for thread=%r turn=%d",
+                    len(errors),
+                    len(topics),
+                    thread_id,
+                    turn_id,
                 )
                 raise RuntimeError(
                     f"astore: {len(errors)}/{len(topics)} topic inserts "
@@ -356,14 +353,20 @@ class InputLayerMemory:
     async def arecall(self, thread_id: str) -> dict[str, Any]:
         """Recall derived context for a thread.
 
-        Returns a dict with: topics, recent, relevant, related_topics.
+        Returns a dict with four keys:
+
+        - **topics**: ``list[str]`` sorted active topics in this thread.
+        - **recent**: ``list[dict]`` with ``turn_id``, ``role``,
+          ``content`` keys, newest first, capped at ``max_recent``.
+        - **relevant**: ``dict[str, list[dict]]`` turns grouped by topic.
+        - **related_topics**: ``list[tuple[str, str]]`` deduplicated
+          co-occurring topic pairs.
+
         All four queries run concurrently; if any fails, a RuntimeError
         is raised after all complete.
         """
         if not thread_id:
-            raise ValueError(
-                "InputLayerMemory.arecall: thread_id must be a non-empty string."
-            )
+            raise ValueError("InputLayerMemory.arecall: thread_id must be a non-empty string.")
         await self.setup()
 
         escaped = escape_iql(thread_id)
@@ -383,8 +386,7 @@ class InputLayerMemory:
         errors = [r for r in results if isinstance(r, BaseException)]
         if errors:
             raise RuntimeError(
-                f"arecall: {len(errors)}/4 queries failed. "
-                f"First error: {errors[0]}"
+                f"arecall: {len(errors)}/4 queries failed. First error: {errors[0]}"
             ) from errors[0]
 
         # Narrow from Any|BaseException to the actual result type
@@ -409,7 +411,9 @@ class InputLayerMemory:
         )
 
         turns = sorted(
-            r_turns.rows, key=lambda row: int(row[_TURN_ID]), reverse=True,
+            r_turns.rows,
+            key=lambda row: int(row[_TURN_ID]),
+            reverse=True,
         )
         result["recent"] = [
             {

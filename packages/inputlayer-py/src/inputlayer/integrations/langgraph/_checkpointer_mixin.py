@@ -22,7 +22,11 @@ from langgraph.checkpoint.base import (
 
 from inputlayer._sync import run_sync
 from inputlayer.integrations.langgraph._checkpoint_serde import CKPT_ID, CKPT_TS
-from inputlayer.integrations.langgraph._utils import escape_iql, validate_row_length
+from inputlayer.integrations.langgraph._utils import (
+    check_error_response,
+    escape_iql,
+    validate_row_length,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +65,8 @@ class _SyncAndMaintenanceMixin:
     ) -> None: ...
 
     async def aget_tuple(  # type: ignore[empty-body]
-        self, config: RunnableConfig,
+        self,
+        config: RunnableConfig,
     ) -> CheckpointTuple | None: ...
 
     def alist(  # type: ignore[empty-body]
@@ -78,7 +83,7 @@ class _SyncAndMaintenanceMixin:
     async def _exec(self, iql: str) -> Any:
         """Execute IQL against the KG with a timeout."""
         try:
-            return await asyncio.wait_for(
+            result = await asyncio.wait_for(
                 self.kg.execute(iql),
                 timeout=self._kg_timeout,
             )
@@ -87,6 +92,8 @@ class _SyncAndMaintenanceMixin:
                 f"KG operation timed out after {self._kg_timeout}s. "
                 f"Query: {iql[:100]}{'...' if len(iql) > 100 else ''}"
             ) from None
+        check_error_response(result, "InputLayerCheckpointer", iql)
+        return result
 
     def _get_setup_lock(self) -> asyncio.Lock:
         with self._setup_lock_guard:
@@ -167,9 +174,14 @@ class _SyncAndMaintenanceMixin:
         limit: int | None = None,
     ) -> Iterator[CheckpointTuple]:
         """List checkpoints for a thread (blocking). See ``alist`` for details."""
-        collected: Sequence[CheckpointTuple] = run_sync(self._alist_collect(
-            config, filter=filter, before=before, limit=limit,
-        ))
+        collected: Sequence[CheckpointTuple] = run_sync(
+            self._alist_collect(
+                config,
+                filter=filter,
+                before=before,
+                limit=limit,
+            )
+        )
         yield from collected
 
     async def _alist_collect(
@@ -182,8 +194,12 @@ class _SyncAndMaintenanceMixin:
     ) -> Sequence[CheckpointTuple]:
         """Collect alist results into a list (used by sync list())."""
         return [
-            tup async for tup in self.alist(
-                config, filter=filter, before=before, limit=limit,
+            tup
+            async for tup in self.alist(
+                config,
+                filter=filter,
+                before=before,
+                limit=limit,
             )
         ]
 
@@ -231,7 +247,9 @@ class _SyncAndMaintenanceMixin:
 
         logger.info(
             "InputLayerCheckpointer: pruning %d checkpoints for thread=%r ns=%r",
-            len(to_prune), thread_id, checkpoint_ns,
+            len(to_prune),
+            thread_id,
+            checkpoint_ns,
         )
 
         await self._batch_delete_checkpoints(thread_id, checkpoint_ns, to_prune)
@@ -249,22 +267,29 @@ class _SyncAndMaintenanceMixin:
         esc_ns = escape_iql(checkpoint_ns)
         for row in rows:
             ckpt_id = escape_iql(str(row[CKPT_ID]))
-            coros.append(self._exec(
-                f"-graph_checkpoint(ThreadId, Ns, CkptId, P, B, M, T) <- "
-                f'ThreadId = "{esc_tid}", Ns = "{esc_ns}", CkptId = "{ckpt_id}"'
-            ))
-            coros.append(self._exec(
-                f"-graph_write(ThreadId, Ns, CkptId, TaskId, TaskPath, "
-                f"Idx, Channel, Blob) <- "
-                f'ThreadId = "{esc_tid}", Ns = "{esc_ns}", CkptId = "{ckpt_id}"'
-            ))
+            coros.append(
+                self._exec(
+                    f"-graph_checkpoint(ThreadId, Ns, CkptId, P, B, M, T) <- "
+                    f'ThreadId = "{esc_tid}", Ns = "{esc_ns}", CkptId = "{ckpt_id}"'
+                )
+            )
+            coros.append(
+                self._exec(
+                    f"-graph_write(ThreadId, Ns, CkptId, TaskId, TaskPath, "
+                    f"Idx, Channel, Blob) <- "
+                    f'ThreadId = "{esc_tid}", Ns = "{esc_ns}", CkptId = "{ckpt_id}"'
+                )
+            )
         results = await asyncio.gather(*coros, return_exceptions=True)
         errors = [r for r in results if isinstance(r, BaseException)]
         if errors:
             logger.error(
                 "InputLayerCheckpointer._batch_delete_checkpoints: "
                 "%d/%d deletes failed for thread=%r ns=%r",
-                len(errors), len(coros), thread_id, checkpoint_ns,
+                len(errors),
+                len(coros),
+                thread_id,
+                checkpoint_ns,
             )
             raise RuntimeError(
                 f"_batch_delete_checkpoints: {len(errors)}/{len(coros)} "
@@ -279,6 +304,10 @@ class _SyncAndMaintenanceMixin:
         keep_last: int = 10,
     ) -> int:
         """Sync wrapper for prune_thread()."""
-        return run_sync(self.prune_thread(
-            thread_id, checkpoint_ns=checkpoint_ns, keep_last=keep_last,
-        ))
+        return run_sync(
+            self.prune_thread(
+                thread_id,
+                checkpoint_ns=checkpoint_ns,
+                keep_last=keep_last,
+            )
+        )

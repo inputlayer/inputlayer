@@ -289,7 +289,6 @@ async def run():
             await il.drop_knowledge_graph("lg_pipeline")
         kg = il.knowledge_graph("lg_pipeline")
         try:
-
             # ── Schema ───────────────────────────────────────────────────
 
             await kg.execute("+doc_classification(doc_id: int, doc_type: string)")
@@ -300,7 +299,9 @@ async def run():
             await kg.execute("+urgent_item(doc_id: int, item_type: string, subject: string)")
 
             step(1, "Build the branching pipeline")
-            print(f"{DIM}  pick_doc -> classify -> [email|code|ticket|report] -> loop -> summarize{RESET}")
+            print(
+                f"{DIM}  pick_doc -> classify -> [email|code|ticket|report] -> loop -> summarize{RESET}"
+            )
 
             # ── Build graph ──────────────────────────────────────────────
 

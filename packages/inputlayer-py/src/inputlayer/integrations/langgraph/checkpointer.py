@@ -119,7 +119,10 @@ def _group_writes_by_checkpoint(
     by_ckpt: dict[str, list[Any]] = {}
     for w_row in rows:
         validate_row_length(
-            w_row, _MIN_WRITE_ROW_LEN_ALIST, "graph_write", "alist",
+            w_row,
+            _MIN_WRITE_ROW_LEN_ALIST,
+            "graph_write",
+            "alist",
         )
         ckpt_id = str(w_row[_WRITE_CKPT_ID])
         by_ckpt.setdefault(ckpt_id, []).append(w_row)
@@ -141,7 +144,8 @@ def _build_checkpoint_tuple(
     metadata = _unpack(serde, str(row[CKPT_METADATA]))
 
     pending_writes = _parse_writes(
-        serde, writes_by_ckpt.get(checkpoint_id, []),
+        serde,
+        writes_by_ckpt.get(checkpoint_id, []),
     )
 
     ckpt_config: RunnableConfig = {
@@ -280,7 +284,11 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
             "InputLayerCheckpointer.aput_writes: deleting then inserting "
             "%d writes for thread=%r ns=%r checkpoint=%r task=%r "
             "(non-atomic: crash between delete and insert loses writes)",
-            len(writes), thread_id, checkpoint_ns, checkpoint_id, task_id,
+            len(writes),
+            thread_id,
+            checkpoint_ns,
+            checkpoint_id,
+            task_id,
         )
 
         await self._exec(
@@ -316,7 +324,11 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
             logger.error(
                 "InputLayerCheckpointer.aput_writes: %d/%d writes failed "
                 "for thread=%r checkpoint=%r task=%r",
-                failed, total, thread_id, checkpoint_id, task_id,
+                failed,
+                total,
+                thread_id,
+                checkpoint_id,
+                task_id,
             )
             raise RuntimeError(
                 f"InputLayerCheckpointer.aput_writes: "
@@ -357,9 +369,7 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
             validate_row_length(row, min_cols, "graph_checkpoint", "aget_tuple")
         row = max(r.rows, key=lambda row: int(row[CKPT_TS]))
         parent_id = str(row[CKPT_PARENT_ID])
-        actual_id = (
-            checkpoint_id if checkpoint_id is not None else str(row[CKPT_ID])
-        )
+        actual_id = checkpoint_id if checkpoint_id is not None else str(row[CKPT_ID])
 
         checkpoint = _unpack(self.serde, str(row[CKPT_BLOB]))
         metadata = _unpack(self.serde, str(row[CKPT_METADATA]))
@@ -448,7 +458,11 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
         count = 0
         for row in sorted_rows:
             tup = _build_checkpoint_tuple(
-                self.serde, row, thread_id, checkpoint_ns, writes_by_ckpt,
+                self.serde,
+                row,
+                thread_id,
+                checkpoint_ns,
+                writes_by_ckpt,
             )
             if tup is None:
                 continue

@@ -36,9 +36,7 @@ def b64_decode(data: str) -> bytes:
     try:
         return base64.b64decode(data.encode("ascii"))
     except (binascii.Error, UnicodeDecodeError) as exc:
-        raise ValueError(
-            f"Failed to decode base64 checkpoint data: {data[:40]!r}"
-        ) from exc
+        raise ValueError(f"Failed to decode base64 checkpoint data: {data[:40]!r}") from exc
 
 
 def pack(serde: SerializerProtocol, obj: Any) -> str:
@@ -85,8 +83,7 @@ def parse_writes(
             int(row[-3])
         except (ValueError, TypeError) as exc:
             raise ValueError(
-                f"graph_write row {i}: idx column (row[-3]) must be an "
-                f"integer, got {row[-3]!r}"
+                f"graph_write row {i}: idx column (row[-3]) must be an integer, got {row[-3]!r}"
             ) from exc
 
     sorted_rows = sorted(rows, key=lambda r: (str(r[-5]), int(r[-3])))

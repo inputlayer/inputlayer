@@ -109,7 +109,6 @@ async def run() -> None:
             await il.drop_knowledge_graph("lg_resumable")
         kg = il.knowledge_graph("lg_resumable")
         try:
-
             # ── Setup ────────────────────────────────────────────────────
 
             step(1, "Create checkpointer backed by InputLayer KG")

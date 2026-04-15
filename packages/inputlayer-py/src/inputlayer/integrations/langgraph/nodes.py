@@ -128,7 +128,8 @@ def kg_node(
     if operation == "query" and isinstance(query, str):
         label = f"query: {query[:50]}"
     elif operation in ("insert", "delete") and relation is not None:
-        label = f"{operation}: {relation.__name__}"
+        name = getattr(relation, "__name__", None) or str(relation)
+        label = f"{operation}: {name}"
     _node.__name__ = f"kg_{label}"
     _node.__qualname__ = f"kg_{label}"
 

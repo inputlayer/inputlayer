@@ -98,13 +98,17 @@ def kg_router(
                 if result.rows:
                     return target
             except (
-                InputLayerConnectionError, AuthenticationError, ConnectionError, OSError,
+                InputLayerConnectionError,
+                AuthenticationError,
+                ConnectionError,
+                OSError,
             ) as exc:
                 # Connection/auth failures are systemic. Re-raise so the
                 # graph surfaces the error instead of silently misrouting.
                 logger.error(
                     "kg_router: branch %r hit a connection/auth error: %s",
-                    target, exc,
+                    target,
+                    exc,
                 )
                 raise
             except QueryError as exc:

@@ -102,7 +102,9 @@ async def gather_evidence(state: dict[str, Any]) -> dict[str, Any]:
 
     # Insert evidence from this source
     for person, etype, detail in EVIDENCE_DB.get(source, []):
-        await kg.execute(f'+evidence("{escape_iql(person)}", "{escape_iql(etype)}", "{escape_iql(detail)}")')
+        await kg.execute(
+            f'+evidence("{escape_iql(person)}", "{escape_iql(etype)}", "{escape_iql(detail)}")'
+        )
         flag = (
             RED
             if etype
@@ -216,7 +218,6 @@ async def run():
             await il.drop_knowledge_graph("lg_investigation")
         kg = il.knowledge_graph("lg_investigation")
         try:
-
             # ── Setup schema and rules ───────────────────────────────────
 
             await kg.execute("+evidence(person: string, evidence_type: string, detail: string)")

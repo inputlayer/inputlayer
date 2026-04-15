@@ -207,10 +207,11 @@ async def run():
             await il.drop_knowledge_graph("lg_selfcorrect")
         kg = il.knowledge_graph("lg_selfcorrect")
         try:
-
             # ── Schema ───────────────────────────────────────────────────
 
-            await kg.execute("+api_endpoint(name: string, method: string, path: string, auth: string)")
+            await kg.execute(
+                "+api_endpoint(name: string, method: string, path: string, auth: string)"
+            )
 
             # ── Validation rules (the core of this example) ──────────────
 
