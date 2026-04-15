@@ -1740,4 +1740,131 @@ class TestDebugResultDeprecation:
 
         dr = DebugResult(iql="?test(X)", plan="plan text")
         with pytest.raises(AttributeError, match="no_such_field"):
-            _ = dr.no_such_field
+            dr.no_such_field
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Edge case regression tests
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestErrorResponseHandling:
+    """Error responses from the server should be detected, not treated as data."""
+
+    async def test_retriever_raises_on_error_response(self) -> None:
+        kg = _mock_kg(columns=["error"], rows=[["Parse error at line 1"]])
+        r = InputLayerRetriever(kg=kg, query="?bad(X)")
+        with pytest.raises(RuntimeError, match="InputLayer rejected query"):
+            await r.ainvoke("test")
+
+    async def test_retriever_raises_on_empty_error_row(self) -> None:
+        """Error response with empty row should not crash."""
+        kg = _mock_kg(columns=["error"], rows=[[]])
+        r = InputLayerRetriever(kg=kg, query="?bad(X)")
+        with pytest.raises(RuntimeError, match="unknown error"):
+            await r.ainvoke("test")
+
+    async def test_retriever_raises_on_no_rows(self) -> None:
+        """Error response with no rows at all."""
+        kg = _mock_kg(columns=["error"], rows=[])
+        r = InputLayerRetriever(kg=kg, query="?bad(X)")
+        with pytest.raises(RuntimeError, match="unknown error"):
+            await r.ainvoke("test")
+
+    async def test_iql_tool_returns_error_string(self) -> None:
+        kg = _mock_kg(columns=["error"], rows=[["Unknown relation 'foo'"]])
+        tool = InputLayerIQLTool(kg=kg)
+        result = await tool.ainvoke("?foo(X)")
+        assert "Error:" in result
+        assert "Unknown relation" in result
+
+    async def test_iql_tool_handles_empty_error_row(self) -> None:
+        kg = _mock_kg(columns=["error"], rows=[[]])
+        tool = InputLayerIQLTool(kg=kg)
+        result = await tool.ainvoke("?bad(X)")
+        assert "Error:" in result
+        assert "unknown error" in result
+
+
+class TestNoneAndEdgeValues:
+    """None values and edge cases in results should be handled gracefully."""
+
+    async def test_retriever_none_in_content_column(self) -> None:
+        """None content values should be skipped, not rendered as 'None'."""
+        kg = _mock_kg(
+            columns=["title", "content"],
+            rows=[["Doc1", None]],
+        )
+        r = InputLayerRetriever(
+            kg=kg,
+            query="?docs(T, C)",
+            page_content_columns=["content"],
+            metadata_columns=["title"],
+        )
+        docs = await r.ainvoke("test")
+        assert len(docs) == 1
+        assert docs[0].page_content == ""  # not "None"
+
+    async def test_retriever_all_none_content_columns(self) -> None:
+        """When all content columns are None, page_content should be empty."""
+        kg = _mock_kg(
+            columns=["title", "body", "summary"],
+            rows=[["Doc1", None, None]],
+        )
+        r = InputLayerRetriever(
+            kg=kg,
+            query="?docs(T, B, S)",
+            page_content_columns=["body", "summary"],
+            metadata_columns=["title"],
+        )
+        docs = await r.ainvoke("test")
+        assert docs[0].page_content == ""
+
+
+class TestMetadataValidation:
+    """Length mismatches in add_texts should be caught early."""
+
+    async def test_vectorstore_rejects_mismatched_metadatas(self) -> None:
+        from inputlayer.integrations.langchain import InputLayerVectorStore
+
+        kg = MagicMock()
+        kg.execute = AsyncMock(return_value=ResultSet(columns=[], rows=[]))
+        store = InputLayerVectorStore(
+            kg=kg,
+            relation=_make_vector_relation(),
+            embeddings=_StubEmbeddings(),
+        )
+        with pytest.raises(ValueError, match="Length mismatch"):
+            await store.aadd_texts(
+                ["text1", "text2", "text3"],
+                metadatas=[{"a": 1}],  # only 1 metadata for 3 texts
+            )
+
+    async def test_vectorstore_rejects_mismatched_ids(self) -> None:
+        from inputlayer.integrations.langchain import InputLayerVectorStore
+
+        kg = MagicMock()
+        kg.execute = AsyncMock(return_value=ResultSet(columns=[], rows=[]))
+        store = InputLayerVectorStore(
+            kg=kg,
+            relation=_make_vector_relation(),
+            embeddings=_StubEmbeddings(),
+        )
+        with pytest.raises(ValueError, match="Length mismatch"):
+            await store.aadd_texts(
+                ["text1", "text2"],
+                ids=["id1"],  # only 1 id for 2 texts
+            )
+
+
+def _make_vector_relation():
+    """Create a minimal Relation with a vector column for testing."""
+    from inputlayer import Relation, Vector
+
+    class TestDoc(Relation):
+        __relation_name__ = "test_doc"
+        id: str
+        content: str
+        embedding: Vector
+
+    return TestDoc
