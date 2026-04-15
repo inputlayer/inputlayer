@@ -2,13 +2,36 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 from collections.abc import Sequence
 from typing import Any
 
-__all__ = ["DEFAULT_KG_TIMEOUT", "escape_iql", "validate_row_length"]
+__all__ = [
+    "DEFAULT_KG_TIMEOUT",
+    "b64d",
+    "b64e",
+    "escape_iql",
+    "validate_row_length",
+]
 
 DEFAULT_KG_TIMEOUT: float = 30.0
+
+
+def b64e(s: str) -> str:
+    """Encode a string as base64 for safe IQL string storage."""
+    return base64.b64encode(s.encode("utf-8")).decode("ascii")
+
+
+def b64d(s: str) -> str:
+    """Decode a base64-encoded string back to the original."""
+    try:
+        return base64.b64decode(s.encode("ascii")).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError) as exc:
+        raise ValueError(
+            f"Failed to decode base64 memory data: {s[:40]!r}"
+        ) from exc
 
 # Match ASCII control characters not already handled explicitly
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")

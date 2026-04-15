@@ -5,16 +5,10 @@ derive active topics, relevant context, and conversation threads.
 
 Usage::
 
-    from inputlayer.integrations.langgraph import InputLayerMemory
-
     memory = InputLayerMemory(kg=kg)
     await memory.setup()
-
     await memory.astore("thread-1", "user", "I need help with ML in Python")
-    await memory.astore("thread-1", "user", "...", topics=["ml", "python"])
-
     context = await memory.arecall("thread-1")
-
     graph.add_node("recall", memory.recall_node(state_key="context"))
     graph.add_node("store", memory.store_node(state_key="new_message"))
 """
@@ -22,8 +16,6 @@ Usage::
 from __future__ import annotations
 
 import asyncio
-import base64
-import binascii
 import logging
 import threading
 import time
@@ -45,23 +37,14 @@ from inputlayer.integrations.langgraph._utils import (
     escape_iql,
     validate_row_length,
 )
+from inputlayer.integrations.langgraph._utils import (
+    b64d as _b64d,
+)
+from inputlayer.integrations.langgraph._utils import (
+    b64e as _b64e,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def _b64e(s: str) -> str:
-    """Encode a string as base64 for safe IQL string storage."""
-    return base64.b64encode(s.encode("utf-8")).decode("ascii")
-
-
-def _b64d(s: str) -> str:
-    """Decode a base64-encoded string back to the original."""
-    try:
-        return base64.b64decode(s.encode("ascii")).decode("utf-8")
-    except (binascii.Error, UnicodeDecodeError) as exc:
-        raise ValueError(
-            f"Failed to decode base64 memory data: {s[:40]!r}"
-        ) from exc
 
 
 # ── Column indices for memory query results ─────────────────────────

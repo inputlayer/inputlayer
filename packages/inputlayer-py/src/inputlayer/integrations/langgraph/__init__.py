@@ -40,9 +40,21 @@ __all__ = [
 def __getattr__(name: str) -> object:
     """Lazy-import heavy classes that require langchain_core/langgraph."""
     if name == "InputLayerCheckpointer":
-        from inputlayer.integrations.langgraph.checkpointer import InputLayerCheckpointer
+        try:
+            from inputlayer.integrations.langgraph.checkpointer import InputLayerCheckpointer
+        except ImportError as exc:
+            raise ImportError(
+                "InputLayerCheckpointer requires the langgraph extra. "
+                "Install it with: pip install inputlayer-client-dev[langgraph]"
+            ) from exc
         return InputLayerCheckpointer
     if name == "InputLayerMemory":
-        from inputlayer.integrations.langgraph.memory import InputLayerMemory
+        try:
+            from inputlayer.integrations.langgraph.memory import InputLayerMemory
+        except ImportError as exc:
+            raise ImportError(
+                "InputLayerMemory requires the langgraph extra. "
+                "Install it with: pip install inputlayer-client-dev[langgraph]"
+            ) from exc
         return InputLayerMemory
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

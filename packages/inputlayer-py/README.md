@@ -279,6 +279,79 @@ uv run python -m examples.langchain.runner --all
 
 Requires a running InputLayer server and optionally LM Studio (or any OpenAI-compatible server) for LLM examples.
 
+## LangGraph Integration
+
+Install the langgraph extra:
+
+```bash
+pip install inputlayer-client-dev[langgraph]
+```
+
+The LangGraph integration provides:
+
+- **`InputLayerCheckpointer`**: Persist graph state in an InputLayer KG. Supports `prune_thread()` for storage management and full async/sync parity.
+- **`InputLayerMemory`**: Semantic long-term memory. Stores conversation turns as facts, derives active topics and relevant context via rules.
+- **`kg_node`**: Factory for query/insert/delete graph nodes.
+- **`kg_router`**: Conditional edge routing driven by IQL queries.
+
+```python
+from inputlayer import InputLayer
+from inputlayer.integrations.langgraph import (
+    InputLayerCheckpointer,
+    InputLayerMemory,
+    kg_node,
+    kg_router,
+)
+
+async with InputLayer("ws://localhost:8080/ws", username="admin", password="...") as il:
+    kg = il.knowledge_graph("my_agent")
+
+    # Checkpointer: persist graph state across process restarts
+    checkpointer = InputLayerCheckpointer(kg=kg)
+    await checkpointer.setup()
+    app = graph.compile(checkpointer=checkpointer)
+
+    # Memory: semantic recall with rule-derived context
+    memory = InputLayerMemory(kg=kg)
+    await memory.setup()
+    graph.add_node("recall", memory.recall_node(state_key="context"))
+    graph.add_node("store", memory.store_node(state_key="new_message"))
+```
+
+### LangGraph Examples
+
+See [`examples/langgraph/`](examples/langgraph/) — 11 examples covering agent patterns:
+
+```bash
+# List all examples
+uv run python -m examples.langgraph.runner --list
+
+# Run specific examples
+uv run python -m examples.langgraph.runner 1 10 11
+
+# Run a range
+uv run python -m examples.langgraph.runner 1-5
+
+# Run all
+uv run python -m examples.langgraph.runner --all
+```
+
+| # | Example | Description |
+|---|---------|-------------|
+| 1 | Reasoning loop | Accumulate facts, rules decide when to stop |
+| 2 | Investigation | Multi-step evidence gathering |
+| 3 | Human-in-the-loop | Policy rules gate actions for approval |
+| 4 | Branching pipeline | Route documents through parallel analysis |
+| 5 | Self-correcting agent | Validation rules catch and fix errors |
+| 6 | Collaborative planning | Multi-agent task decomposition |
+| 7 | Event correlation | Pattern detection across event streams |
+| 8 | Tool selection | Rules pick the right tool per context |
+| 9 | Streaming aggregation | Threshold-based alerts from streaming data |
+| 10 | Resumable graph | Checkpoint, crash, resume from persisted state |
+| 11 | Semantic memory | Store turns as facts, recall derived context |
+
+Requires a running InputLayer server. Examples marked [LLM] need LM Studio (or any OpenAI-compatible server) at `localhost:1234`. Set `INPUTLAYER_URL`, `INPUTLAYER_USER`, `INPUTLAYER_PASSWORD` to override server defaults.
+
 ## Sync Client
 
 For scripts, notebooks, and non-async contexts:

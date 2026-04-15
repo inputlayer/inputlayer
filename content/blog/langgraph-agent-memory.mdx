@@ -7,24 +7,26 @@ excerpt: "Every conversation accumulates history. The real challenge is knowing 
 
 # Beyond Chat History: Using Rules as Agent Memory
 
-When your agent loses track of something you said three turns ago, the response goes sideways. You get a generic answer, repeat yourself, or lose trust. Recency-based memory (just keeping the last N messages) is the usual fix, but a question in turn 7 might connect back to a constraint mentioned in turn 1, and the logical relationship between those two turns has nothing to do with how similar the words are.
+When you're building a multi-turn agent, memory is the thing that separates a useful assistant from one that forgets your name between messages. Most agent frameworks handle this with a sliding window of recent messages or a vector search over past turns. That works until it doesn't.
 
-[InputLayer](https://github.com/inputlayer/inputlayer) gives you a way to reason about this. You store conversation turns as facts, write rules that derive connections between them, and query a knowledge graph (a structured store of facts and their connections) for what's relevant before generating each response. The rules fire automatically as new facts arrive, keeping derived context up to date without any manual bookkeeping.
+The problem isn't storing history. It's knowing which parts of that history matter right now. A question in turn 7 might connect back to a constraint you mentioned in turn 1, and the logical relationship between those two turns has nothing to do with how recent they are or how similar the words look. When your agent loses that thread, you get a generic answer, repeat yourself, or lose trust in the whole interaction.
+
+What if your agent could reason about relevance instead of guessing? You store conversation turns as facts, write rules that derive conclusions about which turns connect to which, and query for what's relevant before generating each response. The rules fire automatically as new facts arrive, keeping all conclusions up to date without any manual bookkeeping.
 
 ## The idea: facts + rules = derived memory
 
 [InputLayer](https://github.com/inputlayer/inputlayer) is an incremental reasoning engine. You give it facts, write rules over them, and it keeps all derived conclusions up to date as new facts arrive. No batch jobs, no re-indexing.
 
-`InputLayerMemory` is a memory component for [LangGraph](https://github.com/langchain-ai/langgraph) agents that stores conversation turns as **facts** and uses **rules** to derive what's relevant.
+`InputLayerMemory` is a [LangGraph](https://github.com/langchain-ai/langgraph) component that stores conversation turns as **facts** and uses **rules** to derive what's relevant. You drop it into your graph as a node, and it handles the storage and retrieval for you.
 
-The schema is minimal. Two base relations:
+The schema is minimal. Two base relations hold the raw data:
 
 ```
 memory_turn(thread_id, turn_id, role, content, timestamp)
 memory_topic(thread_id, turn_id, topic)
 ```
 
-And three rules that derive context automatically. Each rule reads as "the conclusion on the left is true whenever the conditions on the right are satisfied." The `<-` arrow means "comes from," and `_` is a wildcard for values you don't need to name:
+And three rules that derive context automatically. These are written in InputLayer's query language, where each rule says "the conclusion on the left is true whenever the conditions on the right are satisfied." The `<-` arrow means "is derived from," and `_` is a placeholder for values you don't care about in that particular rule:
 
 ```
 % Active topics: what this conversation is about
@@ -45,7 +47,7 @@ topic_thread(ThreadId, TopicA, TopicB) <-
 
 So the first rule says: "a topic is active in a thread if any message in that thread mentions it." The second links messages to their topics. The third finds which topics appear together in the same thread.
 
-That's it. These rules create a **live knowledge graph** of the conversation. When you add a new turn, InputLayer incrementally updates only the conclusions affected by the new facts. No full recomputation, no stale results.
+That's it. These rules create a structured, always-up-to-date map of your conversation's reasoning. When you add a new turn, InputLayer incrementally updates only the conclusions affected by the new facts. No full recomputation, no stale conclusions.
 
 ## A conversation in action
 
@@ -114,7 +116,7 @@ Before generating a response, your agent calls `memory.recall("chat-1")`. The de
 2. **Topic connections**: devops co-occurs with every prior topic in this thread
 3. **Relevant turns**: the ML training discussion (turns 1, 3, 4) and the API discussion (turn 5) are both relevant, since they share topics with the new message
 
-The rule-derived memory returns the full context: you're deploying an ML pipeline (Python, training on GPUs) with an API layer, and now you want to containerize it. The rules connected "Docker" to the earlier ML/API discussion because devops topics co-occur with all the prior ones in this thread.
+The rule-derived memory returns the full picture: you're deploying an ML pipeline (Python, training on GPUs) with an API layer, and now you want to containerize it. Here's what happened under the hood: the `topic_thread` rule fired when "devops" was tagged on the same thread as "ml", "python", "performance", and "api". That co-occurrence is what connected your Docker question to the earlier ML and API discussions. The rules did the cross-referencing, not a similarity search.
 
 ## The proof tree: explainable memory
 
@@ -132,7 +134,7 @@ relevant_turn("chat-1", 3, "user", "Training is slow...", "performance")
 └── because memory_topic("chat-1", 3, "performance")
 ```
 
-This is the derivation chain, a structured explanation of **why** this memory is relevant. You can include this in your LLM's prompt so it has the reasoning chain alongside the context. Instead of guessing which earlier messages matter, it sees exactly which facts and rules produced each piece of context.
+This is the reasoning chain, a structured explanation of **why** this memory is relevant. You can include this in your LLM's prompt so it has the full reasoning alongside the context. Instead of guessing which earlier messages matter, your agent sees the exact conclusions and the facts that produced them.
 
 ## Code: adding memory to a LangGraph agent
 
@@ -211,7 +213,7 @@ frustrated_user(ThreadId) <-
     TurnA != TurnB
 ```
 
-Each new rule extends your memory's reasoning capability without touching application code. The `recall()` method automatically picks up derived facts from any rule.
+Each new rule extends your agent's reasoning without touching application code. The `recall()` method automatically picks up conclusions from any rule you add.
 
 ## Try it yourself
 

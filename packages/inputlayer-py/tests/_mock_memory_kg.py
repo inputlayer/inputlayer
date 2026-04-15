@@ -6,16 +6,11 @@ and the derived rules (active_topic, relevant_turn, topic_thread).
 
 from __future__ import annotations
 
-import base64
 import re
 from dataclasses import dataclass, field
 
+from inputlayer.integrations.langgraph._utils import b64e  # noqa: F401 (re-exported)
 from inputlayer.result import ResultSet
-
-
-def b64e(s: str) -> str:
-    """Helper: base64-encode a string (matches memory.py's _b64e)."""
-    return base64.b64encode(s.encode("utf-8")).decode("ascii")
 
 
 @dataclass
