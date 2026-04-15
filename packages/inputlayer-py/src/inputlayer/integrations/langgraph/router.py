@@ -28,8 +28,8 @@ def kg_router(
     Python 3.7). The first branch whose query returns non-empty results
     wins. If no branch matches, ``default`` is returned.
 
-    Query-level exceptions (``ValueError``, ``RuntimeError``, etc.) are
-    caught, logged as warnings, and the branch is skipped. Connection and
+    Query-level exceptions (``QueryError``) are caught, logged as
+    warnings, and the branch is skipped. Connection and
     authentication errors (``InputLayerConnectionError``,
     ``AuthenticationError``, ``ConnectionError``, ``OSError``) are re-raised
     immediately since they indicate systemic failures, not bad queries.
@@ -107,9 +107,10 @@ def kg_router(
                     target, exc,
                 )
                 raise
-            except (QueryError, ValueError, RuntimeError) as exc:
-                # Domain errors from bad queries are skipped (branch doesn't match).
-                # Programming errors (TypeError, AttributeError) propagate.
+            except QueryError as exc:
+                # Query-level errors (bad syntax, unknown relation) are
+                # skipped so the next branch is tried. All other exceptions
+                # (ValueError, RuntimeError, TypeError, etc.) propagate.
                 logger.warning(
                     "kg_router: branch %r query raised %s: %s - skipping to next branch",
                     target,

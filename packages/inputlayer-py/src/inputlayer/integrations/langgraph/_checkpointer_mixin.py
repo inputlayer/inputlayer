@@ -258,7 +258,18 @@ class _SyncAndMaintenanceMixin:
                 f"Idx, Channel, Blob) <- "
                 f'ThreadId = "{esc_tid}", Ns = "{esc_ns}", CkptId = "{ckpt_id}"'
             ))
-        await asyncio.gather(*coros)
+        results = await asyncio.gather(*coros, return_exceptions=True)
+        errors = [r for r in results if isinstance(r, BaseException)]
+        if errors:
+            logger.error(
+                "InputLayerCheckpointer._batch_delete_checkpoints: "
+                "%d/%d deletes failed for thread=%r ns=%r",
+                len(errors), len(coros), thread_id, checkpoint_ns,
+            )
+            raise RuntimeError(
+                f"_batch_delete_checkpoints: {len(errors)}/{len(coros)} "
+                f"deletes failed. First error: {errors[0]}"
+            ) from errors[0]
 
     def prune(
         self,

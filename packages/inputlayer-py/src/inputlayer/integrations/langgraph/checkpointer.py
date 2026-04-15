@@ -68,6 +68,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _require_thread_id(config: RunnableConfig, method: str) -> str:
+    """Extract and return thread_id from config, raising a helpful KeyError if missing."""
+    try:
+        return config["configurable"]["thread_id"]
+    except KeyError as exc:
+        raise KeyError(
+            f"InputLayerCheckpointer.{method} requires "
+            "config['configurable']['thread_id']. "
+            "Pass config={'configurable': {'thread_id': 'your-thread-id'}}."
+        ) from exc
+
+
 # 4 columns when checkpoint_id is bound (ParentId, Blob, Metadata, Ts).
 # 5 columns when checkpoint_id is unbound (adds CheckpointId).
 _MIN_CKPT_ROW_LEN = 4
@@ -195,16 +208,15 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
         """Persist a checkpoint."""
         await self.setup()
 
+        thread_id = _require_thread_id(config, "aput")
         try:
-            thread_id = config["configurable"]["thread_id"]
+            checkpoint_id = checkpoint["id"]
         except KeyError as exc:
             raise KeyError(
-                "InputLayerCheckpointer.aput requires "
-                "config['configurable']['thread_id']. "
-                "Pass config={'configurable': {'thread_id': 'your-thread-id'}}"
-                " to ainvoke()."
+                "InputLayerCheckpointer.aput: checkpoint dict is missing "
+                "the required 'id' key. Use langgraph.checkpoint.base."
+                "empty_checkpoint() to create a valid checkpoint."
             ) from exc
-        checkpoint_id = checkpoint["id"]
         parent_id = config["configurable"].get("checkpoint_id")
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
 
@@ -249,13 +261,13 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
         """
         await self.setup()
 
+        thread_id = _require_thread_id(config, "aput_writes")
         try:
-            thread_id = config["configurable"]["thread_id"]
             checkpoint_id = config["configurable"]["checkpoint_id"]
         except KeyError as exc:
             raise KeyError(
                 "InputLayerCheckpointer.aput_writes requires "
-                f"config['configurable'][{exc}]. "
+                "config['configurable']['checkpoint_id']. "
                 "Ensure your graph was compiled with this checkpointer and "
                 "that config includes thread_id and checkpoint_id."
             ) from exc
@@ -319,14 +331,7 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
         """Retrieve a checkpoint by config."""
         await self.setup()
 
-        try:
-            thread_id = config["configurable"]["thread_id"]
-        except KeyError as exc:
-            raise KeyError(
-                "InputLayerCheckpointer.aget_tuple requires "
-                "config['configurable']['thread_id']. "
-                "Pass config={'configurable': {'thread_id': 'your-id'}}."
-            ) from exc
+        thread_id = _require_thread_id(config, "aget_tuple")
         checkpoint_id = config["configurable"].get("checkpoint_id")
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
 
@@ -419,14 +424,7 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
         if config is None:
             return
 
-        try:
-            thread_id = config["configurable"]["thread_id"]
-        except KeyError as exc:
-            raise KeyError(
-                "InputLayerCheckpointer.alist requires "
-                "config['configurable']['thread_id']. "
-                "Pass config={'configurable': {'thread_id': 'your-id'}}."
-            ) from exc
+        thread_id = _require_thread_id(config, "alist")
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
 
         r = await self._exec(

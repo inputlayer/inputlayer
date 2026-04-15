@@ -80,6 +80,15 @@ def parse_writes(
                 f"expected at least {_MIN_WRITE_ROW_LEN}: {row!r}"
             )
 
+    for i, row in enumerate(rows):
+        try:
+            int(row[-3])
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                f"graph_write row {i}: idx column (row[-3]) must be an "
+                f"integer, got {row[-3]!r}"
+            ) from exc
+
     sorted_rows = sorted(rows, key=lambda r: (str(r[-5]), int(r[-3])))
     result = []
     for row in sorted_rows:

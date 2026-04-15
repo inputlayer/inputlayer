@@ -99,6 +99,84 @@ class TestPutWritesErrorAggregation:
             await cp.aput_writes(config, writes, task_id="task-1")
 
 
+class TestCheckpointIdValidation:
+    async def test_aput_missing_checkpoint_id_raises(self) -> None:
+        """aput must raise KeyError when checkpoint dict has no 'id' key."""
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        with pytest.raises(KeyError, match="'id'"):
+            await cp.aput(
+                make_config("thread-1"),
+                {},  # type: ignore[arg-type]
+                {"source": "input", "step": 0, "writes": {}, "parents": {}},
+                {},
+            )
+
+    async def test_aput_empty_checkpoint_raises(self) -> None:
+        """aput with completely empty checkpoint dict must raise."""
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        with pytest.raises(KeyError, match="'id'"):
+            await cp.aput(
+                make_config("thread-1"),
+                {"channel_values": {}, "channel_versions": {}},  # type: ignore[arg-type]
+                {"source": "input", "step": 0, "writes": {}, "parents": {}},
+                {},
+            )
+
+
+class TestParseWritesIdxValidation:
+    def test_non_numeric_idx_raises(self) -> None:
+        """parse_writes must raise ValueError if idx column is not numeric."""
+        serde = JsonPlusSerializer()
+        from inputlayer.integrations.langgraph._checkpoint_serde import pack
+        packed = pack(serde, "value")
+        row = ["task-1", "path", "not-a-number", "channel", packed]
+        with pytest.raises(ValueError, match="idx column"):
+            parse_writes(serde, [row])
+
+    def test_none_idx_raises(self) -> None:
+        """parse_writes must raise ValueError if idx is None."""
+        serde = JsonPlusSerializer()
+        from inputlayer.integrations.langgraph._checkpoint_serde import pack
+        packed = pack(serde, "value")
+        row = ["task-1", "path", None, "channel", packed]
+        with pytest.raises(ValueError, match="idx column"):
+            parse_writes(serde, [row])
+
+
+class TestBatchDeleteErrorHandling:
+    async def test_batch_delete_partial_failure_raises(self) -> None:
+        """_batch_delete_checkpoints must raise if any delete fails."""
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+
+        # Store checkpoints to prune
+        for i in range(5):
+            await cp.aput(
+                make_config("thread-1"),
+                make_checkpoint(f"ckpt-{i}"),
+                {"source": "input", "step": i, "writes": {}, "parents": {}},
+                {},
+            )
+
+        # Replace execute with a flaky one that fails on deletes
+        original_execute = kg.execute
+        call_count = 0
+
+        async def flaky_execute(iql: str) -> ResultSet:
+            nonlocal call_count
+            call_count += 1
+            if iql.startswith("-graph_checkpoint(") and call_count > 2:
+                raise RuntimeError("simulated delete failure")
+            return await original_execute(iql)
+
+        kg.execute = flaky_execute
+
+        with pytest.raises(RuntimeError, match="deletes failed"):
+            await cp.prune_thread("thread-1", keep_last=2)
+
+
 class TestDeleteThread:
     async def test_delete_thread(self) -> None:
         """adelete_thread must remove all checkpoints and writes for a thread."""

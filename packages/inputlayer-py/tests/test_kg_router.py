@@ -118,11 +118,13 @@ class TestKgRouterErrors:
             await router({})
 
     async def test_failing_branch_is_skipped_continues_to_next(self) -> None:
-        """A branch query that raises must be skipped; next branch is tried."""
+        """A branch query that raises QueryError must be skipped; next branch is tried."""
+        from inputlayer.exceptions import QueryError
+
         kg = MagicMock()
         kg.execute = AsyncMock(
             side_effect=[
-                RuntimeError("server error"),
+                QueryError("unknown relation: broken"),
                 ResultSet(columns=["x"], rows=[["found"]]),
             ]
         )
@@ -145,8 +147,10 @@ class TestKgRouterErrors:
         assert queries[1] == "?good(X)", "working branch tried after failure"
 
     async def test_all_branches_fail_returns_default(self) -> None:
+        from inputlayer.exceptions import QueryError
+
         kg = MagicMock()
-        kg.execute = AsyncMock(side_effect=RuntimeError("down"))
+        kg.execute = AsyncMock(side_effect=QueryError("bad query"))
 
         router = kg_router(
             branches={"a": "?x(X)", "b": "?y(X)"},
@@ -156,6 +160,32 @@ class TestKgRouterErrors:
         result = await router({"kg": kg})
 
         assert result == "safe"
+
+    async def test_runtime_error_propagates(self) -> None:
+        """RuntimeError is not a query error and must propagate."""
+        kg = MagicMock()
+        kg.execute = AsyncMock(side_effect=RuntimeError("unexpected bug"))
+
+        router = kg_router(
+            branches={"a": "?test(X)"},
+            default="fallback",
+        )
+
+        with pytest.raises(RuntimeError, match="unexpected bug"):
+            await router({"kg": kg})
+
+    async def test_value_error_propagates(self) -> None:
+        """ValueError is not a query error and must propagate."""
+        kg = MagicMock()
+        kg.execute = AsyncMock(side_effect=ValueError("bad input"))
+
+        router = kg_router(
+            branches={"a": "?test(X)"},
+            default="fallback",
+        )
+
+        with pytest.raises(ValueError, match="bad input"):
+            await router({"kg": kg})
 
 
 class TestKgRouterConnectionErrors:
@@ -218,11 +248,13 @@ class TestKgRouterConnectionErrors:
             await router({"kg": kg})
 
     async def test_query_error_still_skipped(self) -> None:
-        """Non-connection errors (ValueError, RuntimeError) should still be skipped."""
+        """QueryError should be skipped, not propagated."""
+        from inputlayer.exceptions import QueryError
+
         kg = MagicMock()
         kg.execute = AsyncMock(
             side_effect=[
-                ValueError("bad query syntax"),
+                QueryError("bad query syntax"),
                 ResultSet(columns=["x"], rows=[["ok"]]),
             ]
         )

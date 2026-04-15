@@ -312,6 +312,11 @@ class InputLayerMemory:
 
         Returns the turn_id assigned (1-based, sequential per thread).
         """
+        if not thread_id:
+            raise ValueError(
+                "InputLayerMemory.astore: thread_id must be a non-empty string. "
+                "Pass a unique identifier per conversation thread."
+            )
         await self.setup()
 
         turn_id = await self._next_turn_id(thread_id)
@@ -372,6 +377,10 @@ class InputLayerMemory:
         All four queries run concurrently; if any fails, a RuntimeError
         is raised after all complete.
         """
+        if not thread_id:
+            raise ValueError(
+                "InputLayerMemory.arecall: thread_id must be a non-empty string."
+            )
         await self.setup()
 
         escaped = escape_iql(thread_id)

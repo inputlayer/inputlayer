@@ -87,6 +87,36 @@ class TestEscaping:
         assert ctx["recent"][0]["content"] == content
 
 
+class TestThreadIdValidation:
+    async def test_astore_empty_thread_id_raises(self) -> None:
+        """astore must reject empty string thread_id."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        with pytest.raises(ValueError, match="non-empty string"):
+            await mem.astore("", "user", "hello")
+
+    async def test_arecall_empty_thread_id_raises(self) -> None:
+        """arecall must reject empty string thread_id."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        with pytest.raises(ValueError, match="non-empty string"):
+            await mem.arecall("")
+
+    async def test_store_sync_empty_thread_id_raises(self) -> None:
+        """Sync store must also reject empty thread_id."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        with pytest.raises(ValueError, match="non-empty string"):
+            mem.store("", "user", "hello")
+
+    async def test_recall_sync_empty_thread_id_raises(self) -> None:
+        """Sync recall must also reject empty thread_id."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        with pytest.raises(ValueError, match="non-empty string"):
+            mem.recall("")
+
+
 class TestStrictMode:
     async def test_store_node_strict_missing_thread_id_raises(self) -> None:
         kg = MockMemoryKG()
