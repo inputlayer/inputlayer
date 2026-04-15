@@ -204,6 +204,7 @@ class InputLayerMemory:
             logger.debug("InputLayerMemory: setup complete")
 
     def setup_sync(self) -> None:
+        """Create memory relations and rules (blocking). See ``setup`` for details."""
         run_sync(self.setup())
 
     def __repr__(self) -> str:
@@ -359,6 +360,7 @@ class InputLayerMemory:
         *,
         topics: list[str] | None = None,
     ) -> int:
+        """Store a conversation turn (blocking). See ``astore`` for details."""
         return run_sync(self.astore(thread_id, role, content, topics=topics))
 
     # ── Recall ───────────────────────────────────────────────────────
@@ -446,6 +448,7 @@ class InputLayerMemory:
         return result
 
     def recall(self, thread_id: str) -> dict[str, Any]:
+        """Recall derived context for a thread (blocking). See ``arecall`` for details."""
         return run_sync(self.arecall(thread_id))
 
     # ── LangGraph node factories ─────────────────────────────────────

@@ -7,15 +7,15 @@ excerpt: "Every conversation accumulates history. The real challenge is knowing 
 
 # Beyond Chat History: Using Rules as Agent Memory
 
-Building agents that hold multi-turn conversations surfaces a tricky problem: which parts of the conversation history are actually relevant to the next response? The last few messages are easy. But a question in turn 7 might connect back to a constraint mentioned in turn 1, and the logical relationship between those two turns has nothing to do with how similar the words are.
+When your agent loses track of something the user said three turns ago, the response goes sideways. The user gets a generic answer, repeats themselves, or loses trust. Recency-based memory (just keeping the last N messages) is the usual fix, but a question in turn 7 might connect back to a constraint mentioned in turn 1, and the logical relationship between those two turns has nothing to do with how similar the words are.
 
-[InputLayer](https://github.com/inputlayer/inputlayer) gives you a way to reason about this. You store conversation turns as facts, write rules that derive connections between them, and ask the knowledge graph what's relevant before generating each response. The rules fire automatically as new facts arrive, keeping derived context up to date without any manual bookkeeping.
+[InputLayer](https://github.com/inputlayer/inputlayer) gives you a way to reason about this. You store conversation turns as facts, write rules that derive connections between them, and query a knowledge graph (a structured store of facts and their connections) for what's relevant before generating each response. The rules fire automatically as new facts arrive, keeping derived context up to date without any manual bookkeeping.
 
 ## The idea: facts + rules = derived memory
 
-[InputLayer](https://github.com/inputlayer/inputlayer) is an incremental reasoning engine. It stores facts and evaluates rules over them. When you insert new facts, rules fire automatically to derive conclusions. No batch jobs, no re-indexing.
+[InputLayer](https://github.com/inputlayer/inputlayer) is an incremental reasoning engine. You give it facts, write rules over them, and it keeps all derived conclusions up to date as new facts arrive. No batch jobs, no re-indexing.
 
-We built `InputLayerMemory`, a memory component for [LangGraph](https://github.com/langchain-ai/langgraph) agents that stores conversation turns as **facts** and uses **rules** to derive what's relevant.
+`InputLayerMemory` is a memory component for [LangGraph](https://github.com/langchain-ai/langgraph) agents that stores conversation turns as **facts** and uses **rules** to derive what's relevant.
 
 The schema is minimal. Two base relations:
 
@@ -237,6 +237,6 @@ The full example with a LangGraph agent is at [`examples/langgraph/ex11_memory.p
 
 ---
 
-*InputLayer is an open-source incremental reasoning engine built in Rust. It speaks WebSocket and has Python SDKs for LangChain and LangGraph.*
+*InputLayer is open-source, built in Rust, and connects over WebSocket. You can use it from Python with LangChain and LangGraph integrations.*
 
 *[GitHub](https://github.com/inputlayer/inputlayer) · [Documentation](https://inputlayer.ai/)*

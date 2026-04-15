@@ -8,6 +8,7 @@ is serialized via LangGraph's SerializerProtocol.
 from __future__ import annotations
 
 import base64
+import binascii
 from typing import Any
 
 from langgraph.checkpoint.serde.base import SerializerProtocol
@@ -32,7 +33,12 @@ def b64_encode(data: bytes) -> str:
 
 def b64_decode(data: str) -> bytes:
     """Decode base64 string back to bytes."""
-    return base64.b64decode(data.encode("ascii"))
+    try:
+        return base64.b64decode(data.encode("ascii"))
+    except (binascii.Error, UnicodeDecodeError) as exc:
+        raise ValueError(
+            f"Failed to decode base64 checkpoint data: {data[:40]!r}"
+        ) from exc
 
 
 def pack(serde: SerializerProtocol, obj: Any) -> str:

@@ -97,6 +97,7 @@ class _SyncAndMaintenanceMixin:
         metadata: CheckpointMetadata,
         new_versions: ChannelVersions,
     ) -> RunnableConfig:
+        """Persist a checkpoint (blocking). See ``aput`` for details."""
         return run_sync(self.aput(config, checkpoint, metadata, new_versions))
 
     def put_writes(
@@ -106,9 +107,11 @@ class _SyncAndMaintenanceMixin:
         task_id: str,
         task_path: str = "",
     ) -> None:
+        """Persist intermediate writes (blocking). See ``aput_writes`` for details."""
         run_sync(self.aput_writes(config, writes, task_id, task_path))
 
     def get_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:
+        """Retrieve a checkpoint by config (blocking). See ``aget_tuple`` for details."""
         return run_sync(self.aget_tuple(config))
 
     def list(
@@ -119,6 +122,7 @@ class _SyncAndMaintenanceMixin:
         before: RunnableConfig | None = None,
         limit: int | None = None,
     ) -> Iterator[CheckpointTuple]:
+        """List checkpoints for a thread (blocking). See ``alist`` for details."""
         results: list[CheckpointTuple] = run_sync(self._alist_collect(
             config, filter=filter, before=before, limit=limit,
         ))
