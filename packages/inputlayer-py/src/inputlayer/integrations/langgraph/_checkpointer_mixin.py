@@ -64,7 +64,7 @@ class _SyncAndMaintenanceMixin:
         task_path: str = "",
     ) -> None: ...
 
-    async def aget_tuple(  # type: ignore[empty-body]
+    async def aget_tuple(
         self,
         config: RunnableConfig,
     ) -> CheckpointTuple | None: ...
@@ -165,7 +165,7 @@ class _SyncAndMaintenanceMixin:
         """Retrieve a checkpoint by config (blocking). See ``aget_tuple`` for details."""
         return run_sync(self.aget_tuple(config))
 
-    def list(  # type: ignore[override]
+    def list(
         self,
         config: RunnableConfig | None,
         *,

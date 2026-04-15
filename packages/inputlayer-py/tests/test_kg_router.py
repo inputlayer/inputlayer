@@ -266,3 +266,59 @@ class TestKgRouterConnectionErrors:
 
         result = await router({"kg": kg})
         assert result == "good"
+
+
+class TestKgRouterEmptyQuery:
+    async def test_callable_returning_empty_string_is_skipped(self) -> None:
+        """A branch callable that returns '' must be skipped, not sent to KG."""
+        kg = MagicMock()
+        kg.execute = AsyncMock(return_value=ResultSet(columns=["x"], rows=[["ok"]]))
+
+        router = kg_router(
+            branches={
+                "empty": lambda s: "",
+                "valid": "?test(X)",
+            },
+            default="fallback",
+        )
+
+        result = await router({"kg": kg})
+
+        assert result == "valid"
+        # Only the valid branch query should be executed
+        kg.execute.assert_awaited_once_with("?test(X)")
+
+    async def test_callable_returning_none_is_skipped(self) -> None:
+        """A branch callable that returns None must be skipped."""
+        kg = MagicMock()
+        kg.execute = AsyncMock(return_value=ResultSet(columns=["x"], rows=[["ok"]]))
+
+        router = kg_router(
+            branches={
+                "none_branch": lambda s: None,
+                "valid": "?test(X)",
+            },
+            default="fallback",
+        )
+
+        result = await router({"kg": kg})
+
+        assert result == "valid"
+        kg.execute.assert_awaited_once_with("?test(X)")
+
+    async def test_all_empty_returns_default(self) -> None:
+        """When all callables return empty/None, must return default."""
+        kg = MagicMock()
+
+        router = kg_router(
+            branches={
+                "a": lambda s: "",
+                "b": lambda s: None,
+            },
+            default="fallback",
+        )
+
+        result = await router({"kg": kg})
+
+        assert result == "fallback"
+        kg.execute.assert_not_called()

@@ -119,11 +119,23 @@ def make_store_node(
             )
             return {}
 
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
         topics = msg.get("topics")
+
+        if not content:
+            logger.warning(
+                "InputLayerMemory.store_node: state['%s']['content'] is empty or "
+                "missing. Storing an empty turn for thread=%r. If this is unintentional, "
+                "ensure your message dict has a 'content' key with a non-empty string.",
+                state_key,
+                thread_id,
+            )
+
         await memory.astore(
             thread_id,
-            msg.get("role", "user"),
-            msg.get("content", ""),
+            role,
+            content,
             topics=topics,
         )
         return {}

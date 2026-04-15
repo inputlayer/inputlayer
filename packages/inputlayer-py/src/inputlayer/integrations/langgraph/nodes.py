@@ -62,6 +62,24 @@ def kg_node(
         raise ValueError("Must provide 'query' for query operations")
     if operation in ("insert", "delete") and relation is None:
         raise ValueError(f"Must provide 'relation' for {operation} operations")
+    if operation == "query" and relation is not None:
+        import warnings
+
+        warnings.warn(
+            "kg_node: 'relation' is ignored in query mode. "
+            "Did you mean operation='insert' or operation='delete'?",
+            UserWarning,
+            stacklevel=2,
+        )
+    if operation in ("insert", "delete") and query is not None:
+        import warnings
+
+        warnings.warn(
+            f"kg_node: 'query' is ignored in {operation} mode. "
+            "Did you mean operation='query'?",
+            UserWarning,
+            stacklevel=2,
+        )
 
     async def _node(state: dict[str, Any]) -> dict[str, Any]:
         if kg_key not in state:

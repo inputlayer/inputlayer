@@ -270,3 +270,105 @@ class TestEviction:
         # Now store in thread-0 again: should re-init from KG and get turn_id=3
         turn_id = await mem.astore("thread-0", "user", "third after eviction")
         assert turn_id == 3
+
+
+class TestDeleteThread:
+    async def test_delete_thread_clears_turns_and_topics(self) -> None:
+        """adelete_thread must remove all turns and topics for the thread."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        await mem.astore("t", "user", "Hello Python", topics=["python"])
+        await mem.astore("t", "user", "Hello Rust", topics=["rust"])
+
+        assert len(kg.turns) == 2
+        assert len(kg.topics) == 2
+
+        await mem.adelete_thread("t")
+
+        assert len(kg.turns) == 0
+        assert len(kg.topics) == 0
+
+    async def test_delete_thread_clears_in_memory_caches(self) -> None:
+        """adelete_thread must clear turn counter and thread lock."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        await mem.astore("t", "user", "Hello")
+        assert "t" in mem._turn_counters
+
+        await mem.adelete_thread("t")
+
+        assert "t" not in mem._turn_counters
+        assert "t" not in mem._thread_locks
+
+    async def test_delete_thread_recall_empty_after(self) -> None:
+        """Recall after delete must return empty context."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        await mem.astore("t", "user", "Python ML question", topics=["python", "ml"])
+
+        ctx_before = await mem.arecall("t")
+        assert len(ctx_before["topics"]) >= 1
+
+        await mem.adelete_thread("t")
+
+        ctx_after = await mem.arecall("t")
+        assert ctx_after["topics"] == []
+        assert ctx_after["recent"] == []
+        assert ctx_after["relevant"] == {}
+        assert ctx_after["related_topics"] == []
+
+    async def test_delete_thread_store_restarts_from_one(self) -> None:
+        """After deleting a thread, new stores must start from turn_id=1."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        await mem.astore("t", "user", "first")
+        await mem.astore("t", "user", "second")
+
+        await mem.adelete_thread("t")
+
+        turn_id = await mem.astore("t", "user", "fresh start")
+        assert turn_id == 1
+
+    async def test_delete_thread_isolates_other_threads(self) -> None:
+        """Deleting one thread must not affect other threads."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        await mem.astore("thread-A", "user", "Python question", topics=["python"])
+        await mem.astore("thread-B", "user", "Rust question", topics=["rust"])
+
+        await mem.adelete_thread("thread-A")
+
+        ctx_b = await mem.arecall("thread-B")
+        assert "rust" in ctx_b["topics"]
+        assert len(ctx_b["recent"]) == 1
+
+    async def test_delete_thread_empty_id_raises(self) -> None:
+        """adelete_thread must reject empty string thread_id."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        with pytest.raises(ValueError, match="non-empty string"):
+            await mem.adelete_thread("")
+
+    def test_delete_thread_sync(self) -> None:
+        """Sync delete_thread must work without an event loop."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        mem.store("t", "user", "Hello Python", topics=["python"])
+        assert len(kg.turns) == 1
+        mem.delete_thread("t")
+        assert len(kg.turns) == 0
+
+
+class TestConcurrentSetup:
+    async def test_concurrent_setup_is_safe(self) -> None:
+        """Multiple concurrent setup() calls should run DDL exactly once."""
+        import asyncio
+
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+
+        await asyncio.gather(*(mem.setup() for _ in range(10)))
+
+        assert mem._setup_done is True
+        # DDL should run exactly 5 times (2 relations + 3 rules)
+        assert len(kg.executed) == 5

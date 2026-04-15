@@ -319,6 +319,38 @@ class TestKgNodeInsertTypeValidation:
             await node({"kg": kg, "data": "not a dict or relation"})
 
 
+class TestKgNodeParameterWarnings:
+    def test_relation_in_query_mode_warns(self) -> None:
+        """Passing relation= in query mode should warn about likely mistake."""
+        import warnings
+
+        from inputlayer.relation import Relation
+
+        class Emp(Relation):
+            name: str
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            kg_node(query="?test(X)", relation=Emp)
+            assert len(w) == 1
+            assert "ignored in query mode" in str(w[0].message)
+
+    def test_query_in_insert_mode_warns(self) -> None:
+        """Passing query= in insert mode should warn about likely mistake."""
+        import warnings
+
+        from inputlayer.relation import Relation
+
+        class Emp(Relation):
+            name: str
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            kg_node(query="?test(X)", relation=Emp, operation="insert", state_key="data")
+            assert len(w) == 1
+            assert "ignored in insert mode" in str(w[0].message)
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  Integration: node + router together
 # ═══════════════════════════════════════════════════════════════════════

@@ -106,10 +106,30 @@ class MockMemoryKG:
                         rows.append([thread_id, topic_a, topic_b])
             return ResultSet(columns=["thread_id", "topic_a", "topic_b"], rows=rows)
 
+        # Conditional delete for memory_turn
+        if iql.startswith("-memory_turn(") and "<-" in iql:
+            thread_id = self._extract_delete_thread(iql)
+            if thread_id:
+                self.turns = [t for t in self.turns if t[0] != thread_id]
+            return ResultSet(columns=[], rows=[])
+
+        # Conditional delete for memory_topic
+        if iql.startswith("-memory_topic(") and "<-" in iql:
+            thread_id = self._extract_delete_thread(iql)
+            if thread_id:
+                self.topics = [t for t in self.topics if t[0] != thread_id]
+            return ResultSet(columns=[], rows=[])
+
         return ResultSet(columns=[], rows=[])
 
     def _extract_thread(self, iql: str) -> str:
         m = re.search(r'"((?:[^"\\]|\\.)*)"', iql)
+        return self._unescape(m.group(1)) if m else ""
+
+    def _extract_delete_thread(self, iql: str) -> str:
+        """Extract ThreadId from a conditional delete: -rel(...) <- ThreadId = "..."."""
+        body = iql.split("<-", 1)[1] if "<-" in iql else ""
+        m = re.search(r'ThreadId\s*=\s*"((?:[^"\\]|\\.)*)"', body)
         return self._unescape(m.group(1)) if m else ""
 
     @staticmethod

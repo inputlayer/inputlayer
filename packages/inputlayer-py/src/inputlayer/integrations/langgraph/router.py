@@ -88,10 +88,11 @@ def kg_router(
         for target, query in branches.items():
             try:
                 q = query(state) if callable(query) else query
-                if q is None:
+                if q is None or q == "":
                     logger.warning(
-                        "kg_router: branch %r query callable returned None - skipping",
+                        "kg_router: branch %r query callable returned %r - skipping",
                         target,
+                        q,
                     )
                     continue
                 result = await kg.execute(q)

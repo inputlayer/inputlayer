@@ -289,19 +289,28 @@ pip install inputlayer-client-dev[langgraph]
 
 The LangGraph integration provides:
 
-- **`InputLayerCheckpointer`**: Persist graph state in an InputLayer KG. Supports `prune_thread()` for storage management and full async/sync parity.
-- **`InputLayerMemory`**: Semantic long-term memory. Stores conversation turns as facts, derives active topics and relevant context via rules.
+- **`InputLayerCheckpointer`**: Persist graph state in an InputLayer KG. Supports `prune_thread()` / `adelete_thread()` for storage management and full async/sync parity.
+- **`InputLayerMemory`**: Semantic long-term memory. Stores conversation turns as facts, derives active topics and relevant context via rules. Supports `adelete_thread()` for thread cleanup.
 - **`kg_node`**: Factory for query/insert/delete graph nodes.
 - **`kg_router`**: Conditional edge routing driven by IQL queries.
+- **`InputLayerState`**: TypedDict base class with the required `kg` field for graph state.
+- **`escape_iql`**: String escaping for safe IQL interpolation in parameterized queries.
 
 ```python
 from inputlayer import InputLayer
 from inputlayer.integrations.langgraph import (
     InputLayerCheckpointer,
     InputLayerMemory,
+    InputLayerState,
+    escape_iql,
     kg_node,
     kg_router,
 )
+from langgraph.graph import END, StateGraph
+
+class MyState(InputLayerState):
+    question: str
+    answer: str
 
 async with InputLayer("ws://localhost:8080/ws", username="admin", password="...") as il:
     kg = il.knowledge_graph("my_agent")
@@ -309,13 +318,22 @@ async with InputLayer("ws://localhost:8080/ws", username="admin", password="..."
     # Checkpointer: persist graph state across process restarts
     checkpointer = InputLayerCheckpointer(kg=kg)
     await checkpointer.setup()
-    app = graph.compile(checkpointer=checkpointer)
 
     # Memory: semantic recall with rule-derived context
     memory = InputLayerMemory(kg=kg)
     await memory.setup()
+
+    # Build a graph with KG-driven nodes and routing
+    graph = StateGraph(MyState)
+    graph.add_node("search", kg_node(query="?relevant(X, Y)", state_key="results"))
     graph.add_node("recall", memory.recall_node(state_key="context"))
     graph.add_node("store", memory.store_node(state_key="new_message"))
+    graph.set_entry_point("recall")
+    graph.add_edge("recall", "search")
+    graph.add_edge("search", "store")
+    graph.add_edge("store", END)
+
+    app = graph.compile(checkpointer=checkpointer)
 ```
 
 ### LangGraph Examples

@@ -72,7 +72,8 @@ logger = logging.getLogger(__name__)
 def _require_thread_id(config: RunnableConfig, method: str) -> str:
     """Extract and return thread_id from config, raising a helpful KeyError if missing."""
     try:
-        return config["configurable"]["thread_id"]
+        thread_id: str = config["configurable"]["thread_id"]
+        return thread_id
     except KeyError as exc:
         raise KeyError(
             f"InputLayerCheckpointer.{method} requires "

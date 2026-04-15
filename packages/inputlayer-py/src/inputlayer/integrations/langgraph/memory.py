@@ -19,7 +19,6 @@ import time
 from collections.abc import Callable, Coroutine
 from typing import Any
 
-from inputlayer._sync import run_sync
 from inputlayer.integrations.langgraph._memory_helpers import (
     extract_topics as _extract_topics,
 )
@@ -29,6 +28,7 @@ from inputlayer.integrations.langgraph._memory_helpers import (
 from inputlayer.integrations.langgraph._memory_helpers import (
     make_store_node as _make_store_node,
 )
+from inputlayer.integrations.langgraph._memory_mixin import _MemorySyncAndMaintenanceMixin
 from inputlayer.integrations.langgraph._utils import (
     DEFAULT_KG_TIMEOUT,
     check_error_response,
@@ -70,7 +70,7 @@ _TOPIC_B = -1
 _MIN_TOPIC_THREAD_ROW_LEN = 2
 
 
-class InputLayerMemory:
+class InputLayerMemory(_MemorySyncAndMaintenanceMixin):
     """Semantic memory backed by an InputLayer KnowledgeGraph.
 
     Stores conversation turns and derived context. Rules compute:
@@ -124,7 +124,7 @@ class InputLayerMemory:
                 self.kg.execute(iql),
                 timeout=self._kg_timeout,
             )
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError, TimeoutError):
             raise TimeoutError(
                 f"KG operation timed out after {self._kg_timeout}s. "
                 f"Query: {iql[:100]}{'...' if len(iql) > 100 else ''}"
@@ -178,20 +178,6 @@ class InputLayerMemory:
 
             self._setup_done = True
             logger.debug("InputLayerMemory: setup complete")
-
-    def setup_sync(self) -> None:
-        """Create memory relations and rules (blocking). See ``setup`` for details."""
-        run_sync(self.setup())
-
-    def __repr__(self) -> str:
-        kg_name = getattr(self.kg, "name", repr(self.kg))
-        return (
-            f"InputLayerMemory(kg={kg_name!r}, "
-            f"max_recent={self.max_recent}, "
-            f"kg_timeout={self._kg_timeout}, "
-            f"setup_done={self._setup_done}, "
-            f"tracked_threads={len(self._turn_counters)})"
-        )
 
     # ── Internal: turn counter ───────────────────────────────────────
 
@@ -337,17 +323,6 @@ class InputLayerMemory:
 
         return turn_id
 
-    def store(
-        self,
-        thread_id: str,
-        role: str,
-        content: str,
-        *,
-        topics: list[str] | None = None,
-    ) -> int:
-        """Store a conversation turn (blocking). See ``astore`` for details."""
-        return run_sync(self.astore(thread_id, role, content, topics=topics))
-
     # ── Recall ───────────────────────────────────────────────────────
 
     async def arecall(self, thread_id: str) -> dict[str, Any]:
@@ -446,10 +421,6 @@ class InputLayerMemory:
         result["related_topics"] = related
 
         return result
-
-    def recall(self, thread_id: str) -> dict[str, Any]:
-        """Recall derived context for a thread (blocking). See ``arecall`` for details."""
-        return run_sync(self.arecall(thread_id))
 
     # ── LangGraph node factories ─────────────────────────────────────
 
