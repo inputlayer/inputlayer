@@ -1,4 +1,4 @@
-"""Sync wrappers and maintenance for InputLayerCheckpointer.
+"""Sync wrappers, setup, and maintenance for InputLayerCheckpointer.
 
 Separated from checkpointer.py to keep individual files under 500 lines.
 Methods are mixed into InputLayerCheckpointer via inheritance.
@@ -6,6 +6,7 @@ Methods are mixed into InputLayerCheckpointer via inheritance.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Iterator, Sequence
 from typing import Any
@@ -26,7 +27,62 @@ logger = logging.getLogger(__name__)
 
 
 class _SyncAndMaintenanceMixin:
-    """Sync wrappers and maintenance ops for InputLayerCheckpointer."""
+    """Setup, sync wrappers, and maintenance ops for InputLayerCheckpointer."""
+
+    # ── Setup & infrastructure ──────────────────────────────────────
+
+    async def _exec(self, iql: str) -> Any:
+        """Execute IQL against the KG with a timeout."""
+        try:
+            return await asyncio.wait_for(
+                self.kg.execute(iql),
+                timeout=self._kg_timeout,
+            )
+        except (asyncio.TimeoutError, TimeoutError):
+            raise TimeoutError(
+                f"KG operation timed out after {self._kg_timeout}s. "
+                f"Query: {iql[:100]}{'...' if len(iql) > 100 else ''}"
+            ) from None
+
+    def _get_setup_lock(self) -> asyncio.Lock:
+        with self._setup_lock_guard:
+            if self._setup_lock is None:
+                self._setup_lock = asyncio.Lock()
+            return self._setup_lock
+
+    async def setup(self) -> None:
+        """Create the checkpoint relations if they don't exist (idempotent)."""
+        if self._setup_done:
+            return
+
+        async with self._get_setup_lock():
+            if self._setup_done:
+                return
+
+            logger.debug("InputLayerCheckpointer: creating checkpoint relations")
+
+            for ddl in [
+                "+graph_checkpoint(thread_id: string, checkpoint_ns: string, "
+                "checkpoint_id: string, parent_id: string, blob: string, "
+                "metadata: string, ts: int)",
+                "+graph_write(thread_id: string, checkpoint_ns: string, "
+                "checkpoint_id: string, task_id: string, task_path: string, "
+                "idx: int, channel: string, blob: string)",
+            ]:
+                await self._exec(ddl)
+
+            self._setup_done = True
+            logger.debug("InputLayerCheckpointer: setup complete")
+
+    def __repr__(self) -> str:
+        kg_name = getattr(self.kg, "name", repr(self.kg))
+        return (
+            f"InputLayerCheckpointer(kg={kg_name!r}, "
+            f"kg_timeout={self._kg_timeout}, "
+            f"setup_done={self._setup_done})"
+        )
+
+    # ── Sync wrappers ───────────────────────────────────────────────
 
     def setup_sync(self) -> None:
         """Sync wrapper for setup()."""
@@ -140,8 +196,6 @@ class _SyncAndMaintenanceMixin:
         rows: list[Any],
     ) -> None:
         """Delete checkpoint and write rows concurrently."""
-        import asyncio
-
         coros = []
         esc_tid = escape_iql(thread_id)
         esc_ns = escape_iql(checkpoint_ns)

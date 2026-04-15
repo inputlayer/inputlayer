@@ -183,57 +183,6 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
         self._setup_lock_guard = threading.Lock()
         self._setup_lock: asyncio.Lock | None = None
 
-    async def _exec(self, iql: str) -> Any:
-        """Execute IQL against the KG with a timeout."""
-        try:
-            return await asyncio.wait_for(
-                self.kg.execute(iql),
-                timeout=self._kg_timeout,
-            )
-        except asyncio.TimeoutError:
-            raise TimeoutError(
-                f"KG operation timed out after {self._kg_timeout}s. "
-                f"Query: {iql[:100]}{'...' if len(iql) > 100 else ''}"
-            ) from None
-
-    def _get_setup_lock(self) -> asyncio.Lock:
-        with self._setup_lock_guard:
-            if self._setup_lock is None:
-                self._setup_lock = asyncio.Lock()
-            return self._setup_lock
-
-    async def setup(self) -> None:
-        """Create the checkpoint relations if they don't exist (idempotent)."""
-        if self._setup_done:
-            return
-
-        async with self._get_setup_lock():
-            if self._setup_done:
-                return
-
-            logger.debug("InputLayerCheckpointer: creating checkpoint relations")
-
-            for ddl in [
-                "+graph_checkpoint(thread_id: string, checkpoint_ns: string, "
-                "checkpoint_id: string, parent_id: string, blob: string, "
-                "metadata: string, ts: int)",
-                "+graph_write(thread_id: string, checkpoint_ns: string, "
-                "checkpoint_id: string, task_id: string, task_path: string, "
-                "idx: int, channel: string, blob: string)",
-            ]:
-                await self._exec(ddl)
-
-            self._setup_done = True
-            logger.debug("InputLayerCheckpointer: setup complete")
-
-    def __repr__(self) -> str:
-        kg_name = getattr(self.kg, "name", repr(self.kg))
-        return (
-            f"InputLayerCheckpointer(kg={kg_name!r}, "
-            f"kg_timeout={self._kg_timeout}, "
-            f"setup_done={self._setup_done})"
-        )
-
     # ── Async API ────────────────────────────────────────────────────
 
     async def aput(

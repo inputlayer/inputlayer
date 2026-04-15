@@ -95,9 +95,7 @@ def kg_node(
                     await kg.insert(data)
             elif isinstance(data, dict):
                 await kg.insert(relation, data)
-            elif hasattr(data, "__class__") and (
-                hasattr(data.__class__, "model_fields") or hasattr(data.__class__, "__fields__")
-            ):
+            elif hasattr(data.__class__, "model_fields") or hasattr(data.__class__, "__fields__"):
                 # Single Relation/pydantic instance
                 await kg.insert([data])
             else:

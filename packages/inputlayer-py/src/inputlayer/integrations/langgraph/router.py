@@ -88,12 +88,22 @@ def kg_router(
         for target, query in branches.items():
             try:
                 q = query(state) if callable(query) else query
+                if q is None:
+                    logger.warning(
+                        "kg_router: branch %r query callable returned None - skipping",
+                        target,
+                    )
+                    continue
                 result = await kg.execute(q)
                 if result.rows:
                     return target
-            except (InputLayerConnectionError, AuthenticationError, ConnectionError, OSError):
+            except (InputLayerConnectionError, AuthenticationError, ConnectionError, OSError) as exc:
                 # Connection/auth failures are systemic. Re-raise so the
                 # graph surfaces the error instead of silently misrouting.
+                logger.error(
+                    "kg_router: branch %r hit a connection/auth error: %s",
+                    target, exc,
+                )
                 raise
             except (QueryError, ValueError, RuntimeError) as exc:
                 # Domain errors from bad queries are skipped (branch doesn't match).
