@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Iterator, Sequence
+import threading
+from collections.abc import AsyncIterator, Iterator, Sequence
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
@@ -27,7 +28,50 @@ logger = logging.getLogger(__name__)
 
 
 class _SyncAndMaintenanceMixin:
-    """Setup, sync wrappers, and maintenance ops for InputLayerCheckpointer."""
+    """Setup, sync wrappers, and maintenance ops for InputLayerCheckpointer.
+
+    Attributes and async methods below are declared for mypy; concrete
+    values are set by ``InputLayerCheckpointer.__init__`` and its
+    method definitions.
+    """
+
+    kg: Any
+    _kg_timeout: float
+    _setup_done: bool
+    _setup_lock_guard: threading.Lock
+    _setup_lock: asyncio.Lock | None
+
+    # Forward declarations for methods defined on the concrete subclass.
+    # The concrete implementations live in checkpointer.py; these stubs
+    # let mypy verify the sync wrappers below.
+    async def aput(  # type: ignore[empty-body]
+        self,
+        config: RunnableConfig,
+        checkpoint: Checkpoint,
+        metadata: CheckpointMetadata,
+        new_versions: ChannelVersions,
+    ) -> RunnableConfig: ...
+
+    async def aput_writes(
+        self,
+        config: RunnableConfig,
+        writes: Sequence[tuple[str, Any]],
+        task_id: str,
+        task_path: str = "",
+    ) -> None: ...
+
+    async def aget_tuple(  # type: ignore[empty-body]
+        self, config: RunnableConfig,
+    ) -> CheckpointTuple | None: ...
+
+    def alist(  # type: ignore[empty-body]
+        self,
+        config: RunnableConfig | None,
+        *,
+        filter: dict[str, Any] | None = None,
+        before: RunnableConfig | None = None,
+        limit: int | None = None,
+    ) -> AsyncIterator[CheckpointTuple]: ...
 
     # ── Setup & infrastructure ──────────────────────────────────────
 
@@ -114,7 +158,7 @@ class _SyncAndMaintenanceMixin:
         """Retrieve a checkpoint by config (blocking). See ``aget_tuple`` for details."""
         return run_sync(self.aget_tuple(config))
 
-    def list(
+    def list(  # type: ignore[override]
         self,
         config: RunnableConfig | None,
         *,
@@ -123,10 +167,10 @@ class _SyncAndMaintenanceMixin:
         limit: int | None = None,
     ) -> Iterator[CheckpointTuple]:
         """List checkpoints for a thread (blocking). See ``alist`` for details."""
-        results: list[CheckpointTuple] = run_sync(self._alist_collect(
+        collected: Sequence[CheckpointTuple] = run_sync(self._alist_collect(
             config, filter=filter, before=before, limit=limit,
         ))
-        yield from results
+        yield from collected
 
     async def _alist_collect(
         self,
@@ -135,7 +179,7 @@ class _SyncAndMaintenanceMixin:
         filter: dict[str, Any] | None = None,
         before: RunnableConfig | None = None,
         limit: int | None = None,
-    ) -> list[CheckpointTuple]:
+    ) -> Sequence[CheckpointTuple]:
         """Collect alist results into a list (used by sync list())."""
         return [
             tup async for tup in self.alist(
@@ -197,10 +241,10 @@ class _SyncAndMaintenanceMixin:
         self,
         thread_id: str,
         checkpoint_ns: str,
-        rows: list[Any],
+        rows: Sequence[Any],
     ) -> None:
         """Delete checkpoint and write rows concurrently."""
-        coros = []
+        coros: Any = []
         esc_tid = escape_iql(thread_id)
         esc_ns = escape_iql(checkpoint_ns)
         for row in rows:

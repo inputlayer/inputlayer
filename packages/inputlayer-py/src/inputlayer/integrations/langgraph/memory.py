@@ -395,7 +395,11 @@ class InputLayerMemory:
                 f"First error: {errors[0]}"
             ) from errors[0]
 
-        r_topics, r_turns, r_relevant, r_related = results
+        # Narrow from Any|BaseException to the actual result type
+        r_topics: Any = results[0]
+        r_turns: Any = results[1]
+        r_relevant: Any = results[2]
+        r_related: Any = results[3]
 
         for row in r_topics.rows:
             validate_row_length(row, _MIN_TOPIC_ROW_LEN, "active_topic", "arecall")

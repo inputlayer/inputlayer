@@ -7,7 +7,7 @@ excerpt: "Every conversation accumulates history. The real challenge is knowing 
 
 # Beyond Chat History: Using Rules as Agent Memory
 
-When your agent loses track of something the user said three turns ago, the response goes sideways. The user gets a generic answer, repeats themselves, or loses trust. Recency-based memory (just keeping the last N messages) is the usual fix, but a question in turn 7 might connect back to a constraint mentioned in turn 1, and the logical relationship between those two turns has nothing to do with how similar the words are.
+When your agent loses track of something you said three turns ago, the response goes sideways. You get a generic answer, repeat yourself, or lose trust. Recency-based memory (just keeping the last N messages) is the usual fix, but a question in turn 7 might connect back to a constraint mentioned in turn 1, and the logical relationship between those two turns has nothing to do with how similar the words are.
 
 [InputLayer](https://github.com/inputlayer/inputlayer) gives you a way to reason about this. You store conversation turns as facts, write rules that derive connections between them, and query a knowledge graph (a structured store of facts and their connections) for what's relevant before generating each response. The rules fire automatically as new facts arrive, keeping derived context up to date without any manual bookkeeping.
 

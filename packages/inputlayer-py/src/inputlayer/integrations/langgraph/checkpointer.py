@@ -158,7 +158,7 @@ def _build_checkpoint_tuple(
     )
 
 
-class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str]):
+class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str]):  # type: ignore[misc]
     """LangGraph checkpointer backed by an InputLayer KnowledgeGraph.
 
     Persists graph state as facts so that graph executions can be
@@ -452,6 +452,8 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
             tup = _build_checkpoint_tuple(
                 self.serde, row, thread_id, checkpoint_ns, writes_by_ckpt,
             )
+            if tup is None:
+                continue
             if filter and not all(tup.metadata.get(k) == v for k, v in filter.items()):
                 continue
 

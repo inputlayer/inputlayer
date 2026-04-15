@@ -6,7 +6,7 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
-__all__ = ["escape_iql", "validate_row_length", "DEFAULT_KG_TIMEOUT"]
+__all__ = ["DEFAULT_KG_TIMEOUT", "escape_iql", "validate_row_length"]
 
 DEFAULT_KG_TIMEOUT: float = 30.0
 

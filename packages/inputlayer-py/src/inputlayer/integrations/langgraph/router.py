@@ -97,7 +97,9 @@ def kg_router(
                 result = await kg.execute(q)
                 if result.rows:
                     return target
-            except (InputLayerConnectionError, AuthenticationError, ConnectionError, OSError) as exc:
+            except (
+                InputLayerConnectionError, AuthenticationError, ConnectionError, OSError,
+            ) as exc:
                 # Connection/auth failures are systemic. Re-raise so the
                 # graph surfaces the error instead of silently misrouting.
                 logger.error(
