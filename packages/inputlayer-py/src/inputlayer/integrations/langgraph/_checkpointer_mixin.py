@@ -94,9 +94,9 @@ class _SyncAndMaintenanceMixin:
     ) -> int:
         """Remove old checkpoints and their writes, keeping the most recent.
 
-        This method is named ``prune_thread`` (not ``aprune``) to avoid
-        conflicting with ``BaseCheckpointSaver.aprune`` which has a
-        different signature.
+        Deletes are batched: one DELETE per checkpoint ID is issued
+        concurrently for both checkpoints and writes to avoid N+1
+        round-trips.
 
         Args:
             thread_id: The thread to prune.
@@ -122,9 +122,7 @@ class _SyncAndMaintenanceMixin:
 
         for row in r.rows:
             validate_row_length(row, 5, "graph_checkpoint", "prune_thread")
-        sorted_rows = sorted(
-            r.rows, key=lambda row: int(row[CKPT_TS]), reverse=True,
-        )
+        sorted_rows = sorted(r.rows, key=lambda row: int(row[CKPT_TS]), reverse=True)
         to_prune = sorted_rows[keep_last:]
 
         logger.info(
@@ -132,23 +130,33 @@ class _SyncAndMaintenanceMixin:
             len(to_prune), thread_id, checkpoint_ns,
         )
 
-        for row in to_prune:
-            ckpt_id = str(row[CKPT_ID])
-            await self._exec(
+        await self._batch_delete_checkpoints(thread_id, checkpoint_ns, to_prune)
+        return len(to_prune)
+
+    async def _batch_delete_checkpoints(
+        self,
+        thread_id: str,
+        checkpoint_ns: str,
+        rows: list[Any],
+    ) -> None:
+        """Delete checkpoint and write rows concurrently."""
+        import asyncio
+
+        coros = []
+        esc_tid = escape_iql(thread_id)
+        esc_ns = escape_iql(checkpoint_ns)
+        for row in rows:
+            ckpt_id = escape_iql(str(row[CKPT_ID]))
+            coros.append(self._exec(
                 f"-graph_checkpoint(ThreadId, Ns, CkptId, P, B, M, T) <- "
-                f'ThreadId = "{escape_iql(thread_id)}", '
-                f'Ns = "{escape_iql(checkpoint_ns)}", '
-                f'CkptId = "{escape_iql(ckpt_id)}"'
-            )
-            await self._exec(
+                f'ThreadId = "{esc_tid}", Ns = "{esc_ns}", CkptId = "{ckpt_id}"'
+            ))
+            coros.append(self._exec(
                 f"-graph_write(ThreadId, Ns, CkptId, TaskId, TaskPath, "
                 f"Idx, Channel, Blob) <- "
-                f'ThreadId = "{escape_iql(thread_id)}", '
-                f'Ns = "{escape_iql(checkpoint_ns)}", '
-                f'CkptId = "{escape_iql(ckpt_id)}"'
-            )
-
-        return len(to_prune)
+                f'ThreadId = "{esc_tid}", Ns = "{esc_ns}", CkptId = "{ckpt_id}"'
+            ))
+        await asyncio.gather(*coros)
 
     def prune(
         self,

@@ -1,8 +1,11 @@
-"""Tests for escape_iql string escaping utility."""
+"""Tests for escape_iql and validate_row_length utilities."""
 
 from __future__ import annotations
 
+import pytest
+
 from inputlayer.integrations.langgraph import escape_iql
+from inputlayer.integrations.langgraph._utils import validate_row_length
 
 
 class TestEscapeIql:
@@ -64,6 +67,53 @@ class TestEscapeIql:
         assert escape_iql("fn()") == "fn()"
 
     def test_non_string_raises_type_error(self) -> None:
-        import pytest
         with pytest.raises(TypeError, match="escape_iql expects a str"):
             escape_iql(42)  # type: ignore[arg-type]
+
+    def test_long_string_with_mixed_special_chars(self) -> None:
+        original = 'He said "hello\\world"\nand\tthen\x00left\x07quickly'
+        escaped = escape_iql(original)
+        assert '\\"' in escaped
+        assert '\\\\' in escaped
+        assert '\\n' in escaped
+        assert '\\t' in escaped
+        assert '\\0' in escaped
+        assert '\\x07' in escaped
+        # Verify no raw control chars survive
+        for ch in escaped:
+            assert ord(ch) >= 0x20, f"Unexpected control char: {ch!r}"
+
+    def test_consecutive_backslashes(self) -> None:
+        assert escape_iql('\\\\') == '\\\\\\\\'
+
+    def test_quote_at_boundaries(self) -> None:
+        assert escape_iql('"') == '\\"'
+        assert escape_iql('""') == '\\"\\"'
+
+
+class TestValidateRowLength:
+    def test_valid_row_passes(self) -> None:
+        validate_row_length(["a", "b", "c"], 3, "test_rel", "test_ctx")
+
+    def test_row_longer_than_min_passes(self) -> None:
+        validate_row_length(["a", "b", "c", "d"], 3, "test_rel", "test_ctx")
+
+    def test_short_row_raises(self) -> None:
+        with pytest.raises(ValueError, match="test_rel row has 2 columns"):
+            validate_row_length(["a", "b"], 3, "test_rel", "test_ctx")
+
+    def test_error_includes_context(self) -> None:
+        with pytest.raises(ValueError, match="my_context"):
+            validate_row_length([], 1, "my_rel", "my_context")
+
+    def test_empty_row_raises(self) -> None:
+        with pytest.raises(ValueError, match="0 columns"):
+            validate_row_length([], 1, "rel", "ctx")
+
+    def test_min_zero_always_passes(self) -> None:
+        validate_row_length([], 0, "rel", "ctx")
+
+    def test_long_row_repr_truncated(self) -> None:
+        long_row = ["x" * 100] * 5
+        with pytest.raises(ValueError, match=r"\.\.\."):
+            validate_row_length(long_row, 10, "rel", "ctx")

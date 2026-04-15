@@ -24,7 +24,7 @@ memory_turn(thread_id, turn_id, role, content, timestamp)
 memory_topic(thread_id, turn_id, topic)
 ```
 
-And three rules that derive context automatically:
+And three rules that derive context automatically. Each rule reads as "the conclusion on the left is true whenever the conditions on the right are satisfied." The `<-` arrow means "comes from," and `_` is a wildcard for values you don't need to name:
 
 ```
 % Active topics: what this conversation is about
@@ -42,6 +42,8 @@ topic_thread(ThreadId, TopicA, TopicB) <-
     memory_topic(ThreadId, _, TopicB),
     TopicA != TopicB
 ```
+
+So the first rule says: "a topic is active in a thread if any message in that thread mentions it." The second links messages to their topics. The third finds which topics appear together in the same thread.
 
 That's it. These rules create a **live knowledge graph** of the conversation. When you add a new turn, InputLayer incrementally updates only the conclusions affected by the new facts. No full recomputation, no stale results.
 
@@ -130,9 +132,11 @@ relevant_turn("chat-1", 3, "user", "Training is slow...", "performance")
 └── because memory_topic("chat-1", 3, "performance")
 ```
 
-This is the derivation chain, a structured explanation of **why** this memory is relevant. Feed this to your LLM and it can cite its reasoning: *"Based on your earlier mention of slow training (turn 3), here's how Docker can help with GPU access..."*
+This is the derivation chain, a structured explanation of **why** this memory is relevant. You can include this in your LLM's prompt so it has the reasoning chain alongside the context. Instead of guessing which earlier messages matter, it sees exactly which facts and rules produced each piece of context.
 
 ## Code: adding memory to a LangGraph agent
+
+Here's how you wire `InputLayerMemory` into a LangGraph agent. Three nodes form the loop: recall context, generate a response, then store the new turn.
 
 ```python
 from inputlayer import InputLayer

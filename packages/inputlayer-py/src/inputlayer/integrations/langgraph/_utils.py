@@ -6,7 +6,9 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
-__all__ = ["escape_iql", "validate_row_length"]
+__all__ = ["escape_iql", "validate_row_length", "DEFAULT_KG_TIMEOUT"]
+
+DEFAULT_KG_TIMEOUT: float = 30.0
 
 # Match ASCII control characters not already handled explicitly
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")

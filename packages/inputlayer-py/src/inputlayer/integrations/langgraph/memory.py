@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import logging
 import threading
 import time
@@ -39,11 +40,13 @@ from inputlayer.integrations.langgraph._memory_helpers import (
 from inputlayer.integrations.langgraph._memory_helpers import (
     make_store_node as _make_store_node,
 )
-from inputlayer.integrations.langgraph._utils import escape_iql, validate_row_length
+from inputlayer.integrations.langgraph._utils import (
+    DEFAULT_KG_TIMEOUT,
+    escape_iql,
+    validate_row_length,
+)
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_KG_TIMEOUT = 30.0
 
 
 def _b64e(s: str) -> str:
@@ -55,7 +58,7 @@ def _b64d(s: str) -> str:
     """Decode a base64-encoded string back to the original."""
     try:
         return base64.b64decode(s.encode("ascii")).decode("utf-8")
-    except Exception as exc:
+    except (binascii.Error, UnicodeDecodeError) as exc:
         raise ValueError(
             f"Failed to decode base64 memory data: {s[:40]!r}"
         ) from exc
@@ -98,6 +101,11 @@ class InputLayerMemory:
 
     Thread safety: a single instance can be shared across coroutines.
     ``setup()`` is guarded by a lock; ``astore()`` uses per-thread locks.
+
+    ``max_tracked_threads`` is a **soft limit**. If all tracked threads
+    are currently active (holding their per-thread lock), a new thread
+    is still admitted to avoid deadlock, and a warning is logged. The
+    excess entries are evicted once threads become idle.
     """
 
     def __init__(
@@ -106,7 +114,7 @@ class InputLayerMemory:
         *,
         max_recent: int = 10,
         max_tracked_threads: int = 10_000,
-        kg_timeout: float = _DEFAULT_KG_TIMEOUT,
+        kg_timeout: float = DEFAULT_KG_TIMEOUT,
     ) -> None:
         if max_recent < 1:
             raise ValueError(
@@ -256,8 +264,11 @@ class InputLayerMemory:
         elif evict_target > 0:
             logger.warning(
                 "InputLayerMemory: eviction requested but all %d threads "
-                "are active. Consider increasing max_tracked_threads.",
+                "are active (soft limit %d exceeded). Excess entries will "
+                "be evicted once threads become idle. Consider increasing "
+                "max_tracked_threads.",
                 len(self._thread_locks),
+                self._max_tracked_threads,
             )
 
     async def _next_turn_id(self, thread_id: str) -> int:

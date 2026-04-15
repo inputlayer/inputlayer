@@ -57,14 +57,16 @@ from inputlayer.integrations.langgraph._checkpoint_serde import pack as _pack
 from inputlayer.integrations.langgraph._checkpoint_serde import parse_writes as _parse_writes
 from inputlayer.integrations.langgraph._checkpoint_serde import unpack as _unpack
 from inputlayer.integrations.langgraph._checkpointer_mixin import _SyncAndMaintenanceMixin
-from inputlayer.integrations.langgraph._utils import escape_iql, validate_row_length
+from inputlayer.integrations.langgraph._utils import (
+    DEFAULT_KG_TIMEOUT,
+    escape_iql,
+    validate_row_length,
+)
 
 if TYPE_CHECKING:
     from langgraph.checkpoint.serde.base import SerializerProtocol
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_KG_TIMEOUT = 30.0
 
 # 4 columns when checkpoint_id is bound (ParentId, Blob, Metadata, Ts).
 # 5 columns when checkpoint_id is unbound (adds CheckpointId).
@@ -74,6 +76,86 @@ _MIN_CKPT_ROW_LEN_WITH_ID = 5
 # graph_write column indices for alist (6 unbound columns)
 _WRITE_CKPT_ID = -6
 _MIN_WRITE_ROW_LEN_ALIST = 6
+
+
+def _apply_before_filter(
+    sorted_rows: list[Sequence[Any]],
+    before: RunnableConfig | None,
+) -> list[Sequence[Any]]:
+    """Filter rows to only those with timestamps before the cutoff checkpoint."""
+    if before is None:
+        return sorted_rows
+    before_cfg = before.get("configurable", {}) if isinstance(before, dict) else {}
+    before_id = before_cfg.get("checkpoint_id")
+    if not before_id:
+        return sorted_rows
+    cutoff_ts = None
+    for row in sorted_rows:
+        if str(row[CKPT_ID]) == before_id:
+            cutoff_ts = int(row[CKPT_TS])
+            break
+    if cutoff_ts is None:
+        return sorted_rows
+    return [row for row in sorted_rows if int(row[CKPT_TS]) < cutoff_ts]
+
+
+def _group_writes_by_checkpoint(
+    rows: list[Sequence[Any]],
+) -> dict[str, list[Any]]:
+    """Group write rows by their checkpoint ID."""
+    by_ckpt: dict[str, list[Any]] = {}
+    for w_row in rows:
+        validate_row_length(
+            w_row, _MIN_WRITE_ROW_LEN_ALIST, "graph_write", "alist",
+        )
+        ckpt_id = str(w_row[_WRITE_CKPT_ID])
+        by_ckpt.setdefault(ckpt_id, []).append(w_row)
+    return by_ckpt
+
+
+def _build_checkpoint_tuple(
+    serde: Any,
+    row: Sequence[Any],
+    thread_id: str,
+    checkpoint_ns: str,
+    writes_by_ckpt: dict[str, list[Any]],
+) -> CheckpointTuple | None:
+    """Build a CheckpointTuple from a checkpoint row and its writes."""
+    checkpoint_id = str(row[CKPT_ID])
+    parent_id = str(row[CKPT_PARENT_ID])
+
+    checkpoint = _unpack(serde, str(row[CKPT_BLOB]))
+    metadata = _unpack(serde, str(row[CKPT_METADATA]))
+
+    pending_writes = _parse_writes(
+        serde, writes_by_ckpt.get(checkpoint_id, []),
+    )
+
+    ckpt_config: RunnableConfig = {
+        "configurable": {
+            "thread_id": thread_id,
+            "checkpoint_ns": checkpoint_ns,
+            "checkpoint_id": checkpoint_id,
+        }
+    }
+
+    parent_config: RunnableConfig | None = None
+    if parent_id:
+        parent_config = {
+            "configurable": {
+                "thread_id": thread_id,
+                "checkpoint_ns": checkpoint_ns,
+                "checkpoint_id": parent_id,
+            }
+        }
+
+    return CheckpointTuple(
+        config=ckpt_config,
+        checkpoint=checkpoint,
+        metadata=metadata,
+        parent_config=parent_config,
+        pending_writes=pending_writes,
+    )
 
 
 class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str]):
@@ -92,7 +174,7 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
         kg: Any,
         *,
         serde: SerializerProtocol | None = None,
-        kg_timeout: float = _DEFAULT_KG_TIMEOUT,
+        kg_timeout: float = DEFAULT_KG_TIMEOUT,
     ) -> None:
         super().__init__(serde=serde or JsonPlusSerializer())
         self.kg = kg
@@ -403,83 +485,28 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
             f'"{escape_iql(checkpoint_ns)}", '
             f"CheckpointId, ParentId, Blob, Metadata, Ts)"
         )
-
         for row in r.rows:
             validate_row_length(row, _MIN_CKPT_ROW_LEN_WITH_ID, "graph_checkpoint", "alist")
-        sorted_rows = sorted(
-            r.rows, key=lambda row: int(row[CKPT_TS]), reverse=True,
-        )
 
-        if before is not None:
-            before_cfg = before.get("configurable", {}) if isinstance(before, dict) else {}
-            before_id = before_cfg.get("checkpoint_id")
-            if before_id:
-                cutoff_ts = None
-                for row in sorted_rows:
-                    if str(row[CKPT_ID]) == before_id:
-                        cutoff_ts = int(row[CKPT_TS])
-                        break
-                if cutoff_ts is not None:
-                    sorted_rows = [
-                        row for row in sorted_rows
-                        if int(row[CKPT_TS]) < cutoff_ts
-                    ]
+        sorted_rows = sorted(r.rows, key=lambda row: int(row[CKPT_TS]), reverse=True)
+        sorted_rows = _apply_before_filter(sorted_rows, before)
 
         r_all_writes = await self._exec(
             f'?graph_write("{escape_iql(thread_id)}", '
             f'"{escape_iql(checkpoint_ns)}", '
             f"CheckpointId, TaskId, TaskPath, Idx, Channel, Blob)"
         )
-        writes_by_ckpt: dict[str, list[Any]] = {}
-        for w_row in r_all_writes.rows:
-            validate_row_length(
-                w_row, _MIN_WRITE_ROW_LEN_ALIST, "graph_write", "alist",
-            )
-            ckpt_id = str(w_row[_WRITE_CKPT_ID])
-            writes_by_ckpt.setdefault(ckpt_id, []).append(w_row)
+        writes_by_ckpt = _group_writes_by_checkpoint(r_all_writes.rows)
 
         count = 0
         for row in sorted_rows:
-            checkpoint_id = str(row[CKPT_ID])
-            parent_id = str(row[CKPT_PARENT_ID])
-
-            checkpoint = _unpack(self.serde, str(row[CKPT_BLOB]))
-            metadata = _unpack(self.serde, str(row[CKPT_METADATA]))
-
-            if filter and not all(
-                metadata.get(k) == v for k, v in filter.items()
-            ):
+            tup = _build_checkpoint_tuple(
+                self.serde, row, thread_id, checkpoint_ns, writes_by_ckpt,
+            )
+            if filter and not all(tup.metadata.get(k) == v for k, v in filter.items()):
                 continue
 
-            pending_writes = _parse_writes(
-                self.serde, writes_by_ckpt.get(checkpoint_id, []),
-            )
-
-            ckpt_config: RunnableConfig = {
-                "configurable": {
-                    "thread_id": thread_id,
-                    "checkpoint_ns": checkpoint_ns,
-                    "checkpoint_id": checkpoint_id,
-                }
-            }
-
-            parent_config: RunnableConfig | None = None
-            if parent_id:
-                parent_config = {
-                    "configurable": {
-                        "thread_id": thread_id,
-                        "checkpoint_ns": checkpoint_ns,
-                        "checkpoint_id": parent_id,
-                    }
-                }
-
-            yield CheckpointTuple(
-                config=ckpt_config,
-                checkpoint=checkpoint,
-                metadata=metadata,
-                parent_config=parent_config,
-                pending_writes=pending_writes,
-            )
+            yield tup
 
             count += 1
             if limit is not None and count >= limit:
