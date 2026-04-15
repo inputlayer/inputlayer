@@ -27,6 +27,7 @@ class _MemorySyncAndMaintenanceMixin:
     kg: Any
     _turn_counters: dict[str, int]
     _thread_locks: dict[str, asyncio.Lock]
+    _active_threads: set[str]
 
     async def setup(self) -> None: ...
     async def astore(  # type: ignore[empty-body]
@@ -96,6 +97,7 @@ class _MemorySyncAndMaintenanceMixin:
         # Clear in-memory caches for this thread
         self._turn_counters.pop(thread_id, None)
         self._thread_locks.pop(thread_id, None)
+        self._active_threads.discard(thread_id)
 
     def delete_thread(self, thread_id: str) -> None:
         """Delete all turns and topics for a thread (blocking).

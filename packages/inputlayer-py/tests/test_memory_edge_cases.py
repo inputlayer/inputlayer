@@ -289,7 +289,7 @@ class TestDeleteThread:
         assert len(kg.topics) == 0
 
     async def test_delete_thread_clears_in_memory_caches(self) -> None:
-        """adelete_thread must clear turn counter and thread lock."""
+        """adelete_thread must clear turn counter, thread lock, and active set."""
         kg = MockMemoryKG()
         mem = InputLayerMemory(kg=kg)
         await mem.astore("t", "user", "Hello")
@@ -299,6 +299,7 @@ class TestDeleteThread:
 
         assert "t" not in mem._turn_counters
         assert "t" not in mem._thread_locks
+        assert "t" not in mem._active_threads
 
     async def test_delete_thread_recall_empty_after(self) -> None:
         """Recall after delete must return empty context."""

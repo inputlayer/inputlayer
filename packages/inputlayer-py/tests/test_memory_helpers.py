@@ -147,8 +147,10 @@ class TestMakeStoreNode:
         with pytest.raises(ValueError, match="tid"):
             await node({"tid": "", "msg": {"role": "user", "content": "hi"}})
 
-    async def test_empty_content_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
-        """Storing a message with empty content must log a warning."""
+    async def test_empty_content_logs_warning_and_skips(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Storing a message with empty content must log a warning and skip storing."""
         import logging
 
         memory = AsyncMock()
@@ -156,13 +158,16 @@ class TestMakeStoreNode:
         node = make_store_node(memory, state_key="msg", thread_key="tid", strict=True)
 
         with caplog.at_level(logging.WARNING):
-            await node({"tid": "t1", "msg": {"role": "user"}})
+            result = await node({"tid": "t1", "msg": {"role": "user"}})
 
         assert any("empty" in record.message.lower() for record in caplog.records)
-        memory.astore.assert_awaited_once_with("t1", "user", "", topics=None)
+        memory.astore.assert_not_awaited()
+        assert result == {}
 
-    async def test_missing_content_key_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
-        """Message dict without 'content' key must log a warning."""
+    async def test_missing_content_key_logs_warning_and_skips(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Message dict without 'content' key must log a warning and skip storing."""
         import logging
 
         memory = AsyncMock()
@@ -170,9 +175,11 @@ class TestMakeStoreNode:
         node = make_store_node(memory, state_key="msg", thread_key="tid", strict=True)
 
         with caplog.at_level(logging.WARNING):
-            await node({"tid": "t1", "msg": {"role": "assistant"}})
+            result = await node({"tid": "t1", "msg": {"role": "assistant"}})
 
         assert any("empty" in record.message.lower() for record in caplog.records)
+        memory.astore.assert_not_awaited()
+        assert result == {}
 
 
 class TestMakeRecallNode:

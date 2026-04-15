@@ -126,11 +126,12 @@ def make_store_node(
         if not content:
             logger.warning(
                 "InputLayerMemory.store_node: state['%s']['content'] is empty or "
-                "missing. Storing an empty turn for thread=%r. If this is unintentional, "
-                "ensure your message dict has a 'content' key with a non-empty string.",
+                "missing for thread=%r. Skipping store to avoid inserting empty turns. "
+                "Ensure your message dict has a 'content' key with a non-empty string.",
                 state_key,
                 thread_id,
             )
+            return {}
 
         await memory.astore(
             thread_id,

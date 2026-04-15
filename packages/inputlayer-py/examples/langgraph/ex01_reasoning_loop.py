@@ -168,14 +168,14 @@ async def run():
 
             await kg.execute("+research_fact(topic: string, content: string)")
 
-            # Rule: enough_context when we have 4+ distinct topics
-            # We can't count directly, but we can check for
-            # specific combinations. Let's use a simpler approach:
-            # enough_context fires when we have facts on 4 specific topics.
+            # Rule: enough_context when we have 4+ distinct topics.
+            # Uses named content variables (Ca, Cb, ...) instead of _
+            # because the engine requires named variables when
+            # inequality constraints reference sibling atoms.
             await kg.execute(
                 '+enough_context("yes") <- '
-                "research_fact(A, _), research_fact(B, _), "
-                "research_fact(C, _), research_fact(D, _), "
+                "research_fact(A, Ca), research_fact(B, Cb), "
+                "research_fact(C, Cc), research_fact(D, Cd), "
                 "A != B, B != C, C != D, A != C, A != D, B != D"
             )
 

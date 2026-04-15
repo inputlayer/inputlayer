@@ -86,14 +86,15 @@ async def generate_spec(state: dict[str, Any]) -> dict[str, Any]:
     violations = state.get("violations", [])
     kg = state["kg"]
 
-    # Clear previous endpoints from KG (delete all facts, keep the schema).
-    # InputLayer's incremental maintenance automatically retracts derived
-    # spec_violation facts when the supporting api_endpoint base facts are
-    # deleted, so we don't need to manually clean up violations here.
+    # Clear previous endpoints and name checks from KG (delete all facts,
+    # keep the schema). InputLayer's incremental maintenance automatically
+    # retracts derived missing_auth/bad_naming facts when the supporting
+    # base facts are deleted.
     if iteration > 0:
         await kg.execute(
             "-api_endpoint(Name, Method, Path, Auth) <- api_endpoint(Name, Method, Path, Auth)"
         )
+        await kg.execute("-has_uppercase(Name) <- has_uppercase(Name)")
 
     if check_llm() and iteration > 0 and violations:
         # Use LLM to fix based on violations
@@ -138,6 +139,9 @@ async def generate_spec(state: dict[str, Any]) -> dict[str, Any]:
             f'+api_endpoint("{escape_iql(ep["name"])}", "{escape_iql(ep["method"])}", '
             f'"{escape_iql(ep["path"])}", "{escape_iql(ep["auth"])}")'
         )
+        # Flag names with uppercase characters so the naming rule can fire
+        if ep["name"] != ep["name"].lower():
+            await kg.execute(f'+has_uppercase("{escape_iql(ep["name"])}")')
 
     print(f"\n  {WHITE}Generated spec (attempt {iteration + 1}):{RESET}")
     for ep in endpoints:
@@ -155,8 +159,22 @@ async def validate_spec(state: dict[str, Any]) -> dict[str, Any]:
     """Run KG validation rules against the spec."""
     kg = state["kg"]
 
-    r = await kg.execute("?spec_violation(Name, RuleType, Description)")
-    violations = [{"name": row[0], "rule": row[1], "description": row[2]} for row in r.rows]
+    r_auth = await kg.execute("?missing_auth(Name)")
+    r_naming = await kg.execute("?bad_naming(Name)")
+
+    violations: list[dict[str, str]] = []
+    for row in r_auth.rows:
+        violations.append({
+            "name": row[0],
+            "rule": "missing_auth",
+            "description": "Mutating endpoint without authentication",
+        })
+    for row in r_naming.rows:
+        violations.append({
+            "name": row[0],
+            "rule": "naming_convention",
+            "description": "Name contains uppercase (must be snake_case)",
+        })
 
     if violations:
         print(f"\n  {RED}Violations found ({len(violations)}):{RESET}")
@@ -212,24 +230,28 @@ async def run():
             await kg.execute(
                 "+api_endpoint(name: string, method: string, path: string, auth: string)"
             )
+            await kg.execute("+has_uppercase(name: string)")
 
             # ── Validation rules (the core of this example) ──────────────
+            # Each violation type is a separate derived relation so the
+            # engine can project correctly. The validate node queries both.
 
             # Rule 1: mutating endpoints (POST/PUT/PATCH/DELETE) must have auth
+            await kg.execute("+missing_auth(name: string)")
             await kg.execute(
-                '+spec_violation(Name, "missing_auth", '
-                '"Mutating endpoint without authentication") <- '
+                "+missing_auth(Name) <- "
                 'api_endpoint(Name, Method, Path, "none"), '
                 'Method != "GET"'
             )
 
             # Rule 2: endpoint names must be snake_case (no uppercase letters)
-            # lower(Name) != Name is true whenever Name contains any uppercase character
+            # We store a has_uppercase fact for names that aren't lowercase,
+            # and the rule joins against it to detect naming violations.
+            await kg.execute("+bad_naming(name: string)")
             await kg.execute(
-                '+spec_violation(Name, "naming_convention", '
-                '"Name contains uppercase (must be snake_case)") <- '
-                "api_endpoint(Name, Method, Path, Auth), "
-                "lower(Name) != Name"
+                "+bad_naming(Name) <- "
+                "api_endpoint(Name, Meth, Path, Auth), "
+                "has_uppercase(Name)"
             )
 
             step(1, "Validation rules defined")

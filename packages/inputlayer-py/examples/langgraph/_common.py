@@ -69,16 +69,21 @@ _llm_available: bool | None = None
 def check_llm() -> bool:
     """Check if an LLM server is reachable. Result is cached after first call.
 
-    Set LLM_BASE_URL to override the default (http://localhost:1234/v1).
+    Set LLM_BASE_URL and LLM_API_KEY for authenticated providers (e.g. OpenAI).
+    Defaults to a local LM Studio server at http://localhost:1234/v1.
     """
     global _llm_available
     if _llm_available is not None:
         return _llm_available
     base_url = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
+    api_key = os.environ.get("LLM_API_KEY", "")
     try:
         import httpx
 
-        resp = httpx.get(f"{base_url}/models", timeout=2)
+        headers: dict[str, str] = {}
+        if api_key and api_key != "lm-studio":
+            headers["Authorization"] = f"Bearer {api_key}"
+        resp = httpx.get(f"{base_url}/models", timeout=5, headers=headers)
         resp.raise_for_status()
         _llm_available = True
     except ImportError:
