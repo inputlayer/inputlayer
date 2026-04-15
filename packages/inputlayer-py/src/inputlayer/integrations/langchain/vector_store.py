@@ -190,6 +190,17 @@ class InputLayerVectorStore(VectorStore):
         if not texts_list:
             return []
 
+        if metadatas is not None and len(metadatas) != len(texts_list):
+            raise ValueError(
+                f"Length mismatch: {len(texts_list)} texts but "
+                f"{len(metadatas)} metadata dicts"
+            )
+        if ids is not None and len(ids) != len(texts_list):
+            raise ValueError(
+                f"Length mismatch: {len(texts_list)} texts but "
+                f"{len(ids)} ids"
+            )
+
         vectors = await self._embeddings.aembed_documents(texts_list)
         ids_out = ids or [str(uuid.uuid4()) for _ in texts_list]
         metas = metadatas or [{} for _ in texts_list]
@@ -584,7 +595,8 @@ class InputLayerVectorStore(VectorStore):
                 if k.lower() == self._vector_field.lower():
                     continue
                 metadata[canonical(k)] = v
-            score = float(row_dict[score_col]) if score_col else 0.0
+            raw_score = row_dict.get(score_col) if score_col else None
+            score = float(raw_score) if raw_score is not None else 0.0
             out.append((Document(page_content=content, metadata=metadata), score))
         return out
 

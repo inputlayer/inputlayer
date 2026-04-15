@@ -145,7 +145,11 @@ class InputLayerRetriever(BaseRetriever):
         logger.debug("IQL retriever query: %s", compiled)
         result = await self.kg.execute(compiled)
         if result.columns == ["error"]:
-            msg = result.rows[0][0] if result.rows else "unknown error"
+            msg = (
+                result.rows[0][0]
+                if result.rows and len(result.rows[0]) > 0
+                else "unknown error"
+            )
             raise RuntimeError(f"InputLayer rejected query: {msg}")
         return self._to_documents(result.columns, result.rows, hidden_columns=set())
 
@@ -244,7 +248,9 @@ class InputLayerRetriever(BaseRetriever):
 
         resolved_content: list[str] = []
         content_cols = (
-            self.page_content_columns if self.page_content_columns is not None else ["content"]
+            self.page_content_columns
+            if self.page_content_columns is not None
+            else ["content"]
         )
         explicit_content = self.page_content_columns is not None
         for c in content_cols:
