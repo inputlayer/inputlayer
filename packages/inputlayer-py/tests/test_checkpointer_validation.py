@@ -247,3 +247,25 @@ class TestDeleteThread:
         assert tup is None
         assert len(kg.checkpoints) == 0
         assert len(kg.writes) == 0
+
+    def test_delete_thread_sync(self) -> None:
+        """Sync delete_thread wrapper must mirror adelete_thread."""
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+
+        import asyncio
+
+        async def seed() -> None:
+            for i in range(3):
+                await cp.aput(
+                    make_config("thread-sync"),
+                    make_checkpoint(f"ckpt-{i}"),
+                    {"source": "input", "step": i, "writes": {}, "parents": {}},
+                    {},
+                )
+
+        asyncio.run(seed())
+        assert len(kg.checkpoints) == 3
+
+        cp.delete_thread("thread-sync")
+        assert len(kg.checkpoints) == 0

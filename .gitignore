@@ -19,8 +19,11 @@ Cargo.lock
 # Local configuration (git-ignored overrides)
 config.local.toml
 
-# Data directory (storage engine data)
-/data/
+# Data directory (storage engine runtime state - never commit).
+# Matches `data/` anywhere in the tree because the server creates it
+# relative to its cwd, which varies depending on where tests/examples
+# are invoked from (root, packages/*, examples/*, etc.).
+data/
 
 # Test temporary files
 tmp/

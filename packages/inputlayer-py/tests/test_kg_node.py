@@ -304,13 +304,29 @@ class TestKgNodeErrors:
             await node({"kg": MagicMock()})
 
 
+class TestKgNodeQueryCallableNone:
+    async def test_callable_returning_none_raises(self) -> None:
+        """kg_node with a callable that returns None must raise ValueError."""
+        kg = _mock_kg()
+        node = kg_node(query=lambda s: None)  # type: ignore[arg-type, return-value]
+        with pytest.raises(ValueError, match="query callable returned"):
+            await node({"kg": kg})
+
+    async def test_callable_returning_empty_string_raises(self) -> None:
+        """kg_node with a callable that returns '' must raise ValueError."""
+        kg = _mock_kg()
+        node = kg_node(query=lambda s: "")
+        with pytest.raises(ValueError, match="query callable returned"):
+            await node({"kg": kg})
+
+
 class TestKgNodeErrorResponse:
     async def test_query_error_response_raises(self) -> None:
         """KG error responses (columns=['error']) must raise, not return as data."""
         kg = _mock_kg(columns=["error"], rows=[["unknown relation: broken"]])
         node = kg_node(query="?broken(X)")
 
-        with pytest.raises(RuntimeError, match="KG returned an error.*unknown relation"):
+        with pytest.raises(RuntimeError, match=r"KG returned an error.*unknown relation"):
             await node({"kg": kg})
 
     async def test_query_error_response_includes_query(self) -> None:

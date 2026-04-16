@@ -133,19 +133,18 @@ class MockKG:
                 continue
             if checkpoint_id and ckpt[2] != checkpoint_id:
                 continue
-            if checkpoint_id:
-                rows.append(list(ckpt[3:]))
-            elif checkpoint_ns is not None:
-                rows.append(list(ckpt[2:]))
-            else:
-                rows.append(list(ckpt[1:]))
+            # Real IQL engine returns all columns, including bound ones.
+            rows.append(list(ckpt))
 
-        if checkpoint_id:
-            cols = ["parent_id", "blob", "metadata", "ts"]
-        elif checkpoint_ns is not None:
-            cols = ["checkpoint_id", "parent_id", "blob", "metadata", "ts"]
-        else:
-            cols = ["checkpoint_ns", "checkpoint_id", "parent_id", "blob", "metadata", "ts"]
+        cols = [
+            "thread_id",
+            "checkpoint_ns",
+            "checkpoint_id",
+            "parent_id",
+            "blob",
+            "metadata",
+            "ts",
+        ]
         return ResultSet(columns=cols, rows=rows)
 
     def _query_writes(self, iql: str) -> ResultSet:
@@ -168,18 +167,19 @@ class MockKG:
                 continue
             if checkpoint_id and w[2] != checkpoint_id:
                 continue
-            if checkpoint_id_bound:
-                # Return columns after the 3 bound ones: task_id, task_path, idx, channel, blob
-                rows.append(list(w[3:]))
-            else:
-                # Return columns after the 2 bound ones: ckpt_id + task fields
-                rows.append(list(w[2:]))
+            # Real IQL engine returns all columns, including bound ones.
+            rows.append(list(w))
 
-        if checkpoint_id_bound:
-            cols = ["task_id", "task_path", "idx", "channel", "blob"]
-        else:
-            cols = ["checkpoint_id", "task_id", "task_path", "idx", "channel", "blob"]
-
+        cols = [
+            "thread_id",
+            "checkpoint_ns",
+            "checkpoint_id",
+            "task_id",
+            "task_path",
+            "idx",
+            "channel",
+            "blob",
+        ]
         return ResultSet(columns=cols, rows=rows)
 
     def _delete_checkpoints(self, iql: str) -> None:

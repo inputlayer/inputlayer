@@ -16,6 +16,7 @@
   "rest-api": "REST API",
   "python-sdk": "Python SDK",
   "langchain": "LangChain Integration",
+  "langgraph": "LangGraph Integration",
   "js-sdk": "JavaScript / TypeScript SDK",
   "deployment": "Deployment",
   "authentication": "Authentication",

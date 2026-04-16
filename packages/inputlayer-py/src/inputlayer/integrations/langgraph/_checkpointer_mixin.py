@@ -78,6 +78,8 @@ class _SyncAndMaintenanceMixin:
         limit: int | None = None,
     ) -> AsyncIterator[CheckpointTuple]: ...
 
+    async def adelete_thread(self, thread_id: str) -> None: ...
+
     # ── Setup & infrastructure ──────────────────────────────────────
 
     async def _exec(self, iql: str) -> Any:
@@ -234,7 +236,10 @@ class _SyncAndMaintenanceMixin:
         await self.setup()
 
         if keep_last < 1:
-            raise ValueError("keep_last must be >= 1")
+            raise ValueError(
+                f"InputLayerCheckpointer.prune_thread: keep_last must be >= 1, "
+                f"got {keep_last}."
+            )
 
         r = await self._exec(
             f'?graph_checkpoint("{escape_iql(thread_id)}", '
@@ -301,14 +306,19 @@ class _SyncAndMaintenanceMixin:
                 f"deletes failed. First error: {errors[0]}"
             ) from errors[0]
 
-    def prune(
+    def prune_thread_sync(
         self,
         thread_id: str,
         *,
         checkpoint_ns: str = "",
         keep_last: int = 10,
     ) -> int:
-        """Sync wrapper for prune_thread()."""
+        """Sync wrapper for ``prune_thread()``.
+
+        Named ``prune_thread_sync`` to avoid clashing with
+        ``BaseCheckpointSaver.prune(thread_ids, *, strategy)``, which has
+        a different signature reserved for future LangGraph runtime use.
+        """
         return run_sync(
             self.prune_thread(
                 thread_id,
@@ -316,3 +326,10 @@ class _SyncAndMaintenanceMixin:
                 keep_last=keep_last,
             )
         )
+
+    def delete_thread(self, thread_id: str) -> None:
+        """Delete all checkpoints and writes for a thread (blocking).
+
+        See ``adelete_thread`` for details.
+        """
+        run_sync(self.adelete_thread(thread_id))

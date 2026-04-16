@@ -87,14 +87,17 @@ def _require_thread_id(config: RunnableConfig, method: str) -> str:
     return thread_id
 
 
-# 4 columns when checkpoint_id is bound (ParentId, Blob, Metadata, Ts).
-# 5 columns when checkpoint_id is unbound (adds CheckpointId).
-_MIN_CKPT_ROW_LEN = 4
-_MIN_CKPT_ROW_LEN_WITH_ID = 5
+# Minimum column counts for safe negative-index access. The engine returns
+# all columns including bound ones, but we use negative indices so the
+# access is robust even if that ever changes. We still assert a floor so
+# a malformed/short row fails loudly instead of raising IndexError later.
+# graph_checkpoint schema: thread_id, ns, checkpoint_id, parent_id, blob, metadata, ts
+_MIN_CKPT_ROW_LEN = 4  # need at least ParentId, Blob, Metadata, Ts
+_MIN_CKPT_ROW_LEN_WITH_ID = 5  # adds CheckpointId when unbound in query
 
-# graph_write column indices for alist (6 unbound columns)
-_WRITE_CKPT_ID = -6
-_MIN_WRITE_ROW_LEN_ALIST = 6
+# graph_write schema: thread_id, ns, checkpoint_id, task_id, task_path, idx, channel, blob
+_WRITE_CKPT_ID = -6  # CheckpointId at -6 when all 8 cols returned
+_MIN_WRITE_ROW_LEN_ALIST = 6  # need checkpoint_id, task_id, task_path, idx, channel, blob
 
 
 def _apply_before_filter(
@@ -181,7 +184,7 @@ def _build_checkpoint_tuple(
     )
 
 
-class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str]):  # type: ignore[misc]
+class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str]):
     """LangGraph checkpointer backed by an InputLayer KnowledgeGraph.
 
     Persists graph state as facts so that graph executions can be

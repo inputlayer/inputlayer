@@ -173,8 +173,8 @@ async def resolve_conflicts(state: dict[str, Any]) -> dict[str, Any]:
             f'?plan_step("{escape_iql(step_name)}", {step_start}, End, Team, "{escape_iql(dep_step)}", Desc)'
         )
         for ps in r2.rows:
-            # step_name, step_start, dep_step are bound; unbound: End=0, Team=1, Desc=2
-            end, team, desc = ps[0], ps[1], ps[2]
+            # plan_step(name, start, end, team, dep, desc) - all 6 cols returned
+            end, team, desc = ps[2], ps[3], ps[5]
             duration = end - step_start
             new_end = new_start + duration
 

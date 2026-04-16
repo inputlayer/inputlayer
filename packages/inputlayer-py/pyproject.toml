@@ -28,6 +28,7 @@ dev = [
     "langchain-core>=0.3,<2",
     "langchain-openai>=1.0",
     "langgraph>=0.2,<2",
+    "typing_extensions>=4.0;python_version<'3.11'",
     "ruff>=0.8",
     "mypy>=1.13",
 ]

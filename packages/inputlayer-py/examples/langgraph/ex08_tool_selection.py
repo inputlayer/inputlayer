@@ -182,10 +182,10 @@ async def classify_and_select(state: dict[str, Any]) -> dict[str, Any]:
     r = await kg.execute(f'?best_tool("{escaped_q}", Tool, Strength)')
 
     if r.rows:
-        # Question is bound; unbound cols: Tool=0, Strength=1
-        best = max(r.rows, key=lambda row: row[1])
-        tool = best[0]
-        strength = best[1]
+        # best_tool(question, tool, strength) - all 3 cols returned
+        best = max(r.rows, key=lambda row: row[2])
+        tool = best[1]
+        strength = best[2]
         print(f'\n  {WHITE}Q: "{question}"{RESET}')
         print(
             f"  {DIM}Categories: {', '.join(categories)} -> "
@@ -255,7 +255,7 @@ async def summarize_results(state: dict[str, Any]) -> dict[str, Any]:
     for a in answers:
         escaped_q = escape_iql(a["question"])
         r = await kg.execute(f'?question_type("{escaped_q}", Category)')
-        cats = [row[0] for row in r.rows]
+        cats = [row[1] for row in r.rows]
         print(
             f'    "{a["question"][:40]}..." -> '
             f"{DIM}{', '.join(cats)}{RESET} -> "

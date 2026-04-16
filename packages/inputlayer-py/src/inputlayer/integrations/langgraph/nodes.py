@@ -95,6 +95,13 @@ def kg_node(
 
         if operation == "query":
             q = query(state) if callable(query) else query
+            if q is None or q == "":
+                raise ValueError(
+                    "kg_node: query callable returned "
+                    f"{q!r}. Expected a non-empty IQL string. "
+                    "Make sure your query function returns a valid query "
+                    "for all reachable states."
+                )
             result = await kg.execute(q)
             check_error_response(result, "kg_node", q)
             return {

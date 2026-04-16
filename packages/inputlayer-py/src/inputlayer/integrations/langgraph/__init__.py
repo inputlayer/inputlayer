@@ -5,7 +5,7 @@ Provides:
 - kg_router: Conditional edge routing based on IQL queries
 - InputLayerState: TypedDict mixin with KG handle
 - InputLayerCheckpointer: Checkpoint persistence backed by an InputLayer KG,
-  with ``prune_thread()``/``prune()`` for storage management
+  with ``prune_thread()`` / ``prune_thread_sync()`` for storage management
 - InputLayerMemory: Semantic long-term memory backed by a KG
 - escape_iql: String escaping for safe IQL interpolation
 

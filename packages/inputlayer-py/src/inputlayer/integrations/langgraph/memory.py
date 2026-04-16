@@ -100,7 +100,12 @@ class InputLayerMemory(_MemorySyncAndMaintenanceMixin):
                 "Set max_recent to the number of recent turns to include in recall."
             )
         if max_tracked_threads < 1:
-            raise ValueError(f"max_tracked_threads must be >= 1, got {max_tracked_threads}.")
+            raise ValueError(
+                f"max_tracked_threads must be >= 1, got {max_tracked_threads}. "
+                "Set this to the soft upper bound on how many distinct "
+                "thread IDs to track in memory (per-thread locks and turn "
+                "counters). Excess threads will be evicted when idle."
+            )
         self.kg = kg
         self.max_recent = max_recent
         self._max_tracked_threads = max_tracked_threads
@@ -317,8 +322,9 @@ class InputLayerMemory(_MemorySyncAndMaintenanceMixin):
                     turn_id,
                 )
                 raise RuntimeError(
-                    f"astore: {len(errors)}/{len(topics)} topic inserts "
-                    f"failed. First error: {errors[0]}"
+                    f"InputLayerMemory.astore: {len(errors)}/{len(topics)} "
+                    f"topic inserts failed for thread={thread_id!r} turn={turn_id}. "
+                    f"First error: {errors[0]}"
                 ) from errors[0]
 
         return turn_id
@@ -360,8 +366,14 @@ class InputLayerMemory(_MemorySyncAndMaintenanceMixin):
 
         errors = [r for r in results if isinstance(r, BaseException)]
         if errors:
+            query_names = ["active_topic", "memory_turn", "relevant_turn", "topic_thread"]
+            failed_names = [
+                query_names[i] for i, r in enumerate(results) if isinstance(r, BaseException)
+            ]
             raise RuntimeError(
-                f"arecall: {len(errors)}/4 queries failed. First error: {errors[0]}"
+                f"InputLayerMemory.arecall: {len(errors)}/4 queries failed "
+                f"for thread={thread_id!r} (failed: {', '.join(failed_names)}). "
+                f"First error: {errors[0]}"
             ) from errors[0]
 
         # Narrow from Any|BaseException to the actual result type

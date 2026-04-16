@@ -165,7 +165,7 @@ class TestPrune:
                 {},
             )
 
-        removed = cp.prune("thread-1", keep_last=2)
+        removed = cp.prune_thread_sync("thread-1", keep_last=2)
         assert removed == 3
 
 
