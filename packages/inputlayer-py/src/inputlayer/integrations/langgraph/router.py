@@ -10,6 +10,7 @@ from inputlayer.exceptions import (
     AuthenticationError,
     InputLayerConnectionError,
     QueryError,
+    QueryTimeoutError,
 )
 
 logger = logging.getLogger(__name__)
@@ -29,10 +30,10 @@ def kg_router(
     wins. If no branch matches, ``default`` is returned.
 
     Query-level exceptions (``QueryError``) are caught, logged as
-    warnings, and the branch is skipped. Connection and
-    authentication errors (``InputLayerConnectionError``,
-    ``AuthenticationError``, ``ConnectionError``, ``OSError``) are re-raised
-    immediately since they indicate systemic failures, not bad queries.
+    warnings, and the branch is skipped. Systemic failures
+    (``InputLayerConnectionError``, ``AuthenticationError``,
+    ``QueryTimeoutError``, ``ConnectionError``, ``OSError``) are re-raised
+    immediately since they indicate infrastructure problems, not bad queries.
 
     This lets the KG's derived facts control the graph's execution path.
     Routing decisions are declarative rules, not imperative Python.
@@ -96,11 +97,26 @@ def kg_router(
                     )
                     continue
                 result = await kg.execute(q)
+                # Error responses have columns=["error"] with the error
+                # message as the only row. Treat as a failed query (skip).
+                if (
+                    hasattr(result, "columns")
+                    and result.columns == ["error"]
+                    and result.rows
+                ):
+                    logger.warning(
+                        "kg_router: branch %r query returned error: %s - "
+                        "skipping to next branch",
+                        target,
+                        result.rows[0][0] if result.rows[0] else "unknown",
+                    )
+                    continue
                 if result.rows:
                     return target
             except (
                 InputLayerConnectionError,
                 AuthenticationError,
+                QueryTimeoutError,
                 ConnectionError,
                 OSError,
             ) as exc:

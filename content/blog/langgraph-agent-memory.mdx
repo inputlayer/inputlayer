@@ -7,15 +7,15 @@ excerpt: "Every conversation accumulates history. The real challenge is knowing 
 
 # Beyond Chat History: Using Rules as Agent Memory
 
-When you're building a multi-turn agent, memory is the thing that separates a useful assistant from one that forgets your name between messages. Most agent frameworks handle this with a sliding window of recent messages or a vector search over past turns. That works until it doesn't.
+You're five turns into a conversation with your agent. You mentioned a constraint back in turn 1, and now in turn 5, you ask something that depends on it. Your agent gives you a generic answer because it has no idea those two turns are connected. You repeat yourself, the interaction drags, and the agent feels like it starts fresh every few messages.
 
-The problem isn't storing history. It's knowing which parts of that history matter right now. A question in turn 7 might connect back to a constraint you mentioned in turn 1, and the logical relationship between those two turns has nothing to do with how recent they are or how similar the words look. When your agent loses that thread, you get a generic answer, repeat yourself, or lose trust in the whole interaction.
+The problem isn't storing history. It's knowing which parts of that history matter right now. A question in turn 7 might connect back to a constraint you mentioned in turn 1, and the logical relationship between those two turns has nothing to do with recency or word overlap.
 
-What if your agent could reason about relevance instead of guessing? You store conversation turns as facts, write rules that derive conclusions about which turns connect to which, and query for what's relevant before generating each response. The rules fire automatically as new facts arrive, keeping all conclusions up to date without any manual bookkeeping.
+What if your agent could reason about relevance instead of guessing? You store conversation turns as facts, write rules that derive conclusions about which turns connect to which, and query for what's relevant before generating each response. The rules update automatically as new facts arrive, keeping all conclusions current without any manual bookkeeping.
 
 ## The idea: facts + rules = derived memory
 
-[InputLayer](https://github.com/inputlayer/inputlayer) is an incremental reasoning engine. You give it facts, write rules over them, and it keeps all derived conclusions up to date as new facts arrive. No batch jobs, no re-indexing.
+[InputLayer](https://github.com/inputlayer/inputlayer) is a reasoning engine. You give it facts, write rules over them, and it keeps all derived conclusions up to date as new facts arrive. When you add a new fact, only the conclusions affected by that fact are recomputed, so updates are fast even as your data grows.
 
 `InputLayerMemory` is a [LangGraph](https://github.com/langchain-ai/langgraph) component that stores conversation turns as **facts** and uses **rules** to derive what's relevant. You drop it into your graph as a node, and it handles the storage and retrieval for you.
 
@@ -47,7 +47,7 @@ topic_thread(ThreadId, TopicA, TopicB) <-
 
 So the first rule says: "a topic is active in a thread if any message in that thread mentions it." The second links messages to their topics. The third finds which topics appear together in the same thread.
 
-That's it. These rules create a structured, always-up-to-date map of your conversation's reasoning. When you add a new turn, InputLayer incrementally updates only the conclusions affected by the new facts. No full recomputation, no stale conclusions.
+That's it. These rules create a structured map of your conversation's reasoning. You'll see exactly how this works in the next section, where adding a single turn triggers the rules and updates the derived context.
 
 ## A conversation in action
 
@@ -66,43 +66,43 @@ Let's trace what happens during a real conversation. You're building an ML pipel
 Each turn is inserted as a `memory_turn` fact. Topics are auto-extracted and stored as `memory_topic` facts:
 
 ```
-memory_topic("chat-1", 1, "ml")
-memory_topic("chat-1", 1, "python")
-memory_topic("chat-1", 3, "ml")
-memory_topic("chat-1", 3, "performance")
-memory_topic("chat-1", 4, "performance")
-memory_topic("chat-1", 5, "api")
+memory_topic("alex-session-42", 1, "ml")
+memory_topic("alex-session-42", 1, "python")
+memory_topic("alex-session-42", 3, "ml")
+memory_topic("alex-session-42", 3, "performance")
+memory_topic("alex-session-42", 4, "performance")
+memory_topic("alex-session-42", 5, "api")
 ```
 
 ### What gets derived (automatically)
 
-The moment those facts are inserted, the rules fire. Here's what the KG has derived:
+The moment those facts are inserted, the rules fire. Here's what the knowledge graph has derived:
 
 **Active topics.** The conversation spans 4 areas:
 ```
-active_topic("chat-1", "api")
-active_topic("chat-1", "ml")
-active_topic("chat-1", "performance")
-active_topic("chat-1", "python")
+active_topic("alex-session-42", "api")
+active_topic("alex-session-42", "ml")
+active_topic("alex-session-42", "performance")
+active_topic("alex-session-42", "python")
 ```
 
 **Relevant turns.** Messages cross-referenced by topic:
 ```
-relevant_turn("chat-1", 1, "user", "I'm building an ML...", "ml")
-relevant_turn("chat-1", 1, "user", "I'm building an ML...", "python")
-relevant_turn("chat-1", 3, "user", "Training is slow...",   "ml")
-relevant_turn("chat-1", 3, "user", "Training is slow...",   "performance")
-relevant_turn("chat-1", 4, "assistant", "Consider mixed...", "performance")
-relevant_turn("chat-1", 5, "user", "Trouble with REST API", "api")
+relevant_turn("alex-session-42", 1, "user", "I'm building an ML...", "ml")
+relevant_turn("alex-session-42", 1, "user", "I'm building an ML...", "python")
+relevant_turn("alex-session-42", 3, "user", "Training is slow...",   "ml")
+relevant_turn("alex-session-42", 3, "user", "Training is slow...",   "performance")
+relevant_turn("alex-session-42", 4, "assistant", "Consider mixed...", "performance")
+relevant_turn("alex-session-42", 5, "user", "Trouble with REST API", "api")
 ```
 
 Notice: turn 1 appears under **both** "ml" and "python". Turn 3 appears under both "ml" and "performance". The rules handle the cross-referencing automatically.
 
 **Topic threads.** Which topics co-occur in the same conversation:
 ```
-topic_thread("chat-1", "ml", "python")          % ml and python both tagged on turn 1
-topic_thread("chat-1", "ml", "performance")     % ml and performance both tagged on turn 3
-topic_thread("chat-1", "python", "performance") % python and performance both in this thread
+topic_thread("alex-session-42", "ml", "python")          % ml and python both tagged on turn 1
+topic_thread("alex-session-42", "ml", "performance")     % ml and performance both tagged on turn 3
+topic_thread("alex-session-42", "python", "performance") % python and performance both in this thread
 ...
 ```
 
@@ -110,7 +110,7 @@ topic_thread("chat-1", "python", "performance") % python and performance both in
 
 Now you ask: **"What about deploying with Docker and Kubernetes?"**
 
-Before generating a response, your agent calls `memory.recall("chat-1")`. The derived context tells it:
+Before generating a response, your agent calls `memory.recall("alex-session-42")`. The derived context tells it:
 
 1. **Active topics**: ml, python, performance, api, devops (the new one)
 2. **Topic connections**: devops co-occurs with every prior topic in this thread
@@ -123,15 +123,15 @@ The rule-derived memory returns the full picture: you're deploying an ML pipelin
 You can ask InputLayer **why** a particular turn is relevant:
 
 ```
-.why ?relevant_turn("chat-1", 3, Role, Content, "performance")
+.why ?relevant_turn("alex-session-42", 3, Role, Content, "performance")
 ```
 
 And it returns a proof tree:
 
 ```
-relevant_turn("chat-1", 3, "user", "Training is slow...", "performance")
-├── because memory_turn("chat-1", 3, "user", "Training is slow...", 3000)
-└── because memory_topic("chat-1", 3, "performance")
+relevant_turn("alex-session-42", 3, "user", "Training is slow...", "performance")
+├── because memory_turn("alex-session-42", 3, "user", "Training is slow...", 3000)
+└── because memory_topic("alex-session-42", 3, "performance")
 ```
 
 This is the reasoning chain, a structured explanation of **why** this memory is relevant. You can include this in your LLM's prompt so it has the full reasoning alongside the context. Instead of guessing which earlier messages matter, your agent sees the exact conclusions and the facts that produced them.
@@ -213,7 +213,7 @@ frustrated_user(ThreadId) <-
     TurnA != TurnB
 ```
 
-Each new rule extends your agent's reasoning without touching application code. The `recall()` method automatically picks up conclusions from any rule you add.
+Each new rule extends your agent's reasoning. The `recall()` method picks up conclusions from any rule you add, so the code that calls `recall()` in your graph doesn't change.
 
 ## Try it yourself
 

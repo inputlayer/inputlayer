@@ -304,6 +304,24 @@ class TestKgNodeErrors:
             await node({"kg": MagicMock()})
 
 
+class TestKgNodeErrorResponse:
+    async def test_query_error_response_raises(self) -> None:
+        """KG error responses (columns=['error']) must raise, not return as data."""
+        kg = _mock_kg(columns=["error"], rows=[["unknown relation: broken"]])
+        node = kg_node(query="?broken(X)")
+
+        with pytest.raises(RuntimeError, match="KG returned an error.*unknown relation"):
+            await node({"kg": kg})
+
+    async def test_query_error_response_includes_query(self) -> None:
+        """Error message must include the query for debugging."""
+        kg = _mock_kg(columns=["error"], rows=[["parse error"]])
+        node = kg_node(query="?bad_syntax(")
+
+        with pytest.raises(RuntimeError, match="bad_syntax"):
+            await node({"kg": kg})
+
+
 class TestKgNodeInsertTypeValidation:
     async def test_insert_unsupported_type_raises(self) -> None:
         """Passing a string/int/etc should raise TypeError, not silently fail."""

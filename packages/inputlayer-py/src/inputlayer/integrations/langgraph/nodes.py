@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable, Coroutine
 from typing import Any, Literal
 
+from inputlayer.integrations.langgraph._utils import check_error_response
+
 
 def kg_node(
     *,
@@ -94,6 +96,7 @@ def kg_node(
         if operation == "query":
             q = query(state) if callable(query) else query
             result = await kg.execute(q)
+            check_error_response(result, "kg_node", q)
             return {
                 state_key: {
                     "columns": result.columns,

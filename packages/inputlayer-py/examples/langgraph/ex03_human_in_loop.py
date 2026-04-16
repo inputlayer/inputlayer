@@ -85,9 +85,9 @@ async def classify_action(state: dict[str, Any]) -> str:
 
     if r.rows:
         # risk_flag(action_type, amount, target, level, reason)
-        # First 3 cols are bound; level=col[3], reason=col[4]
-        level = r.rows[0][3]
-        reason = r.rows[0][4]
+        # First 3 cols are bound; unbound cols: Level=col[0], Reason=col[1]
+        level = r.rows[0][0]
+        reason = r.rows[0][1]
         print(f"  {YELLOW}Risk: {level}: {reason}{RESET}")
         if level == "high":
             return "needs_approval"

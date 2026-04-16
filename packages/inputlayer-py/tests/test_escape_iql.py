@@ -91,6 +91,32 @@ class TestEscapeIql:
         assert escape_iql('""') == '\\"\\"'
 
 
+class TestMockUnescapeRoundTrip:
+    """Verify that mock _unescape correctly reverses escape_iql, including \\xHH."""
+
+    def test_control_char_round_trip(self) -> None:
+        from tests._mock_checkpoint_kg import MockKG
+
+        mock = MockKG()
+        for ch in ["\x01", "\x07", "\x08", "\x0b", "\x0c", "\x1b", "\x1f"]:
+            original = f"prefix{ch}suffix"
+            escaped = escape_iql(original)
+            unescaped = mock._unescape(escaped)
+            assert unescaped == original, (
+                f"Round-trip failed for {ch!r}: "
+                f"escaped={escaped!r}, unescaped={unescaped!r}"
+            )
+
+    def test_standard_escapes_round_trip(self) -> None:
+        from tests._mock_checkpoint_kg import MockKG
+
+        mock = MockKG()
+        for original in ["hello\\world", 'say "hi"', "line\nbreak", "tab\there", "nul\x00byte"]:
+            escaped = escape_iql(original)
+            unescaped = mock._unescape(escaped)
+            assert unescaped == original
+
+
 class TestValidateRowLength:
     def test_valid_row_passes(self) -> None:
         validate_row_length(["a", "b", "c"], 3, "test_rel", "test_ctx")

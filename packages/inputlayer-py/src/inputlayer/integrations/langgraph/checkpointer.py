@@ -70,16 +70,21 @@ logger = logging.getLogger(__name__)
 
 
 def _require_thread_id(config: RunnableConfig, method: str) -> str:
-    """Extract and return thread_id from config, raising a helpful KeyError if missing."""
+    """Extract and return thread_id from config, raising a helpful error if missing or empty."""
     try:
         thread_id: str = config["configurable"]["thread_id"]
-        return thread_id
     except KeyError as exc:
         raise KeyError(
             f"InputLayerCheckpointer.{method} requires "
             "config['configurable']['thread_id']. "
             "Pass config={'configurable': {'thread_id': 'your-thread-id'}}."
         ) from exc
+    if not thread_id:
+        raise ValueError(
+            f"InputLayerCheckpointer.{method}: thread_id must be a "
+            "non-empty string. Pass a unique identifier per conversation thread."
+        )
+    return thread_id
 
 
 # 4 columns when checkpoint_id is bound (ParentId, Blob, Metadata, Ts).
@@ -410,6 +415,11 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
 
     async def adelete_thread(self, thread_id: str) -> None:
         """Delete all checkpoints and writes for a thread."""
+        if not thread_id:
+            raise ValueError(
+                "InputLayerCheckpointer.adelete_thread: thread_id must be a "
+                "non-empty string."
+            )
         await self.setup()
         await self._exec(
             f"-graph_checkpoint(ThreadId, Ns, CkptId, P, B, M, T) <- "

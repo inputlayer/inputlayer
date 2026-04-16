@@ -134,6 +134,16 @@ class MockMemoryKG:
 
     @staticmethod
     def _unescape(s: str) -> str:
-        r"""Reverse escape_iql using single-pass regex."""
+        r"""Reverse escape_iql using single-pass regex, including \xHH sequences."""
         _MAP = {"\\": "\\", '"': '"', "n": "\n", "r": "\r", "t": "\t", "0": "\0"}
-        return re.sub(r"\\(.)", lambda m: _MAP.get(m.group(1), "\\" + m.group(1)), s)
+
+        def _replace(m: re.Match[str]) -> str:
+            captured = m.group(1)
+            if captured in _MAP:
+                return _MAP[captured]
+            # Handle \xHH control character escapes (captured = "xHH")
+            if len(captured) == 3 and captured[0] == "x":
+                return chr(int(captured[1:], 16))
+            return "\\" + captured
+
+        return re.sub(r"\\(x[0-9a-fA-F]{2}|.)", _replace, s)

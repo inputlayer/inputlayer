@@ -145,6 +145,51 @@ class TestParseWritesIdxValidation:
             parse_writes(serde, [row])
 
 
+class TestEmptyThreadIdValidation:
+    async def test_aput_empty_thread_id_raises(self) -> None:
+        """Empty thread_id must raise ValueError, not silently accept."""
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        with pytest.raises(ValueError, match="non-empty string"):
+            await cp.aput(
+                make_config(""),
+                make_checkpoint("ckpt-1"),
+                {"source": "input", "step": 0, "writes": {}, "parents": {}},
+                {},
+            )
+
+    async def test_aget_tuple_empty_thread_id_raises(self) -> None:
+        """Empty thread_id must raise ValueError."""
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        with pytest.raises(ValueError, match="non-empty string"):
+            await cp.aget_tuple(make_config(""))
+
+    async def test_alist_empty_thread_id_raises(self) -> None:
+        """Empty thread_id must raise ValueError."""
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        with pytest.raises(ValueError, match="non-empty string"):
+            async for _ in cp.alist(make_config("")):
+                pass
+
+
+class TestDeleteThreadValidation:
+    async def test_adelete_thread_empty_id_raises(self) -> None:
+        """Empty thread_id on adelete_thread must raise ValueError."""
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        with pytest.raises(ValueError, match="non-empty string"):
+            await cp.adelete_thread("")
+
+    async def test_prune_thread_empty_id_raises(self) -> None:
+        """Empty thread_id on prune_thread must raise ValueError."""
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        with pytest.raises(ValueError, match="non-empty string"):
+            await cp.prune_thread("")
+
+
 class TestBatchDeleteErrorHandling:
     async def test_batch_delete_partial_failure_raises(self) -> None:
         """_batch_delete_checkpoints must raise if any delete fails."""

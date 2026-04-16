@@ -33,8 +33,6 @@ __all__ = [
     "YELLOW",
     "InputLayer",
     "check_llm",
-    "cleanup",
-    "connect",
     "get_llm",
     "header",
     "os",
@@ -116,25 +114,3 @@ def get_llm() -> Any:
     )
 
 
-async def connect() -> tuple[InputLayer, Any]:
-    """Connect to InputLayer. Returns (client, None).
-
-    Each example creates its own KG, so no shared KG handle is returned.
-    Set INPUTLAYER_URL, INPUTLAYER_USER, INPUTLAYER_PASSWORD to override defaults.
-    """
-    il = InputLayer(
-        os.environ.get("INPUTLAYER_URL", "ws://localhost:8080/ws"),
-        username=os.environ.get("INPUTLAYER_USER", "admin"),
-        password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
-    )
-    await il.connect()
-    return il, None
-
-
-async def cleanup(il: InputLayer, kg_name: str = "") -> None:
-    import contextlib
-
-    if kg_name:
-        with contextlib.suppress(Exception):
-            await il.drop_knowledge_graph(kg_name)
-    await il.close()

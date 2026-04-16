@@ -226,6 +226,11 @@ class _SyncAndMaintenanceMixin:
         Returns:
             Number of checkpoints removed.
         """
+        if not thread_id:
+            raise ValueError(
+                "InputLayerCheckpointer.prune_thread: thread_id must be a "
+                "non-empty string."
+            )
         await self.setup()
 
         if keep_last < 1:

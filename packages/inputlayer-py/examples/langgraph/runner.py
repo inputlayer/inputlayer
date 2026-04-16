@@ -69,11 +69,11 @@ def print_menu() -> None:
 
 
 def parse_selection(args: list[str]) -> list[int]:
-    if not args or "--all" in args:
-        return list(range(1, len(EXAMPLES) + 1))
-
-    if "--list" in args:
+    if not args:
         return []
+
+    if "--all" in args:
+        return list(range(1, len(EXAMPLES) + 1))
 
     selected: list[int] = []
     for arg in args:

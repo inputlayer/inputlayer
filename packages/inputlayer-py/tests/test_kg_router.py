@@ -245,6 +245,21 @@ class TestKgRouterConnectionErrors:
         with pytest.raises(OSError, match="network unreachable"):
             await router({"kg": kg})
 
+    async def test_timeout_error_is_not_swallowed(self) -> None:
+        """QueryTimeoutError must propagate as a systemic failure."""
+        from inputlayer.exceptions import QueryTimeoutError
+
+        kg = MagicMock()
+        kg.execute = AsyncMock(side_effect=QueryTimeoutError("query timed out after 30s"))
+
+        router = kg_router(
+            branches={"a": "?test(X)"},
+            default="fallback",
+        )
+
+        with pytest.raises(QueryTimeoutError, match="timed out"):
+            await router({"kg": kg})
+
     async def test_query_error_still_skipped(self) -> None:
         """QueryError should be skipped, not propagated."""
         from inputlayer.exceptions import QueryError
@@ -266,6 +281,49 @@ class TestKgRouterConnectionErrors:
 
         result = await router({"kg": kg})
         assert result == "good"
+
+
+class TestKgRouterErrorResponse:
+    async def test_error_response_is_skipped_not_matched(self) -> None:
+        """KG error responses (columns=['error']) must be skipped, not matched."""
+        kg = MagicMock()
+        kg.execute = AsyncMock(
+            side_effect=[
+                # First branch returns an error response
+                ResultSet(columns=["error"], rows=[["unknown relation: broken"]]),
+                # Second branch returns real data
+                ResultSet(columns=["x"], rows=[["found"]]),
+            ]
+        )
+
+        router = kg_router(
+            branches={
+                "bad": "?broken(X)",
+                "good": "?works(X)",
+            },
+            default="fallback",
+        )
+
+        result = await router({"kg": kg})
+
+        assert result == "good"
+        assert kg.execute.await_count == 2
+
+    async def test_all_error_responses_return_default(self) -> None:
+        """When all branches return error responses, default must be returned."""
+        kg = MagicMock()
+        kg.execute = AsyncMock(
+            return_value=ResultSet(columns=["error"], rows=[["some error"]])
+        )
+
+        router = kg_router(
+            branches={"a": "?x(X)", "b": "?y(X)"},
+            default="safe",
+        )
+
+        result = await router({"kg": kg})
+
+        assert result == "safe"
 
 
 class TestKgRouterEmptyQuery:

@@ -114,7 +114,7 @@ async def ingest_metrics(state: dict[str, Any]) -> dict[str, Any]:
             f'?min_threshold("{escape_iql(component)}", "{escape_iql(name)}", Min)'
         )
         if r_max.rows:
-            max_val = r_max.rows[0][2]
+            max_val = r_max.rows[0][0]
             if value > max_val:
                 pct = ((value - max_val) / max_val) * 100
                 print(f"    {RED}{component}.{name} = {value} (>{max_val}, +{pct:.0f}%){RESET}")
@@ -123,7 +123,7 @@ async def ingest_metrics(state: dict[str, Any]) -> dict[str, Any]:
             else:
                 print(f"    {GREEN}{component}.{name} = {value}{RESET}")
         elif r_min.rows:
-            min_val = r_min.rows[0][2]
+            min_val = r_min.rows[0][0]
             if value < min_val:
                 print(f"    {RED}{component}.{name} = {value} (<{min_val}){RESET}")
             else:
@@ -200,7 +200,8 @@ async def send_alert(state: dict[str, Any]) -> dict[str, Any]:
     r = await kg.execute(f"?breach({latest_ts}, Component, Name, Value, Max)")
 
     for row in r.rows:
-        component, name, value, max_val = row[1], row[2], row[3], row[4]
+        # Ts is bound; unbound cols: Component=0, Name=1, Value=2, Max=3
+        component, name, value, max_val = row[0], row[1], row[2], row[3]
         alerts += 1
 
         # Determine remediation based on rules
