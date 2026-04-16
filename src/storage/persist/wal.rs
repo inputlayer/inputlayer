@@ -343,9 +343,7 @@ impl PersistWal {
 
     /// Get WAL file size
     pub fn file_size(&self) -> u64 {
-        fs::metadata(&self.current_file)
-            .map(|m| m.len())
-            .unwrap_or(0)
+        fs::metadata(&self.current_file).map_or(0, |m| m.len())
     }
 }
 

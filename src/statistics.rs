@@ -164,7 +164,7 @@ impl StatisticsManager {
             .iter()
             .map(|(v, c)| ((*v).clone(), *c))
             .collect();
-        mcv.sort_by(|a, b| b.1.cmp(&a.1));
+        mcv.sort_by_key(|b| std::cmp::Reverse(b.1));
         mcv.truncate(self.config.mcv_count);
 
         // Min/max

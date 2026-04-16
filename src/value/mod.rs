@@ -354,15 +354,10 @@ impl Value {
         match self {
             Value::Int32(v) => i64::from(*v),
             Value::Int64(v) => *v,
-            Value::Float64(v) => {
-                // NaN/Infinity → 0; finite values use Rust's saturating `as` cast
-                // (since Rust 1.45, out-of-range f64→i64 is well-defined: clamps to i64::MIN/MAX)
-                if v.is_finite() {
-                    *v as i64
-                } else {
-                    0
-                }
-            }
+            // NaN/Infinity → 0 (handled by the `_ => 0` wildcard below);
+            // finite values use Rust's saturating `as` cast (since Rust 1.45,
+            // out-of-range f64→i64 is well-defined: clamps to i64::MIN/MAX).
+            Value::Float64(v) if v.is_finite() => *v as i64,
             Value::Bool(b) => i64::from(*b),
             Value::Timestamp(t) => *t,
             _ => 0,
@@ -376,13 +371,8 @@ impl Value {
             Value::Int32(v) => f64::from(*v),
             Value::Int64(v) => *v as f64,
             Value::Float64(v) => *v,
-            Value::Bool(b) => {
-                if *b {
-                    1.0
-                } else {
-                    0.0
-                }
-            }
+            // `false` falls through to the `_ => 0.0` wildcard.
+            Value::Bool(b) if *b => 1.0,
             Value::Timestamp(t) => *t as f64,
             _ => 0.0,
         }
