@@ -566,3 +566,35 @@ class TestIqlInjectionCheckpoint:
             await cp.aput(make_config(tid), ck, CheckpointMetadata(step=0), {})
             got = await cp.aget_tuple(make_config(tid, checkpoint_id="ck-1"))
             assert got is not None, f"round-trip failed for {tid!r}"
+
+
+class TestAListThreads:
+    async def test_empty(self) -> None:
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        assert await cp.alist_threads() == []
+
+    async def test_unique_sorted_ids(self) -> None:
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        await cp.setup()
+
+        ck = make_checkpoint("ck-1")
+        meta = CheckpointMetadata(step=0)
+        await cp.aput(make_config("zeta"), ck, meta, {})
+        await cp.aput(make_config("alpha"), ck, meta, {})
+        await cp.aput(make_config("alpha"), make_checkpoint("ck-2"), meta, {})
+        await cp.aput(make_config("mid"), ck, meta, {})
+
+        assert await cp.alist_threads() == ["alpha", "mid", "zeta"]
+
+    async def test_preserves_weird_ids(self) -> None:
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        await cp.setup()
+
+        ck = make_checkpoint("ck-1")
+        meta = CheckpointMetadata(step=0)
+        await cp.aput(make_config("你好-thread"), ck, meta, {})
+        await cp.aput(make_config("regular-id"), ck, meta, {})
+        assert await cp.alist_threads() == ["regular-id", "你好-thread"]

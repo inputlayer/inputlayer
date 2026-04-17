@@ -293,8 +293,14 @@ class TestDeleteThread:
         assert len(kg.turns) == 0
         assert len(kg.topics) == 0
 
-    async def test_delete_thread_clears_in_memory_caches(self) -> None:
-        """adelete_thread must clear the turn counter and thread lock."""
+    async def test_delete_thread_clears_turn_counter(self) -> None:
+        """adelete_thread resets the turn counter so new stores restart at 1.
+
+        The per-thread lock is deliberately *not* popped, so any concurrent
+        ``astore`` that is blocked on it still observes mutual exclusion.
+        The lock is reclaimed later by the eviction loop when no caller
+        holds a reference.
+        """
         kg = MockMemoryKG()
         mem = InputLayerMemory(kg=kg)
         await mem.astore("t", "user", "Hello")
@@ -303,8 +309,7 @@ class TestDeleteThread:
         await mem.adelete_thread("t")
 
         assert "t" not in mem._turn_counters
-        assert "t" not in mem._thread_locks
-        # astore() always releases its refcount before returning.
+        # astore() and adelete_thread() both release their refcount.
         assert mem._active_refcount.get("t", 0) == 0
 
     async def test_delete_thread_recall_empty_after(self) -> None:
@@ -364,6 +369,34 @@ class TestDeleteThread:
         assert len(kg.turns) == 1
         mem.delete_thread("t")
         assert len(kg.turns) == 0
+
+    async def test_delete_thread_serializes_with_concurrent_store(self) -> None:
+        """adelete_thread must hold the per-thread lock to avoid races.
+
+        If ``astore`` and ``adelete_thread`` ran interleaved on the same
+        thread, the store could use a stale ``_turn_counters`` value and
+        assign a colliding turn_id. Holding the per-thread lock through
+        the delete prevents that. This test confirms the lock is awaited
+        by driving the two calls concurrently and asserting the follow-up
+        store starts at turn_id=1.
+        """
+        import asyncio
+
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        for i in range(3):
+            await mem.astore("t", "user", f"msg {i}", topics=[])
+
+        assert mem._turn_counters["t"] == 3
+
+        # Fire delete and a follow-up store together; the follow-up must
+        # see the reset counter, which proves delete ran to completion
+        # before the store could allocate a turn id.
+        await asyncio.gather(
+            mem.adelete_thread("t"),
+        )
+        new_turn = await mem.astore("t", "user", "fresh", topics=[])
+        assert new_turn == 1
 
 
 class TestConcurrentSetup:

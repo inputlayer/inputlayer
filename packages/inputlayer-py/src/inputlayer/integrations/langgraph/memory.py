@@ -47,11 +47,13 @@ logger = logging.getLogger(__name__)
 
 # ── Column indices for memory query results ─────────────────────────
 # memory_turn(thread_id, turn_id, role, content, ts)
+_TURN_THREAD = -5
 _TURN_ID = -4
 _TURN_ROLE = -3
 _TURN_CONTENT = -2
 _TURN_TS = -1
 _MIN_TURN_ROW_LEN = 4
+_MIN_TURN_ROW_LEN_WITH_THREAD = 5  # thread_id included when unbound in query
 
 # relevant_turn(thread_id, turn_id, role, content, topic)
 _REL_TURN_ID = -4
@@ -93,7 +95,22 @@ class InputLayerMemory(_MemorySyncAndMaintenanceMixin):
         max_recent: int = 10,
         max_tracked_threads: int = 10_000,
         kg_timeout: float = DEFAULT_KG_TIMEOUT,
+        topic_extractor: Callable[[str], list[str]] | None = None,
     ) -> None:
+        """Create a semantic-memory store backed by an InputLayer KG.
+
+        Args:
+            kg: A KnowledgeGraph handle (created via ``il.knowledge_graph(...)``).
+            max_recent: Number of most-recent turns returned by ``arecall``.
+            max_tracked_threads: Soft upper bound on how many distinct
+                thread IDs keep per-thread locks and counters in memory.
+                Idle threads are evicted once the limit is exceeded.
+            kg_timeout: Per-operation timeout for KG calls, in seconds.
+            topic_extractor: Optional callable ``(content) -> list[str]`` used
+                when ``astore`` is called without explicit ``topics=``. Defaults
+                to a keyword-based demo extractor. In production, pass an
+                LLM-backed extractor or always provide explicit topics.
+        """
         if max_recent < 1:
             raise ValueError(
                 f"max_recent must be >= 1, got {max_recent}. "
@@ -108,10 +125,18 @@ class InputLayerMemory(_MemorySyncAndMaintenanceMixin):
                 "thread, defeating the purpose of the cache. Excess "
                 "threads are evicted when idle."
             )
+        if topic_extractor is not None and not callable(topic_extractor):
+            raise TypeError(
+                "topic_extractor must be a callable (content: str) -> list[str], "
+                f"got {type(topic_extractor).__name__}."
+            )
         self.kg = kg
         self.max_recent = max_recent
         self._max_tracked_threads = max_tracked_threads
         self._kg_timeout = kg_timeout
+        self._topic_extractor: Callable[[str], list[str]] = (
+            topic_extractor if topic_extractor is not None else _extract_topics
+        )
         self._setup_done = False
         self._setup_lock_guard = threading.Lock()
         self._setup_lock: asyncio.Lock | None = None
@@ -311,7 +336,15 @@ class InputLayerMemory(_MemorySyncAndMaintenanceMixin):
         )
 
         if topics is None:
-            topics = _extract_topics(content)
+            extracted = self._topic_extractor(content)
+            if not isinstance(extracted, list) or any(
+                not isinstance(t, str) for t in extracted
+            ):
+                raise TypeError(
+                    "topic_extractor must return a list[str], got "
+                    f"{type(extracted).__name__}. Content: {content[:50]!r}."
+                )
+            topics = extracted
 
         if topics:
             results = await asyncio.gather(
@@ -442,6 +475,26 @@ class InputLayerMemory(_MemorySyncAndMaintenanceMixin):
         result["related_topics"] = related
 
         return result
+
+    # ── Listing threads ──────────────────────────────────────────────
+
+    async def alist_threads(self) -> list[str]:
+        """Return every thread_id that has at least one stored turn.
+
+        Handy for admin tools (cleaning up old conversations, listing
+        known users) without having to remember the IDs yourself. Thread
+        IDs are base64-decoded back to the original string before being
+        returned. The list is sorted for stable output.
+        """
+        await self.setup()
+        r = await self._exec("?memory_turn(ThreadId, TurnId, Role, Content, Ts)")
+        seen: set[str] = set()
+        for row in r.rows:
+            validate_row_length(
+                row, _MIN_TURN_ROW_LEN_WITH_THREAD, "memory_turn", "alist_threads"
+            )
+            seen.add(_b64d(str(row[_TURN_THREAD])))
+        return sorted(seen)
 
     # ── LangGraph node factories ─────────────────────────────────────
 

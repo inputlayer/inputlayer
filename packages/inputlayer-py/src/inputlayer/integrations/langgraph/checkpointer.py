@@ -59,6 +59,7 @@ from inputlayer.integrations.langgraph._checkpoint_serde import unpack as _unpac
 from inputlayer.integrations.langgraph._checkpointer_mixin import _SyncAndMaintenanceMixin
 from inputlayer.integrations.langgraph._utils import (
     DEFAULT_KG_TIMEOUT,
+    b64d,
     b64e,
     escape_iql,
     validate_row_length,
@@ -148,9 +149,21 @@ def _build_checkpoint_tuple(
     thread_id: str,
     checkpoint_ns: str,
     writes_by_ckpt: dict[str, list[Any]],
-) -> CheckpointTuple | None:
-    """Build a CheckpointTuple from a checkpoint row and its writes."""
-    checkpoint_id = str(row[CKPT_ID])
+    *,
+    override_checkpoint_id: str | None = None,
+) -> CheckpointTuple:
+    """Build a CheckpointTuple from a checkpoint row and its writes.
+
+    If ``override_checkpoint_id`` is given, it is used in place of the
+    row's CheckpointId column. This supports the ``aget_tuple`` path where
+    the row may have been returned from a query that bound checkpoint_id
+    (and therefore omitted it from the result columns).
+    """
+    checkpoint_id = (
+        override_checkpoint_id
+        if override_checkpoint_id is not None
+        else str(row[CKPT_ID])
+    )
     parent_id = str(row[CKPT_PARENT_ID])
 
     checkpoint = _unpack(serde, str(row[CKPT_BLOB]))
@@ -385,47 +398,25 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
         for row in r.rows:
             validate_row_length(row, min_cols, "graph_checkpoint", "aget_tuple")
         row = max(r.rows, key=lambda row: int(row[CKPT_TS]))
-        parent_id = str(row[CKPT_PARENT_ID])
         actual_id = checkpoint_id if checkpoint_id is not None else str(row[CKPT_ID])
-
-        checkpoint = _unpack(self.serde, str(row[CKPT_BLOB]))
-        metadata = _unpack(self.serde, str(row[CKPT_METADATA]))
 
         r_writes = await self._exec(
             f'?graph_write("{tid_b64}", '
             f'"{ns_b64}", '
             f'"{escape_iql(actual_id)}", TaskId, TaskPath, Idx, Channel, Blob)'
         )
-        pending_writes = _parse_writes(self.serde, r_writes.rows)
 
-        new_config: RunnableConfig = {
-            "configurable": {
-                "thread_id": thread_id,
-                "checkpoint_ns": checkpoint_ns,
-                "checkpoint_id": actual_id,
-            }
-        }
-
-        parent_config: RunnableConfig | None = None
-        if parent_id:
-            parent_config = {
-                "configurable": {
-                    "thread_id": thread_id,
-                    "checkpoint_ns": checkpoint_ns,
-                    "checkpoint_id": parent_id,
-                }
-            }
-
-        return CheckpointTuple(
-            config=new_config,
-            checkpoint=checkpoint,
-            metadata=metadata,
-            parent_config=parent_config,
-            pending_writes=pending_writes,
+        return _build_checkpoint_tuple(
+            self.serde,
+            row,
+            thread_id,
+            checkpoint_ns,
+            {actual_id: list(r_writes.rows)},
+            override_checkpoint_id=actual_id,
         )
 
     async def adelete_thread(self, thread_id: str) -> None:
-        """Delete all checkpoints and writes for a thread."""
+        """Delete all checkpoints and writes for a thread across every namespace."""
         validate_thread_id(thread_id, "InputLayerCheckpointer.adelete_thread")
         await self.setup()
         tid_b64 = b64e(thread_id)
@@ -438,6 +429,26 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
             f"Idx, Channel, Blob) <- "
             f'ThreadId = "{tid_b64}"'
         )
+
+    async def alist_threads(self) -> list[str]:
+        """Return every thread_id that has at least one persisted checkpoint.
+
+        Handy for admin tools, cleanup jobs, and replay. Thread IDs are
+        base64-decoded back to the original string, and the list is
+        sorted for stable output. Namespaces are not surfaced here; use
+        ``alist`` with a config to inspect a specific thread.
+        """
+        await self.setup()
+        r = await self._exec(
+            "?graph_checkpoint(ThreadId, Ns, CkptId, ParentId, Blob, Metadata, Ts)"
+        )
+        # The unbound query returns all seven columns, so thread_id is at -7.
+        min_len = 7
+        seen: set[str] = set()
+        for row in r.rows:
+            validate_row_length(row, min_len, "graph_checkpoint", "alist_threads")
+            seen.add(b64d(str(row[-7])))
+        return sorted(seen)
 
     async def alist(
         self,
@@ -485,8 +496,6 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
                 checkpoint_ns,
                 writes_by_ckpt,
             )
-            if tup is None:
-                continue
             if filter and not all(tup.metadata.get(k) == v for k, v in filter.items()):
                 continue
 

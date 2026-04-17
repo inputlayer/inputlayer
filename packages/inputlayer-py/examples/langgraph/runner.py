@@ -43,6 +43,7 @@ EXAMPLES = [
     ("ex09_streaming_aggregation", "Streaming aggregation with alerts"),
     ("ex10_resumable_graph", "Resumable graph with checkpointer"),
     ("ex11_memory", "Semantic memory with derived context"),
+    ("ex12_resumable_chat", "Resumable chat: checkpointer + memory"),
 ]
 
 LLM_EXAMPLES = {1, 2, 5, 7, 8, 9, 11}

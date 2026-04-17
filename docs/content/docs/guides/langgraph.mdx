@@ -268,19 +268,24 @@ Each thread gets its own history. Namespaces (`checkpoint_ns`) isolate subgraphs
 
 ### Storage management
 
-Long-running agents accumulate checkpoints. Two methods help you manage growth:
+Long-running agents accumulate checkpoints. Three methods help you see and manage what's stored:
 
 ```python
-# Keep only the 10 most recent checkpoints for a thread
+# List every thread_id that has at least one checkpoint
+threads = await checkpointer.alist_threads()
+
+# Keep only the 10 most recent checkpoints for a thread (default namespace)
 await checkpointer.prune_thread("user-42", keep_last=10)
 
-# Wipe a thread entirely (checkpoints + intermediate writes)
+# Wipe a thread entirely, across every namespace (checkpoints + writes)
 await checkpointer.adelete_thread("user-42")
 ```
 
 "Most recent" is measured by the `ts` field, which is a nanosecond wall-clock timestamp taken when the checkpoint was written. If a thread has concurrent branches (rare in practice), all branches compete for the `keep_last` slots based on that wall time. The older checkpoints and their `graph_write` entries are deleted atomically per checkpoint; the batch delete is not a single transaction, so a crash mid-prune leaves a partially pruned state that a subsequent `prune_thread` call will finish.
 
-Both have sync variants (`prune_thread_sync`, `delete_thread`) for non-async contexts.
+`prune_thread` operates on a single `checkpoint_ns` (default `""`, the parent graph). If your agent uses subgraphs, call `prune_thread` once per namespace you want to trim. `adelete_thread` wipes every namespace for that thread in one call, which is the right tool when you are retiring the whole conversation.
+
+All three have sync variants (`prune_thread_sync`, `delete_thread`, `list_threads`) for non-async contexts.
 
 ### Migrating from another checkpointer
 
@@ -408,7 +413,103 @@ Add the rule once, and `recall()` picks up conclusions from it without any code 
 
 ### Production note on topic extraction
 
-The built-in topic extractor is keyword-based and meant for demos. In production, extract topics with an LLM and pass them explicitly to `astore()`. The ontology is what matters, not the extractor.
+The built-in topic extractor is keyword-based and meant for demos. In production you have two options, pick whichever fits your pipeline:
+
+1. **Pass explicit topics on every `astore` call.** This is the most common path, because in a real agent you already have access to the LLM that generated the turn.
+
+   ```python
+   topics = await your_llm_topic_extractor(content)
+   await memory.astore(thread_id, role, content, topics=topics)
+   ```
+
+2. **Plug an extractor into the memory object.** If most turns enter memory through a `store_node`, install the extractor once:
+
+   ```python
+   async def extract(content: str) -> list[str]:
+       ...  # call your LLM, return the tags it found
+
+   def extract_sync(content: str) -> list[str]:
+       # topic_extractor must be sync, so wrap your async function if needed
+       return asyncio.run(extract(content))
+
+   memory = InputLayerMemory(kg=kg, topic_extractor=extract_sync)
+   ```
+
+Either way, `memory.astore(..., topics=[...])` always wins over the extractor, so you can override per-turn when needed. The ontology is what matters, not the extractor.
+
+### Listing stored conversations
+
+For admin tools, cleanup jobs, or replay pipelines, you often want to know what's in memory:
+
+```python
+threads = await memory.alist_threads()  # sorted list of thread_ids
+# or the blocking variant:
+threads = memory.list_threads()
+```
+
+The list comes back sorted and contains every thread that has at least one stored turn.
+
+## Combining the checkpointer and memory in one graph
+
+Real agents usually need both. The checkpointer keeps the graph resumable across restarts. The memory keeps the conversation coherent across many turns. They coexist happily because they use separate relations in the same KG and read the thread identifier from different places:
+
+- `InputLayerCheckpointer` reads `config["configurable"]["thread_id"]`.
+- `InputLayerMemory` reads `state["thread_id"]` (configurable via `thread_key`).
+
+Wire both up and you get a durable, stateful chat agent in about thirty lines:
+
+```python
+from typing import TypedDict, Any
+from inputlayer import InputLayer
+from inputlayer.integrations.langgraph import (
+    InputLayerCheckpointer,
+    InputLayerMemory,
+)
+from langgraph.graph import END, StateGraph
+
+class ChatState(TypedDict, total=False):
+    thread_id: str
+    new_message: dict
+    context: dict
+    response: str
+
+async def respond(state):
+    ctx = state.get("context", {})
+    # Call your LLM with ctx["topics"], ctx["recent"], ctx["relevant"]
+    return {"response": "..."}
+
+async with InputLayer("ws://localhost:8080/ws",
+                      username="admin", password="admin") as il:
+    kg = il.knowledge_graph("chat_agent")
+    memory = InputLayerMemory(kg=kg)
+    checkpointer = InputLayerCheckpointer(kg=kg)
+    await memory.setup()
+    await checkpointer.setup()
+
+    graph = StateGraph(ChatState)
+    graph.add_node("recall", memory.recall_node(state_key="context"))
+    graph.add_node("respond", respond)
+    graph.add_node("store", memory.store_node(state_key="new_message"))
+    graph.set_entry_point("recall")
+    graph.add_edge("recall", "respond")
+    graph.add_edge("respond", "store")
+    graph.add_edge("store", END)
+
+    app = graph.compile(checkpointer=checkpointer)
+
+    thread = "alex-session-42"
+    config = {"configurable": {"thread_id": thread}}
+    await app.ainvoke(
+        {"thread_id": thread,
+         "new_message": {"role": "user", "content": "Help me with Python ML"}},
+        config=config,
+    )
+    # Restart the process; a fresh `app` with the same checkpointer and
+    # memory will resume from the last checkpoint, and `recall` still
+    # surfaces derived context from every prior turn.
+```
+
+The `thread_id` appears twice on purpose. The state copy is what the memory nodes read. The config copy is what the checkpointer uses to key its state. Using the same value everywhere keeps the two aligned so "resume a thread" and "remember a conversation" mean the same thing.
 
 ## Safe parameter binding
 
@@ -429,7 +530,7 @@ Every primitive supports both sync and async. The async methods (`aput`, `aget_t
 
 ## Examples
 
-The SDK ships with 11 runnable examples at [`examples/langgraph/`](https://github.com/inputlayer/inputlayer/tree/main/packages/inputlayer-py/examples/langgraph):
+The SDK ships with 12 runnable examples at [`examples/langgraph/`](https://github.com/inputlayer/inputlayer/tree/main/packages/inputlayer-py/examples/langgraph):
 
 | # | Example | What it shows |
 |---|---------|---------------|
@@ -444,6 +545,7 @@ The SDK ships with 11 runnable examples at [`examples/langgraph/`](https://githu
 | 9 | Streaming aggregation | Threshold-based alerts from streaming data |
 | 10 | Resumable graph | Checkpoint, crash, resume from persisted state |
 | 11 | Semantic memory | Store turns as facts, recall derived context |
+| 12 | Resumable chat | Checkpointer and memory together on one KG |
 
 Run them:
 
@@ -465,7 +567,7 @@ Examples marked `[LLM]` need an OpenAI-compatible server at `localhost:1234` (LM
 
 ## Troubleshooting
 
-**`ValueError: thread_id contains characters the IQL parser cannot safely embed`.** Thread identifiers must avoid `,`, `)`, `<`, and `>` and any ASCII control byte (other than tab, newline, carriage return). These characters confuse the current IQL parser when a string literal appears inside a multi-argument call. Use alphanumeric plus `._-:/@+=` for portable IDs. Content and role are base64-encoded internally, so they are not affected by this limitation.
+**`ValueError: thread_id must be a non-empty string`.** The integration expects a non-empty string thread identifier everywhere it asks for one. Thread IDs, roles, and content are base64-encoded before they touch IQL, so any Unicode string is safe on the wire. The only requirement is that the ID itself is a non-empty `str`.
 
 **`KeyError: thread_id`.** The checkpointer expects a config like `{"configurable": {"thread_id": "..."}}` on every call. Pass it to `app.ainvoke` and `app.aget_state`.
 

@@ -78,11 +78,13 @@ class MockMemoryKG:
 
         # Query memory_turn
         if iql.startswith("?memory_turn("):
-            thread_id = self._extract_thread_b64(iql)
+            # alist_threads issues an unbound query; leave thread_id None so
+            # every turn is returned.
+            thread_filter = self._extract_thread_b64(iql) if '"' in iql else None
             rows = [
                 [b64e(t[0]), t[1], b64e(t[2]), b64e(t[3]), t[4]]
                 for t in self.turns
-                if t[0] == thread_id
+                if thread_filter is None or t[0] == thread_filter
             ]
             return ResultSet(
                 columns=["thread_id", "turn_id", "role", "content", "ts"],

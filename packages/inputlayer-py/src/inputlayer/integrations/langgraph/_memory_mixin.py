@@ -41,7 +41,12 @@ class _MemorySyncAndMaintenanceMixin:
     async def arecall(  # type: ignore[empty-body]
         self, thread_id: str
     ) -> dict[str, Any]: ...
+    async def alist_threads(self) -> list[str]: ...  # type: ignore[empty-body]
     async def _exec(self, iql: str) -> Any: ...
+    async def _acquire_thread_lock(  # type: ignore[empty-body]
+        self, thread_id: str
+    ) -> asyncio.Lock: ...
+    async def _release_thread_lock(self, thread_id: str) -> None: ...
 
     # ── Sync wrappers ───────────────────────────────────────────────
 
@@ -64,6 +69,10 @@ class _MemorySyncAndMaintenanceMixin:
         """Recall derived context for a thread (blocking). See ``arecall`` for details."""
         return run_sync(self.arecall(thread_id))
 
+    def list_threads(self) -> list[str]:
+        """Return every thread_id with stored turns (blocking). See ``alist_threads``."""
+        return run_sync(self.alist_threads())
+
     # ── Thread deletion ─────────────────────────────────────────────
 
     async def adelete_thread(self, thread_id: str) -> None:
@@ -73,30 +82,39 @@ class _MemorySyncAndMaintenanceMixin:
         Derived relations (``active_topic``, ``relevant_turn``,
         ``topic_thread``) are automatically retracted by the engine.
 
-        Also clears the in-memory turn counter and thread lock for this
-        thread so subsequent stores start fresh.
+        Held under the per-thread lock so any in-flight ``astore`` for
+        the same thread finishes first and any follow-up ``astore`` sees
+        a fresh turn counter starting at 1. The lock itself is not
+        removed here; the regular eviction path takes care of that once
+        no callers hold a reference.
         """
         validate_thread_id(thread_id, "InputLayerMemory.adelete_thread")
         await self.setup()
 
-        tid_b64 = b64e(thread_id)
-        await asyncio.gather(
-            self._exec(
-                f"-memory_turn(ThreadId, TurnId, Role, Content, Ts) <- "
-                f'ThreadId = "{tid_b64}"'
-            ),
-            self._exec(
-                f"-memory_topic(ThreadId, TurnId, Topic) <- "
-                f'ThreadId = "{tid_b64}"'
-            ),
-        )
-
-        # Clear in-memory caches for this thread. The refcount may be
-        # nonzero if another coroutine is still holding the lock; we do
-        # not clear it here, but the guard behavior in _evict and
-        # _release handles the stale-entry case safely.
-        self._turn_counters.pop(thread_id, None)
-        self._thread_locks.pop(thread_id, None)
+        # Serialize with in-flight astore calls on the same thread.
+        # Holding the lock guarantees no turn_id can be assigned from
+        # the stale counter while we are clearing it.
+        lock = await self._acquire_thread_lock(thread_id)
+        try:
+            async with lock:
+                tid_b64 = b64e(thread_id)
+                await asyncio.gather(
+                    self._exec(
+                        f"-memory_turn(ThreadId, TurnId, Role, Content, Ts) <- "
+                        f'ThreadId = "{tid_b64}"'
+                    ),
+                    self._exec(
+                        f"-memory_topic(ThreadId, TurnId, Topic) <- "
+                        f'ThreadId = "{tid_b64}"'
+                    ),
+                )
+                # Reset the turn counter so the next astore starts at 1.
+                # The lock object stays in place for any concurrent callers
+                # already blocked on it; once refcount drops to zero, the
+                # eviction loop reclaims it.
+                self._turn_counters.pop(thread_id, None)
+        finally:
+            await self._release_thread_lock(thread_id)
 
     def delete_thread(self, thread_id: str) -> None:
         """Delete all turns and topics for a thread (blocking).

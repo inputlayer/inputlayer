@@ -35,6 +35,12 @@ from inputlayer.integrations.langgraph._utils import (
 # Metadata (-2), Ts (-1). Shared here and in checkpointer.py.
 _MIN_CKPT_ROW_LEN_WITH_ID = 5
 
+# Alias for ``list[str]`` used by the mixin. A bare ``list[str]`` annotation
+# collides with the ``list`` method defined below (required by
+# ``BaseCheckpointSaver``), because class-scope lookup finds the method
+# before the builtin. The alias avoids that shadowing.
+_StrList = list[str]
+
 logger = logging.getLogger(__name__)
 
 
@@ -86,6 +92,7 @@ class _SyncAndMaintenanceMixin:
     ) -> AsyncIterator[CheckpointTuple]: ...
 
     async def adelete_thread(self, thread_id: str) -> None: ...
+    async def alist_threads(self) -> _StrList: ...  # type: ignore[empty-body]
 
     # ── Setup & infrastructure ──────────────────────────────────────
 
@@ -341,3 +348,10 @@ class _SyncAndMaintenanceMixin:
         See ``adelete_thread`` for details.
         """
         run_sync(self.adelete_thread(thread_id))
+
+    def list_threads(self) -> _StrList:
+        """List thread_ids with at least one checkpoint (blocking).
+
+        See ``alist_threads`` for details.
+        """
+        return run_sync(self.alist_threads())

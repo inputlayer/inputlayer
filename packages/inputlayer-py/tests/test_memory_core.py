@@ -318,3 +318,72 @@ class TestTopicExtraction:
         assert topics == ["devops", "python"], (
             f"Expected exactly devops and python, got {topics}"
         )
+
+
+class TestCustomTopicExtractor:
+    async def test_replaces_built_in_extractor(self) -> None:
+        kg = MockMemoryKG()
+        seen_content: list[str] = []
+
+        def custom(content: str) -> list[str]:
+            seen_content.append(content)
+            return ["always-this-topic"]
+
+        mem = InputLayerMemory(kg=kg, topic_extractor=custom)
+        await mem.astore("t", "user", "I went to the store and bought milk")
+        topics = sorted(t[2] for t in kg.topics)
+        assert topics == ["always-this-topic"]
+        assert seen_content == ["I went to the store and bought milk"]
+
+    async def test_explicit_topics_bypass_extractor(self) -> None:
+        kg = MockMemoryKG()
+
+        def custom(_content: str) -> list[str]:
+            raise AssertionError("extractor should not be called when topics= is passed")
+
+        mem = InputLayerMemory(kg=kg, topic_extractor=custom)
+        await mem.astore("t", "user", "any content", topics=["explicit"])
+        topics = sorted(t[2] for t in kg.topics)
+        assert topics == ["explicit"]
+
+    async def test_rejects_non_callable(self) -> None:
+        import pytest
+
+        kg = MockMemoryKG()
+        with pytest.raises(TypeError, match="topic_extractor must be a callable"):
+            InputLayerMemory(kg=kg, topic_extractor="not-a-callable")  # type: ignore[arg-type]
+
+    async def test_rejects_bad_return_type(self) -> None:
+        import pytest
+
+        kg = MockMemoryKG()
+
+        def bad(_content: str) -> str:  # returns str, should be list
+            return "not-a-list"
+
+        mem = InputLayerMemory(kg=kg, topic_extractor=bad)  # type: ignore[arg-type]
+        with pytest.raises(TypeError, match="topic_extractor must return a list"):
+            await mem.astore("t", "user", "some content")
+
+
+class TestAListThreads:
+    async def test_empty_store(self) -> None:
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        assert await mem.alist_threads() == []
+
+    async def test_unique_sorted_ids(self) -> None:
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        await mem.astore("zeta", "user", "hi", topics=[])
+        await mem.astore("alpha", "user", "hi", topics=[])
+        await mem.astore("alpha", "assistant", "hello back", topics=[])
+        await mem.astore("mid", "user", "and me", topics=[])
+        assert await mem.alist_threads() == ["alpha", "mid", "zeta"]
+
+    async def test_survives_unicode_thread_ids(self) -> None:
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        await mem.astore("你好-thread", "user", "hi", topics=[])
+        await mem.astore("regular-id", "user", "hi", topics=[])
+        assert await mem.alist_threads() == ["regular-id", "你好-thread"]

@@ -79,7 +79,7 @@ def kg_node(
             UserWarning,
             stacklevel=2,
         )
-    if operation in ("insert", "delete") and query is not None:
+    elif operation in ("insert", "delete") and query is not None:
         import warnings
 
         warnings.warn(
