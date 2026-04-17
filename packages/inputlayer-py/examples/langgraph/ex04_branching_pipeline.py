@@ -8,7 +8,6 @@ Shows kg_router as an intelligent dispatcher for heterogeneous inputs.
 """
 
 import asyncio
-import contextlib
 from typing import Any
 
 from examples.langgraph._common import (
@@ -20,6 +19,7 @@ from examples.langgraph._common import (
     RESET,
     WHITE,
     YELLOW,
+    drop_kg_if_exists,
     header,
     os,
     step,
@@ -285,8 +285,7 @@ async def run():
         username=os.environ.get("INPUTLAYER_USER", "admin"),
         password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
     ) as il:
-        with contextlib.suppress(Exception):
-            await il.drop_knowledge_graph("lg_pipeline")
+        await drop_kg_if_exists(il, "lg_pipeline")
         kg = il.knowledge_graph("lg_pipeline")
         try:
             # ── Schema ───────────────────────────────────────────────────
@@ -361,8 +360,7 @@ async def run():
 
             success("Done!")
         finally:
-            with contextlib.suppress(Exception):
-                await il.drop_knowledge_graph("lg_pipeline")
+            await drop_kg_if_exists(il, "lg_pipeline")
 
 
 if __name__ == "__main__":

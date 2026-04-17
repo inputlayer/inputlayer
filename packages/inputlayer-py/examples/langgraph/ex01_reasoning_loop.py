@@ -9,7 +9,6 @@ WHEN things happen, the KG controls WHAT follows from WHAT.
 """
 
 import asyncio
-import contextlib
 from typing import Any
 
 # Avoid F405 by importing explicitly from _common
@@ -20,6 +19,7 @@ from examples.langgraph._common import (
     RESET,
     YELLOW,
     check_llm,
+    drop_kg_if_exists,
     get_llm,
     header,
     os,
@@ -160,8 +160,7 @@ async def run():
         username=os.environ.get("INPUTLAYER_USER", "admin"),
         password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
     ) as il:
-        with contextlib.suppress(Exception):
-            await il.drop_knowledge_graph("lg_reasoning")
+        await drop_kg_if_exists(il, "lg_reasoning")
         kg = il.knowledge_graph("lg_reasoning")
         try:
             # ── Setup KG schema and rules ────────────────────────────────
@@ -258,8 +257,7 @@ async def run():
 
             success("Done!")
         finally:
-            with contextlib.suppress(Exception):
-                await il.drop_knowledge_graph("lg_reasoning")
+            await drop_kg_if_exists(il, "lg_reasoning")
 
 
 if __name__ == "__main__":

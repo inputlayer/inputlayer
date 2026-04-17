@@ -10,7 +10,6 @@ to each other directly, they write facts and rules reconcile them.
 """
 
 import asyncio
-import contextlib
 from typing import Any
 
 from examples.langgraph._common import (
@@ -22,6 +21,7 @@ from examples.langgraph._common import (
     RESET,
     WHITE,
     YELLOW,
+    drop_kg_if_exists,
     header,
     os,
     step,
@@ -267,8 +267,7 @@ async def run():
         username=os.environ.get("INPUTLAYER_USER", "admin"),
         password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
     ) as il:
-        with contextlib.suppress(Exception):
-            await il.drop_knowledge_graph("lg_planning")
+        await drop_kg_if_exists(il, "lg_planning")
         kg = il.knowledge_graph("lg_planning")
         try:
             # ── Schema ───────────────────────────────────────────────────
@@ -348,8 +347,7 @@ async def run():
 
             success("Done!")
         finally:
-            with contextlib.suppress(Exception):
-                await il.drop_knowledge_graph("lg_planning")
+            await drop_kg_if_exists(il, "lg_planning")
 
 
 if __name__ == "__main__":

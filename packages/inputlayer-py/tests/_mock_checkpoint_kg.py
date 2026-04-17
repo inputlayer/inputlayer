@@ -12,6 +12,7 @@ from typing import Any
 
 from langgraph.checkpoint.base import Checkpoint, empty_checkpoint
 
+from inputlayer.integrations.langgraph._utils import b64d, b64e
 from inputlayer.result import ResultSet
 
 
@@ -37,17 +38,27 @@ class MockKG:
         if iql.startswith("+graph_write(") and ":" in iql:
             return ResultSet(columns=["x"], rows=[])
 
-        # Insert a graph_checkpoint fact
+        # Insert a graph_checkpoint fact. The SDK b64-encodes thread_id
+        # (index 0) and checkpoint_ns (index 1) on the wire; decode here
+        # so stored tuples reflect the plain caller-visible values.
         if iql.startswith("+graph_checkpoint("):
             args = self._parse_args(iql)
             args = [str(a) if isinstance(a, _BoundString) else a for a in args]
+            if len(args) > 0:
+                args[0] = b64d(args[0])
+            if len(args) > 1:
+                args[1] = b64d(args[1])
             self.checkpoints.append(tuple(args))
             return ResultSet(columns=["x"], rows=[])
 
-        # Insert a graph_write fact
+        # Insert a graph_write fact. Same b64 decoding as checkpoints.
         if iql.startswith("+graph_write("):
             args = self._parse_args(iql)
             args = [str(a) if isinstance(a, _BoundString) else a for a in args]
+            if len(args) > 0:
+                args[0] = b64d(args[0])
+            if len(args) > 1:
+                args[1] = b64d(args[1])
             self.writes.append(tuple(args))
             return ResultSet(columns=["x"], rows=[])
 
@@ -117,9 +128,10 @@ class MockKG:
         body = iql[len("?graph_checkpoint(") :].rstrip(")")
         parts = self._parse_args("+graph_checkpoint(" + body + ")")
 
-        thread_id = str(parts[0]) if isinstance(parts[0], _BoundString) else None
+        # thread_id and checkpoint_ns arrive b64-encoded from the SDK.
+        thread_id = b64d(str(parts[0])) if isinstance(parts[0], _BoundString) else None
         checkpoint_ns = (
-            str(parts[1]) if len(parts) > 1 and isinstance(parts[1], _BoundString) else None
+            b64d(str(parts[1])) if len(parts) > 1 and isinstance(parts[1], _BoundString) else None
         )
         checkpoint_id = (
             str(parts[2]) if len(parts) > 2 and isinstance(parts[2], _BoundString) else None
@@ -133,8 +145,11 @@ class MockKG:
                 continue
             if checkpoint_id and ckpt[2] != checkpoint_id:
                 continue
-            # Real IQL engine returns all columns, including bound ones.
-            rows.append(list(ckpt))
+            # Return encoded thread_id/ns on the wire (matches server).
+            row = list(ckpt)
+            row[0] = b64e(row[0])
+            row[1] = b64e(row[1])
+            rows.append(row)
 
         cols = [
             "thread_id",
@@ -152,9 +167,9 @@ class MockKG:
         #             task_path, idx, channel, blob)
         body = iql[len("?graph_write(") :].rstrip(")")
         parts = self._parse_args("+graph_write(" + body + ")")
-        thread_id = str(parts[0]) if isinstance(parts[0], _BoundString) else None
+        thread_id = b64d(str(parts[0])) if isinstance(parts[0], _BoundString) else None
         checkpoint_ns = (
-            str(parts[1]) if len(parts) > 1 and isinstance(parts[1], _BoundString) else None
+            b64d(str(parts[1])) if len(parts) > 1 and isinstance(parts[1], _BoundString) else None
         )
         checkpoint_id_bound = len(parts) > 2 and isinstance(parts[2], _BoundString)
         checkpoint_id = str(parts[2]) if checkpoint_id_bound else None
@@ -167,8 +182,11 @@ class MockKG:
                 continue
             if checkpoint_id and w[2] != checkpoint_id:
                 continue
-            # Real IQL engine returns all columns, including bound ones.
-            rows.append(list(w))
+            # Return encoded thread_id/ns on the wire (matches server).
+            row = list(w)
+            row[0] = b64e(row[0])
+            row[1] = b64e(row[1])
+            rows.append(row)
 
         cols = [
             "thread_id",
@@ -189,8 +207,9 @@ class MockKG:
         ns_match = re.search(rf'Ns\s*=\s*"{_STR}"', body)
         ckpt_match = re.search(rf'CkptId\s*=\s*"{_STR}"', body)
 
-        thread_id = self._unescape(thread_match.group(1)) if thread_match else None
-        ns = self._unescape(ns_match.group(1)) if ns_match else None
+        # ThreadId and Ns are b64-encoded on the wire, CkptId still uses escape_iql.
+        thread_id = b64d(thread_match.group(1)) if thread_match else None
+        ns = b64d(ns_match.group(1)) if ns_match else None
         ckpt_id = self._unescape(ckpt_match.group(1)) if ckpt_match else None
 
         self.checkpoints = [
@@ -213,8 +232,8 @@ class MockKG:
         ckpt_match = re.search(rf'CkptId\s*=\s*"{_STR}"', body)
         task_match = re.search(rf'TaskId\s*=\s*"{_STR}"', body)
 
-        thread_id = self._unescape(thread_match.group(1)) if thread_match else None
-        ns = self._unescape(ns_match.group(1)) if ns_match else None
+        thread_id = b64d(thread_match.group(1)) if thread_match else None
+        ns = b64d(ns_match.group(1)) if ns_match else None
         ckpt_id = self._unescape(ckpt_match.group(1)) if ckpt_match else None
         task_id = self._unescape(task_match.group(1)) if task_match else None
 

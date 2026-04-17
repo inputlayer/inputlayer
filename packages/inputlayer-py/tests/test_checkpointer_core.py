@@ -437,3 +437,132 @@ class TestConcurrentSetup:
         assert cp._setup_done is True
         # DDL should run exactly 2 times (graph_checkpoint + graph_write schemas)
         assert kg.execute.await_count == 2
+
+
+class TestConcurrentWrites:
+    async def test_concurrent_aput_same_thread_distinct_checkpoints(self) -> None:
+        """Ten concurrent aput calls with distinct checkpoint_ids must all land."""
+        import asyncio
+
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        await cp.setup()
+
+        cfg = make_config("t1")
+
+        async def _put(i: int) -> None:
+            ck = empty_checkpoint()
+            ck["id"] = f"ck-{i}"
+            ck["channel_values"] = {"counter": i}
+            await cp.aput(cfg, ck, CheckpointMetadata(step=i), {})
+
+        await asyncio.gather(*(_put(i) for i in range(10)))
+        assert len({c[2] for c in kg.checkpoints}) == 10
+
+    async def test_concurrent_aput_writes_distinct_tasks(self) -> None:
+        """Concurrent writes for different tasks under the same checkpoint."""
+        import asyncio
+
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        await cp.setup()
+
+        ck = make_checkpoint("ck-1")
+        cfg = make_config("t1", checkpoint_id="ck-1")
+        await cp.aput(make_config("t1"), ck, CheckpointMetadata(step=0), {})
+
+        async def _put_writes(task_id: str) -> None:
+            await cp.aput_writes(
+                cfg,
+                writes=[("channel_a", {"val": task_id})],
+                task_id=task_id,
+            )
+
+        await asyncio.gather(*(_put_writes(f"task-{i}") for i in range(5)))
+        task_ids = {w[3] for w in kg.writes}
+        assert task_ids == {f"task-{i}" for i in range(5)}
+
+
+class TestLargePayload:
+    async def test_aput_with_large_channel_values(self) -> None:
+        """A checkpoint with a >1MB payload must round-trip cleanly."""
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        await cp.setup()
+
+        big_text = "x" * (1_500_000)
+        ck = make_checkpoint("ck-big")
+        ck["channel_values"] = {"doc": big_text}
+        cfg = make_config("t1")
+        await cp.aput(cfg, ck, CheckpointMetadata(step=0), {})
+
+        got = await cp.aget_tuple(make_config("t1", checkpoint_id="ck-big"))
+        assert got is not None
+        assert got.checkpoint["channel_values"]["doc"] == big_text
+
+
+class TestUnicode:
+    async def test_unicode_in_channel_values(self) -> None:
+        """Emoji, RTL marks, zero-width chars must survive serialization."""
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        await cp.setup()
+
+        payload = {
+            "emoji": "hello \U0001f600 world",
+            "rtl": "abc \u202eefg",
+            "zwj": "woman\u200d\U0001f527",
+            "nul_in_text": "before\x00after",
+        }
+        ck = make_checkpoint("ck-uni")
+        ck["channel_values"] = payload
+        await cp.aput(make_config("t1"), ck, CheckpointMetadata(step=0), {})
+
+        got = await cp.aget_tuple(make_config("t1", checkpoint_id="ck-uni"))
+        assert got is not None
+        assert got.checkpoint["channel_values"] == payload
+
+
+class TestNoneValues:
+    async def test_none_channel_value(self) -> None:
+        """None values in channel_values must round-trip."""
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        await cp.setup()
+
+        ck = make_checkpoint("ck-none")
+        ck["channel_values"] = {"optional": None, "required": "set"}
+        await cp.aput(make_config("t1"), ck, CheckpointMetadata(step=0), {})
+
+        got = await cp.aget_tuple(make_config("t1", checkpoint_id="ck-none"))
+        assert got is not None
+        assert got.checkpoint["channel_values"]["optional"] is None
+        assert got.checkpoint["channel_values"]["required"] == "set"
+
+
+class TestIqlInjectionCheckpoint:
+    async def test_malicious_thread_id_round_trips(self) -> None:
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        await cp.setup()
+
+        # Realistic injection payload (avoids ) , < > which
+        # validate_thread_id rejects - see memory.py / checkpointer.py).
+        tid = 'bad"; DROP; -- graph_checkpoint'
+        ck = make_checkpoint("ck-1")
+        await cp.aput(make_config(tid), ck, CheckpointMetadata(step=0), {})
+        got = await cp.aget_tuple(make_config(tid, checkpoint_id="ck-1"))
+        assert got is not None
+        assert got.config["configurable"]["thread_id"] == tid
+
+    async def test_checkpointer_round_trips_parser_hostile_thread_id(self) -> None:
+        """Thread IDs are b64-encoded on the wire, so parser-hostile chars are safe."""
+        kg = MockKG()
+        cp = InputLayerCheckpointer(kg=kg)
+        await cp.setup()
+
+        ck = make_checkpoint("ck-1")
+        for tid in ["bad,tid", "bad)tid", "bad<tid", "bad>tid"]:
+            await cp.aput(make_config(tid), ck, CheckpointMetadata(step=0), {})
+            got = await cp.aget_tuple(make_config(tid, checkpoint_id="ck-1"))
+            assert got is not None, f"round-trip failed for {tid!r}"

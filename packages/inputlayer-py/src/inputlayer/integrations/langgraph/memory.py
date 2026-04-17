@@ -32,8 +32,8 @@ from inputlayer.integrations.langgraph._memory_mixin import _MemorySyncAndMainte
 from inputlayer.integrations.langgraph._utils import (
     DEFAULT_KG_TIMEOUT,
     check_error_response,
-    escape_iql,
     validate_row_length,
+    validate_thread_id,
 )
 from inputlayer.integrations.langgraph._utils import (
     b64d as _b64d,
@@ -99,12 +99,14 @@ class InputLayerMemory(_MemorySyncAndMaintenanceMixin):
                 f"max_recent must be >= 1, got {max_recent}. "
                 "Set max_recent to the number of recent turns to include in recall."
             )
-        if max_tracked_threads < 1:
+        if max_tracked_threads < 2:
             raise ValueError(
-                f"max_tracked_threads must be >= 1, got {max_tracked_threads}. "
+                f"max_tracked_threads must be >= 2, got {max_tracked_threads}. "
                 "Set this to the soft upper bound on how many distinct "
                 "thread IDs to track in memory (per-thread locks and turn "
-                "counters). Excess threads will be evicted when idle."
+                "counters). Values below 2 would evict on every new "
+                "thread, defeating the purpose of the cache. Excess "
+                "threads are evicted when idle."
             )
         self.kg = kg
         self.max_recent = max_recent
@@ -117,8 +119,11 @@ class InputLayerMemory(_MemorySyncAndMaintenanceMixin):
         self._thread_locks: dict[str, asyncio.Lock] = {}
         self._thread_locks_guard_sync = threading.Lock()
         self._thread_locks_guard: asyncio.Lock | None = None
-        # Track which thread locks are currently held so eviction skips them
-        self._active_threads: set[str] = set()
+        # Refcount of in-flight uses per thread. Eviction skips threads
+        # with nonzero refcount. A set is not enough because a discard()
+        # from one finally block would mark the thread evictable while a
+        # second concurrent caller is still using the lock.
+        self._active_refcount: dict[str, int] = {}
 
     # ── Internal: KG execution with timeout ─────────────────────────
 
@@ -186,26 +191,35 @@ class InputLayerMemory(_MemorySyncAndMaintenanceMixin):
 
     # ── Internal: turn counter ───────────────────────────────────────
 
-    async def _get_thread_lock(self, thread_id: str) -> asyncio.Lock:
-        """Get or create a per-thread lock, with eviction of idle entries.
+    async def _acquire_thread_lock(self, thread_id: str) -> asyncio.Lock:
+        """Refcount-and-return the per-thread lock.
 
-        Marks the thread as active while the guard lock is held so that
-        eviction cannot remove this thread between returning and the
-        caller acquiring the per-thread lock.
+        Increments the thread's refcount under the guard so eviction
+        skips it while any caller holds a reference. The caller MUST
+        release via ``_release_thread_lock(thread_id)`` in a finally
+        block, even if the lock was never acquired.
         """
         async with self._get_thread_locks_guard():
             if thread_id not in self._thread_locks:
                 if len(self._thread_locks) >= self._max_tracked_threads:
                     self._evict_oldest_threads()
                 self._thread_locks[thread_id] = asyncio.Lock()
-            # Mark active while guard is held to prevent eviction race
-            self._active_threads.add(thread_id)
+            self._active_refcount[thread_id] = self._active_refcount.get(thread_id, 0) + 1
             return self._thread_locks[thread_id]
+
+    async def _release_thread_lock(self, thread_id: str) -> None:
+        """Decrement the thread's refcount. Removes the entry when zero."""
+        async with self._get_thread_locks_guard():
+            remaining = self._active_refcount.get(thread_id, 0) - 1
+            if remaining <= 0:
+                self._active_refcount.pop(thread_id, None)
+            else:
+                self._active_refcount[thread_id] = remaining
 
     def _evict_oldest_threads(self) -> None:
         """Evict the oldest half of idle tracked threads from caches.
 
-        Skips threads currently in ``_active_threads``. If all threads
+        Skips threads with a nonzero ``_active_refcount``. If all threads
         are active, no eviction occurs (the new thread is still added).
         """
         keep = self._max_tracked_threads // 2
@@ -218,7 +232,7 @@ class InputLayerMemory(_MemorySyncAndMaintenanceMixin):
         for key in keys:
             if evicted >= evict_target:
                 break
-            if key in self._active_threads:
+            if self._active_refcount.get(key, 0) > 0:
                 continue
             self._thread_locks.pop(key, None)
             self._turn_counters.pop(key, None)
@@ -242,12 +256,12 @@ class InputLayerMemory(_MemorySyncAndMaintenanceMixin):
 
     async def _next_turn_id(self, thread_id: str) -> int:
         """Return the next turn_id, initializing from KG if needed."""
-        lock = await self._get_thread_lock(thread_id)
+        lock = await self._acquire_thread_lock(thread_id)
         try:
             async with lock:
                 if thread_id not in self._turn_counters:
                     r = await self._exec(
-                        f'?memory_turn("{escape_iql(thread_id)}", TurnId, Role, Content, Ts)'
+                        f'?memory_turn("{_b64e(thread_id)}", TurnId, Role, Content, Ts)'
                     )
                     if r.rows:
                         for row in r.rows:
@@ -264,7 +278,7 @@ class InputLayerMemory(_MemorySyncAndMaintenanceMixin):
                 self._turn_counters[thread_id] += 1
                 return self._turn_counters[thread_id]
         finally:
-            self._active_threads.discard(thread_id)
+            await self._release_thread_lock(thread_id)
 
     # ── Store ────────────────────────────────────────────────────────
 
@@ -284,18 +298,15 @@ class InputLayerMemory(_MemorySyncAndMaintenanceMixin):
 
         Returns the turn_id assigned (1-based, sequential per thread).
         """
-        if not thread_id:
-            raise ValueError(
-                "InputLayerMemory.astore: thread_id must be a non-empty string. "
-                "Pass a unique identifier per conversation thread."
-            )
+        validate_thread_id(thread_id, "InputLayerMemory.astore")
         await self.setup()
 
         turn_id = await self._next_turn_id(thread_id)
         ts = time.time_ns()
 
+        tid_b64 = _b64e(thread_id)
         await self._exec(
-            f'+memory_turn("{escape_iql(thread_id)}", {turn_id}, '
+            f'+memory_turn("{tid_b64}", {turn_id}, '
             f'"{_b64e(role)}", "{_b64e(content)}", {ts})'
         )
 
@@ -303,10 +314,9 @@ class InputLayerMemory(_MemorySyncAndMaintenanceMixin):
             topics = _extract_topics(content)
 
         if topics:
-            escaped_tid = escape_iql(thread_id)
             results = await asyncio.gather(
                 *(
-                    self._exec(f'+memory_topic("{escaped_tid}", {turn_id}, "{_b64e(topic)}")')
+                    self._exec(f'+memory_topic("{tid_b64}", {turn_id}, "{_b64e(topic)}")')
                     for topic in set(topics)
                 ),
                 return_exceptions=True,
@@ -346,21 +356,20 @@ class InputLayerMemory(_MemorySyncAndMaintenanceMixin):
         All four queries run concurrently; if any fails, a RuntimeError
         is raised after all complete.
         """
-        if not thread_id:
-            raise ValueError("InputLayerMemory.arecall: thread_id must be a non-empty string.")
+        validate_thread_id(thread_id, "InputLayerMemory.arecall")
         await self.setup()
 
-        escaped = escape_iql(thread_id)
+        tid_b64 = _b64e(thread_id)
 
         results = await asyncio.gather(
-            self._exec(f'?active_topic("{escaped}", Topic)'),
+            self._exec(f'?active_topic("{tid_b64}", Topic)'),
             self._exec(
-                f'?memory_turn("{escaped}", TurnId, Role, Content, Ts)',
+                f'?memory_turn("{tid_b64}", TurnId, Role, Content, Ts)',
             ),
             self._exec(
-                f'?relevant_turn("{escaped}", TurnId, Role, Content, Topic)',
+                f'?relevant_turn("{tid_b64}", TurnId, Role, Content, Topic)',
             ),
-            self._exec(f'?topic_thread("{escaped}", TopicA, TopicB)'),
+            self._exec(f'?topic_thread("{tid_b64}", TopicA, TopicB)'),
             return_exceptions=True,
         )
 

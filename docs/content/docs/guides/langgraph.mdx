@@ -6,13 +6,82 @@ InputLayer's LangGraph integration moves that logic into rules. You store facts,
 
 This guide walks through the integration from install to resumable agents with semantic memory. No prior Datalog or IQL experience required.
 
+## Prerequisites
+
+You need two things to run any example in this guide.
+
+1. **A running InputLayer server.** The fastest way is Docker:
+
+   ```bash
+   docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer:latest
+   ```
+
+   The server listens for WebSocket connections at `ws://localhost:8080/ws`.
+
+2. **Python 3.10 or newer.** Check with `python --version`.
+
+Confirm the server is reachable before continuing:
+
+```bash
+curl -sf http://localhost:8080/health && echo "server is up"
+```
+
 ## Installation
 
 ```bash
 pip install inputlayer-client-dev[langgraph]
 ```
 
-This pulls in `langgraph` and `langchain-core` alongside the InputLayer SDK. You'll also need a running InputLayer server.
+This pulls in `langgraph` and `langchain-core` alongside the InputLayer SDK.
+
+## Quick start
+
+The smallest useful program. It stores a fact, writes a rule, and lets a kg_router decide which branch to take:
+
+```python
+import asyncio
+from inputlayer import InputLayer
+from inputlayer.integrations.langgraph import InputLayerState, kg_router
+from langgraph.graph import END, START, StateGraph
+
+class State(InputLayerState):
+    question: str
+    answer: str
+
+async def ask(state):
+    # pretend an LLM answered. In a real app, call your model here.
+    return {"answer": "blue"}
+
+async def say_hi(state):
+    return {"answer": "hi"}
+
+graph = StateGraph(State)
+graph.add_node("ask", ask)
+graph.add_node("say_hi", say_hi)
+graph.set_conditional_entry_point(
+    kg_router(
+        branches={"ask": "?is_question(X)", "say_hi": "?is_greeting(X)"},
+        default="ask",
+    ),
+)
+graph.add_edge("ask", END)
+graph.add_edge("say_hi", END)
+app = graph.compile()
+
+async def main():
+    async with InputLayer("ws://localhost:8080/ws",
+                          username="admin", password="admin") as il:
+        kg = il.knowledge_graph("qs_langgraph")
+        await kg.execute("+is_question(x: string)")
+        await kg.execute("+is_greeting(x: string)")
+        await kg.execute('+is_question("q1")')
+        result = await app.ainvoke({"kg": kg, "question": "what color?", "answer": ""})
+        print(result["answer"])  # "blue"
+
+asyncio.run(main())
+```
+
+That's the whole idea. A fact (`+is_question("q1")`) drives a routing decision. Delete the fact and the default branch wins. No Python `if` changed.
 
 ## The building blocks
 
@@ -102,7 +171,7 @@ The state under `state_key` can be a single `Relation` instance, a list of insta
 
 ### Rules-driven routing with `kg_router`
 
-`kg_router` is a conditional-edge function. Each branch maps a target node to an IQL query. The first branch whose query returns a non-empty result wins. If no branch matches, the router returns the `default`:
+`kg_router` is a conditional-edge function. Each branch maps a target node to an IQL query. Branches are evaluated in insertion order (Python dicts preserve insertion order since 3.7). The first branch whose query returns a non-empty result wins. If no branch matches, the router returns the `default`:
 
 ```python
 from inputlayer.integrations.langgraph import kg_router
@@ -209,7 +278,26 @@ await checkpointer.prune_thread("user-42", keep_last=10)
 await checkpointer.adelete_thread("user-42")
 ```
 
+"Most recent" is measured by the `ts` field, which is a nanosecond wall-clock timestamp taken when the checkpoint was written. If a thread has concurrent branches (rare in practice), all branches compete for the `keep_last` slots based on that wall time. The older checkpoints and their `graph_write` entries are deleted atomically per checkpoint; the batch delete is not a single transaction, so a crash mid-prune leaves a partially pruned state that a subsequent `prune_thread` call will finish.
+
 Both have sync variants (`prune_thread_sync`, `delete_thread`) for non-async contexts.
+
+### Migrating from another checkpointer
+
+The LangGraph interface is stable across implementations, so swapping in `InputLayerCheckpointer` is a one-line change. From `MemorySaver`:
+
+```python
+# before
+from langgraph.checkpoint.memory import MemorySaver
+checkpointer = MemorySaver()
+
+# after
+from inputlayer.integrations.langgraph import InputLayerCheckpointer
+checkpointer = InputLayerCheckpointer(kg=kg)
+await checkpointer.setup()  # create relations
+```
+
+From `SqliteSaver` or `PostgresSaver`: same swap, but also run the one-time data copy below if you want history preserved. The schema is relation-based, so you can replay old checkpoints by inserting into `graph_checkpoint` and `graph_write` directly. Most teams start fresh: point the new checkpointer at a clean KG and let it accumulate new history as agents run. Old checkpoints stay in the old store until you drop it.
 
 ### Concurrency
 
@@ -374,6 +462,20 @@ uv run python -m examples.langgraph.runner --all
 ```
 
 Examples marked `[LLM]` need an OpenAI-compatible server at `localhost:1234` (LM Studio works). Set `INPUTLAYER_URL`, `INPUTLAYER_USER`, `INPUTLAYER_PASSWORD` to override the defaults.
+
+## Troubleshooting
+
+**`ValueError: thread_id contains characters the IQL parser cannot safely embed`.** Thread identifiers must avoid `,`, `)`, `<`, and `>` and any ASCII control byte (other than tab, newline, carriage return). These characters confuse the current IQL parser when a string literal appears inside a multi-argument call. Use alphanumeric plus `._-:/@+=` for portable IDs. Content and role are base64-encoded internally, so they are not affected by this limitation.
+
+**`KeyError: thread_id`.** The checkpointer expects a config like `{"configurable": {"thread_id": "..."}}` on every call. Pass it to `app.ainvoke` and `app.aget_state`.
+
+**`RuntimeError: KG returned an error`.** The KG rejected a query. The error message includes the offending IQL. Common causes: a relation you reference doesn't exist yet (call `setup()` first), or a rule has a syntax error.
+
+**Router always returns `default`.** The branch queries are running, but no branch matches. Check the rules that derive those relations are installed (`.rule list` in the REPL), and that the facts those rules depend on are present.
+
+**Graph hangs.** The checkpointer and memory have a 30-second default timeout on every KG call. If you see a hang longer than that, the underlying WebSocket connection is stuck. Enable `logging.getLogger("inputlayer").setLevel("DEBUG")` to see command traffic.
+
+**`RuntimeError: 1/3 topic inserts failed`.** `astore` inserts the turn row first, then its topics concurrently. If the KG is overloaded or the connection drops mid-batch, some topic rows may be missing for that turn. The turn itself is already persisted. Blindly retrying `astore` with the same content creates a new turn with a fresh ID, so you get two rows for the same content. Prefer one of: (a) insert the missing topics directly with `+memory_topic("<thread>", <turn_id>, "<topic>")`, using the `turn_id` that `astore` returned, or (b) call `adelete_thread` and replay the conversation.
 
 ## Known limitations
 

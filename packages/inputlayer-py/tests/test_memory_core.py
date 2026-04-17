@@ -51,8 +51,8 @@ class TestStore:
         assert turn_id == 1
         assert len(kg.turns) == 1
         assert kg.turns[0][0] == "thread-1"
-        assert kg.turns[0][2] == b64e("user")
-        assert kg.turns[0][3] == b64e("Hello world")
+        assert kg.turns[0][2] == "user"
+        assert kg.turns[0][3] == "Hello world"
 
     async def test_store_auto_extracts_topics(self) -> None:
         kg = MockMemoryKG()
@@ -63,8 +63,8 @@ class TestStore:
             "I need help with Python machine learning",
         )
         topic_names = [t[2] for t in kg.topics]
-        assert b64e("python") in topic_names
-        assert b64e("ml") in topic_names
+        assert "python" in topic_names
+        assert "ml" in topic_names
 
     async def test_store_explicit_topics(self) -> None:
         kg = MockMemoryKG()
@@ -76,8 +76,8 @@ class TestStore:
             topics=["custom_topic", "another"],
         )
         topic_names = [t[2] for t in kg.topics]
-        assert b64e("custom_topic") in topic_names
-        assert b64e("another") in topic_names
+        assert "custom_topic" in topic_names
+        assert "another" in topic_names
 
     async def test_store_increments_turn_id(self) -> None:
         kg = MockMemoryKG()
@@ -89,13 +89,17 @@ class TestStore:
         assert id2 == 2
         assert id3 == 3
 
-    async def test_store_base64_encodes_content(self) -> None:
+    async def test_store_base64_round_trips_content(self) -> None:
         kg = MockMemoryKG()
         mem = InputLayerMemory(kg=kg)
+        # Content with quotes + backslash - escape-hostile but b64-safe.
         content = 'She said "hello" and used a \\ backslash'
         await mem.astore("t", "user", content)
         assert len(kg.turns) == 1
-        assert kg.turns[0][3] == b64e(content)
+        assert kg.turns[0][3] == content
+        # And the encoded wire form must be present in the IQL we sent.
+        turn_inserts = [q for q in kg.executed if q.startswith("+memory_turn(")]
+        assert any(b64e(content) in q for q in turn_inserts)
 
     def test_store_sync(self) -> None:
         kg = MockMemoryKG()
@@ -214,7 +218,7 @@ class TestNodeFactories:
         }
         await node(state)
         assert len(kg.turns) == 1
-        assert kg.turns[0][3] == b64e("Test message")
+        assert kg.turns[0][3] == "Test message"
 
     async def test_store_node_no_message(self) -> None:
         kg = MockMemoryKG()
@@ -261,7 +265,7 @@ class TestNodeFactories:
         }
         await node(state)
         assert len(kg.topics) == 1
-        assert kg.topics[0][2] == b64e("custom_topic")
+        assert kg.topics[0][2] == "custom_topic"
 
     async def test_node_names(self) -> None:
         kg = MockMemoryKG()
@@ -276,7 +280,7 @@ class TestTopicExtraction:
         mem = InputLayerMemory(kg=kg)
         await mem.astore("t", "user", "How to use pandas in Python?")
         topics = [t[2] for t in kg.topics]
-        assert b64e("python") in topics
+        assert "python" in topics
 
     async def test_multiple_topics(self) -> None:
         kg = MockMemoryKG()
@@ -287,8 +291,8 @@ class TestTopicExtraction:
             "Deploy a machine learning model with Docker and Kubernetes",
         )
         topics = [t[2] for t in kg.topics]
-        assert b64e("ml") in topics
-        assert b64e("devops") in topics
+        assert "ml" in topics
+        assert "devops" in topics
 
     async def test_no_topics(self) -> None:
         kg = MockMemoryKG()
@@ -311,6 +315,6 @@ class TestTopicExtraction:
         mem = InputLayerMemory(kg=kg)
         await mem.astore("t", "user", "Deploy a Docker container with Python")
         topics = sorted(t[2] for t in kg.topics)
-        assert topics == sorted([b64e("devops"), b64e("python")]), (
-            f"Expected exactly devops and python (base64), got {topics}"
+        assert topics == ["devops", "python"], (
+            f"Expected exactly devops and python, got {topics}"
         )

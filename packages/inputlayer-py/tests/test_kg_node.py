@@ -449,3 +449,61 @@ class TestIntegration:
 
         assert state["employees"]["rows"] == [["alice"]]
         assert state["skills"]["rows"] == [["ml"]]
+
+
+class TestKgNodeInsertListTypeValidation:
+    async def test_insert_list_of_non_dict_non_relation_raises(self) -> None:
+        """A list of strings/ints has no clear mapping and must raise."""
+        from inputlayer.relation import Relation
+
+        class Emp(Relation):
+            name: str
+
+        kg = _mock_kg()
+        node = kg_node(relation=Emp, operation="insert", state_key="data")
+
+        with pytest.raises(TypeError, match=r"list whose first item is str"):
+            await node({"kg": kg, "data": ["alice", "bob"]})
+
+    async def test_insert_list_mixed_does_not_silently_misroute(self) -> None:
+        """A list that starts with a dict is treated as bulk-dict insert.
+
+        Mixing dicts and instances is ambiguous - we trust the first
+        item's type and let the client raise if the rest disagree.
+        """
+        from inputlayer.relation import Relation
+
+        class Emp(Relation):
+            name: str
+
+        kg = _mock_kg()
+        node = kg_node(relation=Emp, operation="insert", state_key="data")
+
+        await node({"kg": kg, "data": [{"name": "alice"}]})
+        kg.insert.assert_awaited_once_with(Emp, [{"name": "alice"}])
+
+
+class TestKgNodeDeleteTypeValidation:
+    async def test_delete_non_relation_raises(self) -> None:
+        from inputlayer.relation import Relation
+
+        class Emp(Relation):
+            name: str
+
+        kg = _mock_kg()
+        node = kg_node(relation=Emp, operation="delete", state_key="data")
+
+        with pytest.raises(TypeError, match="must be a Relation"):
+            await node({"kg": kg, "data": 42})
+
+    async def test_delete_list_with_non_relation_item_raises(self) -> None:
+        from inputlayer.relation import Relation
+
+        class Emp(Relation):
+            name: str
+
+        kg = _mock_kg()
+        node = kg_node(relation=Emp, operation="delete", state_key="data")
+
+        with pytest.raises(TypeError, match=r"\[1\].*Relation"):
+            await node({"kg": kg, "data": [Emp(name="alice"), "not a relation"]})

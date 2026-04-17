@@ -11,7 +11,6 @@ re-evaluation of all correlations without any manual bookkeeping.
 """
 
 import asyncio
-import contextlib
 from typing import Any
 
 from examples.langgraph._common import (
@@ -24,6 +23,7 @@ from examples.langgraph._common import (
     WHITE,
     YELLOW,
     check_llm,
+    drop_kg_if_exists,
     get_llm,
     header,
     os,
@@ -219,8 +219,7 @@ async def run():
         username=os.environ.get("INPUTLAYER_USER", "admin"),
         password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
     ) as il:
-        with contextlib.suppress(Exception):
-            await il.drop_knowledge_graph("lg_events")
+        await drop_kg_if_exists(il, "lg_events")
         kg = il.knowledge_graph("lg_events")
         try:
             # ── Schema ───────────────────────────────────────────────────
@@ -320,8 +319,7 @@ async def run():
 
             success("Done!")
         finally:
-            with contextlib.suppress(Exception):
-                await il.drop_knowledge_graph("lg_events")
+            await drop_kg_if_exists(il, "lg_events")
 
 
 if __name__ == "__main__":

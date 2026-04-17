@@ -380,3 +380,25 @@ class TestKgRouterEmptyQuery:
 
         assert result == "fallback"
         kg.execute.assert_not_called()
+
+
+class TestKgRouterValidation:
+    def test_empty_target_rejected(self) -> None:
+        with pytest.raises(ValueError, match="branch target must be a non-empty string"):
+            kg_router(branches={"": "?x(X)"})
+
+    def test_non_string_target_rejected(self) -> None:
+        with pytest.raises(ValueError, match="branch target must be a non-empty string"):
+            kg_router(branches={42: "?x(X)"})  # type: ignore[dict-item]
+
+    def test_non_string_non_callable_query_rejected(self) -> None:
+        with pytest.raises(TypeError, match="must be a string or"):
+            kg_router(branches={"a": 42})  # type: ignore[dict-item]
+
+
+class TestKgNodeOperationValidation:
+    def test_unknown_operation_rejected(self) -> None:
+        from inputlayer.integrations.langgraph import kg_node
+
+        with pytest.raises(ValueError, match="operation must be"):
+            kg_node(operation="upsert", query="?x(X)")  # type: ignore[arg-type]

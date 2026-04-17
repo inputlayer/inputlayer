@@ -2,6 +2,11 @@
 
 An in-memory KG simulator that handles memory_turn, memory_topic,
 and the derived rules (active_topic, relevant_turn, topic_thread).
+
+The SDK base64-encodes thread_id, role, content, and topic before
+embedding them in IQL. This mock decodes them on ingest so tests can
+compare against plain values, and re-encodes on query responses so the
+SDK sees the same byte shape the real server would return.
 """
 
 from __future__ import annotations
@@ -9,7 +14,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from inputlayer.integrations.langgraph._utils import b64e  # noqa: F401 (re-exported)
+from inputlayer.integrations.langgraph._utils import b64d, b64e
 from inputlayer.result import ResultSet
 
 
@@ -42,10 +47,10 @@ class MockMemoryKG:
                 iql,
             )
             if m:
-                thread_id = self._unescape(m.group(1))
+                thread_id = b64d(m.group(1))
                 turn_id = int(m.group(2))
-                role = self._unescape(m.group(3))
-                content = self._unescape(m.group(4))
+                role = b64d(m.group(3))
+                content = b64d(m.group(4))
                 ts = int(m.group(5))
                 self.turns.append((thread_id, turn_id, role, content, ts))
             return ResultSet(columns=[], rows=[])
@@ -56,25 +61,29 @@ class MockMemoryKG:
             m = re.match(rf'\+memory_topic\("{_STR}", (\d+), "{_STR}"\)', iql)
             if m:
                 self.topics.append(
-                    (self._unescape(m.group(1)), int(m.group(2)), self._unescape(m.group(3)))
+                    (b64d(m.group(1)), int(m.group(2)), b64d(m.group(3)))
                 )
             return ResultSet(columns=[], rows=[])
 
-        # Query active_topic
+        # Query active_topic: rows are encoded (b64) to match the wire shape.
         if iql.startswith("?active_topic("):
-            thread_id = self._extract_thread(iql)
+            thread_id = self._extract_thread_b64(iql)
             seen = set()
             rows = []
             for t in self.topics:
                 if t[0] == thread_id and t[2] not in seen:
                     seen.add(t[2])
-                    rows.append([thread_id, t[2]])
+                    rows.append([b64e(thread_id), b64e(t[2])])
             return ResultSet(columns=["thread_id", "topic"], rows=rows)
 
         # Query memory_turn
         if iql.startswith("?memory_turn("):
-            thread_id = self._extract_thread(iql)
-            rows = [[t[0], t[1], t[2], t[3], t[4]] for t in self.turns if t[0] == thread_id]
+            thread_id = self._extract_thread_b64(iql)
+            rows = [
+                [b64e(t[0]), t[1], b64e(t[2]), b64e(t[3]), t[4]]
+                for t in self.turns
+                if t[0] == thread_id
+            ]
             return ResultSet(
                 columns=["thread_id", "turn_id", "role", "content", "ts"],
                 rows=rows,
@@ -82,14 +91,22 @@ class MockMemoryKG:
 
         # Query relevant_turn
         if iql.startswith("?relevant_turn("):
-            thread_id = self._extract_thread(iql)
+            thread_id = self._extract_thread_b64(iql)
             rows = []
             for turn in self.turns:
                 if turn[0] != thread_id:
                     continue
                 for topic in self.topics:
                     if topic[0] == thread_id and topic[1] == turn[1]:
-                        rows.append([thread_id, turn[1], turn[2], turn[3], topic[2]])
+                        rows.append(
+                            [
+                                b64e(thread_id),
+                                turn[1],
+                                b64e(turn[2]),
+                                b64e(turn[3]),
+                                b64e(topic[2]),
+                            ]
+                        )
             return ResultSet(
                 columns=["thread_id", "turn_id", "role", "content", "topic"],
                 rows=rows,
@@ -97,53 +114,41 @@ class MockMemoryKG:
 
         # Query topic_thread
         if iql.startswith("?topic_thread("):
-            thread_id = self._extract_thread(iql)
+            thread_id = self._extract_thread_b64(iql)
             thread_topic_entries = [(t[1], t[2]) for t in self.topics if t[0] == thread_id]
             rows = []
             for _, topic_a in thread_topic_entries:
                 for _, topic_b in thread_topic_entries:
                     if topic_a != topic_b:
-                        rows.append([thread_id, topic_a, topic_b])
+                        rows.append(
+                            [b64e(thread_id), b64e(topic_a), b64e(topic_b)]
+                        )
             return ResultSet(columns=["thread_id", "topic_a", "topic_b"], rows=rows)
 
         # Conditional delete for memory_turn
         if iql.startswith("-memory_turn(") and "<-" in iql:
-            thread_id = self._extract_delete_thread(iql)
+            thread_id = self._extract_delete_thread_b64(iql)
             if thread_id:
                 self.turns = [t for t in self.turns if t[0] != thread_id]
             return ResultSet(columns=[], rows=[])
 
         # Conditional delete for memory_topic
         if iql.startswith("-memory_topic(") and "<-" in iql:
-            thread_id = self._extract_delete_thread(iql)
+            thread_id = self._extract_delete_thread_b64(iql)
             if thread_id:
                 self.topics = [t for t in self.topics if t[0] != thread_id]
             return ResultSet(columns=[], rows=[])
 
         return ResultSet(columns=[], rows=[])
 
-    def _extract_thread(self, iql: str) -> str:
+    def _extract_thread_b64(self, iql: str) -> str:
+        """Extract and decode the leading b64 thread_id in a query."""
         m = re.search(r'"((?:[^"\\]|\\.)*)"', iql)
-        return self._unescape(m.group(1)) if m else ""
+        return b64d(m.group(1)) if m else ""
 
-    def _extract_delete_thread(self, iql: str) -> str:
-        """Extract ThreadId from a conditional delete: -rel(...) <- ThreadId = "..."."""
+    def _extract_delete_thread_b64(self, iql: str) -> str:
+        """Extract ThreadId from a conditional delete body (b64-encoded)."""
         body = iql.split("<-", 1)[1] if "<-" in iql else ""
         m = re.search(r'ThreadId\s*=\s*"((?:[^"\\]|\\.)*)"', body)
-        return self._unescape(m.group(1)) if m else ""
+        return b64d(m.group(1)) if m else ""
 
-    @staticmethod
-    def _unescape(s: str) -> str:
-        r"""Reverse escape_iql using single-pass regex, including \xHH sequences."""
-        _MAP = {"\\": "\\", '"': '"', "n": "\n", "r": "\r", "t": "\t", "0": "\0"}
-
-        def _replace(m: re.Match[str]) -> str:
-            captured = m.group(1)
-            if captured in _MAP:
-                return _MAP[captured]
-            # Handle \xHH control character escapes (captured = "xHH")
-            if len(captured) == 3 and captured[0] == "x":
-                return chr(int(captured[1:], 16))
-            return "\\" + captured
-
-        return re.sub(r"\\(x[0-9a-fA-F]{2}|.)", _replace, s)

@@ -11,7 +11,6 @@ pauses.
 """
 
 import asyncio
-import contextlib
 from typing import Any, TypedDict
 
 from examples.langgraph._common import (
@@ -20,6 +19,7 @@ from examples.langgraph._common import (
     RESET,
     WHITE,
     YELLOW,
+    drop_kg_if_exists,
     header,
     os,
     step,
@@ -105,8 +105,7 @@ async def run() -> None:
         username=os.environ.get("INPUTLAYER_USER", "admin"),
         password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
     ) as il:
-        with contextlib.suppress(Exception):
-            await il.drop_knowledge_graph("lg_resumable")
+        await drop_kg_if_exists(il, "lg_resumable")
         kg = il.knowledge_graph("lg_resumable")
         try:
             # ── Setup ────────────────────────────────────────────────────
@@ -183,8 +182,7 @@ async def run() -> None:
 
             success("Done!")
         finally:
-            with contextlib.suppress(Exception):
-                await il.drop_knowledge_graph("lg_resumable")
+            await drop_kg_if_exists(il, "lg_resumable")
 
 
 if __name__ == "__main__":

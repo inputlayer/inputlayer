@@ -6,6 +6,7 @@ import os
 from typing import Any
 
 from inputlayer import InputLayer
+from inputlayer.exceptions import QueryError
 
 # ── ANSI colors ──────────────────────────────────────────────────────
 
@@ -33,6 +34,7 @@ __all__ = [
     "YELLOW",
     "InputLayer",
     "check_llm",
+    "drop_kg_if_exists",
     "get_llm",
     "header",
     "os",
@@ -40,6 +42,21 @@ __all__ = [
     "subheader",
     "success",
 ]
+
+
+async def drop_kg_if_exists(il: InputLayer, name: str) -> None:
+    """Drop a demo KG, ignoring the "does not exist" error only.
+
+    Examples run repeatedly, so we want the KG in a clean state before
+    each run. Swallowing every exception (the previous pattern) hid real
+    problems like auth failures or connection drops. Here we let those
+    propagate and only skip the expected "unknown KG" case.
+    """
+    try:
+        await il.drop_knowledge_graph(name)
+    except QueryError:
+        # Expected when the KG does not exist yet.
+        return
 
 
 def header(title: str, num: int) -> None:

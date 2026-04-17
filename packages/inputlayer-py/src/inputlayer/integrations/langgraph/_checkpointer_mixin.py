@@ -23,10 +23,17 @@ from langgraph.checkpoint.base import (
 from inputlayer._sync import run_sync
 from inputlayer.integrations.langgraph._checkpoint_serde import CKPT_ID, CKPT_TS
 from inputlayer.integrations.langgraph._utils import (
+    b64e,
     check_error_response,
     escape_iql,
     validate_row_length,
+    validate_thread_id,
 )
+
+# graph_checkpoint with CheckpointId included has 5 negative-indexed
+# fields we access: CheckpointId (-5), ParentId (-4), Blob (-3),
+# Metadata (-2), Ts (-1). Shared here and in checkpointer.py.
+_MIN_CKPT_ROW_LEN_WITH_ID = 5
 
 logger = logging.getLogger(__name__)
 
@@ -228,11 +235,7 @@ class _SyncAndMaintenanceMixin:
         Returns:
             Number of checkpoints removed.
         """
-        if not thread_id:
-            raise ValueError(
-                "InputLayerCheckpointer.prune_thread: thread_id must be a "
-                "non-empty string."
-            )
+        validate_thread_id(thread_id, "InputLayerCheckpointer.prune_thread")
         await self.setup()
 
         if keep_last < 1:
@@ -242,8 +245,8 @@ class _SyncAndMaintenanceMixin:
             )
 
         r = await self._exec(
-            f'?graph_checkpoint("{escape_iql(thread_id)}", '
-            f'"{escape_iql(checkpoint_ns)}", '
+            f'?graph_checkpoint("{b64e(thread_id)}", '
+            f'"{b64e(checkpoint_ns)}", '
             f"CheckpointId, ParentId, Blob, Metadata, Ts)"
         )
 
@@ -251,7 +254,12 @@ class _SyncAndMaintenanceMixin:
             return 0
 
         for row in r.rows:
-            validate_row_length(row, 5, "graph_checkpoint", "prune_thread")
+            validate_row_length(
+                row,
+                _MIN_CKPT_ROW_LEN_WITH_ID,
+                "graph_checkpoint",
+                "prune_thread",
+            )
         sorted_rows = sorted(r.rows, key=lambda row: int(row[CKPT_TS]), reverse=True)
         to_prune = sorted_rows[keep_last:]
 
@@ -273,21 +281,21 @@ class _SyncAndMaintenanceMixin:
     ) -> None:
         """Delete checkpoint and write rows concurrently."""
         coros: Any = []
-        esc_tid = escape_iql(thread_id)
-        esc_ns = escape_iql(checkpoint_ns)
+        tid_b64 = b64e(thread_id)
+        ns_b64 = b64e(checkpoint_ns)
         for row in rows:
             ckpt_id = escape_iql(str(row[CKPT_ID]))
             coros.append(
                 self._exec(
                     f"-graph_checkpoint(ThreadId, Ns, CkptId, P, B, M, T) <- "
-                    f'ThreadId = "{esc_tid}", Ns = "{esc_ns}", CkptId = "{ckpt_id}"'
+                    f'ThreadId = "{tid_b64}", Ns = "{ns_b64}", CkptId = "{ckpt_id}"'
                 )
             )
             coros.append(
                 self._exec(
                     f"-graph_write(ThreadId, Ns, CkptId, TaskId, TaskPath, "
                     f"Idx, Channel, Blob) <- "
-                    f'ThreadId = "{esc_tid}", Ns = "{esc_ns}", CkptId = "{ckpt_id}"'
+                    f'ThreadId = "{tid_b64}", Ns = "{ns_b64}", CkptId = "{ckpt_id}"'
                 )
             )
         results = await asyncio.gather(*coros, return_exceptions=True)

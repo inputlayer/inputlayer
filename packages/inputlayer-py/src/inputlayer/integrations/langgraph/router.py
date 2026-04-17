@@ -12,6 +12,7 @@ from inputlayer.exceptions import (
     QueryError,
     QueryTimeoutError,
 )
+from inputlayer.integrations.langgraph._utils import is_error_response
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,17 @@ def kg_router(
     """
     if not branches:
         raise ValueError("Must provide at least one branch")
+    for target, q in branches.items():
+        if not isinstance(target, str) or not target:
+            raise ValueError(
+                f"kg_router: branch target must be a non-empty string, "
+                f"got {target!r}."
+            )
+        if not (isinstance(q, str) or callable(q)):
+            raise TypeError(
+                f"kg_router: branch {target!r} query must be a string or "
+                f"callable(state) -> str, got {type(q).__name__}."
+            )
 
     async def _router(state: dict[str, Any]) -> str:
         if kg_key not in state:
@@ -97,18 +109,14 @@ def kg_router(
                     )
                     continue
                 result = await kg.execute(q)
-                # Error responses have columns=["error"] with the error
-                # message as the only row. Treat as a failed query (skip).
-                if (
-                    hasattr(result, "columns")
-                    and result.columns == ["error"]
-                    and result.rows
-                ):
+                if is_error_response(result):
+                    err_msg = result.rows[0][0] if result.rows[0] else "unknown"
                     logger.warning(
                         "kg_router: branch %r query returned error: %s - "
-                        "skipping to next branch",
+                        "skipping to next branch. Query: %s",
                         target,
-                        result.rows[0][0] if result.rows[0] else "unknown",
+                        err_msg,
+                        q[:100] + ("..." if len(q) > 100 else ""),
                     )
                     continue
                 if result.rows:

@@ -59,8 +59,10 @@ from inputlayer.integrations.langgraph._checkpoint_serde import unpack as _unpac
 from inputlayer.integrations.langgraph._checkpointer_mixin import _SyncAndMaintenanceMixin
 from inputlayer.integrations.langgraph._utils import (
     DEFAULT_KG_TIMEOUT,
+    b64e,
     escape_iql,
     validate_row_length,
+    validate_thread_id,
 )
 
 if TYPE_CHECKING:
@@ -69,21 +71,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+_CONFIG_HELP = (
+    "Example:\n"
+    "    config = {'configurable': {'thread_id': 'user-42'}}\n"
+    "    await app.ainvoke(input, config=config)"
+)
+
+
 def _require_thread_id(config: RunnableConfig, method: str) -> str:
-    """Extract and return thread_id from config, raising a helpful error if missing or empty."""
+    """Extract and return thread_id from config, raising a helpful error if missing or invalid."""
     try:
         thread_id: str = config["configurable"]["thread_id"]
     except KeyError as exc:
         raise KeyError(
             f"InputLayerCheckpointer.{method} requires "
-            "config['configurable']['thread_id']. "
-            "Pass config={'configurable': {'thread_id': 'your-thread-id'}}."
+            f"config['configurable']['thread_id']. {_CONFIG_HELP}"
         ) from exc
-    if not thread_id:
-        raise ValueError(
-            f"InputLayerCheckpointer.{method}: thread_id must be a "
-            "non-empty string. Pass a unique identifier per conversation thread."
-        )
+    validate_thread_id(thread_id, f"InputLayerCheckpointer.{method}")
     return thread_id
 
 
@@ -237,8 +241,8 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
         packed_meta = _pack(self.serde, metadata)
 
         await self._exec(
-            f'+graph_checkpoint("{escape_iql(thread_id)}", '
-            f'"{escape_iql(checkpoint_ns)}", '
+            f'+graph_checkpoint("{b64e(thread_id)}", '
+            f'"{b64e(checkpoint_ns)}", '
             f'"{escape_iql(checkpoint_id)}", '
             f'"{escape_iql(parent_id or "")}", '
             f'"{escape_iql(packed_blob)}", '
@@ -300,11 +304,13 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
             task_id,
         )
 
+        tid_b64 = b64e(thread_id)
+        ns_b64 = b64e(checkpoint_ns)
         await self._exec(
             f"-graph_write(ThreadId, Ns, CkptId, TaskId, TaskPath, "
             f"Idx, Channel, Blob) <- "
-            f'ThreadId = "{escape_iql(thread_id)}", '
-            f'Ns = "{escape_iql(checkpoint_ns)}", '
+            f'ThreadId = "{tid_b64}", '
+            f'Ns = "{ns_b64}", '
             f'CkptId = "{escape_iql(checkpoint_id)}", '
             f'TaskId = "{escape_iql(task_id)}"'
         )
@@ -312,8 +318,8 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
         results = await asyncio.gather(
             *(
                 self._exec(
-                    f'+graph_write("{escape_iql(thread_id)}", '
-                    f'"{escape_iql(checkpoint_ns)}", '
+                    f'+graph_write("{tid_b64}", '
+                    f'"{ns_b64}", '
                     f'"{escape_iql(checkpoint_id)}", '
                     f'"{escape_iql(task_id)}", '
                     f'"{escape_iql(task_path)}", '
@@ -356,17 +362,19 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
         checkpoint_id = config["configurable"].get("checkpoint_id")
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
 
+        tid_b64 = b64e(thread_id)
+        ns_b64 = b64e(checkpoint_ns)
         if checkpoint_id:
             r = await self._exec(
-                f'?graph_checkpoint("{escape_iql(thread_id)}", '
-                f'"{escape_iql(checkpoint_ns)}", '
+                f'?graph_checkpoint("{tid_b64}", '
+                f'"{ns_b64}", '
                 f'"{escape_iql(checkpoint_id)}", '
                 f"ParentId, Blob, Metadata, Ts)"
             )
         else:
             r = await self._exec(
-                f'?graph_checkpoint("{escape_iql(thread_id)}", '
-                f'"{escape_iql(checkpoint_ns)}", '
+                f'?graph_checkpoint("{tid_b64}", '
+                f'"{ns_b64}", '
                 f"CheckpointId, ParentId, Blob, Metadata, Ts)"
             )
 
@@ -384,8 +392,8 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
         metadata = _unpack(self.serde, str(row[CKPT_METADATA]))
 
         r_writes = await self._exec(
-            f'?graph_write("{escape_iql(thread_id)}", '
-            f'"{escape_iql(checkpoint_ns)}", '
+            f'?graph_write("{tid_b64}", '
+            f'"{ns_b64}", '
             f'"{escape_iql(actual_id)}", TaskId, TaskPath, Idx, Channel, Blob)'
         )
         pending_writes = _parse_writes(self.serde, r_writes.rows)
@@ -418,20 +426,17 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
 
     async def adelete_thread(self, thread_id: str) -> None:
         """Delete all checkpoints and writes for a thread."""
-        if not thread_id:
-            raise ValueError(
-                "InputLayerCheckpointer.adelete_thread: thread_id must be a "
-                "non-empty string."
-            )
+        validate_thread_id(thread_id, "InputLayerCheckpointer.adelete_thread")
         await self.setup()
+        tid_b64 = b64e(thread_id)
         await self._exec(
             f"-graph_checkpoint(ThreadId, Ns, CkptId, P, B, M, T) <- "
-            f'ThreadId = "{escape_iql(thread_id)}"'
+            f'ThreadId = "{tid_b64}"'
         )
         await self._exec(
             f"-graph_write(ThreadId, Ns, CkptId, TaskId, TaskPath, "
             f"Idx, Channel, Blob) <- "
-            f'ThreadId = "{escape_iql(thread_id)}"'
+            f'ThreadId = "{tid_b64}"'
         )
 
     async def alist(
@@ -451,9 +456,11 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
         thread_id = _require_thread_id(config, "alist")
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
 
+        tid_b64 = b64e(thread_id)
+        ns_b64 = b64e(checkpoint_ns)
         r = await self._exec(
-            f'?graph_checkpoint("{escape_iql(thread_id)}", '
-            f'"{escape_iql(checkpoint_ns)}", '
+            f'?graph_checkpoint("{tid_b64}", '
+            f'"{ns_b64}", '
             f"CheckpointId, ParentId, Blob, Metadata, Ts)"
         )
         for row in r.rows:
@@ -463,8 +470,8 @@ class InputLayerCheckpointer(_SyncAndMaintenanceMixin, BaseCheckpointSaver[str])
         sorted_rows = _apply_before_filter(sorted_rows, before)
 
         r_all_writes = await self._exec(
-            f'?graph_write("{escape_iql(thread_id)}", '
-            f'"{escape_iql(checkpoint_ns)}", '
+            f'?graph_write("{tid_b64}", '
+            f'"{ns_b64}", '
             f"CheckpointId, TaskId, TaskPath, Idx, Channel, Blob)"
         )
         writes_by_ckpt = _group_writes_by_checkpoint(r_all_writes.rows)

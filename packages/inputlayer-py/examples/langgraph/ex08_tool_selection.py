@@ -9,7 +9,6 @@ Shows: KG as an intelligent tool router for complex agent systems.
 """
 
 import asyncio
-import contextlib
 from typing import Any
 
 from examples.langgraph._common import (
@@ -21,6 +20,7 @@ from examples.langgraph._common import (
     WHITE,
     YELLOW,
     check_llm,
+    drop_kg_if_exists,
     get_llm,
     header,
     os,
@@ -276,8 +276,7 @@ async def run():
         username=os.environ.get("INPUTLAYER_USER", "admin"),
         password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
     ) as il:
-        with contextlib.suppress(Exception):
-            await il.drop_knowledge_graph("lg_tools")
+        await drop_kg_if_exists(il, "lg_tools")
         kg = il.knowledge_graph("lg_tools")
         try:
             # ── Schema ───────────────────────────────────────────────────
@@ -380,8 +379,7 @@ async def run():
 
             success("Done!")
         finally:
-            with contextlib.suppress(Exception):
-                await il.drop_knowledge_graph("lg_tools")
+            await drop_kg_if_exists(il, "lg_tools")
 
 
 if __name__ == "__main__":

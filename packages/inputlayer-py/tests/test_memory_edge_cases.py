@@ -10,18 +10,23 @@ from ._mock_memory_kg import MockMemoryKG, b64e
 
 
 class TestEscaping:
-    async def test_thread_id_with_quotes(self) -> None:
-        """Thread IDs still use escape_iql (they're identifiers, not content)."""
+    async def test_thread_id_with_quotes_uses_base64(self) -> None:
+        """Thread IDs are base64-encoded on the wire so adversarial chars are safe."""
         kg = MockMemoryKG()
         mem = InputLayerMemory(kg=kg)
-        await mem.astore('thread-"special"', "user", "Hello Python")
+        tid = 'thread-"special"'
+        await mem.astore(tid, "user", "Hello Python")
         insert_calls = [
             c
             for c in kg.executed
             if c.startswith("+memory_turn(") and ":" not in c.split("(", 1)[1]
         ]
         assert len(insert_calls) == 1
-        assert r"thread-\"special\"" in insert_calls[0]
+        # The wire form uses the base64 of the thread_id, never the raw quotes.
+        assert b64e(tid) in insert_calls[0]
+        assert r"thread-\"special\"" not in insert_calls[0]
+        # The mock decodes back so downstream tests see the plain value.
+        assert kg.turns[0][0] == tid
 
     async def test_topic_with_quotes(self) -> None:
         """Topics are base64-encoded, so quotes are safe."""
@@ -57,7 +62,7 @@ class TestEscaping:
 
         assert len(kg.turns) == 1
         assert kg.turns[0][0] == thread_id
-        assert kg.turns[0][3] == b64e(content)
+        assert kg.turns[0][3] == content
 
         ctx = await mem.arecall(thread_id)
         assert len(ctx["recent"]) == 1
@@ -73,7 +78,7 @@ class TestEscaping:
         await mem.astore("t", "user", content, topics=["test"])
 
         assert len(kg.turns) == 1
-        assert kg.turns[0][3] == b64e(content)
+        assert kg.turns[0][3] == content
 
         ctx = await mem.arecall("t")
         assert ctx["recent"][0]["content"] == content
@@ -289,7 +294,7 @@ class TestDeleteThread:
         assert len(kg.topics) == 0
 
     async def test_delete_thread_clears_in_memory_caches(self) -> None:
-        """adelete_thread must clear turn counter, thread lock, and active set."""
+        """adelete_thread must clear the turn counter and thread lock."""
         kg = MockMemoryKG()
         mem = InputLayerMemory(kg=kg)
         await mem.astore("t", "user", "Hello")
@@ -299,7 +304,8 @@ class TestDeleteThread:
 
         assert "t" not in mem._turn_counters
         assert "t" not in mem._thread_locks
-        assert "t" not in mem._active_threads
+        # astore() always releases its refcount before returning.
+        assert mem._active_refcount.get("t", 0) == 0
 
     async def test_delete_thread_recall_empty_after(self) -> None:
         """Recall after delete must return empty context."""
@@ -373,3 +379,127 @@ class TestConcurrentSetup:
         assert mem._setup_done is True
         # DDL should run exactly 5 times (2 relations + 3 rules)
         assert len(kg.executed) == 5
+
+
+class TestThreadLockRefcount:
+    """Exercises the refcount-based eviction guard.
+
+    Previously _active_threads was a set. Concurrent callers for the
+    same thread would overlap their add()/discard() calls, leaving the
+    thread unmarked-as-active while a second caller was still using the
+    lock - eviction could then replace the lock mid-flight, splitting
+    writers across two different Lock objects for the same thread.
+    """
+
+    async def test_concurrent_store_same_thread_assigns_unique_turn_ids(self) -> None:
+        import asyncio
+
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+
+        turn_ids = await asyncio.gather(
+            *(mem.astore("t", "user", f"msg {i}") for i in range(20)),
+        )
+        assert sorted(turn_ids) == list(range(1, 21))
+        # Refcount must drop to zero after all calls return.
+        assert mem._active_refcount.get("t", 0) == 0
+
+    async def test_eviction_skips_thread_with_nonzero_refcount(self) -> None:
+        """A thread in use must not be evicted even under capacity pressure."""
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg, max_tracked_threads=2)
+        await mem.setup()
+
+        # Simulate three concurrent threads. The third would normally
+        # trigger eviction of the oldest; with refcount, it cannot evict
+        # threads currently being used.
+        # We acquire locks explicitly to keep the refcount >0.
+        lock_a = await mem._acquire_thread_lock("a")
+        lock_b = await mem._acquire_thread_lock("b")
+        try:
+            async with lock_a, lock_b:
+                # Now ask for "c". Capacity is full; eviction runs; a and
+                # b have refcount 1 so neither can be evicted; c is added
+                # on top without deadlocking.
+                await mem._acquire_thread_lock("c")
+                try:
+                    assert "a" in mem._thread_locks
+                    assert "b" in mem._thread_locks
+                    assert "c" in mem._thread_locks
+                finally:
+                    await mem._release_thread_lock("c")
+        finally:
+            await mem._release_thread_lock("a")
+            await mem._release_thread_lock("b")
+
+    async def test_refcount_drops_to_zero_on_release(self) -> None:
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+
+        lock = await mem._acquire_thread_lock("x")
+        assert mem._active_refcount["x"] == 1
+        lock2 = await mem._acquire_thread_lock("x")
+        assert mem._active_refcount["x"] == 2
+        assert lock is lock2
+        await mem._release_thread_lock("x")
+        assert mem._active_refcount["x"] == 1
+        await mem._release_thread_lock("x")
+        assert "x" not in mem._active_refcount
+
+
+class TestIqlInjection:
+    """Prove that untrusted input cannot escape the IQL literal.
+
+    Content and role are base64-encoded, so arbitrary bytes there are
+    safe. Thread_ids go through ``escape_iql`` but IQL's parser
+    currently mishandles a few chars inside multi-arg string literals
+    (``,``, ``)``, ``<``, ``>``); ``validate_thread_id`` rejects those
+    up front so the SDK raises a clear error instead of relaying an
+    opaque server-side parse failure. See docs/langgraph.mdx.
+    """
+
+    async def test_thread_id_with_quote_is_escaped_on_store(self) -> None:
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+
+        # Realistic injection payload that stays within the character
+        # set the IQL parser actually accepts. Quote + backslash + semi
+        # are the classic break-out attempt; escape_iql neutralises them.
+        sneaky = 'bad"; DROP; -- '
+        await mem.astore(sneaky, "user", "hi")
+        assert any(t[0] == sneaky for t in kg.turns)
+
+    async def test_thread_id_with_backslash_round_trips(self) -> None:
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+
+        tricky = 'back\\slash "quoted"'
+        await mem.astore(tricky, "user", "hi", topics=["x"])
+        ctx = await mem.arecall(tricky)
+        assert ctx["recent"]
+        assert ctx["recent"][0]["content"] == "hi"
+
+    async def test_content_with_control_characters_safe(self) -> None:
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+
+        # Content is base64-encoded, so NUL/bell/escape are harmless.
+        nasty = "hello\x00\x07\x1bworld"
+        await mem.astore("t", "user", nasty)
+        ctx = await mem.arecall("t")
+        assert ctx["recent"][0]["content"] == nasty
+
+    async def test_thread_id_with_formerly_unsafe_chars_round_trips(self) -> None:
+        """Now that thread_id is base64-encoded on the wire, parser-unsafe
+        chars are fine. The old validator rejected them; we dropped the
+        validator once we moved to b64. This test pins that behaviour so
+        a future regression (re-adding the validator) fails loudly.
+        """
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+
+        for tid in ["bad,tid", "bad)tid", "bad<tid", "bad>tid", "bad\x00tid"]:
+            turn_id = await mem.astore(tid, "user", "hi")
+            assert turn_id >= 1
+            ctx = await mem.arecall(tid)
+            assert ctx["recent"][0]["content"] == "hi"

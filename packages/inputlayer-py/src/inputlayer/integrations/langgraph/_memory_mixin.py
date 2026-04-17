@@ -11,7 +11,7 @@ import logging
 from typing import Any
 
 from inputlayer._sync import run_sync
-from inputlayer.integrations.langgraph._utils import escape_iql
+from inputlayer.integrations.langgraph._utils import b64e, validate_thread_id
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class _MemorySyncAndMaintenanceMixin:
     kg: Any
     _turn_counters: dict[str, int]
     _thread_locks: dict[str, asyncio.Lock]
-    _active_threads: set[str]
+    _active_refcount: dict[str, int]
 
     async def setup(self) -> None: ...
     async def astore(  # type: ignore[empty-body]
@@ -76,28 +76,27 @@ class _MemorySyncAndMaintenanceMixin:
         Also clears the in-memory turn counter and thread lock for this
         thread so subsequent stores start fresh.
         """
-        if not thread_id:
-            raise ValueError(
-                "InputLayerMemory.adelete_thread: thread_id must be a non-empty string."
-            )
+        validate_thread_id(thread_id, "InputLayerMemory.adelete_thread")
         await self.setup()
 
-        escaped = escape_iql(thread_id)
+        tid_b64 = b64e(thread_id)
         await asyncio.gather(
             self._exec(
                 f"-memory_turn(ThreadId, TurnId, Role, Content, Ts) <- "
-                f'ThreadId = "{escaped}"'
+                f'ThreadId = "{tid_b64}"'
             ),
             self._exec(
                 f"-memory_topic(ThreadId, TurnId, Topic) <- "
-                f'ThreadId = "{escaped}"'
+                f'ThreadId = "{tid_b64}"'
             ),
         )
 
-        # Clear in-memory caches for this thread
+        # Clear in-memory caches for this thread. The refcount may be
+        # nonzero if another coroutine is still holding the lock; we do
+        # not clear it here, but the guard behavior in _evict and
+        # _release handles the stale-entry case safely.
         self._turn_counters.pop(thread_id, None)
         self._thread_locks.pop(thread_id, None)
-        self._active_threads.discard(thread_id)
 
     def delete_thread(self, thread_id: str) -> None:
         """Delete all turns and topics for a thread (blocking).

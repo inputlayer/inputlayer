@@ -6,6 +6,7 @@ from collections.abc import Callable, Coroutine
 from typing import Any, Literal
 
 from inputlayer.integrations.langgraph._utils import check_error_response
+from inputlayer.relation import Relation
 
 
 def kg_node(
@@ -60,6 +61,11 @@ def kg_node(
     Returns:
         An async function compatible with ``StateGraph.add_node()``.
     """
+    if operation not in ("query", "insert", "delete"):
+        raise ValueError(
+            f"kg_node: operation must be 'query', 'insert', or 'delete', "
+            f"got {operation!r}."
+        )
     if operation == "query" and query is None:
         raise ValueError("Must provide 'query' for query operations")
     if operation in ("insert", "delete") and relation is None:
@@ -117,14 +123,20 @@ def kg_node(
             if not data:
                 return {}
             if isinstance(data, list):
-                if isinstance(data[0], dict):
+                first = data[0]
+                if isinstance(first, dict):
                     await kg.insert(relation, data)
-                else:
+                elif isinstance(first, Relation):
                     await kg.insert(data)
+                else:
+                    raise TypeError(
+                        f"kg_node insert: state['{state_key}'] is a list whose first "
+                        f"item is {type(first).__name__}. Expected a list of dicts or "
+                        "a list of Relation instances."
+                    )
             elif isinstance(data, dict):
                 await kg.insert(relation, data)
-            elif hasattr(data.__class__, "model_fields") or hasattr(data.__class__, "__fields__"):
-                # Single Relation/pydantic instance
+            elif isinstance(data, Relation):
                 await kg.insert([data])
             else:
                 raise TypeError(
@@ -139,10 +151,20 @@ def kg_node(
             if not data:
                 return {}
             if isinstance(data, list):
-                for item in data:
+                for i, item in enumerate(data):
+                    if not isinstance(item, Relation):
+                        raise TypeError(
+                            f"kg_node delete: state['{state_key}'][{i}] must be a "
+                            f"Relation instance, got {type(item).__name__}."
+                        )
                     await kg.delete(item)
-            else:
+            elif isinstance(data, Relation):
                 await kg.delete(data)
+            else:
+                raise TypeError(
+                    f"kg_node delete: state['{state_key}'] must be a Relation "
+                    f"instance or list of Relation instances, got {type(data).__name__}."
+                )
             return {}
 
         else:
