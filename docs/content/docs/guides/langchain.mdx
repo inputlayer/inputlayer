@@ -343,7 +343,7 @@ Now `SalaryAnomaly` updates itself whenever employee data or salary bands change
 When your application needs to show its reasoning - compliance, audit, debugging - InputLayer can return proof trees alongside results. The retriever passes these to the LLM so it can cite specific facts in its answer:
 
 ```python
-# Query with provenance: not just the result, but why it was derived.
+# Query with provenance: the result plus why it was derived.
 result = await kg.execute("?salary_anomaly(Name, Salary, BandMax)")
 for row in result.rows:
     print(f"{row[0]} earns {row[1]}, band max is {row[2]}")

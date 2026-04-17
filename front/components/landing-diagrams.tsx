@@ -20,7 +20,7 @@ function useInView(threshold = 0.3) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════ */
-/*  1. EMBEDDING SPACE — Rules + Vectors                                  */
+/*  1. EMBEDDING SPACE - Rules + Vectors                                  */
 /*  2D scatter showing destinations clustered by similarity,              */
 /*  with a rule boundary that separates reachable from unreachable        */
 /* ═══════════════════════════════════════════════════════════════════════ */
@@ -149,7 +149,7 @@ export function EmbeddingDiagram() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════ */
-/*  2. DIAMOND RETRACTION — Correct retraction                            */
+/*  2. DIAMOND RETRACTION - Correct retraction                            */
 /*  Two independent flight paths to Sydney,                               */
 /*  sequentially removing them to demonstrate correct retraction          */
 /* ═══════════════════════════════════════════════════════════════════════ */
@@ -253,7 +253,7 @@ export function DiamondDiagram() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════ */
-/*  3. WATERFALL — Incremental updates                                    */
+/*  3. WATERFALL - Incremental updates                                    */
 /*  Dramatic bar comparison: 11,280ms vs 6.83ms                           */
 /* ═══════════════════════════════════════════════════════════════════════ */
 
@@ -316,7 +316,7 @@ export function WaterfallDiagram() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════ */
-/*  4. PROOF TREE — Provenance                                      */
+/*  4. PROOF TREE - Provenance                                      */
 /*  Derivation tree matching IL Studio's proof tree panel style     */
 /* ═══════════════════════════════════════════════════════════════════════ */
 

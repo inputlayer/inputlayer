@@ -11,7 +11,7 @@ async def run(kg):
     """Rule-based guardrails: IQL rules define content policies,
     LLM output is checked against them before returning to the user.
 
-    Policies are declarative facts — add/remove rules without code changes.
+    Policies are declarative facts - add/remove rules without code changes.
     The KG enforces them automatically via joins.
     """
     header("Guardrails / output safety", 13)
@@ -168,7 +168,7 @@ async def run(kg):
     # ── Step 3: LLM rewrites blocked content safely ──────────────────
 
     if not check_llm():
-        print(f"\n{DIM}  No LLM — skipping rewrite step.{RESET}")
+        print(f"\n{DIM}  No LLM - skipping rewrite step.{RESET}")
         return
 
     from langchain_core.output_parsers import StrOutputParser
@@ -185,7 +185,7 @@ async def run(kg):
 
         prompt = ChatPromptTemplate.from_template(
             "The following response was blocked by a safety policy. "
-            "Rewrite it to be helpful but safe — decline the "
+            "Rewrite it to be helpful but safe - decline the "
             "specific request while offering a legitimate alternative.\n\n"
             "Blocked response: {blocked}\n\n"
             "Safe rewrite:"

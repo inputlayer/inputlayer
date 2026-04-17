@@ -147,7 +147,7 @@ async def run(kg):
     # ── Step 4: LLM audit report ─────────────────────────────────────
 
     if not check_llm():
-        print(f"\n{DIM}  No LLM — skipping audit report.{RESET}")
+        print(f"\n{DIM}  No LLM - skipping audit report.{RESET}")
         return
 
     from langchain_core.output_parsers import StrOutputParser

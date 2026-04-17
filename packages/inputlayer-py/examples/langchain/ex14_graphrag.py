@@ -16,7 +16,7 @@ async def run(kg):
     This is the Microsoft Research GraphRAG pattern implemented with
     InputLayer's IQL engine instead of a custom graph pipeline.
     """
-    header("GraphRAG — entity graph from documents", 14)
+    header("GraphRAG - entity graph from documents", 14)
 
     # ── Schema ───────────────────────────────────────────────────────
 
@@ -240,7 +240,7 @@ async def run(kg):
     # ── Step 4: Community summaries via LLM ──────────────────────────
 
     if not has_llm:
-        print(f"\n{DIM}  No LLM — skipping community summaries.{RESET}")
+        print(f"\n{DIM}  No LLM - skipping community summaries.{RESET}")
         return
 
     from langchain_core.output_parsers import StrOutputParser
@@ -262,7 +262,7 @@ async def run(kg):
         # Get relationships within this community
         r = await kg.execute("?kg_relationship(S, R, D, DocId)")
         community_rels = [
-            f"  {row[0]} —{row[1]}→ {row[2]}"
+            f"  {row[0]} -{row[1]}→ {row[2]}"
             for row in r.rows
             if row[0] in community or row[2] in community
         ]

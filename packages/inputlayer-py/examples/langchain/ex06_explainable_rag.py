@@ -16,7 +16,7 @@ class TeamMember(Relation):
 
 
 class TeamExpert(Derived):
-    """People who are experts in their team's domain — derived via rules."""
+    """People who are experts in their team's domain - derived via rules."""
 
     person: str
     team: str
@@ -107,7 +107,7 @@ async def run(kg):
 
     for i, row in enumerate(rows):
         person, team, skill = row[0], row[1], row[2]
-        print(f"  {GREEN}{person}{RESET} on {CYAN}{team}{RESET} — skill: {YELLOW}{skill}{RESET}")
+        print(f"  {GREEN}{person}{RESET} on {CYAN}{team}{RESET} - skill: {YELLOW}{skill}{RESET}")
 
         if i < len(proof_trees):
             tree = proof_trees[i]
@@ -120,7 +120,7 @@ async def run(kg):
     # ── Step 2: Feed results + provenance to the LLM ────────────────
 
     if not check_llm():
-        print(f"\n{DIM}  No LLM server detected — skipping LLM step.{RESET}")
+        print(f"\n{DIM}  No LLM server detected - skipping LLM step.{RESET}")
         return
 
     from langchain_core.output_parsers import StrOutputParser
@@ -164,9 +164,9 @@ async def run(kg):
     answer = await chain.ainvoke({"context": context, "question": question})
     print(f"\n{GREEN}  {answer.strip()}{RESET}")
 
-    # ── Step 3: .why_not — explain missing results ───────────────────
+    # ── Step 3: .why_not - explain missing results ───────────────────
 
-    subheader("Step 3: .why_not — why isn't dave an ML expert?")
+    subheader("Step 3: .why_not - why isn't dave an ML expert?")
 
     # NOTE: using _conn.execute to access structured why_not result.
     why_not_query = '.why_not team_expert("dave", "frontend", "machine-learning")'

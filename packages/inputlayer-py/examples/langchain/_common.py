@@ -256,7 +256,7 @@ class UserInterest(Relation):
 
 
 class RelevantArticle(Derived):
-    """Articles relevant to a user — derived via IQL rules."""
+    """Articles relevant to a user - derived via IQL rules."""
 
     title: str
     content: str

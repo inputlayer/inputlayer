@@ -90,9 +90,9 @@ async def run(kg):
     if r.rows:
         print(f"  {GREEN}HIT: {r.rows[0][1]}{RESET}")
     else:
-        print(f"  {YELLOW}MISS — no exact match{RESET}")
+        print(f"  {YELLOW}MISS - no exact match{RESET}")
 
-    # Topic match — new question about transformers
+    # Topic match - new question about transformers
     new_q = "How do transformers handle long sequences?"
     await kg.execute(f"+cache_topic({iql_literal(new_q)}, {iql_literal('transformers')})")
 
@@ -134,7 +134,7 @@ async def run(kg):
 
     rate = (hits / len(queries)) * 100
     print(
-        f"\n  {WHITE}Hit rate: {hits}/{len(queries)} ({rate:.0f}%) — saved {hits} LLM calls{RESET}"
+        f"\n  {WHITE}Hit rate: {hits}/{len(queries)} ({rate:.0f}%) - saved {hits} LLM calls{RESET}"
     )
 
 

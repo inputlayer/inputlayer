@@ -114,14 +114,14 @@ async def run(kg):
         r_info = await kg.execute(f'?item_info({iql_literal(item)}, Category)')
         cat = r_info.rows[0][1] if r_info.rows else "?"
         print(
-            f"  {GREEN}{item}{RESET} {DIM}[{cat}]{RESET} — "
+            f"  {GREEN}{item}{RESET} {DIM}[{cat}]{RESET} - "
             f"recommended by {CYAN}{', '.join(sorted(set(recommenders)))}{RESET}"
         )
 
     # ── Step 3: LLM explains recommendations ─────────────────────────
 
     if not check_llm():
-        print(f"\n{DIM}  No LLM — skipping explanation.{RESET}")
+        print(f"\n{DIM}  No LLM - skipping explanation.{RESET}")
         return
 
     from langchain_core.output_parsers import StrOutputParser

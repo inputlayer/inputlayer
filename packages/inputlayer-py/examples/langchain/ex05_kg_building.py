@@ -11,10 +11,10 @@ async def run(kg):
     This is the reverse of retrieval: Document -> LLM -> KG.
     The LLM extracts entities matching our Relation schema, then we insert them.
     """
-    header("KG building — extract facts from documents", 5)
+    header("KG building - extract facts from documents", 5)
 
     if not check_llm():
-        print(f"\n{DIM}  No LLM server detected — skipping.{RESET}")
+        print(f"\n{DIM}  No LLM server detected - skipping.{RESET}")
         return
 
     from pydantic import Field as PydanticField
@@ -43,7 +43,7 @@ async def run(kg):
     revolutionized text understanding and generation. Another popular post
     covered microservice architecture patterns, specifically how to decompose
     monoliths into scalable, independently deployable services. Our data team
-    wrote about vector databases and their growing role in AI applications —
+    wrote about vector databases and their growing role in AI applications -
     particularly how approximate nearest neighbor search enables real-time
     similarity matching at scale. Finally, we released a tutorial on
     reinforcement learning from human feedback (RLHF), the technique behind
@@ -94,9 +94,9 @@ async def run(kg):
     inserted_ids = await vs.aadd_texts(texts=texts, metadatas=metadatas, ids=ids)
     print(f"  {GREEN}Persisted {len(inserted_ids)} documents through the vector store{RESET}")
 
-    # ── Step 3: Verify — query the KG for the new articles ───────────
+    # ── Step 3: Verify - query the KG for the new articles ───────────
 
-    subheader("Step 3: Verify — query new articles from KG")
+    subheader("Step 3: Verify - query new articles from KG")
 
     result = await kg.execute("?article(Id, Title, Content, Category, Emb), Id >= 100")
     print()
