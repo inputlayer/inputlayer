@@ -1,6 +1,6 @@
 """Tests for inputlayer.functions - 55+ built-in functions → FuncCall AST."""
 
-from inputlayer._ast import FuncCall, Literal
+from inputlayer._ast import FuncCall
 from inputlayer._proxy import ColumnProxy
 from inputlayer.compiler import _VarEnv, compile_expr
 from inputlayer.functions import (
@@ -143,7 +143,8 @@ class TestQuantization:
 
 class TestInt8Distance:
     def test_euclidean_int8(self):
-        assert _compile(euclidean_int8(_col("d", "v1"), _col("d", "v2"))) == "euclidean_int8(V1, V2)"
+        result = _compile(euclidean_int8(_col("d", "v1"), _col("d", "v2")))
+        assert result == "euclidean_int8(V1, V2)"
 
     def test_cosine_int8(self):
         assert _compile(cosine_int8(_col("d", "v1"), _col("d", "v2"))) == "cosine_int8(V1, V2)"
@@ -152,7 +153,8 @@ class TestInt8Distance:
         assert _compile(dot_int8(_col("d", "v1"), _col("d", "v2"))) == "dot_int8(V1, V2)"
 
     def test_manhattan_int8(self):
-        assert _compile(manhattan_int8(_col("d", "v1"), _col("d", "v2"))) == "manhattan_int8(V1, V2)"
+        result = _compile(manhattan_int8(_col("d", "v1"), _col("d", "v2")))
+        assert result == "manhattan_int8(V1, V2)"
 
 
 # ── Temporal ──────────────────────────────────────────────────────────
@@ -205,7 +207,10 @@ class TestTemporal:
         assert result == "interval_contains(S1, E1, S2, E2)"
 
     def test_interval_duration(self):
-        assert _compile(interval_duration(_col("e", "start"), _col("e", "end"))) == "interval_duration(Start, End)"
+        result = _compile(
+            interval_duration(_col("e", "start"), _col("e", "end"))
+        )
+        assert result == "interval_duration(Start, End)"
 
     def test_point_in_interval(self):
         result = _compile(point_in_interval(_col("e", "ts"), _col("e", "start"), _col("e", "end")))
@@ -283,7 +288,10 @@ class TestString:
         assert _compile(replace(_col("e", "name"), "old", "new")) == 'replace(Name, "old", "new")'
 
     def test_concat(self):
-        assert _compile(concat(_col("e", "first"), " ", _col("e", "last"))) == 'concat(First, " ", Last)'
+        result = _compile(
+            concat(_col("e", "first"), " ", _col("e", "last"))
+        )
+        assert result == 'concat(First, " ", Last)'
 
 
 # ── Type Conversion ───────────────────────────────────────────────────

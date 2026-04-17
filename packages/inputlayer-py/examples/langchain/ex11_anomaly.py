@@ -3,6 +3,7 @@
 import asyncio
 
 from examples.langchain._common import *
+
 from inputlayer.integrations.langchain.params import iql_literal
 
 
@@ -10,7 +11,7 @@ async def run(kg):
     """Rule-based anomaly detection: IQL rules define expected patterns,
     automatically flag violations, and the LLM explains them.
 
-    No vector DB can do this — anomaly detection requires logical rules
+    No vector DB can do this - anomaly detection requires logical rules
     that compare values, check ranges, and cross-reference relationships.
     """
     header("Anomaly detection", 11)
@@ -96,7 +97,7 @@ async def run(kg):
 
     # ── Step 1: Show detected anomalies ──────────────────────────────
 
-    subheader("Step 1: Detected anomalies (instant — IQL rules)")
+    subheader("Step 1: Detected anomalies (instant - IQL rules)")
 
     r = await kg.execute("?overpaid(Name, Role, Salary, Max)")
     print(f"\n  {RED}Overpaid ({len(r.rows)}):{RESET}")
@@ -105,7 +106,7 @@ async def run(kg):
         pct = (excess / row[3]) * 100
         print(
             f"    {RED}!{RESET} {GREEN}{row[0]}{RESET} ({row[1]}): "
-            f"${row[2]:,} — {RED}${excess:,} over max "
+            f"${row[2]:,} - {RED}${excess:,} over max "
             f"(+{pct:.0f}%){RESET}"
         )
 
@@ -116,7 +117,7 @@ async def run(kg):
         pct = (deficit / row[3]) * 100
         print(
             f"    {YELLOW}!{RESET} {GREEN}{row[0]}{RESET} ({row[1]}): "
-            f"${row[2]:,} — {YELLOW}${deficit:,} under min "
+            f"${row[2]:,} - {YELLOW}${deficit:,} under min "
             f"(-{pct:.0f}%){RESET}"
         )
 
@@ -136,7 +137,7 @@ async def run(kg):
     # ── Step 3: LLM explains anomalies ───────────────────────────────
 
     if not check_llm():
-        print(f"\n{DIM}  No LLM server — skipping explanation.{RESET}")
+        print(f"\n{DIM}  No LLM server - skipping explanation.{RESET}")
         return
 
     from langchain_core.output_parsers import StrOutputParser

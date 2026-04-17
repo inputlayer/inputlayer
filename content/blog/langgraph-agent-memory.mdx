@@ -1,0 +1,244 @@
+---
+title: "Rules as Agent Memory: Derive What Matters From Every Turn"
+date: "2026-04-10"
+category: "Integrations"
+excerpt: "Chat history tells you what was said. Rules let you derive what it means. A small LangGraph integration turns every conversation turn into a fact and surfaces the semantic connections between them."
+---
+
+# Rules as Agent Memory: Derive What Matters From Every Turn
+
+You're five turns into a conversation with your agent. You mentioned a constraint back in turn 1, and now in turn 5, you ask something that depends on it. Your agent gives you a generic answer because nothing in the graph tells it those two turns are connected. You repeat yourself, the interaction drags, and each response starts from the same blank page.
+
+Chat history captures what was said. The part you usually have to bolt on yourself is the semantic layer: which turns belong to which topic, which topics travel together through the conversation, which user question is still open. That layer is a small reasoning problem, and it is exactly the kind of thing rules are good at.
+
+This post walks through `InputLayerMemory`, a LangGraph component that stores conversation turns as facts and uses rules to derive the context your agent needs for the next reply. You keep the usual history, and you also get a queryable map of what the conversation is about. Rules update automatically as new turns arrive, keeping conclusions current without any manual bookkeeping.
+
+## The idea: facts + rules = derived memory
+
+[InputLayer](https://github.com/inputlayer/inputlayer) is a reasoning engine. You give it facts, write rules over them, and it keeps all derived conclusions up to date as new facts arrive. When you add a new turn, only the conclusions touched by that turn get recomputed, so the semantic layer stays in sync with the conversation instead of being rebuilt from scratch on every reply.
+
+`InputLayerMemory` is a [LangGraph](https://github.com/langchain-ai/langgraph) component that stores conversation turns as **facts** and uses **rules** to derive what's relevant. You drop it into your graph as a node, and it handles the storage and retrieval for you.
+
+The schema is minimal. Two base relations hold the raw data:
+
+```
+memory_turn(thread_id, turn_id, role, content, ts)
+memory_topic(thread_id, turn_id, topic)
+```
+
+And three rules that derive context automatically. These are written in InputLayer's query language, where each rule says "the conclusion on the left is true whenever the conditions on the right are satisfied." The `<-` arrow means "is derived from," and `_` is a placeholder for values you don't care about in that particular rule:
+
+```
+% Active topics: what this conversation is about
+active_topic(ThreadId, Topic) <-
+    memory_topic(ThreadId, _, Topic)
+
+% Relevant turns: messages cross-referenced by topic
+relevant_turn(ThreadId, TurnId, Role, Content, Topic) <-
+    memory_turn(ThreadId, TurnId, Role, Content, _),
+    memory_topic(ThreadId, TurnId, Topic)
+
+% Topic threads: which topics are discussed together
+topic_thread(ThreadId, TopicA, TopicB) <-
+    memory_topic(ThreadId, _, TopicA),
+    memory_topic(ThreadId, _, TopicB),
+    TopicA != TopicB
+```
+
+So the first rule says: "a topic is active in a thread if any message in that thread mentions it." The second links messages to their topics. The third finds which topics appear together in the same thread.
+
+That's it. These rules create a structured map of your conversation's reasoning. You'll see exactly how this works in the next section, where adding a single turn triggers the rules and updates the derived context.
+
+## A conversation in action
+
+Let's trace what happens during a real conversation. You're building an ML pipeline and asking for help:
+
+| Turn | Role | Message |
+|------|------|---------|
+| 1 | user | I'm building a machine learning pipeline in Python. |
+| 2 | assistant | Great! What stage? Data prep, training, or deployment? |
+| 3 | user | Training. The model is slow on our GPU cluster. |
+| 4 | assistant | For performance, consider mixed precision and DataLoader workers. |
+| 5 | user | We also have trouble with our REST API for predictions. |
+
+### What gets stored (base facts)
+
+Each turn is inserted as a `memory_turn` fact. Topics are auto-extracted and stored as `memory_topic` facts:
+
+```
+memory_topic("alex-session-42", 1, "ml")
+memory_topic("alex-session-42", 1, "python")
+memory_topic("alex-session-42", 3, "ml")
+memory_topic("alex-session-42", 3, "performance")
+memory_topic("alex-session-42", 4, "performance")
+memory_topic("alex-session-42", 5, "api")
+```
+
+### What gets derived (automatically)
+
+The moment those facts are inserted, the rules fire. Here's what the knowledge graph has derived:
+
+**Active topics.** The conversation spans 4 areas:
+```
+active_topic("alex-session-42", "api")
+active_topic("alex-session-42", "ml")
+active_topic("alex-session-42", "performance")
+active_topic("alex-session-42", "python")
+```
+
+**Relevant turns.** Messages cross-referenced by topic:
+```
+relevant_turn("alex-session-42", 1, "user", "I'm building an ML...", "ml")
+relevant_turn("alex-session-42", 1, "user", "I'm building an ML...", "python")
+relevant_turn("alex-session-42", 3, "user", "Training is slow...",   "ml")
+relevant_turn("alex-session-42", 3, "user", "Training is slow...",   "performance")
+relevant_turn("alex-session-42", 4, "assistant", "Consider mixed...", "performance")
+relevant_turn("alex-session-42", 5, "user", "Trouble with REST API", "api")
+```
+
+Notice: turn 1 appears under **both** "ml" and "python". Turn 3 appears under both "ml" and "performance". The rules handle the cross-referencing automatically.
+
+**Topic threads.** Which topics co-occur in the same conversation:
+```
+topic_thread("alex-session-42", "ml", "python")          % ml and python both tagged on turn 1
+topic_thread("alex-session-42", "ml", "performance")     % ml and performance both tagged on turn 3
+topic_thread("alex-session-42", "python", "performance") % python and performance both in this thread
+...
+```
+
+### The "aha" moment
+
+Now you ask: **"What about deploying with Docker and Kubernetes?"**
+
+Before generating a response, your agent calls `memory.recall("alex-session-42")`. The derived context tells it:
+
+1. **Active topics**: ml, python, performance, api, devops (the new one)
+2. **Topic connections**: devops co-occurs with every prior topic in this thread
+3. **Relevant turns**: the ML training discussion (turns 1, 3, 4) and the API discussion (turn 5) are both relevant, since they share topics with the new message
+
+The rule-derived memory returns the full picture: you're deploying an ML pipeline (Python, training on GPUs) with an API layer, and now you want to containerize it. Here's what happened under the hood: the `topic_thread` rule fired when "devops" was tagged on the same thread as "ml", "python", "performance", and "api". That co-occurrence is what connected your Docker question to the earlier ML and API discussions. The rules did the cross-referencing, not a similarity search.
+
+## The proof tree: explainable memory
+
+You can ask InputLayer **why** a particular turn is relevant:
+
+```
+.why ?relevant_turn("alex-session-42", 3, Role, Content, "performance")
+```
+
+And it returns a proof tree:
+
+```
+relevant_turn("alex-session-42", 3, "user", "Training is slow...", "performance")
+├── because memory_turn("alex-session-42", 3, "user", "Training is slow...", 3000)
+└── because memory_topic("alex-session-42", 3, "performance")
+```
+
+This is the reasoning chain, a structured explanation of **why** this memory is relevant. You can paste the proof tree into the LLM prompt alongside the context, so the model answers with the supporting facts in view. When a user asks "why did you bring that up?", you have a precise answer: here are the rules that fired and the turns they matched.
+
+## Code: adding memory to a LangGraph agent
+
+Here's how you wire `InputLayerMemory` into a LangGraph agent. Three nodes form the loop: recall context, generate a response, then store the new turn.
+
+```python
+from inputlayer import InputLayer
+from inputlayer.integrations.langgraph import InputLayerMemory
+from langgraph.graph import StateGraph, END
+from typing import TypedDict, Any
+
+class ChatState(TypedDict, total=False):
+    thread_id: str
+    new_message: dict
+    context: dict
+    response: str
+
+async with InputLayer("ws://localhost:8080/ws", username="admin", password="...") as il:
+    kg = il.knowledge_graph("my_agent")
+    memory = InputLayerMemory(kg=kg)
+    await memory.setup()
+
+    graph = StateGraph(ChatState)
+    graph.add_node("recall", memory.recall_node(state_key="context"))
+    graph.add_node("respond", respond_fn)  # your LLM response logic
+    graph.add_node("store", memory.store_node(state_key="new_message"))
+
+    graph.set_entry_point("recall")
+    graph.add_edge("recall", "respond")
+    graph.add_edge("respond", "store")
+    graph.add_edge("store", END)
+```
+
+Each turn through the graph:
+1. **recall** -> queries the KG for derived context (topics, relevant turns, connections)
+2. **respond** -> your LLM uses that context to generate a response
+3. **store** -> the new message becomes a fact, rules fire, context updates
+
+The `recall_node` and `store_node` are LangGraph-compatible node functions. They read from and write to the graph state automatically.
+
+## Extending the ontology
+
+The base ontology (turns + topics -> derived context) is a starting point. Here are rules you could add:
+
+**Unresolved questions.** Questions you asked that never got a follow-up:
+
+```
+% First, find turns that already have a follow-up assistant response
+has_response(ThreadId, TurnId) <-
+    memory_turn(ThreadId, TurnId, "user", _, _),
+    memory_turn(ThreadId, NextTurn, "assistant", _, _),
+    NextTurn > TurnId
+
+% Unresolved: user turns with no follow-up response
+unresolved(ThreadId, TurnId, Content) <-
+    memory_turn(ThreadId, TurnId, "user", Content, _),
+    !has_response(ThreadId, TurnId)
+```
+
+**Conversation phases.** Detect when the topic shifts:
+
+```
+topic_shift(ThreadId, TurnId, OldTopic, NewTopic) <-
+    memory_topic(ThreadId, TurnId, NewTopic),
+    memory_topic(ThreadId, PrevTurn, OldTopic),
+    TurnId = PrevTurn + 1,
+    OldTopic != NewTopic
+```
+
+**Sentiment tracking.** If you extract sentiment as a topic:
+
+```
+frustrated_user(ThreadId) <-
+    memory_topic(ThreadId, TurnA, "frustrated"),
+    memory_topic(ThreadId, TurnB, "frustrated"),
+    TurnA != TurnB
+```
+
+Each new rule extends your agent's reasoning. The `recall()` method picks up conclusions from any rule you add, so the code that calls `recall()` in your graph doesn't change.
+
+## Try it yourself
+
+```bash
+pip install inputlayer-client-dev[langgraph]
+```
+
+```python
+from inputlayer import InputLayer
+from inputlayer.integrations.langgraph import InputLayerMemory
+
+async with InputLayer("ws://localhost:8080/ws", username="admin", password="...") as il:
+    kg = il.knowledge_graph("my_agent")
+    memory = InputLayerMemory(kg=kg)
+    await memory.setup()
+
+    await memory.astore("thread-1", "user", "Help with Python ML")
+    ctx = await memory.arecall("thread-1")
+    print(ctx["topics"])  # ["ml", "python"]
+```
+
+The full example with a LangGraph agent is at [`examples/langgraph/ex11_memory.py`](https://github.com/inputlayer/inputlayer/blob/main/packages/inputlayer-py/examples/langgraph/ex11_memory.py).
+
+---
+
+*InputLayer is open-source, built in Rust, and connects over WebSocket. You can use it from Python with LangChain and LangGraph integrations.*
+
+*[GitHub](https://github.com/inputlayer/inputlayer) · [Documentation](https://inputlayer.ai/)*

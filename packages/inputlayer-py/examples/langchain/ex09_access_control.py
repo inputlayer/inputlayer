@@ -3,6 +3,7 @@
 import asyncio
 
 from examples.langchain._common import *
+
 from inputlayer.integrations.langchain.params import iql_literal
 
 
@@ -11,7 +12,7 @@ async def run(kg):
 
     Documents have clearance levels. Users have roles. Rules compute
     which documents each user can see. The retriever automatically
-    respects these rules — no application-level filtering needed.
+    respects these rules - no application-level filtering needed.
 
     This is impossible with a plain vector store: you'd need to
     manually filter results after retrieval, risking data leaks.
@@ -77,7 +78,7 @@ async def run(kg):
     #   classified_doc(Id, Title, Content, Clr),
     #   acl_user("<user>", Role),
     #   clearance_grants(Role, Clr)
-    # No application-level filtering — access control IS the query.
+    # No application-level filtering - access control IS the query.
 
     def _acl_query(username: str) -> str:
         return (
@@ -105,7 +106,7 @@ async def run(kg):
     for username, role in users:
         r = await kg.execute(_acl_query(username))
         count = len(r.rows)
-        print(f"\n  {GREEN}{username}{RESET} ({role}) — {count} documents:")
+        print(f"\n  {GREEN}{username}{RESET} ({role}) - {count} documents:")
         for row in r.rows:
             clr = row[3]
             color = clearance_colors.get(clr, DIM)
@@ -115,7 +116,7 @@ async def run(kg):
 
     subheader("Step 2: Same retriever, different users")
     print(
-        f"{DIM}  The retriever query is identical — access control is in the IQL rules{RESET}"
+        f"{DIM}  The retriever query is identical - access control is in the IQL rules{RESET}"
     )
 
     for username, _role in users:
@@ -140,16 +141,16 @@ async def run(kg):
 
     subheader("Step 3: Why can't bob see the M&A target list?")
 
-    # Bob is an engineer — try to access a confidential doc
+    # Bob is an engineer - try to access a confidential doc
     r = await kg.execute('?clearance_grants("engineer", "confidential")')
     has_access = len(r.rows) > 0
 
     print(f"\n  {DIM}Query: does engineer role grant confidential access?{RESET}")
     if has_access:
-        print(f"  {GREEN}Yes — clearance granted{RESET}")
+        print(f"  {GREEN}Yes - clearance granted{RESET}")
     else:
         print(
-            f'  {RED}No — clearance_grants("engineer", "confidential") has no matching facts{RESET}'
+            f'  {RED}No - clearance_grants("engineer", "confidential") has no matching facts{RESET}'
         )
         print(f"  {DIM}Engineer role only grants: public, internal{RESET}")
         print(f"  {YELLOW}The join query returns zero rows for bob + confidential docs{RESET}")
@@ -157,7 +158,7 @@ async def run(kg):
     # ── Step 4: LLM answers using only visible docs ──────────────────
 
     if not check_llm():
-        print(f"\n{DIM}  No LLM server detected — skipping LLM step.{RESET}")
+        print(f"\n{DIM}  No LLM server detected - skipping LLM step.{RESET}")
         return
 
     from langchain_core.output_parsers import StrOutputParser
@@ -167,7 +168,7 @@ async def run(kg):
 
     prompt = ChatPromptTemplate.from_template(
         "You are a corporate assistant. You can ONLY use the documents "
-        "provided — do not hallucinate or reference information not shown.\n\n"
+        "provided - do not hallucinate or reference information not shown.\n\n"
         "Visible documents for this user:\n{context}\n\n"
         "Question: {question}\n\n"
         "If the answer requires information not in the visible documents, "
@@ -176,7 +177,7 @@ async def run(kg):
 
     question = "What are our strategic plans and financial performance?"
 
-    subheader("Step 4: LLM answers — same question, different access")
+    subheader("Step 4: LLM answers - same question, different access")
 
     for username, role in [("carol", "contractor"), ("alice", "executive")]:
         r = await kg.execute(_acl_query(username))

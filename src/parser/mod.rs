@@ -661,26 +661,24 @@ fn contains_arithmetic_operator(s: &str) -> bool {
                 return true;
             }
             '*' | '/' | '%' if angle_depth == 0 => return true,
-            '-' if angle_depth == 0 => {
-                // Distinguish unary minus at start vs binary minus
-                // Binary minus has an alphanumeric/paren/underscore before it (possibly with spaces)
-                if i > 0 {
-                    // Check for scientific notation: digit/dot followed by e/E then -
-                    if i >= 2
-                        && (chars[i - 1] == 'e' || chars[i - 1] == 'E')
-                        && (chars[i - 2].is_ascii_digit() || chars[i - 2] == '.')
-                    {
-                        continue;
-                    }
-                    // Look backwards skipping whitespace to find the previous significant char
-                    let mut j = i - 1;
-                    while j > 0 && chars[j].is_whitespace() {
-                        j -= 1;
-                    }
-                    let prev = chars[j];
-                    if prev.is_alphanumeric() || prev == ')' || prev == '_' {
-                        return true;
-                    }
+            '-' if angle_depth == 0 && i > 0 => {
+                // Distinguish unary minus at start vs binary minus.
+                // Binary minus has an alphanumeric/paren/underscore before it (possibly with spaces).
+                // Check for scientific notation: digit/dot followed by e/E then -
+                if i >= 2
+                    && (chars[i - 1] == 'e' || chars[i - 1] == 'E')
+                    && (chars[i - 2].is_ascii_digit() || chars[i - 2] == '.')
+                {
+                    continue;
+                }
+                // Look backwards skipping whitespace to find the previous significant char
+                let mut j = i - 1;
+                while j > 0 && chars[j].is_whitespace() {
+                    j -= 1;
+                }
+                let prev = chars[j];
+                if prev.is_alphanumeric() || prev == ')' || prev == '_' {
+                    return true;
                 }
             }
             _ => {}

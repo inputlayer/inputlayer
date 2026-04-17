@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Callable
+import logging
+from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
+from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -33,6 +37,7 @@ class NotificationDispatcher:
         self._callbacks: list[tuple[str | None, str | None, str | None, Callback]] = []
         self._queue: asyncio.Queue[NotificationEvent] = asyncio.Queue()
         self._last_seq: int = 0
+        self._background_tasks: set[asyncio.Task[Any]] = set()
 
     @property
     def last_seq(self) -> int:
@@ -45,7 +50,7 @@ class NotificationDispatcher:
         relation: str | None = None,
         knowledge_graph: str | None = None,
         callback: Callback | None = None,
-    ) -> Callable | None:
+    ) -> Callable[[Callback], Callback] | None:
         """Register a callback for notifications. Can be used as a decorator."""
         def decorator(fn: Callback) -> Callback:
             self._callbacks.append((event_type, relation, knowledge_graph, fn))
@@ -72,9 +77,15 @@ class NotificationDispatcher:
             try:
                 result = cb(event)
                 if asyncio.iscoroutine(result):
-                    asyncio.ensure_future(result)
+                    task = asyncio.ensure_future(result)
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
             except Exception:
-                pass  # Callbacks should not break the dispatcher
+                logger.exception(
+                    "Notification callback %r raised an exception for event %r",
+                    cb,
+                    event,
+                )
 
     async def __aiter__(self) -> AsyncIterator[NotificationEvent]:
         """Async iterator yielding notification events."""

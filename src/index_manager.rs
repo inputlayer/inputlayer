@@ -229,8 +229,7 @@ impl MaterializedIndex {
         let version = INDEX_VERSION.fetch_add(1, Ordering::SeqCst);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_micros() as u64)
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_micros() as u64);
 
         // Create Arc wrapper for the index
         // Box<dyn Index> and Arc<dyn Index> require different ownership,

@@ -14,7 +14,6 @@ from inputlayer.migrations.operations import (
     operation_from_dict,
 )
 
-
 # ── CreateRelation ───────────────────────────────────────────────────
 
 

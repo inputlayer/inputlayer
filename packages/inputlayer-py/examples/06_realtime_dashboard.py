@@ -3,7 +3,7 @@
 import asyncio
 import os
 
-from inputlayer import InputLayer, Relation, count, sum_
+from inputlayer import InputLayer, Relation, count
 
 
 class SensorReading(Relation):

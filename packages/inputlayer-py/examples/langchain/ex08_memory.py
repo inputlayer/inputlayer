@@ -3,6 +3,7 @@
 import asyncio
 
 from examples.langchain._common import *
+
 from inputlayer.integrations.langchain.params import iql_literal
 
 
@@ -11,7 +12,7 @@ async def run(kg):
 
     Each message turn is stored as a fact. The LLM extracts topics and
     entities per turn. IQL rules derive active context, conversation
-    threads, and relevant history — the LLM uses these derived facts
+    threads, and relevant history - the LLM uses these derived facts
     to produce context-aware responses.
 
     This positions InputLayer as a structured memory backend, not just
@@ -158,7 +159,7 @@ async def run(kg):
     # ── Step 3: Context-aware response using derived facts ───────────
 
     if not check_llm():
-        print(f"\n{DIM}  No LLM server detected — skipping LLM step.{RESET}")
+        print(f"\n{DIM}  No LLM server detected - skipping LLM step.{RESET}")
         return
 
     from langchain_core.output_parsers import StrOutputParser

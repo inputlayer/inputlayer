@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable
+from typing import Any
 
 from inputlayer.auth import (
-    AclEntry,
     ApiKeyInfo,
     UserInfo,
     compile_create_api_key,
@@ -19,7 +19,7 @@ from inputlayer.auth import (
 )
 from inputlayer.connection import Connection
 from inputlayer.knowledge_graph import KnowledgeGraph
-from inputlayer.notifications import NotificationDispatcher, NotificationEvent
+from inputlayer.notifications import NotificationEvent
 
 
 class InputLayer:
@@ -30,7 +30,10 @@ class InputLayer:
         async with InputLayer("ws://localhost:8080/ws", username="admin", password="admin") as il:
             kg = il.knowledge_graph("default")
             await kg.define(Employee)
-            await kg.insert(Employee(id=1, name="Alice", department="eng", salary=120000.0, active=True))
+            await kg.insert(
+                Employee(id=1, name="Alice", department="eng",
+                         salary=120000.0, active=True)
+            )
             result = await kg.query(Employee)
     """
 
@@ -142,7 +145,7 @@ class InputLayer:
         the KG between the use-default and the drop.
         """
         if self._conn.current_kg == name:
-            results = await self._conn.execute_sequence(
+            await self._conn.execute_sequence(
                 [".kg use default", f".kg drop {name}"]
             )
         else:

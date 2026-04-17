@@ -11,7 +11,6 @@ from inputlayer.types import (
     python_type_to_iql,
 )
 
-
 # ── Vector ────────────────────────────────────────────────────────────
 
 class TestVector:

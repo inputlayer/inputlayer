@@ -14,7 +14,7 @@ async def run(kg):
     header("LCEL chain with LLM", 4)
 
     if not check_llm():
-        print(f"\n{DIM}  No LLM server detected — skipping.{RESET}")
+        print(f"\n{DIM}  No LLM server detected - skipping.{RESET}")
         print(f"{DIM}  Start LM Studio and load a model, or set LLM_BASE_URL/LLM_MODEL.{RESET}")
         return
 

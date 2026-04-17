@@ -5,8 +5,8 @@ import json
 import pytest
 
 from inputlayer._protocol import (
-    AuthenticateMessage,
     AuthenticatedResponse,
+    AuthenticateMessage,
     AuthErrorResponse,
     ErrorResponse,
     ExecuteMessage,
@@ -21,7 +21,6 @@ from inputlayer._protocol import (
     deserialize_message,
     serialize_message,
 )
-
 
 # ── Client → Server serialization ────────────────────────────────────
 

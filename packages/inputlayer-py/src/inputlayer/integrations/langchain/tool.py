@@ -222,7 +222,7 @@ def _relation_to_tool(
                 tp | None,
                 Field(default=None, description=f"Filter rows where {col} <= this value"),
             )
-    args_model: type[BaseModel] = create_model(  # type: ignore[call-overload]
+    args_model: type[BaseModel] = create_model(
         f"{relation.__name__}SearchArgs",
         __config__=ConfigDict(arbitrary_types_allowed=True),
         **fields,
@@ -403,10 +403,18 @@ def _format_result(result: Any, max_rows: int) -> str:
         return "[]"
 
     rows = result.rows[:max_rows]
-    payload = [
-        {col: _jsonify(val) for col, val in zip(result.columns, row, strict=False)}
-        for row in rows
-    ]
+    columns = result.columns
+    payload = []
+    for row in rows:
+        if len(row) != len(columns):
+            logger.warning(
+                "Row length (%d) does not match column count (%d); "
+                "truncating to shorter. Columns: %r",
+                len(row), len(columns), columns,
+            )
+        payload.append(
+            {col: _jsonify(val) for col, val in zip(columns, row, strict=False)}
+        )
 
     total = getattr(result, "row_count", len(result.rows)) or len(result.rows)
     if total > max_rows:

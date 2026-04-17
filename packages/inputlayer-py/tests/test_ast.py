@@ -7,12 +7,10 @@ from inputlayer._ast import (
     BoolExpr,
     Column,
     Comparison,
-    Expr,
     FuncCall,
     InExpr,
     Literal,
     MatchExpr,
-    NegatedIn,
     Not,
     Or,
     OrderedColumn,
@@ -142,7 +140,7 @@ class TestFrozen:
         c = Column("e", "name")
         try:
             c.name = "other"  # type: ignore
-            assert False, "Should raise"
+            raise AssertionError("Should raise")
         except AttributeError:
             pass
 
@@ -150,6 +148,6 @@ class TestFrozen:
         c = Comparison("=", Column("e", "a"), Literal(1))
         try:
             c.op = "!="  # type: ignore
-            assert False, "Should raise"
+            raise AssertionError("Should raise")
         except AttributeError:
             pass

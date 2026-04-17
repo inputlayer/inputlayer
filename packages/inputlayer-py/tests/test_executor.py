@@ -17,11 +17,9 @@ from inputlayer.migrations.loader import MigrationInfo
 from inputlayer.migrations.operations import (
     CreateRelation,
     CreateRule,
-    DropRelation,
     ReplaceRule,
 )
 from inputlayer.migrations.recorder import MIGRATION_RELATION, MigrationRecorder
-
 
 # ── Mock KG ──────────────────────────────────────────────────────────
 

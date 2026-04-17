@@ -14,8 +14,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub fn time_now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_millis() as i64)
 }
 
 /// Calculate time difference in milliseconds.

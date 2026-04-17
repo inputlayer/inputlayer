@@ -1,11 +1,7 @@
 """inputlayer - Python Object-Logic Mapper for InputLayer knowledge graph engine."""
 
-# Core types
-from inputlayer.types import Timestamp, Vector, VectorInt8
-
-# Relation system
-from inputlayer.relation import Relation
-from inputlayer.derived import Derived, From, RuleClause
+# Functions (re-export all)
+from inputlayer import functions
 
 # Aggregations
 from inputlayer.aggregations import (
@@ -20,11 +16,13 @@ from inputlayer.aggregations import (
     within_radius,
 )
 
-# Functions (re-export all)
-from inputlayer import functions
+# Auth
+from inputlayer.auth import AclEntry, ApiKeyInfo, UserInfo
 
-# Index
-from inputlayer.index import HnswIndex
+# Client
+from inputlayer.client import InputLayer
+from inputlayer.client_sync import InputLayerSync
+from inputlayer.derived import Derived, From, RuleClause
 
 # Exceptions
 from inputlayer.exceptions import (
@@ -47,19 +45,15 @@ from inputlayer.exceptions import (
     ValidationError,
 )
 
-# Result
-from inputlayer.result import ResultSet
-
-# Client
-from inputlayer.client import InputLayer
-from inputlayer.client_sync import InputLayerSync
+# Index
+from inputlayer.index import HnswIndex
 
 # Knowledge Graph
 from inputlayer.knowledge_graph import (
     ClearResult,
     ColumnInfo,
-    DeleteResult,
     DebugResult,
+    DeleteResult,
     IndexInfo,
     IndexStats,
     InsertResult,
@@ -70,96 +64,100 @@ from inputlayer.knowledge_graph import (
     RelationInfo,
     RuleInfo,
     ServerStatus,
-    WhyResult,
     WhyNotResult,
+    WhyResult,
 )
-
-# Auth
-from inputlayer.auth import AclEntry, ApiKeyInfo, UserInfo
-
-# Session
-from inputlayer.session import Session
-
-# Notifications
-from inputlayer.notifications import NotificationEvent
 
 # Migrations
 from inputlayer.migrations import Migration
 
+# Notifications
+from inputlayer.notifications import NotificationEvent
+
+# Relation system
+from inputlayer.relation import Relation
+
+# Result
+from inputlayer.result import ResultSet
+
+# Session
+from inputlayer.session import Session
+from inputlayer.types import Timestamp, Vector, VectorInt8
+
 __version__ = "0.1.0"
 
 __all__ = [
+    "AclEntry",
+    "ApiKeyInfo",
+    "AuthenticationError",
+    "CannotDropError",
+    "ClearResult",
+    "ColumnInfo",
+    "ConnectionError",
+    "DebugResult",
+    "DeleteResult",
+    "Derived",
+    "From",
+    # Index
+    "HnswIndex",
+    "IndexInfo",
+    "IndexNotFoundError",
+    "IndexStats",
+    # Client
+    "InputLayer",
+    # Exceptions
+    "InputLayerConnectionError",
+    "InputLayerError",
+    "InputLayerPermissionError",
+    "InputLayerSync",
+    "InsertResult",
+    "InternalError",
+    # KG
+    "KnowledgeGraph",
+    "KnowledgeGraphExistsError",
+    "KnowledgeGraphNotFoundError",
+    # Migrations
+    "Migration",
+    # Notifications
+    "NotificationEvent",
+    "PermissionError",
+    "ProofNode",
+    "ProofTree",
+    "QueryError",
+    "QueryTimeoutError",
+    # Relation
+    "Relation",
+    "RelationDescription",
+    "RelationInfo",
+    "RelationNotFoundError",
+    # Result
+    "ResultSet",
+    "RuleClause",
+    "RuleInfo",
+    "RuleNotFoundError",
+    "SchemaConflictError",
+    "ServerStatus",
+    # Session
+    "Session",
+    "Timestamp",
+    # Auth
+    "UserInfo",
+    "ValidationError",
     # Types
     "Vector",
     "VectorInt8",
-    "Timestamp",
-    # Relation
-    "Relation",
-    "Derived",
-    "From",
-    "RuleClause",
+    "WhyNotResult",
+    "WhyResult",
+    "avg",
     # Aggregations
     "count",
     "count_distinct",
-    "sum_",
-    "min_",
+    # Functions
+    "functions",
     "max_",
-    "avg",
+    "min_",
+    "sum_",
     "top_k",
     "top_k_threshold",
     "within_radius",
-    # Functions
-    "functions",
-    # Index
-    "HnswIndex",
-    # Exceptions
-    "InputLayerError",
-    "InputLayerConnectionError",
-    "InputLayerPermissionError",
-    "ConnectionError",
-    "AuthenticationError",
-    "SchemaConflictError",
-    "ValidationError",
-    "QueryError",
-    "QueryTimeoutError",
-    "PermissionError",
-    "KnowledgeGraphNotFoundError",
-    "KnowledgeGraphExistsError",
-    "CannotDropError",
-    "RelationNotFoundError",
-    "RuleNotFoundError",
-    "IndexNotFoundError",
-    "InternalError",
-    # Result
-    "ResultSet",
-    # Client
-    "InputLayer",
-    "InputLayerSync",
-    # KG
-    "KnowledgeGraph",
-    "RelationInfo",
-    "RelationDescription",
-    "ColumnInfo",
-    "RuleInfo",
-    "IndexInfo",
-    "IndexStats",
-    "InsertResult",
-    "DeleteResult",
-    "ClearResult",
-    "DebugResult",
-    "ServerStatus",
-    "ProofNode",
-    "ProofTree",
-    "WhyResult",
-    "WhyNotResult",
-    # Auth
-    "UserInfo",
-    "ApiKeyInfo",
-    "AclEntry",
-    # Session
-    "Session",
-    # Notifications
-    "NotificationEvent",
-    # Migrations
-    "Migration",
 ]

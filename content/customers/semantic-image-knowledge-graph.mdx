@@ -43,7 +43,7 @@ Query: "images with warm lighting showing collaborative work" [primary]
 
 A customer uploads a reference image and asks: "find images with a similar style that also show people in an office setting." The vector similarity captures the visual style and composition, while the structural constraints ensure the content matches. Both conditions are evaluated in a single pass.
 
-More sophisticated queries can traverse relationships between concepts. A customer searching for "collaborative work" might want images showing multiple people interacting with a shared object. This kind of query is impossible with pure vector search because it requires reasoning about the *relationships* between detected entities - not just whether certain objects are present, but how they relate to each other.
+More sophisticated queries can traverse relationships between concepts. A customer searching for "collaborative work" might want images showing multiple people interacting with a shared object. This kind of query is impossible with pure vector search because it requires reasoning about how detected entities *relate* to each other, which objects appear together is the easy part.
 
 ## Results
 

@@ -279,6 +279,98 @@ uv run python -m examples.langchain.runner --all
 
 Requires a running InputLayer server and optionally LM Studio (or any OpenAI-compatible server) for LLM examples.
 
+## LangGraph Integration
+
+Install the langgraph extra:
+
+```bash
+pip install inputlayer-client-dev[langgraph]
+```
+
+The LangGraph integration provides:
+
+- **`InputLayerCheckpointer`**: Persist graph state in an InputLayer KG. Supports `prune_thread()` / `adelete_thread()` for storage management and full async/sync parity.
+- **`InputLayerMemory`**: Semantic long-term memory. Stores conversation turns as facts, derives active topics and relevant context via rules. Supports `adelete_thread()` for thread cleanup.
+- **`kg_node`**: Factory for query/insert/delete graph nodes.
+- **`kg_router`**: Conditional edge routing driven by IQL queries.
+- **`InputLayerState`**: TypedDict base class with the required `kg` field for graph state.
+- **`escape_iql`**: String escaping for safe IQL interpolation in parameterized queries.
+
+```python
+from inputlayer import InputLayer
+from inputlayer.integrations.langgraph import (
+    InputLayerCheckpointer,
+    InputLayerMemory,
+    InputLayerState,
+    escape_iql,
+    kg_node,
+    kg_router,
+)
+from langgraph.graph import END, StateGraph
+
+class MyState(InputLayerState):
+    question: str
+    answer: str
+
+async with InputLayer("ws://localhost:8080/ws", username="admin", password="...") as il:
+    kg = il.knowledge_graph("my_agent")
+
+    # Checkpointer: persist graph state across process restarts
+    checkpointer = InputLayerCheckpointer(kg=kg)
+    await checkpointer.setup()
+
+    # Memory: semantic recall with rule-derived context
+    memory = InputLayerMemory(kg=kg)
+    await memory.setup()
+
+    # Build a graph with KG-driven nodes and routing
+    graph = StateGraph(MyState)
+    graph.add_node("search", kg_node(query="?relevant(X, Y)", state_key="results"))
+    graph.add_node("recall", memory.recall_node(state_key="context"))
+    graph.add_node("store", memory.store_node(state_key="new_message"))
+    graph.set_entry_point("recall")
+    graph.add_edge("recall", "search")
+    graph.add_edge("search", "store")
+    graph.add_edge("store", END)
+
+    app = graph.compile(checkpointer=checkpointer)
+```
+
+### LangGraph Examples
+
+See [`examples/langgraph/`](examples/langgraph/) - 12 examples covering agent patterns:
+
+```bash
+# List all examples
+uv run python -m examples.langgraph.runner --list
+
+# Run specific examples
+uv run python -m examples.langgraph.runner 1 10 11
+
+# Run a range
+uv run python -m examples.langgraph.runner 1-5
+
+# Run all
+uv run python -m examples.langgraph.runner --all
+```
+
+| # | Example | Description |
+|---|---------|-------------|
+| 1 | Reasoning loop | Accumulate facts, rules decide when to stop |
+| 2 | Investigation | Multi-step evidence gathering |
+| 3 | Human-in-the-loop | Policy rules gate actions for approval |
+| 4 | Branching pipeline | Route documents through parallel analysis |
+| 5 | Self-correcting agent | Validation rules catch and fix errors |
+| 6 | Collaborative planning | Multi-agent task decomposition |
+| 7 | Event correlation | Pattern detection across event streams |
+| 8 | Tool selection | Rules pick the right tool per context |
+| 9 | Streaming aggregation | Threshold-based alerts from streaming data |
+| 10 | Resumable graph | Checkpoint, crash, resume from persisted state |
+| 11 | Semantic memory | Store turns as facts, recall derived context |
+| 12 | Resumable chat | Checkpointer and memory together on one KG |
+
+Requires a running InputLayer server. Examples marked [LLM] need LM Studio (or any OpenAI-compatible server) at `localhost:1234`. Set `INPUTLAYER_URL`, `INPUTLAYER_USER`, `INPUTLAYER_PASSWORD` to override server defaults.
+
 ## Sync Client
 
 For scripts, notebooks, and non-async contexts:

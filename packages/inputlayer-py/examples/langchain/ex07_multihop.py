@@ -38,7 +38,7 @@ async def run(kg):
     the LLM interprets the results.
 
     Shows that complex graph traversal happens in IQL rules,
-    not in the LLM — the LLM just reads the derived conclusions.
+    not in the LLM - the LLM just reads the derived conclusions.
     """
     header("Multi-hop reasoning", 7)
 
@@ -112,9 +112,9 @@ async def run(kg):
         names = ", ".join(sorted(reports))
         print(f"  {GREEN}{mgr}{RESET} has authority over: {CYAN}{names}{RESET}")
 
-    # ── Step 2: Multi-hop proof — how does frank reach grace? ────────
+    # ── Step 2: Multi-hop proof - how does frank reach grace? ────────
 
-    subheader("Step 2: Proof tree — how does frank report to grace?")
+    subheader("Step 2: Proof tree - how does frank report to grace?")
 
     # NOTE: using _conn.execute to access raw proof_trees which aren't
     # exposed on the public ResultSet yet.
@@ -136,7 +136,7 @@ async def run(kg):
     # ── Step 4: LLM analyzes the org graph ───────────────────────────
 
     if not check_llm():
-        print(f"\n{DIM}  No LLM server detected — skipping LLM step.{RESET}")
+        print(f"\n{DIM}  No LLM server detected - skipping LLM step.{RESET}")
         return
 
     from langchain_core.output_parsers import StrOutputParser
@@ -164,7 +164,7 @@ async def run(kg):
 
     prompt = ChatPromptTemplate.from_template(
         "You are an organizational analyst. The following facts were derived "
-        "from a knowledge graph using IQL rules — the chain of command "
+        "from a knowledge graph using IQL rules - the chain of command "
         "and influence relationships were computed automatically via "
         "transitive closure, not manually defined.\n\n"
         "{context}\n\n"

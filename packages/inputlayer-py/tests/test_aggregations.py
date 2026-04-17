@@ -1,6 +1,6 @@
 """Tests for inputlayer.aggregations - aggregation functions → AggExpr."""
 
-from inputlayer._ast import AggExpr, Column as AstColumn
+from inputlayer._ast import AggExpr
 from inputlayer._proxy import ColumnProxy
 from inputlayer.aggregations import (
     avg,
@@ -115,4 +115,4 @@ class TestWithinRadius:
         result = within_radius(0.5, _col("d", "id"), distance=_col("d", "dist"))
         text = compile_expr(result, env)
         # within_radius<0.5, Id, Dist:asc>
-        assert "within_radius<0.5, Id, Dist:asc>" == text
+        assert text == "within_radius<0.5, Id, Dist:asc>"

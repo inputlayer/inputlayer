@@ -1,10 +1,7 @@
 """Tests for inputlayer.migrations.loader - migration discovery and import."""
 
-import os
 import textwrap
 from pathlib import Path
-
-import pytest
 
 from inputlayer.migrations.loader import (
     get_latest_state,
@@ -12,7 +9,6 @@ from inputlayer.migrations.loader import (
     load_migrations,
 )
 from inputlayer.migrations.operations import CreateRelation, CreateRule
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -178,13 +174,13 @@ class TestGetNextNumber:
 
     def test_after_multiple(self, tmp_path):
         for i in range(1, 6):
-            _write_migration(tmp_path, f"{i:04d}_auto.py", f"""\
+            _write_migration(tmp_path, f"{i:04d}_auto.py", """\
                 from inputlayer.migrations import Migration
 
                 class M(Migration):
                     dependencies = []
                     operations = []
-                    state = {{}}
+                    state = {}
             """)
         assert get_next_number(tmp_path) == 6
 
@@ -223,7 +219,11 @@ class TestRoundtrip:
 
         # Second migration
         ops2 = [CreateRule("r", ["+r(X) <- t(X)"])]
-        state2 = {"relations": {"t": [("a", "int")]}, "rules": {"r": ["+r(X) <- t(X)"]}, "indexes": {}}
+        state2 = {
+            "relations": {"t": [("a", "int")]},
+            "rules": {"r": ["+r(X) <- t(X)"]},
+            "indexes": {},
+        }
         f2, c2 = generate_migration(2, ops2, state2, ["0001_initial"])
         (tmp_path / f2).write_text(c2)
 

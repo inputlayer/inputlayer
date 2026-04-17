@@ -302,7 +302,7 @@ class KnowledgeGraph:
 
         # Need to switch KG. Use execute_sequence for atomicity so that
         # auto-create can be handled within the same lock hold.
-        async with self._conn._execute_lock:
+        async with self._conn._get_execute_lock():
             # Step 1: try to switch to this KG.
             use_result = await self._conn._send_and_recv(preamble)
             if use_result.switched_kg:
@@ -400,8 +400,10 @@ class KnowledgeGraph:
                 # Try pandas DataFrame
                 try:
                     instances = [rel_cls(**row) for row in data.to_dict("records")]
-                except Exception:
-                    raise TypeError(f"Unsupported data type: {type(data).__name__}")
+                except Exception as err:
+                    raise TypeError(
+                        f"Unsupported data type: {type(data).__name__}"
+                    ) from err
             if len(instances) == 1:
                 iql = compile_insert(instances[0])
             else:
@@ -939,7 +941,12 @@ class KnowledgeGraph:
         result = await self._execute(f".why_not {rel_name}({vals_str})")
         text = "\n".join(str(row[0]) for row in result.rows)
         raw_graphs = getattr(result, "proof_trees", None) or []
-        explanation = ProofTree.from_dict(raw_graphs[0]) if raw_graphs and isinstance(raw_graphs[0], dict) else (raw_graphs[0] if raw_graphs else None)
+        if raw_graphs and isinstance(raw_graphs[0], dict):
+            explanation = ProofTree.from_dict(raw_graphs[0])
+        elif raw_graphs:
+            explanation = raw_graphs[0]
+        else:
+            explanation = None
         return WhyNotResult(text=text, explanation=explanation)
 
     async def compact(self) -> None:

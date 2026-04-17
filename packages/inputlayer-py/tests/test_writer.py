@@ -1,18 +1,14 @@
 """Tests for inputlayer.migrations.writer - migration file generation."""
 
-import pytest
 
 from inputlayer.migrations.operations import (
     CreateIndex,
     CreateRelation,
     CreateRule,
-    DropRelation,
-    DropRule,
     ReplaceRule,
     RunIQL,
 )
 from inputlayer.migrations.writer import generate_migration
-
 
 # ── Filename generation ──────────────────────────────────────────────
 

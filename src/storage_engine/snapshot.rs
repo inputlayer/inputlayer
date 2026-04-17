@@ -108,8 +108,7 @@ impl KnowledgeGraphSnapshot {
         let version = SNAPSHOT_VERSION.fetch_add(1, Ordering::SeqCst);
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_micros() as u64)
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_micros() as u64);
 
         // Note: materialized tuples should be merged into input_tuples by the caller
         // (KnowledgeGraph::publish_snapshot) before calling this constructor.

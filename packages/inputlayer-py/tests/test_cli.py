@@ -2,13 +2,10 @@
 
 import sys
 import textwrap
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from inputlayer.migrations.cli import _discover_models, build_parser, main
-
 
 # ── Parser tests ─────────────────────────────────────────────────────
 
@@ -150,11 +147,15 @@ class TestMakemigrations:
         migrations_dir.mkdir()
 
         # Create an existing migration that matches
-        from inputlayer.migrations.writer import generate_migration
         from inputlayer.migrations.operations import CreateRelation
+        from inputlayer.migrations.writer import generate_migration
 
         ops = [CreateRelation("employee", [("id", "int"), ("name", "string")])]
-        state = {"relations": {"employee": [("id", "int"), ("name", "string")]}, "rules": {}, "indexes": {}}
+        state = {
+            "relations": {"employee": [("id", "int"), ("name", "string")]},
+            "rules": {},
+            "indexes": {},
+        }
         filename, content = generate_migration(1, ops, state, [])
         (migrations_dir / filename).write_text(content)
 

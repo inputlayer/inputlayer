@@ -750,9 +750,7 @@ impl Handler {
         let notify_buf = storage.config().http.rate_limit.notification_buffer_size;
         let (notify_tx, _) = tokio::sync::broadcast::channel(notify_buf);
         let config = Arc::new(storage.config().clone());
-        let ncpu = std::thread::available_parallelism()
-            .map(std::num::NonZero::get)
-            .unwrap_or(4);
+        let ncpu = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
         // Reserve ~25% of cores (min 2) for Tokio async I/O, health checks, WebSocket handling.
         // The rest are available for CPU-bound DD computations via spawn_blocking.
         let io_reserve = (ncpu / 4).max(2).min(ncpu - 1);
@@ -790,9 +788,7 @@ impl Handler {
         let notify_buf = storage.config().http.rate_limit.notification_buffer_size;
         let (notify_tx, _) = tokio::sync::broadcast::channel(notify_buf);
         let config = Arc::new(storage.config().clone());
-        let ncpu = std::thread::available_parallelism()
-            .map(std::num::NonZero::get)
-            .unwrap_or(4);
+        let ncpu = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
         // Reserve ~25% of cores (min 2) for Tokio async I/O, health checks, WebSocket handling.
         let io_reserve = (ncpu / 4).max(2).min(ncpu - 1);
         let compute_permits = ncpu - io_reserve;
@@ -7913,10 +7909,8 @@ mod tests {
 /// Recursively extract variable names from a term.
 fn extract_term_vars(term: &Term, vars: &mut Vec<String>) {
     match term {
-        Term::Variable(v) => {
-            if !vars.contains(v) {
-                vars.push(v.clone());
-            }
+        Term::Variable(v) if !vars.contains(v) => {
+            vars.push(v.clone());
         }
         Term::Arithmetic(expr) => {
             extract_arith_vars(expr, vars);

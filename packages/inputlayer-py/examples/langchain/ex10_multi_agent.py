@@ -3,6 +3,7 @@
 import asyncio
 
 from examples.langchain._common import *
+
 from inputlayer.integrations.langchain.params import iql_literal
 
 
@@ -29,7 +30,7 @@ async def _insert_hardcoded_claims(kg):
             f"  {GREEN}{subj}{RESET} {DIM}{pred}{RESET} {CYAN}{obj}{RESET} {DIM}conf={conf}{RESET}"
         )
 
-    subheader("Step 3: Fact-checker (IQL rules — instant)")
+    subheader("Step 3: Fact-checker (IQL rules - instant)")
 
 
 async def _show_results(kg):
@@ -57,7 +58,7 @@ async def run(kg):
     IQL rules automatically detect verified claims, contradictions,
     and novel (unverifiable) claims.
 
-    The KG is the shared reasoning layer — agents don't talk to each
+    The KG is the shared reasoning layer - agents don't talk to each
     other directly, they read/write facts and the rules do the rest.
     """
     header("Multi-agent with shared KG", 10)
@@ -115,10 +116,10 @@ async def run(kg):
     subheader("Step 1: Ground truth loaded")
     print(f"  {DIM}{len(known_facts)} known facts in the KG{RESET}")
 
-    # ── Agent 1: Researcher — extract claims from an article ─────────
+    # ── Agent 1: Researcher - extract claims from an article ─────────
 
     if not check_llm():
-        print(f"\n{DIM}  No LLM server — using hardcoded claims.{RESET}")
+        print(f"\n{DIM}  No LLM server - using hardcoded claims.{RESET}")
         await _insert_hardcoded_claims(kg)
         await _show_results(kg)
         return
@@ -171,9 +172,9 @@ async def run(kg):
             f"{CYAN}{c.object}{RESET} {status}"
         )
 
-    # ── Agent 2: Fact-checker — rules already fired ──────────────────
+    # ── Agent 2: Fact-checker - rules already fired ──────────────────
 
-    subheader("Step 3: Fact-checker (IQL rules — instant)")
+    subheader("Step 3: Fact-checker (IQL rules - instant)")
     print(f"{DIM}  Rules fired automatically when claims were inserted{RESET}")
 
     await _show_results(kg)

@@ -3,6 +3,7 @@
 import asyncio
 
 from examples.langchain._common import *
+
 from inputlayer.integrations.langchain.params import iql_literal
 
 
@@ -121,7 +122,7 @@ async def run(kg):
     # ── Step 1: Generate an LLM answer ───────────────────────────────
 
     if not check_llm():
-        print(f"\n{DIM}  No LLM — using hardcoded claims.{RESET}")
+        print(f"\n{DIM}  No LLM - using hardcoded claims.{RESET}")
         await _insert_hallucination_claims(kg)
         await _show_grounding_results(kg)
         return
@@ -136,7 +137,7 @@ async def run(kg):
     # Ask the LLM a question it might hallucinate on
     question = (
         "Tell me about the history of Python, Rust, and Go "
-        "programming languages — who created them and when."
+        "programming languages - who created them and when."
     )
 
     subheader("Step 1: LLM generates an answer")
@@ -207,7 +208,7 @@ async def run(kg):
         )
         print(f"\n{GREEN}  {fixed.strip()}{RESET}")
     else:
-        print(f"\n  {GREEN}All claims verified — no corrections needed.{RESET}")
+        print(f"\n  {GREEN}All claims verified - no corrections needed.{RESET}")
 
 
 if __name__ == "__main__":

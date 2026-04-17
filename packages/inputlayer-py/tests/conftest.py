@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
-import subprocess
-import time
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
 
 from inputlayer.client import InputLayer
-
 
 # Integration tests are only run when INPUTLAYER_TEST_SERVER is set
 SKIP_INTEGRATION = not os.environ.get("INPUTLAYER_TEST_SERVER")

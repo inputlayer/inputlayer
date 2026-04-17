@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from typing import Any
 
@@ -10,8 +11,8 @@ import websockets
 from websockets.asyncio.client import ClientConnection
 
 from inputlayer._protocol import (
-    AuthenticateMessage,
     AuthenticatedResponse,
+    AuthenticateMessage,
     AuthErrorResponse,
     ErrorResponse,
     ExecuteMessage,
@@ -23,7 +24,6 @@ from inputlayer._protocol import (
     ResultEndResponse,
     ResultResponse,
     ResultStartResponse,
-    ServerMessage,
     deserialize_message,
 )
 from inputlayer.exceptions import (
@@ -71,7 +71,18 @@ class Connection:
 
         self._dispatcher = NotificationDispatcher()
         self._recv_task: asyncio.Task | None = None
-        self._execute_lock = asyncio.Lock()
+        self._execute_lock: asyncio.Lock | None = None
+
+
+    def _get_execute_lock(self) -> asyncio.Lock:
+        """Lazily create the execute lock in the current event loop.
+
+        Created on first use rather than in __init__ so the Connection
+        can be constructed outside an async context (the common case).
+        """
+        if self._execute_lock is None:
+            self._execute_lock = asyncio.Lock()
+        return self._execute_lock
 
     # ── Properties ────────────────────────────────────────────────────
 
@@ -136,15 +147,11 @@ class Connection:
         self._connected = False
         if self._recv_task and not self._recv_task.done():
             self._recv_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._recv_task
-            except asyncio.CancelledError:
-                pass
         if self._ws:
-            try:
+            with contextlib.suppress(Exception):
                 await self._ws.close()
-            except Exception:
-                pass
             self._ws = None
 
     async def _authenticate(self) -> None:
@@ -187,7 +194,7 @@ class Connection:
         if not self._connected or not self._ws:
             raise ConnectionError("Not connected")
 
-        async with self._execute_lock:
+        async with self._get_execute_lock():
             return await self._send_and_recv(program)
 
     async def execute_with_preamble(
@@ -204,7 +211,7 @@ class Connection:
         if not self._connected or not self._ws:
             raise ConnectionError("Not connected")
 
-        async with self._execute_lock:
+        async with self._get_execute_lock():
             if preamble is not None:
                 result = await self._send_and_recv(preamble)
                 if result.switched_kg:
@@ -220,7 +227,7 @@ class Connection:
         if not self._connected or not self._ws:
             raise ConnectionError("Not connected")
 
-        async with self._execute_lock:
+        async with self._get_execute_lock():
             results = []
             for program in programs:
                 result = await self._send_and_recv(program)
@@ -364,5 +371,5 @@ class Connection:
         """Send a keep-alive ping."""
         if not self._ws:
             raise ConnectionError("Not connected")
-        async with self._execute_lock:
+        async with self._get_execute_lock():
             await self._ws.send(PingMessage().to_json())

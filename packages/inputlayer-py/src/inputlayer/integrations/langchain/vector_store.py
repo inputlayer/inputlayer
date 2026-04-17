@@ -173,7 +173,7 @@ class InputLayerVectorStore(VectorStore):
     def add_texts(
         self,
         texts: Iterable[str],
-        metadatas: list[dict] | None = None,
+        metadatas: list[dict[str, Any]] | None = None,
         ids: list[str] | None = None,
         **kwargs: Any,
     ) -> list[str]:
@@ -182,7 +182,7 @@ class InputLayerVectorStore(VectorStore):
     async def aadd_texts(
         self,
         texts: Iterable[str],
-        metadatas: list[dict] | None = None,
+        metadatas: list[dict[str, Any]] | None = None,
         ids: list[str] | None = None,
         **kwargs: Any,
     ) -> list[str]:
@@ -515,7 +515,7 @@ class InputLayerVectorStore(VectorStore):
         cls,
         texts: list[str],
         embedding: Embeddings,
-        metadatas: list[dict] | None = None,
+        metadatas: list[dict[str, Any]] | None = None,
         *,
         kg: Any | None = None,
         relation: type[Relation] | None = None,
@@ -607,7 +607,7 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
         nb += y * y
     if na == 0.0 or nb == 0.0:
         return 0.0
-    return dot / ((na ** 0.5) * (nb ** 0.5))
+    return float(dot / ((na ** 0.5) * (nb ** 0.5)))
 
 
 def _required_metadata_fields(
