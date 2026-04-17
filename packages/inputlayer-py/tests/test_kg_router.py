@@ -382,6 +382,39 @@ class TestKgRouterEmptyQuery:
         kg.execute.assert_not_called()
 
 
+class TestKgRouterCallableRaises:
+    """A callable that raises inside the router must surface that error.
+
+    Swallowing a KeyError/AttributeError from a branch callable would hide
+    bugs in the user's routing logic behind a silent fallthrough. Only
+    QueryError (from the engine) is caught and skipped.
+    """
+
+    async def test_callable_keyerror_propagates(self) -> None:
+        kg = MagicMock()
+        kg.execute = AsyncMock(return_value=ResultSet(columns=["x"], rows=[]))
+
+        router = kg_router(
+            branches={"a": lambda s: f'?q("{s["missing_key"]}", X)'},
+            default="fallback",
+        )
+
+        with pytest.raises(KeyError, match="missing_key"):
+            await router({"kg": kg})
+
+    async def test_callable_typeerror_propagates(self) -> None:
+        kg = MagicMock()
+        kg.execute = AsyncMock(return_value=ResultSet(columns=["x"], rows=[]))
+
+        def _bad(_s: dict) -> str:
+            return None + "oops"  # type: ignore[operator]
+
+        router = kg_router(branches={"a": _bad}, default="fallback")
+
+        with pytest.raises(TypeError):
+            await router({"kg": kg})
+
+
 class TestKgRouterValidation:
     def test_empty_target_rejected(self) -> None:
         with pytest.raises(ValueError, match="branch target must be a non-empty string"):

@@ -338,7 +338,7 @@ async with InputLayer("ws://localhost:8080/ws", username="admin", password="..."
 
 ### LangGraph Examples
 
-See [`examples/langgraph/`](examples/langgraph/) — 11 examples covering agent patterns:
+See [`examples/langgraph/`](examples/langgraph/) - 12 examples covering agent patterns:
 
 ```bash
 # List all examples
@@ -367,6 +367,7 @@ uv run python -m examples.langgraph.runner --all
 | 9 | Streaming aggregation | Threshold-based alerts from streaming data |
 | 10 | Resumable graph | Checkpoint, crash, resume from persisted state |
 | 11 | Semantic memory | Store turns as facts, recall derived context |
+| 12 | Resumable chat | Checkpointer and memory together on one KG |
 
 Requires a running InputLayer server. Examples marked [LLM] need LM Studio (or any OpenAI-compatible server) at `localhost:1234`. Set `INPUTLAYER_URL`, `INPUTLAYER_USER`, `INPUTLAYER_PASSWORD` to override server defaults.
 

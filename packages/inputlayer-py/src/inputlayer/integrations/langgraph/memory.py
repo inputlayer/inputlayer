@@ -345,6 +345,18 @@ class InputLayerMemory(_MemorySyncAndMaintenanceMixin):
                     f"{type(extracted).__name__}. Content: {content[:50]!r}."
                 )
             topics = extracted
+        else:
+            # Passing a bare string like topics="python" would be silently
+            # iterated character-by-character by set(), creating per-letter
+            # topic facts. Catch that here.
+            if not isinstance(topics, list) or any(
+                not isinstance(t, str) for t in topics
+            ):
+                raise TypeError(
+                    f"InputLayerMemory.astore: topics must be a list[str], "
+                    f"got {type(topics).__name__}. "
+                    f'Pass topics=["python", "ml"], not topics="python".'
+                )
 
         if topics:
             results = await asyncio.gather(

@@ -79,6 +79,26 @@ class TestStore:
         assert "custom_topic" in topic_names
         assert "another" in topic_names
 
+    async def test_store_rejects_bare_string_topics(self) -> None:
+        """topics='python' would be iterated as ['p','y','t','h','o','n']."""
+        import pytest
+
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        with pytest.raises(TypeError, match="topics must be a list"):
+            await mem.astore("t", "user", "x", topics="python")  # type: ignore[arg-type]
+        # Nothing should have been inserted as a topic on that turn.
+        assert kg.topics == []
+
+    async def test_store_rejects_non_string_topic_elements(self) -> None:
+        import pytest
+
+        kg = MockMemoryKG()
+        mem = InputLayerMemory(kg=kg)
+        with pytest.raises(TypeError, match="topics must be a list"):
+            await mem.astore("t", "user", "x", topics=["ok", 42])  # type: ignore[list-item]
+        assert kg.topics == []
+
     async def test_store_increments_turn_id(self) -> None:
         kg = MockMemoryKG()
         mem = InputLayerMemory(kg=kg)

@@ -12,6 +12,7 @@ is "what matters for the next response."
 """
 
 import asyncio
+import base64
 
 # ── State ────────────────────────────────────────────────────────────
 from typing import Any, TypedDict
@@ -189,9 +190,40 @@ async def run() -> None:
             step(4, "Response (informed by derived memory)")
             print(f"\n{GREEN}  {result['response'].strip()}{RESET}")
 
-            # ── Step 5: Show what the memory looks like after ─────────────
+            # ── Step 5: Show the proof tree for a derived turn ───────────
 
-            step(5, "Memory state after the interaction")
+            step(5, "Why is this turn relevant? (.why proof tree)")
+            # .why returns the structured derivation chain for each row in
+            # the query. We pick one performance-tagged relevant turn and
+            # print the rules and base facts that produced it. Memory
+            # base64-encodes thread_id and topic before inserting, so the
+            # query has to use the same encoding.
+            def _b64(s: str) -> str:
+                return base64.b64encode(s.encode("utf-8")).decode("ascii").rstrip("=")
+
+            why = await kg._conn.execute(
+                f'.why ?relevant_turn("{_b64("chat-1")}", TurnId, Role, Content, '
+                f'"{_b64("performance")}")'
+            )
+            if why.rows and why.proof_trees:
+                row = why.rows[0]
+                tree = why.proof_trees[0]
+                turn_id = row[0] if row else "?"
+                print(f"\n  {CYAN}relevant_turn{RESET}(thread='chat-1', turn={turn_id}, topic='performance')")
+                for child in tree.get("children", []):
+                    rel = child.get("relation", "?")
+                    print(f"    {DIM}because {rel}(...)  [base fact]{RESET}")
+                print(
+                    f"\n  {DIM}The proof tree is the exact reasoning chain. Paste it "
+                    f"into your LLM prompt or surface it in the UI to show users why "
+                    f"a memory was included.{RESET}"
+                )
+            else:
+                print(f"  {DIM}(no proof trees available - verify .why is enabled){RESET}")
+
+            # ── Step 6: Show what the memory looks like after ─────────────
+
+            step(6, "Memory state after the interaction")
             final_ctx = await memory.arecall("chat-1")
             print(f"  Topics: {', '.join(final_ctx['topics'])}")
             print(f"  Total turns: {len(final_ctx['recent'])}")

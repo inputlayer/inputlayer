@@ -1,21 +1,21 @@
 ---
-title: "Beyond Chat History: Using Rules as Agent Memory"
+title: "Rules as Agent Memory: Derive What Matters From Every Turn"
 date: "2026-04-10"
 category: "Integrations"
-excerpt: "Every conversation accumulates history. The real challenge is knowing which parts of that history matter for the next response. Rules give your agent memory that reasons about relevance instead of relying on recency alone."
+excerpt: "Chat history tells you what was said. Rules let you derive what it means. A small LangGraph integration turns every conversation turn into a fact and surfaces the semantic connections between them."
 ---
 
-# Beyond Chat History: Using Rules as Agent Memory
+# Rules as Agent Memory: Derive What Matters From Every Turn
 
-You're five turns into a conversation with your agent. You mentioned a constraint back in turn 1, and now in turn 5, you ask something that depends on it. Your agent gives you a generic answer because it has no idea those two turns are connected. You repeat yourself, the interaction drags, and the agent feels like it starts fresh every few messages.
+You're five turns into a conversation with your agent. You mentioned a constraint back in turn 1, and now in turn 5, you ask something that depends on it. Your agent gives you a generic answer because nothing in the graph tells it those two turns are connected. You repeat yourself, the interaction drags, and each response starts from the same blank page.
 
-The problem isn't storing history. It's knowing which parts of that history matter right now. A question in turn 7 might connect back to a constraint you mentioned in turn 1, and the logical relationship between those two turns has nothing to do with recency or word overlap.
+Chat history captures what was said. The part you usually have to bolt on yourself is the semantic layer: which turns belong to which topic, which topics travel together through the conversation, which user question is still open. That layer is a small reasoning problem, and it is exactly the kind of thing rules are good at.
 
-What if your agent could reason about relevance instead of guessing? You store conversation turns as facts, write rules that derive conclusions about which turns connect to which, and query for what's relevant before generating each response. The rules update automatically as new facts arrive, keeping all conclusions current without any manual bookkeeping.
+This post walks through `InputLayerMemory`, a LangGraph component that stores conversation turns as facts and uses rules to derive the context your agent needs for the next reply. You keep the usual history, and you also get a queryable map of what the conversation is about. Rules update automatically as new turns arrive, keeping conclusions current without any manual bookkeeping.
 
 ## The idea: facts + rules = derived memory
 
-[InputLayer](https://github.com/inputlayer/inputlayer) is a reasoning engine. You give it facts, write rules over them, and it keeps all derived conclusions up to date as new facts arrive. When you add a new fact, only the conclusions affected by that fact are recomputed, so updates are fast even as your data grows.
+[InputLayer](https://github.com/inputlayer/inputlayer) is a reasoning engine. You give it facts, write rules over them, and it keeps all derived conclusions up to date as new facts arrive. When you add a new turn, only the conclusions touched by that turn get recomputed, so the semantic layer stays in sync with the conversation instead of being rebuilt from scratch on every reply.
 
 `InputLayerMemory` is a [LangGraph](https://github.com/langchain-ai/langgraph) component that stores conversation turns as **facts** and uses **rules** to derive what's relevant. You drop it into your graph as a node, and it handles the storage and retrieval for you.
 
@@ -134,7 +134,7 @@ relevant_turn("alex-session-42", 3, "user", "Training is slow...", "performance"
 └── because memory_topic("alex-session-42", 3, "performance")
 ```
 
-This is the reasoning chain, a structured explanation of **why** this memory is relevant. You can include this in your LLM's prompt so it has the full reasoning alongside the context. Instead of guessing which earlier messages matter, your agent sees the exact conclusions and the facts that produced them.
+This is the reasoning chain, a structured explanation of **why** this memory is relevant. You can paste the proof tree into the LLM prompt alongside the context, so the model answers with the supporting facts in view. When a user asks "why did you bring that up?", you have a precise answer: here are the rules that fired and the turns they matched.
 
 ## Code: adding memory to a LangGraph agent
 

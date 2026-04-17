@@ -4,7 +4,7 @@ Graph-based agents have a control-flow problem. The moment your agent needs to d
 
 InputLayer's LangGraph integration moves that logic into rules. You store facts, write rules that derive conclusions about what's true, and your graph queries those conclusions to decide where to go next. The graph still runs the steps. The rules decide what the steps mean.
 
-This guide walks through the integration from install to resumable agents with semantic memory. No prior Datalog or IQL experience required.
+This guide walks through the integration from install to resumable agents with semantic memory. Each section builds on the previous one and introduces just enough IQL (InputLayer's query language) to keep going.
 
 ## Prerequisites
 
@@ -302,7 +302,7 @@ checkpointer = InputLayerCheckpointer(kg=kg)
 await checkpointer.setup()  # create relations
 ```
 
-From `SqliteSaver` or `PostgresSaver`: same swap, but also run the one-time data copy below if you want history preserved. The schema is relation-based, so you can replay old checkpoints by inserting into `graph_checkpoint` and `graph_write` directly. Most teams start fresh: point the new checkpointer at a clean KG and let it accumulate new history as agents run. Old checkpoints stay in the old store until you drop it.
+From `SqliteSaver` or `PostgresSaver`: same swap. If you want to preserve history, the schema is relation-based, so you can replay old checkpoints by inserting into `graph_checkpoint` and `graph_write` directly. A lighter option is to point the new checkpointer at a clean KG and let it accumulate fresh history as agents run. Old checkpoints stay in the old store until you drop it.
 
 ### Concurrency
 
