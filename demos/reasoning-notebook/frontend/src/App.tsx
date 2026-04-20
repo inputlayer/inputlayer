@@ -9,8 +9,11 @@ import {
 } from "./api";
 import { Editor } from "./components/Editor";
 import { ExtractionPanel } from "./components/ExtractionPanel";
+import { GraphView } from "./components/GraphView";
 import { Sidebar } from "./components/Sidebar";
 import type { Note } from "./types";
+
+type View = "editor" | "graph";
 
 export function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -18,6 +21,7 @@ export function App() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [saveCount, setSaveCount] = useState(0);
+  const [view, setView] = useState<View>("editor");
 
   useEffect(() => {
     fetchHealth()
@@ -40,6 +44,7 @@ export function App() {
     const note = await createNote("Untitled");
     setNotes((prev) => [note, ...prev]);
     setActiveId(note.id);
+    setView("editor");
   };
 
   const handleDelete = async (id: string) => {
@@ -61,36 +66,74 @@ export function App() {
     []
   );
 
+  const handleSelectFromGraph = (noteId: string) => {
+    setActiveId(noteId);
+    setView("editor");
+  };
+
   const activeNote = notes.find((n) => n.id === activeId) ?? null;
 
   return (
     <div style={styles.container}>
       <header style={styles.header}>
         <h1 style={styles.title}>Reasoning Notebook</h1>
+        <div style={styles.tabs}>
+          <button
+            style={{
+              ...styles.tab,
+              ...(view === "editor" ? styles.tabActive : {}),
+            }}
+            onClick={() => setView("editor")}
+          >
+            Editor
+          </button>
+          <button
+            style={{
+              ...styles.tab,
+              ...(view === "graph" ? styles.tabActive : {}),
+            }}
+            onClick={() => setView("graph")}
+          >
+            Graph
+          </button>
+        </div>
         <StatusBadge health={health} error={error} />
       </header>
       <div style={styles.body}>
-        <Sidebar
-          notes={notes}
-          activeId={activeId}
-          onSelect={setActiveId}
-          onCreate={handleCreate}
-          onDelete={handleDelete}
-        />
-        <main style={styles.main}>
-          {activeNote ? (
-            <div style={{ display: "flex", flexDirection: "column", flex: 1, height: "100%" }}>
-              <Editor note={activeNote} onSave={handleSave} />
-              <ExtractionPanel noteId={activeNote.id} refreshKey={saveCount} />
-            </div>
-          ) : (
-            <p style={styles.placeholder}>
-              {notes.length === 0
-                ? "Create a note to get started"
-                : "Select a note from the sidebar"}
-            </p>
-          )}
-        </main>
+        {view === "editor" && (
+          <>
+            <Sidebar
+              notes={notes}
+              activeId={activeId}
+              onSelect={setActiveId}
+              onCreate={handleCreate}
+              onDelete={handleDelete}
+            />
+            <main style={styles.main}>
+              {activeNote ? (
+                <div style={styles.editorContainer}>
+                  <Editor note={activeNote} onSave={handleSave} />
+                  <ExtractionPanel
+                    noteId={activeNote.id}
+                    refreshKey={saveCount}
+                  />
+                </div>
+              ) : (
+                <p style={styles.placeholder}>
+                  {notes.length === 0
+                    ? "Create a note to get started"
+                    : "Select a note from the sidebar"}
+                </p>
+              )}
+            </main>
+          </>
+        )}
+        {view === "graph" && (
+          <GraphView
+            refreshKey={saveCount}
+            onSelectNote={handleSelectFromGraph}
+          />
+        )}
       </div>
     </div>
   );
@@ -141,15 +184,38 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: "12px 24px",
+    padding: "10px 24px",
     borderBottom: "1px solid rgba(255,255,255,0.06)",
     background: "#11111b",
     flexShrink: 0,
+    gap: 16,
   },
   title: {
     fontSize: 16,
     fontWeight: 600,
     letterSpacing: -0.3,
+  },
+  tabs: {
+    display: "flex",
+    gap: 2,
+    background: "rgba(255,255,255,0.04)",
+    borderRadius: 8,
+    padding: 2,
+  },
+  tab: {
+    background: "none",
+    border: "none",
+    color: "#6c7086",
+    fontSize: 12,
+    fontWeight: 500,
+    padding: "6px 16px",
+    borderRadius: 6,
+    cursor: "pointer",
+    transition: "all 0.15s",
+  },
+  tabActive: {
+    background: "rgba(137,180,250,0.12)",
+    color: "#89b4fa",
   },
   badge: {
     fontSize: 11,
@@ -157,6 +223,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "4px 12px",
     borderRadius: 6,
     letterSpacing: 0.3,
+    flexShrink: 0,
   },
   body: {
     flex: 1,
@@ -170,6 +237,12 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "center",
     background: "#1e1e2e",
+  },
+  editorContainer: {
+    display: "flex",
+    flexDirection: "column" as const,
+    flex: 1,
+    height: "100%",
   },
   placeholder: {
     color: "#6c7086",

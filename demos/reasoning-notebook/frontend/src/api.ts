@@ -87,3 +87,26 @@ export async function fetchNoteEntities(id: string): Promise<NoteEntities> {
   if (!res.ok) throw new Error(`Failed to fetch entities: ${res.status}`);
   return res.json();
 }
+
+export interface GraphData {
+  nodes: Array<{
+    id: string;
+    name: string;
+    kind: string;
+    description: string;
+    source_note_id: string;
+  }>;
+  edges: Array<{
+    id: string;
+    subject: string;
+    predicate: string;
+    object: string;
+    source_note_id: string;
+  }>;
+}
+
+export async function fetchGraph(): Promise<GraphData> {
+  const res = await fetch(`${BASE}/graph`);
+  if (!res.ok) throw new Error(`Failed to fetch graph: ${res.status}`);
+  return res.json();
+}
