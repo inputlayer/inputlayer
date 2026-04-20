@@ -72,6 +72,13 @@ class InputLayerVectorStore(VectorStore):
         on the provider itself, e.g.
         ``OpenAIEmbeddings(timeout=30, max_retries=2)``.
 
+    .. note::
+
+        ``add_texts`` validates that ``texts``, ``metadatas``, and ``ids``
+        all have the same length and raises ``ValueError`` up front.
+        Previously a mismatch would surface as an opaque ``zip`` error
+        deep inside the embedding call.
+
     Usage::
 
         class Chunk(Relation):
@@ -459,13 +466,14 @@ class InputLayerVectorStore(VectorStore):
             ),
         )
 
-        # Find the vector column index in the result.
-        vec_col_idx = None
-        for i, c in enumerate(result.columns):
-            if c.lower() == self._vector_field.lower():
-                vec_col_idx = i
-                break
-
+        vec_col_idx = next(
+            (
+                i
+                for i, c in enumerate(result.columns)
+                if c.lower() == self._vector_field.lower()
+            ),
+            None,
+        )
         if vec_col_idx is None:
             raise ValueError(
                 f"Could not find vector column {self._vector_field!r} in "
@@ -478,7 +486,7 @@ class InputLayerVectorStore(VectorStore):
         out: list[tuple[Document, float, list[float]]] = []
         docs_and_scores = self._rows_to_documents(result.columns, result.rows)
         for (doc, score), row in zip(docs_and_scores, result.rows, strict=True):
-            raw = row[vec_col_idx] if vec_col_idx is not None else None
+            raw = row[vec_col_idx]
             vec = list(raw) if raw is not None else []
             out.append((doc, score, vec))
         return out

@@ -1740,7 +1740,7 @@ class TestDebugResultDeprecation:
 
         dr = DebugResult(iql="?test(X)", plan="plan text")
         with pytest.raises(AttributeError, match="no_such_field"):
-            dr.no_such_field
+            _ = dr.no_such_field
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1784,6 +1784,30 @@ class TestErrorResponseHandling:
         result = await tool.ainvoke("?bad(X)")
         assert "Error:" in result
         assert "unknown error" in result
+
+    async def test_iql_tool_handles_none_error_cell(self) -> None:
+        """An error envelope carrying a None cell should not crash."""
+        kg = _mock_kg(columns=["error"], rows=[[None]])
+        tool = InputLayerIQLTool(kg=kg)
+        result = await tool.ainvoke("?bad(X)")
+        assert "Error:" in result
+        assert "unknown error" in result
+
+    async def test_structured_tool_handles_empty_error_row(self) -> None:
+        """Structured tool path must guard the same edge as the IQL tool."""
+        kg = _mock_kg(columns=["error"], rows=[[]])
+        tool = tools_from_relations(kg, [_Employee])[0]
+        out = await tool.ainvoke({"department": "eng"})
+        payload = json.loads(out)
+        assert payload == {"error": "unknown error"}
+
+    async def test_structured_tool_handles_no_rows_error(self) -> None:
+        """Error response with an empty rows list must not crash."""
+        kg = _mock_kg(columns=["error"], rows=[])
+        tool = tools_from_relations(kg, [_Employee])[0]
+        out = await tool.ainvoke({"department": "eng"})
+        payload = json.loads(out)
+        assert payload == {"error": "unknown error"}
 
 
 class TestNoneAndEdgeValues:
@@ -1857,9 +1881,9 @@ class TestMetadataValidation:
             )
 
 
-def _make_vector_relation():
+def _make_vector_relation() -> type[Relation]:
     """Create a minimal Relation with a vector column for testing."""
-    from inputlayer import Relation, Vector
+    from inputlayer import Vector  # noqa: F401  # used in forward annotation
 
     class TestDoc(Relation):
         __relation_name__ = "test_doc"
