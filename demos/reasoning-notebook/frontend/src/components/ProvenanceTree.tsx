@@ -61,13 +61,22 @@ function TreeNode({
   const conclusion = `${node.conclusion.pred}(${node.conclusion.args.join(", ")})`;
 
   const kindColor =
-    node.kind === "base_fact"
+    node.kind === "fact" || node.kind === "base_fact"
       ? "#a6e3a1"
-      : node.kind === "rule_application"
+      : node.kind === "rule" || node.kind === "rule_application"
         ? "#89b4fa"
         : node.kind === "aggregate"
           ? "#f9e2af"
-          : "#cba6f7";
+          : node.kind === "negation"
+            ? "#f38ba8"
+            : "#cba6f7";
+
+  const kindLabel =
+    node.kind === "fact" && node.source === "edb"
+      ? "base fact"
+      : node.kind === "fact"
+        ? "derived"
+        : node.kind.replace("_", " ");
 
   return (
     <div style={{ marginLeft: depth * 20 }}>
@@ -80,7 +89,7 @@ function TreeNode({
         )}
         {!hasChildren && <span style={styles.toggleSpacer} />}
         <span style={{ ...styles.kindBadge, color: kindColor, borderColor: `${kindColor}33` }}>
-          {node.kind.replace("_", " ")}
+          {kindLabel}
         </span>
         <code style={styles.conclusion}>{conclusion}</code>
       </div>

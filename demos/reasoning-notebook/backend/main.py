@@ -312,12 +312,28 @@ def _proof_tree_to_dict(tree) -> dict[str, Any]:
         nodes[nid] = {
             "kind": node.kind,
             "conclusion": {"pred": node.conclusion.pred, "args": node.conclusion.args},
-            "children": node.children,
+            "children": node.children or [],
             "source": node.source,
             "rule_id": node.rule_id,
             "bindings": node.bindings,
         }
     return {"roots": tree.roots, "nodes": nodes, "query": tree.query}
+
+
+def _raw_tree_to_dict(tree: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a raw wire-format proof tree dict."""
+    nodes = {}
+    for nid, node in tree.get("nodes", {}).items():
+        conc = node.get("conclusion", {})
+        nodes[nid] = {
+            "kind": node.get("kind", "unknown"),
+            "conclusion": {"pred": conc.get("pred", ""), "args": conc.get("args", [])},
+            "children": node.get("children", []),
+            "source": node.get("source"),
+            "rule_id": node.get("rule_id"),
+            "bindings": node.get("bindings"),
+        }
+    return {"roots": tree.get("roots", []), "nodes": nodes, "query": tree.get("query")}
 
 
 @app.post("/why")
@@ -328,7 +344,8 @@ async def why_endpoint(request: Request):
     if not query:
         raise HTTPException(status_code=400, detail="query is required")
 
-    result = await kg.execute(f".why {query}")
+    # Use _execute() to get the raw ResultResponse which includes proof_trees
+    result = await kg._execute(f".why {query}")
     raw_trees = getattr(result, "proof_trees", None) or []
 
     from inputlayer.knowledge_graph import ProofTree
@@ -336,7 +353,7 @@ async def why_endpoint(request: Request):
     trees = []
     for t in raw_trees:
         if isinstance(t, dict):
-            trees.append(t)
+            trees.append(_raw_tree_to_dict(t))
         elif isinstance(t, ProofTree):
             trees.append(_proof_tree_to_dict(t))
 
@@ -355,7 +372,7 @@ async def why_not_endpoint(request: Request):
     if not query:
         raise HTTPException(status_code=400, detail="query is required")
 
-    result = await kg.execute(f".why_not {query}")
+    result = await kg._execute(f".why_not {query}")
     text = "\n".join(str(row[0]) for row in (result.rows or []))
     raw_trees = getattr(result, "proof_trees", None) or []
 
