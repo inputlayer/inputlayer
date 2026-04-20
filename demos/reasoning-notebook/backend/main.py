@@ -300,3 +300,73 @@ async def chat_endpoint(body: ChatRequest, request: Request) -> ChatResponse:
     kg = await get_kg(request)
     reply = await chat_fn(kg, body.message, body.history)
     return ChatResponse(reply=reply)
+
+
+# ── Provenance ─────────────────────────────────────────────────────
+
+
+def _proof_tree_to_dict(tree) -> dict[str, Any]:
+    """Serialize a ProofTree to a JSON-safe dict."""
+    nodes = {}
+    for nid, node in tree.nodes.items():
+        nodes[nid] = {
+            "kind": node.kind,
+            "conclusion": {"pred": node.conclusion.pred, "args": node.conclusion.args},
+            "children": node.children,
+            "source": node.source,
+            "rule_id": node.rule_id,
+            "bindings": node.bindings,
+        }
+    return {"roots": tree.roots, "nodes": nodes, "query": tree.query}
+
+
+@app.post("/why")
+async def why_endpoint(request: Request):
+    body = await request.json()
+    kg = await get_kg(request)
+    query = body.get("query", "")
+    if not query:
+        raise HTTPException(status_code=400, detail="query is required")
+
+    result = await kg.execute(f".why {query}")
+    raw_trees = getattr(result, "proof_trees", None) or []
+
+    from inputlayer.knowledge_graph import ProofTree
+
+    trees = []
+    for t in raw_trees:
+        if isinstance(t, dict):
+            trees.append(t)
+        elif isinstance(t, ProofTree):
+            trees.append(_proof_tree_to_dict(t))
+
+    return {
+        "columns": result.columns,
+        "rows": result.rows or [],
+        "proof_trees": trees,
+    }
+
+
+@app.post("/why_not")
+async def why_not_endpoint(request: Request):
+    body = await request.json()
+    kg = await get_kg(request)
+    query = body.get("query", "")
+    if not query:
+        raise HTTPException(status_code=400, detail="query is required")
+
+    result = await kg.execute(f".why_not {query}")
+    text = "\n".join(str(row[0]) for row in (result.rows or []))
+    raw_trees = getattr(result, "proof_trees", None) or []
+
+    from inputlayer.knowledge_graph import ProofTree
+
+    tree = None
+    if raw_trees:
+        t = raw_trees[0]
+        if isinstance(t, dict):
+            tree = t
+        elif isinstance(t, ProofTree):
+            tree = _proof_tree_to_dict(t)
+
+    return {"text": text, "proof_tree": tree}

@@ -131,6 +131,41 @@ export interface ChatMessage {
   content: string;
 }
 
+// ── Provenance ──
+
+export interface ProofNode {
+  kind: string;
+  conclusion: { pred: string; args: string[] };
+  children: string[];
+  source: string | null;
+  rule_id: string | null;
+  bindings: Record<string, string> | null;
+}
+
+export interface ProofTreeData {
+  roots: string[];
+  nodes: Record<string, ProofNode>;
+  query: string | null;
+}
+
+export interface WhyResponse {
+  columns: string[];
+  rows: string[][];
+  proof_trees: ProofTreeData[];
+}
+
+export async function fetchWhy(query: string): Promise<WhyResponse> {
+  const res = await fetch(`${BASE}/why`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+  if (!res.ok) throw new Error(`Why query failed: ${res.status}`);
+  return res.json();
+}
+
+// ── Chat ──
+
 export async function sendChat(
   message: string,
   history: ChatMessage[]

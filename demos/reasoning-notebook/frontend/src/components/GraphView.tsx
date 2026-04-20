@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
-import { consolidateOntology, fetchGraph, type GraphData } from "../api";
+import {
+  consolidateOntology,
+  fetchGraph,
+  fetchWhy,
+  type GraphData,
+  type ProofTreeData,
+} from "../api";
+import { ProvenanceTree } from "./ProvenanceTree";
 import type { Note } from "../types";
 
 interface GraphViewProps {
@@ -30,6 +37,7 @@ export function GraphView({ refreshKey, notes, onSelectNote }: GraphViewProps) {
   const [raw, setRaw] = useState<GraphData | null>(null);
   const [hovered, setHovered] = useState<GNode | null>(null);
   const [selected, setSelected] = useState<GNode | null>(null);
+  const [proofTree, setProofTree] = useState<ProofTreeData | null>(null);
   const [consolidating, setConsolidating] = useState(false);
   const [consolidateMsg, setConsolidateMsg] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -269,6 +277,25 @@ export function GraphView({ refreshKey, notes, onSelectNote }: GraphViewProps) {
           <h3 style={styles.detailName}>{selected.name}</h3>
           <p style={styles.detailDesc}>{selected.description}</p>
 
+          <button
+            style={styles.whyBtn}
+            onClick={async () => {
+              try {
+                const name = selected.name.replace(/"/g, '\\"');
+                const res = await fetchWhy(
+                  `?entity("${name}", Kind, Desc, Source)`
+                );
+                if (res.proof_trees.length > 0) {
+                  setProofTree(res.proof_trees[0]);
+                }
+              } catch {
+                /* engine may not support .why on this query */
+              }
+            }}
+          >
+            Why?
+          </button>
+
           {/* Source notes */}
           <div style={styles.detailSection}>
             <div style={styles.detailSectionTitle}>Source Notes</div>
@@ -336,6 +363,24 @@ export function GraphView({ refreshKey, notes, onSelectNote }: GraphViewProps) {
                         <span style={styles.relPred}>{rel.predicate}</span>
                       </>
                     )}
+                    <span
+                      style={styles.relWhyLink}
+                      onClick={async () => {
+                        try {
+                          const s = (isOutgoing ? selected.name : srcId).replace(/"/g, '\\"');
+                          const o = (isOutgoing ? tgtId : selected.name).replace(/"/g, '\\"');
+                          const p = rel.predicate.replace(/"/g, '\\"');
+                          const res = await fetchWhy(
+                            `?relationship(Id, "${s}", "${p}", "${o}", Src)`
+                          );
+                          if (res.proof_trees.length > 0) {
+                            setProofTree(res.proof_trees[0]);
+                          }
+                        } catch { /* */ }
+                      }}
+                    >
+                      why?
+                    </span>
                   </div>
                 );
               })}
@@ -367,6 +412,10 @@ export function GraphView({ refreshKey, notes, onSelectNote }: GraphViewProps) {
           </span>
         ))}
       </div>
+
+      {proofTree && (
+        <ProvenanceTree tree={proofTree} onClose={() => setProofTree(null)} />
+      )}
     </div>
   );
 }
@@ -462,6 +511,17 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1.5,
     margin: 0,
   },
+  whyBtn: {
+    background: "rgba(203,166,247,0.12)",
+    color: "#cba6f7",
+    border: "none",
+    borderRadius: 6,
+    padding: "6px 16px",
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: "pointer",
+    alignSelf: "flex-start" as const,
+  },
   detailSection: {
     paddingTop: 8,
     borderTop: "1px solid rgba(255,255,255,0.06)",
@@ -507,6 +567,13 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#89b4fa",
     cursor: "pointer",
     fontWeight: 500,
+  },
+  relWhyLink: {
+    color: "#cba6f7",
+    fontSize: 10,
+    cursor: "pointer",
+    marginLeft: "auto",
+    opacity: 0.7,
   },
   // ── Toolbar + legend ──
   toolbar: {
