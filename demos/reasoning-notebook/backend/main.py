@@ -224,6 +224,10 @@ async def trigger_extraction(note_id: str, request: Request):
     result = await kg.execute(
         f'?note("{note_id}", Title, Content, CreatedAt, UpdatedAt)'
     )
+    logger.info(
+        "Extract lookup note_id=%s columns=%s rows=%d",
+        note_id, result.columns, len(result.rows or []),
+    )
     if not result.rows or result.columns == ["error"]:
         raise HTTPException(status_code=404, detail="Note not found")
     data = dict(zip(result.columns, result.rows[0], strict=True))
