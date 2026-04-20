@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
 import { consolidateOntology, fetchGraph, type GraphData } from "../api";
+import type { Note } from "../types";
 
 interface GraphViewProps {
   refreshKey: number;
+  notes: Note[];
   onSelectNote: (noteId: string) => void;
 }
 
@@ -24,9 +26,10 @@ type GNode = any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type GLink = any;
 
-export function GraphView({ refreshKey, onSelectNote }: GraphViewProps) {
+export function GraphView({ refreshKey, notes, onSelectNote }: GraphViewProps) {
   const [raw, setRaw] = useState<GraphData | null>(null);
   const [hovered, setHovered] = useState<GNode | null>(null);
+  const [selected, setSelected] = useState<GNode | null>(null);
   const [consolidating, setConsolidating] = useState(false);
   const [consolidateMsg, setConsolidateMsg] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -52,6 +55,8 @@ export function GraphView({ refreshKey, onSelectNote }: GraphViewProps) {
     if (!raw) return { nodes: [], links: [] };
 
     const nameToNode = new Map<string, GNode>();
+    const nameToNoteIds = new Map<string, Set<string>>();
+
     for (const e of raw.nodes) {
       if (!nameToNode.has(e.name)) {
         nameToNode.set(e.name, {
@@ -61,7 +66,15 @@ export function GraphView({ refreshKey, onSelectNote }: GraphViewProps) {
           description: e.description,
           source_note_id: e.source_note_id,
         });
+        nameToNoteIds.set(e.name, new Set([e.source_note_id]));
+      } else {
+        nameToNoteIds.get(e.name)!.add(e.source_note_id);
       }
+    }
+
+    // Attach all source note IDs to each node
+    for (const [name, node] of nameToNode) {
+      node.source_note_ids = Array.from(nameToNoteIds.get(name) ?? []);
     }
 
     const links: GLink[] = [];
@@ -79,34 +92,52 @@ export function GraphView({ refreshKey, onSelectNote }: GraphViewProps) {
     return { nodes: Array.from(nameToNode.values()), links };
   }, [raw]);
 
+  // Compute relationships for selected node
+  const selectedRelationships = useMemo(() => {
+    if (!selected) return [];
+    return graphData.links.filter((l: GLink) => {
+      const srcId = typeof l.source === "string" ? l.source : l.source?.id;
+      const tgtId = typeof l.target === "string" ? l.target : l.target?.id;
+      return srcId === selected.id || tgtId === selected.id;
+    });
+  }, [selected, graphData.links]);
+
+  const noteTitle = (noteId: string) => {
+    const note = notes.find((n) => n.id === noteId);
+    return note?.title ?? noteId.slice(0, 8);
+  };
+
   const nodeCanvasObject = useCallback(
     (node: GNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
       const label = node.name;
       const fontSize = 12 / globalScale;
       const color = KIND_COLORS[node.kind] ?? DEFAULT_COLOR;
       const isHovered = hovered?.id === node.id;
-      const radius = isHovered ? 7 / globalScale : 5 / globalScale;
+      const isSelected = selected?.id === node.id;
+      const radius = (isHovered || isSelected) ? 7 / globalScale : 5 / globalScale;
 
-      // Node circle
       ctx.beginPath();
       ctx.arc(node.x!, node.y!, radius, 0, 2 * Math.PI);
       ctx.fillStyle = color;
       ctx.fill();
 
-      if (isHovered) {
+      if (isSelected) {
+        ctx.strokeStyle = "rgba(255,255,255,0.7)";
+        ctx.lineWidth = 2 / globalScale;
+        ctx.stroke();
+      } else if (isHovered) {
         ctx.strokeStyle = "rgba(255,255,255,0.4)";
         ctx.lineWidth = 1.5 / globalScale;
         ctx.stroke();
       }
 
-      // Label
       ctx.font = `${fontSize}px -apple-system, system-ui, sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       ctx.fillStyle = "rgba(205,214,244,0.85)";
       ctx.fillText(label, node.x!, node.y! + radius + 2 / globalScale);
     },
-    [hovered]
+    [hovered, selected]
   );
 
   const linkCanvasObject = useCallback(
@@ -115,25 +146,27 @@ export function GraphView({ refreshKey, onSelectNote }: GraphViewProps) {
       const tgt = link.target as GNode;
       if (!src.x || !tgt.x) return;
 
-      // Line
+      const srcId = typeof link.source === "string" ? link.source : link.source?.id;
+      const tgtId = typeof link.target === "string" ? link.target : link.target?.id;
+      const isHighlighted = selected && (srcId === selected.id || tgtId === selected.id);
+
       ctx.beginPath();
       ctx.moveTo(src.x, src.y!);
       ctx.lineTo(tgt.x, tgt.y!);
-      ctx.strokeStyle = "rgba(108,112,134,0.35)";
-      ctx.lineWidth = 1 / globalScale;
+      ctx.strokeStyle = isHighlighted ? "rgba(166,227,161,0.6)" : "rgba(108,112,134,0.35)";
+      ctx.lineWidth = (isHighlighted ? 2 : 1) / globalScale;
       ctx.stroke();
 
-      // Label
       const midX = (src.x + tgt.x) / 2;
       const midY = (src.y! + tgt.y!) / 2;
       const fontSize = 9 / globalScale;
       ctx.font = `${fontSize}px -apple-system, system-ui, sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillStyle = "rgba(166,227,161,0.6)";
+      ctx.fillStyle = isHighlighted ? "rgba(166,227,161,0.9)" : "rgba(166,227,161,0.6)";
       ctx.fillText(link.predicate, midX, midY);
     },
-    []
+    [selected]
   );
 
   const handleConsolidate = async () => {
@@ -183,16 +216,14 @@ export function GraphView({ refreshKey, onSelectNote }: GraphViewProps) {
     <div ref={containerRef} style={styles.container}>
       <ForceGraph2D
         ref={fgRef}
-        width={dimensions.width}
+        width={dimensions.width - (selected ? 300 : 0)}
         height={dimensions.height}
         graphData={graphData}
         nodeCanvasObject={nodeCanvasObject}
         linkCanvasObject={linkCanvasObject}
         onNodeHover={(node) => setHovered(node as GNode | null)}
-        onNodeClick={(node) => {
-          const n = node as GNode;
-          if (n.source_note_id) onSelectNote(n.source_note_id);
-        }}
+        onNodeClick={(node) => setSelected(node as GNode)}
+        onBackgroundClick={() => setSelected(null)}
         backgroundColor="#1e1e2e"
         linkDirectionalArrowLength={4}
         linkDirectionalArrowRelPos={0.8}
@@ -205,24 +236,128 @@ export function GraphView({ refreshKey, onSelectNote }: GraphViewProps) {
           ctx.fill();
         }}
       />
-      {hovered && (
+
+      {/* Hover tooltip (only when no selection panel) */}
+      {hovered && !selected && (
         <div style={styles.tooltip}>
-          <div style={styles.tooltipKind}>
-            {hovered.kind}
-          </div>
+          <div style={styles.tooltipKind}>{hovered.kind}</div>
           <div style={styles.tooltipName}>{hovered.name}</div>
           <div style={styles.tooltipDesc}>{hovered.description}</div>
         </div>
       )}
+
+      {/* Node detail panel */}
+      {selected && (
+        <div style={styles.detailPanel}>
+          <div style={styles.detailHeader}>
+            <div>
+              <span
+                style={{
+                  ...styles.detailKindBadge,
+                  background: `${KIND_COLORS[selected.kind] ?? DEFAULT_COLOR}20`,
+                  color: KIND_COLORS[selected.kind] ?? DEFAULT_COLOR,
+                }}
+              >
+                {selected.kind}
+              </span>
+            </div>
+            <button style={styles.closeBtn} onClick={() => setSelected(null)}>
+              &times;
+            </button>
+          </div>
+
+          <h3 style={styles.detailName}>{selected.name}</h3>
+          <p style={styles.detailDesc}>{selected.description}</p>
+
+          {/* Source notes */}
+          <div style={styles.detailSection}>
+            <div style={styles.detailSectionTitle}>Source Notes</div>
+            {(selected.source_note_ids ?? [selected.source_note_id]).map(
+              (nid: string) => (
+                <button
+                  key={nid}
+                  style={styles.noteLink}
+                  onClick={() => onSelectNote(nid)}
+                >
+                  {noteTitle(nid)}
+                </button>
+              )
+            )}
+          </div>
+
+          {/* Relationships */}
+          {selectedRelationships.length > 0 && (
+            <div style={styles.detailSection}>
+              <div style={styles.detailSectionTitle}>
+                Relationships ({selectedRelationships.length})
+              </div>
+              {selectedRelationships.map((rel: GLink, i: number) => {
+                const srcId =
+                  typeof rel.source === "string"
+                    ? rel.source
+                    : rel.source?.id;
+                const tgtId =
+                  typeof rel.target === "string"
+                    ? rel.target
+                    : rel.target?.id;
+                const isOutgoing = srcId === selected.id;
+                return (
+                  <div key={i} style={styles.relRow}>
+                    {isOutgoing ? (
+                      <>
+                        <span style={styles.relPred}>{rel.predicate}</span>
+                        <span style={styles.relArrow}>&rarr;</span>
+                        <span
+                          style={styles.relTarget}
+                          onClick={() => {
+                            const node = graphData.nodes.find(
+                              (n: GNode) => n.id === tgtId
+                            );
+                            if (node) setSelected(node);
+                          }}
+                        >
+                          {tgtId}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span
+                          style={styles.relTarget}
+                          onClick={() => {
+                            const node = graphData.nodes.find(
+                              (n: GNode) => n.id === srcId
+                            );
+                            if (node) setSelected(node);
+                          }}
+                        >
+                          {srcId}
+                        </span>
+                        <span style={styles.relArrow}>&rarr;</span>
+                        <span style={styles.relPred}>{rel.predicate}</span>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       <div style={styles.toolbar}>
         <button
-          style={{ ...styles.consolidateBtn, opacity: consolidating ? 0.5 : 1 }}
+          style={{
+            ...styles.consolidateBtn,
+            opacity: consolidating ? 0.5 : 1,
+          }}
           onClick={handleConsolidate}
           disabled={consolidating}
         >
           {consolidating ? "Consolidating..." : "Consolidate Ontology"}
         </button>
-        {consolidateMsg && <span style={styles.consolidateMsg}>{consolidateMsg}</span>}
+        {consolidateMsg && (
+          <span style={styles.consolidateMsg}>{consolidateMsg}</span>
+        )}
       </div>
       <div style={styles.legend}>
         {Object.entries(KIND_COLORS).map(([kind, color]) => (
@@ -242,6 +377,7 @@ const styles: Record<string, React.CSSProperties> = {
     position: "relative" as const,
     overflow: "hidden",
     background: "#1e1e2e",
+    display: "flex",
   },
   empty: {
     flex: 1,
@@ -280,6 +416,99 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#a6adc8",
     lineHeight: 1.4,
   },
+  // ── Detail panel ──
+  detailPanel: {
+    width: 300,
+    flexShrink: 0,
+    background: "#181825",
+    borderLeft: "1px solid rgba(255,255,255,0.06)",
+    padding: "16px 20px",
+    overflowY: "auto" as const,
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 12,
+  },
+  detailHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+  },
+  detailKindBadge: {
+    fontSize: 10,
+    fontWeight: 600,
+    textTransform: "uppercase" as const,
+    letterSpacing: 1,
+    padding: "3px 10px",
+    borderRadius: 5,
+  },
+  closeBtn: {
+    background: "none",
+    border: "none",
+    color: "#6c7086",
+    fontSize: 20,
+    cursor: "pointer",
+    padding: "0 4px",
+    lineHeight: 1,
+  },
+  detailName: {
+    fontSize: 20,
+    fontWeight: 700,
+    color: "#cdd6f4",
+    margin: 0,
+  },
+  detailDesc: {
+    fontSize: 13,
+    color: "#a6adc8",
+    lineHeight: 1.5,
+    margin: 0,
+  },
+  detailSection: {
+    paddingTop: 8,
+    borderTop: "1px solid rgba(255,255,255,0.06)",
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 6,
+  },
+  detailSectionTitle: {
+    fontSize: 10,
+    fontWeight: 600,
+    textTransform: "uppercase" as const,
+    letterSpacing: 1,
+    color: "#6c7086",
+    marginBottom: 2,
+  },
+  noteLink: {
+    background: "rgba(137,180,250,0.08)",
+    border: "1px solid rgba(137,180,250,0.15)",
+    borderRadius: 6,
+    padding: "6px 12px",
+    color: "#89b4fa",
+    fontSize: 12,
+    fontWeight: 500,
+    cursor: "pointer",
+    textAlign: "left" as const,
+  },
+  relRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 12,
+    color: "#a6adc8",
+  },
+  relPred: {
+    color: "#a6e3a1",
+    fontStyle: "italic" as const,
+  },
+  relArrow: {
+    color: "#6c7086",
+    fontSize: 11,
+  },
+  relTarget: {
+    color: "#89b4fa",
+    cursor: "pointer",
+    fontWeight: 500,
+  },
+  // ── Toolbar + legend ──
   toolbar: {
     position: "absolute" as const,
     top: 16,
@@ -309,7 +538,7 @@ const styles: Record<string, React.CSSProperties> = {
   legend: {
     position: "absolute" as const,
     bottom: 16,
-    right: 16,
+    left: 16,
     display: "flex",
     gap: 12,
     background: "rgba(24,24,37,0.9)",

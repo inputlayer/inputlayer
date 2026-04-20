@@ -141,6 +141,7 @@ export function App() {
         {view === "graph" && (
           <GraphView
             refreshKey={saveCount}
+            notes={notes}
             onSelectNote={handleSelectFromGraph}
           />
         )}
