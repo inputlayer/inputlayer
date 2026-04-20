@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.pyc
+data/
+.inputlayer-credentials.toml
+*.tsbuildinfo
+bun.lock
+uv.lock
+.env
