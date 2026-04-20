@@ -283,7 +283,7 @@ export function GraphView({ refreshKey, notes, onSelectNote }: GraphViewProps) {
               try {
                 const name = selected.name.replace(/"/g, '\\"');
                 const res = await fetchWhy(
-                  `?entity("${name}", Kind, Desc, Source)`
+                  `?entity(Id, "${name}", Kind, Desc, Source)`
                 );
                 if (res.proof_trees.length > 0) {
                   setProofTree(res.proof_trees[0]);
