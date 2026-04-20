@@ -19,9 +19,10 @@ from config import (
     INPUTLAYER_USER,
     KG_NAME,
 )
+from chat import chat as chat_fn
 from extraction import Entity, Relationship, extract_from_note
 from ontology import consolidate_ontology
-from schemas import NoteCreate, NoteResponse, NoteUpdate
+from schemas import ChatRequest, ChatResponse, NoteCreate, NoteResponse, NoteUpdate
 
 logger = logging.getLogger("reasoning_notebook")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -289,3 +290,13 @@ async def list_predicates(request: Request):
 async def consolidate(request: Request):
     kg = await get_kg(request)
     return await consolidate_ontology(kg)
+
+
+# ── Chat ───────────────────────────────────────────────────────────
+
+
+@app.post("/chat")
+async def chat_endpoint(body: ChatRequest, request: Request) -> ChatResponse:
+    kg = await get_kg(request)
+    reply = await chat_fn(kg, body.message, body.history)
+    return ChatResponse(reply=reply)

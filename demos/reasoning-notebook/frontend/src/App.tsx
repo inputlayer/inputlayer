@@ -7,13 +7,14 @@ import {
   updateNote,
   type HealthResponse,
 } from "./api";
+import { ChatPanel } from "./components/ChatPanel";
 import { Editor } from "./components/Editor";
 import { ExtractionPanel } from "./components/ExtractionPanel";
 import { GraphView } from "./components/GraphView";
 import { Sidebar } from "./components/Sidebar";
 import type { Note } from "./types";
 
-type View = "editor" | "graph";
+type View = "editor" | "graph" | "chat";
 
 export function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -96,6 +97,15 @@ export function App() {
           >
             Graph
           </button>
+          <button
+            style={{
+              ...styles.tab,
+              ...(view === "chat" ? styles.tabActive : {}),
+            }}
+            onClick={() => setView("chat")}
+          >
+            Chat
+          </button>
         </div>
         <StatusBadge health={health} error={error} />
       </header>
@@ -134,6 +144,7 @@ export function App() {
             onSelectNote={handleSelectFromGraph}
           />
         )}
+        {view === "chat" && <ChatPanel />}
       </div>
     </div>
   );

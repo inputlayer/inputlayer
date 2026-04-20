@@ -125,3 +125,22 @@ export async function consolidateOntology(): Promise<ConsolidationResult> {
   if (!res.ok) throw new Error(`Consolidation failed: ${res.status}`);
   return res.json();
 }
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export async function sendChat(
+  message: string,
+  history: ChatMessage[]
+): Promise<string> {
+  const res = await fetch(`${BASE}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, history }),
+  });
+  if (!res.ok) throw new Error(`Chat failed: ${res.status}`);
+  const data = await res.json();
+  return data.reply;
+}

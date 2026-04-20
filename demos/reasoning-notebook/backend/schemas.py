@@ -19,3 +19,12 @@ class NoteResponse(BaseModel):
     content: str
     created_at: int
     updated_at: int
+
+
+class ChatRequest(BaseModel):
+    message: str
+    history: list[dict[str, str]] = []
+
+
+class ChatResponse(BaseModel):
+    reply: str
