@@ -31,6 +31,28 @@ export function App() {
     loadNotes();
   }, []);
 
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key === "n") {
+        e.preventDefault();
+        handleCreate();
+      } else if (mod && e.key === "k") {
+        e.preventDefault();
+        setView("chat");
+      } else if (mod && e.key === "g") {
+        e.preventDefault();
+        setView("graph");
+      } else if (mod && e.key === "e") {
+        e.preventDefault();
+        setView("editor");
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  });
+
   const loadNotes = async () => {
     try {
       const list = await fetchNotes();
@@ -85,6 +107,7 @@ export function App() {
               ...(view === "editor" ? styles.tabActive : {}),
             }}
             onClick={() => setView("editor")}
+            title="Cmd+E"
           >
             Editor
           </button>
@@ -94,6 +117,7 @@ export function App() {
               ...(view === "graph" ? styles.tabActive : {}),
             }}
             onClick={() => setView("graph")}
+            title="Cmd+G"
           >
             Graph
           </button>
@@ -103,6 +127,7 @@ export function App() {
               ...(view === "chat" ? styles.tabActive : {}),
             }}
             onClick={() => setView("chat")}
+            title="Cmd+K"
           >
             Chat
           </button>
