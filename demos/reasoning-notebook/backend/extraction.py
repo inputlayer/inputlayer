@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from langchain_openai import ChatOpenAI
@@ -91,7 +92,7 @@ EXTRACTION_PROMPT = (
 )
 
 
-async def extract_from_note(kg: Any, note_id: str, title: str, content: str) -> dict[str, int]:
+async def extract_from_note(kg: Any, note_id: str, title: str, content: str) -> dict[str, Any]:
     """Extract entities and relationships from a note and store in the KG.
 
     Returns counts: {"entities": N, "relationships": M}.
@@ -99,16 +100,20 @@ async def extract_from_note(kg: Any, note_id: str, title: str, content: str) -> 
     if not content.strip():
         return {"entities": 0, "relationships": 0}
 
+    # Truncate very long content to avoid exceeding model context limits
+    max_chars = int(os.environ.get("EXTRACTION_MAX_CHARS", "4000"))
+    truncated_content = content[:max_chars]
+
     llm = _get_llm()
     extractor = llm.with_structured_output(Extraction)
 
-    prompt = EXTRACTION_PROMPT.format(title=title, content=content)
+    prompt = EXTRACTION_PROMPT.format(title=title, content=truncated_content)
 
     try:
         result = await extractor.ainvoke(prompt)
-    except Exception:
+    except Exception as exc:
         logger.exception("Extraction failed for note %s", note_id)
-        return {"entities": 0, "relationships": 0}
+        return {"entities": 0, "relationships": 0, "error": str(exc)}
 
     # Retract old extractions for this note
     await kg.execute(

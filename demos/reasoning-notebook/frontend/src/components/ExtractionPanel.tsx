@@ -23,13 +23,17 @@ export function ExtractionPanel({ noteId, refreshKey }: ExtractionPanelProps) {
     setExtracting(true);
     try {
       const result = await extractNote(noteId);
-      setToast(`Extracted ${result.entities} entities, ${result.relationships} relationships`);
+      if (result.error) {
+        setToast(`Extraction error: ${result.error}`);
+      } else {
+        setToast(`Extracted ${result.entities} entities, ${result.relationships} relationships`);
+      }
       const updated = await fetchNoteEntities(noteId);
       setData(updated);
-      setTimeout(() => setToast(null), 4000);
-    } catch {
-      setToast("Extraction failed — check LLM config");
-      setTimeout(() => setToast(null), 4000);
+      setTimeout(() => setToast(null), 6000);
+    } catch (e) {
+      setToast(`Extraction failed: ${e instanceof Error ? e.message : "unknown"}`);
+      setTimeout(() => setToast(null), 6000);
     } finally {
       setExtracting(false);
     }

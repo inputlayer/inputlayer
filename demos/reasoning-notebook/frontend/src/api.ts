@@ -57,6 +57,7 @@ export async function deleteNote(id: string): Promise<void> {
 export interface ExtractionResult {
   entities: number;
   relationships: number;
+  error?: string;
 }
 
 export async function extractNote(id: string): Promise<ExtractionResult> {
