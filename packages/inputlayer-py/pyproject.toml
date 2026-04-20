@@ -62,3 +62,4 @@ warn_return_any = true
 warn_unused_configs = true
 packages = ["inputlayer"]
 mypy_path = "src"
+exclude = ["examples/"]

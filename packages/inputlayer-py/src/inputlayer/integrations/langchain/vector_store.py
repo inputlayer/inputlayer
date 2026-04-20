@@ -72,6 +72,13 @@ class InputLayerVectorStore(VectorStore):
         on the provider itself, e.g.
         ``OpenAIEmbeddings(timeout=30, max_retries=2)``.
 
+    .. note::
+
+        ``add_texts`` validates that ``texts``, ``metadatas``, and ``ids``
+        all have the same length and raises ``ValueError`` up front.
+        Previously a mismatch would surface as an opaque ``zip`` error
+        deep inside the embedding call.
+
     Usage::
 
         class Chunk(Relation):
@@ -189,6 +196,17 @@ class InputLayerVectorStore(VectorStore):
         texts_list = list(texts)
         if not texts_list:
             return []
+
+        if metadatas is not None and len(metadatas) != len(texts_list):
+            raise ValueError(
+                f"Length mismatch: {len(texts_list)} texts but "
+                f"{len(metadatas)} metadata dicts"
+            )
+        if ids is not None and len(ids) != len(texts_list):
+            raise ValueError(
+                f"Length mismatch: {len(texts_list)} texts but "
+                f"{len(ids)} ids"
+            )
 
         vectors = await self._embeddings.aembed_documents(texts_list)
         ids_out = ids or [str(uuid.uuid4()) for _ in texts_list]
@@ -448,13 +466,14 @@ class InputLayerVectorStore(VectorStore):
             ),
         )
 
-        # Find the vector column index in the result.
-        vec_col_idx = None
-        for i, c in enumerate(result.columns):
-            if c.lower() == self._vector_field.lower():
-                vec_col_idx = i
-                break
-
+        vec_col_idx = next(
+            (
+                i
+                for i, c in enumerate(result.columns)
+                if c.lower() == self._vector_field.lower()
+            ),
+            None,
+        )
         if vec_col_idx is None:
             raise ValueError(
                 f"Could not find vector column {self._vector_field!r} in "
@@ -467,7 +486,7 @@ class InputLayerVectorStore(VectorStore):
         out: list[tuple[Document, float, list[float]]] = []
         docs_and_scores = self._rows_to_documents(result.columns, result.rows)
         for (doc, score), row in zip(docs_and_scores, result.rows, strict=True):
-            raw = row[vec_col_idx] if vec_col_idx is not None else None
+            raw = row[vec_col_idx]
             vec = list(raw) if raw is not None else []
             out.append((doc, score, vec))
         return out
@@ -584,7 +603,8 @@ class InputLayerVectorStore(VectorStore):
                 if k.lower() == self._vector_field.lower():
                     continue
                 metadata[canonical(k)] = v
-            score = float(row_dict[score_col]) if score_col else 0.0
+            raw_score = row_dict.get(score_col) if score_col else None
+            score = float(raw_score) if raw_score is not None else 0.0
             out.append((Document(page_content=content, metadata=metadata), score))
         return out
 
