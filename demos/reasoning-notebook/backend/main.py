@@ -286,6 +286,37 @@ async def list_predicates(request: Request):
     return {"predicates": predicates}
 
 
+@app.post("/ontology/cleanup")
+async def cleanup_orphans(request: Request):
+    """Remove entities and relationships whose source note no longer exists."""
+    kg = await get_kg(request)
+    notes = await kg.execute("?note(Id, Title, Content, Ca, Ua)")
+    note_ids = {row[0] for row in (notes.rows or [])}
+
+    removed = 0
+    ents = await kg.execute("?entity(Id, Name, Kind, Desc, Source)")
+    for row in (ents.rows or []):
+        if row[4] not in note_ids:
+            from inputlayer.integrations.langchain.params import iql_literal
+            await kg.execute(
+                f"-entity({iql_literal(row[0])}, {iql_literal(row[1])}, "
+                f"{iql_literal(row[2])}, {iql_literal(row[3])}, {iql_literal(row[4])})"
+            )
+            removed += 1
+
+    rels = await kg.execute("?relationship(Id, Subject, Predicate, Object, Source)")
+    for row in (rels.rows or []):
+        if row[4] not in note_ids:
+            from inputlayer.integrations.langchain.params import iql_literal
+            await kg.execute(
+                f"-relationship({iql_literal(row[0])}, {iql_literal(row[1])}, "
+                f"{iql_literal(row[2])}, {iql_literal(row[3])}, {iql_literal(row[4])})"
+            )
+            removed += 1
+
+    return {"removed": removed}
+
+
 @app.post("/ontology/consolidate")
 async def consolidate(request: Request):
     kg = await get_kg(request)
