@@ -20,6 +20,7 @@ from config import (
     KG_NAME,
 )
 from extraction import Entity, Relationship, extract_from_note
+from ontology import consolidate_ontology
 from schemas import NoteCreate, NoteResponse, NoteUpdate
 
 logger = logging.getLogger("reasoning_notebook")
@@ -258,3 +259,20 @@ async def get_graph(request: Request):
             edges.append(data)
 
     return {"nodes": nodes, "edges": edges}
+
+
+# ── Ontology ───────────────────────────────────────────────────────
+
+
+@app.get("/ontology/predicates")
+async def list_predicates(request: Request):
+    kg = get_kg(request)
+    result = await kg.execute("?relationship(_, _, Predicate, _, _)")
+    predicates = sorted({row[0] for row in (result.rows or [])}) if result.rows else []
+    return {"predicates": predicates}
+
+
+@app.post("/ontology/consolidate")
+async def consolidate(request: Request):
+    kg = get_kg(request)
+    return await consolidate_ontology(kg)

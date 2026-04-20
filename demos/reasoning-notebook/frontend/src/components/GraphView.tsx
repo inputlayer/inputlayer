@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
-import { fetchGraph, type GraphData } from "../api";
+import { consolidateOntology, fetchGraph, type GraphData } from "../api";
 
 interface GraphViewProps {
   refreshKey: number;
@@ -27,6 +27,8 @@ type GLink = any;
 export function GraphView({ refreshKey, onSelectNote }: GraphViewProps) {
   const [raw, setRaw] = useState<GraphData | null>(null);
   const [hovered, setHovered] = useState<GNode | null>(null);
+  const [consolidating, setConsolidating] = useState(false);
+  const [consolidateMsg, setConsolidateMsg] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<ForceGraphMethods | undefined>(undefined);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
@@ -134,6 +136,31 @@ export function GraphView({ refreshKey, onSelectNote }: GraphViewProps) {
     []
   );
 
+  const handleConsolidate = async () => {
+    setConsolidating(true);
+    setConsolidateMsg(null);
+    try {
+      const result = await consolidateOntology();
+      if (result.status === "nothing_to_consolidate") {
+        setConsolidateMsg("Nothing to consolidate");
+      } else if (result.status === "done") {
+        const parts = [];
+        if (result.predicates_renamed) parts.push(`${result.predicates_renamed} predicates renamed`);
+        if (result.entities_renamed) parts.push(`${result.entities_renamed} entities merged`);
+        setConsolidateMsg(parts.length ? parts.join(", ") : "No changes needed");
+        fetchGraph().then(setRaw);
+      } else {
+        setConsolidateMsg(`Status: ${result.status}`);
+      }
+      setTimeout(() => setConsolidateMsg(null), 5000);
+    } catch {
+      setConsolidateMsg("Consolidation failed");
+      setTimeout(() => setConsolidateMsg(null), 5000);
+    } finally {
+      setConsolidating(false);
+    }
+  };
+
   if (!raw) {
     return (
       <div style={styles.empty}>
@@ -187,6 +214,16 @@ export function GraphView({ refreshKey, onSelectNote }: GraphViewProps) {
           <div style={styles.tooltipDesc}>{hovered.description}</div>
         </div>
       )}
+      <div style={styles.toolbar}>
+        <button
+          style={{ ...styles.consolidateBtn, opacity: consolidating ? 0.5 : 1 }}
+          onClick={handleConsolidate}
+          disabled={consolidating}
+        >
+          {consolidating ? "Consolidating..." : "Consolidate Ontology"}
+        </button>
+        {consolidateMsg && <span style={styles.consolidateMsg}>{consolidateMsg}</span>}
+      </div>
       <div style={styles.legend}>
         {Object.entries(KIND_COLORS).map(([kind, color]) => (
           <span key={kind} style={styles.legendItem}>
@@ -242,6 +279,32 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     color: "#a6adc8",
     lineHeight: 1.4,
+  },
+  toolbar: {
+    position: "absolute" as const,
+    top: 16,
+    right: 16,
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    background: "rgba(24,24,37,0.9)",
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 8,
+    padding: "6px 12px",
+  },
+  consolidateBtn: {
+    background: "rgba(249,226,175,0.12)",
+    color: "#f9e2af",
+    border: "none",
+    borderRadius: 6,
+    padding: "5px 14px",
+    fontSize: 11,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  consolidateMsg: {
+    fontSize: 11,
+    color: "#a6e3a1",
   },
   legend: {
     position: "absolute" as const,

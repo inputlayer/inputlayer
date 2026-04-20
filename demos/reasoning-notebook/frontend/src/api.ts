@@ -110,3 +110,17 @@ export async function fetchGraph(): Promise<GraphData> {
   if (!res.ok) throw new Error(`Failed to fetch graph: ${res.status}`);
   return res.json();
 }
+
+export interface ConsolidationResult {
+  status: string;
+  predicate_merges?: Array<{ variants: string[]; canonical: string }>;
+  entity_merges?: Array<{ variants: string[]; canonical: string }>;
+  predicates_renamed?: number;
+  entities_renamed?: number;
+}
+
+export async function consolidateOntology(): Promise<ConsolidationResult> {
+  const res = await fetch(`${BASE}/ontology/consolidate`, { method: "POST" });
+  if (!res.ok) throw new Error(`Consolidation failed: ${res.status}`);
+  return res.json();
+}
