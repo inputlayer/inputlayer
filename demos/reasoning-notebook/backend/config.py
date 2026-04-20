@@ -29,3 +29,7 @@ INPUTLAYER_USER = os.environ.get("INPUTLAYER_USER", "admin")
 INPUTLAYER_PASSWORD = os.environ.get("INPUTLAYER_PASSWORD", _creds.get("admin_password", "admin"))
 KG_NAME = os.environ.get("KG_NAME", "reasoning_notebook")
 FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "http://localhost:5173")
+
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
+LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+LLM_API_KEY = os.environ.get("OPENAI_API_KEY", "lm-studio")

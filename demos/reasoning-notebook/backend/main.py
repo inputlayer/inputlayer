@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+from fastapi import BackgroundTasks
 from inputlayer import InputLayer, Relation
 
 from config import (
@@ -18,6 +19,7 @@ from config import (
     INPUTLAYER_USER,
     KG_NAME,
 )
+from extraction import Entity, Relationship, extract_from_note
 from schemas import NoteCreate, NoteResponse, NoteUpdate
 
 logger = logging.getLogger("reasoning_notebook")
@@ -47,8 +49,8 @@ async def lifespan(app: FastAPI):
     logger.info("Connected to InputLayer at %s", INPUTLAYER_URL)
 
     kg = il.knowledge_graph(KG_NAME)
-    await kg.define(Note)
-    logger.info("Schema deployed: Note")
+    await kg.define(Note, Entity, Relationship)
+    logger.info("Schema deployed: Note, Entity, Relationship")
 
     app.state.il = il
     app.state.kg = kg
@@ -141,7 +143,12 @@ async def get_note(note_id: str, request: Request) -> NoteResponse:
 
 
 @app.put("/notes/{note_id}")
-async def update_note(note_id: str, body: NoteUpdate, request: Request) -> NoteResponse:
+async def update_note(
+    note_id: str,
+    body: NoteUpdate,
+    request: Request,
+    bg: BackgroundTasks,
+) -> NoteResponse:
     kg = get_kg(request)
 
     existing = await kg.execute(
@@ -167,6 +174,9 @@ async def update_note(note_id: str, body: NoteUpdate, request: Request) -> NoteR
         updated_at=now,
     )
     await kg.insert(note)
+
+    bg.add_task(extract_from_note, kg, note_id, new_title, new_content)
+
     return NoteResponse(
         id=note_id,
         title=new_title,
@@ -182,3 +192,69 @@ async def delete_note(note_id: str, request: Request):
     await kg.execute(
         f'-note(Id, T, C, Ca, Ua) <- note(Id, T, C, Ca, Ua), Id = "{note_id}"'
     )
+    await kg.execute(
+        f'-entity(Id, N, K, D, Src) <- entity(Id, N, K, D, Src), Src = "{note_id}"'
+    )
+    await kg.execute(
+        f'-relationship(Id, S, P, O, Src) <- relationship(Id, S, P, O, Src), Src = "{note_id}"'
+    )
+
+
+# ── Extraction ─────────────────────────────────────────────────────
+
+
+@app.post("/notes/{note_id}/extract")
+async def trigger_extraction(note_id: str, request: Request):
+    kg = get_kg(request)
+    result = await kg.execute(
+        f'?note("{note_id}", Title, Content, CreatedAt, UpdatedAt)'
+    )
+    if not result.rows or result.columns == ["error"]:
+        raise HTTPException(status_code=404, detail="Note not found")
+    data = dict(zip(result.columns, result.rows[0], strict=True))
+    counts = await extract_from_note(kg, note_id, data["title"], data["content"])
+    return counts
+
+
+@app.get("/notes/{note_id}/entities")
+async def get_note_entities(note_id: str, request: Request):
+    kg = get_kg(request)
+    entities = await kg.execute(
+        f'?entity(Id, Name, Kind, Desc, "{note_id}")'
+    )
+    relationships = await kg.execute(
+        f'?relationship(Id, Subject, Predicate, Object, "{note_id}")'
+    )
+    return {
+        "entities": [
+            dict(zip(entities.columns, row, strict=True))
+            for row in (entities.rows or [])
+            if entities.columns != ["error"]
+        ],
+        "relationships": [
+            dict(zip(relationships.columns, row, strict=True))
+            for row in (relationships.rows or [])
+            if relationships.columns != ["error"]
+        ],
+    }
+
+
+@app.get("/graph")
+async def get_graph(request: Request):
+    kg = get_kg(request)
+    ent_result = await kg.execute("?entity(Id, Name, Kind, Desc, SourceNoteId)")
+    rel_result = await kg.execute("?relationship(Id, Subject, Predicate, Object, SourceNoteId)")
+
+    nodes = []
+    if ent_result.rows and ent_result.columns != ["error"]:
+        for row in ent_result.rows:
+            data = dict(zip(ent_result.columns, row, strict=True))
+            nodes.append(data)
+
+    edges = []
+    if rel_result.rows and rel_result.columns != ["error"]:
+        for row in rel_result.rows:
+            data = dict(zip(rel_result.columns, row, strict=True))
+            edges.append(data)
+
+    return {"nodes": nodes, "edges": edges}

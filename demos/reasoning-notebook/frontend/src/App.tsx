@@ -8,6 +8,7 @@ import {
   type HealthResponse,
 } from "./api";
 import { Editor } from "./components/Editor";
+import { ExtractionPanel } from "./components/ExtractionPanel";
 import { Sidebar } from "./components/Sidebar";
 import type { Note } from "./types";
 
@@ -16,6 +17,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [saveCount, setSaveCount] = useState(0);
 
   useEffect(() => {
     fetchHealth()
@@ -54,6 +56,7 @@ export function App() {
           .map((n) => (n.id === id ? updated : n))
           .sort((a, b) => b.updated_at - a.updated_at)
       );
+      setSaveCount((c) => c + 1);
     },
     []
   );
@@ -76,7 +79,10 @@ export function App() {
         />
         <main style={styles.main}>
           {activeNote ? (
-            <Editor note={activeNote} onSave={handleSave} />
+            <div style={{ display: "flex", flexDirection: "column", flex: 1, height: "100%" }}>
+              <Editor note={activeNote} onSave={handleSave} />
+              <ExtractionPanel noteId={activeNote.id} refreshKey={saveCount} />
+            </div>
           ) : (
             <p style={styles.placeholder}>
               {notes.length === 0
