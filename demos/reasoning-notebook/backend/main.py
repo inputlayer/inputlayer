@@ -43,8 +43,8 @@ class Note(Relation):
 # ── App setup ──────────────────────────────────────────────────────
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+async def _connect(app: FastAPI) -> None:
+    """Connect to InputLayer and deploy schema. Used at startup and for reconnect."""
     il = InputLayer(INPUTLAYER_URL, username=INPUTLAYER_USER, password=INPUTLAYER_PASSWORD)
     await il.connect()
     logger.info("Connected to InputLayer at %s", INPUTLAYER_URL)
@@ -56,9 +56,12 @@ async def lifespan(app: FastAPI):
     app.state.il = il
     app.state.kg = kg
 
-    yield
 
-    await il.close()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await _connect(app)
+    yield
+    await app.state.il.close()
     logger.info("Disconnected from InputLayer")
 
 
@@ -73,7 +76,17 @@ app.add_middleware(
 )
 
 
-def get_kg(request: Request) -> Any:
+async def get_kg(request: Request) -> Any:
+    """Get the KG handle, reconnecting if the WebSocket dropped."""
+    try:
+        il = request.app.state.il
+        conn = il._conn
+        ws = conn._ws
+        if ws is None or not conn._connected or (hasattr(ws, "close_code") and ws.close_code is not None):
+            raise ConnectionError("stale connection")
+    except (AttributeError, ConnectionError):
+        logger.warning("WebSocket disconnected, reconnecting...")
+        await _connect(request.app)
     return request.app.state.kg
 
 
@@ -82,7 +95,7 @@ def get_kg(request: Request) -> Any:
 
 @app.get("/health")
 async def health(request: Request):
-    kg = get_kg(request)
+    kg = await get_kg(request)
     try:
         result = await kg.execute("?__health(1)")
     except Exception:
@@ -104,7 +117,7 @@ def _row_to_note(columns: list[str], row: list[Any]) -> NoteResponse:
 
 @app.post("/notes", status_code=201)
 async def create_note(body: NoteCreate, request: Request) -> NoteResponse:
-    kg = get_kg(request)
+    kg = await get_kg(request)
     now = int(time.time())
     note = Note(
         id=uuid.uuid4().hex[:12],
@@ -125,7 +138,7 @@ async def create_note(body: NoteCreate, request: Request) -> NoteResponse:
 
 @app.get("/notes")
 async def list_notes(request: Request) -> list[NoteResponse]:
-    kg = get_kg(request)
+    kg = await get_kg(request)
     result = await kg.execute("?note(Id, Title, Content, CreatedAt, UpdatedAt)")
     if not result.rows or result.columns == ["error"]:
         return []
@@ -134,7 +147,7 @@ async def list_notes(request: Request) -> list[NoteResponse]:
 
 @app.get("/notes/{note_id}")
 async def get_note(note_id: str, request: Request) -> NoteResponse:
-    kg = get_kg(request)
+    kg = await get_kg(request)
     result = await kg.execute(
         f'?note("{note_id}", Title, Content, CreatedAt, UpdatedAt)'
     )
@@ -150,7 +163,7 @@ async def update_note(
     request: Request,
     bg: BackgroundTasks,
 ) -> NoteResponse:
-    kg = get_kg(request)
+    kg = await get_kg(request)
 
     existing = await kg.execute(
         f'?note("{note_id}", Title, Content, CreatedAt, UpdatedAt)'
@@ -189,7 +202,7 @@ async def update_note(
 
 @app.delete("/notes/{note_id}", status_code=204)
 async def delete_note(note_id: str, request: Request):
-    kg = get_kg(request)
+    kg = await get_kg(request)
     await kg.execute(
         f'-note(Id, T, C, Ca, Ua) <- note(Id, T, C, Ca, Ua), Id = "{note_id}"'
     )
@@ -206,7 +219,7 @@ async def delete_note(note_id: str, request: Request):
 
 @app.post("/notes/{note_id}/extract")
 async def trigger_extraction(note_id: str, request: Request):
-    kg = get_kg(request)
+    kg = await get_kg(request)
     result = await kg.execute(
         f'?note("{note_id}", Title, Content, CreatedAt, UpdatedAt)'
     )
@@ -219,7 +232,7 @@ async def trigger_extraction(note_id: str, request: Request):
 
 @app.get("/notes/{note_id}/entities")
 async def get_note_entities(note_id: str, request: Request):
-    kg = get_kg(request)
+    kg = await get_kg(request)
     entities = await kg.execute(
         f'?entity(Id, Name, Kind, Desc, "{note_id}")'
     )
@@ -242,7 +255,7 @@ async def get_note_entities(note_id: str, request: Request):
 
 @app.get("/graph")
 async def get_graph(request: Request):
-    kg = get_kg(request)
+    kg = await get_kg(request)
     ent_result = await kg.execute("?entity(Id, Name, Kind, Desc, SourceNoteId)")
     rel_result = await kg.execute("?relationship(Id, Subject, Predicate, Object, SourceNoteId)")
 
@@ -266,7 +279,7 @@ async def get_graph(request: Request):
 
 @app.get("/ontology/predicates")
 async def list_predicates(request: Request):
-    kg = get_kg(request)
+    kg = await get_kg(request)
     result = await kg.execute("?relationship(_, _, Predicate, _, _)")
     predicates = sorted({row[0] for row in (result.rows or [])}) if result.rows else []
     return {"predicates": predicates}
@@ -274,5 +287,5 @@ async def list_predicates(request: Request):
 
 @app.post("/ontology/consolidate")
 async def consolidate(request: Request):
-    kg = get_kg(request)
+    kg = await get_kg(request)
     return await consolidate_ontology(kg)
