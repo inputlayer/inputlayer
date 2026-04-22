@@ -115,26 +115,29 @@ async def extract_from_note(kg: Any, note_id: str, title: str, content: str) -> 
         logger.exception("Extraction failed for note %s", note_id)
         return {"entities": 0, "relationships": 0, "error": str(exc)}
 
-    # Retract old extractions for this note
+    # Retract old TEXT extractions for this note (prefix "t_"), keep image extractions
+    text_prefix = f"t_{note_id}"
     await kg.execute(
-        f'-entity(Id, N, K, D, Src) <- entity(Id, N, K, D, Src), Src = "{note_id}"'
+        f'-entity(Id, N, K, D, Src) <- entity(Id, N, K, D, Src), '
+        f'Src = "{note_id}", starts_with(Id, "{text_prefix}")'
     )
     await kg.execute(
-        f'-relationship(Id, S, P, O, Src) <- relationship(Id, S, P, O, Src), Src = "{note_id}"'
+        f'-relationship(Id, S, P, O, Src) <- relationship(Id, S, P, O, Src), '
+        f'Src = "{note_id}", starts_with(Id, "{text_prefix}")'
     )
 
-    # Insert new entities
+    # Insert new entities with text prefix
     for i, e in enumerate(result.entities):
-        eid = f"{note_id}_e{i}"
+        eid = f"t_{note_id}_e{i}"
         await kg.execute(
             f"+entity({iql_literal(eid)}, {iql_literal(e.name)}, "
             f"{iql_literal(e.kind)}, {iql_literal(e.description)}, "
             f"{iql_literal(note_id)})"
         )
 
-    # Insert new relationships
+    # Insert new relationships with text prefix
     for i, r in enumerate(result.relationships):
-        rid = f"{note_id}_r{i}"
+        rid = f"t_{note_id}_r{i}"
         await kg.execute(
             f"+relationship({iql_literal(rid)}, {iql_literal(r.subject)}, "
             f"{iql_literal(r.predicate)}, {iql_literal(r.object)}, "
