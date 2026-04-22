@@ -103,6 +103,7 @@ export interface GraphData {
     predicate: string;
     object: string;
     source_note_id: string;
+    derived?: boolean;
   }>;
 }
 
@@ -118,6 +119,18 @@ export interface ConsolidationResult {
   entity_merges?: Array<{ variants: string[]; canonical: string }>;
   predicates_renamed?: number;
   entities_renamed?: number;
+}
+
+export interface ResolutionResult {
+  status: string;
+  merges?: Array<{ canonical: string; variant: string; similarity: number }>;
+  entities_renamed?: number;
+}
+
+export async function resolveEntities(): Promise<ResolutionResult> {
+  const res = await fetch(`${BASE}/ontology/resolve`, { method: "POST" });
+  if (!res.ok) throw new Error(`Resolution failed: ${res.status}`);
+  return res.json();
 }
 
 export async function consolidateOntology(): Promise<ConsolidationResult> {

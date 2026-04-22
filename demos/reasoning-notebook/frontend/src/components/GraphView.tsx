@@ -4,6 +4,7 @@ import {
   consolidateOntology,
   fetchGraph,
   fetchWhy,
+  resolveEntities,
   type GraphData,
   type ProofTreeData,
 } from "../api";
@@ -39,6 +40,7 @@ export function GraphView({ refreshKey, notes, onSelectNote }: GraphViewProps) {
   const [selected, setSelected] = useState<GNode | null>(null);
   const [proofTree, setProofTree] = useState<ProofTreeData | null>(null);
   const [consolidating, setConsolidating] = useState(false);
+  const [resolving, setResolving] = useState(false);
   const [consolidateMsg, setConsolidateMsg] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<ForceGraphMethods | undefined>(undefined);
@@ -93,6 +95,7 @@ export function GraphView({ refreshKey, notes, onSelectNote }: GraphViewProps) {
           target: r.object,
           predicate: r.predicate,
           source_note_id: r.source_note_id,
+          derived: r.derived ?? false,
         });
       }
     }
@@ -157,13 +160,22 @@ export function GraphView({ refreshKey, notes, onSelectNote }: GraphViewProps) {
       const srcId = typeof link.source === "string" ? link.source : link.source?.id;
       const tgtId = typeof link.target === "string" ? link.target : link.target?.id;
       const isHighlighted = selected && (srcId === selected.id || tgtId === selected.id);
+      const isDerived = link.derived;
 
       ctx.beginPath();
+      if (isDerived) {
+        ctx.setLineDash([4 / globalScale, 3 / globalScale]);
+      }
       ctx.moveTo(src.x, src.y!);
       ctx.lineTo(tgt.x, tgt.y!);
-      ctx.strokeStyle = isHighlighted ? "rgba(166,227,161,0.6)" : "rgba(108,112,134,0.35)";
+      ctx.strokeStyle = isHighlighted
+        ? "rgba(166,227,161,0.6)"
+        : isDerived
+          ? "rgba(203,166,247,0.35)"
+          : "rgba(108,112,134,0.35)";
       ctx.lineWidth = (isHighlighted ? 2 : 1) / globalScale;
       ctx.stroke();
+      ctx.setLineDash([]);
 
       const midX = (src.x + tgt.x) / 2;
       const midY = (src.y! + tgt.y!) / 2;
@@ -171,7 +183,11 @@ export function GraphView({ refreshKey, notes, onSelectNote }: GraphViewProps) {
       ctx.font = `${fontSize}px -apple-system, system-ui, sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillStyle = isHighlighted ? "rgba(166,227,161,0.9)" : "rgba(166,227,161,0.6)";
+      ctx.fillStyle = isHighlighted
+        ? "rgba(166,227,161,0.9)"
+        : isDerived
+          ? "rgba(203,166,247,0.6)"
+          : "rgba(166,227,161,0.6)";
       ctx.fillText(link.predicate, midX, midY);
     },
     [selected]
@@ -400,6 +416,34 @@ export function GraphView({ refreshKey, notes, onSelectNote }: GraphViewProps) {
         >
           {consolidating ? "Consolidating..." : "Consolidate Ontology"}
         </button>
+        <button
+          style={{
+            ...styles.resolveBtn,
+            opacity: resolving ? 0.5 : 1,
+          }}
+          onClick={async () => {
+            setResolving(true);
+            setConsolidateMsg(null);
+            try {
+              const result = await resolveEntities();
+              if (result.status === "done" && result.entities_renamed) {
+                setConsolidateMsg(`Merged ${result.entities_renamed} duplicate entities`);
+                fetchGraph().then(setRaw);
+              } else {
+                setConsolidateMsg("No duplicates found");
+              }
+              setTimeout(() => setConsolidateMsg(null), 5000);
+            } catch {
+              setConsolidateMsg("Resolution failed");
+              setTimeout(() => setConsolidateMsg(null), 5000);
+            } finally {
+              setResolving(false);
+            }
+          }}
+          disabled={resolving}
+        >
+          {resolving ? "Resolving..." : "Resolve Entities"}
+        </button>
         {consolidateMsg && (
           <span style={styles.consolidateMsg}>{consolidateMsg}</span>
         )}
@@ -411,6 +455,15 @@ export function GraphView({ refreshKey, notes, onSelectNote }: GraphViewProps) {
             {kind}
           </span>
         ))}
+        <span style={styles.legendSep} />
+        <span style={styles.legendItem}>
+          <span style={{ width: 16, height: 2, background: "#a6e3a1", display: "inline-block", borderRadius: 1 }} />
+          extracted
+        </span>
+        <span style={styles.legendItem}>
+          <span style={{ width: 16, height: 2, background: "#cba6f7", display: "inline-block", borderRadius: 1, borderTop: "1px dashed #cba6f7" }} />
+          derived
+        </span>
       </div>
 
       {proofTree && (
@@ -598,6 +651,16 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     cursor: "pointer",
   },
+  resolveBtn: {
+    background: "rgba(166,227,161,0.12)",
+    color: "#a6e3a1",
+    border: "none",
+    borderRadius: 6,
+    padding: "5px 14px",
+    fontSize: 11,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
   consolidateMsg: {
     fontSize: 11,
     color: "#a6e3a1",
@@ -624,6 +687,12 @@ const styles: Record<string, React.CSSProperties> = {
     width: 6,
     height: 6,
     borderRadius: "50%",
+    display: "inline-block",
+  },
+  legendSep: {
+    width: 1,
+    height: 12,
+    background: "rgba(255,255,255,0.1)",
     display: "inline-block",
   },
 };

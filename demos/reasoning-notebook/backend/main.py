@@ -22,6 +22,7 @@ from config import (
 from chat import chat as chat_fn
 from extraction import Entity, Relationship, extract_from_note
 from ontology import consolidate_ontology
+from resolution import EntityEmbedding, resolve_entities
 from schemas import ChatRequest, ChatResponse, NoteCreate, NoteResponse, NoteUpdate
 
 logger = logging.getLogger("reasoning_notebook")
@@ -51,8 +52,26 @@ async def _connect(app: FastAPI) -> None:
     logger.info("Connected to InputLayer at %s", INPUTLAYER_URL)
 
     kg = il.knowledge_graph(KG_NAME)
-    await kg.define(Note, Entity, Relationship)
-    logger.info("Schema deployed: Note, Entity, Relationship")
+    await kg.define(Note, Entity, Relationship, EntityEmbedding)
+
+    # Derived rules — these create inferred facts from extracted data
+    rules = [
+        # Two people mentioned in the same note are colleagues
+        '+colleague(A, B) <- entity(_, A, "person", _, S), entity(_, B, "person", _, S), A != B',
+        # Entities from the same note share context
+        "+shared_context(A, B) <- entity(_, A, _, _, S), entity(_, B, _, _, S), A != B",
+        # Direct connection via any relationship
+        "+connected(A, B) <- relationship(_, A, _, B, _)",
+        "+connected(A, B) <- relationship(_, B, _, A, _)",
+        # Transitive reachability (multi-hop)
+        "+reachable(A, C) <- connected(A, B), connected(B, C), A != C",
+    ]
+    for rule in rules:
+        try:
+            await kg.execute(rule)
+        except Exception:
+            pass  # rule may already exist
+    logger.info("Schema and rules deployed")
 
     app.state.il = il
     app.state.kg = kg
@@ -276,6 +295,34 @@ async def get_graph(request: Request):
             data = dict(zip(rel_result.columns, row, strict=True))
             edges.append(data)
 
+    # Add derived edges from rules
+    derived_queries = [
+        ("colleague", "?colleague(A, B)"),
+        ("connected", "?connected(A, B)"),
+        ("reachable", "?reachable(A, B)"),
+    ]
+    entity_names = {n["name"] for n in nodes}
+    seen_edges = {(e["subject"], e["predicate"], e["object"]) for e in edges}
+
+    for predicate, query in derived_queries:
+        try:
+            result = await kg.execute(query)
+            if result.rows and result.columns != ["error"]:
+                for row in result.rows:
+                    a, b = row[0], row[1]
+                    if a in entity_names and b in entity_names and (a, predicate, b) not in seen_edges:
+                        edges.append({
+                            "id": f"derived_{predicate}_{a}_{b}",
+                            "subject": a,
+                            "predicate": predicate,
+                            "object": b,
+                            "source_note_id": "derived",
+                            "derived": True,
+                        })
+                        seen_edges.add((a, predicate, b))
+        except Exception:
+            pass
+
     return {"nodes": nodes, "edges": edges}
 
 
@@ -325,6 +372,12 @@ async def cleanup_orphans(request: Request):
 async def consolidate(request: Request):
     kg = await get_kg(request)
     return await consolidate_ontology(kg)
+
+
+@app.post("/ontology/resolve")
+async def resolve(request: Request):
+    kg = await get_kg(request)
+    return await resolve_entities(kg)
 
 
 # ── Chat ───────────────────────────────────────────────────────────
