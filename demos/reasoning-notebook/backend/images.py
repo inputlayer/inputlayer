@@ -38,16 +38,6 @@ class Image(Relation):
 # ── Structured extraction model ────────────────────────────────────
 
 
-class ImageExtraction(BaseModel):
-    scene: str = Field(description="Brief description of the scene")
-    objects: list[str] = Field(description="List of objects visible")
-    cultural_context: str = Field(default="", description="Cultural or historical context if applicable")
-    visible_text: str = Field(default="", description="Any text visible in the image")
-    mood: str = Field(default="", description="Emotional quality of the image")
-    entities: list[ImageEntity] = Field(default_factory=list, description="Entities found")
-    relationships: list[ImageRelationship] = Field(default_factory=list, description="Relationships between entities")
-
-
 class ImageEntity(BaseModel):
     name: str = Field(description="Entity name, lowercase")
     kind: str = Field(description="Type: person, place, object, building, artwork, animal, concept")
@@ -60,8 +50,14 @@ class ImageRelationship(BaseModel):
     object: str = Field(description="Target entity name")
 
 
-# Fix forward reference
-ImageExtraction.model_rebuild()
+class ImageExtraction(BaseModel):
+    scene: str = Field(description="Brief description of the scene")
+    objects: list[str] = Field(description="List of objects visible")
+    cultural_context: str = Field(default="", description="Cultural or historical context if applicable")
+    visible_text: str = Field(default="", description="Any text visible in the image")
+    mood: str = Field(default="", description="Emotional quality of the image")
+    entities: list[ImageEntity] = Field(default_factory=list, description="Entities found")
+    relationships: list[ImageRelationship] = Field(default_factory=list, description="Relationships between entities")
 
 
 # ── Storage ────────────────────────────────────────────────────────
