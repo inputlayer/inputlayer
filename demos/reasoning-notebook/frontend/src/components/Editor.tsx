@@ -5,6 +5,7 @@ import type { Note } from "../types";
 interface EditorProps {
   note: Note;
   onSave: (id: string, fields: { title?: string; content?: string }) => void;
+  onImageUploaded?: () => void;
 }
 
 interface ImageAttachment {
@@ -15,7 +16,7 @@ interface ImageAttachment {
   relationships?: number;
 }
 
-export function Editor({ note, onSave }: EditorProps) {
+export function Editor({ note, onSave, onImageUploaded }: EditorProps) {
   const [title, setTitle] = useState(note.title);
   const [content, setContent] = useState(note.content);
   const [dirty, setDirty] = useState(false);
@@ -99,6 +100,7 @@ export function Editor({ note, onSave }: EditorProps) {
         setContent(newContent);
         onSave(note.id, { title, content: newContent });
       }
+      onImageUploaded?.();
     } catch {
       setImages((prev) => prev.filter((img) => img.url !== previewUrl));
     }

@@ -147,7 +147,11 @@ export function App() {
             <main style={styles.main}>
               {activeNote ? (
                 <div style={styles.editorContainer}>
-                  <Editor note={activeNote} onSave={handleSave} />
+                  <Editor
+                note={activeNote}
+                onSave={handleSave}
+                onImageUploaded={() => setSaveCount((c) => c + 1)}
+              />
                   <ExtractionPanel
                     noteId={activeNote.id}
                     refreshKey={saveCount}
