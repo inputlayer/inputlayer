@@ -59,7 +59,7 @@ def _char_ngram_embed(text: str, dim: int = EMBED_DIM) -> list[float]:
 # ── Resolution pipeline ───────────────────────────────────────────
 
 
-async def resolve_entities(kg: Any, threshold: float = 0.85) -> dict[str, Any]:
+async def resolve_entities(kg: Any, threshold: float = 0.95) -> dict[str, Any]:
     """Find and merge near-duplicate entities using vector similarity.
 
     1. Get all unique entity names
@@ -142,7 +142,7 @@ async def resolve_entities(kg: Any, threshold: float = 0.85) -> dict[str, Any]:
             continue
 
         for row in (result.rows or []):
-            match_data = dict(zip(result.columns, row, strict=True))
+            match_data = {k.lower(): v for k, v in zip(result.columns, row, strict=True)}
             match_name = match_data["entity_name"]
             if match_name == name or match_name in merged_away:
                 continue
