@@ -59,13 +59,9 @@ async def _connect(app: FastAPI) -> None:
     rules = [
         # Two people mentioned in the same note are colleagues
         '+colleague(A, B) <- entity(_, A, "person", _, S), entity(_, B, "person", _, S), A != B',
-        # Entities from the same note share context
-        "+shared_context(A, B) <- entity(_, A, _, _, S), entity(_, B, _, _, S), A != B",
-        # Direct connection via any relationship
+        # Direct connection via any relationship (bidirectional)
         "+connected(A, B) <- relationship(_, A, _, B, _)",
         "+connected(A, B) <- relationship(_, B, _, A, _)",
-        # Transitive reachability (multi-hop)
-        "+reachable(A, C) <- connected(A, B), connected(B, C), A != C",
     ]
     for rule in rules:
         try:
@@ -299,8 +295,6 @@ async def get_graph(request: Request):
     # Add derived edges from rules
     derived_queries = [
         ("colleague", "?colleague(A, B)"),
-        ("connected", "?connected(A, B)"),
-        ("reachable", "?reachable(A, B)"),
     ]
     entity_names = {n["name"] for n in nodes}
     seen_edges = {(e["subject"], e["predicate"], e["object"]) for e in edges}
