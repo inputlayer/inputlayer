@@ -8,6 +8,7 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "inputlayer-client-dev[langchain,langgraph]",
     "langchain-openai>=0.3",
+    "python-multipart>=0.0.26",
 ]
 
 [tool.uv.sources]
