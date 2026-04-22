@@ -21,6 +21,7 @@ from config import (
 )
 from chat import chat as chat_fn
 from extraction import Entity, Relationship, extract_from_note
+from images import Image, extract_from_image, get_image_path, save_image
 from ontology import consolidate_ontology
 from resolution import EntityEmbedding, resolve_entities
 from schemas import ChatRequest, ChatResponse, NoteCreate, NoteResponse, NoteUpdate
@@ -52,7 +53,7 @@ async def _connect(app: FastAPI) -> None:
     logger.info("Connected to InputLayer at %s", INPUTLAYER_URL)
 
     kg = il.knowledge_graph(KG_NAME)
-    await kg.define(Note, Entity, Relationship, EntityEmbedding)
+    await kg.define(Note, Entity, Relationship, EntityEmbedding, Image)
 
     # Derived rules — these create inferred facts from extracted data
     rules = [
@@ -475,3 +476,45 @@ async def why_not_endpoint(request: Request):
             tree = _proof_tree_to_dict(t)
 
     return {"text": text, "proof_tree": tree}
+
+
+# ── Images ─────────────────────────────────────────────────────────
+
+
+@app.post("/notes/{note_id}/images")
+async def upload_image(note_id: str, request: Request):
+    from fastapi import UploadFile, File
+
+    kg = await get_kg(request)
+
+    # Read multipart form data
+    form = await request.form()
+    file = form.get("file")
+    if file is None:
+        raise HTTPException(status_code=400, detail="No file uploaded")
+
+    data = await file.read()
+    filename_orig = getattr(file, "filename", "image.jpg") or "image.jpg"
+    image_id, filename = save_image(data, filename_orig)
+
+    # Extract in foreground so we can return the description
+    result = await extract_from_image(kg, image_id, note_id, filename)
+
+    return {
+        "image_id": image_id,
+        "filename": filename,
+        "url": f"/images/{filename}",
+        "description": result.get("description", ""),
+        "entities": result.get("entities", 0),
+        "relationships": result.get("relationships", 0),
+    }
+
+
+@app.get("/images/{filename}")
+async def serve_image(filename: str):
+    from fastapi.responses import FileResponse
+
+    path = get_image_path(filename)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(path)

@@ -4,6 +4,7 @@ dist/
 __pycache__/
 *.pyc
 data/
+uploads/
 .inputlayer-credentials.toml
 *.tsbuildinfo
 bun.lock

@@ -144,6 +144,31 @@ export interface ChatMessage {
   content: string;
 }
 
+// ── Images ──
+
+export interface ImageUploadResult {
+  image_id: string;
+  filename: string;
+  url: string;
+  description: string;
+  entities: number;
+  relationships: number;
+}
+
+export async function uploadImage(
+  noteId: string,
+  file: File
+): Promise<ImageUploadResult> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${BASE}/notes/${noteId}/images`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) throw new Error(`Image upload failed: ${res.status}`);
+  return res.json();
+}
+
 // ── Provenance ──
 
 export interface ProofNode {
