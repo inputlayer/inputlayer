@@ -40,6 +40,7 @@ function MilkdownEditorInner({
   const noteIdRef = useRef(note.id);
   const suppressSaveRef = useRef(false);
 
+  // Only reset editor state when switching to a different note
   useEffect(() => {
     setTitle(note.title);
     titleRef.current = note.title;
@@ -48,7 +49,8 @@ function MilkdownEditorInner({
     suppressSaveRef.current = true;
     setDirty(false);
     setImages([]);
-  }, [note.id, note.title, note.content]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note.id]);
 
   const scheduleSave = useCallback(
     (newContent: string) => {
@@ -100,18 +102,18 @@ function MilkdownEditorInner({
     [note.id]
   );
 
-  // Sync content when note changes — suppress save during replaceAll
+  // Sync editor content only when switching notes
   useEffect(() => {
     const editor = get();
     if (editor) {
       suppressSaveRef.current = true;
       editor.action(replaceAll(note.content));
-      // Re-enable saves after the replaceAll settles
       requestAnimationFrame(() => {
         suppressSaveRef.current = false;
       });
     }
-  }, [note.id, note.content, get]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note.id, get]);
 
   const handleImageFile = async (file: File) => {
     if (!file.type.startsWith("image/")) return;

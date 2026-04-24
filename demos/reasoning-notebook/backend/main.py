@@ -127,8 +127,22 @@ async def health(request: Request):
 # ── Note CRUD ──────────────────────────────────────────────────────
 
 
+def _unescape_iql_string(s: Any) -> Any:
+    """Unescape IQL string literals returned by the engine."""
+    if not isinstance(s, str):
+        return s
+    return (
+        s.replace("\\n", "\n")
+        .replace("\\r", "\r")
+        .replace("\\t", "\t")
+        .replace("\\0", "\x00")
+        .replace('\\"', '"')
+        .replace("\\\\", "\\")
+    )
+
+
 def _row_to_note(columns: list[str], row: list[Any]) -> NoteResponse:
-    data = dict(zip(columns, row, strict=True))
+    data = {k: _unescape_iql_string(v) for k, v in zip(columns, row, strict=True)}
     return NoteResponse(**data)
 
 
