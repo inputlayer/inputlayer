@@ -115,15 +115,13 @@ async def extract_from_note(kg: Any, note_id: str, title: str, content: str) -> 
         logger.exception("Extraction failed for note %s", note_id)
         return {"entities": 0, "relationships": 0, "error": str(exc)}
 
-    # Retract old TEXT extractions for this note (prefix "t_"), keep image extractions
-    text_prefix = f"t_{note_id}"
+    # Retract ALL old extractions for this note, then re-insert
+    # (both text and image entities share the same source_note_id)
     await kg.execute(
-        f'-entity(Id, N, K, D, Src) <- entity(Id, N, K, D, Src), '
-        f'Src = "{note_id}", starts_with(Id, "{text_prefix}")'
+        f'-entity(Id, N, K, D, Src) <- entity(Id, N, K, D, Src), Src = "{note_id}"'
     )
     await kg.execute(
-        f'-relationship(Id, S, P, O, Src) <- relationship(Id, S, P, O, Src), '
-        f'Src = "{note_id}", starts_with(Id, "{text_prefix}")'
+        f'-relationship(Id, S, P, O, Src) <- relationship(Id, S, P, O, Src), Src = "{note_id}"'
     )
 
     # Insert new entities with text prefix
