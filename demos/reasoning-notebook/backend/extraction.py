@@ -129,17 +129,35 @@ async def extract_from_note(kg: Any, note_id: str, title: str, content: str) -> 
         f'-relationship(Id, S, P, O, Src) <- relationship(Id, S, P, O, Src), Src = "{note_id}"'
     )
 
-    # Insert new entities with text prefix
+    # Insert entities
+    entity_names = set()
     for i, e in enumerate(result.entities):
         eid = f"t_{note_id}_e{i}"
+        entity_names.add(e.name)
         await kg.execute(
             f"+entity({iql_literal(eid)}, {iql_literal(e.name)}, "
             f"{iql_literal(e.kind)}, {iql_literal(e.description)}, "
             f"{iql_literal(note_id)})"
         )
 
-    # Insert new relationships with text prefix
+    # Auto-create entities referenced in relationships but not in the entity list
+    extra_idx = len(result.entities)
+    for r in result.relationships:
+        for name in [r.subject, r.object]:
+            if name not in entity_names:
+                eid = f"t_{note_id}_e{extra_idx}"
+                extra_idx += 1
+                entity_names.add(name)
+                await kg.execute(
+                    f"+entity({iql_literal(eid)}, {iql_literal(name)}, "
+                    f'"concept", "auto-created from relationship", '
+                    f"{iql_literal(note_id)})"
+                )
+
+    # Insert relationships (only where both sides exist as entities)
     for i, r in enumerate(result.relationships):
+        if r.subject not in entity_names or r.object not in entity_names:
+            continue
         rid = f"t_{note_id}_r{i}"
         await kg.execute(
             f"+relationship({iql_literal(rid)}, {iql_literal(r.subject)}, "
