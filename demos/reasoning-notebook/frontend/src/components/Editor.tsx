@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Editor as MilkdownEditor } from "@milkdown/core";
+import { useEffect, useRef, useState } from "react";
+import { Editor as MilkdownEditor, rootCtx } from "@milkdown/core";
 import { commonmark } from "@milkdown/preset-commonmark";
 import { gfm } from "@milkdown/preset-gfm";
 import { nord } from "@milkdown/theme-nord";
@@ -34,67 +34,63 @@ function MilkdownEditorInner({
   const [dirty, setDirty] = useState(false);
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
+
+  // All mutable state in refs to avoid re-render cascades
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contentRef = useRef(note.content);
   const titleRef = useRef(note.title);
   const noteIdRef = useRef(note.id);
-  const suppressSaveRef = useRef(false);
+  const onSaveRef = useRef(onSave);
+  const onImageUploadedRef = useRef(onImageUploaded);
+  const suppressRef = useRef(true); // start suppressed until editor loads
 
-  // Only reset editor state when switching to a different note
+  // Keep refs in sync without causing editor recreation
+  onSaveRef.current = onSave;
+  onImageUploadedRef.current = onImageUploaded;
+
+  // Reset on note switch
   useEffect(() => {
     setTitle(note.title);
     titleRef.current = note.title;
     contentRef.current = note.content;
     noteIdRef.current = note.id;
-    suppressSaveRef.current = true;
+    suppressRef.current = true;
     setDirty(false);
     setImages([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note.id]);
 
-  const scheduleSave = useCallback(
-    (newContent: string) => {
-      if (suppressSaveRef.current) return;
-      setDirty(true);
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => {
-        onSave(noteIdRef.current, {
-          title: titleRef.current,
-          content: newContent,
-        });
-        setDirty(false);
-      }, 800);
-    },
-    [onSave]
-  );
+  const doSave = (newContent: string) => {
+    if (suppressRef.current) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      onSaveRef.current(noteIdRef.current, {
+        title: titleRef.current,
+        content: newContent,
+      });
+      setDirty(false);
+    }, 1200);
+    setDirty(true);
+  };
 
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value;
     setTitle(v);
     titleRef.current = v;
-    setDirty(true);
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      onSave(noteIdRef.current, {
-        title: titleRef.current,
-        content: contentRef.current,
-      });
-      setDirty(false);
-    }, 800);
+    doSave(contentRef.current);
   };
 
+  // Editor created once per note.id — never recreated on re-renders
   const { get } = useEditor(
     (root) =>
       MilkdownEditor.make()
         .config(nord)
         .config((ctx) => {
           ctx.set(rootCtx, root);
-          ctx
-            .get(listenerCtx)
-            .markdownUpdated((_ctx, markdown, _prev) => {
-              contentRef.current = markdown;
-              scheduleSave(markdown);
-            });
+          ctx.get(listenerCtx).markdownUpdated((_ctx, markdown) => {
+            contentRef.current = markdown;
+            doSave(markdown);
+          });
         })
         .use(commonmark)
         .use(gfm)
@@ -102,15 +98,16 @@ function MilkdownEditorInner({
     [note.id]
   );
 
-  // Sync editor content only when switching notes
+  // Load content into editor on note switch
   useEffect(() => {
     const editor = get();
     if (editor) {
-      suppressSaveRef.current = true;
+      suppressRef.current = true;
       editor.action(replaceAll(note.content));
-      requestAnimationFrame(() => {
-        suppressSaveRef.current = false;
-      });
+      // Allow saves after editor settles
+      setTimeout(() => {
+        suppressRef.current = false;
+      }, 100);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note.id, get]);
@@ -125,7 +122,7 @@ function MilkdownEditorInner({
     ]);
 
     try {
-      const result: ImageUploadResult = await uploadImage(note.id, file);
+      const result: ImageUploadResult = await uploadImage(noteIdRef.current, file);
 
       setImages((prev) =>
         prev.map((img) =>
@@ -141,16 +138,16 @@ function MilkdownEditorInner({
         )
       );
 
-      // Append image description to content and save (don't touch the editor DOM)
+      // Save description to backend without touching editor DOM
       if (result.description) {
         const imageText = `\n\n[Image: ${file.name}]\n${result.description}`;
         contentRef.current = contentRef.current + imageText;
-        onSave(noteIdRef.current, {
+        onSaveRef.current(noteIdRef.current, {
           title: titleRef.current,
           content: contentRef.current,
         });
       }
-      onImageUploaded?.();
+      onImageUploadedRef.current?.();
     } catch {
       setImages((prev) => prev.filter((img) => img.url !== previewUrl));
     }
@@ -166,7 +163,7 @@ function MilkdownEditorInner({
     if ((e.metaKey || e.ctrlKey) && e.key === "s") {
       e.preventDefault();
       if (saveTimer.current) clearTimeout(saveTimer.current);
-      onSave(noteIdRef.current, {
+      onSaveRef.current(noteIdRef.current, {
         title: titleRef.current,
         content: contentRef.current,
       });
@@ -232,12 +229,9 @@ function MilkdownEditorInner({
   );
 }
 
-// Need to import rootCtx for the config
-import { rootCtx } from "@milkdown/core";
-
 export function Editor(props: EditorProps) {
   return (
-    <MilkdownProvider>
+    <MilkdownProvider key={props.note.id}>
       <MilkdownEditorInner {...props} />
     </MilkdownProvider>
   );
