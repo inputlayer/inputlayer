@@ -36,22 +36,30 @@ function MilkdownEditorInner({
   const [dragOver, setDragOver] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contentRef = useRef(note.content);
+  const titleRef = useRef(note.title);
   const noteIdRef = useRef(note.id);
+  const suppressSaveRef = useRef(false);
 
   useEffect(() => {
     setTitle(note.title);
+    titleRef.current = note.title;
     contentRef.current = note.content;
     noteIdRef.current = note.id;
+    suppressSaveRef.current = true;
     setDirty(false);
     setImages([]);
   }, [note.id, note.title, note.content]);
 
   const scheduleSave = useCallback(
-    (newTitle: string, newContent: string) => {
+    (newContent: string) => {
+      if (suppressSaveRef.current) return;
       setDirty(true);
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
-        onSave(noteIdRef.current, { title: newTitle, content: newContent });
+        onSave(noteIdRef.current, {
+          title: titleRef.current,
+          content: newContent,
+        });
         setDirty(false);
       }, 800);
     },
@@ -61,7 +69,16 @@ function MilkdownEditorInner({
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value;
     setTitle(v);
-    scheduleSave(v, contentRef.current);
+    titleRef.current = v;
+    setDirty(true);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      onSave(noteIdRef.current, {
+        title: titleRef.current,
+        content: contentRef.current,
+      });
+      setDirty(false);
+    }, 800);
   };
 
   const { get } = useEditor(
@@ -74,7 +91,7 @@ function MilkdownEditorInner({
             .get(listenerCtx)
             .markdownUpdated((_ctx, markdown, _prev) => {
               contentRef.current = markdown;
-              scheduleSave(title, markdown);
+              scheduleSave(markdown);
             });
         })
         .use(commonmark)
@@ -83,11 +100,16 @@ function MilkdownEditorInner({
     [note.id]
   );
 
-  // Sync content when note changes
+  // Sync content when note changes — suppress save during replaceAll
   useEffect(() => {
     const editor = get();
     if (editor) {
+      suppressSaveRef.current = true;
       editor.action(replaceAll(note.content));
+      // Re-enable saves after the replaceAll settles
+      requestAnimationFrame(() => {
+        suppressSaveRef.current = false;
+      });
     }
   }, [note.id, note.content, get]);
 
@@ -124,9 +146,16 @@ function MilkdownEditorInner({
         const newContent = contentRef.current + imageMarkdown;
         contentRef.current = newContent;
         if (editor) {
+          suppressSaveRef.current = true;
           editor.action(replaceAll(newContent));
+          requestAnimationFrame(() => {
+            suppressSaveRef.current = false;
+          });
         }
-        onSave(note.id, { title, content: newContent });
+        onSave(noteIdRef.current, {
+          title: titleRef.current,
+          content: newContent,
+        });
       }
       onImageUploaded?.();
     } catch {
@@ -144,7 +173,10 @@ function MilkdownEditorInner({
     if ((e.metaKey || e.ctrlKey) && e.key === "s") {
       e.preventDefault();
       if (saveTimer.current) clearTimeout(saveTimer.current);
-      onSave(note.id, { title, content: contentRef.current });
+      onSave(noteIdRef.current, {
+        title: titleRef.current,
+        content: contentRef.current,
+      });
       setDirty(false);
     }
   };
