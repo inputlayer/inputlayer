@@ -141,22 +141,13 @@ function MilkdownEditorInner({
         )
       );
 
-      // Insert image markdown into editor
+      // Append image description to content and save (don't touch the editor DOM)
       if (result.description) {
-        const editor = get();
-        const imageMarkdown = `\n\n![${file.name}](/api${result.url})\n\n*${result.description}*\n`;
-        const newContent = contentRef.current + imageMarkdown;
-        contentRef.current = newContent;
-        if (editor) {
-          suppressSaveRef.current = true;
-          editor.action(replaceAll(newContent));
-          requestAnimationFrame(() => {
-            suppressSaveRef.current = false;
-          });
-        }
+        const imageText = `\n\n[Image: ${file.name}]\n${result.description}`;
+        contentRef.current = contentRef.current + imageText;
         onSave(noteIdRef.current, {
           title: titleRef.current,
-          content: newContent,
+          content: contentRef.current,
         });
       }
       onImageUploaded?.();
