@@ -84,17 +84,18 @@ export function GraphView({ refreshKey, notes, onSelectNote }: GraphViewProps) {
     const nameToNoteIds = new Map<string, Set<string>>();
 
     for (const e of raw.nodes) {
+      const cleanSource = stripImgPrefix(e.source_note_id);
       if (!nameToNode.has(e.name)) {
         nameToNode.set(e.name, {
           id: e.name,
           name: e.name,
           kind: e.kind,
           description: e.description,
-          source_note_id: e.source_note_id,
+          source_note_id: cleanSource,
         });
-        nameToNoteIds.set(e.name, new Set([e.source_note_id]));
+        nameToNoteIds.set(e.name, new Set([cleanSource]));
       } else {
-        nameToNoteIds.get(e.name)!.add(e.source_note_id);
+        nameToNoteIds.get(e.name)!.add(cleanSource);
       }
     }
 
