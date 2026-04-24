@@ -1,15 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import { Editor as MilkdownEditor, rootCtx } from "@milkdown/core";
-import { commonmark } from "@milkdown/preset-commonmark";
-import { gfm } from "@milkdown/preset-gfm";
-import { nord } from "@milkdown/theme-nord";
-import { listener, listenerCtx } from "@milkdown/plugin-listener";
-import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
-import { replaceAll } from "@milkdown/utils";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Markdown from "react-markdown";
 import { uploadImage, type ImageUploadResult } from "../api";
 import type { Note } from "../types";
-
-import "@milkdown/theme-nord/style.css";
 
 interface EditorProps {
   note: Note;
@@ -25,92 +17,62 @@ interface ImageAttachment {
   relationships?: number;
 }
 
-function MilkdownEditorInner({
-  note,
-  onSave,
-  onImageUploaded,
-}: EditorProps) {
+export function Editor({ note, onSave, onImageUploaded }: EditorProps) {
   const [title, setTitle] = useState(note.title);
+  const [content, setContent] = useState(note.content);
   const [dirty, setDirty] = useState(false);
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
-
-  // All mutable state in refs to avoid re-render cascades
+  const [showPreview, setShowPreview] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const contentRef = useRef(note.content);
-  const titleRef = useRef(note.title);
   const noteIdRef = useRef(note.id);
   const onSaveRef = useRef(onSave);
   const onImageUploadedRef = useRef(onImageUploaded);
-  const suppressRef = useRef(true); // start suppressed until editor loads
 
-  // Keep refs in sync without causing editor recreation
   onSaveRef.current = onSave;
   onImageUploadedRef.current = onImageUploaded;
 
-  // Reset on note switch
   useEffect(() => {
     setTitle(note.title);
-    titleRef.current = note.title;
-    contentRef.current = note.content;
+    setContent(note.content);
     noteIdRef.current = note.id;
-    suppressRef.current = true;
     setDirty(false);
     setImages([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note.id]);
 
-  const doSave = (newContent: string) => {
-    if (suppressRef.current) return;
+  const scheduleSave = useCallback((newTitle: string, newContent: string) => {
+    setDirty(true);
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       onSaveRef.current(noteIdRef.current, {
-        title: titleRef.current,
+        title: newTitle,
         content: newContent,
       });
       setDirty(false);
-    }, 1200);
-    setDirty(true);
-  };
+    }, 1000);
+  }, []);
 
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value;
     setTitle(v);
-    titleRef.current = v;
-    doSave(contentRef.current);
+    scheduleSave(v, content);
   };
 
-  // Editor created once per note.id — never recreated on re-renders
-  const { get } = useEditor(
-    (root) =>
-      MilkdownEditor.make()
-        .config(nord)
-        .config((ctx) => {
-          ctx.set(rootCtx, root);
-          ctx.get(listenerCtx).markdownUpdated((_ctx, markdown) => {
-            contentRef.current = markdown;
-            doSave(markdown);
-          });
-        })
-        .use(commonmark)
-        .use(gfm)
-        .use(listener),
-    [note.id]
-  );
+  const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const v = e.target.value;
+    setContent(v);
+    scheduleSave(title, v);
+  };
 
-  // Load content into editor on note switch
-  useEffect(() => {
-    const editor = get();
-    if (editor) {
-      suppressRef.current = true;
-      editor.action(replaceAll(note.content));
-      // Allow saves after editor settles
-      setTimeout(() => {
-        suppressRef.current = false;
-      }, 100);
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+      e.preventDefault();
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      onSaveRef.current(noteIdRef.current, { title, content });
+      setDirty(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note.id, get]);
+  };
 
   const handleImageFile = async (file: File) => {
     if (!file.type.startsWith("image/")) return;
@@ -138,13 +100,12 @@ function MilkdownEditorInner({
         )
       );
 
-      // Save description to backend without touching editor DOM
       if (result.description) {
-        const imageText = `\n\n[Image: ${file.name}]\n${result.description}`;
-        contentRef.current = contentRef.current + imageText;
-        onSaveRef.current(noteIdRef.current, {
-          title: titleRef.current,
-          content: contentRef.current,
+        const imageText = `\n\n![${file.name}](/api${result.url})\n\n*${result.description}*`;
+        setContent((prev) => {
+          const updated = prev + imageText;
+          onSaveRef.current(noteIdRef.current, { title, content: updated });
+          return updated;
         });
       }
       onImageUploadedRef.current?.();
@@ -159,15 +120,15 @@ function MilkdownEditorInner({
     Array.from(e.dataTransfer.files).forEach(handleImageFile);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === "s") {
-      e.preventDefault();
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      onSaveRef.current(noteIdRef.current, {
-        title: titleRef.current,
-        content: contentRef.current,
-      });
-      setDirty(false);
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = Array.from(e.clipboardData.items);
+    for (const item of items) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) handleImageFile(file);
+        return;
+      }
     }
   };
 
@@ -187,6 +148,15 @@ function MilkdownEditorInner({
           {new Date(note.updated_at * 1000).toLocaleString()}
         </span>
         {dirty && <span style={styles.dirty}>Unsaved</span>}
+        <button
+          style={{
+            ...styles.previewToggle,
+            ...(showPreview ? styles.previewToggleActive : {}),
+          }}
+          onClick={() => setShowPreview(!showPreview)}
+        >
+          {showPreview ? "Edit" : "Preview"}
+        </button>
         <span style={styles.dropHint}>Drop images here</span>
       </div>
       <input
@@ -196,8 +166,29 @@ function MilkdownEditorInner({
         placeholder="Untitled"
         spellCheck={false}
       />
-      <div style={styles.milkdownContainer}>
-        <Milkdown />
+      <div style={styles.contentArea}>
+        {showPreview ? (
+          <div style={styles.preview}>
+            <Markdown
+              components={{
+                img: ({ src, alt }) => (
+                  <img src={src} alt={alt || ""} style={styles.previewImg} />
+                ),
+              }}
+            >
+              {content}
+            </Markdown>
+          </div>
+        ) : (
+          <textarea
+            style={styles.textarea}
+            value={content}
+            onChange={handleContentChange}
+            onPaste={handlePaste}
+            placeholder="Start writing markdown... (drag or paste images)"
+            spellCheck={false}
+          />
+        )}
       </div>
 
       {images.length > 0 && (
@@ -226,14 +217,6 @@ function MilkdownEditorInner({
         </div>
       )}
     </div>
-  );
-}
-
-export function Editor(props: EditorProps) {
-  return (
-    <MilkdownProvider key={props.note.id}>
-      <MilkdownEditorInner {...props} />
-    </MilkdownProvider>
   );
 }
 
@@ -269,6 +252,20 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "2px 8px",
     borderRadius: 4,
   },
+  previewToggle: {
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 6,
+    padding: "3px 12px",
+    fontSize: 11,
+    color: "#6c7086",
+    cursor: "pointer",
+  },
+  previewToggleActive: {
+    background: "rgba(137,180,250,0.12)",
+    borderColor: "rgba(137,180,250,0.2)",
+    color: "#89b4fa",
+  },
   dropHint: {
     fontSize: 10,
     color: "#45475a",
@@ -285,10 +282,34 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "20px 24px 8px",
     fontFamily: "inherit",
   },
-  milkdownContainer: {
+  contentArea: {
     flex: 1,
     overflow: "auto",
-    padding: "0 24px 24px",
+  },
+  textarea: {
+    width: "100%",
+    height: "100%",
+    background: "none",
+    border: "none",
+    outline: "none",
+    color: "#bac2de",
+    fontSize: 15,
+    lineHeight: 1.7,
+    padding: "8px 24px 24px",
+    resize: "none" as const,
+    fontFamily: "'JetBrains Mono', 'SF Mono', Consolas, monospace",
+    tabSize: 2,
+  },
+  preview: {
+    padding: "8px 24px 24px",
+    color: "#cdd6f4",
+    fontSize: 15,
+    lineHeight: 1.7,
+  },
+  previewImg: {
+    maxWidth: "100%",
+    borderRadius: 8,
+    margin: "8px 0",
   },
   imageStrip: {
     borderTop: "1px solid rgba(255,255,255,0.06)",
