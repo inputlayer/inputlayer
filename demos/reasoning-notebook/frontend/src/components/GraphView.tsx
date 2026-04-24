@@ -197,18 +197,31 @@ export function GraphView({ refreshKey, notes, onSelectNote }: GraphViewProps) {
       ctx.stroke();
       ctx.setLineDash([]);
 
-      const midX = (src.x + tgt.x) / 2;
-      const midY = (src.y! + tgt.y!) / 2;
-      const fontSize = 9 / globalScale;
-      ctx.font = `${fontSize}px -apple-system, system-ui, sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = isHighlighted
-        ? "rgba(166,227,161,0.9)"
-        : isDerived
-          ? "rgba(203,166,247,0.6)"
-          : "rgba(166,227,161,0.6)";
-      ctx.fillText(link.predicate, midX, midY);
+      // Only show label when edge is highlighted (node selected)
+      if (isHighlighted) {
+        const midX = (src.x + tgt.x) / 2;
+        const midY = (src.y! + tgt.y!) / 2;
+        const fontSize = 10 / globalScale;
+        ctx.font = `${fontSize}px -apple-system, system-ui, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = isDerived
+          ? "rgba(203,166,247,0.95)"
+          : "rgba(166,227,161,0.95)";
+        // Background for readability
+        const textWidth = ctx.measureText(link.predicate).width;
+        ctx.fillStyle = "rgba(24,24,37,0.85)";
+        ctx.fillRect(
+          midX - textWidth / 2 - 3 / globalScale,
+          midY - fontSize / 2 - 1 / globalScale,
+          textWidth + 6 / globalScale,
+          fontSize + 2 / globalScale
+        );
+        ctx.fillStyle = isDerived
+          ? "rgba(203,166,247,0.95)"
+          : "rgba(166,227,161,0.95)";
+        ctx.fillText(link.predicate, midX, midY);
+      }
     },
     [selected]
   );
