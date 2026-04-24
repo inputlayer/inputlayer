@@ -79,14 +79,19 @@ def _get_llm() -> ChatOpenAI:
 
 
 EXTRACTION_PROMPT = (
-    "Extract all entities (people, organizations, technologies, concepts, "
-    "places, events, roles) and their relationships from the following note.\n\n"
+    "Extract all notable entities and their relationships from the following note.\n\n"
+    "Entity types to look for:\n"
+    "- People (named or described, e.g. 'the keeper', 'a sailor')\n"
+    "- Places (cities, landmarks, buildings, natural features)\n"
+    "- Objects (vehicles, tools, notable physical things)\n"
+    "- Organizations, technologies, concepts, events, roles\n\n"
     "Rules:\n"
     "- Normalize all entity names to lowercase\n"
-    "- Use short, consistent predicate names (works_at, uses, part_of, "
-    "collaborates_with, manages, created_by, reports_to, located_in)\n"
+    "- For unnamed characters, use descriptive names (e.g. 'the keeper', 'narrator')\n"
+    "- Use short predicate names (located_at, part_of, contains, guides, observed_by, "
+    "works_at, uses, manages, created_by, reports_to, near)\n"
     "- Every relationship's subject and object must match an entity name exactly\n"
-    "- If the text is empty or has no extractable entities, return empty lists\n\n"
+    "- Extract at least the key subjects and locations mentioned\n\n"
     "Note title: {title}\n\n"
     "Note content:\n{content}"
 )
