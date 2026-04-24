@@ -34,6 +34,10 @@ const KIND_COLORS: Record<string, string> = {
 
 const DEFAULT_COLOR = "#6c7086";
 
+function stripImgPrefix(id: string): string {
+  return id.startsWith("img:") ? id.slice(4) : id;
+}
+
 function kindColor(kind: string): string {
   const k = kind.toLowerCase();
   // Exact match
@@ -129,9 +133,6 @@ export function GraphView({ refreshKey, notes, onSelectNote }: GraphViewProps) {
       return srcId === selected.id || tgtId === selected.id;
     });
   }, [selected, graphData.links]);
-
-  const stripImgPrefix = (id: string) =>
-    id.startsWith("img:") ? id.slice(4) : id;
 
   const noteTitle = (noteId: string) => {
     const realId = stripImgPrefix(noteId);
