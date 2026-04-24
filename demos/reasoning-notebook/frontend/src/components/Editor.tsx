@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Editor as MilkdownEditor } from "@milkdown/core";
+import { commonmark } from "@milkdown/preset-commonmark";
+import { gfm } from "@milkdown/preset-gfm";
+import { nord } from "@milkdown/theme-nord";
+import { listener, listenerCtx } from "@milkdown/plugin-listener";
+import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
+import { replaceAll } from "@milkdown/utils";
 import { uploadImage, type ImageUploadResult } from "../api";
 import type { Note } from "../types";
+
+import "@milkdown/theme-nord/style.css";
 
 interface EditorProps {
   note: Note;
@@ -16,18 +25,23 @@ interface ImageAttachment {
   relationships?: number;
 }
 
-export function Editor({ note, onSave, onImageUploaded }: EditorProps) {
+function MilkdownEditorInner({
+  note,
+  onSave,
+  onImageUploaded,
+}: EditorProps) {
   const [title, setTitle] = useState(note.title);
-  const [content, setContent] = useState(note.content);
   const [dirty, setDirty] = useState(false);
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const contentRef = useRef(note.content);
+  const noteIdRef = useRef(note.id);
 
   useEffect(() => {
     setTitle(note.title);
-    setContent(note.content);
+    contentRef.current = note.content;
+    noteIdRef.current = note.id;
     setDirty(false);
     setImages([]);
   }, [note.id, note.title, note.content]);
@@ -37,44 +51,54 @@ export function Editor({ note, onSave, onImageUploaded }: EditorProps) {
       setDirty(true);
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
-        onSave(note.id, { title: newTitle, content: newContent });
+        onSave(noteIdRef.current, { title: newTitle, content: newContent });
         setDirty(false);
       }, 800);
     },
-    [note.id, onSave]
+    [onSave]
   );
 
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value;
     setTitle(v);
-    scheduleSave(v, content);
+    scheduleSave(v, contentRef.current);
   };
 
-  const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const v = e.target.value;
-    setContent(v);
-    scheduleSave(title, v);
-  };
+  const { get } = useEditor(
+    (root) =>
+      MilkdownEditor.make()
+        .config(nord)
+        .config((ctx) => {
+          ctx.set(rootCtx, root);
+          ctx
+            .get(listenerCtx)
+            .markdownUpdated((_ctx, markdown, _prev) => {
+              contentRef.current = markdown;
+              scheduleSave(title, markdown);
+            });
+        })
+        .use(commonmark)
+        .use(gfm)
+        .use(listener),
+    [note.id]
+  );
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === "s") {
-      e.preventDefault();
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      onSave(note.id, { title, content });
-      setDirty(false);
+  // Sync content when note changes
+  useEffect(() => {
+    const editor = get();
+    if (editor) {
+      editor.action(replaceAll(note.content));
     }
-  };
+  }, [note.id, note.content, get]);
 
   const handleImageFile = async (file: File) => {
     if (!file.type.startsWith("image/")) return;
 
     const previewUrl = URL.createObjectURL(file);
-    const placeholder: ImageAttachment = {
-      url: previewUrl,
-      description: "",
-      uploading: true,
-    };
-    setImages((prev) => [...prev, placeholder]);
+    setImages((prev) => [
+      ...prev,
+      { url: previewUrl, description: "", uploading: true },
+    ]);
 
     try {
       const result: ImageUploadResult = await uploadImage(note.id, file);
@@ -93,11 +117,15 @@ export function Editor({ note, onSave, onImageUploaded }: EditorProps) {
         )
       );
 
-      // Append image description to note content
+      // Insert image markdown into editor
       if (result.description) {
-        const imageText = `\n\n[Image: ${file.name}]\n${result.description}`;
-        const newContent = content + imageText;
-        setContent(newContent);
+        const editor = get();
+        const imageMarkdown = `\n\n![${file.name}](/api${result.url})\n\n*${result.description}*\n`;
+        const newContent = contentRef.current + imageMarkdown;
+        contentRef.current = newContent;
+        if (editor) {
+          editor.action(replaceAll(newContent));
+        }
         onSave(note.id, { title, content: newContent });
       }
       onImageUploaded?.();
@@ -109,19 +137,15 @@ export function Editor({ note, onSave, onImageUploaded }: EditorProps) {
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    const files = Array.from(e.dataTransfer.files);
-    files.forEach(handleImageFile);
+    Array.from(e.dataTransfer.files).forEach(handleImageFile);
   };
 
-  const handlePaste = (e: React.ClipboardEvent) => {
-    const items = Array.from(e.clipboardData.items);
-    for (const item of items) {
-      if (item.type.startsWith("image/")) {
-        e.preventDefault();
-        const file = item.getAsFile();
-        if (file) handleImageFile(file);
-        return;
-      }
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+      e.preventDefault();
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      onSave(note.id, { title, content: contentRef.current });
+      setDirty(false);
     }
   };
 
@@ -150,25 +174,15 @@ export function Editor({ note, onSave, onImageUploaded }: EditorProps) {
         placeholder="Untitled"
         spellCheck={false}
       />
-      <textarea
-        ref={textareaRef}
-        style={styles.content}
-        value={content}
-        onChange={handleContentChange}
-        onPaste={handlePaste}
-        placeholder="Start writing... (drag or paste images)"
-        spellCheck={false}
-      />
+      <div style={styles.milkdownContainer}>
+        <Milkdown />
+      </div>
 
       {images.length > 0 && (
         <div style={styles.imageStrip}>
           {images.map((img, i) => (
             <div key={i} style={styles.imageCard}>
-              <img
-                src={img.url}
-                alt=""
-                style={styles.imageThumb}
-              />
+              <img src={img.url} alt="" style={styles.imageThumb} />
               <div style={styles.imageInfo}>
                 {img.uploading ? (
                   <span style={styles.imageUploading}>Analyzing...</span>
@@ -179,7 +193,7 @@ export function Editor({ note, onSave, onImageUploaded }: EditorProps) {
                     </span>
                     {(img.entities ?? 0) > 0 && (
                       <span style={styles.imageBadge}>
-                        {img.entities} entities, {img.relationships} relationships
+                        {img.entities} entities, {img.relationships} rels
                       </span>
                     )}
                   </>
@@ -190,6 +204,17 @@ export function Editor({ note, onSave, onImageUploaded }: EditorProps) {
         </div>
       )}
     </div>
+  );
+}
+
+// Need to import rootCtx for the config
+import { rootCtx } from "@milkdown/core";
+
+export function Editor(props: EditorProps) {
+  return (
+    <MilkdownProvider>
+      <MilkdownEditorInner {...props} />
+    </MilkdownProvider>
   );
 }
 
@@ -241,17 +266,10 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "20px 24px 8px",
     fontFamily: "inherit",
   },
-  content: {
+  milkdownContainer: {
     flex: 1,
-    background: "none",
-    border: "none",
-    outline: "none",
-    color: "#bac2de",
-    fontSize: 15,
-    lineHeight: 1.7,
-    padding: "8px 24px 24px",
-    resize: "none" as const,
-    fontFamily: "inherit",
+    overflow: "auto",
+    padding: "0 24px 24px",
   },
   imageStrip: {
     borderTop: "1px solid rgba(255,255,255,0.06)",
@@ -290,11 +308,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 11,
     color: "#a6adc8",
     lineHeight: 1.4,
-    overflow: "hidden" as const,
-    textOverflow: "ellipsis" as const,
-    display: "-webkit-box",
-    WebkitLineClamp: 2,
-    WebkitBoxOrient: "vertical" as const,
   },
   imageBadge: {
     fontSize: 10,

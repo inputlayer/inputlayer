@@ -9,6 +9,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@milkdown/core": "^7.20.0",
+    "@milkdown/ctx": "^7.20.0",
+    "@milkdown/plugin-listener": "^7.20.0",
+    "@milkdown/plugin-upload": "^7.20.0",
+    "@milkdown/preset-commonmark": "^7.20.0",
+    "@milkdown/preset-gfm": "^7.20.0",
+    "@milkdown/react": "^7.20.0",
+    "@milkdown/theme-nord": "^7.20.0",
+    "@milkdown/utils": "^7.20.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-force-graph-2d": "^1.29.1"
