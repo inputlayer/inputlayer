@@ -254,7 +254,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   previewToggle: {
     background: "rgba(255,255,255,0.04)",
-    border: "1px solid rgba(255,255,255,0.08)",
+    borderWidth: 1,
+    borderStyle: "solid" as const,
+    borderColor: "rgba(255,255,255,0.08)",
     borderRadius: 6,
     padding: "3px 12px",
     fontSize: 11,

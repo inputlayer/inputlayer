@@ -109,7 +109,9 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "10px 16px",
     cursor: "pointer",
     position: "relative" as const,
-    borderLeft: "3px solid transparent",
+    borderLeftWidth: 3,
+    borderLeftStyle: "solid" as const,
+    borderLeftColor: "transparent",
     transition: "background 0.1s",
   },
   itemActive: {
