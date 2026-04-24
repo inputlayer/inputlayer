@@ -275,7 +275,7 @@ export function GraphView({ refreshKey, notes, onSelectNote }: GraphViewProps) {
     <div ref={containerRef} style={styles.container}>
       <ForceGraph2D
         ref={fgRef}
-        width={dimensions.width - (selected ? 300 : 0)}
+        width={dimensions.width}
         height={dimensions.height}
         graphData={graphData}
         nodeCanvasObject={nodeCanvasObject}
@@ -555,8 +555,11 @@ const styles: Record<string, React.CSSProperties> = {
   },
   // ── Detail panel ──
   detailPanel: {
+    position: "absolute" as const,
+    top: 0,
+    right: 0,
+    bottom: 0,
     width: 300,
-    flexShrink: 0,
     background: "#181825",
     borderLeft: "1px solid rgba(255,255,255,0.06)",
     padding: "16px 20px",
@@ -564,6 +567,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column" as const,
     gap: 12,
+    zIndex: 5,
   },
   detailHeader: {
     display: "flex",
