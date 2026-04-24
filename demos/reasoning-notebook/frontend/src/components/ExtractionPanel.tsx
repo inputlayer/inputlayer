@@ -14,6 +14,7 @@ export function ExtractionPanel({ noteId, refreshKey }: ExtractionPanelProps) {
   const [data, setData] = useState<NoteEntities | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     fetchNoteEntities(noteId).then(setData).catch(() => setData(null));
@@ -44,7 +45,8 @@ export function ExtractionPanel({ noteId, refreshKey }: ExtractionPanelProps) {
 
   return (
     <div style={styles.panel}>
-      <div style={styles.header}>
+      <div style={styles.header} onClick={() => setExpanded(!expanded)}>
+        <button style={styles.toggle}>{expanded ? "▾" : "▸"}</button>
         <span style={styles.title}>Knowledge Graph</span>
         <div style={styles.stats}>
           <span style={styles.stat}>
@@ -61,14 +63,17 @@ export function ExtractionPanel({ noteId, refreshKey }: ExtractionPanelProps) {
             ...styles.extractBtn,
             opacity: extracting ? 0.5 : 1,
           }}
-          onClick={handleExtract}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleExtract();
+          }}
           disabled={extracting}
         >
           {extracting ? "Extracting..." : "Extract"}
         </button>
       </div>
       {toast && <div style={styles.toast}>{toast}</div>}
-      {data && entityCount > 0 && (
+      {expanded && data && entityCount > 0 && (
         <div style={styles.body}>
           <div style={styles.section}>
             {data.entities.map((e) => (
@@ -103,8 +108,20 @@ const styles: Record<string, React.CSSProperties> = {
   header: {
     display: "flex",
     alignItems: "center",
-    gap: 16,
+    gap: 10,
     padding: "10px 24px",
+    cursor: "pointer",
+    userSelect: "none" as const,
+  },
+  toggle: {
+    background: "none",
+    border: "none",
+    color: "#6c7086",
+    fontSize: 11,
+    padding: 0,
+    cursor: "pointer",
+    width: 14,
+    flexShrink: 0,
   },
   title: {
     fontSize: 11,
