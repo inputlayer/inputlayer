@@ -25,9 +25,25 @@ const KIND_COLORS: Record<string, string> = {
   place: "#fab387",
   event: "#f38ba8",
   role: "#94e2d5",
+  object: "#f5c2e7",
+  building: "#fab387",
+  artwork: "#cba6f7",
+  animal: "#94e2d5",
+  software: "#a6e3a1",
 };
 
 const DEFAULT_COLOR = "#6c7086";
+
+function kindColor(kind: string): string {
+  const k = kind.toLowerCase();
+  // Exact match
+  if (KIND_COLORS[k]) return KIND_COLORS[k];
+  // Check if any known kind is a substring (handles "artwork/animal", "building/artwork")
+  for (const [key, color] of Object.entries(KIND_COLORS)) {
+    if (k.includes(key)) return color;
+  }
+  return DEFAULT_COLOR;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type GNode = any;
@@ -126,7 +142,7 @@ export function GraphView({ refreshKey, notes, onSelectNote }: GraphViewProps) {
     (node: GNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
       const label = node.name;
       const fontSize = 12 / globalScale;
-      const color = KIND_COLORS[node.kind] ?? DEFAULT_COLOR;
+      const color = kindColor(node.kind);
       const isHovered = hovered?.id === node.id;
       const isSelected = selected?.id === node.id;
       const radius = (isHovered || isSelected) ? 7 / globalScale : 5 / globalScale;
@@ -282,8 +298,8 @@ export function GraphView({ refreshKey, notes, onSelectNote }: GraphViewProps) {
               <span
                 style={{
                   ...styles.detailKindBadge,
-                  background: `${KIND_COLORS[selected.kind] ?? DEFAULT_COLOR}20`,
-                  color: KIND_COLORS[selected.kind] ?? DEFAULT_COLOR,
+                  background: `${kindColor(selected.kind)}20`,
+                  color: kindColor(selected.kind),
                 }}
               >
                 {selected.kind}
