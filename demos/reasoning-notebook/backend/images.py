@@ -149,23 +149,24 @@ async def extract_from_image(
             f"{iql_literal(filename)}, {iql_literal(description)})"
         )
 
-        # Store extracted entities (prefixed with i_ to distinguish from text)
+        # Store extracted entities with img: source prefix
+        img_source = f"img:{note_id}"
         for i, e in enumerate(extraction.entities):
             eid = f"i_{image_id}_e{i}"
             await kg.execute(
                 f"+entity({iql_literal(eid)}, {iql_literal(e.name)}, "
                 f"{iql_literal(e.kind)}, {iql_literal(e.description)}, "
-                f"{iql_literal(note_id)})"
+                f"{iql_literal(img_source)})"
             )
             entities_count += 1
 
-        # Store extracted relationships (prefixed with i_)
+        # Store extracted relationships with img: source prefix
         for i, r in enumerate(extraction.relationships):
             rid = f"i_{image_id}_r{i}"
             await kg.execute(
                 f"+relationship({iql_literal(rid)}, {iql_literal(r.subject)}, "
                 f"{iql_literal(r.predicate)}, {iql_literal(r.object)}, "
-                f"{iql_literal(note_id)})"
+                f"{iql_literal(img_source)})"
             )
             relationships_count += 1
 

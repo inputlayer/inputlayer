@@ -234,14 +234,23 @@ async def update_note(
 @app.delete("/notes/{note_id}", status_code=204)
 async def delete_note(note_id: str, request: Request):
     kg = await get_kg(request)
+    img_source = f"img:{note_id}"
     await kg.execute(
         f'-note(Id, T, C, Ca, Ua) <- note(Id, T, C, Ca, Ua), Id = "{note_id}"'
     )
+    # Delete text-extracted entities
     await kg.execute(
         f'-entity(Id, N, K, D, Src) <- entity(Id, N, K, D, Src), Src = "{note_id}"'
     )
     await kg.execute(
         f'-relationship(Id, S, P, O, Src) <- relationship(Id, S, P, O, Src), Src = "{note_id}"'
+    )
+    # Delete image-extracted entities
+    await kg.execute(
+        f'-entity(Id, N, K, D, Src) <- entity(Id, N, K, D, Src), Src = "{img_source}"'
+    )
+    await kg.execute(
+        f'-relationship(Id, S, P, O, Src) <- relationship(Id, S, P, O, Src), Src = "{img_source}"'
     )
 
 
@@ -268,23 +277,22 @@ async def trigger_extraction(note_id: str, request: Request):
 @app.get("/notes/{note_id}/entities")
 async def get_note_entities(note_id: str, request: Request):
     kg = await get_kg(request)
-    entities = await kg.execute(
-        f'?entity(Id, Name, Kind, Desc, "{note_id}")'
-    )
-    relationships = await kg.execute(
-        f'?relationship(Id, Subject, Predicate, Object, "{note_id}")'
-    )
+    img_source = f"img:{note_id}"
+
+    # Fetch both text-extracted and image-extracted entities
+    text_ents = await kg.execute(f'?entity(Id, Name, Kind, Desc, "{note_id}")')
+    img_ents = await kg.execute(f'?entity(Id, Name, Kind, Desc, "{img_source}")')
+    text_rels = await kg.execute(f'?relationship(Id, Subject, Predicate, Object, "{note_id}")')
+    img_rels = await kg.execute(f'?relationship(Id, Subject, Predicate, Object, "{img_source}")')
+
+    def collect_rows(result):
+        if not result.rows or result.columns == ["error"]:
+            return []
+        return [dict(zip(result.columns, row, strict=True)) for row in result.rows]
+
     return {
-        "entities": [
-            dict(zip(entities.columns, row, strict=True))
-            for row in (entities.rows or [])
-            if entities.columns != ["error"]
-        ],
-        "relationships": [
-            dict(zip(relationships.columns, row, strict=True))
-            for row in (relationships.rows or [])
-            if relationships.columns != ["error"]
-        ],
+        "entities": collect_rows(text_ents) + collect_rows(img_ents),
+        "relationships": collect_rows(text_rels) + collect_rows(img_rels),
     }
 
 
