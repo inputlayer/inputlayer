@@ -113,9 +113,13 @@ export function GraphView({ refreshKey, notes, onSelectNote }: GraphViewProps) {
     });
   }, [selected, graphData.links]);
 
+  const stripImgPrefix = (id: string) =>
+    id.startsWith("img:") ? id.slice(4) : id;
+
   const noteTitle = (noteId: string) => {
-    const note = notes.find((n) => n.id === noteId);
-    return note?.title ?? noteId.slice(0, 8);
+    const realId = stripImgPrefix(noteId);
+    const note = notes.find((n) => n.id === realId);
+    return note?.title ?? realId.slice(0, 8);
   };
 
   const nodeCanvasObject = useCallback(
@@ -320,7 +324,7 @@ export function GraphView({ refreshKey, notes, onSelectNote }: GraphViewProps) {
                 <button
                   key={nid}
                   style={styles.noteLink}
-                  onClick={() => onSelectNote(nid)}
+                  onClick={() => onSelectNote(stripImgPrefix(nid))}
                 >
                   {noteTitle(nid)}
                 </button>
