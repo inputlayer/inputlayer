@@ -252,6 +252,14 @@ async def delete_note(note_id: str, request: Request):
     await kg.execute(
         f'-relationship(Id, S, P, O, Src) <- relationship(Id, S, P, O, Src), Src = "{img_source}"'
     )
+    # Delete image records and scene analysis
+    await kg.execute(
+        f'-image(Id, N, F, D) <- image(Id, N, F, D), N = "{note_id}"'
+    )
+    await kg.execute(
+        f'-image_scene(Id, N, S, O, P, E, Et, A, C, Cu, T) <- '
+        f'image_scene(Id, N, S, O, P, E, Et, A, C, Cu, T), N = "{note_id}"'
+    )
 
 
 # ── Extraction ─────────────────────────────────────────────────────
@@ -384,6 +392,28 @@ async def cleanup_orphans(request: Request):
                 f"-relationship({iql_literal(row[0])}, {iql_literal(row[1])}, "
                 f"{iql_literal(row[2])}, {iql_literal(row[3])}, {iql_literal(row[4])})"
             )
+            removed += 1
+
+    # Clean orphaned image records and scene analyses
+    imgs = await kg.execute("?image(Id, NoteId, Filename, Desc)")
+    for row in (imgs.rows or []):
+        if row[1] not in note_ids:
+            from inputlayer.integrations.langchain.params import iql_literal
+            await kg.execute(
+                f"-image({iql_literal(row[0])}, {iql_literal(row[1])}, "
+                f"{iql_literal(row[2])}, {iql_literal(row[3])})"
+            )
+            removed += 1
+
+    scenes = await kg.execute(
+        "?image_scene(ImageId, NoteId, Scene, Objects, People, Emotion, "
+        "EventType, Aesthetic, Caption, Culture, Text)"
+    )
+    for row in (scenes.rows or []):
+        if row[1] not in note_ids:
+            from inputlayer.integrations.langchain.params import iql_literal
+            vals = ", ".join(iql_literal(v) for v in row)
+            await kg.execute(f"-image_scene({vals})")
             removed += 1
 
     return {"removed": removed}
