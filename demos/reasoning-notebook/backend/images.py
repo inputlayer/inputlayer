@@ -50,14 +50,37 @@ class ImageRelationship(BaseModel):
     object: str = Field(description="Target entity name")
 
 
-class ImageExtraction(BaseModel):
-    scene: str = Field(description="Brief description of the scene")
-    objects: list[str] = Field(description="List of objects visible")
+class ImageAnalysis(BaseModel):
+    scene: str = Field(description="Brief scene description, e.g. 'birthday party, indoors'")
+    objects: list[str] = Field(description="List of objects visible, e.g. ['cake', 'candles', 'balloons']")
+    people: str = Field(default="none", description="People count and description, e.g. '5 (2 children, 3 adults)' or 'none'")
+    emotion: str = Field(default="neutral", description="Emotional quality, e.g. 'joyful, celebratory'")
+    event_type: str = Field(default="", description="Type of event if applicable, e.g. 'birthday', 'ceremony', 'travel'")
+    aesthetic: str = Field(default="", description="Visual style, e.g. 'warm lighting, candid' or 'dramatic, high contrast'")
+    caption_seed: str = Field(default="", description="A short phrase that could caption this image, e.g. 'blowing out the candles'")
     cultural_context: str = Field(default="", description="Cultural or historical context if applicable")
     visible_text: str = Field(default="", description="Any text visible in the image")
-    mood: str = Field(default="", description="Emotional quality of the image")
-    entities: list[ImageEntity] = Field(default_factory=list, description="Entities found")
+    entities: list[ImageEntity] = Field(default_factory=list, description="Notable entities found")
     relationships: list[ImageRelationship] = Field(default_factory=list, description="Relationships between entities")
+
+
+# ── KG Schema for image analysis ───────────────────────────────────
+
+
+class ImageScene(Relation):
+    """Scene-level analysis of an image."""
+
+    image_id: str
+    note_id: str
+    scene: str
+    objects: str
+    people: str
+    emotion: str
+    event_type: str
+    aesthetic: str
+    caption_seed: str
+    cultural_context: str
+    visible_text: str
 
 
 # ── Storage ────────────────────────────────────────────────────────
@@ -83,12 +106,19 @@ def get_image_path(filename: str) -> Path | None:
 
 
 VISION_PROMPT = (
-    "Analyze this image and extract structured information.\n"
-    "Identify: the scene, objects, any cultural context, visible text, "
-    "mood, and notable entities and their relationships.\n"
-    "For entities, use lowercase names and categorize them "
-    "(person, place, object, building, artwork, animal, concept).\n"
-    "For relationships, describe how entities relate to each other."
+    "Analyze this image and extract structured information.\n\n"
+    "Provide:\n"
+    "- scene: brief description (e.g. 'birthday party, indoors')\n"
+    "- objects: list of visible objects (e.g. ['cake', 'candles'])\n"
+    "- people: count and description (e.g. '5 (2 children, 3 adults)') or 'none'\n"
+    "- emotion: emotional quality (e.g. 'joyful, celebratory')\n"
+    "- event_type: type of event (e.g. 'birthday', 'ceremony', 'travel')\n"
+    "- aesthetic: visual style (e.g. 'warm lighting, candid')\n"
+    "- caption_seed: a short caption phrase (e.g. 'blowing out the candles')\n"
+    "- cultural_context: cultural or historical context if any\n"
+    "- visible_text: any text visible in the image\n"
+    "- entities: notable entities with name, kind, description\n"
+    "- relationships: how entities relate to each other"
 )
 
 
@@ -131,12 +161,13 @@ async def extract_from_image(
         logger.exception("Vision description failed for image %s", image_id)
         description = ""
 
-    # Step 2: Structured extraction
+    # Step 2: Structured extraction with rich schema
     entities_count = 0
     relationships_count = 0
+    analysis = None
     try:
-        extractor = llm.with_structured_output(ImageExtraction)
-        extraction = await extractor.ainvoke([
+        extractor = llm.with_structured_output(ImageAnalysis)
+        analysis = await extractor.ainvoke([
             HumanMessage(content=[
                 {"type": "text", "text": VISION_PROMPT},
                 {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{img_b64}"}},
@@ -149,9 +180,19 @@ async def extract_from_image(
             f"{iql_literal(filename)}, {iql_literal(description)})"
         )
 
+        # Store scene-level analysis
+        await kg.execute(
+            f"+image_scene({iql_literal(image_id)}, {iql_literal(note_id)}, "
+            f"{iql_literal(analysis.scene)}, {iql_literal(', '.join(analysis.objects))}, "
+            f"{iql_literal(analysis.people)}, {iql_literal(analysis.emotion)}, "
+            f"{iql_literal(analysis.event_type)}, {iql_literal(analysis.aesthetic)}, "
+            f"{iql_literal(analysis.caption_seed)}, {iql_literal(analysis.cultural_context)}, "
+            f"{iql_literal(analysis.visible_text)})"
+        )
+
         # Store extracted entities with img: source prefix
         img_source = f"img:{note_id}"
-        for i, e in enumerate(extraction.entities):
+        for i, e in enumerate(analysis.entities):
             eid = f"i_{image_id}_e{i}"
             await kg.execute(
                 f"+entity({iql_literal(eid)}, {iql_literal(e.name)}, "
@@ -161,7 +202,7 @@ async def extract_from_image(
             entities_count += 1
 
         # Store extracted relationships with img: source prefix
-        for i, r in enumerate(extraction.relationships):
+        for i, r in enumerate(analysis.relationships):
             rid = f"i_{image_id}_r{i}"
             await kg.execute(
                 f"+relationship({iql_literal(rid)}, {iql_literal(r.subject)}, "
@@ -178,9 +219,22 @@ async def extract_from_image(
         image_id, len(description), entities_count, relationships_count,
     )
 
-    return {
+    result: dict[str, Any] = {
         "image_id": image_id,
         "description": description,
         "entities": entities_count,
         "relationships": relationships_count,
     }
+    if analysis:
+        result["analysis"] = {
+            "scene": analysis.scene,
+            "objects": analysis.objects,
+            "people": analysis.people,
+            "emotion": analysis.emotion,
+            "event_type": analysis.event_type,
+            "aesthetic": analysis.aesthetic,
+            "caption_seed": analysis.caption_seed,
+            "cultural_context": analysis.cultural_context,
+            "visible_text": analysis.visible_text,
+        }
+    return result

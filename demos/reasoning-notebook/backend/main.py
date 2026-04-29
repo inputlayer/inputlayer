@@ -21,7 +21,7 @@ from config import (
 )
 from chat import chat as chat_fn
 from extraction import Entity, Relationship, extract_from_note
-from images import Image, extract_from_image, get_image_path, save_image
+from images import Image, ImageScene, extract_from_image, get_image_path, save_image
 from ontology import consolidate_ontology
 from resolution import EntityEmbedding, resolve_entities
 from schemas import ChatRequest, ChatResponse, NoteCreate, NoteResponse, NoteUpdate
@@ -53,7 +53,7 @@ async def _connect(app: FastAPI) -> None:
     logger.info("Connected to InputLayer at %s", INPUTLAYER_URL)
 
     kg = il.knowledge_graph(KG_NAME)
-    await kg.define(Note, Entity, Relationship, EntityEmbedding, Image)
+    await kg.define(Note, Entity, Relationship, EntityEmbedding, Image, ImageScene)
 
     # Derived rules — these create inferred facts from extracted data
     rules = [
