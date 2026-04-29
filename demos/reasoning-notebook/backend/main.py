@@ -322,6 +322,104 @@ async def get_graph(request: Request):
             data = dict(zip(rel_result.columns, row, strict=True))
             edges.append(data)
 
+    # Add image_scene data as graph nodes
+    scene_result = await kg.execute(
+        "?image_scene(ImageId, NoteId, Scene, Objects, People, Emotion, "
+        "EventType, Aesthetic, Caption, Culture, Text)"
+    )
+    if scene_result.rows and scene_result.columns != ["error"]:
+        for row in scene_result.rows:
+            sd = dict(zip(scene_result.columns, row, strict=True))
+            img_id = sd["image_id"]
+            note_id = sd["note_id"]
+            scene_node = f"scene:{img_id}"
+
+            # Scene hub node
+            nodes.append({
+                "id": f"scene_{img_id}",
+                "name": sd["caption_seed"] or sd["scene"][:40],
+                "kind": "scene",
+                "description": sd["scene"],
+                "source_note_id": note_id,
+            })
+
+            # Emotion node
+            if sd.get("emotion") and sd["emotion"] != "neutral":
+                nodes.append({
+                    "id": f"emotion_{img_id}",
+                    "name": sd["emotion"].split(",")[0].strip(),
+                    "kind": "emotion",
+                    "description": sd["emotion"],
+                    "source_note_id": note_id,
+                })
+                edges.append({
+                    "id": f"scene_emotion_{img_id}",
+                    "subject": sd["caption_seed"] or sd["scene"][:40],
+                    "predicate": "evokes",
+                    "object": sd["emotion"].split(",")[0].strip(),
+                    "source_note_id": note_id,
+                    "derived": True,
+                })
+
+            # Event type node
+            if sd.get("event_type"):
+                nodes.append({
+                    "id": f"event_{img_id}",
+                    "name": sd["event_type"],
+                    "kind": "event",
+                    "description": f"Event type: {sd['event_type']}",
+                    "source_note_id": note_id,
+                })
+                edges.append({
+                    "id": f"scene_event_{img_id}",
+                    "subject": sd["caption_seed"] or sd["scene"][:40],
+                    "predicate": "depicts",
+                    "object": sd["event_type"],
+                    "source_note_id": note_id,
+                    "derived": True,
+                })
+
+            # Object nodes from the comma-separated list
+            objects_str = sd.get("objects", "")
+            if objects_str:
+                for obj_name in objects_str.split(", "):
+                    obj_clean = obj_name.strip().lower()[:50]
+                    if not obj_clean:
+                        continue
+                    nodes.append({
+                        "id": f"obj_{img_id}_{obj_clean[:10]}",
+                        "name": obj_clean,
+                        "kind": "object",
+                        "description": f"Object seen in image",
+                        "source_note_id": note_id,
+                    })
+                    edges.append({
+                        "id": f"scene_obj_{img_id}_{obj_clean[:10]}",
+                        "subject": sd["caption_seed"] or sd["scene"][:40],
+                        "predicate": "contains",
+                        "object": obj_clean,
+                        "source_note_id": note_id,
+                        "derived": True,
+                    })
+
+            # Cultural context node
+            if sd.get("cultural_context"):
+                nodes.append({
+                    "id": f"culture_{img_id}",
+                    "name": sd["cultural_context"][:40],
+                    "kind": "concept",
+                    "description": sd["cultural_context"],
+                    "source_note_id": note_id,
+                })
+                edges.append({
+                    "id": f"scene_culture_{img_id}",
+                    "subject": sd["caption_seed"] or sd["scene"][:40],
+                    "predicate": "cultural_context",
+                    "object": sd["cultural_context"][:40],
+                    "source_note_id": note_id,
+                    "derived": True,
+                })
+
     # Add derived edges from rules
     derived_queries = [
         ("colleague", "?colleague(A, B)"),

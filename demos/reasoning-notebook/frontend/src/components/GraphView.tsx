@@ -30,6 +30,8 @@ const KIND_COLORS: Record<string, string> = {
   artwork: "#cba6f7",
   animal: "#94e2d5",
   software: "#a6e3a1",
+  scene: "#f5e0dc",
+  emotion: "#f38ba8",
 };
 
 const DEFAULT_COLOR = "#6c7086";
