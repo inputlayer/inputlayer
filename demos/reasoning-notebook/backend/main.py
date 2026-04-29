@@ -304,6 +304,21 @@ async def get_note_entities(note_id: str, request: Request):
     }
 
 
+@app.get("/notes/{note_id}/scenes")
+async def get_note_scenes(note_id: str, request: Request):
+    kg = await get_kg(request)
+    result = await kg.execute(
+        f'?image_scene(ImageId, "{note_id}", Scene, Objects, People, Emotion, '
+        f'EventType, Aesthetic, Caption, Culture, Text)'
+    )
+    if not result.rows or result.columns == ["error"]:
+        return []
+    return [
+        {k.lower(): _unescape_iql_string(v) for k, v in zip(result.columns, row, strict=True)}
+        for row in result.rows
+    ]
+
+
 @app.get("/graph")
 async def get_graph(request: Request):
     kg = await get_kg(request)

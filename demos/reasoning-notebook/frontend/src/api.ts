@@ -107,6 +107,26 @@ export interface GraphData {
   }>;
 }
 
+export interface ImageSceneData {
+  image_id: string;
+  note_id: string;
+  scene: string;
+  objects: string;
+  people: string;
+  emotion: string;
+  event_type: string;
+  aesthetic: string;
+  caption_seed: string;
+  cultural_context: string;
+  visible_text: string;
+}
+
+export async function fetchImageScenes(noteId: string): Promise<ImageSceneData[]> {
+  const res = await fetch(`${BASE}/notes/${noteId}/scenes`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
 export async function fetchGraph(): Promise<GraphData> {
   const res = await fetch(`${BASE}/graph`);
   if (!res.ok) throw new Error(`Failed to fetch graph: ${res.status}`);

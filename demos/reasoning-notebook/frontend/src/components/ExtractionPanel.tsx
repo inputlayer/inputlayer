@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import {
   extractNote,
+  fetchImageScenes,
   fetchNoteEntities,
+  type ImageSceneData,
   type NoteEntities,
 } from "../api";
 
@@ -12,12 +14,14 @@ interface ExtractionPanelProps {
 
 export function ExtractionPanel({ noteId, refreshKey }: ExtractionPanelProps) {
   const [data, setData] = useState<NoteEntities | null>(null);
+  const [scenes, setScenes] = useState<ImageSceneData[]>([]);
   const [extracting, setExtracting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     fetchNoteEntities(noteId).then(setData).catch(() => setData(null));
+    fetchImageScenes(noteId).then(setScenes).catch(() => setScenes([]));
   }, [noteId, refreshKey]);
 
   const handleExtract = async () => {
@@ -94,6 +98,71 @@ export function ExtractionPanel({ noteId, refreshKey }: ExtractionPanelProps) {
               ))}
             </div>
           )}
+        </div>
+      )}
+      {expanded && scenes.length > 0 && (
+        <div style={styles.body}>
+          {scenes.map((s, i) => (
+            <div key={i} style={styles.sceneCard}>
+              <div style={styles.sceneTitle}>Image Analysis</div>
+              <div style={styles.sceneGrid}>
+                {s.scene && (
+                  <div style={styles.sceneRow}>
+                    <span style={styles.sceneLabel}>Scene</span>
+                    <span style={styles.sceneValue}>{s.scene}</span>
+                  </div>
+                )}
+                {s.objects && (
+                  <div style={styles.sceneRow}>
+                    <span style={styles.sceneLabel}>Objects</span>
+                    <span style={styles.sceneValue}>{s.objects}</span>
+                  </div>
+                )}
+                {s.people && s.people !== "none" && (
+                  <div style={styles.sceneRow}>
+                    <span style={styles.sceneLabel}>People</span>
+                    <span style={styles.sceneValue}>{s.people}</span>
+                  </div>
+                )}
+                {s.emotion && s.emotion !== "neutral" && (
+                  <div style={styles.sceneRow}>
+                    <span style={styles.sceneLabel}>Emotion</span>
+                    <span style={styles.sceneValue}>{s.emotion}</span>
+                  </div>
+                )}
+                {s.event_type && (
+                  <div style={styles.sceneRow}>
+                    <span style={styles.sceneLabel}>Event</span>
+                    <span style={styles.sceneValue}>{s.event_type}</span>
+                  </div>
+                )}
+                {s.aesthetic && (
+                  <div style={styles.sceneRow}>
+                    <span style={styles.sceneLabel}>Aesthetic</span>
+                    <span style={styles.sceneValue}>{s.aesthetic}</span>
+                  </div>
+                )}
+                {s.caption_seed && (
+                  <div style={styles.sceneRow}>
+                    <span style={styles.sceneLabel}>Caption</span>
+                    <span style={{ ...styles.sceneValue, fontStyle: "italic" }}>{s.caption_seed}</span>
+                  </div>
+                )}
+                {s.cultural_context && (
+                  <div style={styles.sceneRow}>
+                    <span style={styles.sceneLabel}>Culture</span>
+                    <span style={styles.sceneValue}>{s.cultural_context}</span>
+                  </div>
+                )}
+                {s.visible_text && (
+                  <div style={styles.sceneRow}>
+                    <span style={styles.sceneLabel}>Text</span>
+                    <span style={styles.sceneValue}>{s.visible_text}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -211,5 +280,42 @@ const styles: Record<string, React.CSSProperties> = {
   relPred: {
     color: "#a6e3a1",
     fontStyle: "italic" as const,
+  },
+  sceneCard: {
+    marginTop: 8,
+    padding: "10px 12px",
+    background: "rgba(245,224,220,0.04)",
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftStyle: "solid" as const,
+    borderLeftColor: "#f5e0dc",
+  },
+  sceneTitle: {
+    fontSize: 10,
+    fontWeight: 600,
+    textTransform: "uppercase" as const,
+    letterSpacing: 1,
+    color: "#f5e0dc",
+    marginBottom: 8,
+  },
+  sceneGrid: {
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 4,
+  },
+  sceneRow: {
+    display: "flex",
+    gap: 8,
+    fontSize: 11,
+    lineHeight: 1.4,
+  },
+  sceneLabel: {
+    color: "#6c7086",
+    fontWeight: 600,
+    minWidth: 60,
+    flexShrink: 0,
+  },
+  sceneValue: {
+    color: "#a6adc8",
   },
 };
