@@ -68,13 +68,20 @@ MODELS = [
         "multimodal": True,
     },
     # Cloud — Anthropic
-    # {
-    #     "name": "claude-sonnet-4",
-    #     "provider": "anthropic",
-    #     "api_key_env": "ANTHROPIC_API_KEY",
-    #     "model": "claude-sonnet-4-20250514",
-    #     "multimodal": True,
-    # },
+    {
+        "name": "claude-opus-4.7",
+        "provider": "anthropic",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "model": "claude-opus-4-7",
+        "multimodal": True,
+    },
+    {
+        "name": "claude-mythos-preview",
+        "provider": "anthropic",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "model": "claude-mythos-preview",
+        "multimodal": True,
+    },
 ]
 
 
