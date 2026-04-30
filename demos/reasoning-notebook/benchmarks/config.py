@@ -26,6 +26,14 @@ MODELS = [
         "model": "deepseek/deepseek-r1-0528-qwen3-8b",
         "multimodal": False,
     },
+    {
+        "name": "gemma-4-e4b (local)",
+        "provider": "openai",
+        "base_url": "http://localhost:1234/v1",
+        "api_key": "lm-studio",
+        "model": "google/gemma-4-e4b",
+        "multimodal": True,
+    },
     # Cloud — OpenAI
     {
         "name": "gpt-4o-mini",
@@ -44,13 +52,13 @@ MODELS = [
         "multimodal": True,
     },
     # Cloud — Anthropic
-    {
-        "name": "claude-sonnet-4",
-        "provider": "anthropic",
-        "api_key_env": "ANTHROPIC_API_KEY",
-        "model": "claude-sonnet-4-20250514",
-        "multimodal": True,
-    },
+    # {
+    #     "name": "claude-sonnet-4",
+    #     "provider": "anthropic",
+    #     "api_key_env": "ANTHROPIC_API_KEY",
+    #     "model": "claude-sonnet-4-20250514",
+    #     "multimodal": True,
+    # },
 ]
 
 
