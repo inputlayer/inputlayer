@@ -5,6 +5,10 @@ __pycache__/
 *.pyc
 data/
 uploads/
+benchmarks/results/
+benchmarks/inputs/*.jpg
+benchmarks/inputs/*.jpeg
+benchmarks/inputs/*.png
 .inputlayer-credentials.toml
 *.tsbuildinfo
 bun.lock
