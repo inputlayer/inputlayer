@@ -105,12 +105,14 @@ async def benchmark_text(model_cfg: dict, text: str, input_name: str) -> dict[st
     try:
         if model_cfg["provider"] == "anthropic":
             from langchain_anthropic import ChatAnthropic
-            llm = ChatAnthropic(
-                api_key=model_cfg["api_key"],
-                model=model_cfg["model"],
-                temperature=0,
-                max_tokens=1024,
-            )
+            kwargs: dict[str, Any] = {
+                "api_key": model_cfg["api_key"],
+                "model": model_cfg["model"],
+                "max_tokens": 1024,
+            }
+            if "opus-4-7" not in model_cfg["model"] and "mythos" not in model_cfg["model"]:
+                kwargs["temperature"] = 0
+            llm = ChatAnthropic(**kwargs)
         else:
             llm = ChatOpenAI(
                 base_url=model_cfg.get("base_url"),
@@ -170,12 +172,14 @@ async def benchmark_image(model_cfg: dict, image_path: Path, input_name: str) ->
     try:
         if model_cfg["provider"] == "anthropic":
             from langchain_anthropic import ChatAnthropic
-            llm = ChatAnthropic(
-                api_key=model_cfg["api_key"],
-                model=model_cfg["model"],
-                temperature=0,
-                max_tokens=1024,
-            )
+            kwargs: dict[str, Any] = {
+                "api_key": model_cfg["api_key"],
+                "model": model_cfg["model"],
+                "max_tokens": 1024,
+            }
+            if "opus-4-7" not in model_cfg["model"] and "mythos" not in model_cfg["model"]:
+                kwargs["temperature"] = 0
+            llm = ChatAnthropic(**kwargs)
         else:
             llm = ChatOpenAI(
                 base_url=model_cfg.get("base_url"),
