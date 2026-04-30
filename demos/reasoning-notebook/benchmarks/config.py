@@ -48,7 +48,7 @@ MODELS = [
         "base_url": "http://localhost:1234/v1",
         "api_key": "lm-studio",
         "model": "qwen/qwen3.5-9b",
-        "multimodal": False,
+        "multimodal": True,
     },
     # Cloud — OpenAI
     {
