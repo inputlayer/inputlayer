@@ -18,14 +18,14 @@ MODELS = [
         "model": "mistralai/ministral-3-3b",
         "multimodal": True,
     },
-    {
-        "name": "deepseek-r1-8b (local)",
-        "provider": "openai",
-        "base_url": "http://localhost:1234/v1",
-        "api_key": "lm-studio",
-        "model": "deepseek/deepseek-r1-0528-qwen3-8b",
-        "multimodal": False,
-    },
+    # {
+    #     "name": "deepseek-r1-8b (local)",
+    #     "provider": "openai",
+    #     "base_url": "http://localhost:1234/v1",
+    #     "api_key": "lm-studio",
+    #     "model": "deepseek/deepseek-r1-0528-qwen3-8b",
+    #     "multimodal": False,
+    # },
     {
         "name": "gemma-4-e4b (local)",
         "provider": "openai",
@@ -33,6 +33,22 @@ MODELS = [
         "api_key": "lm-studio",
         "model": "google/gemma-4-e4b",
         "multimodal": True,
+    },
+    {
+        "name": "glm-4.6v-flash (local)",
+        "provider": "openai",
+        "base_url": "http://localhost:1234/v1",
+        "api_key": "lm-studio",
+        "model": "zai-org/glm-4.6v-flash",
+        "multimodal": True,
+    },
+    {
+        "name": "qwen3.5-9b (local)",
+        "provider": "openai",
+        "base_url": "http://localhost:1234/v1",
+        "api_key": "lm-studio",
+        "model": "qwen/qwen3.5-9b",
+        "multimodal": False,
     },
     # Cloud — OpenAI
     {
