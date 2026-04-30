@@ -21,12 +21,17 @@ import time
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
+# Import benchmark config BEFORE adding backend to path
+bench_dir = Path(__file__).parent
+sys.path.insert(0, str(bench_dir))
+from config import get_enabled_models, MODELS  # noqa: E402
+sys.path.pop(0)
 
-from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, Field
+# Now add backend to path for langchain deps
+sys.path.insert(0, str(bench_dir.parent / "backend"))
 
-from config import get_enabled_models, MODELS
+from langchain_openai import ChatOpenAI  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
 
 
 # ── Extraction schemas (same as the app) ───────────────────────────
