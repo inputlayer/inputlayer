@@ -232,7 +232,177 @@ def generate_html(results: list[dict], source_file: str) -> str:
             f'</tr>\n'
         )
 
-    html += '</tbody></table></div>\n</body></html>'
+    html += '</tbody></table></div>\n'
+
+    # ── Charts via Chart.js ──
+    # Prepare data for charts
+    successful_models = [m for m in models if m in model_stats]
+
+    # Per-input breakdown data
+    chart_labels = json.dumps(successful_models)
+
+    # Entities per input per model
+    input_datasets_ent = []
+    input_datasets_time = []
+    palette = ["#89b4fa", "#a6e3a1", "#f9e2af", "#f38ba8", "#cba6f7", "#fab387", "#94e2d5", "#f5c2e7"]
+    for idx, input_name in enumerate(inputs):
+        color = palette[idx % len(palette)]
+        ent_data = []
+        time_data = []
+        for model in successful_models:
+            r = next((x for x in results if x["model"] == model and x["input"] == input_name and x["success"]), None)
+            ent_data.append(r.get("entities_count", 0) if r else 0)
+            time_data.append(r.get("time_seconds", 0) if r else 0)
+        input_datasets_ent.append({
+            "label": input_name,
+            "data": ent_data,
+            "backgroundColor": color,
+            "borderRadius": 4,
+        })
+        input_datasets_time.append({
+            "label": input_name,
+            "data": time_data,
+            "backgroundColor": color,
+            "borderRadius": 4,
+        })
+
+    # Relationship data
+    rel_data = []
+    for model in successful_models:
+        avg = model_stats[model][1]
+        rel_data.append(round(avg, 1))
+
+    html += f"""
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:32px;">
+  <div style="background:#181825;border-radius:8px;padding:20px;">
+    <h3 style="margin-top:0;">Entities Extracted per Input</h3>
+    <canvas id="chartEntities" height="250"></canvas>
+  </div>
+  <div style="background:#181825;border-radius:8px;padding:20px;">
+    <h3 style="margin-top:0;">Extraction Time (seconds)</h3>
+    <canvas id="chartTime" height="250"></canvas>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:24px;">
+  <div style="background:#181825;border-radius:8px;padding:20px;">
+    <h3 style="margin-top:0;">Avg Entities vs Relationships</h3>
+    <canvas id="chartEntRel" height="250"></canvas>
+  </div>
+  <div style="background:#181825;border-radius:8px;padding:20px;">
+    <h3 style="margin-top:0;">Speed vs Quality</h3>
+    <canvas id="chartScatter" height="250"></canvas>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script>
+const textColor = '#a6adc8';
+const gridColor = 'rgba(255,255,255,0.04)';
+const defaults = {{
+  color: textColor,
+  font: {{ family: '-apple-system, system-ui, sans-serif', size: 11 }},
+}};
+Chart.defaults.color = textColor;
+Chart.defaults.font.family = defaults.font.family;
+Chart.defaults.font.size = defaults.font.size;
+
+const scaleOpts = {{
+  ticks: {{ color: textColor }},
+  grid: {{ color: gridColor }},
+}};
+
+// Entities per input
+new Chart(document.getElementById('chartEntities'), {{
+  type: 'bar',
+  data: {{
+    labels: {chart_labels},
+    datasets: {json.dumps(input_datasets_ent)},
+  }},
+  options: {{
+    responsive: true,
+    plugins: {{ legend: {{ labels: {{ color: textColor }} }} }},
+    scales: {{ x: scaleOpts, y: {{ ...scaleOpts, title: {{ display: true, text: 'Entities', color: textColor }} }} }},
+  }},
+}});
+
+// Time per input
+new Chart(document.getElementById('chartTime'), {{
+  type: 'bar',
+  data: {{
+    labels: {chart_labels},
+    datasets: {json.dumps(input_datasets_time)},
+  }},
+  options: {{
+    responsive: true,
+    plugins: {{ legend: {{ labels: {{ color: textColor }} }} }},
+    scales: {{ x: scaleOpts, y: {{ ...scaleOpts, title: {{ display: true, text: 'Seconds', color: textColor }} }} }},
+  }},
+}});
+
+// Avg entities vs relationships
+new Chart(document.getElementById('chartEntRel'), {{
+  type: 'bar',
+  data: {{
+    labels: {chart_labels},
+    datasets: [
+      {{
+        label: 'Avg Entities',
+        data: {json.dumps([round(model_stats[m][0], 1) for m in successful_models])},
+        backgroundColor: '#89b4fa',
+        borderRadius: 4,
+      }},
+      {{
+        label: 'Avg Relationships',
+        data: {json.dumps([round(model_stats[m][1], 1) for m in successful_models])},
+        backgroundColor: '#a6e3a1',
+        borderRadius: 4,
+      }},
+    ],
+  }},
+  options: {{
+    responsive: true,
+    plugins: {{ legend: {{ labels: {{ color: textColor }} }} }},
+    scales: {{ x: scaleOpts, y: scaleOpts }},
+  }},
+}});
+
+// Speed vs quality scatter
+new Chart(document.getElementById('chartScatter'), {{
+  type: 'scatter',
+  data: {{
+    datasets: [{{
+      label: 'Models',
+      data: {json.dumps([
+          {"x": round(model_stats[m][2], 2), "y": round(model_stats[m][0], 1)}
+          for m in successful_models
+      ])},
+      backgroundColor: '#cba6f7',
+      pointRadius: 8,
+      pointHoverRadius: 12,
+    }}],
+  }},
+  options: {{
+    responsive: true,
+    plugins: {{
+      legend: {{ display: false }},
+      tooltip: {{
+        callbacks: {{
+          label: function(ctx) {{
+            return {json.dumps(successful_models)}[ctx.dataIndex] +
+              ': ' + ctx.parsed.y + ' entities, ' + ctx.parsed.x + 's';
+          }}
+        }}
+      }},
+    }},
+    scales: {{
+      x: {{ ...scaleOpts, title: {{ display: true, text: 'Avg Time (s)', color: textColor }} }},
+      y: {{ ...scaleOpts, title: {{ display: true, text: 'Avg Entities', color: textColor }} }},
+    }},
+  }},
+}});
+</script>
+</body></html>"""
     return html
 
 
