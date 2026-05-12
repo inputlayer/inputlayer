@@ -9,6 +9,7 @@ benchmarks/results/
 benchmarks/inputs/*.jpg
 benchmarks/inputs/*.jpeg
 benchmarks/inputs/*.png
+.ipynb_checkpoints/
 .inputlayer-credentials.toml
 *.tsbuildinfo
 bun.lock
