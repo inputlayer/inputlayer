@@ -16,10 +16,14 @@ SERVER_PORT="${INPUTLAYER_TEST_PORT:-8080}"
 SERVER_URL="http://127.0.0.1:${SERVER_PORT}"
 CLIENT_SERVER_URL="${SERVER_URL}"
 
-# Auth: bootstrap API key for test harness
-BOOTSTRAP_API_KEY="test-snapshot-api-key-$(openssl rand -hex 16)"
-export INPUTLAYER_BOOTSTRAP_API_KEY="$BOOTSTRAP_API_KEY"
-export INPUTLAYER_API_KEY="$BOOTSTRAP_API_KEY"
+# Auth: the server is started with a clean environment (no INPUTLAYER_* vars,
+# see start_server) and a generated test config, so it bootstraps or reuses
+# credentials in .inputlayer-credentials.toml. After startup we read the API
+# key from that file and export INPUTLAYER_API_KEY for the client invocations.
+# Reason: `--config` mode rejects unknown INPUTLAYER_* env vars (config parse
+# error), so the old INPUTLAYER_BOOTSTRAP_API_KEY approach cannot be combined
+# with a config file.
+CREDENTIALS_FILE="$PROJECT_DIR/.inputlayer-credentials.toml"
 
 # Parallelism: use all CPUs
 NCPU=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
@@ -171,6 +175,49 @@ stop_server() {
     fi
 }
 
+# Generate the test server config. Mirrors the server defaults except:
+# - WS message and per-IP rate limits are OFF: statement-heavy test scripts
+#   (e.g. rule packs loaded via .load, which the client expands into one WS
+#   message per statement) legitimately exceed the production default of
+#   100 msgs/sec on localhost.
+# - credentials_file is pinned so we can read the API key back deterministically.
+write_server_config() {
+    cat > "$TEMP_DIR/server-config.toml" <<EOF
+[storage]
+data_dir = "$PROJECT_DIR/data"
+default_database = "default"
+
+[storage.persistence]
+format = "parquet"
+compression = "snappy"
+auto_save_interval = 0
+enable_wal = true
+
+[optimization]
+enable_join_planning = true
+enable_sip_rewriting = true
+enable_subplan_sharing = true
+enable_boolean_specialization = true
+enable_magic_sets = true
+
+[logging]
+level = "info"
+format = "text"
+
+[http]
+enabled = true
+host = "127.0.0.1"
+port = $SERVER_PORT
+
+[http.auth]
+credentials_file = "$CREDENTIALS_FILE"
+
+[http.rate_limit]
+ws_max_messages_per_sec = 0
+per_ip_max_rps = 0
+EOF
+}
+
 start_server() {
     local clean_data="${1:-true}"
     # Wait for port to be free FIRST (up to 15s)
@@ -186,7 +233,16 @@ start_server() {
         : > "$SERVER_LOG"
     fi
     echo "Server log: $SERVER_LOG"
-    "$SERVER_BIN" >>"$SERVER_LOG" 2>&1 &
+    write_server_config
+    # Launch with a clean environment: in --config mode the server rejects
+    # any INPUTLAYER_* env var that does not map to a config field.
+    (
+        cd "$PROJECT_DIR" || exit 1
+        for v in $(compgen -e); do
+            [[ "$v" == INPUTLAYER_* ]] && unset "$v"
+        done
+        exec "$SERVER_BIN" --config "$TEMP_DIR/server-config.toml" >>"$SERVER_LOG" 2>&1
+    ) &
     SERVER_PID=$!
     for i in $(seq 1 30); do
         if check_server; then break; fi
@@ -196,6 +252,17 @@ start_server() {
         echo -e "${RED}Server failed to start!${NC}"
         return 1
     fi
+    # Read the API key the server bootstrapped (or reused) for client auth
+    if [[ ! -f "$CREDENTIALS_FILE" ]]; then
+        echo -e "${RED}Server started but no credentials file at $CREDENTIALS_FILE${NC}"
+        return 1
+    fi
+    INPUTLAYER_API_KEY="$(grep '^api_key' "$CREDENTIALS_FILE" | head -1 | cut -d'"' -f2)"
+    if [[ -z "$INPUTLAYER_API_KEY" ]]; then
+        echo -e "${RED}Could not parse api_key from $CREDENTIALS_FILE${NC}"
+        return 1
+    fi
+    export INPUTLAYER_API_KEY
     echo "Server started (PID $SERVER_PID)"
     return 0
 }
