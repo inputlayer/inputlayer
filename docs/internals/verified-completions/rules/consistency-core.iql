@@ -1,0 +1,237 @@
+// ============================================================================
+// consistency-core.iql - Verified Completions rule pack
+// ============================================================================
+// Validated on the real engine 2026-07-26 (issue #81). Structure note:
+//
+//   ONE CLAUSE PER DETECTION RELATION, UNIONS ONLY IN REPORTING VIEWS.
+//
+// Engine issue #91: multi-clause rules can silently evaluate empty (or return
+// malformed rows) when clauses share a derived relation with certain body
+// shapes. The original single 15-clause `conflict` relation hit exactly that.
+// The workaround (verified): every detection rule gets its own relation with
+// exactly one clause; the reporting views (`conflict`, `violation`, `tension`,
+// `finding`) union them, one clause per kind, each clause reading a DISTINCT
+// relation - a pattern verified to evaluate correctly. The external interface
+// is unchanged: the gateway still queries conflict/violation/tension/finding.
+// Multi-clause rules kept below (eq, coentity, disjoint, bf, areach, src) are
+// either plain recursion, base-relation unions, or were re-tested after the
+// restructure - do not add clauses to detection rules.
+//
+// Load order: the gateway runs `.kg create _conv_<id>` and `.kg use ...`,
+// then `.load consistency-core.iql`. This file contains no .kg commands and
+// no wildcards outside negated atoms. Every statement is one line.
+//
+// Trust boundary: the LLM authors DATA only. Rules below are frozen at load;
+// the extractor can widen their coverage solely by inserting ontology FACTS
+// (e.g. +functional("visa_number")), which these rules quantify over.
+//
+// Comparison semantics VERIFIED IN SOURCE (src/code_generator/mod.rs):
+//   Var != Var   -> ColumnsNe, type-generic: works on strings.    (used freely)
+//   Var <  Var   -> ColumnsLt, int/float ONLY; silently false on strings.
+//                   -> never used on string columns here. All ordered checks
+//                     ride int columns: the gateway mirrors quantities AND
+//                     date encodings (ISO date -> YYYYMMDD int, datetime ->
+//                     epoch seconds) into claim_num / constraint_num.
+//   Var <  "str" -> ColumnLtStr, string-specialized: fine (constant form).
+// Symmetric conflict kinds therefore derive as mirrored pairs, (a,b) and
+// (b,a); the reporting layer / assembler deduplicates unordered pairs.
+
+// -- 0. EDB schemas (inserted by the gateway, never derived here) ------------
++claim(id: string, entity: string, attr: string, val: string)
++claim_modality(id: string, modality: string)
++claim_source(id: string, msg: int, surface: string)
++claim_origin(id: string, origin: string)
++claim_num(id: string, entity: string, attr: string, nval: int)
++before_claim(id: string, event_a: string, event_b: string)
++constraint(id: string, ctype: string, attr: string, val: string)
++constraint_num(id: string, ctype: string, attr: string, nval: int)
++constraint_source(id: string, msg: int, surface: string)
++same_as(e1: string, e2: string)
+
+// Ontology relations (seeded in section 9; extendable by extractor facts)
++functional(attr: string)
++inverse_functional(attr: string)
++disjoint_base(t1: string, t2: string)
++acyclic(attr: string)
++asymmetric(attr: string)
++irreflexive(attr: string)
++pair_order(start_attr: string, end_attr: string)
++cardinality_attr(attr: string)
++attr_max(attr: string, bound: int)
++attr_min(attr: string, bound: int)
++attr_domain(attr: string, dom: string)
+
+// -- 1. Modality gates -------------------------------------------------------
+// The only doors into the conflict rules; hedges/questions/opinions stay inert.
++active(C, E, A, V) <- claim(C, E, A, V), claim_modality(C, "asserted")
++denied(C, E, A, V) <- claim(C, E, A, V), claim_modality(C, "negated")
++hedged(C, E, A, V) <- claim(C, E, A, V), claim_modality(C, "hedged")
+
+// -- 2. Identity layer -------------------------------------------------------
+// eq = symmetric-transitive closure of canonicalizer merges; coentity lets
+// every rule see through merges without rewriting claims, so a wrong merge
+// retracts cleanly along with everything derived through it.
+// Symmetry is applied at the BASE (eq0), not recursively: the recursive rule
+// eq(X,Y) <- eq(Y,X) sends the .why backward-chaining prover in circles and
+// times out proof queries. Transitive closure of a symmetric base is itself
+// symmetric, so the derived relation is identical.
++mentioned(E) <- claim(C, E, A, V)
++eq0(X, Y) <- same_as(X, Y)
++eq0(X, Y) <- same_as(Y, X)
++eq(X, Y) <- eq0(X, Y)
++eq(X, Z) <- eq(X, Y), eq0(Y, Z)
++coentity(E, E) <- mentioned(E)
++coentity(X, Y) <- eq(X, Y)
+
+// I1: text says distinct, canonicalizer merged them
++conflict_identity_merged(C) <- active(C, E1, "distinct_from", E2), eq(E1, E2)
+// I2: explicitly-distinct entities sharing a unique identifier
++conflict_identity_shared_id(C1, C2) <- active(CD, X, "distinct_from", Y), active(C1, X, A, V), active(C2, Y, A, V), inverse_functional(A)
+
+// -- 3. Value conflicts ------------------------------------------------------
+// V1: single-valued attribute, two values ("Aug 14" vs "Aug 12")
++conflict_functional(C1, C2) <- active(C1, E1, A, V1), active(C2, E2, A, V2), coentity(E1, E2), functional(A), V1 != V2
+
+// V2: same proposition asserted and denied
++conflict_polarity(C1, C2) <- active(C1, E1, A, V), denied(C2, E2, A, V), coentity(E1, E2)
+
+// V3: entity in two mutually exclusive classes
++disjoint(A, B) <- disjoint_base(A, B)
++disjoint(B, A) <- disjoint_base(A, B)
++conflict_disjoint_class(C1, C2) <- active(C1, E1, "is_a", T1), active(C2, E2, "is_a", T2), coentity(E1, E2), disjoint(T1, T2)
+
+// V4: attribute applied to an entity of a type disjoint from its domain
++conflict_domain(C1, C2) <- active(C1, E1, A, V0), attr_domain(A, T), active(C2, E2, "is_a", T2), coentity(E1, E2), disjoint(T, T2)
+
+// V5: numeric value outside seeded plausible bounds (ints via claim_num)
++conflict_range_over(C) <- claim_num(C, E, A, N), claim_modality(C, "asserted"), attr_max(A, M), N > M
++conflict_range_under(C) <- claim_num(C, E, A, N), claim_modality(C, "asserted"), attr_min(A, M), N < M
+
+// V6: stated group size vs distinct named members (overflow only:
+// naming MORE members than the claimed count is a contradiction;
+// naming fewer is not, since lists may be partial)
++member_of(G, M) <- active(C, G, "has_member", M)
++member_tally(G, count_distinct<M>) <- member_of(G, M)
++claimed_size(C, G, N) <- claim_num(C, G, A, N), claim_modality(C, "asserted"), cardinality_attr(A)
++conflict_cardinality(C) <- claimed_size(C, G, N), member_tally(G, T), T > N
+
+// -- 4. Order & graph conflicts ----------------------------------------------
+// The family only chaining can catch: no single pair of sentences is wrong.
+
+// O1a: explicit "X before Y" statements - transitive closure, cycle = clash
++bfe(X, Y) <- before_claim(B, X, Y)
++bf(X, Y) <- bfe(X, Y)
++bf(X, Z) <- bf(X, Y), bfe(Y, Z)
++conflict_cycle_before(C) <- before_claim(C, X, Y), bf(Y, X)
+
+// O1b: generic acyclicity for declared hierarchical attributes
+// (part_of, reports_to, ancestor_of ... one rule family for all)
++aedge(A, X, Y) <- active(C, X, A, Y), acyclic(A)
++areach(A, X, Y) <- aedge(A, X, Y)
++areach(A, X, Z) <- areach(A, X, Y), aedge(A, Y, Z)
++conflict_cycle_hierarchy(C) <- active(C, X, A, Y), acyclic(A), areach(A, Y, X)
+
+// O2: asymmetric relation asserted both ways (parent_of(a,b) + parent_of(b,a))
++conflict_asymmetry(C1, C2) <- active(C1, X, A, Y), active(C2, Y, A, X), asymmetric(A), X != Y
+
+// O3: self-relation where forbidden, including via identity merges
++conflict_irreflexive(C) <- active(C, X, A, Y), coentity(X, Y), irreflexive(A)
+
+// O4: declared start/end pair running backwards on one entity
+// (return before departure, death before birth). Ordered check rides the
+// claim_num int mirror (ISO dates as YYYYMMDD, datetimes as epoch seconds).
++conflict_interval_order(C1, C2) <- claim_num(C1, E1, As, Ns), claim_modality(C1, "asserted"), claim_num(C2, E2, Ae, Ne), claim_modality(C2, "asserted"), coentity(E1, E2), pair_order(As, Ae), Ne < Ns
+
+// -- 5. Deontic layer: system-prompt constraints ------------------------------
+// D1: forbid vs require the same topic - the system-prompt linter,
+// works on /v1/verify with no completion at all
++clash_forbid_require(K1, K2) <- constraint(K1, "forbid", T, V1), constraint(K2, "require", T, V2)
+
+// D2: two values for one persona attribute ("You are Aria" / "name is Max")
++clash_persona(K1, K2) <- constraint(K1, "persona", A, V1), constraint(K2, "persona", A, V2), V1 != V2
+
+// D3: impossible numeric window (max below min)
++clash_window(K1, K2) <- constraint_num(K1, "max_value", A, Vmax), constraint_num(K2, "min_value", A, Vmin), Vmax < Vmin
+
+// -- 6. Output-vs-constraint violations (M3; origin-gated) --------------------
++out(C, E, A, V) <- active(C, E, A, V), claim_origin(C, "output")
++out_topic(T) <- out(C, E, "mentions_topic", T)
+
++v_forbidden_topic(C, K) <- out(C, E, "mentions_topic", T), constraint(K, "forbid", T, V1)
++v_persona_break(C, K) <- out(C, "assistant", A, V1), constraint(K, "persona", A, V2), V1 != V2
++v_limit_exceeded(C, K) <- claim_num(C, E, A, N), claim_origin(C, "output"), claim_modality(C, "asserted"), constraint_num(K, "max_value", A, M), N > M
++v_floor_missed(C, K) <- claim_num(C, E, A, N), claim_origin(C, "output"), claim_modality(C, "asserted"), constraint_num(K, "min_value", A, M), N < M
+
+// D4: required topic MISSING from the output - stratified negation over a
+// non-recursive relation; the claim_origin atom set-dedups to gate the rule
+// so it only fires once an output has actually been extracted
++v_required_missing(K) <- constraint(K, "require", T, V1), claim_origin(Cz, "output"), !out_topic(T)
+
+// -- 7. Soft tensions (advisory severity, never hard conflicts) ---------------
++tension_hedge_vs_assert(C1, C2) <- active(C1, E1, A, V1), hedged(C2, E2, A, V2), coentity(E1, E2), functional(A), V1 != V2
+
+// -- 8. Reporting views (the gateway's query interface, unchanged) ------------
+// Union views: one clause per kind, every clause reads a DISTINCT relation
+// (the verified-safe union pattern; see header note and issue #91).
+// C1 = C2 marks single-claim findings; the assembler deduplicates mirrors.
++conflict("identity", C, C) <- conflict_identity_merged(C)
++conflict("identity", C1, C2) <- conflict_identity_shared_id(C1, C2)
++conflict("functional", C1, C2) <- conflict_functional(C1, C2)
++conflict("polarity", C1, C2) <- conflict_polarity(C1, C2)
++conflict("disjoint_class", C1, C2) <- conflict_disjoint_class(C1, C2)
++conflict("domain", C1, C2) <- conflict_domain(C1, C2)
++conflict("range", C, C) <- conflict_range_over(C)
++conflict("range", C, C) <- conflict_range_under(C)
++conflict("cardinality", C, C) <- conflict_cardinality(C)
++conflict("cycle", C, C) <- conflict_cycle_before(C)
++conflict("cycle", C, C) <- conflict_cycle_hierarchy(C)
++conflict("asymmetry", C1, C2) <- conflict_asymmetry(C1, C2)
++conflict("irreflexive", C, C) <- conflict_irreflexive(C)
++conflict("interval_order", C1, C2) <- conflict_interval_order(C1, C2)
++conflict("instruction_clash", K1, K2) <- clash_forbid_require(K1, K2)
++conflict("instruction_clash", K1, K2) <- clash_persona(K1, K2)
++conflict("instruction_clash", K1, K2) <- clash_window(K1, K2)
+
++violation("forbidden_topic", C, K) <- v_forbidden_topic(C, K)
++violation("persona_break", C, K) <- v_persona_break(C, K)
++violation("limit_exceeded", C, K) <- v_limit_exceeded(C, K)
++violation("floor_missed", C, K) <- v_floor_missed(C, K)
++violation("required_missing", K, K) <- v_required_missing(K)
+
++tension("hedge_vs_assert", C1, C2) <- tension_hedge_vs_assert(C1, C2)
+
++finding(K, "hard", C1, C2) <- conflict(K, C1, C2)
++finding(K, "soft", C1, C2) <- tension(K, C1, C2)
+
+// src unifies claim and constraint provenance so the *_src views stay
+// single-clause (a 2-clause union over distinct BASE relations: safe)
++src(Id, M, S) <- claim_source(Id, M, S)
++src(Id, M, S) <- constraint_source(Id, M, S)
++finding_src(K, Sev, C1, M1, S1, C2, M2, S2) <- finding(K, Sev, C1, C2), src(C1, M1, S1), src(C2, M2, S2)
++violation_src(K, C, Mc, Sc, Kc, Mk, Sk) <- violation(K, C, Kc), src(C, Mc, Sc), constraint_source(Kc, Mk, Sk)
+
+// -- 9. Seed ontology ----------------------------------------------------------
+// Conservative by design: every entry can turn a real disagreement into a
+// flag, so entries must be near-universally true (nationality deliberately
+// absent: dual citizenship). Operators extend; the extractor extends at
+// runtime with the SAME fact syntax - data, never rules.
++functional[("departure_date",), ("departure_city",), ("return_date",), ("arrival_city",), ("age",), ("birth_date",), ("death_date",), ("start_date",), ("end_date",), ("check_in",), ("check_out",), ("total_price",), ("capacity",), ("capital_of",), ("ceo_of",), ("headquartered_in",), ("assistant_identity",), ("member_count",)]
+// inverse_functional kept strictly to identifiers that are near-universally
+// one-per-person: email (shared team/family inboxes), order_number and
+// booking_reference (joint orders/bookings) are excluded on principle -
+// real-world shareable identifiers would generate false alarms (see
+// poc/DATASET.md, Design principles).
++inverse_functional[("passport_number",), ("ssn",)]
++disjoint_base[("person", "organization"), ("person", "location"), ("person", "event"), ("organization", "location"), ("alive", "deceased")]
++acyclic[("part_of",), ("located_in",), ("ancestor_of",), ("parent_of",), ("reports_to",), ("prerequisite_of",), ("caused_by",)]
++asymmetric[("parent_of",), ("manager_of",), ("older_than",)]
++irreflexive[("parent_of",), ("sibling_of",), ("married_to",), ("manager_of",), ("distinct_from",)]
++pair_order[("departure_date", "return_date"), ("start_date", "end_date"), ("start_time", "end_time"), ("birth_date", "death_date"), ("check_in", "check_out")]
++cardinality_attr[("member_count",), ("party_size",), ("headcount",)]
++attr_max[("age", 130), ("percentage", 100)]
++attr_min[("age", 0), ("total_price", 0), ("capacity", 0)]
+// attr_domain seeds make the V4 domain rule live (benchmark row A4): without
+// at least one seed the rule can never fire, since the extractor may not
+// declare domains (section 7.8 of the lifecycle prompt). Person-only
+// attributes that no organization/location/event can have:
++attr_domain[("blood_type", "person"), ("marital_status", "person"), ("passport_number", "person")]

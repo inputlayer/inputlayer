@@ -1,0 +1,52 @@
+// hello-consistency.iql — the whole idea in one screen
+// Standalone starter: simpler arities than the full pack, on purpose.
+// Run:  docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer
+// then paste this into the CLI, or `.load hello-consistency.iql`.
+
+.kg create hello_consistency
+.kg use hello_consistency
+
+// ── Two sentences, translated to facts (in production Claude writes these) ─
+//    m1: "We fly out of Geneva on August 14th."
+//    m3: "Since we leave on the 12th, can Bob get an aisle seat?"
++claim[("c0", "trip", "departure_city", "geneva"), ("c1", "trip", "departure_date", "2026-08-14"), ("c2", "trip", "departure_date", "2026-08-12")]
++claim_modality[("c0", "asserted"), ("c1", "asserted"), ("c2", "asserted")]
++claim_source[("c0", 1, "fly out of Geneva"), ("c1", 1, "on August 14th"), ("c2", 3, "we leave on the 12th")]
+
+// ── One ontology fact: this attribute is single-valued ─────────────────────
++functional("departure_date")
++functional("departure_city")
+
+// ── The entire verifier, miniature: three rules ────────────────────────────
++fact(C, E, A, V) <- claim(C, E, A, V), claim_modality(C, "asserted")
++conflict(C1, C2) <- fact(C1, E, A, V1), fact(C2, E, A, V2), functional(A), V1 != V2
++report(C1, S1, C2, S2) <- conflict(C1, C2), claim_source(C1, M1, S1), claim_source(C2, M2, S2)
+
+// Expect the conflict in both orders: ("c1","c2") and ("c2","c1").
+// (Engine detail: Var<Var ordering is numeric-only, so no C1 < C2 dedup
+//  guard on string ids — the reporting layer dedups unordered pairs.)
+?conflict(C1, C2)
+// Expect the two quoted spans side by side — the "receipts" view
+?report(C1, S1, C2, S2)
+// The proof tree grounding the flag in both claims + the ontology fact
+.why ?conflict("c1", "c2")
+
+// ── The false-alarm discipline, in two inserts ─────────────────────────────
+//    m2: "It might be Lyon actually."  → modality "hedged" → gate holds it out
++claim[("c3", "trip", "departure_city", "lyon")]
++claim_modality[("c3", "hedged")]
+
+// Still only the same mirrored pair — geneva vs lyon does NOT fire: the
+// hedge never passes the modality gate. Delete the gate (use claim instead
+// of fact in the conflict rule) and it would. That gate is why the verifier
+// stays trustworthy.
+?conflict(C1, C2)
+
+// ── The incremental story, in one delete ───────────────────────────────────
+// Retract the m3 presupposition (user corrects themselves): the conflict
+// vanishes, nothing recomputes from scratch.
+-claim("c2", "trip", "departure_date", "2026-08-12")
+?conflict(C1, C2)
+
+.kg use default
+.kg drop hello_consistency

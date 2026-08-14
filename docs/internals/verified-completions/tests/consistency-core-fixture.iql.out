@@ -1,0 +1,411 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+
+> .kg create test_consistency_core
+Knowledge graph 'test_consistency_core' created.
+Switched to knowledge graph: test_consistency_core
+> .kg use test_consistency_core
+Switched to knowledge graph: test_consistency_core
+> .load docs/internals/verified-completions/rules/consistency-core.iql
+Loading file: docs/internals/verified-completions/rules/consistency-core.iql
+> +claim(id: string, entity: string, attr: string, val: string)
+Schema for 'claim' registered with 4 columns (persistent)
+> +claim_modality(id: string, modality: string)
+Schema for 'claim_modality' registered with 2 columns (persistent)
+> +claim_source(id: string, msg: int, surface: string)
+Schema for 'claim_source' registered with 3 columns (persistent)
+> +claim_origin(id: string, origin: string)
+Schema for 'claim_origin' registered with 2 columns (persistent)
+> +claim_num(id: string, entity: string, attr: string, nval: int)
+Schema for 'claim_num' registered with 4 columns (persistent)
+> +before_claim(id: string, event_a: string, event_b: string)
+Schema for 'before_claim' registered with 3 columns (persistent)
+> +constraint(id: string, ctype: string, attr: string, val: string)
+Schema for 'constraint' registered with 4 columns (persistent)
+> +constraint_num(id: string, ctype: string, attr: string, nval: int)
+Schema for 'constraint_num' registered with 4 columns (persistent)
+> +constraint_source(id: string, msg: int, surface: string)
+Schema for 'constraint_source' registered with 3 columns (persistent)
+> +same_as(e1: string, e2: string)
+Schema for 'same_as' registered with 2 columns (persistent)
+> +functional(attr: string)
+Schema for 'functional' registered with 1 columns (persistent)
+> +inverse_functional(attr: string)
+Schema for 'inverse_functional' registered with 1 columns (persistent)
+> +disjoint_base(t1: string, t2: string)
+Schema for 'disjoint_base' registered with 2 columns (persistent)
+> +acyclic(attr: string)
+Schema for 'acyclic' registered with 1 columns (persistent)
+> +asymmetric(attr: string)
+Schema for 'asymmetric' registered with 1 columns (persistent)
+> +irreflexive(attr: string)
+Schema for 'irreflexive' registered with 1 columns (persistent)
+> +pair_order(start_attr: string, end_attr: string)
+Schema for 'pair_order' registered with 2 columns (persistent)
+> +cardinality_attr(attr: string)
+Schema for 'cardinality_attr' registered with 1 columns (persistent)
+> +attr_max(attr: string, bound: int)
+Schema for 'attr_max' registered with 2 columns (persistent)
+> +attr_min(attr: string, bound: int)
+Schema for 'attr_min' registered with 2 columns (persistent)
+> +attr_domain(attr: string, dom: string)
+Schema for 'attr_domain' registered with 2 columns (persistent)
+> +active(C, E, A, V) <- claim(C, E, A, V), claim_modality(C, "asserted")
+Rule 'active' registered.
+> +denied(C, E, A, V) <- claim(C, E, A, V), claim_modality(C, "negated")
+Rule 'denied' registered.
+> +hedged(C, E, A, V) <- claim(C, E, A, V), claim_modality(C, "hedged")
+Rule 'hedged' registered.
+> +mentioned(E) <- claim(C, E, A, V)
+Rule 'mentioned' registered.
+> +eq0(X, Y) <- same_as(X, Y)
+Rule 'eq0' registered.
+> +eq0(X, Y) <- same_as(Y, X)
+Rule 'eq0' registered.
+> +eq(X, Y) <- eq0(X, Y)
+Rule 'eq' registered.
+> +eq(X, Z) <- eq(X, Y), eq0(Y, Z)
+Rule 'eq' registered.
+> +coentity(E, E) <- mentioned(E)
+Rule 'coentity' registered.
+> +coentity(X, Y) <- eq(X, Y)
+Rule 'coentity' registered.
+> +conflict_identity_merged(C) <- active(C, E1, "distinct_from", E2), eq(E1, E2)
+Rule 'conflict_identity_merged' registered.
+> +conflict_identity_shared_id(C1, C2) <- active(CD, X, "distinct_from", Y), active(C1, X, A, V), active(C2, Y, A, V), inverse_functional(A)
+Rule 'conflict_identity_shared_id' registered.
+> +conflict_functional(C1, C2) <- active(C1, E1, A, V1), active(C2, E2, A, V2), coentity(E1, E2), functional(A), V1 != V2
+Rule 'conflict_functional' registered.
+> +conflict_polarity(C1, C2) <- active(C1, E1, A, V), denied(C2, E2, A, V), coentity(E1, E2)
+Rule 'conflict_polarity' registered.
+> +disjoint(A, B) <- disjoint_base(A, B)
+Rule 'disjoint' registered.
+> +disjoint(B, A) <- disjoint_base(A, B)
+Rule 'disjoint' registered.
+> +conflict_disjoint_class(C1, C2) <- active(C1, E1, "is_a", T1), active(C2, E2, "is_a", T2), coentity(E1, E2), disjoint(T1, T2)
+Rule 'conflict_disjoint_class' registered.
+> +conflict_domain(C1, C2) <- active(C1, E1, A, V0), attr_domain(A, T), active(C2, E2, "is_a", T2), coentity(E1, E2), disjoint(T, T2)
+Rule 'conflict_domain' registered.
+> +conflict_range_over(C) <- claim_num(C, E, A, N), claim_modality(C, "asserted"), attr_max(A, M), N > M
+Rule 'conflict_range_over' registered.
+> +conflict_range_under(C) <- claim_num(C, E, A, N), claim_modality(C, "asserted"), attr_min(A, M), N < M
+Rule 'conflict_range_under' registered.
+> +member_of(G, M) <- active(C, G, "has_member", M)
+Rule 'member_of' registered.
+> +member_tally(G, count_distinct<M>) <- member_of(G, M)
+Rule 'member_tally' registered.
+> +claimed_size(C, G, N) <- claim_num(C, G, A, N), claim_modality(C, "asserted"), cardinality_attr(A)
+Rule 'claimed_size' registered.
+> +conflict_cardinality(C) <- claimed_size(C, G, N), member_tally(G, T), T > N
+Rule 'conflict_cardinality' registered.
+> +bfe(X, Y) <- before_claim(B, X, Y)
+Rule 'bfe' registered.
+> +bf(X, Y) <- bfe(X, Y)
+Rule 'bf' registered.
+> +bf(X, Z) <- bf(X, Y), bfe(Y, Z)
+Rule 'bf' registered.
+> +conflict_cycle_before(C) <- before_claim(C, X, Y), bf(Y, X)
+Rule 'conflict_cycle_before' registered.
+> +aedge(A, X, Y) <- active(C, X, A, Y), acyclic(A)
+Rule 'aedge' registered.
+> +areach(A, X, Y) <- aedge(A, X, Y)
+Rule 'areach' registered.
+> +areach(A, X, Z) <- areach(A, X, Y), aedge(A, Y, Z)
+Rule 'areach' registered.
+> +conflict_cycle_hierarchy(C) <- active(C, X, A, Y), acyclic(A), areach(A, Y, X)
+Rule 'conflict_cycle_hierarchy' registered.
+> +conflict_asymmetry(C1, C2) <- active(C1, X, A, Y), active(C2, Y, A, X), asymmetric(A), X != Y
+Rule 'conflict_asymmetry' registered.
+> +conflict_irreflexive(C) <- active(C, X, A, Y), coentity(X, Y), irreflexive(A)
+Rule 'conflict_irreflexive' registered.
+> +conflict_interval_order(C1, C2) <- claim_num(C1, E1, As, Ns), claim_modality(C1, "asserted"), claim_num(C2, E2, Ae, Ne), claim_modality(C2, "asserted"), coentity(E1, E2), pair_order(As, Ae), Ne < Ns
+Rule 'conflict_interval_order' registered.
+> +clash_forbid_require(K1, K2) <- constraint(K1, "forbid", T, V1), constraint(K2, "require", T, V2)
+Rule 'clash_forbid_require' registered.
+> +clash_persona(K1, K2) <- constraint(K1, "persona", A, V1), constraint(K2, "persona", A, V2), V1 != V2
+Rule 'clash_persona' registered.
+> +clash_window(K1, K2) <- constraint_num(K1, "max_value", A, Vmax), constraint_num(K2, "min_value", A, Vmin), Vmax < Vmin
+Rule 'clash_window' registered.
+> +out(C, E, A, V) <- active(C, E, A, V), claim_origin(C, "output")
+Rule 'out' registered.
+> +out_topic(T) <- out(C, E, "mentions_topic", T)
+Rule 'out_topic' registered.
+> +v_forbidden_topic(C, K) <- out(C, E, "mentions_topic", T), constraint(K, "forbid", T, V1)
+Rule 'v_forbidden_topic' registered.
+> +v_persona_break(C, K) <- out(C, "assistant", A, V1), constraint(K, "persona", A, V2), V1 != V2
+Rule 'v_persona_break' registered.
+> +v_limit_exceeded(C, K) <- claim_num(C, E, A, N), claim_origin(C, "output"), claim_modality(C, "asserted"), constraint_num(K, "max_value", A, M), N > M
+Rule 'v_limit_exceeded' registered.
+> +v_floor_missed(C, K) <- claim_num(C, E, A, N), claim_origin(C, "output"), claim_modality(C, "asserted"), constraint_num(K, "min_value", A, M), N < M
+Rule 'v_floor_missed' registered.
+> +v_required_missing(K) <- constraint(K, "require", T, V1), claim_origin(Cz, "output"), !out_topic(T)
+Rule 'v_required_missing' registered.
+> +tension_hedge_vs_assert(C1, C2) <- active(C1, E1, A, V1), hedged(C2, E2, A, V2), coentity(E1, E2), functional(A), V1 != V2
+Rule 'tension_hedge_vs_assert' registered.
+> +conflict("identity", C, C) <- conflict_identity_merged(C)
+Rule 'conflict' registered.
+> +conflict("identity", C1, C2) <- conflict_identity_shared_id(C1, C2)
+Rule 'conflict' registered.
+> +conflict("functional", C1, C2) <- conflict_functional(C1, C2)
+Rule 'conflict' registered.
+> +conflict("polarity", C1, C2) <- conflict_polarity(C1, C2)
+Rule 'conflict' registered.
+> +conflict("disjoint_class", C1, C2) <- conflict_disjoint_class(C1, C2)
+Rule 'conflict' registered.
+> +conflict("domain", C1, C2) <- conflict_domain(C1, C2)
+Rule 'conflict' registered.
+> +conflict("range", C, C) <- conflict_range_over(C)
+Rule 'conflict' registered.
+> +conflict("range", C, C) <- conflict_range_under(C)
+Rule 'conflict' registered.
+> +conflict("cardinality", C, C) <- conflict_cardinality(C)
+Rule 'conflict' registered.
+> +conflict("cycle", C, C) <- conflict_cycle_before(C)
+Rule 'conflict' registered.
+> +conflict("cycle", C, C) <- conflict_cycle_hierarchy(C)
+Rule 'conflict' registered.
+> +conflict("asymmetry", C1, C2) <- conflict_asymmetry(C1, C2)
+Rule 'conflict' registered.
+> +conflict("irreflexive", C, C) <- conflict_irreflexive(C)
+Rule 'conflict' registered.
+> +conflict("interval_order", C1, C2) <- conflict_interval_order(C1, C2)
+Rule 'conflict' registered.
+> +conflict("instruction_clash", K1, K2) <- clash_forbid_require(K1, K2)
+Rule 'conflict' registered.
+> +conflict("instruction_clash", K1, K2) <- clash_persona(K1, K2)
+Rule 'conflict' registered.
+> +conflict("instruction_clash", K1, K2) <- clash_window(K1, K2)
+Rule 'conflict' registered.
+> +violation("forbidden_topic", C, K) <- v_forbidden_topic(C, K)
+Rule 'violation' registered.
+> +violation("persona_break", C, K) <- v_persona_break(C, K)
+Rule 'violation' registered.
+> +violation("limit_exceeded", C, K) <- v_limit_exceeded(C, K)
+Rule 'violation' registered.
+> +violation("floor_missed", C, K) <- v_floor_missed(C, K)
+Rule 'violation' registered.
+> +violation("required_missing", K, K) <- v_required_missing(K)
+Rule 'violation' registered.
+> +tension("hedge_vs_assert", C1, C2) <- tension_hedge_vs_assert(C1, C2)
+Rule 'tension' registered.
+> +finding(K, "hard", C1, C2) <- conflict(K, C1, C2)
+Rule 'finding' registered.
+> +finding(K, "soft", C1, C2) <- tension(K, C1, C2)
+Rule 'finding' registered.
+> +src(Id, M, S) <- claim_source(Id, M, S)
+Rule 'src' registered.
+> +src(Id, M, S) <- constraint_source(Id, M, S)
+Rule 'src' registered.
+> +finding_src(K, Sev, C1, M1, S1, C2, M2, S2) <- finding(K, Sev, C1, C2), src(C1, M1, S1), src(C2, M2, S2)
+Rule 'finding_src' registered.
+> +violation_src(K, C, Mc, Sc, Kc, Mk, Sk) <- violation(K, C, Kc), src(C, Mc, Sc), constraint_source(Kc, Mk, Sk)
+Rule 'violation_src' registered.
+> +functional[("departure_date",), ("departure_city",), ("return_date",), ("arrival_city",), ("age",), ("birth_date",), ("death_date",), ("start_date",), ("end_date",), ("check_in",), ("check_out",), ("total_price",), ("capacity",), ("capital_of",), ("ceo_of",), ("headquartered_in",), ("assistant_identity",), ("member_count",)]
+Inserted 18 fact(s) into 'functional'.
+> +inverse_functional[("passport_number",), ("ssn",)]
+Inserted 2 fact(s) into 'inverse_functional'.
+> +disjoint_base[("person", "organization"), ("person", "location"), ("person", "event"), ("organization", "location"), ("alive", "deceased")]
+Inserted 5 fact(s) into 'disjoint_base'.
+> +acyclic[("part_of",), ("located_in",), ("ancestor_of",), ("parent_of",), ("reports_to",), ("prerequisite_of",), ("caused_by",)]
+Inserted 7 fact(s) into 'acyclic'.
+> +asymmetric[("parent_of",), ("manager_of",), ("older_than",)]
+Inserted 3 fact(s) into 'asymmetric'.
+> +irreflexive[("parent_of",), ("sibling_of",), ("married_to",), ("manager_of",), ("distinct_from",)]
+Inserted 5 fact(s) into 'irreflexive'.
+> +pair_order[("departure_date", "return_date"), ("start_date", "end_date"), ("start_time", "end_time"), ("birth_date", "death_date"), ("check_in", "check_out")]
+Inserted 5 fact(s) into 'pair_order'.
+> +cardinality_attr[("member_count",), ("party_size",), ("headcount",)]
+Inserted 3 fact(s) into 'cardinality_attr'.
+> +attr_max[("age", 130), ("percentage", 100)]
+Inserted 2 fact(s) into 'attr_max'.
+> +attr_min[("age", 0), ("total_price", 0), ("capacity", 0)]
+Inserted 3 fact(s) into 'attr_min'.
+> +attr_domain[("blood_type", "person"), ("marital_status", "person"), ("passport_number", "person")]
+Inserted 3 fact(s) into 'attr_domain'.
+File loaded.
+> +constraint[("k_m0_1", "persona", "assistant_identity", "aria"), ("k_m0_2", "persona", "tone", "formal"), ("k_m0_3", "forbid", "pricing", ""), ("k_m0_4", "require", "pricing", ""), ("k_m0_5", "require", "itinerary", "")]
+Inserted 5 fact(s) into 'constraint'.
+> +constraint_num[("k_m0_6", "max_value", "total_price", 2000)]
+Inserted 1 fact(s) into 'constraint_num'.
+> +constraint_source[("k_m0_1", 0, "You are Aria"), ("k_m0_2", 0, "a formal assistant"), ("k_m0_3", 0, "Never mention pricing"), ("k_m0_4", 0, "Always include the final price table"), ("k_m0_5", 0, "Cover the itinerary"), ("k_m0_6", 0, "budget is capped at $2,000")]
+Inserted 6 fact(s) into 'constraint_source'.
+> +claim[("c_m1_1", "trip", "departure_city", "geneva"), ("c_m1_2", "trip", "departure_date", "2026-08-14"), ("c_m1_3", "robert", "is_a", "person")]
+Inserted 3 fact(s) into 'claim'.
+> +claim_modality[("c_m1_1", "asserted"), ("c_m1_2", "asserted"), ("c_m1_3", "asserted")]
+Inserted 3 fact(s) into 'claim_modality'.
+> +claim_source[("c_m1_1", 1, "fly out of Geneva"), ("c_m1_2", 1, "on August 14th"), ("c_m1_3", 1, "My brother Robert")]
+Inserted 3 fact(s) into 'claim_source'.
+> +claim_num[("c_m1_2", "trip", "departure_date", 20260814)]
+Inserted 1 fact(s) into 'claim_num'.
+> +claim_origin[("c_m1_1", "prompt"), ("c_m1_2", "prompt"), ("c_m1_3", "prompt")]
+Inserted 3 fact(s) into 'claim_origin'.
+> +claim[("c_m2_1", "trip", "departure_city", "lyon")]
+Inserted 1 fact(s) into 'claim'.
+> +claim_modality[("c_m2_1", "hedged")]
+Inserted 1 fact(s) into 'claim_modality'.
+> +claim_source[("c_m2_1", 2, "might be Lyon we depart from")]
+Inserted 1 fact(s) into 'claim_source'.
+> +claim_origin[("c_m2_1", "prompt")]
+Inserted 1 fact(s) into 'claim_origin'.
+> +claim[("c_m3_1", "trip", "departure_date", "2026-08-12"), ("c_m3_2", "robert", "seat_preference", "aisle")]
+Inserted 2 fact(s) into 'claim'.
+> +claim_modality[("c_m3_1", "asserted"), ("c_m3_2", "question")]
+Inserted 2 fact(s) into 'claim_modality'.
+> +claim_source[("c_m3_1", 3, "we leave on the 12th"), ("c_m3_2", 3, "get Bob an aisle seat")]
+Inserted 2 fact(s) into 'claim_source'.
+> +claim_num[("c_m3_1", "trip", "departure_date", 20260812)]
+Inserted 1 fact(s) into 'claim_num'.
+> +claim_origin[("c_m3_1", "prompt"), ("c_m3_2", "prompt")]
+Inserted 2 fact(s) into 'claim_origin'.
+> +before_claim[("b_m3_1", "keynote", "workshop"), ("b_m3_2", "workshop", "demo")]
+Inserted 2 fact(s) into 'before_claim'.
+> +claim_source[("b_m3_1", 3, "keynote is before the workshop"), ("b_m3_2", 3, "the workshop before the demo")]
+Inserted 2 fact(s) into 'claim_source'.
+> +before_claim[("b_m4_1", "demo", "keynote")]
+Inserted 1 fact(s) into 'before_claim'.
+> +claim_source[("b_m4_1", 4, "the demo now runs before the keynote")]
+Inserted 1 fact(s) into 'claim_source'.
+> +claim[("c_m5_1", "anna_1", "distinct_from", "anna_2")]
+Inserted 1 fact(s) into 'claim'.
+> +claim_modality[("c_m5_1", "asserted")]
+Inserted 1 fact(s) into 'claim_modality'.
+> +claim_source[("c_m5_1", 5, "a different Anna")]
+Inserted 1 fact(s) into 'claim_source'.
+> +claim_origin[("c_m5_1", "prompt")]
+Inserted 1 fact(s) into 'claim_origin'.
+> +same_as[("anna_1", "anna_2")]
+Inserted 1 fact(s) into 'same_as'.
+> +claim[("c_m6_1", "trip", "return_date", "2026-08-10")]
+Inserted 1 fact(s) into 'claim'.
+> +claim_modality[("c_m6_1", "asserted")]
+Inserted 1 fact(s) into 'claim_modality'.
+> +claim_source[("c_m6_1", 6, "back on August 10th")]
+Inserted 1 fact(s) into 'claim_source'.
+> +claim_num[("c_m6_1", "trip", "return_date", 20260810)]
+Inserted 1 fact(s) into 'claim_num'.
+> +claim_origin[("c_m6_1", "prompt")]
+Inserted 1 fact(s) into 'claim_origin'.
+> +claim[("c_m7_1", "grandpa", "age", "150")]
+Inserted 1 fact(s) into 'claim'.
+> +claim_num[("c_m7_1", "grandpa", "age", 150)]
+Inserted 1 fact(s) into 'claim_num'.
+> +claim_modality[("c_m7_1", "asserted")]
+Inserted 1 fact(s) into 'claim_modality'.
+> +claim_source[("c_m7_1", 7, "Grandpa is 150 years old")]
+Inserted 1 fact(s) into 'claim_source'.
+> +claim_origin[("c_m7_1", "prompt")]
+Inserted 1 fact(s) into 'claim_origin'.
+> +claim[("c_m8_1", "team", "member_count", "2"), ("c_m8_2", "team", "has_member", "ada"), ("c_m8_3", "team", "has_member", "bo"), ("c_m8_4", "team", "has_member", "cy")]
+Inserted 4 fact(s) into 'claim'.
+> +claim_num[("c_m8_1", "team", "member_count", 2)]
+Inserted 1 fact(s) into 'claim_num'.
+> +claim_modality[("c_m8_1", "asserted"), ("c_m8_2", "asserted"), ("c_m8_3", "asserted"), ("c_m8_4", "asserted")]
+Inserted 4 fact(s) into 'claim_modality'.
+> +claim_source[("c_m8_1", 8, "The team is 2 people"), ("c_m8_2", 8, "Ada"), ("c_m8_3", 8, "Bo"), ("c_m8_4", 8, "Cy")]
+Inserted 4 fact(s) into 'claim_source'.
+> +claim_origin[("c_m8_1", "prompt"), ("c_m8_2", "prompt"), ("c_m8_3", "prompt"), ("c_m8_4", "prompt")]
+Inserted 4 fact(s) into 'claim_origin'.
+> +claim[("c_m9_1", "ada", "parent_of", "bea"), ("c_m9_2", "bea", "parent_of", "ada")]
+Inserted 2 fact(s) into 'claim'.
+> +claim_modality[("c_m9_1", "asserted"), ("c_m9_2", "asserted")]
+Inserted 2 fact(s) into 'claim_modality'.
+> +claim_source[("c_m9_1", 9, "Ada is Bea's parent"), ("c_m9_2", 9, "Bea is Ada's parent")]
+Inserted 2 fact(s) into 'claim_source'.
+> +claim_origin[("c_m9_1", "prompt"), ("c_m9_2", "prompt")]
+Inserted 2 fact(s) into 'claim_origin'.
+> +claim[("c_o1", "assistant_reply", "mentions_topic", "pricing"), ("c_o2", "assistant", "assistant_identity", "max"), ("c_o3", "trip", "total_price", "2600 USD")]
+Inserted 3 fact(s) into 'claim'.
+> +claim_num[("c_o3", "trip", "total_price", 2600)]
+Inserted 1 fact(s) into 'claim_num'.
+> +claim_modality[("c_o1", "asserted"), ("c_o2", "asserted"), ("c_o3", "asserted")]
+Inserted 3 fact(s) into 'claim_modality'.
+> +claim_source[("c_o1", 10, "The total comes to $2,600"), ("c_o2", 10, "I'm Max, your assistant"), ("c_o3", 10, "total comes to $2,600 for the trip")]
+Inserted 3 fact(s) into 'claim_source'.
+> +claim_origin[("c_o1", "output"), ("c_o2", "output"), ("c_o3", "output")]
+Inserted 3 fact(s) into 'claim_origin'.
+> ?conflict(K, C1, C2)
+┌─────────────────────┬──────────┬──────────┐
+│ K                   │ C1       │ C2       │
+├─────────────────────┼──────────┼──────────┤
+│ "asymmetry"         │ "c_m9_1" │ "c_m9_2" │
+│ "asymmetry"         │ "c_m9_2" │ "c_m9_1" │
+│ "cardinality"       │ "c_m8_1" │ "c_m8_1" │
+│ "cycle"             │ "b_m3_1" │ "b_m3_1" │
+│ "cycle"             │ "b_m3_2" │ "b_m3_2" │
+│ "cycle"             │ "b_m4_1" │ "b_m4_1" │
+│ "cycle"             │ "c_m9_1" │ "c_m9_1" │
+│ "cycle"             │ "c_m9_2" │ "c_m9_2" │
+│ "functional"        │ "c_m1_2" │ "c_m3_1" │
+│ "functional"        │ "c_m3_1" │ "c_m1_2" │
+│ "identity"          │ "c_m5_1" │ "c_m5_1" │
+│ "instruction_clash" │ "k_m0_3" │ "k_m0_4" │
+│ "interval_order"    │ "c_m1_2" │ "c_m6_1" │
+│ "interval_order"    │ "c_m3_1" │ "c_m6_1" │
+│ "irreflexive"       │ "c_m5_1" │ "c_m5_1" │
+│ "range"             │ "c_m7_1" │ "c_m7_1" │
+└─────────────────────┴──────────┴──────────┘
+16 rows
+> ?violation(K, C, Kc)
+┌────────────────────┬──────────┬──────────┐
+│ K                  │ C        │ Kc       │
+├────────────────────┼──────────┼──────────┤
+│ "forbidden_topic"  │ "c_o1"   │ "k_m0_3" │
+│ "limit_exceeded"   │ "c_o3"   │ "k_m0_6" │
+│ "persona_break"    │ "c_o2"   │ "k_m0_1" │
+│ "required_missing" │ "k_m0_5" │ "k_m0_5" │
+└────────────────────┴──────────┴──────────┘
+4 rows
+> ?tension(K, C1, C2)
+┌───────────────────┬──────────┬──────────┐
+│ K                 │ C1       │ C2       │
+├───────────────────┼──────────┼──────────┤
+│ "hedge_vs_assert" │ "c_m1_1" │ "c_m2_1" │
+└───────────────────┴──────────┴──────────┘
+1 rows
+> ?finding_src("functional", Sev, C1, M1, S1, C2, M2, S2)
+┌──────────────┬────────┬──────────┬────┬────────────────────────┬──────────┬────┬────────────────────────┐
+│ functional   │ Sev    │ C1       │ M1 │ S1                     │ C2       │ M2 │ S2                     │
+├──────────────┼────────┼──────────┼────┼────────────────────────┼──────────┼────┼────────────────────────┤
+│ "functional" │ "hard" │ "c_m1_2" │  1 │ "on August 14th"       │ "c_m3_1" │  3 │ "we leave on the 12th" │
+│ "functional" │ "hard" │ "c_m3_1" │  3 │ "we leave on the 12th" │ "c_m1_2" │  1 │ "on August 14th"       │
+└──────────────┴────────┴──────────┴────┴────────────────────────┴──────────┴────┴────────────────────────┘
+2 rows
+> .why ?conflict("functional", "c_m1_2", "c_m3_1")
+┌──────────────┬──────────┬──────────┐
+│ _c0          │ _c1      │ _c2      │
+├──────────────┼──────────┼──────────┤
+│ "functional" │ "c_m1_2" │ "c_m3_1" │
+└──────────────┴──────────┴──────────┘
+1 rows
+> .why ?conflict("cycle", "b_m4_1", "b_m4_1")
+┌─────────┬──────────┬──────────┐
+│ _c0     │ _c1      │ _c2      │
+├─────────┼──────────┼──────────┤
+│ "cycle" │ "b_m4_1" │ "b_m4_1" │
+└─────────┴──────────┴──────────┘
+1 rows
+> .why ?violation("required_missing", "k_m0_5", "k_m0_5")
+┌────────────────────┬──────────┬──────────┐
+│ _c0                │ _c1      │ _c2      │
+├────────────────────┼──────────┼──────────┤
+│ "required_missing" │ "k_m0_5" │ "k_m0_5" │
+└────────────────────┴──────────┴──────────┘
+1 rows
+> -before_claim("b_m4_1", "demo", "keynote")
+Deleted 1 facts from 'before_claim'.
+> ?conflict("cycle", C1, C2)
+┌─────────┬──────────┬──────────┐
+│ cycle   │ C1       │ C2       │
+├─────────┼──────────┼──────────┤
+│ "cycle" │ "c_m9_1" │ "c_m9_1" │
+│ "cycle" │ "c_m9_2" │ "c_m9_2" │
+└─────────┴──────────┴──────────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_consistency_core
+Knowledge graph 'test_consistency_core' dropped.

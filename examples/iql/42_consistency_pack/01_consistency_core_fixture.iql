@@ -1,0 +1,142 @@
+// Test: Verified Completions consistency-core rule pack end-to-end
+// Description: One corrupted conversation exercising 10 rule families of
+// docs/internals/verified-completions/rules/consistency-core.iql, plus the
+// correct-retraction check. Kept in sync with
+// docs/internals/verified-completions/tests/consistency-core-fixture.iql.
+
+.kg create test_consistency_n42t01
+.kg use test_consistency_n42t01
+
+// Path is relative to the server cwd (repo root in dev):
+.load docs/internals/verified-completions/rules/consistency-core.iql
+
+// ── m0 system: "You are Aria, a formal assistant. Never mention pricing.
+//               Always include the final price table. Cover the itinerary.
+//               The budget is capped at $2,000." ────────────────────────────
++constraint[("k_m0_1", "persona", "assistant_identity", "aria"), ("k_m0_2", "persona", "tone", "formal"), ("k_m0_3", "forbid", "pricing", ""), ("k_m0_4", "require", "pricing", ""), ("k_m0_5", "require", "itinerary", "")]
++constraint_num[("k_m0_6", "max_value", "total_price", 2000)]
++constraint_source[("k_m0_1", 0, "You are Aria"), ("k_m0_2", 0, "a formal assistant"), ("k_m0_3", 0, "Never mention pricing"), ("k_m0_4", 0, "Always include the final price table"), ("k_m0_5", 0, "Cover the itinerary"), ("k_m0_6", 0, "budget is capped at $2,000")]
+
+// ── m1 user: "We fly out of Geneva on August 14th. My brother Robert too." ─
++claim[("c_m1_1", "trip", "departure_city", "geneva"), ("c_m1_2", "trip", "departure_date", "2026-08-14"), ("c_m1_3", "robert", "is_a", "person")]
++claim_modality[("c_m1_1", "asserted"), ("c_m1_2", "asserted"), ("c_m1_3", "asserted")]
++claim_source[("c_m1_1", 1, "fly out of Geneva"), ("c_m1_2", 1, "on August 14th"), ("c_m1_3", 1, "My brother Robert")]
++claim_num[("c_m1_2", "trip", "departure_date", 20260814)]
++claim_origin[("c_m1_1", "prompt"), ("c_m1_2", "prompt"), ("c_m1_3", "prompt")]
+
+// ── m2 assistant: "It might be Lyon we depart from, let me confirm." ───────
++claim[("c_m2_1", "trip", "departure_city", "lyon")]
++claim_modality[("c_m2_1", "hedged")]
++claim_source[("c_m2_1", 2, "might be Lyon we depart from")]
++claim_origin[("c_m2_1", "prompt")]
+
+// ── m3 user: "Since we leave on the 12th, get Bob an aisle seat. The
+//             keynote is before the workshop, the workshop before the demo." ─
++claim[("c_m3_1", "trip", "departure_date", "2026-08-12"), ("c_m3_2", "robert", "seat_preference", "aisle")]
++claim_modality[("c_m3_1", "asserted"), ("c_m3_2", "question")]
++claim_source[("c_m3_1", 3, "we leave on the 12th"), ("c_m3_2", 3, "get Bob an aisle seat")]
++claim_num[("c_m3_1", "trip", "departure_date", 20260812)]
++claim_origin[("c_m3_1", "prompt"), ("c_m3_2", "prompt")]
++before_claim[("b_m3_1", "keynote", "workshop"), ("b_m3_2", "workshop", "demo")]
++claim_source[("b_m3_1", 3, "keynote is before the workshop"), ("b_m3_2", 3, "the workshop before the demo")]
+
+// ── m4 user: "One change: the demo now runs before the keynote." ───────────
++before_claim[("b_m4_1", "demo", "keynote")]
++claim_source[("b_m4_1", 4, "the demo now runs before the keynote")]
+
+// ── m5 user: "That's a different Anna, by the way."
+//    (canonicalizer had already merged anna_1 and anna_2) ───────────────────
++claim[("c_m5_1", "anna_1", "distinct_from", "anna_2")]
++claim_modality[("c_m5_1", "asserted")]
++claim_source[("c_m5_1", 5, "a different Anna")]
++claim_origin[("c_m5_1", "prompt")]
++same_as[("anna_1", "anna_2")]
+
+// ── m6 user: "We're back on August 10th." ──────────────────────────────────
++claim[("c_m6_1", "trip", "return_date", "2026-08-10")]
++claim_modality[("c_m6_1", "asserted")]
++claim_source[("c_m6_1", 6, "back on August 10th")]
++claim_num[("c_m6_1", "trip", "return_date", 20260810)]
++claim_origin[("c_m6_1", "prompt")]
+
+// ── m7 user: "Grandpa is 150 years old." ───────────────────────────────────
++claim[("c_m7_1", "grandpa", "age", "150")]
++claim_num[("c_m7_1", "grandpa", "age", 150)]
++claim_modality[("c_m7_1", "asserted")]
++claim_source[("c_m7_1", 7, "Grandpa is 150 years old")]
++claim_origin[("c_m7_1", "prompt")]
+
+// ── m8 user: "The team is 2 people: Ada, Bo, and Cy." ──────────────────────
++claim[("c_m8_1", "team", "member_count", "2"), ("c_m8_2", "team", "has_member", "ada"), ("c_m8_3", "team", "has_member", "bo"), ("c_m8_4", "team", "has_member", "cy")]
++claim_num[("c_m8_1", "team", "member_count", 2)]
++claim_modality[("c_m8_1", "asserted"), ("c_m8_2", "asserted"), ("c_m8_3", "asserted"), ("c_m8_4", "asserted")]
++claim_source[("c_m8_1", 8, "The team is 2 people"), ("c_m8_2", 8, "Ada"), ("c_m8_3", 8, "Bo"), ("c_m8_4", 8, "Cy")]
++claim_origin[("c_m8_1", "prompt"), ("c_m8_2", "prompt"), ("c_m8_3", "prompt"), ("c_m8_4", "prompt")]
+
+// ── m9 user: "Ada is Bea's parent. Bea is Ada's parent." ───────────────────
++claim[("c_m9_1", "ada", "parent_of", "bea"), ("c_m9_2", "bea", "parent_of", "ada")]
++claim_modality[("c_m9_1", "asserted"), ("c_m9_2", "asserted")]
++claim_source[("c_m9_1", 9, "Ada is Bea's parent"), ("c_m9_2", 9, "Bea is Ada's parent")]
++claim_origin[("c_m9_1", "prompt"), ("c_m9_2", "prompt")]
+
+// ── m10 assistant output (verify_output mode; origin stamped "output"):
+//    "I'm Max, your assistant. The total comes to $2,600 for the trip." ─────
++claim[("c_o1", "assistant_reply", "mentions_topic", "pricing"), ("c_o2", "assistant", "assistant_identity", "max"), ("c_o3", "trip", "total_price", "2600 USD")]
++claim_num[("c_o3", "trip", "total_price", 2600)]
++claim_modality[("c_o1", "asserted"), ("c_o2", "asserted"), ("c_o3", "asserted")]
++claim_source[("c_o1", 10, "The total comes to $2,600"), ("c_o2", 10, "I'm Max, your assistant"), ("c_o3", 10, "total comes to $2,600 for the trip")]
++claim_origin[("c_o1", "output"), ("c_o2", "output"), ("c_o3", "output")]
+
+// ── Expected hard conflicts ────────────────────────────────────────────────
+// ("instruction_clash", "k_m0_3", "k_m0_4")   forbid+require pricing (D1)
+// ("functional", "c_m1_2","c_m3_1") + mirror  Aug 14 vs Aug 12 (V1)
+// ("cycle", "b_m3_1", "b_m3_1")               keynote<workshop<demo<keynote
+// ("cycle", "b_m3_2", "b_m3_2")               ... every member claim of the
+// ("cycle", "b_m4_1", "b_m4_1")               ... derived cycle flags (O1a)
+// ("identity",    "c_m5_1", "c_m5_1")         distinct yet merged (I1)
+// ("irreflexive", "c_m5_1", "c_m5_1")         distinct_from self via merge (O3)
+// ("interval_order", "c_m1_2", "c_m6_1")      20260810 < 20260814 via claim_num
+// ("interval_order", "c_m3_1", "c_m6_1")      20260810 < 20260812 via claim_num
+// Symmetric kinds (functional, asymmetry, instruction_clash D2, identity I2,
+// disjoint_class) appear in BOTH orders; assembler dedups unordered pairs.
+// ("range",       "c_m7_1", "c_m7_1")         age 150 > max 130 (V5)
+// ("cardinality", "c_m8_1", "c_m8_1")         3 named members > claimed 2 (V6)
+// ("asymmetry", "c_m9_1","c_m9_2") + mirror   mutual parent_of (O2)
+// ("cycle", "c_m9_1", "c_m9_1")               mutual parent_of is ALSO a
+// ("cycle", "c_m9_2", "c_m9_2")               2-cycle in an acyclic attr (O1b)
+// (verified on engine 2026-07-26: 16 rows total)
+?conflict(K, C1, C2)
+
+// ── Expected violations (output vs system constraints) ─────────────────────
+// ("forbidden_topic",  "c_o1",   "k_m0_3")    output discusses pricing
+// ("persona_break",    "c_o2",   "k_m0_1")    "max" vs assigned "aria"
+// ("limit_exceeded",   "c_o3",   "k_m0_6")    2600 > cap 2000
+// ("required_missing", "k_m0_5", "k_m0_5")    itinerary never covered
+// NOTE: k_m0_4 (require pricing) is satisfied by c_o1 — must NOT appear.
+?violation(K, C, Kc)
+
+// ── Expected soft tension ──────────────────────────────────────────────────
+// ("hedge_vs_assert", "hard"?no — severity "soft"): (c_m1_1, c_m2_1)
+//   asserted Geneva vs hedged Lyon — advisory only, never a conflict row
+?tension(K, C1, C2)
+
+// ── Provenance view: both spans attached to the functional finding ─────────
+// Expect one row: msg 1 "on August 14th" x msg 3 "we leave on the 12th"
+?finding_src("functional", Sev, C1, M1, S1, C2, M2, S2)
+
+// ── Proof trees ────────────────────────────────────────────────────────────
+.why ?conflict("functional", "c_m1_2", "c_m3_1")
+.why ?conflict("cycle", "b_m4_1", "b_m4_1")
+.why ?violation("required_missing", "k_m0_5", "k_m0_5")
+
+// ── Retraction check (correct-retraction end-to-end): remove m4's edit ─────
+// After this delete the three before-claim "cycle" rows (b_m3_1, b_m3_2,
+// b_m4_1) must vanish while every other finding survives untouched --
+// including the two parent_of hierarchy-cycle rows (c_m9_1, c_m9_2), which
+// do not depend on m4 and are the expected remaining output here.
+-before_claim("b_m4_1", "demo", "keynote")
+?conflict("cycle", C1, C2)
+
+// Cleanup
+.kg use default
+.kg drop test_consistency_n42t01

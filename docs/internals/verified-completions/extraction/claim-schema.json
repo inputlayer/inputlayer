@@ -1,0 +1,80 @@
+{
+  "$comment": "Passed via output_config.format (type: json_schema) on the extraction call. Structured outputs guarantee conformance, so the gateway parses this without repair logic. Kept within documented structured-outputs limits: additionalProperties false everywhere, no string-length or numeric-range constraints, no regex patterns — semantic validity (id formats, ISO dates, surface-span verbatim-ness) is enforced by the gateway's ingestion validator instead.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["claims", "before_claims", "constraints", "ontology"],
+  "properties": {
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "entity", "attribute", "value", "modality", "msg", "surface"],
+        "properties": {
+          "id":        { "type": "string", "description": "c_m<msgIdx>_<n>, ordered by appearance" },
+          "entity":    { "type": "string", "description": "snake_case canonical entity id; reuse ENTITIES_SO_FAR" },
+          "attribute": { "type": "string", "description": "snake_case; prefer VOCABULARY entries" },
+          "value":     { "type": "string", "description": "normalized per prompt section 5; entity ids for entity-valued attributes" },
+          "modality":  { "type": "string", "enum": ["asserted", "negated", "hedged", "conditional", "opinion", "question"] },
+          "msg":       { "type": "integer", "description": "source message index" },
+          "surface":   { "type": "string", "description": "verbatim contiguous substring of the source message" }
+        }
+      }
+    },
+    "before_claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "event_a", "event_b", "msg", "surface"],
+        "properties": {
+          "id":      { "type": "string", "description": "b_m<msgIdx>_<n>" },
+          "event_a": { "type": "string", "description": "entity id of the earlier event" },
+          "event_b": { "type": "string", "description": "entity id of the later event" },
+          "msg":     { "type": "integer" },
+          "surface": { "type": "string" }
+        }
+      }
+    },
+    "constraints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "type", "attr", "value", "msg", "surface"],
+        "properties": {
+          "id":      { "type": "string", "description": "k_m<msgIdx>_<n>" },
+          "type":    { "type": "string", "enum": ["forbid", "require", "max_value", "min_value", "persona"] },
+          "attr":    { "type": "string", "description": "topic id (forbid/require), bounded attribute (max/min), or persona attribute" },
+          "value":   { "type": "string", "description": "empty string for forbid/require; normalized bound or persona value otherwise" },
+          "msg":     { "type": "integer" },
+          "surface": { "type": "string" }
+        }
+      }
+    },
+    "ontology": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["functional", "pair_order", "acyclic", "asymmetric", "irreflexive"],
+      "properties": {
+        "functional":  { "type": "array", "items": { "type": "string" }, "description": "newly coined single-valued attributes" },
+        "pair_order":  {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["start_attr", "end_attr"],
+            "properties": {
+              "start_attr": { "type": "string" },
+              "end_attr":   { "type": "string" }
+            }
+          },
+          "description": "newly coined start/end attribute pairs"
+        },
+        "acyclic":     { "type": "array", "items": { "type": "string" } },
+        "asymmetric":  { "type": "array", "items": { "type": "string" } },
+        "irreflexive": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}
