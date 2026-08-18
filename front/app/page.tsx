@@ -465,7 +465,7 @@ export default function LandingPage() {
           <div className="relative rounded-2xl border border-border bg-gradient-to-br from-primary/10 via-transparent to-primary/5 p-12 space-y-10">
             <div className="text-center space-y-3">
               <h2 className="text-3xl font-bold tracking-tight">
-                Open source. Run it yourself.
+                Source-available. Run it yourself.
               </h2>
               <p className="text-muted-foreground text-lg max-w-xl mx-auto">
                 No account, no API key, no vendor lock-in. From first query to production in four steps.
@@ -505,7 +505,7 @@ export default function LandingPage() {
                   step: "4",
                   icon: <FileText className="h-5 w-5 text-primary" />,
                   title: "Go to production",
-                  desc: "Apache 2.0 + Commons Clause. Commercial license when you need it.",
+                  desc: "Elastic License 2.0 core, Apache 2.0 SDKs. Commercial license when you need it.",
                   href: "/commercial/",
                   external: false,
                   label: "View license",

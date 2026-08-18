@@ -539,4 +539,4 @@ uv run mypy src/inputlayer/
 
 ## License
 
-Apache 2.0 + Commons Clause. See [LICENSE](../../LICENSE).
+Apache 2.0. See [LICENSE](./LICENSE). (The InputLayer core server is separately licensed under the Elastic License 2.0.)

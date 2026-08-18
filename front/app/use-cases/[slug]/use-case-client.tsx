@@ -49,7 +49,7 @@ export function UseCaseClient({ useCase, slug }: UseCaseClientProps) {
 
       <CTABanner
         heading="Ready to build?"
-        description="InputLayer is open-source. Pull the Docker image and start building in minutes."
+        description="InputLayer is source-available and free to use. Pull the Docker image and start building in minutes."
         buttons={[
           { label: "Read the docs", href: "/docs/" },
           { label: "Launch demo", href: "https://demo.inputlayer.ai", variant: "secondary", external: true },

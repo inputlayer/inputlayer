@@ -1,11 +1,11 @@
 # InputLayer
 
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
-[![License](https://img.shields.io/badge/license-Apache%202.0%20%2B%20Commons%20Clause-blue.svg)](./LICENSE)
+[![License](https://img.shields.io/badge/license-Elastic%202.0-blue.svg)](./LICENSE)
 
 **Streaming reasoning layer for AI systems.**
 
-Store facts. Define rules. InputLayer derives the conclusions, keeps them current as data changes, and explains every result with a proof tree. Combine recursive reasoning with vector search in a single query. Open source.
+Store facts. Define rules. InputLayer derives the conclusions, keeps them current as data changes, and explains every result with a proof tree. Combine recursive reasoning with vector search in a single query. Source-available and free to use.
 
 ---
 
@@ -147,4 +147,20 @@ See [CONTRIBUTING](CONTRIBUTING).
 
 ## License
 
-Apache 2.0 + Commons Clause. Open source for non-commercial use. Commercial use requires a separate license - see [COMMERCIAL_LICENSE.md](./COMMERCIAL_LICENSE.md).
+InputLayer uses a split licensing model: the core is protected, the clients are permissive.
+
+| Component | Path | License |
+|-----------|------|---------|
+| **Core** (server, engine, everything not listed below) | repository root | [Elastic License 2.0](./LICENSE) |
+| Python SDK | `packages/inputlayer-py` | Apache 2.0 |
+| TypeScript SDK | `packages/inputlayer-js` | Apache 2.0 |
+| API client | `packages/api-client` | Apache 2.0 |
+| VS Code extension | `packages/inputlayer-vscode` | MIT |
+
+**Core (Elastic License 2.0):** free to use, copy, modify, and run - including commercially and in production. You may not provide InputLayer to third parties as a hosted or managed service, and you may not circumvent license-key functionality or remove licensing notices. For rights beyond that, see [COMMERCIAL_LICENSE.md](./COMMERCIAL_LICENSE.md).
+
+These terms apply to all versions of InputLayer, including every pre-1.0 development version preceding the official 1.0 release.
+
+**Clients (Apache 2.0 / MIT):** embed them in any application without restriction.
+
+"InputLayer" is a trademark of InputLayer - see [NOTICE](./NOTICE).

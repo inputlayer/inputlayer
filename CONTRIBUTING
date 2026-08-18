@@ -373,7 +373,7 @@ If you want to help with any of these, open an issue first to coordinate.
 
 ## License
 
-By contributing to InputLayer, you agree that your contributions will be licensed under the Apache License 2.0 with Commons Clause. See [LICENSE](LICENSE) for the full text.
+By contributing to InputLayer, you agree that your contributions will be licensed under the license covering the part of the repository you contribute to - the Elastic License 2.0 for the core (see [LICENSE](LICENSE)), or the package's own license for the client SDKs (see the License section of the README). You additionally grant InputLayer a perpetual, worldwide, irrevocable license to relicense and distribute your contributions under other terms, including commercial licenses. You confirm that you have the right to grant this license for your contributions.
 
 ---
 

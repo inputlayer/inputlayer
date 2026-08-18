@@ -49,7 +49,7 @@ export function CustomerClient({ story, slug }: CustomerClientProps) {
 
       <CTABanner
         heading="See what InputLayer can do for you"
-        description="Open-source. Single Docker container. Start building in minutes."
+        description="Source-available. Single Docker container. Start building in minutes."
         buttons={[
           { label: "Get started", href: "/docs/guides/quickstart/" },
           { label: "Launch demo", href: "https://demo.inputlayer.ai", variant: "secondary", external: true },
