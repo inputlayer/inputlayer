@@ -6,7 +6,7 @@ import type { Metadata } from "next"
 export const metadata: Metadata = {
   title: "Commercial Licensing - InputLayer",
   description:
-    "Commercial licensing for InputLayer. Apache 2.0 + Commons Clause for open source use. Commercial license available for redistribution and hosted services.",
+    "Commercial licensing for InputLayer. Core source-available under the Elastic License 2.0; client SDKs Apache 2.0. Commercial license available for hosted services and redistribution.",
 }
 
 export default function CommercialPage() {
@@ -14,7 +14,7 @@ export default function CommercialPage() {
     <PageLayout>
       <ContentHero
         heading="Commercial licensing"
-        subtitle="InputLayer is source-available under Apache 2.0 + Commons Clause. You can use it commercially - the only restriction is on redistributing InputLayer itself for profit."
+        subtitle="The InputLayer core is source-available under the Elastic License 2.0, and the client SDKs are Apache 2.0. You can use it all commercially - the only restriction is on offering InputLayer itself as a hosted service or redistributing it under other terms."
       />
 
       <section className="mx-auto max-w-3xl px-6 py-12 space-y-12">

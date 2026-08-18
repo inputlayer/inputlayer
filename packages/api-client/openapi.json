@@ -8,7 +8,7 @@
       "url": "https://inputlayer.io"
     },
     "license": {
-      "name": "Apache-2.0 WITH Commons Clause",
+      "name": "Elastic-2.0",
       "url": "https://github.com/inputlayer/inputlayer/blob/main/LICENSE"
     },
     "version": "1.0.0"

@@ -396,7 +396,7 @@ Because extraction runs in the completion's shadow, `annotate` mode adds ~zero w
 4. **Rule-pack loading.** Per-session KG import of `.il` packs vs. a shared read-only KG referenced by sessions — depends on engine support for cross-KG reads; per-session copy is the safe default.
 5. **Embedding provider for canonicalization** — engine-internal embeddings vs. gateway-computed (e.g., via the configured LLM provider); affects the `[llm]` config surface.
 6. **Multi-tenant quotas.** `max_sessions` is a blunt instrument; per-key quotas and per-KG memory ceilings may be needed before anyone puts this in front of untrusted traffic.
-7. **Licensing note.** The gateway is a feature of the repo under the existing Apache-2.0 + Commons Clause terms; it consumes the *operator's* Anthropic key. No change proposed, flagged for completeness.
+7. **Licensing note.** The gateway is a feature of the repo under the existing Elastic License 2.0 terms; it consumes the *operator's* Anthropic key. No change proposed, flagged for completeness.
 
 ---
 

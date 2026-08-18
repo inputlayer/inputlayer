@@ -52,7 +52,7 @@ export function CustomersIndexClient({ stories }: CustomersIndexClientProps) {
 
       <CTABanner
         heading="Ready to get started?"
-        description="InputLayer is open-source. Pull the Docker image and start building."
+        description="InputLayer is source-available and free to use. Pull the Docker image and start building."
         buttons={[
           { label: "Read the docs", href: "/docs/" },
           { label: "View on GitHub", href: "https://github.com/inputlayer/inputlayer", variant: "secondary", external: true },
