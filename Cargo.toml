@@ -83,8 +83,12 @@ futures-util = "0.3"
 
 # WebSocket client (CLI)
 tokio-tungstenite = "0.24"
-clap = { version = "4.5.60", features = ["derive"] }
+clap = { version = "4.5.60", features = ["derive", "env"] }
 crc32fast = "1.5.0"
+
+# Ontology registry client (il CLI)
+tar = "0.4"
+flate2 = "1.0"
 
 [dev-dependencies]
 tempfile = "3.0"
@@ -102,6 +106,10 @@ path = "src/bin/server.rs"
 [[bin]]
 name = "inputlayer-client"
 path = "src/bin/client.rs"
+
+[[bin]]
+name = "il"
+path = "src/bin/il/main.rs"
 
 [[example]]
 name = "simple_query"
