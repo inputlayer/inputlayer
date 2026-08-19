@@ -205,6 +205,20 @@ def _add_connection_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_migrations_dir(sub: argparse.ArgumentParser) -> None:
+    """Accept --migrations-dir after the subcommand as well as before it.
+
+    Delegating callers (the `il` CLI) always place flags after the
+    subcommand. SUPPRESS keeps the subparser from clobbering the value the
+    global flag already parsed.
+    """
+    sub.add_argument(
+        "--migrations-dir",
+        default=argparse.SUPPRESS,
+        help="Directory for migration files (default: ./migrations)",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(
@@ -226,22 +240,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Python module path containing models (e.g. myapp.models)",
     )
     make.add_argument("--name", default=None, help="Custom migration name suffix")
+    _add_migrations_dir(make)
     make.set_defaults(func=_cmd_makemigrations)
 
     # migrate
     mig = subparsers.add_parser("migrate", help="Apply pending migrations")
     _add_connection_args(mig)
+    _add_migrations_dir(mig)
     mig.set_defaults(func=_cmd_migrate)
 
     # revert
     rev = subparsers.add_parser("revert", help="Revert migrations to a target")
     _add_connection_args(rev)
+    _add_migrations_dir(rev)
     rev.add_argument("target", help="Migration name to revert to (e.g. 0001_initial)")
     rev.set_defaults(func=_cmd_revert)
 
     # showmigrations
     show = subparsers.add_parser("showmigrations", help="Show migration status")
     _add_connection_args(show)
+    _add_migrations_dir(show)
     show.set_defaults(func=_cmd_showmigrations)
 
     return parser

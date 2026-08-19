@@ -33,6 +33,33 @@ class TestParser:
         with pytest.raises(SystemExit):
             parser.parse_args(["revert", "--url", "ws://x", "--kg", "test"])
 
+    def test_migrations_dir_before_subcommand(self):
+        parser = build_parser()
+        args = parser.parse_args(
+            ["--migrations-dir", "custom", "makemigrations", "--models", "m"]
+        )
+        assert args.migrations_dir == "custom"
+
+    def test_migrations_dir_after_subcommand(self):
+        # Delegating callers (the il CLI) always place flags after the
+        # subcommand; this position must work on every subcommand.
+        parser = build_parser()
+        args = parser.parse_args(
+            ["makemigrations", "--models", "m", "--migrations-dir", "custom"]
+        )
+        assert args.migrations_dir == "custom"
+        args = parser.parse_args(
+            ["showmigrations", "--url", "ws://x", "--kg", "k",
+             "--migrations-dir", "custom"]
+        )
+        assert args.migrations_dir == "custom"
+
+    def test_migrations_dir_default_survives_subparser(self):
+        # SUPPRESS on the subparser copy must not clobber the global default.
+        parser = build_parser()
+        args = parser.parse_args(["makemigrations", "--models", "m"])
+        assert args.migrations_dir == "migrations"
+
     def test_showmigrations_parses(self):
         parser = build_parser()
         args = parser.parse_args(["showmigrations", "--url", "ws://x", "--kg", "test"])
