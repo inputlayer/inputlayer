@@ -14,5 +14,22 @@ services:
       INPUTLAYER_HTTP__CORS_ALLOW_ALL: "${CORS_ALLOW_ALL:-false}"
       INPUTLAYER_LOGGING__LEVEL: ${INPUTLAYER_LOG_LEVEL:-info}
 
+  # The model gateway: OpenAI-compatible Verified Completions API on its own
+  # port, its own configuration. Remove this service if you only want the
+  # engine.
+  gateway:
+    image: ghcr.io/inputlayer/inputlayer-gateway:latest
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-8081}:8081"
+    environment:
+      GATEWAY_HOST: "0.0.0.0"
+      GATEWAY_PORT: "8081"
+      INPUTLAYER_URL: "http://inputlayer:8080"
+      INPUTLAYER_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    depends_on:
+      - inputlayer
+
 volumes:
   inputlayer-data:

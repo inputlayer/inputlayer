@@ -2,10 +2,21 @@
 name = "inputlayer-gateway"
 version = "0.1.0"
 edition = "2021"
-description = "InputLayer Gateway - the model gateway for Verified Completions (placeholder, see issue #83)"
+description = "InputLayer Gateway - the model gateway for Verified Completions"
 license = "Elastic-2.0"
 repository = "https://github.com/inputlayer/inputlayer"
 rust-version = "1.88"
 publish = false
 
 [dependencies]
+axum = "0.7"
+tokio = { version = "1.0", features = ["full"] }
+serde_json = "1.0"
+reqwest = { version = "0.12", features = ["json"] }
+anyhow = "1.0"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+doc_markdown = "allow"

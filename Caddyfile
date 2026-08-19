@@ -1,3 +1,13 @@
 {$DOMAIN:localhost} {
-	reverse_proxy inputlayer:8080
+	# Verified Completions API (the model gateway)
+	handle /v1/verify* {
+		reverse_proxy gateway:8081
+	}
+	handle /v1/chat/completions* {
+		reverse_proxy gateway:8081
+	}
+	# Everything else: the engine (WS API, GUI, health, metrics)
+	handle {
+		reverse_proxy inputlayer:8080
+	}
 }

@@ -17,33 +17,60 @@ COPY gui/ ./gui/
 COPY docs/content/ ./docs/content/
 RUN cd gui && npm run build
 
-# ---- Rust Builder ----
+# ---- Rust Builder (shared by both images) ----
 FROM rust:1.88-bookworm AS builder
 
 WORKDIR /build
 
-# Cache dependencies: copy manifests first, build a dummy lib to cache deps.
-# gateway/ is a workspace member, so its manifest and a stub source must
-# exist for any cargo invocation to load the workspace.
+# Cache dependencies: copy manifests first, build dummy targets to cache deps
 COPY Cargo.toml ./
 COPY gateway/Cargo.toml ./gateway/
 RUN mkdir src && echo "fn main() {}" > src/main.rs && \
     mkdir -p src/bin && echo "fn main() {}" > src/bin/server.rs && \
     echo "" > src/lib.rs && \
-    mkdir -p gateway/src && echo "" > gateway/src/lib.rs && \
+    mkdir -p gateway/src && echo "fn main() {}" > gateway/src/main.rs && \
+    echo "" > gateway/src/lib.rs && \
     cargo generate-lockfile && \
-    cargo build --release --bin inputlayer-server 2>/dev/null || true && \
+    cargo build --release --bin inputlayer-server --bin inputlayer-gateway 2>/dev/null || true && \
     rm -rf src gateway/src
 
-# Build the real binary
+# Build the real binaries
 COPY src/ src/
 COPY gateway/ gateway/
 COPY docs/ docs/
-RUN cargo build --all-features --release --bin inputlayer-server && \
-    strip target/release/inputlayer-server
+RUN cargo build --all-features --release --bin inputlayer-server --bin inputlayer-gateway && \
+    strip target/release/inputlayer-server target/release/inputlayer-gateway
 
-# ---- Runtime ----
-FROM debian:bookworm-slim
+# ---- Gateway Runtime (build with: docker build --target gateway) ----
+FROM debian:bookworm-slim AS gateway
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN useradd -r -s /bin/false -m -d /var/lib/inputlayer gateway
+
+COPY --from=builder /build/target/release/inputlayer-gateway /usr/local/bin/
+
+# Gateway configuration is its own surface, separate from the engine:
+#   GATEWAY_HOST / GATEWAY_PORT   bind address
+#   INPUTLAYER_URL                engine base URL
+#   INPUTLAYER_API_KEY            engine API key (WS access, from #83 on)
+#   ANTHROPIC_API_KEY             model provider key (never seen by the engine)
+ENV GATEWAY_HOST=0.0.0.0
+ENV GATEWAY_PORT=8081
+ENV INPUTLAYER_URL=http://inputlayer:8080
+
+EXPOSE 8081
+USER gateway
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -sf http://localhost:8081/health || exit 1
+
+ENTRYPOINT ["inputlayer-gateway"]
+
+# ---- Engine Runtime (default target, keep last) ----
+FROM debian:bookworm-slim AS engine
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates curl && \
