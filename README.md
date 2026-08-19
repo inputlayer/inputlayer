@@ -92,6 +92,20 @@ If you know SQL, the query language takes about 10 minutes to learn. See the [Qu
 
 ---
 
+## Ontologies, Ready to Go
+
+InputLayer ships ready-made ontologies for common use cases in the [ontology registry](https://github.com/inputlayer/ontology-registry) — rule packs you install into a running engine with one command, Helm-style. The first is **`consistency-core` (Verified Completions)**: logical-consistency verification for AI conversations — contradictions, timeline cycles, identity mix-ups, and policy violations, every finding backed by verbatim quoted spans and a proof tree, validated against a 1,628-scenario adversarial corpus.
+
+```bash
+il search                                      # browse the registry
+il install consistency-core --kg mychat --create   # sha256-verified, one atomic deploy
+il list --kg mychat                            # what's installed, pinned by version+digest
+```
+
+The `il` CLI builds with the engine (`cargo build --bin il`) and talks to the server over the same WebSocket API as every other client. The design keeps one hard rule: the LLM only ever writes *data* — the rules are human-written, reviewed in the registry, and frozen at load. See `docs/internals/verified-completions/` for the rule pack's design, benchmark corpus, and extraction contract.
+
+---
+
 ## SDKs
 
 **Python:**
