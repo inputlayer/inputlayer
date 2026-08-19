@@ -1,0 +1,11 @@
+[package]
+name = "inputlayer-gateway"
+version = "0.1.0"
+edition = "2021"
+description = "Verified Completions gateway for InputLayer (placeholder — see issue #83)"
+license = "Elastic-2.0"
+repository = "https://github.com/inputlayer/inputlayer"
+rust-version = "1.88"
+publish = false
+
+[dependencies]

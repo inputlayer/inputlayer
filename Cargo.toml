@@ -1,3 +1,9 @@
+# Workspace: the engine stays the root package (path and crate name unchanged,
+# per #82); the gateway is a separate member so HTTP/LLM client dependencies
+# never enter the engine crate.
+[workspace]
+members = ["gateway"]
+
 [package]
 name = "inputlayer"
 version = "0.1.0"
