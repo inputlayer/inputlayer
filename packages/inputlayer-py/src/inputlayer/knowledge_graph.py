@@ -963,11 +963,22 @@ class KnowledgeGraph:
         )
 
     async def load(self, path: str, *, mode: str | None = None) -> None:
-        """Load data from a file."""
-        cmd = f".load {path}"
-        if mode:
-            cmd += f" {mode}"
-        await self._execute(cmd)
+        """Load an IQL file into this knowledge graph.
+
+        The file is read locally and sent to the server as a single
+        multi-statement program, so the load is atomic: the server parses
+        every statement before executing any, and rejects the whole
+        program on the first error.
+
+        (Sending ``.load`` over the wire does not work: the server treats
+        it as a client-only REPL command and silently ignores it.)
+        """
+        if mode is not None:
+            msg = "load(mode=...) is not supported; --replace/--merge are unimplemented server-side"
+            raise NotImplementedError(msg)
+        with open(path, encoding="utf-8") as f:
+            program = f.read()
+        await self._execute(program)
 
     async def clear_prefix(self, prefix: str) -> ClearResult:
         """Clear all relations matching a prefix."""
