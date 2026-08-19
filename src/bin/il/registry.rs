@@ -83,7 +83,9 @@ impl Registry {
                 self.index_url
             );
         }
-        resp.json().await.context("registry index is not valid JSON")
+        resp.json()
+            .await
+            .context("registry index is not valid JSON")
     }
 
     /// Resolve `name` or `name@version` against the index (latest = first listed).

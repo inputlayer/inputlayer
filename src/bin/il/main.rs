@@ -4,10 +4,12 @@
 //! registry (github.com/inputlayer/ontology-registry); `il` is the installer,
 //! and deployment rides the engine's WebSocket API as one atomic program.
 //!
-//!   il search [term]                  browse the registry index
-//!   il fetch <name>[@version]         download + digest-verify into the cache
-//!   il install <name>[@ver] --kg X    fetch, deploy over WS, pin pack_meta
-//!   il list [--kg X]                  what's installed where (via pack_meta)
+//! ```text
+//! il search [term]                  browse the registry index
+//! il fetch <name>[@version]         download + digest-verify into the cache
+//! il install <name>[@ver] --kg X    fetch, deploy over WS, pin pack_meta
+//! il list [--kg X]                  what's installed where (via pack_meta)
+//! ```
 
 mod registry;
 mod ws;
@@ -186,7 +188,9 @@ async fn install(
     engine
         .execute(&format!(".kg use {kg}"))
         .await
-        .with_context(|| format!("failed to switch to knowledge graph '{kg}' (--create to create it)"))?;
+        .with_context(|| {
+            format!("failed to switch to knowledge graph '{kg}' (--create to create it)")
+        })?;
 
     println!(
         "deploying {name}@{} → {kg} ({statement_count} statements, 1 atomic round trip) …",

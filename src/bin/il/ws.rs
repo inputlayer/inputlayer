@@ -53,9 +53,8 @@ pub struct QueryResult {
     pub rows: Vec<Vec<serde_json::Value>>,
 }
 
-type WsStream = tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
->;
+type WsStream =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 pub struct Engine {
     stream: WsStream,
