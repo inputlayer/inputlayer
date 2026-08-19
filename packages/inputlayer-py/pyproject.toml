@@ -34,7 +34,7 @@ dev = [
 ]
 
 [project.scripts]
-il = "inputlayer.migrations.cli:main"
+inputlayer-migrate = "inputlayer.migrations.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/inputlayer"]
