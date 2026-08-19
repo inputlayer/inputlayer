@@ -25,7 +25,7 @@
 //! ```
 
 use figment::{
-    providers::{Env, Format, Toml},
+    providers::{Env, Format, Serialized, Toml},
     Figment,
 };
 use serde::{Deserialize, Serialize};
@@ -502,23 +502,51 @@ impl Default for RateLimitConfig {
 impl Config {
     /// Load configuration from default locations
     ///
-    /// Merges in order:
-    /// 1. config.toml (base configuration)
-    /// 2. config.local.toml (local overrides, git-ignored)
-    /// 3. Environment variables (INPUTLAYER_* prefix)
+    /// Environment source for `INPUTLAYER_*` config overrides.
+    ///
+    /// Only keys under the known top-level config sections pass through.
+    /// The server documents env vars under the same prefix that are NOT
+    /// config fields (`INPUTLAYER_BOOTSTRAP_API_KEY`,
+    /// `INPUTLAYER_ADMIN_PASSWORD`, `INPUTLAYER_API_KEY` for clients), and
+    /// strict parsing turned any of them into a startup failure (#92). The
+    /// TOML sources stay strict; only the env source is filtered.
+    fn env_source() -> Env {
+        const SECTIONS: [&str; 4] = ["storage", "optimization", "logging", "http"];
+        Env::prefixed("INPUTLAYER_")
+            .filter(|key| {
+                let key = key.as_str().to_ascii_lowercase();
+                let section = key.split("__").next().unwrap_or_default();
+                SECTIONS.contains(&section)
+            })
+            .split("__")
+    }
+
+    /// Merges in order (later wins):
+    /// 1. Built-in defaults
+    /// 2. config.toml (base configuration)
+    /// 3. config.local.toml (local overrides, git-ignored)
+    /// 4. Environment variables (INPUTLAYER_* prefix)
+    ///
+    /// Defaults are seeded first so that a missing config file still yields
+    /// a valid config with env overrides applied - previously the no-file
+    /// path fell back to `Config::default()` and env vars did nothing (#92).
     pub fn load() -> Result<Self, figment::Error> {
-        Figment::new()
+        Figment::from(Serialized::defaults(Self::default()))
             .merge(Toml::file("config.toml"))
             .merge(Toml::file("config.local.toml"))
-            .merge(Env::prefixed("INPUTLAYER_").split("__"))
+            .merge(Self::env_source())
             .extract()
     }
 
-    /// Load configuration from specific file path
+    /// Load configuration from specific file path.
+    ///
+    /// Defaults are seeded first, so a partial config file only needs the
+    /// fields it wants to change. Unknown keys in the file are still
+    /// rejected (strict TOML parsing).
     pub fn from_file(path: &str) -> Result<Self, figment::Error> {
-        let config: Self = Figment::new()
+        let config: Self = Figment::from(Serialized::defaults(Self::default()))
             .merge(Toml::file(path))
-            .merge(Env::prefixed("INPUTLAYER_").split("__"))
+            .merge(Self::env_source())
             .extract()?;
         config.warn_unsafe_defaults();
         Ok(config)
@@ -728,6 +756,46 @@ impl Default for AuthConfig {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_non_config_env_vars_are_ignored() {
+        // #92: the server documents INPUTLAYER_* env vars that are not
+        // config fields; they must not break config parsing.
+        figment::Jail::expect_with(|jail| {
+            jail.create_file("server.toml", "[storage]\ndata_dir = \"/tmp/x\"\n")?;
+            jail.set_env("INPUTLAYER_BOOTSTRAP_API_KEY", "secret");
+            jail.set_env("INPUTLAYER_ADMIN_PASSWORD", "secret");
+            jail.set_env("INPUTLAYER_API_KEY", "client-key");
+            let config = Config::from_file("server.toml").expect("parse must succeed");
+            assert_eq!(config.storage.data_dir, PathBuf::from("/tmp/x"));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_env_overrides_apply_without_config_file() {
+        // #92: the no-config-file path used Config::default() directly and
+        // env overrides did nothing.
+        figment::Jail::expect_with(|jail| {
+            jail.set_env("INPUTLAYER_HTTP__PORT", "8082");
+            jail.set_env("INPUTLAYER_STORAGE__DATA_DIR", "/tmp/env-data");
+            let config = Config::load().expect("load must succeed with no file");
+            assert_eq!(config.http.port, 8082);
+            assert_eq!(config.storage.data_dir, PathBuf::from("/tmp/env-data"));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_env_overrides_beat_config_file() {
+        figment::Jail::expect_with(|jail| {
+            jail.create_file("server.toml", "[http]\nenabled = true\nport = 9000\n")?;
+            jail.set_env("INPUTLAYER_HTTP__PORT", "9001");
+            let config = Config::from_file("server.toml").expect("parse must succeed");
+            assert_eq!(config.http.port, 9001);
+            Ok(())
+        });
+    }
 
     #[test]
     fn test_default_config() {

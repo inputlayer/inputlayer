@@ -90,6 +90,7 @@ crc32fast = "1.5.0"
 tempfile = "3.0"
 proptest = "1.4"
 criterion = "0.5"
+figment = { version = "0.10", features = ["test"] }
 
 [[bin]]
 name = "inputlayer"
