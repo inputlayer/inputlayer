@@ -23,7 +23,7 @@
 //! catalog.drop("path").unwrap();
 //! ```
 
-use crate::ast::{AggregateFunc, BodyPredicate, Program, Rule};
+use crate::ast::{AggregateFunc, BodyPredicate, ComparisonOp, Program, Rule, Term};
 use crate::recursion::{build_extended_dependency_graph, find_sccs};
 use crate::statement::serialize::SerializableTerm;
 use crate::statement::{RuleDef, SerializableRule};
@@ -94,6 +94,54 @@ pub fn validate_rule(rule: &Rule, name: &str) -> Result<(), String> {
                     sorted_unbound.join(", "),
                     atom.relation
                 ));
+            }
+        }
+    }
+
+    // Check 4: Comparison safety (issue #108).
+    // `positive_body_variables()` already includes variables bound by
+    // assignment-style equalities (Y = constant / function / arithmetic,
+    // propagated through variable equalities). Two shapes remain unsafe and
+    // previously registered fine while deriving wrong results:
+    //   (a) a non-equality comparison over an unbound variable - e.g.
+    //       `Salary > 100000` with Salary bound nowhere can never filter;
+    //   (b) an equality that binds a variable used nowhere else in the rule
+    //       - the mistaken-filter shape `customer(_, Name, _), Tier = "gold"`,
+    //       satisfied by assignment for every row.
+    for pred in &rule.body {
+        if let BodyPredicate::Comparison(left, op, right) = pred {
+            if matches!(op, ComparisonOp::Equal) {
+                for term in [left, right] {
+                    if let Term::Variable(v) = term {
+                        let used_elsewhere = rule.head.variables().contains(v)
+                            || rule.body.iter().any(|other| {
+                                !std::ptr::eq(other, pred) && other.variables().contains(v)
+                            });
+                        if !used_elsewhere {
+                            return Err(format!(
+                                "Unsafe comparison in rule '{name}': variable {v} appears only \
+                                 in the equality and nowhere else, so the equality binds it \
+                                 instead of filtering and the rule matches every row. Bind {v} \
+                                 in a body atom (e.g. replace a wildcard with {v}) or remove \
+                                 the comparison."
+                            ));
+                        }
+                    }
+                }
+            } else {
+                let cmp_vars = pred.variables();
+                let unbound: Vec<_> = cmp_vars.difference(&positive_vars).cloned().collect();
+                if !unbound.is_empty() {
+                    let mut sorted_unbound = unbound;
+                    sorted_unbound.sort();
+                    return Err(format!(
+                        "Unsafe comparison in rule '{}': Variable(s) {} not bound by any \
+                         positive body atom. Bind them in a body atom (e.g. replace a \
+                         wildcard with the variable) before comparing.",
+                        name,
+                        sorted_unbound.join(", ")
+                    ));
+                }
             }
         }
     }
@@ -2012,6 +2060,116 @@ mod tests {
         let rule = Rule::new(head, body);
         let err = validate_rule(&rule, "foo").unwrap_err();
         assert!(err.contains("Unsafe rule") || err.contains("not bound"));
+    }
+
+    #[test]
+    fn test_validate_rule_rejects_dead_equality_binding() {
+        // Issue #108 repro shape: `+gold(Name) <- customer(_, Name, _),
+        // Tier = "gold"` - Tier appears only in the equality, so it binds by
+        // assignment for every row instead of filtering.
+        let head = Atom::new(
+            "gold_customer".to_string(),
+            vec![Term::Variable("Name".to_string())],
+        );
+        let body = vec![
+            BodyPredicate::Positive(Atom::new(
+                "customer".to_string(),
+                vec![
+                    Term::Placeholder,
+                    Term::Variable("Name".to_string()),
+                    Term::Placeholder,
+                ],
+            )),
+            BodyPredicate::Comparison(
+                Term::Variable("Tier".to_string()),
+                ComparisonOp::Equal,
+                Term::StringConstant("gold".to_string()),
+            ),
+        ];
+        let err = validate_rule(&Rule::new(head, body), "gold_customer").unwrap_err();
+        assert!(err.contains("Tier"), "error names the variable: {err}");
+        assert!(err.contains("Unsafe comparison"), "err: {err}");
+    }
+
+    #[test]
+    fn test_validate_rule_rejects_unbound_nonequality_comparison() {
+        // `+r(Id) <- emp(Id), Salary > 100000` - Salary bound nowhere.
+        let head = Atom::new("r".to_string(), vec![Term::Variable("Id".to_string())]);
+        let body = vec![
+            BodyPredicate::Positive(Atom::new(
+                "emp".to_string(),
+                vec![Term::Variable("Id".to_string())],
+            )),
+            BodyPredicate::Comparison(
+                Term::Variable("Salary".to_string()),
+                ComparisonOp::GreaterThan,
+                Term::Constant(100_000),
+            ),
+        ];
+        let err = validate_rule(&Rule::new(head, body), "r").unwrap_err();
+        assert!(err.contains("Salary"), "err: {err}");
+    }
+
+    #[test]
+    fn test_validate_rule_accepts_bound_comparisons_and_assignments() {
+        // Filter over a bound variable: emp(Id, Salary), Salary > 100000.
+        let head = Atom::new("r".to_string(), vec![Term::Variable("Id".to_string())]);
+        let body = vec![
+            BodyPredicate::Positive(Atom::new(
+                "emp".to_string(),
+                vec![
+                    Term::Variable("Id".to_string()),
+                    Term::Variable("Salary".to_string()),
+                ],
+            )),
+            BodyPredicate::Comparison(
+                Term::Variable("Salary".to_string()),
+                ComparisonOp::GreaterThan,
+                Term::Constant(100_000),
+            ),
+        ];
+        assert!(validate_rule(&Rule::new(head, body), "r").is_ok());
+
+        // Assignment used in the head: `+tagged(X, L) <- t(X), L = "hot"`.
+        let head = Atom::new(
+            "tagged".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Variable("L".to_string()),
+            ],
+        );
+        let body = vec![
+            BodyPredicate::Positive(Atom::new(
+                "t".to_string(),
+                vec![Term::Variable("X".to_string())],
+            )),
+            BodyPredicate::Comparison(
+                Term::Variable("L".to_string()),
+                ComparisonOp::Equal,
+                Term::StringConstant("hot".to_string()),
+            ),
+        ];
+        assert!(validate_rule(&Rule::new(head, body), "tagged").is_ok());
+
+        // Assignment consumed by a later comparison: Y = X, Y != 0.
+        let head = Atom::new("s".to_string(), vec![Term::Variable("X".to_string())]);
+        let body = vec![
+            BodyPredicate::Positive(Atom::new(
+                "t".to_string(),
+                vec![Term::Variable("X".to_string())],
+            )),
+            BodyPredicate::Comparison(
+                Term::Variable("Y".to_string()),
+                ComparisonOp::Equal,
+                Term::Variable("X".to_string()),
+            ),
+            BodyPredicate::Comparison(
+                Term::Variable("Y".to_string()),
+                ComparisonOp::NotEqual,
+                Term::Constant(0),
+            ),
+        ];
+        assert!(validate_rule(&Rule::new(head, body), "s").is_ok());
     }
 
     #[test]
