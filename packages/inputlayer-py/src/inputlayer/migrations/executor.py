@@ -2,26 +2,35 @@
 
 from __future__ import annotations
 
+from inputlayer.migrations.errors import MigrationError, check_engine_result
 from inputlayer.migrations.loader import MigrationInfo
 from inputlayer.migrations.recorder import KGExecutor, MigrationRecorder
 
-
-class MigrationError(Exception):
-    """Raised when a migration fails to apply or revert."""
+__all__ = ["MigrationError", "apply_migration", "migrate", "revert_migration", "revert_to"]
 
 
 def apply_migration(kg: KGExecutor, migration: MigrationInfo) -> None:
-    """Apply a single migration's forward operations."""
+    """Apply a single migration's forward operations.
+
+    Raises MigrationError on the first failing operation. Operations are
+    not transactional: earlier operations of this migration stay applied,
+    but the migration is NOT recorded as applied, so the failure is
+    visible and a re-run picks up where the schema actually is.
+    """
     for op in migration.operations:
         for cmd in op.forward_commands():
-            kg.execute(cmd)
+            check_engine_result(
+                kg.execute(cmd), f"applying {migration.name} ({op.describe()})"
+            )
 
 
 def revert_migration(kg: KGExecutor, migration: MigrationInfo) -> None:
     """Revert a single migration's operations in reverse order."""
     for op in reversed(migration.operations):
         for cmd in op.backward_commands():
-            kg.execute(cmd)
+            check_engine_result(
+                kg.execute(cmd), f"reverting {migration.name} ({op.describe()})"
+            )
 
 
 def migrate(

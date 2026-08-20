@@ -15,7 +15,7 @@ pip install inputlayer-client-dev[pandas]
 
 Requirements: Python 3.10+ and a running InputLayer server.
 
-The package also installs the `il` CLI for managing schema migrations. See [Migrations](migrations) for the full guide.
+The package also installs the `il migration` commands for managing schema migrations. See [Migrations](migrations) for the full guide.
 
 ## Connecting
 
@@ -744,13 +744,13 @@ For production deployments, the SDK includes a Django-style migration system tha
 
 ```bash
 # Generate a migration from your current models
-il makemigrations --models myapp.models
+il migration generate --models myapp.models
 
 # Apply pending migrations to a server
-il migrate --url ws://localhost:8080/ws --kg production
+il migration apply --url ws://localhost:8080/ws --kg production
 
 # Check what's applied
-il showmigrations --url ws://localhost:8080/ws --kg production
+il migration status --url ws://localhost:8080/ws --kg production
 ```
 
 This is a large topic with its own dedicated guide. See [Migrations](migrations) for the full walkthrough covering the CLI, operations, workflows, and CI/CD integration.

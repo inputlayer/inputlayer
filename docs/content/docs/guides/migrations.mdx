@@ -65,11 +65,11 @@ il migration generate --models myapp.models
 Output:
 
 ```
-Created migrations/0001_initial.json
-  - CreateRelation: employee
-  - CreateRelation: document
-  - CreateRule: senior
-  - CreateIndex: doc_search
+Created migration: migrations/0001_initial.json
+  - Create relation employee
+  - Create relation document
+  - Create rule senior (1 clause)
+  - Create index doc_search
 ```
 
 The autodetector inspects your model classes, compares them against the previous migration's state (or an empty state for the first run), and generates the minimal set of operations.
@@ -83,8 +83,8 @@ il migration apply --url ws://localhost:8080/ws --kg production
 Output:
 
 ```
-Applying 0001_initial... OK
-1 migration(s) applied.
+Applied 1 migration(s):
+  [X] 0001_initial
 ```
 
 ### 4. Make Changes and Iterate
@@ -98,10 +98,10 @@ il migration generate --models myapp.models
 Output:
 
 ```
-Created migrations/0002_auto.json
-  - DropRelation: employee
-  - CreateRelation: employee
-  - ReplaceRule: senior
+Created migration: migrations/0002_auto.json
+  - Drop relation employee
+  - Create relation employee
+  - Replace rule senior
 ```
 
 The autodetector noticed that `employee` has new columns (which requires a drop and recreate since InputLayer doesn't support ALTER) and that the rule definition changed.
@@ -123,8 +123,8 @@ il migration status --url ws://localhost:8080/ws --kg production
 Output:
 
 ```
-[X] 0001_initial
-[X] 0002_auto
+  [X] 0001_initial
+  [X] 0002_auto
 ```
 
 ### 6. Rollback

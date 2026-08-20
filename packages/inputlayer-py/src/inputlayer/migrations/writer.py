@@ -10,8 +10,10 @@ generated.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
+from inputlayer.migrations.errors import MigrationError
 from inputlayer.migrations.operations import Operation
 
 MIGRATION_FORMAT = 1
@@ -29,6 +31,11 @@ def generate_migration(
 
     Returns (filename, content).
     """
+    if name_suffix is not None and not re.fullmatch(r"[a-z0-9_]+", name_suffix):
+        raise MigrationError(
+            f"invalid migration name {name_suffix!r}: use lowercase letters, "
+            "digits, and underscores only"
+        )
     if number == 1 and name_suffix is None:
         name_suffix = "initial"
     elif name_suffix is None:
