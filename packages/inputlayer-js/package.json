@@ -1,6 +1,6 @@
 {
   "name": "inputlayer-js-dev",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TypeScript Object-Logic Mapper for InputLayer knowledge graph engine",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
