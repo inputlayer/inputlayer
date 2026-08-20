@@ -267,6 +267,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
+    from inputlayer.exceptions import InputLayerError
     from inputlayer.migrations.errors import MigrationError
 
     parser = build_parser()
@@ -278,7 +279,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         return args.func(args)
-    except MigrationError as exc:
+    except (MigrationError, InputLayerError) as exc:
         print(f"error: {exc}")
         return 1
 

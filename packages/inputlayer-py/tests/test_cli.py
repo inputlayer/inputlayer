@@ -18,6 +18,21 @@ class TestParser:
     def test_no_command_returns_1(self):
         assert main([]) == 1
 
+    def test_connection_error_prints_cleanly(self, capsys, monkeypatch):
+        # SDK errors (unreachable server, auth failure) must exit 1 with a
+        # clean message, not a traceback.
+        from inputlayer.exceptions import InputLayerConnectionError
+        from inputlayer.migrations import cli
+
+        def boom(args):
+            raise InputLayerConnectionError("Failed to connect to ws://nope")
+
+        monkeypatch.setattr(cli, "_cmd_showmigrations", boom)
+        rc = main(["showmigrations", "--url", "ws://nope", "--kg", "k"])
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "error: Failed to connect" in out
+
     def test_makemigrations_requires_models(self):
         parser = build_parser()
         with pytest.raises(SystemExit):
