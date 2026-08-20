@@ -42,13 +42,13 @@ static TRACE_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = Once
 #[derive(Parser, Debug)]
 #[command(name = "inputlayer-server", version, about)]
 struct Cli {
-    /// Host address to bind to
-    #[arg(long, default_value = "127.0.0.1")]
-    host: String,
+    /// Host address to bind to (default: config value, 127.0.0.1)
+    #[arg(long)]
+    host: Option<String>,
 
-    /// Port to listen on
-    #[arg(long, default_value_t = 8080)]
-    port: u16,
+    /// Port to listen on (default: config value, 8080)
+    #[arg(long)]
+    port: Option<u16>,
 
     /// Path to configuration file (TOML)
     #[arg(long, short)]
@@ -82,9 +82,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             std::process::exit(1);
         })
     } else {
-        Config::load().unwrap_or_else(|_| {
-            println!("Using default configuration");
-            Config::default()
+        Config::load().unwrap_or_else(|e| {
+            eprintln!("ERROR: invalid configuration: {e}");
+            std::process::exit(1);
         })
     };
 
@@ -110,9 +110,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         eprintln!("PANIC at {location}: {payload}");
     }));
 
-    // Override from CLI flags
-    config.http.host = cli.host;
-    config.http.port = cli.port;
+    // CLI flags override config/env only when explicitly passed - previously
+    // the clap defaults clobbered file and env values unconditionally (#92).
+    if let Some(host) = cli.host {
+        config.http.host = host;
+    }
+    if let Some(port) = cli.port {
+        config.http.port = port;
+    }
     config.http.enabled = true;
 
     if let Some(data_dir) = cli.data_dir {
