@@ -31,7 +31,8 @@ RUN mkdir src && echo "fn main() {}" > src/main.rs && \
     mkdir -p gateway/src && echo "fn main() {}" > gateway/src/main.rs && \
     echo "" > gateway/src/lib.rs && \
     cargo generate-lockfile && \
-    cargo build --release --bin inputlayer-server --bin inputlayer-gateway 2>/dev/null || true && \
+    (cargo build --release -p inputlayer --bin inputlayer-server && \
+     cargo build --release -p inputlayer-gateway --bin inputlayer-gateway) 2>/dev/null || true && \
     rm -rf src gateway/src
 
 # Build the real binaries. The touch is load-bearing: COPY preserves context
@@ -43,7 +44,8 @@ COPY src/ src/
 COPY gateway/ gateway/
 COPY docs/ docs/
 RUN find src gateway/src -type f -exec touch {} + && \
-    cargo build --all-features --release --bin inputlayer-server --bin inputlayer-gateway && \
+    cargo build --all-features --release -p inputlayer --bin inputlayer-server && \
+    cargo build --release -p inputlayer-gateway --bin inputlayer-gateway && \
     strip target/release/inputlayer-server target/release/inputlayer-gateway
 
 # ---- Gateway Runtime (build with: docker build --target gateway) ----
