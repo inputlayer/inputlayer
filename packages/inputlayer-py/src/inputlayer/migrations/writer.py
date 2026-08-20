@@ -3,8 +3,7 @@
 A migration is data, not code: typed operations (each with enough
 structure to derive both apply and revert IQL) plus a state snapshot.
 Any SDK language - and the il CLI natively - can read and apply them.
-Legacy .py migrations remain loadable (see loader.py) but are no longer
-generated.
+JSON is the only migration format.
 """
 
 from __future__ import annotations

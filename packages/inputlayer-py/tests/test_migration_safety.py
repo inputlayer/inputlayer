@@ -9,7 +9,6 @@ unvalidated names reaching IQL and the filesystem.
 from __future__ import annotations
 
 import json
-import textwrap
 
 import pytest
 
@@ -21,17 +20,6 @@ from inputlayer.migrations.recorder import MigrationRecorder
 from inputlayer.migrations.writer import generate_migration
 
 STATE = {"relations": {}, "rules": {}, "indexes": {}}
-
-LEGACY_PY = textwrap.dedent("""\
-    from inputlayer.migrations import Migration
-    from inputlayer.migrations import operations as ops
-
-    class M(Migration):
-        dependencies = []
-        operations = [ops.CreateRelation(name="t", columns=[("a", "int")])]
-        state = {"relations": {"t": [("a", "int")]}, "rules": {}, "indexes": {}}
-""")
-
 
 def _write_json(directory, filename, **overrides):
     document = {
@@ -45,13 +33,13 @@ def _write_json(directory, filename, **overrides):
 
 
 class TestDuplicateDetection:
-    def test_same_name_across_formats_is_rejected(self, tmp_path):
-        # The exact double-apply trap: a stale legacy .py twin of a
-        # regenerated .json.
-        (tmp_path / "0001_initial.py").write_text(LEGACY_PY)
+    def test_stray_py_twin_is_ignored(self, tmp_path):
+        # Pre-1.0: .py is not a migration format. A stale .py twin of a
+        # regenerated .json is inert - only the JSON loads, no double-apply.
+        (tmp_path / "0001_initial.py").write_text("raise RuntimeError('never imported')")
         _write_json(tmp_path, "0001_initial.json")
-        with pytest.raises(MigrationError, match="duplicate migration name"):
-            load_migrations(tmp_path)
+        loaded = load_migrations(tmp_path)
+        assert [m.filename for m in loaded] == ["0001_initial.json"]
 
     def test_same_number_different_names_is_rejected(self, tmp_path):
         _write_json(tmp_path, "0002_a.json")
@@ -59,12 +47,13 @@ class TestDuplicateDetection:
         with pytest.raises(MigrationError, match="duplicate migration number"):
             load_migrations(tmp_path)
 
-    def test_mixed_formats_with_distinct_numbers_load(self, tmp_path):
-        # The legitimate mixed directory: legacy history + new JSON.
-        (tmp_path / "0001_initial.py").write_text(LEGACY_PY)
-        _write_json(tmp_path, "0002_auto.json")
-        loaded = load_migrations(tmp_path)
-        assert [m.name for m in loaded] == ["0001_initial", "0002_auto"]
+    def test_same_name_is_impossible_same_number_guard_covers_it(self, tmp_path):
+        # With a single format, equal names imply equal filenames; the
+        # number guard is what catches renumber collisions.
+        _write_json(tmp_path, "0001_a.json")
+        _write_json(tmp_path, "0001_b.json")
+        with pytest.raises(MigrationError, match="duplicate migration number"):
+            load_migrations(tmp_path)
 
 
 class TestJsonValidation:

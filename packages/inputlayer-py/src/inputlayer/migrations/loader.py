@@ -1,14 +1,12 @@
-"""Migration loader - discover and import migration files from a directory."""
+"""Migration loader - discover and load JSON migration files from a directory."""
 
 from __future__ import annotations
 
-import importlib.util
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from inputlayer.migrations import Migration
 from inputlayer.migrations.errors import MigrationError
 
 
@@ -28,7 +26,7 @@ class MigrationInfo:
         return self.name
 
 
-_MIGRATION_RE = re.compile(r"^(\d{4})_.+\.(py|json)$")
+_MIGRATION_RE = re.compile(r"^(\d{4})_.+\.json$")
 
 
 def _load_json_migration(entry: Path, name: str, number: int) -> MigrationInfo:
@@ -71,34 +69,13 @@ def _load_json_migration(entry: Path, name: str, number: int) -> MigrationInfo:
     )
 
 
-def _load_py_migration(entry: Path, name: str, number: int) -> MigrationInfo | None:
-    """Load a legacy Python migration (read-only back-compat)."""
-    spec = importlib.util.spec_from_file_location(f"migrations.{name}", entry)
-    if spec is None or spec.loader is None:
-        return None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    m_cls = getattr(module, "M", None)
-    if m_cls is None or not (isinstance(m_cls, type) and issubclass(m_cls, Migration)):
-        return None
-
-    return MigrationInfo(
-        name=name,
-        number=number,
-        filename=entry.name,
-        dependencies=list(getattr(m_cls, "dependencies", [])),
-        operations=list(getattr(m_cls, "operations", [])),
-        state=dict(getattr(m_cls, "state", {})),
-    )
-
-
 def load_migrations(directory: str | Path) -> list[MigrationInfo]:
     """Discover and load all migration files from a directory.
 
-    JSON migrations are the current, language-neutral format; .py files
-    are the legacy format and remain loadable. Returns migrations sorted
-    by number.
+    Migrations are language-neutral JSON documents; that is the only
+    format (pre-1.0, no legacy loading). Non-matching files - including
+    stray .py files from older SDKs - are ignored. Returns migrations
+    sorted by number.
     """
     directory = Path(directory)
     if not directory.is_dir():
@@ -115,12 +92,7 @@ def load_migrations(directory: str | Path) -> list[MigrationInfo]:
         number = int(match.group(1))
         name = entry.stem  # e.g. "0001_initial"
 
-        if entry.suffix == ".json":
-            migrations.append(_load_json_migration(entry, name, number))
-        else:
-            info = _load_py_migration(entry, name, number)
-            if info is not None:
-                migrations.append(info)
+        migrations.append(_load_json_migration(entry, name, number))
 
     migrations.sort(key=lambda m: m.number)
 

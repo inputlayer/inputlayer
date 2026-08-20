@@ -234,8 +234,6 @@ Each generated migration is a self-contained, language-neutral JSON document - n
 }
 ```
 
-Legacy `.py` migrations from earlier SDK versions are still loaded; new migrations are always written as JSON.
-
 Three key fields:
 
 - **`dependencies`** - list of migration names that must be applied first. The autodetector sets this to the previous migration.
