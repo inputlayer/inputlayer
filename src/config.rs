@@ -26,7 +26,7 @@
 
 use figment::{
     providers::{Env, Format, Serialized, Toml},
-    Figment,
+    Figment, Metadata, Profile, Provider,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -499,9 +499,67 @@ impl Default for RateLimitConfig {
     }
 }
 
+/// Renames the legacy storage aliases (`default_database`,
+/// `auto_create_databases`) to their canonical field names before figment
+/// merges. The defaults seed always emits canonical names, and serde's
+/// derive rejects a merged document containing both spellings of the same
+/// field as a duplicate - so a config using a documented alias would fail
+/// to parse at startup.
+struct NormalizeAliases<P>(P);
+
+impl<P: Provider> Provider for NormalizeAliases<P> {
+    fn metadata(&self) -> Metadata {
+        self.0.metadata()
+    }
+
+    fn data(&self) -> Result<figment::value::Map<Profile, figment::value::Dict>, figment::Error> {
+        let mut data = self.0.data()?;
+        for dict in data.values_mut() {
+            if let Some(figment::value::Value::Dict(_, storage)) = dict.get_mut("storage") {
+                for (alias, canonical) in [
+                    ("default_database", "default_knowledge_graph"),
+                    ("auto_create_databases", "auto_create_knowledge_graphs"),
+                ] {
+                    if let Some(value) = storage.remove(alias) {
+                        storage.insert(canonical.to_string(), value);
+                    }
+                }
+            }
+        }
+        Ok(data)
+    }
+}
+
 impl Config {
     /// Load configuration from default locations
     ///
+    /// Seed of default values, built THROUGH serde so the field-level serde
+    /// defaults are authoritative for omitted keys - exactly the values a
+    /// config that omits those keys received before seeding existed. The
+    /// hand-written Default impls diverge on several flags
+    /// (enable_join_planning, max_result_rows, gui.enabled, ...) and must
+    /// not leak into merged configs.
+    fn seed() -> Self {
+        // Every nested config struct appears as an explicit empty section:
+        // `#[serde(default)]` on a struct-typed FIELD falls back to the
+        // hand-written Default impl, which diverges from the field-level
+        // defaults inside that struct (e.g. max_result_rows 100000 vs 0).
+        // An empty section forces field-level defaults throughout.
+        let minimal = serde_json::json!({
+            "storage": {
+                "data_dir": "./data",
+                "default_knowledge_graph": "default",
+                "persistence": { "format": "parquet", "compression": "snappy" },
+                "persist": {},
+                "performance": {}
+            },
+            "optimization": {},
+            "logging": {},
+            "http": { "gui": {}, "auth": {}, "rate_limit": {} }
+        });
+        serde_json::from_value(minimal).expect("minimal config seed must deserialize")
+    }
+
     /// Environment source for `INPUTLAYER_*` config overrides.
     ///
     /// Only keys under the known top-level config sections pass through.
@@ -531,11 +589,13 @@ impl Config {
     /// a valid config with env overrides applied - previously the no-file
     /// path fell back to `Config::default()` and env vars did nothing (#92).
     pub fn load() -> Result<Self, figment::Error> {
-        Figment::from(Serialized::defaults(Self::default()))
-            .merge(Toml::file("config.toml"))
-            .merge(Toml::file("config.local.toml"))
-            .merge(Self::env_source())
-            .extract()
+        let config: Self = Figment::from(Serialized::defaults(Self::seed()))
+            .merge(NormalizeAliases(Toml::file("config.toml")))
+            .merge(NormalizeAliases(Toml::file("config.local.toml")))
+            .merge(NormalizeAliases(Self::env_source()))
+            .extract()?;
+        config.warn_unsafe_defaults();
+        Ok(config)
     }
 
     /// Load configuration from specific file path.
@@ -551,9 +611,9 @@ impl Config {
                 "config file not found: {path}"
             )));
         }
-        let config: Self = Figment::from(Serialized::defaults(Self::default()))
-            .merge(Toml::file(path))
-            .merge(Self::env_source())
+        let config: Self = Figment::from(Serialized::defaults(Self::seed()))
+            .merge(NormalizeAliases(Toml::file(path)))
+            .merge(NormalizeAliases(Self::env_source()))
             .extract()?;
         config.warn_unsafe_defaults();
         Ok(config)
@@ -800,6 +860,55 @@ mod tests {
             jail.set_env("INPUTLAYER_HTTP__PORT", "9001");
             let config = Config::from_file("server.toml").expect("parse must succeed");
             assert_eq!(config.http.port, 9001);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_storage_aliases_survive_the_seed() {
+        // #103 review blocker: the seed emits canonical names, and a config
+        // using the documented aliases must not die as a duplicate field.
+        figment::Jail::expect_with(|jail| {
+            jail.create_file(
+                "server.toml",
+                "[storage]\ndefault_database = \"legacy\"\nauto_create_databases = true\n",
+            )?;
+            let config = Config::from_file("server.toml").expect("aliases must parse");
+            assert_eq!(config.storage.default_knowledge_graph, "legacy");
+            assert!(config.storage.auto_create_knowledge_graphs);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_storage_alias_env_var_survives_the_seed() {
+        figment::Jail::expect_with(|jail| {
+            jail.set_env("INPUTLAYER_STORAGE__DEFAULT_DATABASE", "legacy_env");
+            let config = Config::load().expect("aliased env var must parse");
+            assert_eq!(config.storage.default_knowledge_graph, "legacy_env");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_seed_matches_serde_field_defaults() {
+        // Omitted keys must get the serde field defaults (pre-seeding
+        // semantics), not the hand-written Default impl values.
+        figment::Jail::expect_with(|_jail| {
+            let config = Config::load().expect("no-file load");
+            assert!(!config.optimization.enable_join_planning);
+            assert!(!config.optimization.enable_sip_rewriting);
+            assert_eq!(config.storage.performance.max_result_rows, 0);
+            assert!(!config.http.enabled);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_shipped_template_parses() {
+        figment::Jail::expect_with(|jail| {
+            jail.create_file("shipped.toml", include_str!("../config.toml"))?;
+            Config::from_file("shipped.toml").expect("shipped config.toml must parse");
             Ok(())
         });
     }

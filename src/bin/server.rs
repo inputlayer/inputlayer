@@ -82,9 +82,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             std::process::exit(1);
         })
     } else {
-        Config::load().unwrap_or_else(|_| {
-            println!("Using default configuration");
-            Config::default()
+        Config::load().unwrap_or_else(|e| {
+            eprintln!("ERROR: invalid configuration: {e}");
+            std::process::exit(1);
         })
     };
 

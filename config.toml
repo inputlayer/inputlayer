@@ -95,5 +95,5 @@ enabled = true
 static_dir = "./gui/dist"
 
 [http.auth]
-# Authentication is disabled by default
-enabled = false
+# Authentication is always on; bootstrap the admin user via
+# INPUTLAYER_ADMIN_PASSWORD / INPUTLAYER_BOOTSTRAP_API_KEY env vars.
