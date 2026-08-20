@@ -1,0 +1,109 @@
+---
+title: "Migrations as Data: Schema Versioning Where Rules Are Schema Too"
+date: "2026-08-20"
+category: "Engineering"
+excerpt: "InputLayer's migration tool versions relations, rules, and indexes together, stores its ledger as facts in the knowledge graph itself, and writes migration files as plain JSON - so any language can read and apply them."
+---
+
+# Migrations as Data: Schema Versioning Where Rules Are Schema Too
+
+Prototyping against InputLayer is deliberately loose: call `define()`, insert facts, iterate. Production is a different discipline. You need versioned schema changes, rollback, and a clear record of what is deployed where - the problems Django and Rails solved for SQL databases twenty years ago.
+
+We just shipped that discipline for InputLayer, and building it for a reasoning engine forced three design decisions that make it different from the migration tool you already know.
+
+## 1. Rules are schema here
+
+In a SQL database, a migration changes tables. In InputLayer, your *logic* is part of the schema: derived relations are defined by rules, and changing a rule changes what every downstream query returns.
+
+So migrations version all three things together - relations, rules, and vector indexes:
+
+```
+il migration generate --models myapp.models
+```
+
+```
+Created migration: migrations/0002_auto.json
+  - Create relation order
+  - Replace rule gold_customer
+```
+
+The autodetector diffs your model classes against the last migration's state. Change a `Derived` rule's `where()` clause and the diff is a `ReplaceRule` operation that stores both the old and the new clauses - which is what makes rollback meaningful: reverting restores the exact previous logic, and the engine's incremental evaluation retracts every conclusion the new rule had derived. Rollback is not just "the table is back"; it is "the reasoning is back."
+
+## 2. The ledger lives in the knowledge graph
+
+Where do you record which migrations are applied? In a SQL database you create a bookkeeping table. In InputLayer the answer is more natural: applied-state is just facts.
+
+```
+?inputlayer_migrations(Name, AppliedAt)
+```
+
+```
+| name           | applied_at                         |
+| "0001_initial" | "2026-08-20T09:14:02.113724+00:00" |
+| "0002_auto"    | "2026-08-20T09:15:41.930012+00:00" |
+```
+
+Your deployment history is queryable with the same language as everything else, per knowledge graph, with no side-channel state. `il migration status` is a thin view over that relation.
+
+## 3. Migration files are data, not code
+
+Django migrations are Python files. That felt wrong here, because InputLayer clients are polyglot - Python today, TypeScript next - and a migration file you can only read with one language's runtime chains every future client to that language.
+
+So a migration is a JSON document:
+
+```json
+{
+  "format": 1,
+  "dependencies": ["0001_initial"],
+  "operations": [
+    {
+      "type": "CreateRelation",
+      "name": "order",
+      "columns": [["id", "int"], ["customer_id", "int"], ["total", "float"]]
+    },
+    {
+      "type": "ReplaceRule",
+      "name": "gold_customer",
+      "old_clauses": ["+gold_customer(Name) <- customer(_, Name, Tier), Tier = \"gold\""],
+      "new_clauses": ["+gold_customer(Name) <- customer(_, Name, Tier), Tier = \"platinum\""]
+    }
+  ],
+  "state": { "relations": { "...": "snapshot the autodetector diffs against" } }
+}
+```
+
+Every operation is typed and carries enough structure to derive both its forward IQL and its reverse. No imports, no classes, no runtime required to read it. During development we proved the point by applying a migration with nothing but `jq` and the plain WebSocket client - ten lines of shell, zero Python.
+
+That neutrality is the roadmap: the TypeScript SDK gets a `generate` frontend over the same files, and the `il` CLI will eventually apply, revert, and report status natively over the WebSocket API with no SDK installed at all. Only `generate` is inherently language-specific, because it diffs your language-native model definitions.
+
+## The command surface
+
+Migrations live under the `il` product CLI as a noun group, the same grammar helm uses for `helm repo`:
+
+```
+il migration generate --models myapp.models
+il migration apply    --url ws://localhost:8080/ws --kg production
+il migration status   --url ws://localhost:8080/ws --kg production
+il migration revert   --url ws://localhost:8080/ws --kg production 0001_initial
+```
+
+`revert <target>` keeps the target and unwinds everything after it, in reverse order, using each operation's stored reverse.
+
+## Honest edges
+
+Two things to know before you rely on it:
+
+- InputLayer has no ALTER. A column change compiles to drop-and-recreate, which loses that relation's stored facts. The migration says so in its operation list - read the plan before applying it to data you care about.
+- Operations within one migration apply sequentially, not transactionally. A failure mid-migration stops immediately, is reported loudly, and the migration is not recorded as applied - but earlier operations of that migration remain. Re-running after fixing the cause is the recovery path.
+
+Both are exactly the failure modes we test: the loader refuses duplicate or malformed migration files with errors that name the file, a failed operation can never be silently recorded as applied, and the whole lifecycle - generate, apply, status, revert, re-apply - runs against a live engine in our verification.
+
+## Try it
+
+```bash
+pip install inputlayer-client-dev
+il migration generate --models yourapp.models
+il migration apply --url ws://localhost:8080/ws --kg dev
+```
+
+The full guide, including the file anatomy and the operations reference, is in the [migrations documentation](https://inputlayer.ai/docs/guides/migrations/).
