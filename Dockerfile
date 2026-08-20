@@ -22,17 +22,22 @@ FROM rust:1.88-bookworm AS builder
 
 WORKDIR /build
 
-# Cache dependencies: copy manifest first, build a dummy lib to cache deps
+# Cache dependencies: copy manifests first, build a dummy lib to cache deps.
+# gateway/ is a workspace member, so its manifest and a stub source must
+# exist for any cargo invocation to load the workspace.
 COPY Cargo.toml ./
+COPY gateway/Cargo.toml ./gateway/
 RUN mkdir src && echo "fn main() {}" > src/main.rs && \
     mkdir -p src/bin && echo "fn main() {}" > src/bin/server.rs && \
     echo "" > src/lib.rs && \
+    mkdir -p gateway/src && echo "" > gateway/src/lib.rs && \
     cargo generate-lockfile && \
     cargo build --release --bin inputlayer-server 2>/dev/null || true && \
-    rm -rf src
+    rm -rf src gateway/src
 
 # Build the real binary
 COPY src/ src/
+COPY gateway/ gateway/
 COPY docs/ docs/
 RUN cargo build --all-features --release --bin inputlayer-server && \
     strip target/release/inputlayer-server
