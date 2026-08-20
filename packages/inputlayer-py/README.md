@@ -17,7 +17,7 @@ pip install inputlayer-client-dev[all]         # everything
 
 Requirements: Python 3.10+ and a running InputLayer server.
 
-This also installs the `il` CLI for managing schema migrations.
+This also installs the `inputlayer-migrate` tool for schema migrations; with the InputLayer product CLI installed, use it as `il migration <verb>`.
 
 ## Quick Start
 
@@ -391,16 +391,16 @@ The SDK includes a Django-style migration system for production schema managemen
 
 ```bash
 # Generate a migration from your models
-il makemigrations --models myapp.models
+il migration generate --models myapp.models
 
 # Apply pending migrations
-il migrate --url ws://localhost:8080/ws --kg production
+il migration apply --url ws://localhost:8080/ws --kg production
 
 # Check status
-il showmigrations --url ws://localhost:8080/ws --kg production
+il migration status --url ws://localhost:8080/ws --kg production
 
 # Rollback
-il revert --url ws://localhost:8080/ws --kg production 0001_initial
+il migration revert --url ws://localhost:8080/ws --kg production 0001_initial
 ```
 
 The autodetector diffs your current Python models against the last migration's state and generates the minimal set of operations (create/drop relations, create/drop/replace rules, create/drop indexes). Each migration file is self-contained with a full state snapshot.
@@ -485,10 +485,10 @@ The autodetector diffs your current Python models against the last migration's s
 
 | Command | Description |
 |---------|-------------|
-| `il makemigrations --models <module>` | Generate migration from model diff |
-| `il migrate --url <ws> --kg <name>` | Apply pending migrations |
-| `il revert --url <ws> --kg <name> <target>` | Revert to a target migration |
-| `il showmigrations --url <ws> --kg <name>` | Show applied/pending status |
+| `il migration generate --models <module>` | Generate migration from model diff |
+| `il migration apply --url <ws> --kg <name>` | Apply pending migrations |
+| `il migration revert --url <ws> --kg <name> <target>` | Revert to a target migration |
+| `il migration status --url <ws> --kg <name>` | Show applied/pending status |
 
 ### Aggregation Functions
 

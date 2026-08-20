@@ -1,6 +1,6 @@
-"""Tests for inputlayer.migrations.loader - migration discovery and import."""
+"""Tests for inputlayer.migrations.loader - JSON migration discovery."""
 
-import textwrap
+import json
 from pathlib import Path
 
 from inputlayer.migrations.loader import (
@@ -9,13 +9,23 @@ from inputlayer.migrations.loader import (
     load_migrations,
 )
 from inputlayer.migrations.operations import CreateRelation, CreateRule
+from inputlayer.migrations.writer import generate_migration
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
+EMPTY_STATE = {"relations": {}, "rules": {}, "indexes": {}}
 
-def _write_migration(tmp_path: Path, filename: str, content: str) -> Path:
+
+def _write_json(tmp_path: Path, filename: str, **overrides) -> Path:
+    document = {
+        "format": 1,
+        "dependencies": [],
+        "operations": [],
+        "state": EMPTY_STATE,
+    }
+    document.update(overrides)
     f = tmp_path / filename
-    f.write_text(textwrap.dedent(content))
+    f.write_text(json.dumps(document))
     return f
 
 
@@ -30,98 +40,59 @@ class TestLoadMigrations:
         assert load_migrations(tmp_path / "nope") == []
 
     def test_loads_single_migration(self, tmp_path):
-        _write_migration(tmp_path, "0001_initial.py", """\
-            from inputlayer.migrations import Migration
-            from inputlayer.migrations import operations as ops
-
-            class M(Migration):
-                dependencies = []
-                operations = [
-                    ops.CreateRelation(name="t", columns=[("a", "int")]),
-                ]
-                state = {"relations": {"t": [["a", "int"]]}, "rules": {}, "indexes": {}}
-        """)
-        result = load_migrations(tmp_path)
-        assert len(result) == 1
-        assert result[0].name == "0001_initial"
-        assert result[0].number == 1
-        assert len(result[0].operations) == 1
-        assert isinstance(result[0].operations[0], CreateRelation)
+        _write_json(
+            tmp_path,
+            "0001_initial.json",
+            operations=[
+                {"type": "CreateRelation", "name": "employee", "columns": [["id", "int"]]}
+            ],
+        )
+        loaded = load_migrations(tmp_path)
+        assert len(loaded) == 1
+        assert loaded[0].name == "0001_initial"
+        assert loaded[0].number == 1
+        assert isinstance(loaded[0].operations[0], CreateRelation)
 
     def test_loads_multiple_sorted(self, tmp_path):
-        _write_migration(tmp_path, "0002_auto.py", """\
-            from inputlayer.migrations import Migration
-            from inputlayer.migrations import operations as ops
-
-            class M(Migration):
-                dependencies = ["0001_initial"]
-                operations = []
-                state = {"relations": {}, "rules": {}, "indexes": {}}
-        """)
-        _write_migration(tmp_path, "0001_initial.py", """\
-            from inputlayer.migrations import Migration
-            from inputlayer.migrations import operations as ops
-
-            class M(Migration):
-                dependencies = []
-                operations = []
-                state = {"relations": {}, "rules": {}, "indexes": {}}
-        """)
-        result = load_migrations(tmp_path)
-        assert len(result) == 2
-        assert result[0].number == 1
-        assert result[1].number == 2
+        # Written out of order; loaded sorted by number.
+        _write_json(tmp_path, "0002_auto.json")
+        _write_json(tmp_path, "0001_initial.json")
+        loaded = load_migrations(tmp_path)
+        assert [m.number for m in loaded] == [1, 2]
 
     def test_ignores_non_migration_files(self, tmp_path):
-        _write_migration(tmp_path, "__init__.py", "")
-        _write_migration(tmp_path, "README.md", "# hi")
-        _write_migration(tmp_path, "helper.py", "x = 1")
-        assert load_migrations(tmp_path) == []
+        (tmp_path / "README.md").write_text("not a migration")
+        (tmp_path / "helper.json").write_text("{}")
+        _write_json(tmp_path, "0001_initial.json")
+        assert len(load_migrations(tmp_path)) == 1
 
-    def test_ignores_files_without_M_class(self, tmp_path):
-        _write_migration(tmp_path, "0001_bad.py", """\
-            # No M class here
-            x = 42
-        """)
-        assert load_migrations(tmp_path) == []
+    def test_ignores_stray_py_files(self, tmp_path):
+        # Pre-1.0: JSON is the only migration format. A .py file from an
+        # older SDK is inert - not loaded, not an error.
+        (tmp_path / "0001_initial.py").write_text("raise RuntimeError('never imported')")
+        _write_json(tmp_path, "0002_auto.json")
+        loaded = load_migrations(tmp_path)
+        assert [m.name for m in loaded] == ["0002_auto"]
 
     def test_dependencies_loaded(self, tmp_path):
-        _write_migration(tmp_path, "0002_auto.py", """\
-            from inputlayer.migrations import Migration
-            from inputlayer.migrations import operations as ops
+        _write_json(tmp_path, "0002_auto.json", dependencies=["0001_initial"])
+        _write_json(tmp_path, "0001_initial.json")
+        loaded = load_migrations(tmp_path)
+        assert loaded[1].dependencies == ["0001_initial"]
 
-            class M(Migration):
-                dependencies = ["0001_initial"]
-                operations = []
-                state = {}
-        """)
-        result = load_migrations(tmp_path)
-        assert result[0].dependencies == ["0001_initial"]
-
-    def test_state_loaded(self, tmp_path):
-        _write_migration(tmp_path, "0001_initial.py", """\
-            from inputlayer.migrations import Migration
-            from inputlayer.migrations import operations as ops
-
-            class M(Migration):
-                dependencies = []
-                operations = []
-                state = {"relations": {"t": [["a", "int"]]}, "rules": {}, "indexes": {}}
-        """)
-        result = load_migrations(tmp_path)
-        assert "t" in result[0].state["relations"]
+    def test_state_loaded_with_tuple_columns(self, tmp_path):
+        state = {
+            "relations": {"employee": [["id", "int"], ["name", "string"]]},
+            "rules": {},
+            "indexes": {},
+        }
+        _write_json(tmp_path, "0001_initial.json", state=state)
+        loaded = load_migrations(tmp_path)
+        assert loaded[0].state["relations"]["employee"] == [("id", "int"), ("name", "string")]
 
     def test_filename_property(self, tmp_path):
-        _write_migration(tmp_path, "0001_initial.py", """\
-            from inputlayer.migrations import Migration
-
-            class M(Migration):
-                dependencies = []
-                operations = []
-                state = {}
-        """)
-        result = load_migrations(tmp_path)
-        assert result[0].filename == "0001_initial.py"
+        _write_json(tmp_path, "0001_initial.json")
+        assert load_migrations(tmp_path)[0].filename == "0001_initial.json"
 
 
 # ── get_latest_state ─────────────────────────────────────────────────
@@ -129,29 +100,18 @@ class TestLoadMigrations:
 
 class TestGetLatestState:
     def test_empty_directory(self, tmp_path):
-        state = get_latest_state(tmp_path)
-        assert state == {"relations": {}, "rules": {}, "indexes": {}}
+        assert get_latest_state(tmp_path) == EMPTY_STATE
 
     def test_returns_last_migration_state(self, tmp_path):
-        _write_migration(tmp_path, "0001_initial.py", """\
-            from inputlayer.migrations import Migration
-
-            class M(Migration):
-                dependencies = []
-                operations = []
-                state = {"relations": {"a": []}, "rules": {}, "indexes": {}}
-        """)
-        _write_migration(tmp_path, "0002_auto.py", """\
-            from inputlayer.migrations import Migration
-
-            class M(Migration):
-                dependencies = ["0001_initial"]
-                operations = []
-                state = {"relations": {"a": [], "b": []}, "rules": {}, "indexes": {}}
-        """)
+        _write_json(tmp_path, "0001_initial.json", state={
+            "relations": {"a": [["x", "int"]]}, "rules": {}, "indexes": {},
+        })
+        _write_json(tmp_path, "0002_auto.json", state={
+            "relations": {"a": [["x", "int"]], "b": [["y", "string"]]},
+            "rules": {}, "indexes": {},
+        })
         state = get_latest_state(tmp_path)
-        assert "a" in state["relations"]
-        assert "b" in state["relations"]
+        assert set(state["relations"]) == {"a", "b"}
 
 
 # ── get_next_number ──────────────────────────────────────────────────
@@ -162,40 +122,28 @@ class TestGetNextNumber:
         assert get_next_number(tmp_path) == 1
 
     def test_after_first(self, tmp_path):
-        _write_migration(tmp_path, "0001_initial.py", """\
-            from inputlayer.migrations import Migration
-
-            class M(Migration):
-                dependencies = []
-                operations = []
-                state = {}
-        """)
+        _write_json(tmp_path, "0001_initial.json")
         assert get_next_number(tmp_path) == 2
 
     def test_after_multiple(self, tmp_path):
-        for i in range(1, 6):
-            _write_migration(tmp_path, f"{i:04d}_auto.py", """\
-                from inputlayer.migrations import Migration
-
-                class M(Migration):
-                    dependencies = []
-                    operations = []
-                    state = {}
-            """)
-        assert get_next_number(tmp_path) == 6
+        _write_json(tmp_path, "0001_initial.json")
+        _write_json(tmp_path, "0002_auto.json")
+        _write_json(tmp_path, "0003_more.json")
+        assert get_next_number(tmp_path) == 4
 
 
-# ── Roundtrip: writer → loader ──────────────────────────────────────
+# ── Writer output round-trips through the loader ─────────────────────
 
 
-class TestRoundtrip:
+class TestWriterLoaderRoundtrip:
     def test_writer_output_loadable(self, tmp_path):
-        from inputlayer.migrations.writer import generate_migration
-
-        ops = [CreateRelation("employee", [("id", "int"), ("name", "string")])]
+        ops = [
+            CreateRelation("employee", [("id", "int"), ("name", "string")]),
+            CreateRule("r", ["+r(X) <- employee(X, _)"]),
+        ]
         state = {
             "relations": {"employee": [("id", "int"), ("name", "string")]},
-            "rules": {},
+            "rules": {"r": ["+r(X) <- employee(X, _)"]},
             "indexes": {},
         }
         filename, content = generate_migration(1, ops, state, [])
@@ -204,29 +152,16 @@ class TestRoundtrip:
         loaded = load_migrations(tmp_path)
         assert len(loaded) == 1
         assert loaded[0].name == "0001_initial"
-        assert len(loaded[0].operations) == 1
+        assert len(loaded[0].operations) == 2
         assert isinstance(loaded[0].operations[0], CreateRelation)
         assert loaded[0].state["relations"]["employee"] == [("id", "int"), ("name", "string")]
 
     def test_chained_migrations_loadable(self, tmp_path):
-        from inputlayer.migrations.writer import generate_migration
-
-        # First migration
-        ops1 = [CreateRelation("t", [("a", "int")])]
-        state1 = {"relations": {"t": [("a", "int")]}, "rules": {}, "indexes": {}}
-        f1, c1 = generate_migration(1, ops1, state1, [])
+        f1, c1 = generate_migration(1, [], EMPTY_STATE, [])
         (tmp_path / f1).write_text(c1)
-
-        # Second migration
-        ops2 = [CreateRule("r", ["+r(X) <- t(X)"])]
-        state2 = {
-            "relations": {"t": [("a", "int")]},
-            "rules": {"r": ["+r(X) <- t(X)"]},
-            "indexes": {},
-        }
-        f2, c2 = generate_migration(2, ops2, state2, ["0001_initial"])
+        f2, c2 = generate_migration(2, [], EMPTY_STATE, ["0001_initial"])
         (tmp_path / f2).write_text(c2)
 
         loaded = load_migrations(tmp_path)
-        assert len(loaded) == 2
+        assert [m.name for m in loaded] == ["0001_initial", "0002_auto"]
         assert loaded[1].dependencies == ["0001_initial"]

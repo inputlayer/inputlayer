@@ -1,14 +1,13 @@
-"""Migration loader - discover and import migration files from a directory."""
+"""Migration loader - discover and load JSON migration files from a directory."""
 
 from __future__ import annotations
 
-import importlib.util
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from inputlayer.migrations import Migration
+from inputlayer.migrations.errors import MigrationError
 
 
 @dataclass
@@ -27,13 +26,56 @@ class MigrationInfo:
         return self.name
 
 
-_MIGRATION_RE = re.compile(r"^(\d{4})_.+\.py$")
+_MIGRATION_RE = re.compile(r"^(\d{4})_.+\.json$")
+
+
+def _load_json_migration(entry: Path, name: str, number: int) -> MigrationInfo:
+    """Load a language-neutral JSON migration (the current format)."""
+    import json
+
+    from inputlayer.migrations.operations import operation_from_dict
+    from inputlayer.migrations.writer import MIGRATION_FORMAT
+
+    try:
+        document = json.loads(entry.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise MigrationError(f"{entry.name}: invalid JSON: {exc}") from exc
+    if not isinstance(document, dict):
+        raise MigrationError(f"{entry.name}: migration document must be a JSON object")
+    fmt = document.get("format")
+    if not isinstance(fmt, int) or fmt > MIGRATION_FORMAT:
+        raise MigrationError(
+            f"{entry.name}: unsupported migration format {fmt!r} "
+            f"(this SDK reads up to {MIGRATION_FORMAT} - upgrade the SDK)"
+        )
+    state = dict(document.get("state", {}))
+    # JSON has no tuples; restore (col, type) pairs so state comparisons in
+    # the autodetector see no phantom changes against in-memory model state.
+    if "relations" in state:
+        state["relations"] = {
+            rel: [tuple(col) for col in cols] for rel, cols in state["relations"].items()
+        }
+    try:
+        operations = [operation_from_dict(d) for d in document.get("operations", [])]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise MigrationError(f"{entry.name}: invalid operation: {exc}") from exc
+    return MigrationInfo(
+        name=name,
+        number=number,
+        filename=entry.name,
+        dependencies=list(document.get("dependencies", [])),
+        operations=operations,
+        state=state,
+    )
 
 
 def load_migrations(directory: str | Path) -> list[MigrationInfo]:
     """Discover and load all migration files from a directory.
 
-    Returns migrations sorted by number.
+    Migrations are language-neutral JSON documents; that is the only
+    format (pre-1.0, no legacy loading). Non-matching files - including
+    stray .py files from older SDKs - are ignored. Returns migrations
+    sorted by number.
     """
     directory = Path(directory)
     if not directory.is_dir():
@@ -50,28 +92,31 @@ def load_migrations(directory: str | Path) -> list[MigrationInfo]:
         number = int(match.group(1))
         name = entry.stem  # e.g. "0001_initial"
 
-        # Import the module dynamically
-        spec = importlib.util.spec_from_file_location(f"migrations.{name}", entry)
-        if spec is None or spec.loader is None:
-            continue
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        migrations.append(_load_json_migration(entry, name, number))
 
-        # Extract the M class
-        m_cls = getattr(module, "M", None)
-        if m_cls is None or not (isinstance(m_cls, type) and issubclass(m_cls, Migration)):
-            continue
+    migrations.sort(key=lambda m: m.number)
 
-        migrations.append(MigrationInfo(
-            name=name,
-            number=number,
-            filename=entry.name,
-            dependencies=list(getattr(m_cls, "dependencies", [])),
-            operations=list(getattr(m_cls, "operations", [])),
-            state=dict(getattr(m_cls, "state", {})),
-        ))
+    # Duplicate names or numbers are always a mistake (a stale legacy .py
+    # twin of a regenerated .json, or a merge collision) and previously
+    # caused the same migration to be applied twice - destructively for
+    # Drop/Replace operations. Refuse loudly.
+    by_name: dict[str, str] = {}
+    by_number: dict[int, str] = {}
+    for m in migrations:
+        if m.name in by_name:
+            raise MigrationError(
+                f"duplicate migration name '{m.name}': {by_name[m.name]} and "
+                f"{m.filename} - delete the stale one"
+            )
+        if m.number in by_number:
+            raise MigrationError(
+                f"duplicate migration number {m.number:04d}: "
+                f"{by_number[m.number]} and {m.filename} - renumber one of them"
+            )
+        by_name[m.name] = m.filename
+        by_number[m.number] = m.filename
 
-    return sorted(migrations, key=lambda m: m.number)
+    return migrations
 
 
 def get_latest_state(directory: str | Path) -> dict[str, Any]:

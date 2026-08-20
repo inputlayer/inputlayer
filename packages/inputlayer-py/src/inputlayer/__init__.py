@@ -68,8 +68,6 @@ from inputlayer.knowledge_graph import (
     WhyResult,
 )
 
-# Migrations
-from inputlayer.migrations import Migration
 
 # Notifications
 from inputlayer.notifications import NotificationEvent
@@ -116,8 +114,6 @@ __all__ = [
     "KnowledgeGraph",
     "KnowledgeGraphExistsError",
     "KnowledgeGraphNotFoundError",
-    # Migrations
-    "Migration",
     # Notifications
     "NotificationEvent",
     "PermissionError",

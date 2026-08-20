@@ -6,7 +6,7 @@ The migration system solves this. It works like Django migrations: you define yo
 
 ## Installation
 
-The `il` CLI is installed automatically when you install the Python SDK:
+Migrations run through the `il` CLI as `il migration <verb>` (generate, apply, revert, status). The underlying tool ships with the Python SDK (as the `inputlayer-migrate` entry point, which `il migration` delegates to):
 
 ```bash
 pip install inputlayer-client-dev
@@ -15,7 +15,7 @@ pip install inputlayer-client-dev
 Verify it's available:
 
 ```bash
-il --help
+il migration --help
 ```
 
 ## Quick Start
@@ -59,17 +59,17 @@ doc_search = HnswIndex(
 ### 2. Generate the Initial Migration
 
 ```bash
-il makemigrations --models myapp.models
+il migration generate --models myapp.models
 ```
 
 Output:
 
 ```
-Created migrations/0001_initial.py
-  - CreateRelation: employee
-  - CreateRelation: document
-  - CreateRule: senior
-  - CreateIndex: doc_search
+Created migration: migrations/0001_initial.json
+  - Create relation employee
+  - Create relation document
+  - Create rule senior (1 clause)
+  - Create index doc_search
 ```
 
 The autodetector inspects your model classes, compares them against the previous migration's state (or an empty state for the first run), and generates the minimal set of operations.
@@ -77,14 +77,14 @@ The autodetector inspects your model classes, compares them against the previous
 ### 3. Apply the Migration
 
 ```bash
-il migrate --url ws://localhost:8080/ws --kg production
+il migration apply --url ws://localhost:8080/ws --kg production
 ```
 
 Output:
 
 ```
-Applying 0001_initial... OK
-1 migration(s) applied.
+Applied 1 migration(s):
+  [X] 0001_initial
 ```
 
 ### 4. Make Changes and Iterate
@@ -92,16 +92,16 @@ Applying 0001_initial... OK
 Now say you add a new field and a new rule. Update your models, then generate again:
 
 ```bash
-il makemigrations --models myapp.models
+il migration generate --models myapp.models
 ```
 
 Output:
 
 ```
-Created migrations/0002_auto.py
-  - DropRelation: employee
-  - CreateRelation: employee
-  - ReplaceRule: senior
+Created migration: migrations/0002_auto.json
+  - Drop relation employee
+  - Create relation employee
+  - Replace rule senior
 ```
 
 The autodetector noticed that `employee` has new columns (which requires a drop and recreate since InputLayer doesn't support ALTER) and that the rule definition changed.
@@ -109,7 +109,7 @@ The autodetector noticed that `employee` has new columns (which requires a drop 
 Apply it:
 
 ```bash
-il migrate --url ws://localhost:8080/ws --kg production
+il migration apply --url ws://localhost:8080/ws --kg production
 ```
 
 ### 5. Check Status
@@ -117,14 +117,14 @@ il migrate --url ws://localhost:8080/ws --kg production
 See which migrations are applied on a given server:
 
 ```bash
-il showmigrations --url ws://localhost:8080/ws --kg production
+il migration status --url ws://localhost:8080/ws --kg production
 ```
 
 Output:
 
 ```
-[X] 0001_initial
-[X] 0002_auto
+  [X] 0001_initial
+  [X] 0002_auto
 ```
 
 ### 6. Rollback
@@ -132,19 +132,19 @@ Output:
 If something goes wrong, revert to a previous migration:
 
 ```bash
-il revert --url ws://localhost:8080/ws --kg production 0001_initial
+il migration revert --url ws://localhost:8080/ws --kg production 0001_initial
 ```
 
 This runs the backward operations for every migration after `0001_initial`, in reverse order. The server state will match what it looked like right after `0001_initial` was applied.
 
 ## CLI Reference
 
-### `il makemigrations`
+### `il migration generate`
 
 Generate a migration file by diffing your current models against the last migration's state.
 
 ```bash
-il makemigrations --models myapp.models [--name descriptive_suffix] [--migrations-dir ./migrations]
+il migration generate --models myapp.models [--name descriptive_suffix] [--migrations-dir ./migrations]
 ```
 
 | Option | Description | Default |
@@ -155,12 +155,12 @@ il makemigrations --models myapp.models [--name descriptive_suffix] [--migration
 
 The command discovers all `Relation` subclasses, `Derived` subclasses, and `HnswIndex` instances in the given module.
 
-### `il migrate`
+### `il migration apply`
 
 Apply all pending migrations to a server.
 
 ```bash
-il migrate --url ws://host:port/ws --kg my_graph [options]
+il migration apply --url ws://host:port/ws --kg my_graph [options]
 ```
 
 | Option | Description |
@@ -172,69 +172,66 @@ il migrate --url ws://host:port/ws --kg my_graph [options]
 | `--api-key` | API key for authentication |
 | `--migrations-dir` | Directory containing migration files (default: `./migrations`) |
 
-### `il revert`
+### `il migration revert`
 
 Revert all migrations applied after the specified target.
 
 ```bash
-il revert --url ws://host:port/ws --kg my_graph 0001_initial [options]
+il migration revert --url ws://host:port/ws --kg my_graph 0001_initial [options]
 ```
 
 The target migration itself stays applied - everything after it gets reverted in reverse order.
 
-### `il showmigrations`
+### `il migration status`
 
 Display the applied/pending status of all migrations.
 
 ```bash
-il showmigrations --url ws://host:port/ws --kg my_graph [options]
+il migration status --url ws://host:port/ws --kg my_graph [options]
 ```
 
 ## Migration File Anatomy
 
-Each generated migration is a self-contained Python file. Here's what one looks like:
+Each generated migration is a self-contained, language-neutral JSON document - no code, no runtime required to read it. Any SDK language can consume the same files. Here's what one looks like:
 
-```python
-# migrations/0001_initial.py
-# Auto-generated by il
-
-from inputlayer.migrations import Migration
-from inputlayer.migrations import operations as ops
-
-class M(Migration):
-    dependencies = []
-
-    operations = [
-        ops.CreateRelation(
-            name="employee",
-            columns=[("id", "int"), ("name", "string"), ("department", "string"), ("salary", "float")],
-        ),
-        ops.CreateRule(
-            name="senior",
-            clauses=["+senior(Name) <- employee(_, Name, _, Salary), Salary > 100000"],
-        ),
-        ops.CreateIndex(
-            name="doc_search",
-            relation="document",
-            column="embedding",
-            metric="cosine",
-            m=16,
-            ef_construction=100,
-            ef_search=50,
-        ),
-    ]
-
-    state = {
-        "relations": {
-            "employee": [("id", "int"), ("name", "string"), ("department", "string"), ("salary", "float")],
-        },
-        "rules": {
-            "senior": ["+senior(Name) <- employee(_, Name, _, Salary), Salary > 100000"],
-        },
-        "indexes": {
-            "doc_search": {"relation": "document", "column": "embedding", "metric": "cosine", "m": 16, "ef_construction": 100, "ef_search": 50},
-        },
+```json
+{
+  "format": 1,
+  "dependencies": [],
+  "operations": [
+    {
+      "type": "CreateRelation",
+      "name": "employee",
+      "columns": [["id", "int"], ["name", "string"], ["department", "string"], ["salary", "float"]]
+    },
+    {
+      "type": "CreateRule",
+      "name": "senior",
+      "clauses": ["+senior(Name) <- employee(_, Name, _, Salary), Salary > 100000"]
+    },
+    {
+      "type": "CreateIndex",
+      "name": "doc_search",
+      "relation": "document",
+      "column": "embedding",
+      "metric": "cosine",
+      "m": 16,
+      "ef_construction": 100,
+      "ef_search": 50
     }
+  ],
+  "state": {
+    "relations": {
+      "employee": [["id", "int"], ["name", "string"], ["department", "string"], ["salary", "float"]]
+    },
+    "rules": {
+      "senior": ["+senior(Name) <- employee(_, Name, _, Salary), Salary > 100000"]
+    },
+    "indexes": {
+      "doc_search": {"relation": "document", "column": "embedding", "metric": "cosine", "m": 16, "ef_construction": 100, "ef_search": 50}
+    }
+  }
+}
 ```
 
 Three key fields:
@@ -273,7 +270,7 @@ This is useful for seeding data, running one-off transformations, or anything th
 
 ## How the Autodetector Works
 
-When you run `il makemigrations`, here's what happens:
+When you run `il migration generate`, here's what happens:
 
 1. **Discovery** - the tool imports your models module and finds all `Relation` subclasses, `Derived` subclasses, and `HnswIndex` instances
 2. **Current state** - it builds a `ModelState` snapshot from your Python classes, converting types and compiling rules to IQL
@@ -290,7 +287,7 @@ The migration system tracks which migrations have been applied using an internal
 This means:
 
 - Different knowledge graphs can be at different migration versions
-- You can see exactly what's deployed on any server with `il showmigrations`
+- You can see exactly what's deployed on any server with `il migration status`
 - The system never re-applies an already-applied migration
 
 ## Development Workflow
@@ -302,14 +299,14 @@ This means:
 inputlayer-server
 
 # Generate and apply migrations as you develop
-il makemigrations --models myapp.models
-il migrate --url ws://localhost:8080/ws --kg dev
+il migration generate --models myapp.models
+il migration apply --url ws://localhost:8080/ws --kg dev
 ```
 
 ### Team Workflow
 
 1. Commit migration files alongside the model changes that generated them
-2. Each developer runs `il migrate` against their local server to sync up
+2. Each developer runs `il migration apply` against their local server to sync up
 3. During code review, verify that migration operations match the model diff
 4. Never edit or delete a migration that's already been applied - always create new ones
 
@@ -318,8 +315,8 @@ il migrate --url ws://localhost:8080/ws --kg dev
 By default, migrations are named `0001_initial`, `0002_auto`, etc. Use `--name` for clarity:
 
 ```bash
-il makemigrations --models myapp.models --name add_user_roles
-# → creates migrations/0003_add_user_roles.py
+il migration generate --models myapp.models --name add_user_roles
+# -> creates migrations/0003_add_user_roles.json
 ```
 
 ## CI/CD Integration
@@ -329,7 +326,7 @@ il makemigrations --models myapp.models --name add_user_roles
 ```yaml
 - name: Apply migrations
   run: |
-    il migrate \
+    il migration apply \
       --url ${{ secrets.IL_WS_URL }} \
       --kg production \
       --api-key ${{ secrets.IL_API_KEY }}
@@ -346,7 +343,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: pip install inputlayer-client-dev
       - run: |
-          il migrate \
+          il migration apply \
             --url ${{ secrets.STAGING_WS_URL }} \
             --kg staging \
             --api-key ${{ secrets.STAGING_API_KEY }}
@@ -357,7 +354,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: pip install inputlayer-client-dev
       - run: |
-          il migrate \
+          il migration apply \
             --url ${{ secrets.PROD_WS_URL }} \
             --kg production \
             --api-key ${{ secrets.PROD_API_KEY }}
@@ -403,4 +400,4 @@ print(f"Generated: {filename}")
 
 **Commit migrations with your code.** Migration files should live in version control right next to the model changes that generated them. This makes code review straightforward - reviewers can verify that the generated operations match the model diff.
 
-**Use descriptive names.** `0003_add_user_roles.py` is much easier to understand at a glance than `0003_auto.py`. Use `--name` when generating migrations.
+**Use descriptive names.** `0003_add_user_roles.json` is much easier to understand at a glance than `0003_auto.json`. Use `--name` when generating migrations.

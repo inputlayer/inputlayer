@@ -18,6 +18,21 @@ class TestParser:
     def test_no_command_returns_1(self):
         assert main([]) == 1
 
+    def test_connection_error_prints_cleanly(self, capsys, monkeypatch):
+        # SDK errors (unreachable server, auth failure) must exit 1 with a
+        # clean message, not a traceback.
+        from inputlayer.exceptions import InputLayerConnectionError
+        from inputlayer.migrations import cli
+
+        def boom(args):
+            raise InputLayerConnectionError("Failed to connect to ws://nope")
+
+        monkeypatch.setattr(cli, "_cmd_showmigrations", boom)
+        rc = main(["showmigrations", "--url", "ws://nope", "--kg", "k"])
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "error: Failed to connect" in out
+
     def test_makemigrations_requires_models(self):
         parser = build_parser()
         with pytest.raises(SystemExit):
@@ -32,6 +47,33 @@ class TestParser:
         parser = build_parser()
         with pytest.raises(SystemExit):
             parser.parse_args(["revert", "--url", "ws://x", "--kg", "test"])
+
+    def test_migrations_dir_before_subcommand(self):
+        parser = build_parser()
+        args = parser.parse_args(
+            ["--migrations-dir", "custom", "makemigrations", "--models", "m"]
+        )
+        assert args.migrations_dir == "custom"
+
+    def test_migrations_dir_after_subcommand(self):
+        # Delegating callers (the il CLI) always place flags after the
+        # subcommand; this position must work on every subcommand.
+        parser = build_parser()
+        args = parser.parse_args(
+            ["makemigrations", "--models", "m", "--migrations-dir", "custom"]
+        )
+        assert args.migrations_dir == "custom"
+        args = parser.parse_args(
+            ["showmigrations", "--url", "ws://x", "--kg", "k",
+             "--migrations-dir", "custom"]
+        )
+        assert args.migrations_dir == "custom"
+
+    def test_migrations_dir_default_survives_subparser(self):
+        # SUPPRESS on the subparser copy must not clobber the global default.
+        parser = build_parser()
+        args = parser.parse_args(["makemigrations", "--models", "m"])
+        assert args.migrations_dir == "migrations"
 
     def test_showmigrations_parses(self):
         parser = build_parser()
@@ -125,7 +167,7 @@ class TestMakemigrations:
                 "--models", "models_for_cli",
             ])
             assert result == 0
-            files = list(migrations_dir.glob("0001_*.py"))
+            files = list(migrations_dir.glob("0001_*.json"))
             assert len(files) == 1
             assert "initial" in files[0].name
         finally:
@@ -168,7 +210,7 @@ class TestMakemigrations:
             ])
             assert result == 0
             # Should not create a second migration
-            files = list(migrations_dir.glob("0002_*.py"))
+            files = list(migrations_dir.glob("0002_*.json"))
             assert len(files) == 0
         finally:
             sys.path.pop(0)
@@ -220,7 +262,7 @@ class TestMakemigrations:
             ])
             assert result == 0
 
-            files = sorted(migrations_dir.glob("*.py"))
+            files = sorted(migrations_dir.glob("*.json"))
             assert len(files) == 2
 
             # Load and check dependency
