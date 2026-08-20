@@ -32,7 +32,7 @@ test-all: check static-analysis
 	echo ""; \
 	rm -f /tmp/il_trace.log /tmp/il_server.log 2>/dev/null || true; \
 	echo "=== Build (release) ==="; \
-	if cargo build --all-features --release 2>&1; then \
+	if cargo build --workspace --all-features --release 2>&1; then \
 		BUILD_STATUS="PASS"; \
 	else \
 		BUILD_STATUS="FAIL"; \
@@ -42,7 +42,7 @@ test-all: check static-analysis
 	echo "=== Unit + Integration Tests ($$NCPU threads) ==="; \
 	UNIT_TMPFILE=$$(mktemp); \
 	set -o pipefail; \
-	RUST_TEST_THREADS=$$NCPU cargo test --all-features -- --test-threads=$$NCPU --format=pretty \
+	RUST_TEST_THREADS=$$NCPU cargo test --workspace --all-features -- --test-threads=$$NCPU --format=pretty \
 		2>&1 | tee "$$UNIT_TMPFILE"; \
 	UNIT_EXIT=$${PIPESTATUS[0]}; \
 	tail -5 "$$UNIT_TMPFILE"; \
@@ -187,7 +187,7 @@ ci-test-all:
 	echo ""; \
 	echo "=== Build (release, thin LTO) ==="; \
 	if CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_CODEGEN_UNITS=4 \
-	   cargo build --all-features --release 2>&1; then \
+	   cargo build --workspace --all-features --release 2>&1; then \
 		BUILD_STATUS="PASS"; \
 	else \
 		BUILD_STATUS="FAIL"; \
@@ -197,7 +197,7 @@ ci-test-all:
 	echo "=== Unit Tests ==="; \
 	UNIT_TMPFILE=$$(mktemp); \
 	set -o pipefail; \
-	RUST_TEST_THREADS=$$CI_JOBS cargo test --all-features -- --test-threads=$$CI_JOBS --format=pretty \
+	RUST_TEST_THREADS=$$CI_JOBS cargo test --workspace --all-features -- --test-threads=$$CI_JOBS --format=pretty \
 		2>&1 | tee "$$UNIT_TMPFILE"; \
 	UNIT_EXIT=$${PIPESTATUS[0]}; \
 	tail -5 "$$UNIT_TMPFILE"; \
@@ -285,11 +285,11 @@ ci: check ci-test-all
 
 # Tier 1: Unit tests (cargo test - includes all #[test] functions)
 unit-test:
-	cargo test --all-features
+	cargo test --workspace --all-features
 
 # Tier 2: Integration tests only
 integration-test:
-	cargo test --all-features --test '*'
+	cargo test --workspace --all-features --test '*'
 
 # Tier 3: E2E snapshot tests (parallel, against live server)
 e2e-test:
@@ -322,7 +322,7 @@ python-test:
 # Build without gui-build so CI doesn't need Node.js. The server runs
 # headless for integration tests.
 python-test-live:
-	@cargo build --all-features --release
+	@cargo build --workspace --all-features --release
 	@DATA_DIR=$$(mktemp -d -t il-py-live-XXXXXX); \
 	rm -rf $$DATA_DIR && mkdir -p $$DATA_DIR; \
 	echo "[python-test-live] data dir: $$DATA_DIR"; \
@@ -358,7 +358,7 @@ python-test-live:
 # an LLM (1, 2, 3) end-to-end against a live server. Catches example
 # regressions that the unit tests cannot.
 python-test-examples:
-	@cargo build --all-features --release
+	@cargo build --workspace --all-features --release
 	@DATA_DIR=$$(mktemp -d -t il-py-ex-XXXXXX); \
 	rm -rf $$DATA_DIR && mkdir -p $$DATA_DIR; \
 	lsof -ti :8080 | xargs -r kill -9 2>/dev/null || true; \
@@ -474,11 +474,11 @@ fmt-check:
 
 # Run clippy lints
 lint:
-	cargo clippy --all-features -- -D warnings
+	cargo clippy --workspace --all-features -- -D warnings
 
 # Check compilation + formatting + lints (quality gate)
 check: fmt-check lint
-	cargo check --all-features
+	cargo check --workspace --all-features
 
 # Fix formatting and lint issues automatically where possible
 fix: fmt
@@ -492,11 +492,11 @@ build: gui-build
 
 # Build in release mode (GUI + Rust)
 build-release: gui-build
-	cargo build --all-features --release
+	cargo build --workspace --all-features --release
 
 # Run unit tests in release mode
 test-release:
-	cargo test --all-features --release
+	cargo test --workspace --all-features --release
 
 # Clean build artifacts
 clean:
@@ -511,7 +511,7 @@ doc:
 
 # Check documentation (CI mode)
 doc-check:
-	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
+	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 
 # Release & Maintenance
 

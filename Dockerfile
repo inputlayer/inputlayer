@@ -25,15 +25,17 @@ WORKDIR /build
 # Cache dependencies: copy manifests first, build dummy targets to cache deps
 COPY Cargo.toml ./
 COPY gateway/Cargo.toml ./gateway/
+COPY ontology-client/Cargo.toml ./ontology-client/
 RUN mkdir src && echo "fn main() {}" > src/main.rs && \
     mkdir -p src/bin && echo "fn main() {}" > src/bin/server.rs && \
     echo "" > src/lib.rs && \
     mkdir -p gateway/src && echo "fn main() {}" > gateway/src/main.rs && \
     echo "" > gateway/src/lib.rs && \
+    mkdir -p ontology-client/src && echo "" > ontology-client/src/lib.rs && \
     cargo generate-lockfile && \
     (cargo build --release -p inputlayer --bin inputlayer-server && \
      cargo build --release -p inputlayer-gateway --bin inputlayer-gateway) 2>/dev/null || true && \
-    rm -rf src gateway/src
+    rm -rf src gateway/src ontology-client/src
 
 # Build the real binaries. The touch is load-bearing: COPY preserves context
 # mtimes, which in CI predate the dummy dep-cache build above - without it
@@ -42,8 +44,9 @@ RUN mkdir src && echo "fn main() {}" > src/main.rs && \
 # change; the featureless gateway crate has no such protection).
 COPY src/ src/
 COPY gateway/ gateway/
+COPY ontology-client/ ontology-client/
 COPY docs/ docs/
-RUN find src gateway/src -type f -exec touch {} + && \
+RUN find src gateway/src ontology-client/src -type f -exec touch {} + && \
     cargo build --all-features --release -p inputlayer --bin inputlayer-server && \
     cargo build --release -p inputlayer-gateway --bin inputlayer-gateway && \
     strip target/release/inputlayer-server target/release/inputlayer-gateway

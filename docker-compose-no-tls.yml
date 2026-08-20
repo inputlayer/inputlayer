@@ -28,8 +28,19 @@ services:
       INPUTLAYER_URL: "http://inputlayer:8080"
       INPUTLAYER_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Every ontology published in the registry index is loaded at startup
+      # and pinned by version and digest; each request selects one via the
+      # x-il-ontology header. INPUTLAYER_REGISTRY overrides the index location and
+      # INPUTLAYER_REGISTRY_TOKEN is needed while the registry is private.
+      INPUTLAYER_REGISTRY: ${INPUTLAYER_REGISTRY:-}
+      INPUTLAYER_REGISTRY_TOKEN: ${INPUTLAYER_REGISTRY_TOKEN:-}
+    volumes:
+      # Persist the ontology cache so container recreation does not depend
+      # on the registry being reachable.
+      - gateway-cache:/var/lib/inputlayer
     depends_on:
       - inputlayer
 
 volumes:
   inputlayer-data:
+  gateway-cache:

@@ -132,7 +132,7 @@ impl Registry {
             .with_context(|| format!("failed to fetch registry index: {}", self.index_url))?;
         if !resp.status().is_success() {
             bail!(
-                "registry index fetch failed ({}): {} - private registries need IL_REGISTRY_TOKEN",
+                "registry index fetch failed ({}): {} - private registries need INPUTLAYER_REGISTRY_TOKEN",
                 resp.status(),
                 self.index_url
             );

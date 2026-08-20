@@ -83,7 +83,9 @@ jobs:
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish || echo "Publish failed (version may already exist)"
+        run: |
+          cargo publish -p inputlayer-ontology-client || echo "inputlayer-ontology-client publish failed (version may already exist)"
+          cargo publish -p inputlayer || echo "inputlayer publish failed (version may already exist)"
 
   # Create GitHub release
   github-release:

@@ -12,12 +12,10 @@
 //! il migration <verb>               generate | apply | revert | status
 //! ```
 
-mod registry;
-mod ws;
-
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use registry::Registry;
+use inputlayer_ontology_client::registry::{self, Registry};
+use inputlayer_ontology_client::ws;
 
 #[derive(Parser)]
 #[command(
@@ -30,13 +28,18 @@ struct Cli {
     #[arg(
         long,
         global = true,
-        env = "IL_REGISTRY",
+        env = "INPUTLAYER_REGISTRY",
         default_value = registry::DEFAULT_INDEX_URL
     )]
     registry: String,
 
     /// Token for private registries (also read from GITHUB_TOKEN)
-    #[arg(long, global = true, env = "IL_REGISTRY_TOKEN", hide_env_values = true)]
+    #[arg(
+        long,
+        global = true,
+        env = "INPUTLAYER_REGISTRY_TOKEN",
+        hide_env_values = true
+    )]
     registry_token: Option<String>,
 
     #[command(subcommand)]
