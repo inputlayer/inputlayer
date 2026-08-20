@@ -34,15 +34,26 @@ fn env_or(name: &str, default: &str) -> String {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    use anyhow::Context;
+
     let host = env_or("GATEWAY_HOST", "127.0.0.1");
-    let port = env_or("GATEWAY_PORT", "8081");
+    let port: u16 = env_or("GATEWAY_PORT", "8081")
+        .parse()
+        .context("GATEWAY_PORT must be a port number")?;
     let engine_url = env_or("INPUTLAYER_URL", "http://127.0.0.1:8080")
         .trim_end_matches('/')
         .to_string();
     let has_model_key = std::env::var("ANTHROPIC_API_KEY").is_ok_and(|v| !v.is_empty());
 
+    // Readiness probes trigger an outbound engine call; without a timeout a
+    // wedged engine turns every probe into a hung socket.
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .context("failed to build HTTP client")?;
+
     let state = Arc::new(AppState {
-        http: reqwest::Client::new(),
+        http,
         engine_url,
         has_model_key,
     });

@@ -34,11 +34,16 @@ RUN mkdir src && echo "fn main() {}" > src/main.rs && \
     cargo build --release --bin inputlayer-server --bin inputlayer-gateway 2>/dev/null || true && \
     rm -rf src gateway/src
 
-# Build the real binaries
+# Build the real binaries. The touch is load-bearing: COPY preserves context
+# mtimes, which in CI predate the dummy dep-cache build above - without it
+# cargo considers the crates fresh and ships the dummy `fn main() {}`
+# binaries (the engine only escaped via the --all-features fingerprint
+# change; the featureless gateway crate has no such protection).
 COPY src/ src/
 COPY gateway/ gateway/
 COPY docs/ docs/
-RUN cargo build --all-features --release --bin inputlayer-server --bin inputlayer-gateway && \
+RUN find src gateway/src -type f -exec touch {} + && \
+    cargo build --all-features --release --bin inputlayer-server --bin inputlayer-gateway && \
     strip target/release/inputlayer-server target/release/inputlayer-gateway
 
 # ---- Gateway Runtime (build with: docker build --target gateway) ----
@@ -65,7 +70,7 @@ EXPOSE 8081
 USER gateway
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -sf http://localhost:8081/health || exit 1
+    CMD curl -sf "http://localhost:${GATEWAY_PORT:-8081}/health" || exit 1
 
 ENTRYPOINT ["inputlayer-gateway"]
 

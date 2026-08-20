@@ -61,8 +61,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.component.name }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
-          cache-from: type=gha,scope=${{ matrix.platform }}
-          cache-to: type=gha,scope=${{ matrix.platform }},mode=max
+          cache-from: type=gha,scope=${{ matrix.component.target }}-${{ matrix.platform }}
+          cache-to: type=gha,scope=${{ matrix.component.target }}-${{ matrix.platform }},mode=max
 
       - name: Export digest
         if: github.event_name != 'pull_request'
@@ -75,13 +75,13 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: digests-${{ matrix.component.name }}-${{ matrix.arch }}
+          name: digests-${{ matrix.component.target }}-${{ matrix.arch }}
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
 
   merge:
-    name: Merge manifests (${{ matrix.component }})
+    name: Merge manifests (${{ matrix.component.name }})
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
     needs: build
@@ -90,7 +90,11 @@ jobs:
       packages: write
     strategy:
       matrix:
-        component: [inputlayer, inputlayer-gateway]
+        component:
+          - name: inputlayer
+            target: engine
+          - name: inputlayer-gateway
+            target: gateway
     env:
       # Docker Hub mirroring is enabled by adding DOCKERHUB_USERNAME and
       # DOCKERHUB_TOKEN repo secrets; without them only GHCR is published.
@@ -100,7 +104,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: /tmp/digests
-          pattern: digests-${{ matrix.component }}-*
+          pattern: digests-${{ matrix.component.target }}-*
           merge-multiple: true
 
       - name: Set up Docker Buildx
@@ -117,7 +121,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.component }}
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.component.name }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch
@@ -129,11 +133,11 @@ jobs:
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.component }}@sha256:%s ' *)
+            $(printf '${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.component.name }}@sha256:%s ' *)
 
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.component }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.component.name }}:${{ steps.meta.outputs.version }}
 
       - name: Log in to Docker Hub
         if: env.DOCKERHUB_ENABLED == 'true'
@@ -146,7 +150,7 @@ jobs:
         if: env.DOCKERHUB_ENABLED == 'true'
         run: |
           for tag in $(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON"); do
-            hub_tag="docker.io/inputlayer/${{ matrix.component }}:${tag##*:}"
+            hub_tag="docker.io/inputlayer/${{ matrix.component.name }}:${tag##*:}"
             echo "mirroring ${tag} -> ${hub_tag}"
             docker buildx imagetools create -t "${hub_tag}" "${tag}"
           done
