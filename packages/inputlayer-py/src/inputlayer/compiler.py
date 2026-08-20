@@ -666,6 +666,17 @@ def compile_rule(
         else:
             head_parts.append(column_to_variable(col))
 
+    # Compile filter conditions BEFORE building body atoms, so every column
+    # the condition references is registered in the env and gets bound to a
+    # variable in its atom. Compiling them after produced atoms with `_` for
+    # condition-only columns while the condition referenced an unbound
+    # variable - which the engine accepts and silently satisfies, deriving
+    # wrong results (e.g. a tier == "gold" filter matching every row).
+    cond_parts: list[str] = []
+    if condition:
+        cond_parts = compile_bool_expr(condition, env)
+        cond_parts = [p for p in cond_parts if p]
+
     # Build body atoms
     body_atoms: list[str] = []
     for rn, cls, alias in body_relations:
@@ -679,12 +690,6 @@ def compile_rule(
             else:
                 atom_parts.append("_")
         body_atoms.append(f"{rn}({', '.join(atom_parts)})")
-
-    # Compile filter conditions
-    cond_parts: list[str] = []
-    if condition:
-        cond_parts = compile_bool_expr(condition, env)
-        cond_parts = [p for p in cond_parts if p]
 
     all_body = body_atoms + cond_parts
     prefix = "+" if persistent else ""

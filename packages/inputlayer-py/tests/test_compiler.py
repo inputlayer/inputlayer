@@ -494,6 +494,25 @@ class TestCompileRule:
         )
         assert "+high_earner(Id, Name)" in result
         assert "Salary > 100000" in result
+        # The condition column must be BOUND in the body atom. Emitting
+        # employee(Id, Name, _, _, _) alongside `Salary > 100000` leaves
+        # Salary unbound - the engine accepts that and silently satisfies
+        # the comparison, deriving wrong results.
+        assert "employee(Id, Name, _, Salary, _)" in result
+
+    def test_condition_only_column_is_bound(self):
+        # Regression: a column referenced ONLY by the where-condition (not
+        # selected into the head) must still be bound in its atom.
+        cond = Comparison("=", AstColumn("employee", "department"), Literal("eng"))
+        result = compile_rule(
+            "eng_member",
+            ["name"],
+            {"name": AstColumn("employee", "name")},
+            [(Employee._resolve_name(), Employee, None)],
+            condition=cond,
+            persistent=True,
+        )
+        assert result == '+eng_member(Name) <- employee(_, Name, Department, _, _), Department = "eng"'
 
     def test_recursive(self):
         # reachable(Src, Dst) <- reachable(Src, Mid), edge(Mid, Dst)
