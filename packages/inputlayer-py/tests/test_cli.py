@@ -152,7 +152,7 @@ class TestMakemigrations:
                 "--models", "models_for_cli",
             ])
             assert result == 0
-            files = list(migrations_dir.glob("0001_*.py"))
+            files = list(migrations_dir.glob("0001_*.json"))
             assert len(files) == 1
             assert "initial" in files[0].name
         finally:
@@ -195,7 +195,7 @@ class TestMakemigrations:
             ])
             assert result == 0
             # Should not create a second migration
-            files = list(migrations_dir.glob("0002_*.py"))
+            files = list(migrations_dir.glob("0002_*.json"))
             assert len(files) == 0
         finally:
             sys.path.pop(0)
@@ -247,7 +247,7 @@ class TestMakemigrations:
             ])
             assert result == 0
 
-            files = sorted(migrations_dir.glob("*.py"))
+            files = sorted(migrations_dir.glob("*.json"))
             assert len(files) == 2
 
             # Load and check dependency
