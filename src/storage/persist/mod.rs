@@ -508,7 +508,7 @@ impl PersistBackend for FilePersist {
         consolidate(&mut filtered);
 
         // Remember old batch refs for cleanup after the new batch is durable
-        let old_batches: Vec<BatchRef> = state.meta.batches.drain(..).collect();
+        let old_batches: Vec<BatchRef> = std::mem::take(&mut state.meta.batches);
 
         // Step 1: Write new compacted batch FIRST (crash-safe ordering)
         // If we crash here, old batches still exist and metadata still points to them.
