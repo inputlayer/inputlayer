@@ -1,4 +1,4 @@
-//! Minimal WebSocket client for `il` — connect, authenticate, execute.
+//! Minimal WebSocket client for `il` - connect, authenticate, execute.
 //!
 //! Speaks the same GlobalWs* protocol as `inputlayer-client`, but exposes only
 //! the request/response surface the registry commands need. Streaming results
@@ -53,6 +53,27 @@ pub struct QueryResult {
     pub rows: Vec<Vec<serde_json::Value>>,
 }
 
+impl QueryResult {
+    /// The engine reports many per-statement failures as message rows inside
+    /// an Ok result rather than as error frames ("Insert rejected for ...",
+    /// "Failed to register schema ..."). Anything that must know whether its
+    /// statements actually executed has to scan for them.
+    pub fn soft_errors(&self) -> Vec<String> {
+        const MARKERS: [&str; 4] = [
+            "Insert rejected",
+            "Failed to register schema",
+            "Create failed:",
+            "Drop failed:",
+        ];
+        self.rows
+            .iter()
+            .filter_map(|row| row.first().and_then(serde_json::Value::as_str))
+            .filter(|msg| MARKERS.iter().any(|m| msg.contains(m)))
+            .map(str::to_string)
+            .collect()
+    }
+}
+
 type WsStream =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
@@ -60,15 +81,18 @@ pub struct Engine {
     stream: WsStream,
 }
 
-/// `http(s)://host:port` → `ws(s)://host:port/ws`
+/// `http(s)://host:port` -> `ws(s)://host:port/ws`; scheme-less input
+/// defaults to `ws://`.
 pub fn ws_url(server: &str) -> String {
     let base = server.trim_end_matches('/');
     let converted = if let Some(rest) = base.strip_prefix("https://") {
         format!("wss://{rest}")
     } else if let Some(rest) = base.strip_prefix("http://") {
         format!("ws://{rest}")
-    } else {
+    } else if base.starts_with("ws://") || base.starts_with("wss://") {
         base.to_string()
+    } else {
+        format!("ws://{base}")
     };
     if converted.ends_with("/ws") {
         converted
@@ -132,7 +156,18 @@ impl Engine {
                         return Ok(acc);
                     }
                 }
-                WsResponse::Error { message } => bail!("{message}"),
+                WsResponse::Error { message } => {
+                    // The global socket pushes connection-level errors that
+                    // are not responses to the in-flight request; treating
+                    // them as one fails the request spuriously.
+                    if message.starts_with("Missed ")
+                        || message.starts_with("Idle timeout")
+                        || message.starts_with("Connection lifetime")
+                    {
+                        continue;
+                    }
+                    bail!("{message}");
+                }
                 _ => {} // notifications, pongs: skip
             }
         }

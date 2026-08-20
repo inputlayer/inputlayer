@@ -3,7 +3,7 @@
 //!
 //! The registry is Helm-shaped (see inputlayer/ontology-registry): `index.json`
 //! maps ontology names to versions, each carrying a tarball URL and a sha256
-//! digest. Nothing is unpacked or deployed unless the digest matches — a
+//! digest. Nothing is unpacked or deployed unless the digest matches - a
 //! mismatch is a hard refusal, because entries are rule packs the engine will
 //! treat as ground truth.
 
@@ -53,18 +53,72 @@ pub struct Registry {
     client: reqwest::Client,
 }
 
+/// Registry names and versions end up in filesystem paths and IQL literals;
+/// keep them to a boring charset so a hostile index cannot traverse or
+/// inject. Rejects empty strings and leading dots.
+pub fn validate_component(kind: &str, value: &str) -> Result<()> {
+    let ok = !value.is_empty()
+        && !value.starts_with('.')
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    if ok {
+        Ok(())
+    } else {
+        bail!("invalid {kind} {value:?}: allowed characters are [A-Za-z0-9._-]");
+    }
+}
+
+fn host_of(url: &str) -> Option<String> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let mut host = &rest[..end];
+    if let Some(at) = host.rfind('@') {
+        host = &host[at + 1..];
+    }
+    let host = host.rsplit_once(':').map_or(host, |(h, _)| h);
+    Some(host.to_ascii_lowercase())
+}
+
 impl Registry {
     pub fn new(index_url: String, token: Option<String>) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
         Self {
             index_url,
             token,
-            client: reqwest::Client::new(),
+            client,
+        }
+    }
+
+    /// The token is only ever sent to GitHub hosts or the index's own host -
+    /// index entries can list arbitrary mirror URLs, and a bearer token must
+    /// not follow them there.
+    fn token_for(&self, url: &str) -> Option<&str> {
+        let token = self.token.as_deref()?;
+        let host = host_of(url)?;
+        let github = matches!(
+            host.as_str(),
+            "github.com"
+                | "api.github.com"
+                | "raw.githubusercontent.com"
+                | "objects.githubusercontent.com"
+                | "release-assets.githubusercontent.com"
+        );
+        if github || Some(host) == host_of(&self.index_url) {
+            Some(token)
+        } else {
+            None
         }
     }
 
     fn request(&self, url: &str) -> reqwest::RequestBuilder {
         let mut req = self.client.get(url).header("User-Agent", "il-cli");
-        if let Some(token) = &self.token {
+        if let Some(token) = self.token_for(url) {
             req = req.header("Authorization", format!("Bearer {token}"));
         }
         req
@@ -78,7 +132,7 @@ impl Registry {
             .with_context(|| format!("failed to fetch registry index: {}", self.index_url))?;
         if !resp.status().is_success() {
             bail!(
-                "registry index fetch failed ({}): {} — private registries need IL_REGISTRY_TOKEN",
+                "registry index fetch failed ({}): {} - private registries need IL_REGISTRY_TOKEN",
                 resp.status(),
                 self.index_url
             );
@@ -108,17 +162,28 @@ impl Registry {
                 .first()
                 .ok_or_else(|| anyhow!("ontology '{name}' has no versions"))?,
         };
+        validate_component("ontology name", name)?;
+        validate_component("version", &entry.version)?;
         Ok((name.to_string(), entry.clone()))
     }
 
-    /// Fetch into the cache (digest-verified) and return the unpacked entry dir.
-    /// A cached entry is trusted because it can only have been written by a
-    /// successful verified fetch.
+    /// Fetch into the cache (digest-verified) and return the unpacked entry
+    /// dir. Cache writes are staged and renamed into place so an interrupted
+    /// unpack never leaves a half-populated dir that later runs trust, and a
+    /// cache hit is only honored when its recorded digest matches the index
+    /// (a republished version is re-fetched, keeping pack_meta attribution
+    /// honest).
     pub async fn fetch(&self, name: &str, entry: &IndexEntry) -> Result<PathBuf> {
-        let dir = cache_dir()?.join(name).join(&entry.version);
-        let entry_dir = dir.join(name);
+        let version_dir = cache_dir()?.join(name).join(&entry.version);
+        let entry_dir = version_dir.join(name);
+        let digest_file = version_dir.join(".digest");
         if entry_dir.join("ontology.toml").is_file() {
-            return Ok(entry_dir);
+            let recorded = std::fs::read_to_string(&digest_file).unwrap_or_default();
+            if recorded.trim() == entry.digest {
+                return Ok(entry_dir);
+            }
+            std::fs::remove_dir_all(&version_dir)
+                .with_context(|| format!("cannot evict stale cache {}", version_dir.display()))?;
         }
 
         let url = entry
@@ -137,15 +202,30 @@ impl Registry {
             );
         }
 
-        std::fs::create_dir_all(&dir)
-            .with_context(|| format!("cannot create cache dir {}", dir.display()))?;
+        let parent = version_dir
+            .parent()
+            .ok_or_else(|| anyhow!("cache path has no parent"))?;
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("cannot create cache dir {}", parent.display()))?;
+        let staging = parent.join(format!(".{}.tmp-{}", entry.version, std::process::id()));
+        let _ = std::fs::remove_dir_all(&staging);
+        std::fs::create_dir_all(&staging)?;
         let decoder = flate2::read::GzDecoder::new(std::io::Cursor::new(bytes));
         tar::Archive::new(decoder)
-            .unpack(&dir)
+            .unpack(&staging)
             .context("failed to unpack ontology tarball")?;
-        if !entry_dir.join("ontology.toml").is_file() {
+        if !staging.join(name).join("ontology.toml").is_file() {
+            let _ = std::fs::remove_dir_all(&staging);
             bail!("tarball did not contain {name}/ontology.toml");
         }
+        std::fs::write(staging.join(".digest"), &entry.digest)?;
+        let _ = std::fs::remove_dir_all(&version_dir);
+        std::fs::rename(&staging, &version_dir).with_context(|| {
+            format!(
+                "cannot move verified cache entry into {}",
+                version_dir.display()
+            )
+        })?;
         Ok(entry_dir)
     }
 
@@ -168,7 +248,7 @@ struct AssetLookup {
     filename: String,
 }
 
-/// `…github.com/{owner}/{repo}/releases/download/{tag}/{file}` → API lookup.
+/// `...github.com/{owner}/{repo}/releases/download/{tag}/{file}` -> API lookup.
 fn asset_api_lookup(url: &str) -> Option<AssetLookup> {
     let rest = url.strip_prefix("https://github.com/")?;
     let mut parts = rest.split('/');

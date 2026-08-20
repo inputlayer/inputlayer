@@ -1,4 +1,4 @@
-//! `il` — the InputLayer product CLI.
+//! `il` - the InputLayer product CLI.
 //!
 //! First slice: the ontology-registry verbs. Ontologies live in a Helm-style
 //! registry (github.com/inputlayer/ontology-registry); `il` is the installer,
@@ -9,6 +9,7 @@
 //! il fetch <name>[@version]         download + digest-verify into the cache
 //! il install <name>[@ver] --kg X    fetch, deploy over WS, pin pack_meta
 //! il list [--kg X]                  what's installed where (via pack_meta)
+//! il migration <verb>               generate | apply | revert | status
 //! ```
 
 mod registry;
@@ -21,7 +22,7 @@ use registry::Registry;
 #[derive(Parser)]
 #[command(
     name = "il",
-    about = "InputLayer CLI — install ontologies from the registry into a running engine",
+    about = "InputLayer CLI - install ontologies from the registry into a running engine",
     version
 )]
 struct Cli {
@@ -65,6 +66,9 @@ enum Command {
         #[arg(long, env = "INPUTLAYER_API_KEY", hide_env_values = true)]
         api_key: String,
     },
+    /// Manage schema migrations (delegates to the Python SDK's migration tool)
+    #[command(subcommand)]
+    Migration(MigrationCommand),
     /// Show ontologies pinned in a knowledge graph (reads pack_meta)
     List {
         /// Knowledge graph to inspect
@@ -77,6 +81,50 @@ enum Command {
         #[arg(long, env = "INPUTLAYER_API_KEY", hide_env_values = true)]
         api_key: String,
     },
+}
+
+/// il owns the migration vocabulary; the delegation layer translates each
+/// verb to the Python tool's subcommand, so Django-flavored names like
+/// `makemigrations` never surface in the product CLI. Leaf commands pass
+/// `--help` and all flags through untouched.
+#[derive(Subcommand)]
+enum MigrationCommand {
+    /// Generate a migration from model changes
+    #[command(disable_help_flag = true)]
+    Generate {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Apply pending migrations to a knowledge graph
+    #[command(disable_help_flag = true)]
+    Apply {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Revert an applied migration
+    #[command(disable_help_flag = true)]
+    Revert {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Show applied and pending migrations
+    #[command(disable_help_flag = true)]
+    Status {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+}
+
+impl MigrationCommand {
+    /// (python subcommand, passthrough args)
+    fn delegate(&self) -> (&'static str, &[String]) {
+        match self {
+            Self::Generate { args } => ("makemigrations", args),
+            Self::Apply { args } => ("migrate", args),
+            Self::Revert { args } => ("revert", args),
+            Self::Status { args } => ("showmigrations", args),
+        }
+    }
 }
 
 #[tokio::main]
@@ -109,11 +157,29 @@ async fn run() -> Result<()> {
             server,
             api_key,
         } => install(&reg, &spec, &kg, create, &server, &api_key).await,
+        Command::Migration(cmd) => migration(&cmd),
         Command::List {
             kg,
             server,
             api_key,
         } => list(&kg, &server, &api_key).await,
+    }
+}
+
+/// The migrations tool lives in the Python SDK; `il` stays the single CLI by
+/// delegating. Exit code and all flags pass through untouched.
+fn migration(cmd: &MigrationCommand) -> Result<()> {
+    let (subcommand, args) = cmd.delegate();
+    match std::process::Command::new("inputlayer-migrate")
+        .arg(subcommand)
+        .args(args)
+        .status()
+    {
+        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => anyhow::bail!(
+            "inputlayer-migrate not found - migrations are provided by the Python SDK:\n  pip install inputlayer-client-dev"
+        ),
+        Err(err) => Err(err).context("failed to run inputlayer-migrate"),
     }
 }
 
@@ -139,7 +205,7 @@ async fn search(reg: &Registry, term: Option<&str>) -> Result<()> {
 
 async fn fetch(reg: &Registry, spec: &str) -> Result<std::path::PathBuf> {
     let (name, entry) = reg.resolve(spec).await?;
-    println!("fetching {name}@{} …", entry.version);
+    println!("fetching {name}@{} ...", entry.version);
     let dir = reg.fetch(&name, &entry).await?;
     println!("sha256 verified: {}", entry.digest);
     Ok(dir)
@@ -157,7 +223,7 @@ async fn install(
     let entry_dir = reg.fetch(&name, &entry).await?;
     let manifest = registry::read_manifest(&entry_dir)?;
     println!(
-        "{} {} — {} ({})",
+        "{} {} - {} ({})",
         manifest.ontology.name, manifest.ontology.version, manifest.ontology.title, entry.digest
     );
 
@@ -193,35 +259,67 @@ async fn install(
         })?;
 
     println!(
-        "deploying {name}@{} → {kg} ({statement_count} statements, 1 atomic round trip) …",
+        "deploying {name}@{} -> {kg} ({statement_count} statements, 1 round trip) ...",
         entry.version
     );
-    engine
-        .execute(&program)
-        .await
-        .context("pack deployment failed — nothing was loaded (atomic)")?;
+    // Parse errors reject the whole program up front; runtime failures are
+    // per-statement and reported as message rows, so both paths are checked.
+    let deploy = engine.execute(&program).await.context(
+        "pack deployment failed (parse errors reject the whole program; a mid-program \
+         runtime failure may leave earlier statements applied - inspect the KG)",
+    )?;
+    let problems = deploy.soft_errors();
+    if !problems.is_empty() {
+        anyhow::bail!(
+            "pack deployment reported {} failed statement(s); earlier statements may \
+             remain applied - inspect the KG:\n  {}",
+            problems.len(),
+            problems.join("\n  ")
+        );
+    }
+
+    registry::validate_component("ontology name", &manifest.ontology.name)?;
+    registry::validate_component("version", &manifest.ontology.version)?;
 
     // Pin the install so findings are attributable to an exact rule set and
-    // `il list` can report it. Schema decl is tolerated if it already exists.
-    if let Err(err) = engine
+    // `il list` can report it. The decl may legitimately already exist; any
+    // other decl failure surfaces via the read-back below.
+    let _ = engine
         .execute("+pack_meta(name: string, version: string, digest: string)")
-        .await
-    {
-        let msg = err.to_string().to_lowercase();
-        if !msg.contains("exist") {
-            return Err(err.context("failed to declare pack_meta schema"));
-        }
-    }
-    engine
+        .await;
+    let pin = engine
         .execute(&format!(
             "+pack_meta[(\"{}\", \"{}\", \"{}\")]",
             manifest.ontology.name, manifest.ontology.version, entry.digest
         ))
         .await
         .context("failed to pin pack_meta")?;
+    if let Some(problem) = pin.soft_errors().first() {
+        anyhow::bail!("failed to pin pack_meta: {problem}");
+    }
+
+    // Trust the read-back, not the insert's silence: the engine reports some
+    // rejections as plain messages.
+    let pinned = engine
+        .execute("?pack_meta(Name, Version, Digest)")
+        .await
+        .context("failed to verify pack_meta pin")?;
+    let confirmed = pinned.rows.iter().any(|row| {
+        row.first().and_then(serde_json::Value::as_str) == Some(manifest.ontology.name.as_str())
+            && row.get(1).and_then(serde_json::Value::as_str)
+                == Some(manifest.ontology.version.as_str())
+    });
+    if !confirmed {
+        anyhow::bail!(
+            "pack deployed, but the pack_meta pin did not verify - the KG has no \
+             ({}, {}) row",
+            manifest.ontology.name,
+            manifest.ontology.version
+        );
+    }
 
     println!(
-        "✓ {}@{} → {kg} (pinned in pack_meta)",
+        "ok {}@{} -> {kg} (pinned in pack_meta)",
         manifest.ontology.name, manifest.ontology.version
     );
     Ok(())
@@ -235,10 +333,18 @@ async fn list(kg: &str, server: &str, api_key: &str) -> Result<()> {
         .with_context(|| format!("failed to switch to knowledge graph '{kg}'"))?;
     let result = match engine.execute("?pack_meta(Name, Version, Digest)").await {
         Ok(result) => result,
-        Err(_) => {
+        // Only an unknown-relation error means "nothing installed"; anything
+        // else (timeout, auth, disconnect) must not masquerade as an answer.
+        Err(err)
+            if {
+                let msg = err.to_string().to_lowercase();
+                msg.contains("unknown relation") || msg.contains("not found")
+            } =>
+        {
             println!("{kg}: no managed installs (no pack_meta relation)");
             return Ok(());
         }
+        Err(err) => return Err(err.context("failed to read pack_meta")),
     };
     println!("{:<14} {:<24} {:<9} DIGEST", "KG", "ONTOLOGY", "VERSION");
     for row in &result.rows {
