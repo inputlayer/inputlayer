@@ -542,8 +542,15 @@ impl Config {
     ///
     /// Defaults are seeded first, so a partial config file only needs the
     /// fields it wants to change. Unknown keys in the file are still
-    /// rejected (strict TOML parsing).
+    /// rejected (strict TOML parsing), and an explicitly given path that
+    /// does not exist is an error - with seeded defaults a missing file
+    /// would otherwise silently produce a default config.
     pub fn from_file(path: &str) -> Result<Self, figment::Error> {
+        if !std::path::Path::new(path).is_file() {
+            return Err(figment::Error::from(format!(
+                "config file not found: {path}"
+            )));
+        }
         let config: Self = Figment::from(Serialized::defaults(Self::default()))
             .merge(Toml::file(path))
             .merge(Self::env_source())
