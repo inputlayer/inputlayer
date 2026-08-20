@@ -102,7 +102,7 @@ il install consistency-core --kg mychat --create   # sha256-verified, one atomic
 il list --kg mychat                            # what's installed, pinned by version+digest
 ```
 
-The `il` CLI builds with the engine (`cargo build --bin il`) and talks to the server over the same WebSocket API as every other client. The design keeps one hard rule: the LLM only ever writes *data* — the rules are human-written, reviewed in the registry, and frozen at load. See `docs/internals/verified-completions/` for the rule pack's design, benchmark corpus, and extraction contract.
+The `il` CLI builds with the engine (`cargo build --bin il`) and talks to the server over the same WebSocket API as every other client. It also carries schema migrations - `il migration generate / apply / revert / status` - with language-neutral JSON migration files (see the [migrations guide](https://inputlayer.ai/docs/guides/migrations/)). The design keeps one hard rule: the LLM only ever writes *data* — the rules are human-written, reviewed in the registry, and frozen at load. See `docs/internals/verified-completions/` for the rule pack's design, benchmark corpus, and extraction contract.
 
 ---
 
