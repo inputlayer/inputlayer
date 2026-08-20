@@ -48,6 +48,13 @@ pub fn numeric_mirror(attribute: &str, value: &str) -> Option<i64> {
         }
         return Some(y * 10_000 + 101);
     }
+    leading_int(value)
+}
+
+/// Leading integer of a quantity string: "2600", "2600 EUR" -> 2600;
+/// "150x" -> None. This is the pack convention for numeric bounds that
+/// carry a unit.
+fn leading_int(value: &str) -> Option<i64> {
     let digits: String = value.chars().take_while(char::is_ascii_digit).collect();
     if !digits.is_empty() {
         let rest = &value[digits.len()..];
@@ -87,9 +94,11 @@ fn fill(template: &str, object: &Value, num: Option<i64>) -> Option<String> {
         } else {
             match object.get(key)? {
                 Value::Number(n) if n.is_i64() || n.is_u64() => out.push_str(&n.to_string()),
-                // The pack schema carries numerics as strings ("2000"); a
-                // full integer parse is the only accepted coercion.
-                Value::String(s) => out.push_str(&s.trim().parse::<i64>().ok()?.to_string()),
+                // The pack schema carries numerics as strings, with an
+                // optional unit ("2000", "2000 EUR"); the leading-integer
+                // parse is the only accepted coercion - its output is a
+                // parsed i64, so nothing hostile can reach the bare slot.
+                Value::String(s) => out.push_str(&leading_int(s.trim())?.to_string()),
                 _ => return None,
             }
         }
@@ -320,6 +329,21 @@ insert = ['+constraint[("{id}", "{type}", "{attr}", "{value}")]']
             out.statements[0]
         );
         assert_eq!(out.statements.len(), 2);
+    }
+
+    #[test]
+    fn bare_slot_coerces_unit_bearing_bounds() {
+        let m = manifest(MAP_TOML);
+        let extraction = serde_json::json!({
+            "constraints": [{"id": "k1", "type": "max_value", "attr": "total_price",
+                             "value": "2000 EUR"}]
+        });
+        let out = map_extraction(&m, &extraction);
+        assert_eq!(
+            out.statements,
+            vec!["+constraint_num[(\"k1\", \"max_value\", \"total_price\", 2000)]"]
+        );
+        assert!(out.skipped.is_empty());
     }
 
     #[test]

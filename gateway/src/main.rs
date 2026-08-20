@@ -300,7 +300,6 @@ async fn verify(
                 "digest": ontology.digest,
                 "findings": outcome.findings,
                 "dropped": outcome.dropped,
-                "notes": outcome.notes,
             }}})),
         ),
         Err(err) => (StatusCode::OK, Json(unverified(ontology, &err.to_string()))),

@@ -26,7 +26,6 @@ pub struct VerifyOutcome {
     pub status: &'static str,
     pub findings: Vec<Value>,
     pub dropped: Vec<String>,
-    pub notes: Vec<String>,
 }
 
 /// Drop extraction rows whose quote is not verbatim in the message it cites.
@@ -91,7 +90,16 @@ pub async fn run_verify(
         statements,
         skipped,
     } = map_extraction(&ontology.manifest, &extraction);
-    let notes: Vec<String> = skipped;
+    // A mapping skip means the extraction and the manifest disagree (schema
+    // drift, a field the templates expect but the schema cannot produce).
+    // Silently verifying over partially mapped facts would be a false
+    // "verified" - exactly what this product must never emit. Fail open.
+    if !skipped.is_empty() {
+        anyhow::bail!(
+            "extraction-to-ontology mapping failed (pack drift?): {}",
+            skipped.join("; ")
+        );
+    }
 
     // The KG name must be unique PER REQUEST, not per content: two
     // concurrent identical requests sharing a name would race each other's
@@ -126,7 +134,6 @@ pub async fn run_verify(
         },
         findings,
         dropped,
-        notes,
     })
 }
 
