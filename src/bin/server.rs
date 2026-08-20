@@ -173,7 +173,7 @@ fn init_tracing(logging_config: &LoggingConfig) {
     //   - Not set: logs to stderr (production default)
     //   - Set to a path: logs to that file
     // IL_TRACE=0 disables tracing entirely (not recommended for production)
-    let disabled = env::var("IL_TRACE").ok().is_some_and(|v| v == "0");
+    let disabled = env::var("IL_TRACE").is_ok_and(|v| v == "0");
     if disabled {
         return;
     }
