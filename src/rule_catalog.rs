@@ -28,7 +28,7 @@ use crate::recursion::{build_extended_dependency_graph, find_sccs};
 use crate::statement::serialize::SerializableTerm;
 use crate::statement::{RuleDef, SerializableRule};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 
@@ -101,35 +101,59 @@ pub fn validate_rule(rule: &Rule, name: &str) -> Result<(), String> {
     // Check 4: Comparison safety (issue #108).
     // `positive_body_variables()` already includes variables bound by
     // assignment-style equalities (Y = constant / function / arithmetic,
-    // propagated through variable equalities). Two shapes remain unsafe and
-    // previously registered fine while deriving wrong results:
-    //   (a) a non-equality comparison over an unbound variable - e.g.
-    //       `Salary > 100000` with Salary bound nowhere can never filter;
-    //   (b) an equality that binds a variable used nowhere else in the rule
-    //       - the mistaken-filter shape `customer(_, Name, _), Tier = "gold"`,
-    //       satisfied by assignment for every row.
+    // propagated through variable equalities). Three shapes remain unsafe
+    // and previously registered fine while deriving wrong results:
+    //   (a) a non-equality comparison over an unbound variable, including
+    //       variables nested inside arithmetic or function-call terms -
+    //       `Salary > 100000` or `Salary + 1 > 100` with Salary bound
+    //       nowhere can never filter;
+    //   (b) an assignment whose expression side references unbound
+    //       variables - `Z = abs_int64(Y)` with Y bound nowhere cannot be
+    //       computed;
+    //   (c) a dead assignment cluster - equality-bound variables with no
+    //       connection to any atom or head variable, e.g. the mistaken
+    //       filter `customer(_, Name, _), Tier = "gold"` (satisfied by
+    //       assignment for every row), including clusters that alibi each
+    //       other like a duplicated `Tier = "gold", Tier = "gold"` or a
+    //       mutual `A = B, B = A`. Detected by reachability: every
+    //       comparison variable must reach a head or non-comparison
+    //       variable through the comparison co-occurrence graph.
+    //
+    // Deep variable extraction (Term::variables) is used throughout;
+    // BodyPredicate::variables only sees top-level variables on comparison
+    // sides and misses arithmetic/function arguments.
+    let deep_cmp_vars = |left: &Term, right: &Term| -> HashSet<String> {
+        let mut vars = left.variables();
+        vars.extend(right.variables());
+        vars
+    };
+
     for pred in &rule.body {
         if let BodyPredicate::Comparison(left, op, right) = pred {
             if matches!(op, ComparisonOp::Equal) {
+                // (b) Expression sides of assignments must have bound inputs.
                 for term in [left, right] {
-                    if let Term::Variable(v) = term {
-                        let used_elsewhere = rule.head.variables().contains(v)
-                            || rule.body.iter().any(|other| {
-                                !std::ptr::eq(other, pred) && other.variables().contains(v)
-                            });
-                        if !used_elsewhere {
+                    if !matches!(term, Term::Variable(_)) {
+                        let inputs = term.variables();
+                        let unbound: Vec<_> = inputs.difference(&positive_vars).cloned().collect();
+                        if !unbound.is_empty() {
+                            let mut sorted_unbound = unbound;
+                            sorted_unbound.sort();
                             return Err(format!(
-                                "Unsafe comparison in rule '{name}': variable {v} appears only \
-                                 in the equality and nowhere else, so the equality binds it \
-                                 instead of filtering and the rule matches every row. Bind {v} \
-                                 in a body atom (e.g. replace a wildcard with {v}) or remove \
-                                 the comparison."
+                                "Unsafe comparison in rule '{}': Variable(s) {} inside the \
+                                 assignment expression not bound by any positive body atom. \
+                                 Bind them in a body atom (e.g. replace a wildcard with the \
+                                 variable) first.",
+                                name,
+                                sorted_unbound.join(", ")
                             ));
                         }
                     }
                 }
             } else {
-                let cmp_vars = pred.variables();
+                // (a) Non-equality comparisons filter; every variable they
+                // touch (however nested) must be bound.
+                let cmp_vars = deep_cmp_vars(left, right);
                 let unbound: Vec<_> = cmp_vars.difference(&positive_vars).cloned().collect();
                 if !unbound.is_empty() {
                     let mut sorted_unbound = unbound;
@@ -144,6 +168,59 @@ pub fn validate_rule(rule: &Rule, name: &str) -> Result<(), String> {
                 }
             }
         }
+    }
+
+    // (c) Dead-cluster detection: propagate anchoredness (head vars and all
+    // non-comparison predicate vars) through comparison co-occurrence until
+    // fixed point; any comparison variable left unanchored belongs to a
+    // cluster that cannot influence the result and exists only because an
+    // assignment mistakenly replaced a filter.
+    let mut anchored: HashSet<String> = rule.head.variables();
+    for pred in &rule.body {
+        if !pred.is_comparison() {
+            anchored.extend(pred.variables());
+        }
+    }
+    let comparison_var_sets: Vec<HashSet<String>> = rule
+        .body
+        .iter()
+        .filter_map(|pred| match pred {
+            BodyPredicate::Comparison(left, _, right) => Some(deep_cmp_vars(left, right)),
+            _ => None,
+        })
+        .collect();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for vars in &comparison_var_sets {
+            if vars.iter().any(|v| anchored.contains(v)) {
+                for v in vars {
+                    if anchored.insert(v.clone()) {
+                        changed = true;
+                    }
+                }
+            }
+        }
+    }
+    let mut dead: Vec<String> = comparison_var_sets
+        .iter()
+        .flatten()
+        .filter(|v| !anchored.contains(*v))
+        .cloned()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    if !dead.is_empty() {
+        dead.sort();
+        return Err(format!(
+            "Unsafe comparison in rule '{}': Variable(s) {} appear only in comparisons and \
+             are not connected to any body atom or head variable, so the equality binds \
+             them instead of filtering and the comparisons cannot affect the result. Bind \
+             them in a body atom (e.g. replace a wildcard with the variable) or remove the \
+             comparisons.",
+            name,
+            dead.join(", ")
+        ));
     }
 
     Ok(())
@@ -822,6 +899,23 @@ impl RuleCatalog {
 
         self.rules = catalog_file.rules;
         self.dirty = false;
+
+        // Deliberately no validation on load: a KG must never be bricked by
+        // rules persisted before a validation rule tightened. But unsafe
+        // rules keep deriving whatever they derived, so warn loudly.
+        for (name, defs) in &self.rules {
+            for rule in defs.to_rules() {
+                if let Err(reason) = validate_rule(&rule, name) {
+                    tracing::warn!(
+                        rule = %name,
+                        %reason,
+                        "persisted rule fails current safety validation; it remains \
+                         registered but may derive incorrect results - review and \
+                         re-create it"
+                    );
+                }
+            }
+        }
         Ok(())
     }
 
@@ -2170,6 +2264,107 @@ mod tests {
             ),
         ];
         assert!(validate_rule(&Rule::new(head, body), "s").is_ok());
+    }
+
+    /// Parse a single rule through the real parser - several cases below
+    /// exercise exactly what hand-built ASTs would mask (nested terms,
+    /// comparison shapes as the parser actually produces them).
+    fn parse_rule(iql: &str) -> Rule {
+        let program = crate::parser::parse_program(iql).expect("parse");
+        program.rules.into_iter().next().expect("one rule")
+    }
+
+    #[test]
+    fn test_dead_equality_clusters_rejected() {
+        // Review finding: duplicated or mutually-referencing dead equalities
+        // alibied each other under a used-elsewhere test and derived every
+        // row (contradictory pairs included). Reachability closes all of it.
+        for iql in [
+            "bad(X) <- t(X), Tier = \"gold\", Tier = \"gold\"",
+            "bad(X) <- t(X), Tier = \"gold\", Tier = \"silver\"",
+            "bad(X) <- t(X), A = B, B = A",
+            "bad(X) <- t(X), A = \"x\", B = \"x\", A = B",
+            "bad(X) <- t(X), Tier = \"gold\", Tier != \"x\"",
+        ] {
+            let err =
+                validate_rule(&parse_rule(iql), "bad").expect_err(&format!("must reject: {iql}"));
+            assert!(err.contains("Unsafe comparison"), "{iql}: {err}");
+        }
+    }
+
+    #[test]
+    fn test_unbound_variables_nested_in_terms_rejected() {
+        // Review finding: BodyPredicate::variables only sees top-level
+        // variables, letting `Salary + 1 > 100` and `abs_int64(Y) > 5`
+        // escape to the old runtime schema error.
+        for iql in [
+            "bad(X) <- t(X), Salary + 1 > 100",
+            "bad(X) <- t(X), abs_int64(Y) > 5",
+        ] {
+            let err =
+                validate_rule(&parse_rule(iql), "bad").expect_err(&format!("must reject: {iql}"));
+            assert!(err.contains("not bound"), "{iql}: {err}");
+        }
+    }
+
+    #[test]
+    fn test_assignment_with_unbound_expression_inputs_rejected() {
+        // Review finding: `Z = abs_int64(Y)` marked Z bound without ever
+        // checking Y.
+        for iql in [
+            "s(X, Z) <- t(X), Z = abs_int64(Y)",
+            "s(X, Z) <- t(X), Z = Y + 1",
+        ] {
+            let err =
+                validate_rule(&parse_rule(iql), "s").expect_err(&format!("must reject: {iql}"));
+            assert!(err.contains("assignment expression"), "{iql}: {err}");
+        }
+    }
+
+    #[test]
+    fn test_legitimate_comparison_shapes_accepted() {
+        for iql in [
+            // Assignment consumed by the head.
+            "tagged(X, L) <- t(X), L = \"hot\"",
+            // Bound-variable filter.
+            "r(Id) <- emp(Id, Salary), Salary > 100000",
+            // Assignment chained into a filter.
+            "s(X) <- t(X), Y = X, Y != 0",
+            // No-op alias to a bound variable: harmless, ran fine pre-#111,
+            // stays accepted (review finding 4).
+            "s(X) <- t(X), Y = X",
+            // Computed value used in a filter against a bound column.
+            "s(X) <- emp(X, Salary), Cap = 100000, Salary < Cap",
+            // Equality-bound variable consumed by a negated atom: the
+            // constant-guard shape. Well-defined semantics; deliberately
+            // accepted (review finding 7).
+            "g(X) <- t(X), Tier = \"gold\", !banned(Tier)",
+        ] {
+            let rule = parse_rule(iql);
+            assert!(
+                validate_rule(&rule, "r").is_ok(),
+                "must accept: {iql}: {:?}",
+                validate_rule(&rule, "r")
+            );
+        }
+    }
+
+    #[test]
+    fn test_load_keeps_pre_fix_unsafe_rules_without_bricking() {
+        // A KG persisted before a validation tightening must load (no
+        // brick), warn, and keep the rule registered.
+        let temp = TempDir::new().expect("tempdir");
+        let db_dir = temp.path().to_path_buf();
+        {
+            let mut catalog = RuleCatalog::new(db_dir.clone()).expect("new");
+            // register() is the documented validation-skipping side door -
+            // exactly how a pre-fix rule would have entered.
+            let unsafe_rule = parse_rule("bad(X) <- t(X), Tier = \"gold\"");
+            catalog.register("bad", &unsafe_rule).expect("register");
+            catalog.save().expect("save");
+        }
+        let catalog = RuleCatalog::new(db_dir).expect("load must not brick");
+        assert!(catalog.get("bad").is_some(), "unsafe rule stays registered");
     }
 
     #[test]

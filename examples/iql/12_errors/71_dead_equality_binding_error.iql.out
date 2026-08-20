@@ -1,0 +1,42 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+
+> .kg create test_dead_eq_n12t71
+Knowledge graph 'test_dead_eq_n12t71' created.
+Switched to knowledge graph: test_dead_eq_n12t71
+> .kg use test_dead_eq_n12t71
+Switched to knowledge graph: test_dead_eq_n12t71
+> +customer(id: int, name: string, tier: string)
+Schema for 'customer' registered with 3 columns (persistent)
+> +customer[(1, "ada", "gold"), (2, "bo", "silver")]
+Inserted 2 fact(s) into 'customer'.
+> +gold_customer(name: string)
+Schema for 'gold_customer' registered with 1 columns (persistent)
+> +gold_customer(Name) <- customer(_, Name, _), Tier = "gold"
+Failed to register rule: Unsafe comparison in rule 'gold_customer': Variable(s) Tier appear only in comparisons and are not connected to any body atom or head variable, so the equality binds them instead of filtering and the comparisons cannot affect the result. Bind them in a body atom (e.g. replace a wildcard with the variable) or remove the comparisons.
+> +gold_customer(Name) <- customer(_, Name, _), Tier = "gold", Tier = "gold"
+Failed to register rule: Unsafe comparison in rule 'gold_customer': Variable(s) Tier appear only in comparisons and are not connected to any body atom or head variable, so the equality binds them instead of filtering and the comparisons cannot affect the result. Bind them in a body atom (e.g. replace a wildcard with the variable) or remove the comparisons.
+> bad(X) <- customer(X, _, _), A = B, B = A
+Unsafe comparison in rule 'bad': Variable(s) A, B appear only in comparisons and are not connected to any body atom or head variable, so the equality binds them instead of filtering and the comparisons cannot affect the result. Bind them in a body atom (e.g. replace a wildcard with the variable) or remove the comparisons.
+> ?gold_customer(Name)
+No results.
+> +tagged(name: string, label: string)
+Schema for 'tagged' registered with 2 columns (persistent)
+> +tagged(Name, L) <- customer(_, Name, _), L = "hot"
+Rule 'tagged' registered.
+> ?tagged(Name, L)
+┌───────┬───────┐
+│ name  │ label │
+├───────┼───────┤
+│ "ada" │ "hot" │
+│ "bo"  │ "hot" │
+└───────┴───────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_dead_eq_n12t71
+Knowledge graph 'test_dead_eq_n12t71' dropped.
