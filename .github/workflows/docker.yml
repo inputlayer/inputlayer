@@ -95,10 +95,6 @@ jobs:
             target: engine
           - name: inputlayer-gateway
             target: gateway
-    env:
-      # Docker Hub mirroring is enabled by adding DOCKERHUB_USERNAME and
-      # DOCKERHUB_TOKEN repo secrets; without them only GHCR is published.
-      DOCKERHUB_ENABLED: ${{ secrets.DOCKERHUB_USERNAME != '' }}
     steps:
       - name: Download digests
         uses: actions/download-artifact@v4
@@ -138,19 +134,3 @@ jobs:
       - name: Inspect image
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.component.name }}:${{ steps.meta.outputs.version }}
-
-      - name: Log in to Docker Hub
-        if: env.DOCKERHUB_ENABLED == 'true'
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Mirror manifests to Docker Hub
-        if: env.DOCKERHUB_ENABLED == 'true'
-        run: |
-          for tag in $(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON"); do
-            hub_tag="docker.io/inputlayer/${{ matrix.component.name }}:${tag##*:}"
-            echo "mirroring ${tag} -> ${hub_tag}"
-            docker buildx imagetools create -t "${hub_tag}" "${tag}"
-          done
