@@ -13,7 +13,7 @@ Switched to knowledge graph: test_unbound_cmp_n12t61
 > +data[(1,), (2,)]
 Inserted 2 fact(s) into 'data'.
 > bad(X) <- data(X), Y > 5
-Query execution failed: Variable 'Y' not found in schema ["X"]
+Unsafe comparison in rule 'bad': Variable(s) Y not bound by any positive body atom. Bind them in a body atom (e.g. replace a wildcard with the variable) before comparing.
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_unbound_cmp_n12t61

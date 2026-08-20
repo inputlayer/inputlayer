@@ -1,0 +1,32 @@
+// Test: Dead equality binding rejected at rule registration (issue #108)
+// An equality whose variable is not connected to any atom or head variable
+// binds by assignment for every row instead of filtering. Both the
+// persistent and session rule paths must reject it, including clusters
+// that reference each other.
+
+.kg create test_dead_eq_n12t71
+.kg use test_dead_eq_n12t71
+
++customer(id: int, name: string, tier: string)
++customer[(1, "ada", "gold"), (2, "bo", "silver")]
++gold_customer(name: string)
+
+// Persistent path: single dead equality
++gold_customer(Name) <- customer(_, Name, _), Tier = "gold"
+
+// Persistent path: duplicated dead equalities must not alibi each other
++gold_customer(Name) <- customer(_, Name, _), Tier = "gold", Tier = "gold"
+
+// Session path: mutual dead pair
+bad(X) <- customer(X, _, _), A = B, B = A
+
+// Nothing registered, nothing derived
+?gold_customer(Name)
+
+// The legitimate assignment feature still works: bound into the head
++tagged(name: string, label: string)
++tagged(Name, L) <- customer(_, Name, _), L = "hot"
+?tagged(Name, L)
+
+.kg use default
+.kg drop test_dead_eq_n12t71
