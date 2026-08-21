@@ -68,7 +68,7 @@ il search
 
 ```
 ONTOLOGY                 LATEST    ENGINE     TITLE
-consistency-core         1.0.3     >=0.1.0    Verified Completions
+consistency-core         1.0.4     >=0.1.0    Verified Completions
 ```
 
 ```bash
@@ -76,8 +76,8 @@ il install consistency-core --kg support --create --api-key $INPUTLAYER_BOOTSTRA
 ```
 
 ```
-installed consistency-core@1.0.3 into support (107 statements)
-digest sha256:00dfecadb35e636006b73ef34bb4bf70394790e839d000e95c99390c9fdc9a7d
+installed consistency-core@1.0.4 into support (107 statements)
+digest sha256:161835125f386207c681ffab3d8dc7bab839f618e07e20a05007a761f6979fb8
 recorded 47 rule(s), 21 relation(s) in pack_item
 ```
 
@@ -115,8 +115,8 @@ The completion behaves like any OpenAI chat call. Alongside it, the conversation
 ```json
 { "reports": [ {
     "kg": "support",
-    "ontology": "consistency-core@1.0.3",
-    "digest": "sha256:00dfecadb35e636006b73ef34bb4bf70394790e839d000e95c99390c9fdc9a7d",
+    "ontology": "consistency-core@1.0.4",
+    "digest": "sha256:161835125f386207c681ffab3d8dc7bab839f618e07e20a05007a761f6979fb8",
     "status": "complete",
     "findings": [ {
         "view": "finding_src(K, Sev, C1, M1, S1, C2, M2, S2)",
@@ -126,15 +126,24 @@ The completion behaves like any OpenAI chat call. Alongside it, the conversation
                    { "message": "2", "surface": "we leave on the 12th" } ],
         "row": ["functional", "hard", "trip-42:c_m0_2", "0", "August 14th",
                  "trip-42:c_m2_1", "2", "we leave on the 12th"],
-        "proof": [ { "nodes": { "n0": { "kind": "fact", "source": "edb",
-            "conclusion": { "pred": "claim", "args": ["trip-42:c_m0_2",
-                "trip-42:trip", "departure_date", "2026-08-14"] } } } } ]
+        "proof": [ { "roots": ["n15"], "nodes": {
+            "n0":  { "kind": "fact", "source": "edb", "conclusion": { "pred": "claim",
+                     "args": ["trip-42:c_m0_2", "trip-42:trip", "departure_date", "2026-08-14"] } },
+            "n2":  { "kind": "rule", "children": ["n0", "n1"],
+                     "rule_id": "active(C, E, A, V) <- claim(C, E, A, V), claim_modality(C, \"asserted\")",
+                     "conclusion": { "pred": "active", "args": ["trip-42:c_m0_2", "trip-42:trip",
+                                     "departure_date", "2026-08-14"] } },
+            "n14": { "kind": "rule", "children": ["n2", "n5", "n12", "n13"],
+                     "rule_id": "conflict_functional(C1, C2) <- active(C1, E1, A, V1), active(C2, E2, A, V2), coentity(E1, E2), functional(A), V1 != V2",
+                     "conclusion": { "pred": "conflict_functional",
+                                     "args": ["trip-42:c_m0_2", "trip-42:c_m2_1"] } }
+        } } ]
     } ],
     "dropped": []
 } ] }
 ```
 
-(Abridged: `proof` is the engine's full derivation tree - rule applications with bindings down to base facts, each base fact a claim carrying its quoted span - and this conversation actually yields a second finding too, because the assistant's own "departure August 14th" confirmation is extracted as another conflicting claim.)
+(The `proof` excerpt keeps 3 of 16 nodes: the real tree runs from the base `claim` facts through `active`, `mentioned`, `coentity`, and the `functional` seed up to `conflict`, every node carrying its rule text and variable bindings. Each base fact is a claim with its quoted span, so the chain reads end to end: quote -> claim -> rules -> finding. This conversation also yields a second finding, because the assistant's own "departure August 14th" confirmation is extracted as another conflicting claim.)
 
 Requests **without** `x-il-ontology` are pure proxy calls: no translation, no engine involvement, no `inputlayer` key on the response. Requests with a selection but no conversation id evaluate one-shot: a synthetic prefix, facts retracted after the response, reports inline only.
 
