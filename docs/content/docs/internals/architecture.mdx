@@ -636,12 +636,12 @@ default_kg = "default"
 
 ### 11.3 Environment Variables
 
-All environment variables use the `IL_` prefix:
+All environment variables use the `INPUTLAYER_` prefix:
 
 | Variable | Purpose |
 |----------|---------|
-| `IL_DEBUG` | Enable debug output for IR building, execution, and optimization |
-| `IL_DEBUG_SESSION` | Enable debug output for session fact handling |
+| `INPUTLAYER_DEBUG` | Enable debug output for IR building, execution, and optimization |
+| `INPUTLAYER_DEBUG_SESSION` | Enable debug output for session fact handling |
 
 ---
 

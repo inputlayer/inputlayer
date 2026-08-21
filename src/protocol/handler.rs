@@ -3712,7 +3712,7 @@ impl QueryJob {
             .map_err(|e| e.to_string())?;
         drop(storage); // Release storage read lock BEFORE DD computation
 
-        let debug_session = std::env::var("IL_DEBUG_SESSION").is_ok();
+        let debug_session = std::env::var("INPUTLAYER_DEBUG_SESSION").is_ok();
         if debug_session && !session_fact_tuples.is_empty() {
             debug!(
                 count = session_fact_tuples.len(),

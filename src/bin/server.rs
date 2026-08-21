@@ -169,29 +169,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 fn init_tracing(logging_config: &LoggingConfig) {
-    // IL_TRACE_FILE controls where logs go:
+    // INPUTLAYER_TRACE_FILE controls where logs go:
     //   - Not set: logs to stderr (production default)
     //   - Set to a path: logs to that file
-    // IL_TRACE=0 disables tracing entirely (not recommended for production)
-    let disabled = env::var("IL_TRACE").is_ok_and(|v| v == "0");
+    // INPUTLAYER_TRACE=0 disables tracing entirely (not recommended for production)
+    let disabled = env::var("INPUTLAYER_TRACE").is_ok_and(|v| v == "0");
     if disabled {
         return;
     }
 
-    // Use IL_TRACE_JSON env var if set, otherwise fall back to config.logging.format
-    let json = env::var("IL_TRACE_JSON")
+    // Use INPUTLAYER_TRACE_JSON env var if set, otherwise fall back to config.logging.format
+    let json = env::var("INPUTLAYER_TRACE_JSON")
         .ok()
         .map_or_else(|| logging_config.format == "json", |v| v != "0");
 
-    // Use IL_TRACE_LEVEL env var if set, otherwise fall back to config.logging.level
-    let level = env::var("IL_TRACE_LEVEL")
+    // Use INPUTLAYER_TRACE_LEVEL env var if set, otherwise fall back to config.logging.level
+    let level = env::var("INPUTLAYER_TRACE_LEVEL")
         .ok()
         .unwrap_or_else(|| logging_config.level.clone());
 
     let filter = tracing_subscriber::EnvFilter::try_new(&level)
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
 
-    let use_file = if let Ok(log_path) = env::var("IL_TRACE_FILE") {
+    let use_file = if let Ok(log_path) = env::var("INPUTLAYER_TRACE_FILE") {
         // Try to open the log file
         match std::fs::OpenOptions::new()
             .create(true)
@@ -223,7 +223,7 @@ fn init_tracing(logging_config: &LoggingConfig) {
             }
             Err(e) => {
                 eprintln!(
-                    "WARNING: Unable to open IL_TRACE_FILE '{log_path}': {e}. \
+                    "WARNING: Unable to open INPUTLAYER_TRACE_FILE '{log_path}': {e}. \
                      Falling back to stderr logging."
                 );
                 false

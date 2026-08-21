@@ -67,7 +67,7 @@ test-all: check static-analysis
 	echo "=== Snapshot Tests (E2E) ==="; \
 	SNAP_TMPFILE=$$(mktemp); \
 	set -o pipefail; \
-	IL_TRACE=1 IL_TRACE_LEVEL=trace IL_SERVER_LOG=/tmp/il_server.log IL_TRACE_FILE=/tmp/il_trace.log \
+	INPUTLAYER_TRACE=1 INPUTLAYER_TRACE_LEVEL=trace INPUTLAYER_SERVER_LOG=/tmp/il_server.log INPUTLAYER_TRACE_FILE=/tmp/il_trace.log \
 	   ./scripts/run_snapshot_tests.sh --skip-build 2>&1 | tee "$$SNAP_TMPFILE"; \
 	SNAP_EXIT=$${PIPESTATUS[0]}; \
 	tail -10 "$$SNAP_TMPFILE"; \

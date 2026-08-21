@@ -303,7 +303,7 @@ chmod 755 ./data
 
 Set environment variable for verbose output:
 ```bash
-IL_TRACE_LEVEL=debug inputlayer-server
+INPUTLAYER_TRACE_LEVEL=debug inputlayer-server
 ```
 
 ### Check System Status
@@ -321,7 +321,7 @@ Find data files:
 ls -la ./data/
 ```
 
-Check logs (if file logging configured via `IL_TRACE_FILE`):
+Check logs (if file logging configured via `INPUTLAYER_TRACE_FILE`):
 ```bash
 tail -f /path/to/configured/log/file
 ```
