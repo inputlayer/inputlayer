@@ -84,9 +84,24 @@ async fn verify_pipeline_finds_functional_conflict_live() {
         url: server,
         api_key,
     };
-    let outcome = run_verify(&engine, &loaded, extraction, &messages)
+    let outcome = run_verify(&engine, &loaded, extraction, &messages, true)
         .await
         .expect("pipeline");
+
+    // Trace carries the validated extraction (the dropped claim is gone),
+    // the mapped statements, and the ephemeral KG name.
+    let trace = outcome.trace.as_ref().expect("trace requested");
+    assert_eq!(
+        trace["extraction"]["claims"].as_array().map(Vec::len),
+        Some(2)
+    );
+    assert!(trace["statements"]
+        .as_array()
+        .is_some_and(|s| !s.is_empty()));
+    assert!(trace["kg"]
+        .as_str()
+        .is_some_and(|k| k.starts_with("_verify_")));
+    assert!(trace["engine_ms"].is_number());
 
     assert_eq!(outcome.status, "conflicts_found");
     assert_eq!(

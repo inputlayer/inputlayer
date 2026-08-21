@@ -26,6 +26,10 @@ pub struct VerifyOutcome {
     pub status: &'static str,
     pub findings: Vec<Value>,
     pub dropped: Vec<String>,
+    /// Present when the request opted into tracing (x-il-trace): the
+    /// validated extraction, the mapped IQL statements, the ephemeral KG
+    /// name, and engine wall time. The caller sees only its own data.
+    pub trace: Option<Value>,
 }
 
 /// Drop extraction rows whose quote is not verbatim in the message it cites.
@@ -84,6 +88,7 @@ pub async fn run_verify(
     ontology: &LoadedOntology,
     mut extraction: Value,
     messages: &[(String, String)],
+    want_trace: bool,
 ) -> Result<VerifyOutcome> {
     let dropped = validate_quotes(&ontology.manifest, &mut extraction, messages);
     let MapOutcome {
@@ -121,11 +126,21 @@ pub async fn run_verify(
         .context("engine unreachable")?;
 
     // Ephemeral KG lifecycle; cleanup is best-effort on every exit path.
+    let engine_started = std::time::Instant::now();
     let result = verify_in_kg(&mut engine, &kg, ontology, &statements).await;
     let _ = engine.execute(".kg use default").await;
     let _ = engine.execute(&format!(".kg drop {kg}")).await;
+    let engine_ms = engine_started.elapsed().as_millis();
 
     let findings = result?;
+    let trace = want_trace.then(|| {
+        json!({
+            "extraction": extraction,
+            "statements": statements,
+            "kg": kg,
+            "engine_ms": engine_ms,
+        })
+    });
     Ok(VerifyOutcome {
         status: if findings.is_empty() {
             "verified"
@@ -134,6 +149,7 @@ pub async fn run_verify(
         },
         findings,
         dropped,
+        trace,
     })
 }
 
