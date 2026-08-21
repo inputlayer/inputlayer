@@ -461,6 +461,19 @@ async fn chat_completions(
                 .to_string(),
         );
     }
+    // Configuration failures come FIRST: with no ontologies loaded (an
+    // unreachable registry at startup) every selection would otherwise be
+    // reported as "ontology not published", blaming the caller for the
+    // operator's outage.
+    let wants_evaluation = headers.contains_key("x-il-ontology")
+        || request.il_ontology.as_ref().is_some_and(|v| !v.is_null());
+    if wants_evaluation && state.ontologies.is_empty() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": { "type": "not_configured",
+                "message": "no ontologies loaded (registry unreachable at startup)" } })),
+        );
+    }
     let selections = match parse_selection(&state, &headers, request.il_ontology.as_ref()) {
         Ok(selections) => selections,
         Err(response) => return response,
@@ -1056,17 +1069,20 @@ fn openai_response(
     response
 }
 
-/// A provider 4xx (except 429) is the caller's own mistake (bad params the
-/// gateway does not pre-validate) and surfaces as 400; everything else is
-/// provider trouble and surfaces as 502.
+/// Map a provider error to a status that tells the truth about WHOSE
+/// problem it is: a rejected request shape (400/404/413/422) is the
+/// caller's, but the provider refusing our credentials (401/403) or rate
+/// limiting us (429) is the operator's - reporting those as 400 would send
+/// a developer hunting through their own request while the deployment's
+/// model key is what is wrong.
 fn upstream_error(err: &anyhow::Error) -> (StatusCode, Json<Value>) {
     let upstream = err
         .downcast_ref::<inputlayer_gateway::model::UpstreamStatus>()
         .map(|s| s.0);
     let (status, error_type) = match upstream {
-        Some(code) if (400..500).contains(&code) && code != 429 => {
-            (StatusCode::BAD_REQUEST, "invalid_request")
-        }
+        Some(401 | 403) => (StatusCode::BAD_GATEWAY, "model_credentials"),
+        Some(429) => (StatusCode::SERVICE_UNAVAILABLE, "model_rate_limited"),
+        Some(code) if (400..500).contains(&code) => (StatusCode::BAD_REQUEST, "invalid_request"),
         _ => (StatusCode::BAD_GATEWAY, "upstream_error"),
     };
     (

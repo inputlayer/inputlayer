@@ -198,6 +198,7 @@ async fn run() -> Result<()> {
                 &format!(".ontology install {spec}"),
                 &kg,
                 create,
+                true,
                 &server,
                 &api_key,
             )
@@ -213,6 +214,7 @@ async fn run() -> Result<()> {
                 &format!(".ontology remove {name}"),
                 &kg,
                 false,
+                false,
                 &server,
                 &api_key,
             )
@@ -227,6 +229,7 @@ async fn run() -> Result<()> {
             ontology_command(
                 &format!(".ontology upgrade {spec}"),
                 &kg,
+                false,
                 false,
                 &server,
                 &api_key,
@@ -294,6 +297,7 @@ async fn ontology_command(
     command: &str,
     kg: &str,
     create: bool,
+    create_supported: bool,
     server: &str,
     api_key: &str,
 ) -> Result<()> {
@@ -312,7 +316,14 @@ async fn ontology_command(
         .execute(&format!(".kg use {kg}"))
         .await
         .with_context(|| {
-            format!("failed to switch to knowledge graph '{kg}' (--create to create it)")
+            // The --create hint only makes sense for install; remove and
+            // upgrade have no such flag and a missing KG means the pack was
+            // never installed there.
+            if create_supported {
+                format!("failed to switch to knowledge graph '{kg}' (--create to create it)")
+            } else {
+                format!("knowledge graph '{kg}' not found - nothing installed there")
+            }
         })?;
     let result = engine.execute(command).await?;
     for row in &result.rows {
