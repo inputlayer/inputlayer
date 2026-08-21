@@ -8,6 +8,11 @@ services:
       INPUTLAYER_ADMIN_PASSWORD: ${INPUTLAYER_ADMIN_PASSWORD:-}
       INPUTLAYER_BOOTSTRAP_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:-}
       INPUTLAYER_HTTP__HOST: "0.0.0.0"
+      # The engine fetches ontology packs on .ontology install. HTTPS index
+      # URL, or a local path (mount a registry clone) for deployments with
+      # no outbound network.
+      INPUTLAYER_REGISTRY: ${INPUTLAYER_REGISTRY:-}
+      INPUTLAYER_REGISTRY_TOKEN: ${INPUTLAYER_REGISTRY_TOKEN:-}
       INPUTLAYER_HTTP__PORT: "8080"
       INPUTLAYER_HTTP__CORS_ALLOW_ALL: "false"
       INPUTLAYER_LOGGING__LEVEL: ${INPUTLAYER_LOG_LEVEL:-info}
@@ -15,8 +20,8 @@ services:
 
   # The model gateway: OpenAI-compatible Verified Completions API.
   # Separate deployable with its own configuration; the engine never sees
-  # the model provider key. Caddy routes /v1/verify and /v1/chat/completions
-  # here. Remove this service if you only want the engine.
+  # the model provider key. Caddy routes /v1/chat/completions, /v1/events,
+  # and /v1/ontologies here. Remove this service if you only want the engine.
   gateway:
     image: ghcr.io/inputlayer/inputlayer-gateway:latest
     restart: unless-stopped

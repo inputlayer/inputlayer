@@ -1,13 +1,17 @@
 //! `il` - the InputLayer product CLI.
 //!
-//! First slice: the ontology-registry verbs. Ontologies live in a Helm-style
-//! registry (github.com/inputlayer/ontology-registry); `il` is the installer,
-//! and deployment rides the engine's WebSocket API as one atomic program.
+//! Ontologies live in a Helm-style registry
+//! (github.com/inputlayer/ontology-registry). The ENGINE owns the ontology
+//! lifecycle - il's install/remove/upgrade delegate to the engine's
+//! `.ontology` commands over its WebSocket API, so every client runs the
+//! identical implementation under the engine's own auth and ACLs.
 //!
 //! ```text
 //! il search [term]                  browse the registry index
 //! il fetch <name>[@version]         download + digest-verify into the cache
-//! il install <name>[@ver] --kg X    fetch, deploy over WS, pin pack_meta
+//! il install <name>[@ver] --kg X    engine-side .ontology install
+//! il upgrade <name>[@ver] --kg X    rules re-deployed, data kept
+//! il remove <name> --kg X           rules, relations, and data torn down
 //! il list [--kg X]                  what's installed where (via pack_meta)
 //! il migration <verb>               generate | apply | revert | status
 //! ```
@@ -62,6 +66,36 @@ enum Command {
         /// Create the knowledge graph if it does not exist
         #[arg(long)]
         create: bool,
+        /// Engine URL
+        #[arg(long, env = "INPUTLAYER_URL", default_value = "http://127.0.0.1:8080")]
+        server: String,
+        /// Engine API key
+        #[arg(long, env = "INPUTLAYER_API_KEY", hide_env_values = true)]
+        api_key: String,
+    },
+    /// Remove an installed ontology from a knowledge graph (rules,
+    /// relations, and their data)
+    Remove {
+        /// Ontology name
+        name: String,
+        /// Target knowledge graph
+        #[arg(long)]
+        kg: String,
+        /// Engine URL
+        #[arg(long, env = "INPUTLAYER_URL", default_value = "http://127.0.0.1:8080")]
+        server: String,
+        /// Engine API key
+        #[arg(long, env = "INPUTLAYER_API_KEY", hide_env_values = true)]
+        api_key: String,
+    },
+    /// Upgrade an installed ontology to a new version (rules re-deployed,
+    /// data kept)
+    Upgrade {
+        /// Ontology name, optionally pinned: name or name@version
+        spec: String,
+        /// Target knowledge graph
+        #[arg(long)]
+        kg: String,
         /// Engine URL
         #[arg(long, env = "INPUTLAYER_URL", default_value = "http://127.0.0.1:8080")]
         server: String,
@@ -159,7 +193,46 @@ async fn run() -> Result<()> {
             create,
             server,
             api_key,
-        } => install(&reg, &spec, &kg, create, &server, &api_key).await,
+        } => {
+            ontology_command(
+                &format!(".ontology install {spec}"),
+                &kg,
+                create,
+                &server,
+                &api_key,
+            )
+            .await
+        }
+        Command::Remove {
+            name,
+            kg,
+            server,
+            api_key,
+        } => {
+            ontology_command(
+                &format!(".ontology remove {name}"),
+                &kg,
+                false,
+                &server,
+                &api_key,
+            )
+            .await
+        }
+        Command::Upgrade {
+            spec,
+            kg,
+            server,
+            api_key,
+        } => {
+            ontology_command(
+                &format!(".ontology upgrade {spec}"),
+                &kg,
+                false,
+                &server,
+                &api_key,
+            )
+            .await
+        }
         Command::Migration(cmd) => migration(&cmd),
         Command::List {
             kg,
@@ -214,55 +287,39 @@ async fn fetch(reg: &Registry, spec: &str) -> Result<std::path::PathBuf> {
     Ok(dir)
 }
 
-async fn install(
-    reg: &Registry,
-    spec: &str,
+/// Ontology lifecycle delegates to the engine's `.ontology` commands -
+/// the engine owns loading (fetch, digest verification, deploy, pin,
+/// inventory), so every client runs the identical implementation.
+async fn ontology_command(
+    command: &str,
     kg: &str,
     create: bool,
     server: &str,
     api_key: &str,
 ) -> Result<()> {
-    let (name, entry) = reg.resolve(spec).await?;
-    let entry_dir = reg.fetch(&name, &entry).await?;
-    let manifest = registry::read_manifest(&entry_dir)?;
-    println!(
-        "{} {} - {} ({})",
-        manifest.ontology.name, manifest.ontology.version, manifest.ontology.title, entry.digest
-    );
-
-    let mut program = String::new();
-    for rel in &manifest.ontology.rules {
-        let path = entry_dir.join(rel);
-        let text = std::fs::read_to_string(&path)
-            .with_context(|| format!("cannot read rules file {}", path.display()))?;
-        program.push_str(&text);
-        program.push('\n');
-    }
-
-    let statement_count = program
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with("//"))
-        .count();
+    registry::validate_component("knowledge graph", kg)?;
     let mut engine = ws::Engine::connect(server, api_key).await?;
-    println!(
-        "deploying {name}@{} -> {kg} ({statement_count} statements, 1 round trip) ...",
-        entry.version
-    );
-    inputlayer_ontology_client::deploy::deploy_pack(
-        &mut engine,
-        kg,
-        create,
-        &manifest.ontology.name,
-        &manifest.ontology.version,
-        &entry.digest,
-        &program,
-    )
-    .await?;
-    println!(
-        "ok {}@{} -> {kg} (pinned in pack_meta)",
-        manifest.ontology.name, manifest.ontology.version
-    );
+    if create {
+        // Tolerate an existing KG so install is idempotent under --create.
+        if let Err(err) = engine.execute(&format!(".kg create {kg}")).await {
+            let msg = err.to_string().to_lowercase();
+            if !msg.contains("exist") {
+                return Err(err.context(format!("failed to create knowledge graph '{kg}'")));
+            }
+        }
+    }
+    engine
+        .execute(&format!(".kg use {kg}"))
+        .await
+        .with_context(|| {
+            format!("failed to switch to knowledge graph '{kg}' (--create to create it)")
+        })?;
+    let result = engine.execute(command).await?;
+    for row in &result.rows {
+        if let Some(text) = row.first().and_then(serde_json::Value::as_str) {
+            println!("{text}");
+        }
+    }
     Ok(())
 }
 

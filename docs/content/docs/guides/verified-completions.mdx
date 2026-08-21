@@ -1,23 +1,17 @@
 # Verified Completions
 
-LLMs contradict themselves. A travel assistant that confirms a departure on August 14th will happily plan around "we leave on the 12th" three messages later, and neither the model nor the user notices until something breaks. Verified Completions catches this class of failure at the source: every conversation is translated into typed facts inside a knowledge graph, an ontology's rules run over those facts incrementally, and every contradiction comes back with the exact quoted spans that conflict.
+LLMs contradict themselves. A travel assistant that confirms a departure on August 14th will happily plan around "we leave on the 12th" three messages later, and neither the model nor the user notices until something breaks. InputLayer catches this class of failure at the source: conversations flowing through an OpenAI-compatible chat API are translated into typed facts inside a knowledge graph, an ontology's rules evaluate them incrementally, and every finding comes back with the exact quoted spans that clash - plus the engine's proof tree showing the derivation.
 
-The key design decision: translation from text to facts is never open-domain. Extraction is always bound to an ontology pack from the registry - the pack supplies the extraction prompt, the JSON schema the model must produce, the mapping from extracted rows to facts, and the Datalog rules that judge them. The model cannot invent relations, and a claim whose quote is not verbatim in the conversation is dropped before it ever becomes a fact. Noise becomes a missed finding, never a false one.
+Three design decisions shape everything:
 
-This guide takes you from zero to watching the engine catch a contradiction a model just made, in about ten minutes.
+- **The chat API is the only ingestion path.** There is no "submit for evaluation" endpoint. You chat; evaluation happens to the traffic.
+- **Translation is opt-in and ontology-bound.** A request that selects KG/ontology pairs gets translated against exactly those packs - never open-domain. A request without a selection is a pure OpenAI proxy call, untouched.
+- **The engine owns ontologies.** Loading an ontology into a knowledge graph is an engine command (`.ontology install`), governed by the engine's own users and ACLs. The gateway never deploys rules - it translates, stores, and reads.
 
 ## The stack
 
-Two services:
-
-- **Engine** (`inputlayer`): the reasoning engine. Stores facts, runs rules incrementally, answers queries. Never sees your model provider key.
-- **Model gateway** (`inputlayer-gateway`): the only component that talks to the model provider. It extracts conversations into claims (bound to an ontology), inserts them into an ephemeral knowledge graph on the engine, and returns the findings.
-
-At startup the gateway loads every ontology published in the [ontology registry](https://github.com/inputlayer/ontology-registry), each pinned by version and sha256 digest for the life of the process. A registry update never changes a running gateway.
-
-## 1. Start the stack
-
-Create a directory with this `docker-compose.yml` (or grab [docker-compose-no-tls.yml](https://github.com/inputlayer/inputlayer/blob/main/docker-compose-no-tls.yml) from the repo):
+- **Engine** (`inputlayer`): the reasoning core. Owns knowledge graphs, rules, facts, and the ontology lifecycle. Fetches packs from the [ontology registry](https://github.com/inputlayer/ontology-registry) - or from a local clone, for deployments with no outbound network (`INPUTLAYER_REGISTRY` accepts a filesystem path).
+- **Model gateway** (`inputlayer-gateway`): the only component holding the model provider key. Serves the OpenAI-compatible chat API and the per-conversation events stream.
 
 ```yaml
 services:
@@ -40,6 +34,7 @@ services:
       - "8081:8081"
     environment:
       GATEWAY_HOST: "0.0.0.0"
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:-}
       INPUTLAYER_URL: "http://inputlayer:8080"
       INPUTLAYER_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -53,45 +48,19 @@ volumes:
   gateway-cache:
 ```
 
-Put your keys in the environment and bring it up:
-
 ```bash
 export INPUTLAYER_ADMIN_PASSWORD=change-me
 export INPUTLAYER_BOOTSTRAP_API_KEY=$(openssl rand -hex 16)
+export GATEWAY_API_KEY=$(openssl rand -hex 16)
 export ANTHROPIC_API_KEY=sk-ant-...   # your model provider key
 docker compose up -d
 ```
 
-The gateway logs show the registry being resolved and pinned:
+`GATEWAY_API_KEY` is what your applications present to the gateway - in the OpenAI SDK it is simply `api_key`. Left unset, the gateway runs open with a loud warning: acceptable on a private network, never on a public one.
 
-```
-ontology loaded: consistency-core@1.0.2 (sha256:947df8d140d3650abfdece63b48920aeb9f054a98c5a2114ba98100f93e7c7f1)
-InputLayer Gateway listening on http://0.0.0.0:8081
-```
+## 1. Install an ontology into a knowledge graph
 
-Confirm both services:
-
-```bash
-curl -s http://localhost:8081/health
-```
-
-```json
-{"model_key_configured":true,"ontologies":["consistency-core@1.0.2"],"service":"inputlayer-gateway","status":"ok","version":"0.1.0"}
-```
-
-`/ready` additionally probes the engine, so it is the right target for orchestration readiness checks.
-
-## 2. Install the CLI
-
-The `il` CLI ships with the `inputlayer` crate. Install it from source:
-
-```bash
-cargo install --git https://github.com/inputlayer/inputlayer --bin il inputlayer
-```
-
-(Once the crate is published to crates.io, `cargo install inputlayer` will work too.)
-
-Browse what the registry publishes:
+Ontology loading is an engine command. The `il` CLI (installed from source: `cargo install --git https://github.com/inputlayer/inputlayer --bin il inputlayer`) delegates to it:
 
 ```bash
 il search
@@ -99,152 +68,24 @@ il search
 
 ```
 ONTOLOGY                 LATEST    ENGINE     TITLE
-consistency-core         1.0.2     >=0.1.0    Verified Completions
-```
-
-The gateway already loaded everything published, so nothing here is required for verification to work. But the CLI is how you look inside the box - and how you provision an ontology into a persistent knowledge graph you can query yourself:
-
-```bash
-il install consistency-core --kg playground --create --api-key $INPUTLAYER_BOOTSTRAP_API_KEY
-```
-
-```
-consistency-core 1.0.2 - Verified Completions (sha256:947df8d140d3650abfdece63b48920aeb9f054a98c5a2114ba98100f93e7c7f1)
-deploying consistency-core@1.0.2 -> playground (107 statements, 1 round trip) ...
-ok consistency-core@1.0.2 -> playground (pinned in pack_meta)
+consistency-core         1.0.3     >=0.1.0    Verified Completions
 ```
 
 ```bash
-il list --kg playground --api-key $INPUTLAYER_BOOTSTRAP_API_KEY
+il install consistency-core --kg support --create --api-key $INPUTLAYER_BOOTSTRAP_API_KEY
 ```
 
 ```
-KG             ONTOLOGY                 VERSION   DIGEST
-playground     consistency-core         1.0.2     sha256:947df8d140d3650abfdece63b48920aeb9f054a98c5a2114ba98100f93e7c7f1
+installed consistency-core@1.0.3 into support (107 statements)
+digest sha256:00dfecadb35e636006b73ef34bb4bf70394790e839d000e95c99390c9fdc9a7d
+recorded 47 rule(s), 21 relation(s) in pack_item
 ```
 
-The download is sha256-verified against the registry index; a digest mismatch is a hard refusal. `pack_meta` pins what is deployed where, so a team can always answer "which ontology version does this KG run?".
+Under the hood this sends `.ontology install consistency-core` over the engine's WebSocket API: the engine fetches the pack (digest-verified), deploys its rules into the `support` KG, pins the exact version and digest in `pack_meta`, and records the deployed rule/relation inventory so `il upgrade` (rules re-deployed, data kept) and `il remove` (everything torn down) are exact. Any WS client - the Studio included - can send the same command, and the engine's per-user auth and per-KG ACLs govern who may.
 
-## 3. Verify a conversation
+## 2. Chat - and let evaluation happen
 
-`POST /v1/verify` takes a conversation and an ontology selection. The selection is mandatory - the `x-il-ontology` header (or an `il_ontology` field in the body) names which ontology binds the extraction, optionally pinned as `name@version`. A request without one is rejected before any model call.
-
-Here is a conversation with a contradiction a human would probably miss:
-
-```bash
-curl -s http://localhost:8081/v1/verify \
-  -H 'content-type: application/json' \
-  -H 'x-il-ontology: consistency-core' \
-  -d '{
-    "messages": [
-      {"role": "user", "content": "Hi! Planning our family trip: we fly out of Geneva on August 14th, and our total budget is 2000 EUR."},
-      {"role": "assistant", "content": "Great, a Geneva departure on August 14th with a 2000 EUR budget. I will keep that in mind."},
-      {"role": "user", "content": "Since we leave on the 12th, can you check whether we need to book the airport transfer earlier?"}
-    ]
-  }'
-```
-
-```json
-{
-  "inputlayer": {
-    "consistency": {
-      "status": "conflicts_found",
-      "ontology": "consistency-core@1.0.2",
-      "digest": "sha256:947df8d140d3650abfdece63b48920aeb9f054a98c5a2114ba98100f93e7c7f1",
-      "findings": [
-        {
-          "view": "finding_src(K, Sev, C1, M1, S1, C2, M2, S2)",
-          "title": "functional - hard",
-          "spans": [
-            { "message": "0", "surface": "August 14th" },
-            { "message": "2", "surface": "we leave on the 12th" }
-          ],
-          "row": ["functional", "hard", "c_m0_2", "0", "August 14th", "c_m2_1", "2", "we leave on the 12th"]
-        }
-      ],
-      "dropped": []
-    }
-  }
-}
-```
-
-Walk through what happened between the request and this response:
-
-1. The model (claude-haiku-4-5, chosen by the pack) extracted the conversation into typed claims using the pack's prompt and schema. A departure date is a **functional** attribute in this ontology - an entity can only have one.
-2. Each claim's `surface` quote was checked verbatim against the message it cites. Anything the model misquoted would land in `dropped` instead of becoming a fact.
-3. The claims were mapped to facts through the pack's templates and inserted into an ephemeral knowledge graph created just for this request.
-4. The pack's rules ran incrementally and derived a `functional` conflict between the August 14th claim and the August 12th claim.
-5. The finding came back with both verbatim spans, and the ephemeral graph was dropped.
-
-A consistent conversation comes back clean:
-
-```json
-{"inputlayer": {"consistency": {"status": "verified", "findings": [], "dropped": [], ...}}}
-```
-
-## 4. Catch the model breaking the user's constraint
-
-Consistency checks are not only user-vs-user. The ontology gates constraint checks by claim origin: claims made by the assistant (`origin: "output"`) are held against the constraints the user stated. Feed the gateway a conversation where the assistant ignored a hard limit:
-
-```bash
-curl -s http://localhost:8081/v1/verify \
-  -H 'content-type: application/json' \
-  -H 'x-il-ontology: consistency-core' \
-  -d '{
-    "messages": [
-      {"role": "user", "content": "Find me a hotel in Geneva. Hard limit: total price must stay under 2000 EUR."},
-      {"role": "assistant", "content": "I recommend the Grand Bellevue: lakeside view, excellent breakfast, and the total price is 2600 EUR for your dates."}
-    ]
-  }'
-```
-
-```json
-{
-  "inputlayer": {
-    "consistency": {
-      "status": "conflicts_found",
-      "ontology": "consistency-core@1.0.2",
-      "digest": "sha256:947df8d140d3650abfdece63b48920aeb9f054a98c5a2114ba98100f93e7c7f1",
-      "findings": [
-        {
-          "view": "violation_src(K, C, M, S, Kc, Mk, Sk)",
-          "title": "violation - limit_exceeded",
-          "spans": [ { "message": "1", "surface": "the total price is 2600 EUR" } ],
-          "row": ["limit_exceeded", "c_m1_4", "1", "the total price is 2600 EUR",
-                   "k_m0_1", "0", "total price must stay under 2000 EUR"]
-        }
-      ],
-      "dropped": []
-    }
-  }
-}
-```
-
-The assistant's 2600 EUR recommendation was extracted as an output claim, held against the user's `max_value` constraint, and flagged - with the violating span and the constraint's own source in the row.
-
-## 5. What a hostile conversation gets
-
-The pipeline enforces three mechanical guarantees against conversations that try to inject facts, each independent of the model behaving well:
-
-- **Quote gate**: a claim whose quote is not verbatim in the message it cites is dropped and reported in `dropped` - including claims with malformed or empty quote fields.
-- **Typed template slots**: extracted strings are escaped in quoted positions, rejected outright if they carry control characters, and only parsed integers ever reach unquoted positions - extracted text cannot escape into the fact language.
-- **Drift bail**: extraction that does not map cleanly onto the ontology's templates aborts to `unverified` rather than verifying over partial facts.
-
-In our testing, a conversation carrying an embedded "system override" demanding fabricated claims and injected fact syntax produced no findings and no inserted facts. The failure direction is designed to be the safe one: a missed finding, never a forged fact.
-
-## Response contract
-
-| `status` | Meaning |
-|---|---|
-| `verified` | Facts inserted, rules ran, no findings. |
-| `conflicts_found` | One or more findings, each with quoted spans. |
-| `unverified` | The verifier could not complete (model or engine trouble, or extraction that does not map cleanly). Carries a `reason`. Verification fails open: your traffic is never taken down by the verifier. |
-
-Errors you can act on: `400` for a missing or unknown ontology selection or a version assertion that does not match the gateway's pin; `503` when no model key is configured or no ontologies loaded.
-
-## The chat proxy
-
-`POST /v1/verify` is the verification primitive; `POST /v1/chat/completions` is the product: an OpenAI-compatible endpoint where completions come from the model provider and every response carries the consistency block. Point any OpenAI SDK at the gateway and change nothing else:
+Point any OpenAI SDK at the gateway. Selection is a list of `<kg>/<ontology>` pairs in the `x-il-ontology` header; a conversation id groups turns:
 
 ```python
 from openai import OpenAI
@@ -252,7 +93,10 @@ from openai import OpenAI
 client = OpenAI(
     base_url="http://127.0.0.1:8081/v1",
     api_key="gw-secret",  # your GATEWAY_API_KEY
-    default_headers={"x-il-ontology": "consistency-core"},
+    default_headers={
+        "x-il-ontology": "support/consistency-core",
+        "x-il-conversation": "trip-42",
+    },
 )
 r = client.chat.completions.create(
     model="claude-haiku-4-5",
@@ -263,25 +107,83 @@ r = client.chat.completions.create(
     ],
 )
 print(r.choices[0].message.content)          # a normal completion
-print(r.model_extra["inputlayer"])           # ... with findings attached
+print(r.model_extra["inputlayer"])           # ... with per-ontology reports
 ```
 
-The completion works like any OpenAI chat call (`claude-*` models are forwarded as-is; other model names fall back to the default), and `model_extra["inputlayer"]["consistency"]` carries the same findings, spans, and optional trace as `/v1/verify`. Streaming is not supported yet ([#85](https://github.com/inputlayer/inputlayer/issues/85)); text content only, no tool calls.
+The completion behaves like any OpenAI chat call. Alongside it, the conversation was translated into the pack's typed claims (one extraction prompt per selected pack), every identifier prefixed with `trip-42:` so conversations are isolated namespaces inside the shared `support` KG, the tuples stored, and the pack's rules evaluated incrementally - the engine's differential core processes each turn's delta. The report:
 
-### Authentication
+```json
+{ "reports": [ {
+    "kg": "support",
+    "ontology": "consistency-core@1.0.3",
+    "digest": "sha256:00dfecadb35e636006b73ef34bb4bf70394790e839d000e95c99390c9fdc9a7d",
+    "status": "complete",
+    "findings": [ {
+        "view": "finding_src(K, Sev, C1, M1, S1, C2, M2, S2)",
+        "title": "functional - hard",
+        "blocking": true,
+        "spans": [ { "message": "0", "surface": "August 14th" },
+                   { "message": "2", "surface": "we leave on the 12th" } ],
+        "row": ["functional", "hard", "trip-42:c_m0_2", "0", "August 14th",
+                 "trip-42:c_m2_1", "2", "we leave on the 12th"],
+        "proof": [ { "nodes": { "n0": { "kind": "fact", "source": "edb",
+            "conclusion": { "pred": "claim", "args": ["trip-42:c_m0_2",
+                "trip-42:trip", "departure_date", "2026-08-14"] } } } } ]
+    } ],
+    "dropped": []
+} ] }
+```
 
-Set `GATEWAY_API_KEY` and every `/v1/*` request must carry `Authorization: Bearer <key>` - this is what the OpenAI SDK's `api_key` becomes. Unset, the gateway is open: acceptable on a private network, never on a public one, which is why the TLS compose file refuses to start without it. A chat proxy spends your model-provider budget on every request; treat the gateway key like the provider key.
+(Abridged: `proof` is the engine's full derivation tree - rule applications with bindings down to base facts, each base fact a claim carrying its quoted span - and this conversation actually yields a second finding too, because the assistant's own "departure August 14th" confirmation is extracted as another conflicting claim.)
 
-### Modes
+Requests **without** `x-il-ontology` are pure proxy calls: no translation, no engine involvement, no `inputlayer` key on the response. Requests with a selection but no conversation id evaluate one-shot: a synthetic prefix, facts retracted after the response, reports inline only.
 
-| `il_mode` (or `x-il-mode` header) | Behavior |
+## 3. Watch a conversation live
+
+Observers subscribe per conversation - the Studio's live panel is exactly this:
+
+```python
+import asyncio, json, websockets
+
+async def watch():
+    uri = "ws://127.0.0.1:8081/v1/events?conversation=trip-42&token=gw-secret"
+    async with websockets.connect(uri) as ws:
+        while True:
+            event = json.loads(await ws.recv())
+            print(event["type"], event.get("title") or "")
+
+asyncio.run(watch())
+```
+
+```
+translation
+finding functional - hard
+report
+```
+
+Three event kinds per evaluated request, per ontology: `translation` (the stored tuples), `finding` (the watch-view row with spans and the engine proof tree), and `report` (the per-ontology close). A ring buffer replays recent events to late subscribers. Everything traceable in the stream comes from the engine; the gateway relays.
+
+## 4. Enforce - and fail closed
+
+`x-il-mode: enforce` (or `il_mode` in the body) verifies before completing, and it fails CLOSED:
+
+| Situation | Response |
 |---|---|
-| `annotate` (default) | Completion and verification run concurrently; findings are attached, nothing is ever blocked. Verifier trouble yields `status: "unverified"` and the completion still goes out. |
-| `enforce` | Verify first: a conversation with findings is refused with HTTP 422 and no completion tokens are spent. **Fails open**: if the conversation cannot be verified (extraction error, engine down), the completion proceeds with `status: "unverified"`. |
-| `enforce-strict` | Fails closed: no completion unless verification actually ran clean. `conflicts_found` gets 422; `unverified` gets 503 `verification_unavailable`. |
+| Any blocking finding (packs mark their watch views `blocking = true`) | HTTP 422 `consistency_violation`, no completion tokens spent |
+| Any selected pair could not be evaluated (engine down, ontology not installed in that KG, extraction failed or dropped rows) | HTTP 503 `verification_unavailable`, no completion |
+| Everything evaluated clean | Completion proceeds, reports attached |
 
-The fail-open distinction matters: `enforce` guarantees "no completion over KNOWN contradictions", not "no completion unless verified" - content that breaks extraction (for example, a conversation long enough to truncate it) downgrades enforcement to annotation. Callers who need the hard guarantee use `enforce-strict` and accept that verifier downtime blocks completions.
+There is no fail-open enforcement variant: content engineered to break extraction blocks the completion instead of sneaking past. Callers who prefer availability over enforcement use `annotate` (the default) and read the reports themselves. Informational ontologies whose views are not `blocking` never refuse anything.
+
+## Response contract
+
+| Report `status` | Meaning |
+|---|---|
+| `complete` | Translation ran, tuples stored, rules evaluated. `findings` may be empty or not. |
+| `incomplete` | This pair could not be evaluated (`reason` says why). Under `annotate` the completion still goes out; under `enforce` the request is refused. |
+
+Errors you can act on: `400` for malformed pairs, unknown ontologies, version mismatches against the gateway's pin, or `enforce` without a selection; `401` without a valid bearer token; `503` when no model key or no ontologies are configured.
 
 ## Where this is going
 
-Streaming and incremental per-session verification are M2 ([#85](https://github.com/inputlayer/inputlayer/issues/85)); checking the model's own reply before it is returned, with repair mode, is M3 ([#86](https://github.com/inputlayer/inputlayer/issues/86)). The registry grows independently: each new ontology pack published becomes available to every gateway on its next restart, pinned and digest-verified, with no gateway release in between.
+Streaming completions and richer session lifecycle (retention TTLs, edited-history retraction) are M2 ([#85](https://github.com/inputlayer/inputlayer/issues/85)); checking the model's own reply before it is returned, with repair mode, is M3 ([#86](https://github.com/inputlayer/inputlayer/issues/86)). The registry grows independently: each new pack published becomes available to every gateway restart and every `.ontology install`, pinned and digest-verified.

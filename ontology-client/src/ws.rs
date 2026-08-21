@@ -28,6 +28,8 @@ enum WsResponse {
     Result {
         columns: Vec<String>,
         rows: Vec<Vec<serde_json::Value>>,
+        #[serde(default)]
+        proof_trees: Option<serde_json::Value>,
     },
     ResultStart {
         columns: Vec<String>,
@@ -51,6 +53,9 @@ pub struct QueryResult {
     #[allow(dead_code)]
     pub columns: Vec<String>,
     pub rows: Vec<Vec<serde_json::Value>>,
+    /// Engine-produced proof trees (present on `.why` results), passed
+    /// through untouched.
+    pub proof_trees: Option<serde_json::Value>,
 }
 
 impl QueryResult {
@@ -137,13 +142,22 @@ impl Engine {
         let mut streamed: Option<QueryResult> = None;
         loop {
             match Self::next_response(&mut self.stream).await? {
-                WsResponse::Result { columns, rows } => {
-                    return Ok(QueryResult { columns, rows });
+                WsResponse::Result {
+                    columns,
+                    rows,
+                    proof_trees,
+                } => {
+                    return Ok(QueryResult {
+                        columns,
+                        rows,
+                        proof_trees,
+                    });
                 }
                 WsResponse::ResultStart { columns } => {
                     streamed = Some(QueryResult {
                         columns,
                         rows: Vec::new(),
+                        proof_trees: None,
                     });
                 }
                 WsResponse::ResultChunk { rows } => {

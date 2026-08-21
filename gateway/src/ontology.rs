@@ -43,6 +43,11 @@ pub struct ExtractionSection {
     pub prompt: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
+    /// Per-section list of extracted fields whose values are
+    /// conversation-scoped identifiers; the gateway prefixes them with the
+    /// conversation id to isolate conversations inside a shared KG.
+    #[serde(default)]
+    pub identifier_fields: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -84,6 +89,14 @@ pub struct WatchSpec {
     pub spans: Vec<Vec<String>>,
     #[serde(default)]
     pub symmetric_dedup: bool,
+    /// Rows from a blocking view refuse completions in enforce mode; the
+    /// pack declares its enforcement semantics (D4).
+    #[serde(default)]
+    pub blocking: bool,
+    /// Proof goal template ({Col} placeholders); instantiated per finding
+    /// and run through the engine's `.why` for the events stream.
+    #[serde(default)]
+    pub proof: Option<String>,
 }
 
 /// A fully loaded, request-ready ontology entry.

@@ -12,6 +12,11 @@ services:
       INPUTLAYER_HTTP__HOST: "0.0.0.0"
       INPUTLAYER_HTTP__PORT: "8080"
       INPUTLAYER_HTTP__CORS_ALLOW_ALL: "${CORS_ALLOW_ALL:-false}"
+      # The engine fetches ontology packs on .ontology install. HTTPS index
+      # URL, or a local path (mount a registry clone) for deployments with
+      # no outbound network.
+      INPUTLAYER_REGISTRY: ${INPUTLAYER_REGISTRY:-}
+      INPUTLAYER_REGISTRY_TOKEN: ${INPUTLAYER_REGISTRY_TOKEN:-}
       INPUTLAYER_LOGGING__LEVEL: ${INPUTLAYER_LOG_LEVEL:-info}
 
   # The model gateway: OpenAI-compatible Verified Completions API on its own

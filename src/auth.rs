@@ -235,6 +235,10 @@ fn authorize_kg_editor(stmt: &Statement) -> Result<(), String> {
             | MetaCommand::IndexRebuild(_) => Ok(()),
             // Data loading/clearing
             MetaCommand::ClearPrefix(_) | MetaCommand::Load { .. } => Ok(()),
+            // Ontology lifecycle: rule/relation deployment, editor-level
+            MetaCommand::OntologyInstall(_)
+            | MetaCommand::OntologyRemove(_)
+            | MetaCommand::OntologyUpgrade(_) => Ok(()),
             // ACL list (read-only)
             MetaCommand::KgAclList(_) => Ok(()),
             // Session commands (ephemeral)
@@ -401,6 +405,18 @@ fn authorize_non_admin_meta(role: &Role, cmd: &MetaCommand) -> Result<(), String
         | MetaCommand::RuleEdit { .. }
         | MetaCommand::RuleClear(_)
         | MetaCommand::RuleRemove { .. } => Ok(()),
+
+        // Ontology lifecycle writes rules and relations: viewers denied,
+        // editors and above deferred to per-KG auth.
+        MetaCommand::OntologyInstall(_)
+        | MetaCommand::OntologyRemove(_)
+        | MetaCommand::OntologyUpgrade(_) => {
+            if *role == Role::Viewer {
+                Err("Permission denied: viewers cannot manage ontologies".to_string())
+            } else {
+                Ok(())
+            }
+        }
 
         // Index management - deferred to per-KG auth
         MetaCommand::IndexList
@@ -766,5 +782,19 @@ mod tests {
 
         let result = PersistedCredentials::load(&path);
         assert!(result.is_none());
+    }
+}
+
+#[cfg(test)]
+mod ontology_auth_tests {
+    use super::*;
+
+    #[test]
+    fn viewers_cannot_manage_ontologies() {
+        let cmd = MetaCommand::OntologyInstall("x".to_string());
+        assert!(authorize_non_admin_meta(&Role::Viewer, &cmd).is_err());
+        assert!(authorize_non_admin_meta(&Role::Editor, &cmd).is_ok());
+        let cmd = MetaCommand::OntologyRemove("x".to_string());
+        assert!(authorize_non_admin_meta(&Role::Viewer, &cmd).is_err());
     }
 }

@@ -95,6 +95,59 @@ impl Registry {
         }
     }
 
+    /// Local registry mode: a non-HTTP index location is a filesystem path
+    /// to a cloned/mirrored registry repo (the directory holding
+    /// `ontologies/`). Operators who do not want outbound network point
+    /// INPUTLAYER_REGISTRY here; packs are read and digest-pinned entirely
+    /// from disk.
+    fn local_root(&self) -> Option<PathBuf> {
+        if self.index_url.starts_with("http://") || self.index_url.starts_with("https://") {
+            return None;
+        }
+        let raw = self
+            .index_url
+            .strip_prefix("file://")
+            .unwrap_or(&self.index_url);
+        let path = PathBuf::from(raw);
+        let root = if path.is_file() {
+            path.parent().map(PathBuf::from)?
+        } else {
+            path
+        };
+        Some(root)
+    }
+
+    fn local_index(root: &Path) -> Result<Index> {
+        let ontologies = root.join("ontologies");
+        let mut entries = std::collections::BTreeMap::new();
+        let dir = std::fs::read_dir(&ontologies).with_context(|| {
+            format!(
+                "local registry has no ontologies/ directory: {}",
+                ontologies.display()
+            )
+        })?;
+        for item in dir.filter_map(Result::ok) {
+            let entry_dir = item.path();
+            if !entry_dir.join("ontology.toml").is_file() {
+                continue;
+            }
+            let manifest = read_manifest(&entry_dir)?;
+            validate_component("ontology name", &manifest.ontology.name)?;
+            validate_component("version", &manifest.ontology.version)?;
+            entries.insert(
+                manifest.ontology.name.clone(),
+                vec![IndexEntry {
+                    version: manifest.ontology.version,
+                    title: manifest.ontology.title,
+                    engine: String::new(),
+                    urls: Vec::new(),
+                    digest: local_dir_digest(&entry_dir)?,
+                }],
+            );
+        }
+        Ok(Index { entries })
+    }
+
     /// The token is only ever sent to GitHub hosts or the index's own host -
     /// index entries can list arbitrary mirror URLs, and a bearer token must
     /// not follow them there.
@@ -125,6 +178,9 @@ impl Registry {
     }
 
     pub async fn index(&self) -> Result<Index> {
+        if let Some(root) = self.local_root() {
+            return Self::local_index(&root);
+        }
         let resp = self
             .request(&self.index_url)
             .send()
@@ -174,6 +230,23 @@ impl Registry {
     /// (a republished version is re-fetched, keeping pack_meta attribution
     /// honest).
     pub async fn fetch(&self, name: &str, entry: &IndexEntry) -> Result<PathBuf> {
+        if let Some(root) = self.local_root() {
+            let entry_dir = root.join("ontologies").join(name);
+            let manifest = read_manifest(&entry_dir)?;
+            anyhow::ensure!(
+                manifest.ontology.version == entry.version,
+                "local registry has {}@{}, requested {}",
+                name,
+                manifest.ontology.version,
+                entry.version
+            );
+            let digest = local_dir_digest(&entry_dir)?;
+            anyhow::ensure!(
+                digest == entry.digest,
+                "local pack changed on disk between resolve and fetch"
+            );
+            return Ok(entry_dir);
+        }
         let version_dir = cache_dir()?.join(name).join(&entry.version);
         let entry_dir = version_dir.join(name);
         let digest_file = version_dir.join(".digest");
@@ -315,9 +388,89 @@ pub fn read_manifest(entry_dir: &Path) -> Result<Manifest> {
     toml::from_str(&text).with_context(|| format!("invalid manifest: {}", path.display()))
 }
 
+/// Canonical digest of a pack directory for local registry mode: sha256
+/// over sorted (relative path, length, content) triples. NOTE: this differs
+/// from a release tarball's digest by construction - a deployment must use
+/// the same registry source (local or remote) for engine installs and
+/// gateway pack loading, or pack_meta pin checks will mismatch.
+pub fn local_dir_digest(entry_dir: &Path) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    fn walk(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+        for item in std::fs::read_dir(dir)?.filter_map(Result::ok) {
+            let path = item.path();
+            if path.is_dir() {
+                walk(&path, files)?;
+            } else {
+                files.push(path);
+            }
+        }
+        Ok(())
+    }
+    let mut files = Vec::new();
+    walk(entry_dir, &mut files)
+        .with_context(|| format!("cannot walk pack dir {}", entry_dir.display()))?;
+    files.sort();
+    let mut hasher = Sha256::new();
+    for path in files {
+        let rel = path
+            .strip_prefix(entry_dir)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let content = std::fs::read(&path)
+            .with_context(|| format!("cannot read pack file {}", path.display()))?;
+        hasher.update(rel.as_bytes());
+        hasher.update([0u8]);
+        hasher.update((content.len() as u64).to_le_bytes());
+        hasher.update(&content);
+    }
+    Ok(format!("sha256:{:x}", hasher.finalize()))
+}
+
 pub fn cache_dir() -> Result<PathBuf> {
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .ok_or_else(|| anyhow!("cannot determine home directory"))?;
     Ok(PathBuf::from(home).join(".inputlayer").join("ontologies"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch_registry() -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("il-local-registry-test-{}", std::process::id()));
+        let pack = dir.join("ontologies").join("mini-pack");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(pack.join("rules")).expect("mkdir");
+        std::fs::write(
+            pack.join("ontology.toml"),
+            "[ontology]\nname = \"mini-pack\"\nversion = \"0.1.0\"\ntitle = \"Mini\"\nrules = [\"rules/r.iql\"]\n",
+        )
+        .expect("manifest");
+        std::fs::write(pack.join("rules/r.iql"), "+t(a: string)\n").expect("rules");
+        dir
+    }
+
+    #[tokio::test]
+    async fn local_registry_resolves_and_fetches_from_disk() {
+        let root = scratch_registry();
+        let registry = Registry::new(root.to_string_lossy().to_string(), None);
+        let index = registry.index().await.expect("index");
+        assert_eq!(index.entries.len(), 1);
+        let (name, entry) = registry.resolve("mini-pack").await.expect("resolve");
+        assert_eq!(name, "mini-pack");
+        assert_eq!(entry.version, "0.1.0");
+        assert!(entry.digest.starts_with("sha256:"));
+        let dir = registry.fetch(&name, &entry).await.expect("fetch");
+        assert!(dir.join("ontology.toml").is_file());
+        // Version pin against a version the clone does not have: refused.
+        assert!(registry.resolve("mini-pack@9.9.9").await.is_err());
+        // Digest changes when content changes.
+        std::fs::write(dir.join("rules/r.iql"), "+t2(a: string)\n").expect("rewrite");
+        let (_, entry2) = registry.resolve("mini-pack").await.expect("resolve2");
+        assert_ne!(entry.digest, entry2.digest);
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

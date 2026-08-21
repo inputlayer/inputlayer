@@ -1,9 +1,13 @@
 {$DOMAIN:localhost} {
-	# Verified Completions API (the model gateway)
-	handle /v1/verify* {
+	# Verified Completions API (the model gateway): chat completions,
+	# conversation events stream, ontology listing.
+	handle /v1/chat/completions* {
 		reverse_proxy gateway:8081
 	}
-	handle /v1/chat/completions* {
+	handle /v1/events* {
+		reverse_proxy gateway:8081
+	}
+	handle /v1/ontologies* {
 		reverse_proxy gateway:8081
 	}
 	# Everything else: the engine (WS API, GUI, health, metrics)
