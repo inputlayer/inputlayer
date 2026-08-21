@@ -4307,7 +4307,22 @@ impl Handler {
         // Protect _internal KG from direct access.
         // Block both explicit commands AND sessions already bound to _internal.
         let session_kg_owned: Option<String> = if knowledge_graph.is_none() {
-            session_id.and_then(|sid| self.sessions.session_kg(sid).ok())
+            match session_id {
+                // A session whose KG binding cannot be read (reaped) must
+                // not silently fall through to the storage default: the
+                // per-KG ACL check keys off this value, and None skips it.
+                Some(sid) => match self.sessions.session_kg(sid) {
+                    Ok(kg) => Some(kg),
+                    Err(_) if trimmed.starts_with(".ontology") => {
+                        return Err(
+                            "session expired - reconnect before running .ontology commands"
+                                .to_string(),
+                        );
+                    }
+                    Err(_) => None,
+                },
+                None => None,
+            }
         } else {
             None
         };
@@ -4734,24 +4749,42 @@ impl Handler {
             .ok_or_else(|| "No knowledge graph selected".to_string())
     }
 
-    /// The engine reports many per-statement failures as message rows inside
-    /// an Ok result; scan for them the same way the WS clients do.
+    /// The engine reports many per-statement failures as message rows
+    /// inside an Ok result. Deny by default, exactly like the WS client's
+    /// classifier: an allowlist of failure phrases means any unfamiliar
+    /// phrasing reads as success, and reporting success for a statement
+    /// that did not execute is the failure this must never have.
     fn result_problem_rows(result: &QueryResult) -> Vec<String> {
-        const MARKERS: [&str; 5] = [
-            "Insert rejected",
-            "Failed to register schema",
-            "Create failed:",
-            "Drop failed:",
-            "must be run as a standalone",
+        const SUCCESS_MARKERS: [&str; 12] = [
+            "Inserted ",
+            "Deleted ",
+            "Updated ",
+            "Conditional delete:",
+            "Relation ",
+            "Rule ",
+            "Schema ",
+            "Knowledge graph ",
+            "Switched to knowledge graph",
+            "Registered ",
+            "Type ",
+            "No facts",
         ];
+        if result.schema.len() != 1 || result.schema[0].name != "message" {
+            return Vec::new();
+        }
         result
             .rows
             .iter()
             .filter_map(|row| match row.values.first() {
-                Some(WireValue::String(s)) if MARKERS.iter().any(|m| s.contains(m)) => {
-                    Some(s.clone())
-                }
+                Some(WireValue::String(s)) => Some(s.clone()),
                 _ => None,
+            })
+            .filter(|message| {
+                let trimmed = message.trim();
+                !trimmed.is_empty()
+                    && !SUCCESS_MARKERS
+                        .iter()
+                        .any(|marker| trimmed.starts_with(marker))
             })
             .collect()
     }
@@ -4924,14 +4957,43 @@ impl Handler {
             if line.is_empty() {
                 continue;
             }
+            // Bookkeeping relations are the engine's, not a pack's: a pack
+            // that could insert into pack_meta would forge ANOTHER pack's
+            // pin, and a gateway trusting that pin would report "verified"
+            // over rules that were never deployed.
+            const RESERVED: [&str; 3] = ["pack_meta", "pack_item", "il_conversation"];
+            let reserved_target = match &statement::parse_statement(line) {
+                Ok(statement::Statement::Insert(op)) => RESERVED.contains(&op.relation.as_str()),
+                Ok(statement::Statement::SchemaDecl(decl)) => {
+                    RESERVED.contains(&decl.name.as_str())
+                }
+                Ok(statement::Statement::PersistentRule(rule)) => {
+                    RESERVED.contains(&rule.head.relation.as_str())
+                }
+                _ => false,
+            };
+            if reserved_target {
+                return Err(format!(
+                    "pack {name} writes a reserved relation (pack_meta, pack_item, \
+                     and il_conversation belong to the engine)"
+                ));
+            }
             match statement::parse_statement(line) {
                 Ok(
                     statement::Statement::SchemaDecl(_)
                     | statement::Statement::PersistentRule(_)
                     | statement::Statement::Insert(_)
-                    | statement::Statement::Fact(_)
                     | statement::Statement::TypeDecl(_),
                 ) => {}
+                // Facts (`foo("a").`) become SESSION facts and are silently
+                // discarded, so a pack shipping them would report installed
+                // statements that do not exist afterwards.
+                Ok(statement::Statement::Fact(_)) => {
+                    return Err(format!(
+                        "pack {name} uses a session fact (`rel(...).`); packs must use \
+                         persistent inserts (`+rel[(...)]`)"
+                    ));
+                }
                 Ok(other) => {
                     return Err(format!(
                         "pack {name} contains a disallowed statement (packs may only declare \
@@ -5157,11 +5219,19 @@ impl Handler {
         // relations are actually gone.
         let leftovers: Vec<String> = {
             let storage = self.storage.read();
-            let existing = storage.list_relations_in(&kg).map_err(|e| e.to_string())?;
+            let relations = storage.list_relations_in(&kg).map_err(|e| e.to_string())?;
+            let rules = storage.list_rules_in(&kg).map_err(|e| e.to_string())?;
             items
                 .iter()
-                .filter(|(k, item)| k == "relation" && existing.contains(item))
-                .map(|(_, item)| item.clone())
+                .filter(|(kind, item)| match kind.as_str() {
+                    "relation" => relations.contains(item),
+                    // Rules are verified too: a `.rule drop` that failed
+                    // would otherwise leave live rules behind while the pin
+                    // and inventory are cleared, making them untrackable.
+                    "rule" => rules.contains(item),
+                    _ => false,
+                })
+                .map(|(kind, item)| format!("{kind} {item}"))
                 .collect()
         };
         if !leftovers.is_empty() {
@@ -5169,7 +5239,7 @@ impl Handler {
             // manageable (retry, or inspect) instead of becoming an
             // untracked orphan.
             return Err(format!(
-                "removal incomplete: relation(s) still present after drop: {} \
+                "removal incomplete: still present after drop: {} \
                  (pack_meta and pack_item left in place - retry or inspect the KG)",
                 leftovers.join(", ")
             ));

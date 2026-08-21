@@ -24,6 +24,9 @@ struct Conversation {
     tx: broadcast::Sender<Value>,
     /// Monotonic touch counter for LRU eviction.
     touched: u64,
+    /// Created by a subscriber before the conversation existed: evict
+    /// these first, so subscriber churn cannot displace live traffic.
+    pending: bool,
 }
 
 #[derive(Default)]
@@ -43,6 +46,7 @@ impl EventHub {
         if entry.ring.len() == RING_CAPACITY {
             entry.ring.pop_front();
         }
+        entry.pending = false;
         entry.ring.push_back(event.clone());
         let _ = entry.tx.send(event); // no subscribers is fine
     }
@@ -60,7 +64,7 @@ impl EventHub {
         if !map.contains_key(conversation) && map.len() >= MAX_CONVERSATIONS {
             if let Some(oldest) = map
                 .iter()
-                .min_by_key(|(_, c)| c.touched)
+                .min_by_key(|(_, c)| (!c.pending, c.touched))
                 .map(|(k, _)| k.clone())
             {
                 map.remove(&oldest);
@@ -72,19 +76,33 @@ impl EventHub {
                 ring: VecDeque::with_capacity(RING_CAPACITY),
                 tx: broadcast::channel(CHANNEL_CAPACITY).0,
                 touched: now,
+                pending: false,
             });
         entry.touched = now;
         entry
     }
 
     /// Recent history plus a live receiver for a conversation.
+    ///
+    /// Subscribing does NOT create an entry: otherwise a client opening
+    /// sockets on junk ids would evict live conversations from the cap.
+    /// An unknown conversation gets an empty replay and a receiver that
+    /// starts producing as soon as that conversation publishes.
     pub fn subscribe(&self, conversation: &str) -> (Vec<Value>, broadcast::Receiver<Value>) {
         let mut map = self
             .conversations
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let entry = self.entry(&mut map, conversation);
-        (entry.ring.iter().cloned().collect(), entry.tx.subscribe())
+        match map.get(conversation) {
+            Some(entry) => (entry.ring.iter().cloned().collect(), entry.tx.subscribe()),
+            None => {
+                // Park on a channel that this conversation will adopt when
+                // it first publishes.
+                let entry = self.entry(&mut map, conversation);
+                entry.pending = true;
+                (Vec::new(), entry.tx.subscribe())
+            }
+        }
     }
 }
 

@@ -385,6 +385,15 @@ fn parse_selection(
                 )));
             }
         }
+        // Duplicate pairs would run two concurrent evaluations against the
+        // same KG with the same prefix, racing each other's inserts and
+        // (for one-shot requests) retractions.
+        if selections
+            .iter()
+            .any(|s: &Selection| s.kg == kg && s.ontology.name == ontology.name)
+        {
+            continue;
+        }
         selections.push(Selection {
             kg: kg.to_string(),
             ontology: Arc::clone(ontology),
@@ -930,8 +939,21 @@ async fn events_ws(
                                 return;
                             }
                         }
-                        // Lagged: skip ahead; Closed: hub dropped.
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                        // A subscriber that fell behind lost events the
+                        // replay ring can no longer supply; say so in the
+                        // stream rather than leaving a silent hole in what
+                        // is meant to be the record of evaluation.
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                            let notice =
+                                json!({ "type": "lagged", "skipped": skipped }).to_string();
+                            if socket
+                                .send(axum::extract::ws::Message::Text(notice))
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
+                        }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
                     }
                 }

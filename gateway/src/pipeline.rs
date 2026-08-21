@@ -228,28 +228,10 @@ pub async fn evaluate(
         }
     }
 
-    let findings = read_findings(&mut engine, ontology, prefix).await;
+    let findings = read_findings(&mut engine, ontology, prefix, &mut notes).await;
 
-    // One-shot requests (no conversation id) leave no residue: retract the
-    // stored tuples and the tracking row.
     if retract_after {
-        let mut retract = String::new();
-        for statement in &statements {
-            if let Some(rest) = statement.strip_prefix('+') {
-                retract.push_str(&format!("-{rest}\n"));
-            }
-        }
-        retract.push_str(&format!(
-            "-il_conversation(I, O) <- il_conversation(I, O), I = \"{prefix}\"\n"
-        ));
-        match engine.execute(&retract).await {
-            Ok(result) => {
-                for problem in result.soft_errors() {
-                    notes.push(format!("one-shot retraction incomplete: {problem}"));
-                }
-            }
-            Err(err) => notes.push(format!("one-shot retraction failed: {err}")),
-        }
+        notes.extend(retract_conversation(&mut engine, prefix, &statements).await);
     }
 
     let findings = findings?;
@@ -275,6 +257,68 @@ pub async fn evaluate(
         tuples,
         trace,
     })
+}
+
+/// Retract a one-shot request's facts so it leaves no residue.
+///
+/// ONLY statements carrying this conversation's prefix are retracted. A
+/// pack may map a section to shared, ontology-level relations (seed lists
+/// a KG's rules quantify over); flipping those inserts into deletes would
+/// delete the pack's own seeds and silently disable detection for every
+/// other conversation in the knowledge graph, permanently.
+async fn retract_conversation(
+    engine: &mut Engine,
+    prefix: &str,
+    statements: &[String],
+) -> Vec<String> {
+    let mut notes = Vec::new();
+    let marker = format!("\"{prefix}:");
+    let mut retract = String::new();
+    let mut skipped = 0usize;
+    for statement in statements {
+        match statement.strip_prefix('+') {
+            Some(rest) if statement.contains(&marker) => {
+                retract.push_str(&format!("-{rest}\n"));
+            }
+            _ => skipped += 1,
+        }
+    }
+    if skipped > 0 {
+        notes.push(format!(
+            "one-shot retraction skipped {skipped} statement(s) that are not \
+             conversation-scoped (shared or ontology-level facts are never retracted)"
+        ));
+    }
+    retract.push_str(&format!(
+        "-il_conversation(I, O) <- il_conversation(I, O), I = \"{prefix}\"\n"
+    ));
+    match engine.execute(&retract).await {
+        Ok(result) => {
+            for problem in result.soft_errors() {
+                notes.push(format!("one-shot retraction incomplete: {problem}"));
+            }
+        }
+        Err(err) => notes.push(format!("one-shot retraction failed: {err}")),
+    }
+    // Trust the read-back, not the delete messages ("Deleted 0 facts" is a
+    // success phrase): confirm nothing prefixed survives.
+    if let Ok(check) = engine.execute("?claim(C, E, A, V)").await {
+        let residue = check
+            .rows
+            .iter()
+            .filter(|row| {
+                row.first()
+                    .and_then(Value::as_str)
+                    .is_some_and(|c| c.starts_with(&format!("{prefix}:")))
+            })
+            .count();
+        if residue > 0 {
+            notes.push(format!(
+                "one-shot retraction left {residue} claim(s) in the knowledge graph"
+            ));
+        }
+    }
+    notes
 }
 
 /// The KG must run exactly the rule set of the pack the conversation was
@@ -310,6 +354,7 @@ async fn read_findings(
     engine: &mut Engine,
     ontology: &LoadedOntology,
     prefix: &str,
+    notes: &mut Vec<String>,
 ) -> Result<Vec<Value>> {
     let mut findings = Vec::new();
     for watch in &ontology.manifest.report.watch {
@@ -326,6 +371,7 @@ async fn read_findings(
             .with_context(|| format!("querying {}", watch.view))?;
         let columns = column_names(&watch.view);
         let mut seen = std::collections::HashSet::new();
+        let mut filtered = 0usize;
         for row in &result.rows {
             let mut cells: Vec<String> = row
                 .iter()
@@ -336,6 +382,7 @@ async fn read_findings(
                 .collect();
             cells.resize(columns.len(), String::new());
             if !row_in_conversation(&cells, &columns, &watch.scope, prefix) {
+                filtered += 1;
                 continue;
             }
             if watch.symmetric_dedup {
@@ -375,14 +422,23 @@ async fn read_findings(
                 Some(template) => {
                     let mut goal = template.clone();
                     for column in &columns {
-                        goal = goal.replace(
-                            &format!("{{{column}}}"),
-                            &crate::mapper::esc(&value_of(column)),
-                        );
+                        let value = value_of(column);
+                        if value.chars().any(char::is_control) {
+                            goal.clear();
+                            break;
+                        }
+                        goal = goal.replace(&format!("{{{column}}}"), &crate::mapper::esc(&value));
                     }
-                    match engine.execute(&format!(".why ?{goal}")).await {
-                        Ok(result) => result.proof_trees.unwrap_or(Value::Null),
-                        Err(err) => json!({ "error": err.to_string() }),
+                    if goal.is_empty() {
+                        // A cell carrying control characters could split the
+                        // proof query into a second statement: skip the
+                        // proof, keep the finding.
+                        json!({ "error": "proof skipped: unsafe cell value" })
+                    } else {
+                        match engine.execute(&format!(".why ?{goal}")).await {
+                            Ok(result) => result.proof_trees.unwrap_or(Value::Null),
+                            Err(err) => json!({ "error": err.to_string() }),
+                        }
                     }
                 }
                 None => Value::Null,
@@ -395,6 +451,16 @@ async fn read_findings(
                 "row": cells,
                 "proof": proof,
             }));
+        }
+        // A view that returned rows of which NONE belong to this
+        // conversation is worth saying out loud: it is the signature of a
+        // pack whose scope columns are bound to something unprefixed, and
+        // silence there would read as "nothing found".
+        if filtered > 0 && !result.rows.is_empty() {
+            notes.push(format!(
+                "{}: {filtered} row(s) belong to other conversations",
+                watch.view
+            ));
         }
     }
     Ok(findings)

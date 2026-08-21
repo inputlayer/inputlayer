@@ -67,7 +67,7 @@ impl QueryResult {
     /// is DENY BY DEFAULT - a single-column message row counts as a problem
     /// unless it matches a known-good phrase.
     pub fn soft_errors(&self) -> Vec<String> {
-        const SUCCESS_MARKERS: [&str; 12] = [
+        const SUCCESS_MARKERS: [&str; 18] = [
             "Inserted ",
             "Deleted ",
             "Updated ",
@@ -80,6 +80,13 @@ impl QueryResult {
             "Registered ",
             "Type ",
             "No facts",
+            // `.ontology` command results (engine-owned lifecycle).
+            "installed ",
+            "removed ",
+            "upgraded ",
+            "digest ",
+            "recorded ",
+            "kept ",
         ];
         // Message rows only: real query results are not problem reports.
         if self.columns.len() != 1 || self.columns.first().map(String::as_str) != Some("message") {

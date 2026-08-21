@@ -196,6 +196,7 @@ async fn run() -> Result<()> {
         } => {
             ontology_command(
                 &format!(".ontology install {spec}"),
+                Some(&spec),
                 &kg,
                 create,
                 true,
@@ -212,6 +213,7 @@ async fn run() -> Result<()> {
         } => {
             ontology_command(
                 &format!(".ontology remove {name}"),
+                Some(&name),
                 &kg,
                 false,
                 false,
@@ -228,6 +230,7 @@ async fn run() -> Result<()> {
         } => {
             ontology_command(
                 &format!(".ontology upgrade {spec}"),
+                Some(&spec),
                 &kg,
                 false,
                 false,
@@ -295,6 +298,7 @@ async fn fetch(reg: &Registry, spec: &str) -> Result<std::path::PathBuf> {
 /// inventory), so every client runs the identical implementation.
 async fn ontology_command(
     command: &str,
+    spec: Option<&str>,
     kg: &str,
     create: bool,
     create_supported: bool,
@@ -302,6 +306,15 @@ async fn ontology_command(
     api_key: &str,
 ) -> Result<()> {
     registry::validate_component("knowledge graph", kg)?;
+    // The spec is interpolated into a meta command; keep it to the
+    // registry charset so it cannot become extra tokens.
+    if let Some(spec) = spec {
+        let name = spec.split('@').next().unwrap_or(spec);
+        registry::validate_component("ontology name", name)?;
+        if let Some(version) = spec.split_once('@').map(|(_, v)| v) {
+            registry::validate_component("version", version)?;
+        }
+    }
     let mut engine = ws::Engine::connect(server, api_key).await?;
     if create {
         // Tolerate an existing KG so install is idempotent under --create.
@@ -330,6 +343,16 @@ async fn ontology_command(
         if let Some(text) = row.first().and_then(serde_json::Value::as_str) {
             println!("{text}");
         }
+    }
+    // The engine reports many failures as message rows inside an Ok
+    // result; exiting 0 over them would tell a script the install worked.
+    let problems = result.soft_errors();
+    if !problems.is_empty() {
+        anyhow::bail!(
+            "engine reported {} problem(s):\n  {}",
+            problems.len(),
+            problems.join("\n  ")
+        );
     }
     Ok(())
 }
