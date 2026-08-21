@@ -26,6 +26,10 @@ pub struct VerifyOutcome {
     pub status: &'static str,
     pub findings: Vec<Value>,
     pub dropped: Vec<String>,
+    /// Present when the request opted into tracing (x-il-trace): the
+    /// validated extraction, the mapped IQL statements, the ephemeral KG
+    /// name, and engine wall time. The caller sees only its own data.
+    pub trace: Option<Value>,
 }
 
 /// Drop extraction rows whose quote is not verbatim in the message it cites.
@@ -84,6 +88,7 @@ pub async fn run_verify(
     ontology: &LoadedOntology,
     mut extraction: Value,
     messages: &[(String, String)],
+    want_trace: bool,
 ) -> Result<VerifyOutcome> {
     let dropped = validate_quotes(&ontology.manifest, &mut extraction, messages);
     let MapOutcome {
@@ -104,28 +109,40 @@ pub async fn run_verify(
     // The KG name must be unique PER REQUEST, not per content: two
     // concurrent identical requests sharing a name would race each other's
     // create/insert/drop, and the loser's empty queries would read as a
-    // false "verified". The content hash stays for log correlation only.
+    // false "verified". Pid and sequence provide the uniqueness but are
+    // HASHED IN rather than embedded readably - the name is exposed to the
+    // caller via the trace, and a readable global counter would let one
+    // tenant measure another's traffic.
     let seq = REQUEST_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut hasher = Sha256::new();
     hasher.update(ontology.name.as_bytes());
     hasher.update(serde_json::to_vec(messages).unwrap_or_default());
+    hasher.update(std::process::id().to_le_bytes());
+    hasher.update(seq.to_le_bytes());
     let digest = hasher.finalize();
-    let kg = format!(
-        "_verify_{}_{}_{seq}",
-        hex::encode(&digest[..6]),
-        std::process::id()
-    );
+    let kg = format!("_verify_{}", hex::encode(&digest[..8]));
 
     let mut engine = Engine::connect(&engine_config.url, &engine_config.api_key)
         .await
         .context("engine unreachable")?;
 
     // Ephemeral KG lifecycle; cleanup is best-effort on every exit path.
+    // engine_ms covers create+deploy+insert+query+cleanup (not connect).
+    let engine_started = std::time::Instant::now();
     let result = verify_in_kg(&mut engine, &kg, ontology, &statements).await;
     let _ = engine.execute(".kg use default").await;
     let _ = engine.execute(&format!(".kg drop {kg}")).await;
+    let engine_ms = engine_started.elapsed().as_millis();
 
     let findings = result?;
+    let trace = want_trace.then(|| {
+        json!({
+            "extraction": extraction,
+            "statements": statements,
+            "kg": kg,
+            "engine_ms": engine_ms,
+        })
+    });
     Ok(VerifyOutcome {
         status: if findings.is_empty() {
             "verified"
@@ -134,6 +151,7 @@ pub async fn run_verify(
         },
         findings,
         dropped,
+        trace,
     })
 }
 

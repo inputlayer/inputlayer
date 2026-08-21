@@ -20,7 +20,9 @@
 //! Every request MUST select an ontology (x-il-ontology header or
 //! il_ontology body field) - extraction is always bound to one, so without
 //! a selection there is nothing to translate against and the request is
-//! rejected before any model call.
+//! rejected before any model call. An x-il-trace: 1 header additionally
+//! returns the validated extraction, the mapped IQL statements, and
+//! timings inside the consistency block.
 
 use anyhow::{Context, Result};
 use axum::extract::State;
@@ -217,53 +219,10 @@ async fn verify(
         );
     }
 
-    // Ontology selection is REQUIRED: extraction is always bound to an
-    // ontology, so without one there is nothing to translate against. The
-    // header wins over the body field; a version assertion must match the
-    // pinned version. A malformed header is an explicit client intent that
-    // failed - reject it rather than silently falling through.
-    let header_selection = match headers.get("x-il-ontology") {
-        Some(value) => match value.to_str() {
-            Ok(v) => Some(v.trim().to_string()),
-            Err(_) => {
-                return bad_request("x-il-ontology header is not valid ASCII".to_string());
-            }
-        },
-        None => None,
+    let ontology = match select_ontology(&state, &headers, request.il_ontology.as_deref()) {
+        Ok(ontology) => ontology,
+        Err(response) => return response,
     };
-    let selected = header_selection.filter(|v| !v.is_empty()).or_else(|| {
-        request
-            .il_ontology
-            .as_deref()
-            .map(str::trim)
-            .map(str::to_string)
-            .filter(|v| !v.is_empty())
-    });
-    let Some(spec) = selected else {
-        return bad_request(format!(
-            "an ontology must be selected (x-il-ontology header or il_ontology field); \
-             available: {}",
-            available_list(&state)
-        ));
-    };
-    let (name, version) = match spec.split_once('@') {
-        Some((n, v)) => (n, Some(v)),
-        None => (spec.as_str(), None),
-    };
-    let Some(ontology) = state.ontologies.get(name) else {
-        return bad_request(format!(
-            "ontology {name:?} is not published; available: {}",
-            available_list(&state)
-        ));
-    };
-    if let Some(asserted) = version {
-        if asserted != ontology.version {
-            return bad_request(format!(
-                "ontology {name} is pinned at {}, request asserted {asserted}",
-                ontology.version
-            ));
-        }
-    }
     if request.messages.is_empty() {
         return bad_request("messages must not be empty".to_string());
     }
@@ -277,7 +236,24 @@ async fn verify(
     let system_prompt = ontology.render_prompt(&today);
     let user_content = render_conversation(&messages);
 
+    // Tracing is per-request opt-in: the response additionally carries the
+    // validated extraction, the mapped IQL statements, and timings - only
+    // data derived from the caller's own request. Like x-il-ontology, a
+    // malformed value is explicit intent that failed: reject it rather
+    // than silently not tracing.
+    let want_trace = match headers.get("x-il-trace") {
+        None => false,
+        Some(value) => match value.to_str().map(|v| v.trim().to_ascii_lowercase()) {
+            Ok(v) if v == "1" || v == "true" => true,
+            Ok(v) if v.is_empty() || v == "0" || v == "false" => false,
+            _ => {
+                return bad_request("x-il-trace must be 1/true or 0/false".to_string());
+            }
+        },
+    };
+
     // Fail open from here: verifier trouble must not fail caller traffic.
+    let extract_started = std::time::Instant::now();
     let extraction = match extractor
         .extract(
             &ontology.extraction_model,
@@ -290,20 +266,87 @@ async fn verify(
         Ok(value) => value,
         Err(err) => return (StatusCode::OK, Json(unverified(ontology, &err.to_string()))),
     };
+    let extract_ms = extract_started.elapsed().as_millis();
 
-    match run_verify(&state.engine, ontology, extraction, &messages).await {
-        Ok(outcome) => (
-            StatusCode::OK,
-            Json(json!({ "inputlayer": { "consistency": {
+    match run_verify(&state.engine, ontology, extraction, &messages, want_trace).await {
+        Ok(outcome) => {
+            let mut consistency = json!({
                 "status": outcome.status,
                 "ontology": format!("{}@{}", ontology.name, ontology.version),
                 "digest": ontology.digest,
                 "findings": outcome.findings,
                 "dropped": outcome.dropped,
-            }}})),
-        ),
+            });
+            if let Some(mut trace) = outcome.trace {
+                if let Some(t) = trace.as_object_mut() {
+                    t.insert("model".to_string(), json!(ontology.extraction_model));
+                    t.insert("extract_ms".to_string(), json!(extract_ms));
+                }
+                consistency["trace"] = trace;
+            }
+            (
+                StatusCode::OK,
+                Json(json!({ "inputlayer": { "consistency": consistency } })),
+            )
+        }
         Err(err) => (StatusCode::OK, Json(unverified(ontology, &err.to_string()))),
     }
+}
+
+/// Resolve the request's REQUIRED ontology selection: extraction is always
+/// bound to an ontology, so without one there is nothing to translate
+/// against. The x-il-ontology header wins over the body field; a
+/// name@version assertion must match the pinned version. A malformed header
+/// is an explicit client intent that failed - reject it rather than
+/// silently falling through.
+fn select_ontology<'a>(
+    state: &'a AppState,
+    headers: &HeaderMap,
+    body_field: Option<&str>,
+) -> Result<&'a Arc<LoadedOntology>, (StatusCode, Json<Value>)> {
+    let header_selection = match headers.get("x-il-ontology") {
+        Some(value) => match value.to_str() {
+            Ok(v) => Some(v.trim().to_string()),
+            Err(_) => {
+                return Err(bad_request(
+                    "x-il-ontology header is not valid ASCII".to_string(),
+                ));
+            }
+        },
+        None => None,
+    };
+    let selected = header_selection.filter(|v| !v.is_empty()).or_else(|| {
+        body_field
+            .map(str::trim)
+            .map(str::to_string)
+            .filter(|v| !v.is_empty())
+    });
+    let Some(spec) = selected else {
+        return Err(bad_request(format!(
+            "an ontology must be selected (x-il-ontology header or il_ontology field); \
+             available: {}",
+            available_list(state)
+        )));
+    };
+    let (name, version) = match spec.split_once('@') {
+        Some((n, v)) => (n, Some(v)),
+        None => (spec.as_str(), None),
+    };
+    let Some(ontology) = state.ontologies.get(name) else {
+        return Err(bad_request(format!(
+            "ontology {name:?} is not published; available: {}",
+            available_list(state)
+        )));
+    };
+    if let Some(asserted) = version {
+        if asserted != ontology.version {
+            return Err(bad_request(format!(
+                "ontology {name} is pinned at {}, request asserted {asserted}",
+                ontology.version
+            )));
+        }
+    }
+    Ok(ontology)
 }
 
 fn available_list(state: &AppState) -> String {
