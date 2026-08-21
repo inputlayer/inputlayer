@@ -200,6 +200,12 @@ fn map_object(
                     for template in &extra.insert {
                         if let Some(statement) = fill(template, object, bound) {
                             statements.push(statement);
+                        } else {
+                            // An extra whose condition matched but whose
+                            // template cannot fill is the same drift class as
+                            // a failed main template: it must surface (and
+                            // bail the request), not silently omit a fact.
+                            skipped.push(format!("{section}: extra template failed to fill"));
                         }
                     }
                 }
@@ -379,6 +385,31 @@ insert = ['+constraint[("{id}", "{type}", "{attr}", "{value}")]']
         });
         let out = map_extraction(&m, &extraction);
         assert!(out.statements.is_empty(), "{:?}", out.statements);
+    }
+
+    #[test]
+    fn extra_fill_failure_surfaces_as_skip() {
+        let m = manifest(
+            r#"
+[ontology]
+name = "t"
+version = "0"
+rules = []
+[[map.claims]]
+insert = ['+claim[("{id}")]']
+[[map.claims.extra]]
+when = "numeric_mirror(attribute, value)"
+insert = ['+mirror[("{nonexistent}")]']
+"#,
+        );
+        let extraction = serde_json::json!({
+            "claims": [{"id": "c1", "attribute": "age", "value": "42"}]
+        });
+        let out = map_extraction(&m, &extraction);
+        assert_eq!(out.statements, vec!["+claim[(\"c1\")]"]);
+        // The failed extra must be reported so run_verify bails, not
+        // silently omitted.
+        assert_eq!(out.skipped.len(), 1, "{:?}", out.skipped);
     }
 
     #[test]

@@ -120,7 +120,7 @@ il list --kg playground --api-key $INPUTLAYER_BOOTSTRAP_API_KEY
 
 ```
 KG             ONTOLOGY                 VERSION   DIGEST
-playground     consistency-core         1.0.2     sha256:947df8d140d3650...
+playground     consistency-core         1.0.2     sha256:947df8d140d3650abfdece63b48920aeb9f054a98c5a2114ba98100f93e7c7f1
 ```
 
 The download is sha256-verified against the registry index; a digest mismatch is a hard refusal. `pack_meta` pins what is deployed where, so a team can always answer "which ontology version does this KG run?".
@@ -203,6 +203,8 @@ curl -s http://localhost:8081/v1/verify \
   "inputlayer": {
     "consistency": {
       "status": "conflicts_found",
+      "ontology": "consistency-core@1.0.2",
+      "digest": "sha256:947df8d140d3650abfdece63b48920aeb9f054a98c5a2114ba98100f93e7c7f1",
       "findings": [
         {
           "view": "violation_src(K, C, M, S, Kc, Mk, Sk)",

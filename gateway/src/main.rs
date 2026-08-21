@@ -105,7 +105,7 @@ async fn main() -> Result<()> {
         println!("no ontologies loaded - /v1/verify will 503");
     }
     let extractor: Option<Arc<dyn Extractor>> = match std::env::var("ANTHROPIC_API_KEY") {
-        Ok(key) if !key.is_empty() => Some(Arc::new(AnthropicExtractor::new(key))),
+        Ok(key) if !key.trim().is_empty() => Some(Arc::new(AnthropicExtractor::new(key))),
         _ => {
             println!("ANTHROPIC_API_KEY not set - /v1/verify will 503");
             None
