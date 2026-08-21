@@ -327,9 +327,9 @@ il migration generate --models myapp.models --name add_user_roles
 - name: Apply migrations
   run: |
     il migration apply \
-      --url ${{ secrets.IL_WS_URL }} \
+      --url ${{ secrets.INPUTLAYER_WS_URL }} \
       --kg production \
-      --api-key ${{ secrets.IL_API_KEY }}
+      --api-key ${{ secrets.INPUTLAYER_API_KEY }}
 ```
 
 ### Staging Validation

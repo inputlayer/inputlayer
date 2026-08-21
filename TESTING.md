@@ -65,14 +65,14 @@ Environment variables:
 Enable structured server tracing logs (useful for diagnosing hangs/timeouts):
 
 ```bash
-IL_TRACE=1 IL_TRACE_FILE=/tmp/inputlayer-trace.log ./scripts/run_snapshot_tests.sh
+INPUTLAYER_TRACE=1 INPUTLAYER_TRACE_FILE=/tmp/inputlayer-trace.log ./scripts/run_snapshot_tests.sh
 ```
 
 Optional:
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `IL_TRACE_JSON` | 0 | Set to `1` for JSON logs |
-| `IL_TRACE_LEVEL` | `trace` | Log level (e.g., `info`, `debug`, `trace`) |
+| `INPUTLAYER_TRACE_JSON` | 0 | Set to `1` for JSON logs |
+| `INPUTLAYER_TRACE_LEVEL` | `trace` | Log level (e.g., `info`, `debug`, `trace`) |
 
 ### Affected-Only Tests
 

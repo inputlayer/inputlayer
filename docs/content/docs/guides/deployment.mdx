@@ -9,8 +9,8 @@ Run InputLayer in production with Docker, systemd, reverse proxies, and Kubernet
 | Host | `127.0.0.1` | `--host` | `INPUTLAYER_HTTP__HOST` | `http.host` |
 | Port | `8080` | `--port` | `INPUTLAYER_HTTP__PORT` | `http.port` |
 | Data directory | `./data` | `--data-dir` | `INPUTLAYER_STORAGE__DATA_DIR` | `storage.data_dir` |
-| Log level | `info` | -- | `IL_TRACE_LEVEL` | `logging.level` |
-| Log format | `text` | -- | `IL_TRACE_JSON=1` | `logging.format` |
+| Log level | `info` | -- | `INPUTLAYER_TRACE_LEVEL` | `logging.level` |
+| Log format | `text` | -- | `INPUTLAYER_TRACE_JSON=1` | `logging.format` |
 | Admin password | auto-generated | -- | `INPUTLAYER_ADMIN_PASSWORD` | `http.auth.bootstrap_admin_password` |
 | Config file | `config.toml` | `--config` | -- | -- |
 
@@ -33,9 +33,9 @@ export INPUTLAYER_STORAGE__PERSIST__ENABLED=true
 export INPUTLAYER_STORAGE__PERSIST__DURABILITY_MODE=immediate
 
 # Logging (via tracing)
-export IL_TRACE_LEVEL=info          # trace, debug, info, warn, error
-export IL_TRACE_JSON=1              # JSON structured logging
-export IL_TRACE_FILE=/var/log/inputlayer/server.log  # Log to file instead of stderr
+export INPUTLAYER_TRACE_LEVEL=info          # trace, debug, info, warn, error
+export INPUTLAYER_TRACE_JSON=1              # JSON structured logging
+export INPUTLAYER_TRACE_FILE=/var/log/inputlayer/server.log  # Log to file instead of stderr
 
 # Authentication
 export INPUTLAYER_ADMIN_PASSWORD=your-secure-password
@@ -193,8 +193,8 @@ services:
       INPUTLAYER_STORAGE__PERSIST__ENABLED: "true"
       INPUTLAYER_STORAGE__PERSIST__DURABILITY_MODE: "immediate"
       INPUTLAYER_ADMIN_PASSWORD: "${INPUTLAYER_ADMIN_PASSWORD}"
-      IL_TRACE_LEVEL: "info"
-      IL_TRACE_JSON: "1"
+      INPUTLAYER_TRACE_LEVEL: "info"
+      INPUTLAYER_TRACE_JSON: "1"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
       interval: 10s
@@ -240,7 +240,7 @@ services:
       INPUTLAYER_HTTP__PORT: "8080"
       INPUTLAYER_STORAGE__DATA_DIR: "/var/lib/inputlayer/data"
       INPUTLAYER_ADMIN_PASSWORD: "${INPUTLAYER_ADMIN_PASSWORD}"
-      IL_TRACE_JSON: "1"
+      INPUTLAYER_TRACE_JSON: "1"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.inputlayer.rule=Host(`inputlayer.example.com`)"
@@ -312,9 +312,9 @@ ProtectKernelTunables=true
 ProtectControlGroups=true
 
 # Environment
-Environment=IL_TRACE_LEVEL=info
-Environment=IL_TRACE_JSON=1
-Environment=IL_TRACE_FILE=/var/log/inputlayer/server.log
+Environment=INPUTLAYER_TRACE_LEVEL=info
+Environment=INPUTLAYER_TRACE_JSON=1
+Environment=INPUTLAYER_TRACE_FILE=/var/log/inputlayer/server.log
 
 [Install]
 WantedBy=multi-user.target
@@ -427,9 +427,9 @@ spec:
               value: "true"
             - name: INPUTLAYER_STORAGE__PERSIST__DURABILITY_MODE
               value: "immediate"
-            - name: IL_TRACE_LEVEL
+            - name: INPUTLAYER_TRACE_LEVEL
               value: "info"
-            - name: IL_TRACE_JSON
+            - name: INPUTLAYER_TRACE_JSON
               value: "1"
             - name: INPUTLAYER_ADMIN_PASSWORD
               valueFrom:

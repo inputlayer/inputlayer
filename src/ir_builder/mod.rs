@@ -50,7 +50,7 @@ impl IRBuilder {
         //    between scans that would otherwise produce a Cartesian product.
         //    E.g., `data(Id, 1), PrevId = Id - 1, data(PrevId, 0)` should join on PrevId.
         let mut current = scans.remove(0);
-        if std::env::var("IL_DEBUG").is_ok() {
+        if std::env::var("INPUTLAYER_DEBUG").is_ok() {
             eprintln!("DEBUG IR build: first scan = {:?}", current.output_schema());
         }
         for scan in scans {
@@ -65,7 +65,7 @@ impl IRBuilder {
                 if let Some((compute_name, ir_expr)) =
                     self.find_arithmetic_join_bridge(rule, &left_schema, &right_schema)
                 {
-                    if std::env::var("IL_DEBUG").is_ok() {
+                    if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                         eprintln!(
                             "DEBUG IR build: adding computed join key '{compute_name}' to left side"
                         );
@@ -78,14 +78,14 @@ impl IRBuilder {
                 }
             }
 
-            if std::env::var("IL_DEBUG").is_ok() {
+            if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                 eprintln!(
                     "DEBUG IR build: joining with scan = {:?}",
                     scan.output_schema()
                 );
             }
             current = self.build_join(current, scan)?;
-            if std::env::var("IL_DEBUG").is_ok() {
+            if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                 eprintln!("DEBUG IR build: after join = {:?}", current.output_schema());
             }
         }
@@ -123,7 +123,7 @@ impl IRBuilder {
         // Build join tree (same logic as build_ir)
         let start = std::time::Instant::now();
         let mut current = scans.remove(0);
-        if std::env::var("IL_DEBUG").is_ok() {
+        if std::env::var("INPUTLAYER_DEBUG").is_ok() {
             eprintln!("DEBUG IR build: first scan = {:?}", current.output_schema());
         }
         for scan in scans {
@@ -135,7 +135,7 @@ impl IRBuilder {
                 if let Some((compute_name, ir_expr)) =
                     self.find_arithmetic_join_bridge(rule, &left_schema, &right_schema)
                 {
-                    if std::env::var("IL_DEBUG").is_ok() {
+                    if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                         eprintln!(
                             "DEBUG IR build: adding computed join key '{compute_name}' to left side"
                         );
@@ -147,14 +147,14 @@ impl IRBuilder {
                 }
             }
 
-            if std::env::var("IL_DEBUG").is_ok() {
+            if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                 eprintln!(
                     "DEBUG IR build: joining with scan = {:?}",
                     scan.output_schema()
                 );
             }
             current = self.build_join(current, scan)?;
-            if std::env::var("IL_DEBUG").is_ok() {
+            if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                 eprintln!("DEBUG IR build: after join = {:?}", current.output_schema());
             }
         }
@@ -1388,7 +1388,7 @@ impl IRBuilder {
         let input_schema = input.output_schema();
         let head = &rule.head;
 
-        if std::env::var("IL_DEBUG").is_ok() {
+        if std::env::var("INPUTLAYER_DEBUG").is_ok() {
             eprintln!("DEBUG build_projection_with_computed:");
             eprintln!("  input_schema = {input_schema:?}");
             eprintln!("  head = {:?}", head.args);
@@ -1411,7 +1411,7 @@ impl IRBuilder {
                     })?;
                     final_projection.push(pos);
                     final_output_schema.push(v.clone());
-                    if std::env::var("IL_DEBUG").is_ok() {
+                    if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                         eprintln!("  head[{head_idx}] Variable({v}) -> project col {pos}");
                     }
                 }
@@ -1428,7 +1428,7 @@ impl IRBuilder {
                     extended_schema.push(col_name.clone());
                     final_projection.push(computed_col_idx);
                     final_output_schema.push(col_name.clone());
-                    if std::env::var("IL_DEBUG").is_ok() {
+                    if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                         eprintln!(
                             "  head[{head_idx}] Arithmetic -> compute col {computed_col_idx} ({col_name})"
                         );
@@ -1447,7 +1447,7 @@ impl IRBuilder {
                     extended_schema.push(col_name.clone());
                     final_projection.push(computed_col_idx);
                     final_output_schema.push(col_name.clone());
-                    if std::env::var("IL_DEBUG").is_ok() {
+                    if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                         eprintln!(
                             "  head[{head_idx}] Constant({val}) -> compute col {computed_col_idx} ({col_name})"
                         );
@@ -1466,7 +1466,7 @@ impl IRBuilder {
                     extended_schema.push(col_name.clone());
                     final_projection.push(computed_col_idx);
                     final_output_schema.push(col_name.clone());
-                    if std::env::var("IL_DEBUG").is_ok() {
+                    if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                         eprintln!(
                             "  head[{head_idx}] FloatConstant({val}) -> compute col {computed_col_idx} ({col_name})"
                         );
@@ -1485,7 +1485,7 @@ impl IRBuilder {
                     extended_schema.push(col_name.clone());
                     final_projection.push(computed_col_idx);
                     final_output_schema.push(col_name.clone());
-                    if std::env::var("IL_DEBUG").is_ok() {
+                    if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                         eprintln!(
                             "  head[{head_idx}] StringConstant({s}) -> compute col {computed_col_idx} ({col_name})"
                         );
@@ -1504,7 +1504,7 @@ impl IRBuilder {
                     extended_schema.push(col_name.clone());
                     final_projection.push(computed_col_idx);
                     final_output_schema.push(col_name.clone());
-                    if std::env::var("IL_DEBUG").is_ok() {
+                    if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                         eprintln!(
                             "  head[{head_idx}] BoolConstant({b}) -> compute col {computed_col_idx} ({col_name})"
                         );
@@ -1513,7 +1513,7 @@ impl IRBuilder {
                 Term::Placeholder => {
                     // Placeholders in head are semantically invalid (head defines output
                     // columns, not "don't care" positions). Skip them gracefully.
-                    if std::env::var("IL_DEBUG").is_ok() {
+                    if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                         eprintln!("  head[{head_idx}] Placeholder -> SKIPPED (invalid in head)");
                     }
                     // Don't add anything to projection - placeholders in head are ignored
@@ -1527,7 +1527,7 @@ impl IRBuilder {
             }
         }
 
-        if std::env::var("IL_DEBUG").is_ok() {
+        if std::env::var("INPUTLAYER_DEBUG").is_ok() {
             eprintln!("  extended_schema = {extended_schema:?}");
             eprintln!("  final_projection = {final_projection:?}");
             eprintln!("  final_output_schema = {final_output_schema:?}");

@@ -168,7 +168,7 @@ impl CodeGenerator {
         &mut self,
         annotations: Vec<crate::boolean_specialization::SemiringAnnotation>,
     ) {
-        if std::env::var("IL_DEBUG").is_ok() && !annotations.is_empty() {
+        if std::env::var("INPUTLAYER_DEBUG").is_ok() && !annotations.is_empty() {
             for (i, ann) in annotations.iter().enumerate() {
                 eprintln!(
                     "DEBUG CodeGen semiring[{}]: {:?} ({})",
@@ -200,7 +200,7 @@ impl CodeGenerator {
     /// fixpoint iteration. This method always executes a single pass.
     /// Dispatches to `BooleanDiff` or `isize` based on the semiring type.
     pub fn execute(&self, ir: &IRNode) -> Result<Vec<Tuple>, String> {
-        if std::env::var("IL_DEBUG").is_ok() {
+        if std::env::var("INPUTLAYER_DEBUG").is_ok() {
             eprintln!(
                 "DEBUG CodeGen::execute: semiring={:?}, diff_type={}",
                 self.semiring_type,
@@ -333,7 +333,7 @@ impl CodeGenerator {
         let (base_inputs, recursive_inputs) = if let Some((_, base_idx, rec_idx)) =
             Self::detect_recursive_union_for_relation(inputs, Some(recursive_rel))
         {
-            if std::env::var("IL_DEBUG").is_ok() {
+            if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                 eprintln!(
                     "DEBUG: recursive fixpoint: base_indices={base_idx:?}, recursive_indices={rec_idx:?}"
                 );
@@ -345,7 +345,7 @@ impl CodeGenerator {
             // ALL inputs reference the recursive relation (e.g. edge(X,Y) <- edge(X,Y)
             // plus edge(X,Y) <- edge(X,Z), edge(Z,Y)). Use existing base facts as the
             // implicit base case via a Scan node, and treat all inputs as recursive.
-            if std::env::var("IL_DEBUG").is_ok() {
+            if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                 eprintln!(
                     "DEBUG: all inputs reference '{recursive_rel}' - using base facts as implicit base case"
                 );
@@ -363,7 +363,7 @@ impl CodeGenerator {
         if let Some(edge_relation) =
             Self::detect_transitive_closure_pattern(&base_inputs, &recursive_inputs, recursive_rel)
         {
-            if std::env::var("IL_DEBUG").is_ok() {
+            if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                 eprintln!(
                     "DEBUG: detected transitive closure pattern with edge relation '{edge_relation}'"
                 );
@@ -375,7 +375,7 @@ impl CodeGenerator {
         if let Some((edge_rel, seeds, bound_col)) =
             self.detect_bound_tc_pattern(&base_inputs, &recursive_inputs, recursive_rel)
         {
-            if std::env::var("IL_DEBUG").is_ok() {
+            if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                 eprintln!(
                     "DEBUG: detected bound TC pattern: edge='{}', seeds={}, bound_col={}",
                     edge_rel,
@@ -1091,7 +1091,7 @@ impl CodeGenerator {
         let rec_rel = recursive_rel.to_string();
         let result_limit = self.max_result_rows;
 
-        if std::env::var("IL_DEBUG").is_ok() {
+        if std::env::var("INPUTLAYER_DEBUG").is_ok() {
             if let Some(ref agg) = agg_in_loop {
                 eprintln!(
                     "DEBUG: recursive min/max aggregation-in-loop: group_by={:?}, agg_col={}, is_min={}",
@@ -1398,7 +1398,7 @@ impl CodeGenerator {
                 right_keys,
                 output_schema,
             } => {
-                if std::env::var("IL_DEBUG").is_ok() {
+                if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                     eprintln!("DEBUG IRNode::Join: left schema={:?} right schema={:?} left_keys={:?} right_keys={:?} output_schema={:?}",
                              left.output_schema(), right.output_schema(), left_keys, right_keys, output_schema);
                 }
@@ -1580,7 +1580,7 @@ impl CodeGenerator {
         // Check live collections first (for recursive relations in iterative scopes)
         if let Some(live_map) = live {
             if let Some(collection) = live_map.get(relation) {
-                if std::env::var("IL_DEBUG").is_ok() {
+                if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                     eprintln!("DEBUG Scan '{relation}': using live collection");
                 }
                 return collection.clone();
@@ -1588,7 +1588,7 @@ impl CodeGenerator {
         }
 
         let data = input_data.get(relation).cloned().unwrap_or_default();
-        if std::env::var("IL_DEBUG").is_ok() {
+        if std::env::var("INPUTLAYER_DEBUG").is_ok() {
             eprintln!("DEBUG Scan '{}': {} tuples", relation, data.len());
             for t in &data {
                 eprintln!("DEBUG Scan '{}': {:?}", relation, t.values());
@@ -2144,7 +2144,7 @@ impl CodeGenerator {
                         // For stratified negation, this should not happen (the right side
                         // of negation must be in a lower stratum and already materialized).
                         // Log a debug warning if it does occur.
-                        if std::env::var("IL_DEBUG").is_ok() {
+                        if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                             eprintln!(
                                 "DEBUG antijoin: relation '{relation}' is live-only (not in input_data), \
                                  negation may be incomplete"
@@ -2365,7 +2365,7 @@ impl CodeGenerator {
         }
 
         // DEBUG: Log what we found
-        if std::env::var("IL_DEBUG").is_ok() {
+        if std::env::var("INPUTLAYER_DEBUG").is_ok() {
             eprintln!(
                 "DEBUG detect_recursive_union: {} inputs, scan_relations = {:?}",
                 inputs.len(),
@@ -2741,13 +2741,13 @@ impl CodeGenerator {
             // e.g., Q = quantize(V), D = dequantize(Q) - D needs to see Q
             let mut current_tuple = tuple.clone();
 
-            if std::env::var("IL_DEBUG").is_ok() {
+            if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                 eprintln!("DEBUG Compute: input tuple = {:?}", current_tuple.values());
             }
 
             for (name, expr) in &expressions {
                 let value = Self::evaluate_expression(expr, &current_tuple);
-                if std::env::var("IL_DEBUG").is_ok() {
+                if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                     eprintln!("DEBUG Compute: expr='{name}' => {value:?}");
                 }
                 // Extend the current tuple with the computed value
@@ -2757,7 +2757,7 @@ impl CodeGenerator {
                 current_tuple = Tuple::new(values);
             }
 
-            if std::env::var("IL_DEBUG").is_ok() {
+            if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                 eprintln!("DEBUG Compute: output = {:?}", current_tuple.values());
             }
 

@@ -9,22 +9,29 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build:
-    name: Build (${{ matrix.platform }})
+    name: Build ${{ matrix.component.name }} (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
     strategy:
       matrix:
+        component:
+          - name: inputlayer
+            target: engine
+          - name: inputlayer-gateway
+            target: gateway
+        platform: [linux/amd64, linux/arm64]
         include:
           - platform: linux/amd64
             runner: blacksmith-4vcpu-ubuntu-2404
+            arch: amd64
           - platform: linux/arm64
             runner: blacksmith-4vcpu-ubuntu-2404-arm
+            arch: arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -43,18 +50,19 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.component.name }}
 
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
+          target: ${{ matrix.component.target }}
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
-          cache-from: type=gha,scope=${{ matrix.platform }}
-          cache-to: type=gha,scope=${{ matrix.platform }},mode=max
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.component.name }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          cache-from: type=gha,scope=${{ matrix.component.target }}-${{ matrix.platform }}
+          cache-to: type=gha,scope=${{ matrix.component.target }}-${{ matrix.platform }},mode=max
 
       - name: Export digest
         if: github.event_name != 'pull_request'
@@ -67,25 +75,32 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: digests-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
+          name: digests-${{ matrix.component.target }}-${{ matrix.arch }}
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
 
   merge:
-    name: Merge manifests
+    name: Merge manifests (${{ matrix.component.name }})
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
     needs: build
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        component:
+          - name: inputlayer
+            target: engine
+          - name: inputlayer-gateway
+            target: gateway
     steps:
       - name: Download digests
         uses: actions/download-artifact@v4
         with:
           path: /tmp/digests
-          pattern: digests-*
+          pattern: digests-${{ matrix.component.target }}-*
           merge-multiple: true
 
       - name: Set up Docker Buildx
@@ -102,7 +117,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.component.name }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch
@@ -114,8 +129,8 @@ jobs:
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+            $(printf '${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.component.name }}@sha256:%s ' *)
 
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.component.name }}:${{ steps.meta.outputs.version }}

@@ -13,6 +13,33 @@ services:
       INPUTLAYER_LOGGING__LEVEL: ${INPUTLAYER_LOG_LEVEL:-info}
     # NOT exposed to host - only accessible via Caddy
 
+  # The model gateway: OpenAI-compatible Verified Completions API.
+  # Separate deployable with its own configuration; the engine never sees
+  # the model provider key. Caddy routes /v1/verify and /v1/chat/completions
+  # here. Remove this service if you only want the engine.
+  gateway:
+    image: ghcr.io/inputlayer/inputlayer-gateway:latest
+    restart: unless-stopped
+    environment:
+      GATEWAY_HOST: "0.0.0.0"
+      GATEWAY_PORT: "8081"
+      INPUTLAYER_URL: "http://inputlayer:8080"
+      INPUTLAYER_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Every ontology published in the registry index is loaded at startup
+      # and pinned by version and digest; each request selects one via the
+      # x-il-ontology header. INPUTLAYER_REGISTRY overrides the index location and
+      # INPUTLAYER_REGISTRY_TOKEN is needed while the registry is private.
+      INPUTLAYER_REGISTRY: ${INPUTLAYER_REGISTRY:-}
+      INPUTLAYER_REGISTRY_TOKEN: ${INPUTLAYER_REGISTRY_TOKEN:-}
+    volumes:
+      # Persist the ontology cache so container recreation does not depend
+      # on the registry being reachable.
+      - gateway-cache:/var/lib/inputlayer
+    depends_on:
+      - inputlayer
+    # NOT exposed to host - only accessible via Caddy
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -28,8 +55,10 @@ services:
       DOMAIN: ${DOMAIN:-localhost}
     depends_on:
       - inputlayer
+      - gateway
 
 volumes:
   inputlayer-data:
+  gateway-cache:
   caddy-data:
   caddy-config:

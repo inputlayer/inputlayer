@@ -651,7 +651,7 @@ impl IQLEngine {
                 })
                 .flat_map(|scc| scc.iter().cloned())
                 .collect();
-            if std::env::var("IL_DEBUG").is_ok() && !recursive_rels.is_empty() {
+            if std::env::var("INPUTLAYER_DEBUG").is_ok() && !recursive_rels.is_empty() {
                 eprintln!("DEBUG SIP: skipping recursive relations: {recursive_rels:?}");
             }
             sip_rewriter.set_recursive_relations(recursive_rels);
@@ -659,7 +659,7 @@ impl IQLEngine {
             let rewritten = sip_rewriter.rewrite_program(program);
             let stats = sip_rewriter.get_stats();
 
-            if std::env::var("IL_DEBUG").is_ok() {
+            if std::env::var("INPUTLAYER_DEBUG").is_ok() {
                 if stats.rules_rewritten > 0 {
                     eprintln!(
                         "DEBUG SIP: rewrote {} rules, generated {} SIP rules",
@@ -718,7 +718,7 @@ impl IQLEngine {
             let (rewritten, magic_seeds) =
                 magic_sets::MagicSetRewriter::rewrite_program(program, &bindings);
 
-            let debug = std::env::var("IL_DEBUG").is_ok();
+            let debug = std::env::var("INPUTLAYER_DEBUG").is_ok();
             if debug {
                 eprintln!(
                     "DEBUG Magic Sets: rewrote {} relations, {} magic seeds",
@@ -948,7 +948,7 @@ impl IQLEngine {
             self.ir_nodes = optimized_irs;
             // Store shared views - they will be executed BEFORE main rules
             self.shared_views = shared_views;
-            if std::env::var("IL_DEBUG").is_ok() && !self.shared_views.is_empty() {
+            if std::env::var("INPUTLAYER_DEBUG").is_ok() && !self.shared_views.is_empty() {
                 eprintln!(
                     "DEBUG optimize_ir: created {} shared views",
                     self.shared_views.len()
@@ -1077,7 +1077,7 @@ impl IQLEngine {
     /// Returns a vector where each element is `Some(head_name)` if the IR node
     /// at that index is recursive, or None if non-recursive.
     fn detect_recursion_info(&self, rule_heads: &[String]) -> Vec<Option<String>> {
-        let debug = std::env::var("IL_DEBUG").is_ok();
+        let debug = std::env::var("INPUTLAYER_DEBUG").is_ok();
 
         self.ir_nodes
             .iter()
@@ -1110,7 +1110,7 @@ impl IQLEngine {
         codegen: &mut CodeGenerator,
         accumulated: &HashMap<String, Vec<Tuple>>,
     ) {
-        let debug = std::env::var("IL_DEBUG").is_ok();
+        let debug = std::env::var("INPUTLAYER_DEBUG").is_ok();
 
         // Load input tuples
         for (relation, data) in &self.input_tuples {
@@ -1146,7 +1146,7 @@ impl IQLEngine {
     /// them in dependency order using topological sort: views that reference no
     /// other views first, then views that depend on already-computed views.
     fn execute_shared_views(&self) -> Result<HashMap<String, Vec<Tuple>>, String> {
-        let debug = std::env::var("IL_DEBUG").is_ok();
+        let debug = std::env::var("INPUTLAYER_DEBUG").is_ok();
         let mut results: HashMap<String, Vec<Tuple>> = HashMap::new();
 
         if self.shared_views.is_empty() {
@@ -1329,7 +1329,7 @@ impl IQLEngine {
             }
         }
 
-        if std::env::var("IL_DEBUG").is_ok() {
+        if std::env::var("INPUTLAYER_DEBUG").is_ok() {
             eprintln!("DEBUG topological_sort_ir_nodes: execution order = {order:?}");
         }
 
@@ -1536,7 +1536,7 @@ impl IQLEngine {
         ),
         String,
     > {
-        let debug = std::env::var("IL_DEBUG").is_ok();
+        let debug = std::env::var("INPUTLAYER_DEBUG").is_ok();
         if debug {
             eprintln!("DEBUG execute_tuples: starting");
         }

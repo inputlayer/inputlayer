@@ -2828,7 +2828,7 @@ impl KnowledgeGraph {
         // Add the query
         combined.push_str(program);
 
-        if std::env::var("IL_DEBUG").is_ok() {
+        if std::env::var("INPUTLAYER_DEBUG").is_ok() {
             eprintln!(
                 "DEBUG execute_with_rules_tuples: {} view rules ({} skipped as materialized), program = {}",
                 rule_defs.len(),
