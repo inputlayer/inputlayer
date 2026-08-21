@@ -242,6 +242,46 @@ In our testing, a conversation carrying an embedded "system override" demanding 
 
 Errors you can act on: `400` for a missing or unknown ontology selection or a version assertion that does not match the gateway's pin; `503` when no model key is configured or no ontologies loaded.
 
+## The chat proxy
+
+`POST /v1/verify` is the verification primitive; `POST /v1/chat/completions` is the product: an OpenAI-compatible endpoint where completions come from the model provider and every response carries the consistency block. Point any OpenAI SDK at the gateway and change nothing else:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://127.0.0.1:8081/v1",
+    api_key="gw-secret",  # your GATEWAY_API_KEY
+    default_headers={"x-il-ontology": "consistency-core"},
+)
+r = client.chat.completions.create(
+    model="claude-haiku-4-5",
+    messages=[
+        {"role": "user", "content": "We fly out of Geneva on August 14th."},
+        {"role": "assistant", "content": "Noted: departure August 14th."},
+        {"role": "user", "content": "Since we leave on the 12th, do we need an earlier taxi?"},
+    ],
+)
+print(r.choices[0].message.content)          # a normal completion
+print(r.model_extra["inputlayer"])           # ... with findings attached
+```
+
+The completion works like any OpenAI chat call (`claude-*` models are forwarded as-is; other model names fall back to the default), and `model_extra["inputlayer"]["consistency"]` carries the same findings, spans, and optional trace as `/v1/verify`. Streaming is not supported yet ([#85](https://github.com/inputlayer/inputlayer/issues/85)); text content only, no tool calls.
+
+### Authentication
+
+Set `GATEWAY_API_KEY` and every `/v1/*` request must carry `Authorization: Bearer <key>` - this is what the OpenAI SDK's `api_key` becomes. Unset, the gateway is open: acceptable on a private network, never on a public one, which is why the TLS compose file refuses to start without it. A chat proxy spends your model-provider budget on every request; treat the gateway key like the provider key.
+
+### Modes
+
+| `il_mode` (or `x-il-mode` header) | Behavior |
+|---|---|
+| `annotate` (default) | Completion and verification run concurrently; findings are attached, nothing is ever blocked. Verifier trouble yields `status: "unverified"` and the completion still goes out. |
+| `enforce` | Verify first: a conversation with findings is refused with HTTP 422 and no completion tokens are spent. **Fails open**: if the conversation cannot be verified (extraction error, engine down), the completion proceeds with `status: "unverified"`. |
+| `enforce-strict` | Fails closed: no completion unless verification actually ran clean. `conflicts_found` gets 422; `unverified` gets 503 `verification_unavailable`. |
+
+The fail-open distinction matters: `enforce` guarantees "no completion over KNOWN contradictions", not "no completion unless verified" - content that breaks extraction (for example, a conversation long enough to truncate it) downgrades enforcement to annotation. Callers who need the hard guarantee use `enforce-strict` and accept that verifier downtime blocks completions.
+
 ## Where this is going
 
-`POST /v1/verify` is the verification primitive: hand it any conversation, get findings. The next milestone ([#84](https://github.com/inputlayer/inputlayer/issues/84)) is the chat proxy - `POST /v1/chat/completions` answering through your model provider and returning the assistant message with the `inputlayer.consistency` block attached, so every completion arrives already verified. The registry grows from here too: each new ontology pack published becomes available to every gateway on its next restart, pinned and digest-verified, with no gateway release in between.
+Streaming and incremental per-session verification are M2 ([#85](https://github.com/inputlayer/inputlayer/issues/85)); checking the model's own reply before it is returned, with repair mode, is M3 ([#86](https://github.com/inputlayer/inputlayer/issues/86)). The registry grows independently: each new ontology pack published becomes available to every gateway on its next restart, pinned and digest-verified, with no gateway release in between.
