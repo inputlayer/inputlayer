@@ -83,11 +83,13 @@ curl -s http://localhost:8081/health
 
 ## 2. Install the CLI
 
-The `il` CLI ships with the `inputlayer` crate:
+The `il` CLI ships with the `inputlayer` crate. Install it from source:
 
 ```bash
-cargo install inputlayer
+cargo install --git https://github.com/inputlayer/inputlayer --bin il inputlayer
 ```
+
+(Once the crate is published to crates.io, `cargo install inputlayer` will work too.)
 
 Browse what the registry publishes:
 
@@ -220,7 +222,13 @@ The assistant's 2600 EUR recommendation was extracted as an output claim, held a
 
 ## 5. What a hostile conversation gets
 
-Because extraction is ontology-bound and quote-gated, a conversation that tries to inject facts gets nowhere. Embedded "system override" instructions demanding fabricated claims produce no findings; a claim whose quote does not appear verbatim in the cited message is dropped and reported in `dropped`; and mapped values are typed at the template layer, so extracted text can never escape into the fact language. The failure direction is always the safe one: a missed finding, never a forged fact or a false conflict.
+The pipeline enforces three mechanical guarantees against conversations that try to inject facts, each independent of the model behaving well:
+
+- **Quote gate**: a claim whose quote is not verbatim in the message it cites is dropped and reported in `dropped` - including claims with malformed or empty quote fields.
+- **Typed template slots**: extracted strings are escaped in quoted positions, rejected outright if they carry control characters, and only parsed integers ever reach unquoted positions - extracted text cannot escape into the fact language.
+- **Drift bail**: extraction that does not map cleanly onto the ontology's templates aborts to `unverified` rather than verifying over partial facts.
+
+In our testing, a conversation carrying an embedded "system override" demanding fabricated claims and injected fact syntax produced no findings and no inserted facts. The failure direction is designed to be the safe one: a missed finding, never a forged fact.
 
 ## Response contract
 
