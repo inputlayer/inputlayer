@@ -109,23 +109,25 @@ pub async fn run_verify(
     // The KG name must be unique PER REQUEST, not per content: two
     // concurrent identical requests sharing a name would race each other's
     // create/insert/drop, and the loser's empty queries would read as a
-    // false "verified". The content hash stays for log correlation only.
+    // false "verified". Pid and sequence provide the uniqueness but are
+    // HASHED IN rather than embedded readably - the name is exposed to the
+    // caller via the trace, and a readable global counter would let one
+    // tenant measure another's traffic.
     let seq = REQUEST_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut hasher = Sha256::new();
     hasher.update(ontology.name.as_bytes());
     hasher.update(serde_json::to_vec(messages).unwrap_or_default());
+    hasher.update(std::process::id().to_le_bytes());
+    hasher.update(seq.to_le_bytes());
     let digest = hasher.finalize();
-    let kg = format!(
-        "_verify_{}_{}_{seq}",
-        hex::encode(&digest[..6]),
-        std::process::id()
-    );
+    let kg = format!("_verify_{}", hex::encode(&digest[..8]));
 
     let mut engine = Engine::connect(&engine_config.url, &engine_config.api_key)
         .await
         .context("engine unreachable")?;
 
     // Ephemeral KG lifecycle; cleanup is best-effort on every exit path.
+    // engine_ms covers create+deploy+insert+query+cleanup (not connect).
     let engine_started = std::time::Instant::now();
     let result = verify_in_kg(&mut engine, &kg, ontology, &statements).await;
     let _ = engine.execute(".kg use default").await;

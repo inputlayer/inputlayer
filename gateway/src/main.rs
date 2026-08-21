@@ -237,12 +237,20 @@ async fn verify(
     let user_content = render_conversation(&messages);
 
     // Tracing is per-request opt-in: the response additionally carries the
-    // validated extraction, the mapped IQL statements, and timings. It only
-    // ever exposes data derived from the caller's own request.
-    let want_trace = headers
-        .get("x-il-trace")
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| matches!(v.trim(), "1" | "true"));
+    // validated extraction, the mapped IQL statements, and timings - only
+    // data derived from the caller's own request. Like x-il-ontology, a
+    // malformed value is explicit intent that failed: reject it rather
+    // than silently not tracing.
+    let want_trace = match headers.get("x-il-trace") {
+        None => false,
+        Some(value) => match value.to_str().map(|v| v.trim().to_ascii_lowercase()) {
+            Ok(v) if v == "1" || v == "true" => true,
+            Ok(v) if v.is_empty() || v == "0" || v == "false" => false,
+            _ => {
+                return bad_request("x-il-trace must be 1/true or 0/false".to_string());
+            }
+        },
+    };
 
     // Fail open from here: verifier trouble must not fail caller traffic.
     let extract_started = std::time::Instant::now();

@@ -84,6 +84,12 @@ async fn verify_pipeline_finds_functional_conflict_live() {
         url: server,
         api_key,
     };
+    // The opt-out half of the trace contract: no request, no trace.
+    let untraced = run_verify(&engine, &loaded, extraction.clone(), &messages, false)
+        .await
+        .expect("pipeline (untraced)");
+    assert!(untraced.trace.is_none());
+
     let outcome = run_verify(&engine, &loaded, extraction, &messages, true)
         .await
         .expect("pipeline");
