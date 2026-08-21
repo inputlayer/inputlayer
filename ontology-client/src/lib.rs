@@ -6,5 +6,6 @@
 //! (authenticate, execute, soft-error scanning), so the two products can
 //! never drift.
 
+pub mod deploy;
 pub mod registry;
 pub mod ws;

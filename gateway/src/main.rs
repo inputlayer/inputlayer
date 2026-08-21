@@ -161,11 +161,22 @@ async fn main() -> Result<()> {
         api_key,
     });
 
+    // Browser clients (the Studio) may run on a different origin than the
+    // gateway; the API is bearer-authenticated, so permissive CORS is the
+    // standard posture (same as any public model API).
+    let cors = tower_http::cors::CorsLayer::new()
+        .allow_origin(tower_http::cors::Any)
+        .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
+        .allow_headers(tower_http::cors::Any);
+
     let app = Router::new()
         .route("/health", get(health))
         .route("/ready", get(ready))
         .route("/v1/verify", post(verify))
         .route("/v1/chat/completions", post(chat_completions))
+        .route("/v1/ontologies", get(list_ontologies))
+        .route("/v1/ontologies/install", post(install_ontology))
+        .layer(cors)
         .with_state(state);
 
     let addr = format!("{host}:{port}");
@@ -599,6 +610,121 @@ fn enforcement_refusal(
             "conversation could not be verified; completion refused (enforce-strict)",
         )),
         _ => None,
+    }
+}
+
+/// The published ontology set: what a Studio (or any client) can select
+/// from, one entry per loaded pack with its pinned identity.
+async fn list_ontologies(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<Value>) {
+    if let Err(response) = authorize(&state, &headers) {
+        return response;
+    }
+    let mut ontologies: Vec<Value> = state
+        .ontologies
+        .values()
+        .map(|o| {
+            json!({
+                "name": o.name,
+                "version": o.version,
+                "digest": o.digest,
+                "title": o.manifest.ontology.title,
+            })
+        })
+        .collect();
+    ontologies.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    (StatusCode::OK, Json(json!({ "ontologies": ontologies })))
+}
+
+#[derive(Deserialize)]
+struct InstallRequest {
+    ontology: String,
+    kg: String,
+    #[serde(default)]
+    create: bool,
+}
+
+/// Install a loaded ontology pack into a persistent knowledge graph -
+/// the same deploy-and-pin routine `il install` uses, exposed for the
+/// Studio. The pack comes from the gateway's own pinned set, never from an
+/// arbitrary caller-supplied source.
+async fn install_ontology(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<InstallRequest>,
+) -> (StatusCode, Json<Value>) {
+    if let Err(response) = authorize(&state, &headers) {
+        return response;
+    }
+    if state.ontologies.is_empty() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": { "type": "not_configured",
+                "message": "no ontologies loaded (registry unreachable at startup)" } })),
+        );
+    }
+    let (name, version) = match request.ontology.split_once('@') {
+        Some((n, v)) => (n, Some(v)),
+        None => (request.ontology.as_str(), None),
+    };
+    let Some(ontology) = state.ontologies.get(name) else {
+        return bad_request(format!(
+            "ontology {name:?} is not published; available: {}",
+            available_list(&state)
+        ));
+    };
+    if let Some(asserted) = version {
+        if asserted != ontology.version {
+            return bad_request(format!(
+                "ontology {name} is pinned at {}, request asserted {asserted}",
+                ontology.version
+            ));
+        }
+    }
+    if let Err(err) =
+        inputlayer_ontology_client::registry::validate_component("knowledge graph", &request.kg)
+    {
+        return bad_request(err.to_string());
+    }
+
+    let Ok(mut engine) =
+        inputlayer_ontology_client::ws::Engine::connect(&state.engine.url, &state.engine.api_key)
+            .await
+    else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": { "type": "engine_unavailable",
+                    "message": "engine unreachable" } })),
+        );
+    };
+    match inputlayer_ontology_client::deploy::deploy_pack(
+        &mut engine,
+        &request.kg,
+        request.create,
+        &ontology.name,
+        &ontology.version,
+        &ontology.digest,
+        &ontology.rules_program,
+    )
+    .await
+    {
+        Ok(statements) => (
+            StatusCode::OK,
+            Json(json!({
+                "installed": {
+                    "ontology": format!("{}@{}", ontology.name, ontology.version),
+                    "digest": ontology.digest,
+                    "kg": request.kg,
+                    "statements": statements,
+                }
+            })),
+        ),
+        Err(err) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": { "type": "install_failed", "message": err.to_string() } })),
+        ),
     }
 }
 

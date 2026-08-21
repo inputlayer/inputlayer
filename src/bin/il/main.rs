@@ -238,89 +238,27 @@ async fn install(
         program.push_str(&text);
         program.push('\n');
     }
+
     let statement_count = program
         .lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with("//"))
         .count();
-
     let mut engine = ws::Engine::connect(server, api_key).await?;
-    if create {
-        // Tolerate an existing KG so install is idempotent under --create.
-        if let Err(err) = engine.execute(&format!(".kg create {kg}")).await {
-            let msg = err.to_string().to_lowercase();
-            if !msg.contains("exist") {
-                return Err(err.context(format!("failed to create knowledge graph '{kg}'")));
-            }
-        }
-    }
-    engine
-        .execute(&format!(".kg use {kg}"))
-        .await
-        .with_context(|| {
-            format!("failed to switch to knowledge graph '{kg}' (--create to create it)")
-        })?;
-
     println!(
         "deploying {name}@{} -> {kg} ({statement_count} statements, 1 round trip) ...",
         entry.version
     );
-    // Parse errors reject the whole program up front; runtime failures are
-    // per-statement and reported as message rows, so both paths are checked.
-    let deploy = engine.execute(&program).await.context(
-        "pack deployment failed (parse errors reject the whole program; a mid-program \
-         runtime failure may leave earlier statements applied - inspect the KG)",
-    )?;
-    let problems = deploy.soft_errors();
-    if !problems.is_empty() {
-        anyhow::bail!(
-            "pack deployment reported {} failed statement(s); earlier statements may \
-             remain applied - inspect the KG:\n  {}",
-            problems.len(),
-            problems.join("\n  ")
-        );
-    }
-
-    registry::validate_component("ontology name", &manifest.ontology.name)?;
-    registry::validate_component("version", &manifest.ontology.version)?;
-
-    // Pin the install so findings are attributable to an exact rule set and
-    // `il list` can report it. The decl may legitimately already exist; any
-    // other decl failure surfaces via the read-back below.
-    let _ = engine
-        .execute("+pack_meta(name: string, version: string, digest: string)")
-        .await;
-    let pin = engine
-        .execute(&format!(
-            "+pack_meta[(\"{}\", \"{}\", \"{}\")]",
-            manifest.ontology.name, manifest.ontology.version, entry.digest
-        ))
-        .await
-        .context("failed to pin pack_meta")?;
-    if let Some(problem) = pin.soft_errors().first() {
-        anyhow::bail!("failed to pin pack_meta: {problem}");
-    }
-
-    // Trust the read-back, not the insert's silence: the engine reports some
-    // rejections as plain messages.
-    let pinned = engine
-        .execute("?pack_meta(Name, Version, Digest)")
-        .await
-        .context("failed to verify pack_meta pin")?;
-    let confirmed = pinned.rows.iter().any(|row| {
-        row.first().and_then(serde_json::Value::as_str) == Some(manifest.ontology.name.as_str())
-            && row.get(1).and_then(serde_json::Value::as_str)
-                == Some(manifest.ontology.version.as_str())
-    });
-    if !confirmed {
-        anyhow::bail!(
-            "pack deployed, but the pack_meta pin did not verify - the KG has no \
-             ({}, {}) row",
-            manifest.ontology.name,
-            manifest.ontology.version
-        );
-    }
-
+    inputlayer_ontology_client::deploy::deploy_pack(
+        &mut engine,
+        kg,
+        create,
+        &manifest.ontology.name,
+        &manifest.ontology.version,
+        &entry.digest,
+        &program,
+    )
+    .await?;
     println!(
         "ok {}@{} -> {kg} (pinned in pack_meta)",
         manifest.ontology.name, manifest.ontology.version
