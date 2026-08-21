@@ -36,8 +36,8 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use inputlayer_gateway::extract::{
-    render_conversation, AnthropicExtractor, ChatParams, Completer, Extractor,
+use inputlayer_gateway::model::{
+    render_conversation, AnthropicClient, ChatParams, Completer, Extractor,
 };
 use inputlayer_gateway::ontology::LoadedOntology;
 use inputlayer_gateway::pipeline::{run_verify, EngineConfig};
@@ -122,8 +122,8 @@ async fn main() -> Result<()> {
     if ontologies.is_empty() {
         println!("no ontologies loaded - /v1/verify will 503");
     }
-    let model_client: Option<Arc<AnthropicExtractor>> = match std::env::var("ANTHROPIC_API_KEY") {
-        Ok(key) if !key.trim().is_empty() => Some(Arc::new(AnthropicExtractor::new(key))),
+    let model_client: Option<Arc<AnthropicClient>> = match std::env::var("ANTHROPIC_API_KEY") {
+        Ok(key) if !key.trim().is_empty() => Some(Arc::new(AnthropicClient::new(key))),
         _ => {
             println!("ANTHROPIC_API_KEY not set - /v1/verify and /v1/chat/completions will 503");
             None
@@ -229,6 +229,9 @@ fn bad_request(message: String) -> (StatusCode, Json<Value>) {
 }
 
 /// Bearer auth on the /v1/* endpoints when GATEWAY_API_KEY is configured.
+/// The scheme is case-insensitive per RFC 7235; the comparison goes through
+/// SHA-256 digests so equality time does not depend on where the presented
+/// key diverges.
 fn authorize(state: &AppState, headers: &HeaderMap) -> Result<(), (StatusCode, Json<Value>)> {
     let Some(expected) = &state.api_key else {
         return Ok(());
@@ -236,8 +239,17 @@ fn authorize(state: &AppState, headers: &HeaderMap) -> Result<(), (StatusCode, J
     let presented = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "));
-    if presented == Some(expected.as_str()) {
+        .and_then(|v| {
+            let (scheme, token) = v.split_once(' ')?;
+            scheme
+                .eq_ignore_ascii_case("bearer")
+                .then(|| token.trim_start())
+        });
+    let matches = presented.is_some_and(|token| {
+        use sha2::Digest;
+        sha2::Sha256::digest(token.as_bytes()) == sha2::Sha256::digest(expected.as_bytes())
+    });
+    if matches {
         Ok(())
     } else {
         Err((
@@ -505,9 +517,9 @@ async fn chat_completions(
         .filter(|v| !v.is_empty())
         .or_else(|| request.il_mode.clone())
         .unwrap_or_else(|| "annotate".to_string());
-    if mode != "annotate" && mode != "enforce" {
+    if mode != "annotate" && mode != "enforce" && mode != "enforce-strict" {
         return bad_request(format!(
-            "il_mode must be \"annotate\" or \"enforce\", got {mode:?}"
+            "il_mode must be \"annotate\", \"enforce\", or \"enforce-strict\", got {mode:?}"
         ));
     }
     if request.messages.is_empty() {
@@ -528,43 +540,65 @@ async fn chat_completions(
     };
 
     let response_model = params.model.clone();
-    if mode == "enforce" {
-        // Verify FIRST; a contradictory conversation is refused before any
-        // completion tokens are spent. Unverified fails open (completion
-        // proceeds) - consistent with M0's stance that verifier trouble
-        // must not take down caller traffic.
-        let consistency = consistency_block(&state, &ontology, &messages, want_trace).await;
-        if consistency["status"] == "conflicts_found" {
-            return (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Json(json!({
-                    "error": { "type": "consistency_violation",
-                        "message": "conversation contains contradictions; completion refused (enforce mode)" },
-                    "inputlayer": { "consistency": consistency },
-                })),
-            );
-        }
-        match completer.complete(&params).await {
-            Ok(completion) => (
-                StatusCode::OK,
-                Json(openai_response(&response_model, &completion, consistency)),
-            ),
-            Err(err) => upstream_error(&err),
-        }
-    } else {
+    if mode == "annotate" {
         // annotate: completion and verification run concurrently -
         // verification checks the incoming conversation, not the reply.
         let (completion, consistency) = tokio::join!(
             completer.complete(&params),
             consistency_block(&state, &ontology, &messages, want_trace)
         );
-        match completion {
+        return match completion {
             Ok(completion) => (
                 StatusCode::OK,
                 Json(openai_response(&response_model, &completion, consistency)),
             ),
             Err(err) => upstream_error(&err),
-        }
+        };
+    }
+
+    // enforce / enforce-strict: verify FIRST, so a refused conversation
+    // never spends completion tokens.
+    let consistency = consistency_block(&state, &ontology, &messages, want_trace).await;
+    if let Some(refusal) = enforcement_refusal(&mode, consistency["status"].as_str()) {
+        let (status_code, error_type, message) = refusal;
+        return (
+            status_code,
+            Json(json!({
+                "error": { "type": error_type, "message": message },
+                "inputlayer": { "consistency": consistency },
+            })),
+        );
+    }
+    match completer.complete(&params).await {
+        Ok(completion) => (
+            StatusCode::OK,
+            Json(openai_response(&response_model, &completion, consistency)),
+        ),
+        Err(err) => upstream_error(&err),
+    }
+}
+
+/// The enforcement decision, pure for testability. `enforce` fails OPEN on
+/// an unverifiable conversation (verifier trouble must not take down caller
+/// traffic - and note this is bypassable by content engineered to break
+/// extraction, which is why the strict variant exists). `enforce-strict`
+/// fails CLOSED: no completion unless verification actually ran clean.
+fn enforcement_refusal(
+    mode: &str,
+    status: Option<&str>,
+) -> Option<(StatusCode, &'static str, &'static str)> {
+    match (mode, status) {
+        (_, Some("conflicts_found")) => Some((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "consistency_violation",
+            "conversation contains contradictions; completion refused",
+        )),
+        ("enforce-strict", status) if status != Some("verified") => Some((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "verification_unavailable",
+            "conversation could not be verified; completion refused (enforce-strict)",
+        )),
+        _ => None,
     }
 }
 
@@ -587,7 +621,8 @@ fn chat_params(
     let mut system_parts: Vec<String> = Vec::new();
     let mut turns: Vec<(String, String)> = Vec::new();
     for message in &request.messages {
-        if message.role == "system" {
+        // "developer" is OpenAI's system-equivalent role.
+        if message.role == "system" || message.role == "developer" {
             system_parts.push(message.content.clone());
             continue;
         }
@@ -636,10 +671,13 @@ fn chat_params(
 /// Assemble the OpenAI-shaped response with the consistency block attached.
 fn openai_response(
     model: &str,
-    completion: &inputlayer_gateway::extract::ChatCompletion,
+    completion: &inputlayer_gateway::model::ChatCompletion,
     consistency: Value,
 ) -> Value {
     use sha2::Digest;
+    // Per-process counter so two identical completions in the same second
+    // still get distinct ids.
+    static ID_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let created = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
@@ -648,6 +686,11 @@ fn openai_response(
     hasher.update(created.to_le_bytes());
     hasher.update(completion.text.as_bytes());
     hasher.update(std::process::id().to_le_bytes());
+    hasher.update(
+        ID_SEQ
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            .to_le_bytes(),
+    );
     let digest = hasher.finalize();
     let id: String = digest[..12]
         .iter()
@@ -675,10 +718,22 @@ fn openai_response(
     })
 }
 
+/// A provider 4xx (except 429) is the caller's own mistake (bad params the
+/// gateway does not pre-validate) and surfaces as 400; everything else is
+/// provider trouble and surfaces as 502.
 fn upstream_error(err: &anyhow::Error) -> (StatusCode, Json<Value>) {
+    let upstream = err
+        .downcast_ref::<inputlayer_gateway::model::UpstreamStatus>()
+        .map(|s| s.0);
+    let (status, error_type) = match upstream {
+        Some(code) if (400..500).contains(&code) && code != 429 => {
+            (StatusCode::BAD_REQUEST, "invalid_request")
+        }
+        _ => (StatusCode::BAD_GATEWAY, "upstream_error"),
+    };
     (
-        StatusCode::BAD_GATEWAY,
-        Json(json!({ "error": { "type": "upstream_error", "message": err.to_string() } })),
+        status,
+        Json(json!({ "error": { "type": error_type, "message": err.to_string() } })),
     )
 }
 
@@ -761,5 +816,33 @@ mod tests {
     fn system_only_conversation_is_rejected() {
         let req = request(vec![message("system", "only instructions")]);
         assert!(chat_params(&req, "m".to_string()).is_err());
+    }
+
+    #[test]
+    fn developer_role_is_system() {
+        let req = request(vec![
+            message("developer", "Follow the spec."),
+            message("user", "hi"),
+        ]);
+        let params = chat_params(&req, "m".to_string()).expect("params");
+        assert_eq!(params.system.as_deref(), Some("Follow the spec."));
+        assert_eq!(params.messages.len(), 1);
+    }
+
+    #[test]
+    fn enforcement_decision_table() {
+        // Conflicts refuse in both enforcement modes.
+        assert!(enforcement_refusal("enforce", Some("conflicts_found")).is_some());
+        assert!(enforcement_refusal("enforce-strict", Some("conflicts_found")).is_some());
+        // enforce fails OPEN on unverified; strict fails CLOSED.
+        assert!(enforcement_refusal("enforce", Some("unverified")).is_none());
+        let strict = enforcement_refusal("enforce-strict", Some("unverified"));
+        assert_eq!(
+            strict.map(|(code, kind, _)| (code, kind)),
+            Some((StatusCode::SERVICE_UNAVAILABLE, "verification_unavailable"))
+        );
+        // Verified proceeds everywhere.
+        assert!(enforcement_refusal("enforce", Some("verified")).is_none());
+        assert!(enforcement_refusal("enforce-strict", Some("verified")).is_none());
     }
 }
