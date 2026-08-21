@@ -21,6 +21,9 @@ pub struct EngineConfig {
 pub struct EvalOutcome {
     pub findings: Vec<Value>,
     pub dropped: Vec<String>,
+    /// Operational problems that do not invalidate the evaluation itself
+    /// (for example an incomplete one-shot retraction).
+    pub notes: Vec<String>,
     /// The stored tuples with their provenance, for the translation event.
     pub tuples: Vec<Value>,
     pub trace: Option<Value>,
@@ -81,36 +84,74 @@ pub fn validate_quotes(
 /// id, so conversations are isolated namespaces inside the shared KG:
 /// identifiers never collide across conversations, and the pack's rules
 /// (which join through identifiers) evaluate unchanged.
+///
+/// FAILS CLOSED: a declared identifier field that is missing, empty, or
+/// not a string cannot be namespaced, and an unprefixed identifier would
+/// join across conversations (an empty entity in two conversations makes
+/// their claims collide and fabricates cross-conversation findings). Such
+/// rows are dropped, not passed through - extraction noise becomes a
+/// missed finding, never a false one.
 pub fn prefix_identifiers(
     manifest: &crate::ontology::Manifest,
     extraction: &mut Value,
     prefix: &str,
-) {
+) -> Vec<String> {
+    let mut dropped = Vec::new();
     for (section, fields) in &manifest.extraction.identifier_fields {
         let Some(rows) = extraction.get_mut(section).and_then(Value::as_array_mut) else {
             continue;
         };
-        for row in rows {
+        rows.retain_mut(|row| {
             let Some(object) = row.as_object_mut() else {
-                continue;
+                dropped.push(format!("{section}: row is not an object"));
+                return false;
             };
             for field in fields {
-                if let Some(Value::String(value)) = object.get_mut(field) {
-                    if !value.is_empty() {
-                        *value = format!("{prefix}:{value}");
+                match object.get(field) {
+                    Some(Value::String(value)) if !value.trim().is_empty() => {}
+                    _ => {
+                        dropped.push(format!(
+                            "{section}: identifier field {field:?} missing, empty, or not a string"
+                        ));
+                        return false;
                     }
                 }
             }
-        }
+            for field in fields {
+                if let Some(Value::String(value)) = object.get_mut(field) {
+                    *value = format!("{prefix}:{value}");
+                }
+            }
+            true
+        });
     }
+    dropped
 }
 
-/// A finding row belongs to the conversation when any of its cells carries
-/// the conversation prefix (identifiers in finding rows are the prefixed
-/// claim/constraint ids).
-fn row_in_conversation(cells: &[String], prefix: &str) -> bool {
+/// A finding row belongs to a conversation only when EVERY column the pack
+/// declares as conversation-scoped carries that conversation's prefix.
+///
+/// Attribution must never rest on free-text columns: values and quoted
+/// surfaces are model-controlled, so a caller who picks a conversation id
+/// like `http` would otherwise match any other conversation's row
+/// containing a URL - leaking its spans, ids, and proof tree.
+fn row_in_conversation(
+    cells: &[String],
+    columns: &[String],
+    scope: &[String],
+    prefix: &str,
+) -> bool {
+    if scope.is_empty() {
+        return false; // undeclared scope: cannot attribute safely
+    }
     let marker = format!("{prefix}:");
-    cells.iter().any(|cell| cell.starts_with(&marker))
+    scope.iter().all(|name| {
+        columns
+            .iter()
+            .position(|c| c == name)
+            .and_then(|i| cells.get(i))
+            .is_some_and(|cell| cell.starts_with(&marker))
+    })
 }
 
 /// Evaluate one (kg, ontology) pair for a conversation turn.
@@ -129,8 +170,12 @@ pub async fn evaluate(
     want_trace: bool,
     retract_after: bool,
 ) -> Result<EvalOutcome> {
-    let dropped = validate_quotes(&ontology.manifest, &mut extraction, messages);
-    prefix_identifiers(&ontology.manifest, &mut extraction, prefix);
+    let mut dropped = validate_quotes(&ontology.manifest, &mut extraction, messages);
+    dropped.extend(prefix_identifiers(
+        &ontology.manifest,
+        &mut extraction,
+        prefix,
+    ));
     let MapOutcome {
         statements,
         skipped,
@@ -153,26 +198,9 @@ pub async fn evaluate(
         .await
         .with_context(|| format!("knowledge graph '{kg}' not available"))?;
 
-    // The pin check: this KG must run exactly the rule set of the pack the
-    // conversation was translated with.
-    let pins = engine
-        .execute("?pack_meta(N, V, D)")
-        .await
-        .with_context(|| format!("'{kg}' has no pack_meta - install the ontology first"))?;
-    let pinned = pins.rows.iter().any(|row| {
-        row.first().and_then(Value::as_str) == Some(ontology.name.as_str())
-            && row.get(1).and_then(Value::as_str) == Some(ontology.version.as_str())
-            && row.get(2).and_then(Value::as_str) == Some(ontology.digest.as_str())
-    });
-    anyhow::ensure!(
-        pinned,
-        "ontology {}@{} (digest {}) is not installed in '{kg}' - run .ontology install \
-         (and ensure engine and gateway use the same registry source)",
-        ontology.name,
-        ontology.version,
-        ontology.digest
-    );
+    ensure_pack_pinned(&mut engine, ontology, kg).await?;
 
+    let mut notes: Vec<String> = Vec::new();
     let started = std::time::Instant::now();
     // Conversation tracking: instantiated and queryable like anything else.
     let _ = engine
@@ -214,7 +242,14 @@ pub async fn evaluate(
         retract.push_str(&format!(
             "-il_conversation(I, O) <- il_conversation(I, O), I = \"{prefix}\"\n"
         ));
-        let _ = engine.execute(&retract).await;
+        match engine.execute(&retract).await {
+            Ok(result) => {
+                for problem in result.soft_errors() {
+                    notes.push(format!("one-shot retraction incomplete: {problem}"));
+                }
+            }
+            Err(err) => notes.push(format!("one-shot retraction failed: {err}")),
+        }
     }
 
     let findings = findings?;
@@ -236,9 +271,39 @@ pub async fn evaluate(
     Ok(EvalOutcome {
         findings,
         dropped,
+        notes,
         tuples,
         trace,
     })
+}
+
+/// The KG must run exactly the rule set of the pack the conversation was
+/// translated with: name, version, AND digest. A mismatch refuses rather
+/// than proceeding, because findings attributed to a rule set that is not
+/// the deployed one are worse than no findings.
+async fn ensure_pack_pinned(
+    engine: &mut Engine,
+    ontology: &LoadedOntology,
+    kg: &str,
+) -> Result<()> {
+    let pins = engine
+        .execute("?pack_meta(N, V, D)")
+        .await
+        .with_context(|| format!("'{kg}' has no pack_meta - install the ontology first"))?;
+    let pinned = pins.rows.iter().any(|row| {
+        row.first().and_then(Value::as_str) == Some(ontology.name.as_str())
+            && row.get(1).and_then(Value::as_str) == Some(ontology.version.as_str())
+            && row.get(2).and_then(Value::as_str) == Some(ontology.digest.as_str())
+    });
+    anyhow::ensure!(
+        pinned,
+        "ontology {}@{} (digest {}) is not installed in '{kg}' - run .ontology install \
+         (and ensure engine and gateway use the same registry source)",
+        ontology.name,
+        ontology.version,
+        ontology.digest
+    );
+    Ok(())
 }
 
 async fn read_findings(
@@ -248,6 +313,13 @@ async fn read_findings(
 ) -> Result<Vec<Value>> {
     let mut findings = Vec::new();
     for watch in &ontology.manifest.report.watch {
+        anyhow::ensure!(
+            !watch.scope.is_empty(),
+            "pack {} declares no scope columns for watch view {} - conversation \
+             attribution would be unsafe (pack must be 1.0.4 or newer)",
+            ontology.name,
+            watch.view
+        );
         let result = engine
             .execute(&format!("?{}", watch.view))
             .await
@@ -263,7 +335,7 @@ async fn read_findings(
                 })
                 .collect();
             cells.resize(columns.len(), String::new());
-            if !row_in_conversation(&cells, prefix) {
+            if !row_in_conversation(&cells, &columns, &watch.scope, prefix) {
                 continue;
             }
             if watch.symmetric_dedup {
@@ -295,15 +367,22 @@ async fn read_findings(
                 .collect();
             // The engine's explainability produces the proof; the gateway
             // only instantiates the pack's goal template and relays.
+            // Cell values are model-controlled: escape them the same way
+            // the mapper does before they enter the proof goal, or a value
+            // containing a quote could reshape the goal into one that
+            // matches a different row (and returns its proof tree).
             let proof = match &watch.proof {
                 Some(template) => {
                     let mut goal = template.clone();
                     for column in &columns {
-                        goal = goal.replace(&format!("{{{column}}}"), &value_of(column));
+                        goal = goal.replace(
+                            &format!("{{{column}}}"),
+                            &crate::mapper::esc(&value_of(column)),
+                        );
                     }
                     match engine.execute(&format!(".why ?{goal}")).await {
                         Ok(result) => result.proof_trees.unwrap_or(Value::Null),
-                        Err(_) => Value::Null,
+                        Err(err) => json!({ "error": err.to_string() }),
                     }
                 }
                 None => Value::Null,
@@ -342,15 +421,35 @@ mod tests {
     }
 
     #[test]
-    fn conversation_row_filter() {
+    fn conversation_attribution_uses_only_scope_columns() {
+        let columns: Vec<String> = ["K", "C1", "S1", "C2"]
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let scope: Vec<String> = ["C1", "C2"].iter().map(|s| (*s).to_string()).collect();
         let cells = vec![
             "functional".to_string(),
             "c42:c_m0_1".to_string(),
-            "August 14th".to_string(),
+            "see http://x".to_string(),
+            "c42:c_m2_1".to_string(),
         ];
-        assert!(row_in_conversation(&cells, "c42"));
-        assert!(!row_in_conversation(&cells, "c4"));
-        assert!(!row_in_conversation(&cells, "other"));
+        assert!(row_in_conversation(&cells, &columns, &scope, "c42"));
+        // Prefix-of-a-prefix and unrelated ids do not match.
+        assert!(!row_in_conversation(&cells, &columns, &scope, "c4"));
+        assert!(!row_in_conversation(&cells, &columns, &scope, "other"));
+        // A conversation id crafted to match FREE TEXT ("http") must not
+        // capture another conversation's row - only scope columns count.
+        assert!(!row_in_conversation(&cells, &columns, &scope, "http"));
+        // A row with only one scope column in the conversation is not ours.
+        let mixed = vec![
+            "functional".to_string(),
+            "c42:c_m0_1".to_string(),
+            "x".to_string(),
+            "cOTHER:c_m2_1".to_string(),
+        ];
+        assert!(!row_in_conversation(&mixed, &columns, &scope, "c42"));
+        // Undeclared scope cannot attribute at all.
+        assert!(!row_in_conversation(&cells, &columns, &[], "c42"));
     }
 
     fn manifest(toml_text: &str) -> crate::ontology::Manifest {
@@ -414,6 +513,36 @@ within = "msg"
     }
 
     #[test]
+    fn identifier_prefixing_drops_unnamespaceable_rows() {
+        let manifest = manifest(
+            r#"
+[ontology]
+name = "t"
+version = "0"
+rules = []
+
+[extraction]
+identifier_fields = { claims = ["id", "entity"] }
+"#,
+        );
+        // Empty, missing, and non-string identifiers cannot be namespaced:
+        // an unprefixed entity would join across conversations.
+        let mut extraction = json!({ "claims": [
+            {"id": "ok", "entity": "trip"},
+            {"id": "e1", "entity": ""},
+            {"id": "e2", "entity": "   "},
+            {"id": "e3"},
+            {"id": 5, "entity": "trip"},
+        ]});
+        let dropped = prefix_identifiers(&manifest, &mut extraction, "c42");
+        assert_eq!(dropped.len(), 4, "{dropped:?}");
+        let claims = extraction["claims"].as_array().expect("claims");
+        assert_eq!(claims.len(), 1);
+        assert_eq!(claims[0]["id"], "c42:ok");
+        assert_eq!(claims[0]["entity"], "c42:trip");
+    }
+
+    #[test]
     fn identifier_prefixing_by_declared_fields() {
         let manifest = manifest(
             r#"
@@ -429,7 +558,8 @@ identifier_fields = { claims = ["id", "entity"] }
         let mut extraction = json!({ "claims": [
             {"id": "c1", "entity": "trip", "value": "2026-08-14", "surface": "s"},
         ], "constraints": [ {"id": "k1"} ]});
-        prefix_identifiers(&manifest, &mut extraction, "c42");
+        let dropped = prefix_identifiers(&manifest, &mut extraction, "c42");
+        assert!(dropped.is_empty(), "{dropped:?}");
         assert_eq!(extraction["claims"][0]["id"], "c42:c1");
         assert_eq!(extraction["claims"][0]["entity"], "c42:trip");
         // Non-identifier fields untouched; undeclared sections untouched.

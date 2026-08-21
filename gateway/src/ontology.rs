@@ -97,6 +97,15 @@ pub struct WatchSpec {
     /// and run through the engine's `.why` for the events stream.
     #[serde(default)]
     pub proof: Option<String>,
+    /// Columns of this view that hold conversation-scoped identifiers. A
+    /// row belongs to a conversation only when EVERY one of these carries
+    /// that conversation's prefix - free-text columns (values, quoted
+    /// surfaces) are never used for attribution, because their content is
+    /// model-controlled and could be made to look like another
+    /// conversation's prefix. A pack that does not declare `scope` cannot
+    /// be evaluated in conversation mode at all (fail closed).
+    #[serde(default)]
+    pub scope: Vec<String>,
 }
 
 /// A fully loaded, request-ready ontology entry.

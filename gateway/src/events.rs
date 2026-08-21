@@ -14,15 +14,22 @@ use tokio::sync::broadcast;
 
 const RING_CAPACITY: usize = 256;
 const CHANNEL_CAPACITY: usize = 64;
+/// Conversation ids are caller-chosen, so the hub must not grow with them:
+/// past this many tracked conversations the least recently touched one is
+/// evicted (its live subscribers see the channel close and can resubscribe).
+const MAX_CONVERSATIONS: usize = 1024;
 
 struct Conversation {
     ring: VecDeque<Value>,
     tx: broadcast::Sender<Value>,
+    /// Monotonic touch counter for LRU eviction.
+    touched: u64,
 }
 
 #[derive(Default)]
 pub struct EventHub {
     conversations: Mutex<HashMap<String, Conversation>>,
+    clock: std::sync::atomic::AtomicU64,
 }
 
 impl EventHub {
@@ -32,17 +39,42 @@ impl EventHub {
             .conversations
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let entry = map
-            .entry(conversation.to_string())
-            .or_insert_with(|| Conversation {
-                ring: VecDeque::with_capacity(RING_CAPACITY),
-                tx: broadcast::channel(CHANNEL_CAPACITY).0,
-            });
+        let entry = self.entry(&mut map, conversation);
         if entry.ring.len() == RING_CAPACITY {
             entry.ring.pop_front();
         }
         entry.ring.push_back(event.clone());
         let _ = entry.tx.send(event); // no subscribers is fine
+    }
+
+    /// Fetch or create a conversation, evicting the least recently touched
+    /// one when the hub is full.
+    fn entry<'a>(
+        &self,
+        map: &'a mut HashMap<String, Conversation>,
+        conversation: &str,
+    ) -> &'a mut Conversation {
+        let now = self
+            .clock
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if !map.contains_key(conversation) && map.len() >= MAX_CONVERSATIONS {
+            if let Some(oldest) = map
+                .iter()
+                .min_by_key(|(_, c)| c.touched)
+                .map(|(k, _)| k.clone())
+            {
+                map.remove(&oldest);
+            }
+        }
+        let entry = map
+            .entry(conversation.to_string())
+            .or_insert_with(|| Conversation {
+                ring: VecDeque::with_capacity(RING_CAPACITY),
+                tx: broadcast::channel(CHANNEL_CAPACITY).0,
+                touched: now,
+            });
+        entry.touched = now;
+        entry
     }
 
     /// Recent history plus a live receiver for a conversation.
@@ -51,12 +83,7 @@ impl EventHub {
             .conversations
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let entry = map
-            .entry(conversation.to_string())
-            .or_insert_with(|| Conversation {
-                ring: VecDeque::with_capacity(RING_CAPACITY),
-                tx: broadcast::channel(CHANNEL_CAPACITY).0,
-            });
+        let entry = self.entry(&mut map, conversation);
         (entry.ring.iter().cloned().collect(), entry.tx.subscribe())
     }
 }
@@ -77,6 +104,18 @@ mod tests {
         assert_eq!(replay[1]["n"], 2);
         hub.publish("c1", json!({"n": 3}));
         assert_eq!(rx.try_recv().expect("live event")["n"], 3);
+    }
+
+    #[test]
+    fn hub_evicts_least_recently_touched_conversation() {
+        let hub = EventHub::default();
+        for n in 0..(MAX_CONVERSATIONS + 10) {
+            hub.publish(&format!("c{n}"), json!({ "n": n }));
+        }
+        let map = hub.conversations.lock().expect("lock");
+        assert_eq!(map.len(), MAX_CONVERSATIONS, "hub is capped");
+        assert!(!map.contains_key("c0"), "oldest evicted");
+        assert!(map.contains_key(&format!("c{}", MAX_CONVERSATIONS + 9)));
     }
 
     #[test]

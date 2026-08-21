@@ -4812,6 +4812,68 @@ impl Handler {
             .collect()
     }
 
+    /// Inventory items owned by packs OTHER than `name` in this KG.
+    async fn pack_items_of_others(
+        &self,
+        session_id: Option<&SessionId>,
+        kg: &str,
+        name: &str,
+        auth: Option<&crate::auth::AuthIdentity>,
+    ) -> std::collections::BTreeSet<(String, String)> {
+        let result = Box::pin(self.execute_program(
+            session_id,
+            Some(kg.to_string()),
+            "?pack_item(P, K, I)".to_string(),
+            auth,
+        ))
+        .await;
+        let Ok(result) = result else {
+            return std::collections::BTreeSet::new();
+        };
+        result
+            .rows
+            .iter()
+            .filter_map(|row| {
+                let get = |i: usize| match row.values.get(i) {
+                    Some(WireValue::String(s)) => Some(s.clone()),
+                    _ => None,
+                };
+                match (get(0), get(1), get(2)) {
+                    (Some(p), Some(k), Some(i)) if p != name => Some((k, i)),
+                    _ => None,
+                }
+            })
+            .collect()
+    }
+
+    /// The pinned (version, digest) for a pack in a KG, if any.
+    async fn pack_pin(
+        &self,
+        session_id: Option<&SessionId>,
+        kg: &str,
+        name: &str,
+        auth: Option<&crate::auth::AuthIdentity>,
+    ) -> Option<(String, String)> {
+        let result = Box::pin(self.execute_program(
+            session_id,
+            Some(kg.to_string()),
+            "?pack_meta(N, V, D)".to_string(),
+            auth,
+        ))
+        .await
+        .ok()?;
+        result.rows.iter().find_map(|row| {
+            let get = |i: usize| match row.values.get(i) {
+                Some(WireValue::String(s)) => Some(s.clone()),
+                _ => None,
+            };
+            match (get(0), get(1), get(2)) {
+                (Some(n), Some(v), Some(d)) if n == name => Some((v, d)),
+                _ => None,
+            }
+        })
+    }
+
     /// `.ontology install <name[@version]>`: fetch the pack from the
     /// registry (digest-verified), deploy its rules into the current KG, pin
     /// it in `pack_meta`, and record the deployed rule/relation inventory in
@@ -4850,6 +4912,47 @@ impl Handler {
             .filter(|l| !l.is_empty() && !l.starts_with("//"))
             .count();
 
+        // A pack is DATA, not a script. Digest pinning proves the pack is
+        // what the index said - not that it is safe. Rules programs execute
+        // as multi-statement programs, which bypasses per-statement and
+        // per-KG authorization, so anything other than schema/rule/fact
+        // statements is refused before deployment: no meta commands (a
+        // `.kg use other-kg` would write into another KG, a nested
+        // `.ontology install` would recurse without bound), no deletes.
+        for line in join_continuation_lines(&strip_comments(&program)).lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            match statement::parse_statement(line) {
+                Ok(
+                    statement::Statement::SchemaDecl(_)
+                    | statement::Statement::PersistentRule(_)
+                    | statement::Statement::Insert(_)
+                    | statement::Statement::Fact(_)
+                    | statement::Statement::TypeDecl(_),
+                ) => {}
+                Ok(other) => {
+                    return Err(format!(
+                        "pack {name} contains a disallowed statement (packs may only declare \
+                         schemas, rules, types, and facts): {}",
+                        match other {
+                            statement::Statement::Meta(_) => "meta command",
+                            statement::Statement::Delete(_) => "delete",
+                            statement::Statement::Update(_) => "update",
+                            statement::Statement::Query(_) => "query",
+                            statement::Statement::SessionRule(_) => "session rule",
+                            statement::Statement::DeleteRelationOrRule(_) => "drop",
+                            _ => "unsupported statement",
+                        }
+                    ));
+                }
+                Err(err) => {
+                    return Err(format!("pack {name} has an unparsable statement: {err}"));
+                }
+            }
+        }
+
         // Inventory before, so the diff identifies what this pack added.
         let (rules_before, rels_before) = {
             let storage = self.storage.read();
@@ -4859,6 +4962,18 @@ impl Handler {
             )
         };
         let prior_items = self.pack_items(session_id, &kg, &name, auth).await;
+        // Installing a DIFFERENT version over an existing one would stack
+        // both rule sets while pack_meta claims only the new one - findings
+        // attributed to rules that are not the ones that derived them.
+        if let Some((pinned_version, _)) = self.pack_pin(session_id, &kg, &name, auth).await {
+            if pinned_version != entry.version {
+                return Err(format!(
+                    "ontology '{name}' is already installed in '{kg}' at {pinned_version}; \
+                     use .ontology upgrade {name}@{} to replace it",
+                    entry.version
+                ));
+            }
+        }
         let program_copy = program.clone();
 
         let deploy =
@@ -4984,6 +5099,18 @@ impl Handler {
                 "ontology '{name}' is not installed in '{kg}' (no pack_item inventory)"
             ));
         }
+        // Rules and relations another installed pack also declares are
+        // SHARED: dropping them would delete the other pack's data and
+        // leave its rules dangling. Leave them in place and report.
+        let shared = self.pack_items_of_others(session_id, &kg, name, auth).await;
+        let (items, retained): (Vec<(String, String)>, Vec<(String, String)>) =
+            items.into_iter().partition(|item| !shared.contains(item));
+        if items.is_empty() {
+            return Err(format!(
+                "every item of '{name}' in '{kg}' is shared with another installed pack; \
+                 nothing to remove safely"
+            ));
+        }
         // Column counts, to clear facts before dropping: `.rel drop` on a
         // populated relation inside a large batch can report success while
         // leaving the relation behind (engine bug, filed) - an emptied
@@ -5012,12 +5139,6 @@ impl Handler {
             }
             program.push_str(&format!(".rel drop {item}\n"));
         }
-        program.push_str(&format!(
-            "-pack_item(P, K, I) <- pack_item(P, K, I), P = \"{name}\"\n"
-        ));
-        program.push_str(&format!(
-            "-pack_meta(N, V, D) <- pack_meta(N, V, D), N = \"{name}\"\n"
-        ));
         let result =
             Box::pin(self.execute_program(session_id, Some(kg.clone()), program, auth)).await?;
         let mut messages = vec![format!(
@@ -5044,9 +5165,33 @@ impl Handler {
                 .collect()
         };
         if !leftovers.is_empty() {
+            // Pin and inventory are still intact, so the pack stays
+            // manageable (retry, or inspect) instead of becoming an
+            // untracked orphan.
             return Err(format!(
-                "removal incomplete: relation(s) still present after drop: {}",
+                "removal incomplete: relation(s) still present after drop: {} \
+                 (pack_meta and pack_item left in place - retry or inspect the KG)",
                 leftovers.join(", ")
+            ));
+        }
+        // Only now that the drops are verified: clear the pin and inventory.
+        let cleanup = Box::pin(self.execute_program(
+            session_id,
+            Some(kg.clone()),
+            format!(
+                "-pack_item(P, K, I) <- pack_item(P, K, I), P = \"{name}\"\n\
+                 -pack_meta(N, V, D) <- pack_meta(N, V, D), N = \"{name}\""
+            ),
+            auth,
+        ))
+        .await?;
+        for problem in Self::result_problem_rows(&cleanup) {
+            messages.push(format!("  warning: {problem}"));
+        }
+        if !retained.is_empty() {
+            messages.push(format!(
+                "  kept {} item(s) shared with another installed pack",
+                retained.len()
             ));
         }
         Ok(Self::messages_result(messages))
@@ -5075,6 +5220,13 @@ impl Handler {
         let rule_items: Vec<&(String, String)> =
             items.iter().filter(|(k, _)| k == "rule").collect();
         let mut program = String::new();
+        // The pin goes FIRST: between dropping the old rules and deploying
+        // the new ones this KG runs no rule set, and a stale pin would tell
+        // the gateway it is safe to evaluate against rules that are not
+        // there. Unpinned means the gateway refuses - fail closed.
+        program.push_str(&format!(
+            "-pack_meta(N, V, D) <- pack_meta(N, V, D), N = \"{name}\"\n"
+        ));
         for (_, item) in &rule_items {
             program.push_str(&format!(".rule drop {item}\n"));
         }
@@ -5095,7 +5247,13 @@ impl Handler {
         }
         let install = self
             .handle_ontology_install(session_id, Some(kg.clone()), spec, auth)
-            .await?;
+            .await
+            .map_err(|err| {
+                format!(
+                    "upgrade of '{name}' in '{kg}' left the KG WITHOUT rules and unpinned \
+                     (evaluation refuses until a successful install): {err}"
+                )
+            })?;
         let mut messages = vec![format!(
             "upgraded {name} in {kg} (dropped {} old rule(s), data kept)",
             rule_items.len()

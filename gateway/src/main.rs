@@ -619,6 +619,7 @@ struct Report {
     reason: Option<String>,
     findings: Vec<Value>,
     dropped: Vec<String>,
+    notes: Vec<String>,
     tuples: Vec<Value>,
     trace: Option<Value>,
 }
@@ -648,7 +649,7 @@ async fn evaluate_all(
             )
             .await;
             match outcome {
-                Ok((findings, dropped, tuples, trace)) => Report {
+                Ok((findings, dropped, notes, tuples, trace)) => Report {
                     kg,
                     ontology: format!("{}@{}", ontology.name, ontology.version),
                     digest: ontology.digest.clone(),
@@ -656,6 +657,7 @@ async fn evaluate_all(
                     reason: None,
                     findings,
                     dropped,
+                    notes,
                     tuples,
                     trace,
                 },
@@ -667,6 +669,7 @@ async fn evaluate_all(
                     reason: Some(err.to_string()),
                     findings: Vec::new(),
                     dropped: Vec::new(),
+                    notes: Vec::new(),
                     tuples: Vec::new(),
                     trace: None,
                 },
@@ -676,7 +679,13 @@ async fn evaluate_all(
     futures_util::future::join_all(futures).await
 }
 
-type EvalParts = (Vec<Value>, Vec<String>, Vec<Value>, Option<Value>);
+type EvalParts = (
+    Vec<Value>,
+    Vec<String>,
+    Vec<String>,
+    Vec<Value>,
+    Option<Value>,
+);
 
 async fn evaluate_one(
     state: &AppState,
@@ -722,7 +731,13 @@ async fn evaluate_one(
         }
         trace
     });
-    Ok((outcome.findings, outcome.dropped, outcome.tuples, trace))
+    Ok((
+        outcome.findings,
+        outcome.dropped,
+        outcome.notes,
+        outcome.tuples,
+        trace,
+    ))
 }
 
 /// Enforce fails CLOSED: 422 on any blocking finding from any pair, 503
@@ -774,6 +789,9 @@ fn reports_json(reports: &[Report]) -> Value {
                 "findings": r.findings,
                 "dropped": r.dropped,
             });
+            if !r.notes.is_empty() {
+                report["notes"] = json!(r.notes);
+            }
             if let Some(reason) = &r.reason {
                 report["reason"] = json!(reason);
             }
@@ -1163,6 +1181,7 @@ mod tests {
                 vec![serde_json::json!({"blocking": false})]
             },
             dropped: Vec::new(),
+            notes: Vec::new(),
             tuples: Vec::new(),
             trace: None,
         }
