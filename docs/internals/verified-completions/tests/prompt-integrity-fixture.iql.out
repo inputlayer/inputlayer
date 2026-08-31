@@ -275,6 +275,8 @@ Schema for 'cond_brand' registered with 2 columns (persistent)
 Schema for 'prompt_value' registered with 3 columns (persistent)
 > +pi_source(id: string, msg: int, surface: string)
 Schema for 'pi_source' registered with 3 columns (persistent)
+> +roster_member(id: string, tool: string)
+Schema for 'roster_member' registered with 2 columns (persistent)
 > +ex_call(id: string, ex: string, tool: string)
 Schema for 'ex_call' registered with 3 columns (persistent)
 > +ex_reply_num(id: string, ex: string, attr: string, nval: int)
@@ -301,8 +303,8 @@ Rule 'permits' registered.
 Rule 'requires_up' registered.
 > +permits_up(D, A2) <- permits(D, A1), subeq(A1, A2)
 Rule 'permits_up' registered.
-> +forbids_up(D, A2) <- directive(D, "forbid", A1, C), subeq(A1, A2)
-Rule 'forbids_up' registered.
+> +forbids_down(D, A1) <- directive(D, "forbid", A2, C), subeq(A1, A2)
+Rule 'forbids_down' registered.
 > +commanded(A2) <- requires_up(D, A2)
 Rule 'commanded' registered.
 > +pi_unknown_tool(C) <- ref(C, "tool", T), !tool(T)
@@ -315,6 +317,10 @@ Rule 'arg_has_enum' registered.
 Rule 'pi_enum_violation' registered.
 > +pi_unknown_field(C) <- ref(C, "field", F), !field(F)
 Rule 'pi_unknown_field' registered.
+> +claimed_tool(T) <- roster_member(C, T)
+Rule 'claimed_tool' registered.
+> +pi_roster_understated(C) <- roster_member(C, T2), tool(T), !claimed_tool(T)
+Rule 'pi_roster_understated' registered.
 > +pi_action_misroute(D) <- routes(D, P, T), action_of(T2, P), T != T2
 Rule 'pi_action_misroute' registered.
 > +pi_drift_max(K) <- constraint_num(K, "max_value", A, N), contract_max(A, M), N != M
@@ -329,9 +335,15 @@ Rule 'pi_missing_required' registered.
 Rule 'pi_invariant_permit' registered.
 > +pi_invariant_require(D) <- requires_up(D, A), inv_forbid(A)
 Rule 'pi_invariant_require' registered.
-> +pi_invariant_forbid(D) <- forbids_up(D, A), inv_require(A)
+> +pi_invariant_forbid(D) <- forbids_down(D, A), inv_require(A)
 Rule 'pi_invariant_forbid' registered.
-> +pi_deontic_clash(D1, D2) <- requires_up(D1, A), forbids_up(D2, A)
+> +exempts_up(D, A2) <- directive(D, "exempt", A1, C), subeq(A1, A2)
+Rule 'exempts_up' registered.
+> +pi_invariant_optional(D) <- exempts_up(D, A), inv_require(A)
+Rule 'pi_invariant_optional' registered.
+> +pi_required_exempt(D1, D2) <- requires_up(D1, A), exempts_up(D2, A)
+Rule 'pi_required_exempt' registered.
+> +pi_deontic_clash(D1, D2) <- requires_up(D1, A), forbids_down(D2, A)
 Rule 'pi_deontic_clash' registered.
 > +pi_example_over_cap(C, K) <- ex_reply_num(C, E, A, N), constraint_num(K, "max_value", A, M), N > M
 Rule 'pi_example_over_cap' registered.
@@ -347,7 +359,7 @@ Rule 'pi_example_forbidden_prop' registered.
 Rule 'ex_searched' registered.
 > +pi_example_skips_search(C) <- ex_reply_prop(C, E, "recommends_products"), inv_require("search_before_recommend"), !ex_searched(E)
 Rule 'pi_example_skips_search' registered.
-> +pi_merchant_carveout(D) <- cond_brand(D, B), directive(D, M, A, C2), inv_global(A)
+> +pi_merchant_carveout(D) <- cond_brand(D, B), directive(D, M, A, C2)
 Rule 'pi_merchant_carveout' registered.
 > +pi_foreign_term(C) <- ref(C, "term", W), !lexicon(W)
 Rule 'pi_foreign_term' registered.
@@ -360,6 +372,8 @@ Rule 'pi_conflict' registered.
 > +pi_conflict("unknown_field", C, C) <- pi_unknown_field(C)
 Rule 'pi_conflict' registered.
 > +pi_conflict("action_misroute", C, C) <- pi_action_misroute(C)
+Rule 'pi_conflict' registered.
+> +pi_conflict("roster_understated", C, C) <- pi_roster_understated(C)
 Rule 'pi_conflict' registered.
 > +pi_conflict("contract_drift", K, K) <- pi_drift_max(K)
 Rule 'pi_conflict' registered.
@@ -374,6 +388,10 @@ Rule 'pi_conflict' registered.
 > +pi_conflict("invariant_require", D, D) <- pi_invariant_require(D)
 Rule 'pi_conflict' registered.
 > +pi_conflict("invariant_forbid", D, D) <- pi_invariant_forbid(D)
+Rule 'pi_conflict' registered.
+> +pi_conflict("invariant_optional", D, D) <- pi_invariant_optional(D)
+Rule 'pi_conflict' registered.
+> +pi_conflict("required_exempt", D1, D2) <- pi_required_exempt(D1, D2)
 Rule 'pi_conflict' registered.
 > +pi_conflict("deontic_clash", D1, D2) <- pi_deontic_clash(D1, D2)
 Rule 'pi_conflict' registered.
@@ -492,6 +510,10 @@ Inserted 1 fact(s) into 'pi_source'.
 Inserted 1 fact(s) into 'prompt_value'.
 > +pi_source[("d16", 0, "Refer to products by their fit and wash when calling tools")]
 Inserted 1 fact(s) into 'pi_source'.
+> +directive[("d17", "exempt", "search_before_recommend", "staple_items")]
+Inserted 1 fact(s) into 'directive'.
+> +pi_source[("d17", 0, "Search is optional for staple items like a plain tee")]
+Inserted 1 fact(s) into 'pi_source'.
 > +ref[("d15", "term", "condition_grades")]
 Inserted 1 fact(s) into 'ref'.
 > +pi_source[("d15", 0, "Mention handbag condition grades")]
@@ -535,6 +557,7 @@ Inserted 1 fact(s) into 'pi_source'.
 │ "example_phantom_tool"   │ "x3"                      │ "x3"                      │
 │ "example_skips_search"   │ "x5"                      │ "x5"                      │
 │ "example_under_floor"    │ "x1"                      │ "d8"                      │
+│ "invariant_optional"     │ "d17"                     │ "d17"                     │
 │ "invariant_permit"       │ "d9"                      │ "d9"                      │
 │ "invariant_require"      │ "d10"                     │ "d10"                     │
 │ "merchant_carveout"      │ "d13"                     │ "d13"                     │
@@ -543,7 +566,7 @@ Inserted 1 fact(s) into 'pi_source'.
 │ "unknown_field"          │ "d5"                      │ "d5"                      │
 │ "unknown_tool"           │ "d1"                      │ "d1"                      │
 └──────────────────────────┴───────────────────────────┴───────────────────────────┘
-18 rows
+19 rows
 > ?conflict(K, C1, C2)
 ┌─────────────────────┬──────┬──────┐
 │ K                   │ C1   │ C2   │

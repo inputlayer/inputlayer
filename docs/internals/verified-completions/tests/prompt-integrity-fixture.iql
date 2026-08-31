@@ -78,6 +78,10 @@
 // drifted (the render contract keys on sku)
 +prompt_value[("d16", "render_key", "wash")]
 +pi_source[("d16", 0, "Refer to products by their fit and wash when calling tools")]
+// d17 (~c6-04): "search is optional for staple items" - a required invariant
+// made optional; no forbid anywhere, the exemption itself is the finding
++directive[("d17", "exempt", "search_before_recommend", "staple_items")]
++pi_source[("d17", 0, "Search is optional for staple items like a plain tee")]
 // d15 (soft, ~c5-04): "mention handbag condition grades" - foreign vocabulary
 +ref[("d15", "term", "condition_grades")]
 +pi_source[("d15", 0, "Mention handbag condition grades")]
@@ -116,6 +120,7 @@
 // ("deontic_clash", "d11", "d12")         ask_clarify < question_opening
 // ("merchant_carveout", "d13", "d13")     Elgate exemption on a global rule
 // ("contract_drift_value", "d16", "d16")  render key wash vs contract sku
+// ("invariant_optional", "d17", "d17")    required search made optional
 // ("example_forbidden_prop", "x6", "x6")  mixed-currency total, via world map
 // ("example_over_cap", "x1", "d7")        4 demonstrated > cap 3
 // ("example_under_floor", "x1", "d8")     4 demonstrated < corrupted floor 5

@@ -69,6 +69,7 @@
 
 // -- 0c. EXAMPLE schemas (parsed from demonstrated exchanges; a third origin
 //        beside conversation and output) ----------------------------------
++roster_member(id: string, tool: string)
 +ex_call(id: string, ex: string, tool: string)
 +ex_reply_num(id: string, ex: string, attr: string, nval: int)
 +ex_reply_prop(id: string, ex: string, prop: string)
@@ -86,9 +87,13 @@
 //       the weakening modalities - both open the same door) ----------------
 +permits(D, A) <- directive(D, "permit", A, C)
 +permits(D, A) <- directive(D, "exempt", A, C)
+// Direction matters: doing a sub-action IS doing its super, so require and
+// permit lift UP the taxonomy; forbidding a super forbids every sub, so
+// forbid propagates DOWN. Lifting forbid upward turned "never recommend
+// out-of-stock" into "never recommend" - a false clash on a clean prompt.
 +requires_up(D, A2) <- directive(D, "require", A1, C), subeq(A1, A2)
 +permits_up(D, A2) <- permits(D, A1), subeq(A1, A2)
-+forbids_up(D, A2) <- directive(D, "forbid", A1, C), subeq(A1, A2)
++forbids_down(D, A1) <- directive(D, "forbid", A2, C), subeq(A1, A2)
 +commanded(A2) <- requires_up(D, A2)
 
 // -- 3. World-reference violations (set membership against the registry) ---
@@ -101,6 +106,11 @@
 +pi_enum_violation(C) <- ref_arg_val(C, T, A, V), arg_has_enum(T, A), !arg_enum(T, A, V)
 // W4: a data field the schema does not carry
 +pi_unknown_field(C) <- ref(C, "field", F), !field(F)
+// W4b: the prompt claims an exhaustive tool roster smaller than the registry
+// ("the tools available are X and Y") - every named tool real, the LIST is the
+// lie; fires once per hidden tool, deduped in reporting
++claimed_tool(T) <- roster_member(C, T)
++pi_roster_understated(C) <- roster_member(C, T2), tool(T), !claimed_tool(T)
 // W5: an action routed to the wrong registered tool ("save for later" via
 // add_to_basket): both tools real, the purpose says which one is bound
 +pi_action_misroute(D) <- routes(D, P, T), action_of(T2, P), T != T2
@@ -125,12 +135,20 @@
 //       because the condition is satisfiable) ------------------------------
 +pi_invariant_permit(D) <- permits_up(D, A), inv_forbid(A)
 +pi_invariant_require(D) <- requires_up(D, A), inv_forbid(A)
-+pi_invariant_forbid(D) <- forbids_up(D, A), inv_require(A)
++pi_invariant_forbid(D) <- forbids_down(D, A), inv_require(A)
+// making a required action optional IS the violation: "search is optional for
+// staple items" exempts search_before_recommend, and no forbid is in sight
++exempts_up(D, A2) <- directive(D, "exempt", A1, C), subeq(A1, A2)
++pi_invariant_optional(D) <- exempts_up(D, A), inv_require(A)
+// the prompt's own require, exempted elsewhere in the same prompt ("ask which
+// they want" ... "take the gender from their profile rather than asking"):
+// permit does not clash with require, but a targeted exemption does
++pi_required_exempt(D1, D2) <- requires_up(D1, A), exempts_up(D2, A)
 
 // -- 7. Intra-prompt deontic clash through the taxonomy (core's D1 needs
 //       string-equal topics; "ask which they want" vs "never open with a
 //       question" clash only through ask_clarify < question_opening) -------
-+pi_deontic_clash(D1, D2) <- requires_up(D1, A), forbids_up(D2, A)
++pi_deontic_clash(D1, D2) <- requires_up(D1, A), forbids_down(D2, A)
 
 // -- 8. Example violations (the third origin, doing what core's M3 rules do
 //       for outputs; deterministic parse feeds these, no LLM required) -----
@@ -150,9 +168,12 @@
 +pi_example_skips_search(C) <- ex_reply_prop(C, E, "recommends_products"), inv_require("search_before_recommend"), !ex_searched(E)
 
 // -- 9. Fences ---------------------------------------------------------------
-// F1: a global-invariant rule carved out per merchant/brand ("treat brand
-// X's stock states as stale") - uniformity is the invariant
-+pi_merchant_carveout(D) <- cond_brand(D, B), directive(D, M, A, C2), inv_global(A)
+// F1: a shared-prompt rule carved out per merchant/brand ("treat brand X's
+// stock states as stale", "brand Y sizes run small, so...") - in a prompt
+// serving every merchant, uniformity is the invariant, so ANY brand-scoped
+// directive is the finding; inv_global remains available for deployments
+// where some rules legitimately vary per brand
++pi_merchant_carveout(D) <- cond_brand(D, B), directive(D, M, A, C2)
 // F2 (soft): vocabulary from outside the store's own lexicon - advisory,
 // because lexicons are never complete; the modality-gate lesson applied
 +pi_foreign_term(C) <- ref(C, "term", W), !lexicon(W)
@@ -164,6 +185,7 @@
 +pi_conflict("enum_violation", C, C) <- pi_enum_violation(C)
 +pi_conflict("unknown_field", C, C) <- pi_unknown_field(C)
 +pi_conflict("action_misroute", C, C) <- pi_action_misroute(C)
++pi_conflict("roster_understated", C, C) <- pi_roster_understated(C)
 +pi_conflict("contract_drift", K, K) <- pi_drift_max(K)
 +pi_conflict("contract_drift_min", K, K) <- pi_drift_min(K)
 +pi_conflict("contract_drift_value", C, C) <- pi_drift_value(C)
@@ -171,6 +193,8 @@
 +pi_conflict("invariant_permit", D, D) <- pi_invariant_permit(D)
 +pi_conflict("invariant_require", D, D) <- pi_invariant_require(D)
 +pi_conflict("invariant_forbid", D, D) <- pi_invariant_forbid(D)
++pi_conflict("invariant_optional", D, D) <- pi_invariant_optional(D)
++pi_conflict("required_exempt", D1, D2) <- pi_required_exempt(D1, D2)
 +pi_conflict("deontic_clash", D1, D2) <- pi_deontic_clash(D1, D2)
 +pi_conflict("example_over_cap", C, K) <- pi_example_over_cap(C, K)
 +pi_conflict("example_under_floor", C, K) <- pi_example_under_floor(C, K)
