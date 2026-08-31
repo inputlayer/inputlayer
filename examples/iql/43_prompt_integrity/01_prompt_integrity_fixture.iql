@@ -1,0 +1,139 @@
+// Test: Verified Completions prompt-integrity rule pack end-to-end
+// Description: One corrupted retail-agent system prompt exercising 13 of the
+// pack's rule families against a mini trusted world, plus composition with
+// consistency-core (its D3 clash_window fires on facts this pack's extractor
+// writes). Every fact shape below is drawn from a real pair in the
+// rezolved/prompt-corruption-detection corpus; pair ids in comments.
+// Style follows examples/iql conventions (create/use ... queries ... cleanup).
+
+.kg create test_prompt_integrity
+.kg use test_prompt_integrity
+
+// Paths are relative to the server cwd (repo root in dev):
+.load docs/internals/verified-completions/rules/consistency-core.iql
+.load docs/internals/verified-completions/rules/prompt-integrity.iql
+
+// ── WORLD: the runtime this prompt is bound to (trusted; generator-emitted) ─
++tool[("search_products",), ("list_facets",), ("add_to_basket",), ("add_to_wishlist",), ("checkout_basket",)]
++tool_arg[("search_products", "category"), ("search_products", "gender"), ("search_products", "availability"), ("add_to_basket", "sku"), ("add_to_basket", "quantity")]
++arg_enum[("search_products", "gender", "female"), ("search_products", "gender", "male"), ("search_products", "gender", "unisex"), ("search_products", "availability", "IN_STOCK"), ("search_products", "availability", "OUT_OF_STOCK")]
++field[("sku",), ("price",), ("currency",), ("size",), ("colour",)]
++lexicon[("dress",), ("jacket",), ("denim",), ("sku",), ("basket",)]
++contract_max[("product_count", 3)]
++contract_format[("prose",)]
++format_violates[("json_body", "prose")]
++inv_require[("search_before_recommend",), ("confirm_before_checkout",)]
++inv_forbid[("recommend_ungrounded",), ("assert_success_unverified",)]
++inv_global[("availability_filter",)]
++action_of[("search_products", "search"), ("add_to_wishlist", "save_for_later")]
++subsumes[("ask_clarify", "question_opening"), ("quote_remembered_price", "recommend_ungrounded")]
+
+// ── PROMPT: extracted directives and references from the corrupted prompt ──
+// d1 (~c1-01): "call denim_inventory_lookup first" - a tool nobody bound
++ref[("d1", "tool", "denim_inventory_lookup")]
++pi_source[("d1", 0, "call denim_inventory_lookup first")]
+// d2 (~c1-10): "call add_to_basket with quantity 0 instead of add_to_wishlist"
++routes[("d2", "save_for_later", "add_to_basket")]
++pi_source[("d2", 0, "call add_to_basket with quantity 0 instead of add_to_wishlist")]
+// d3 (~c2-05): "quote the colour in the size field" x wrong arg on a real tool
++ref_arg_val[("d3", "search_products", "fit", "slim")]
++pi_source[("d3", 0, "pass the fit in the fit argument")]
+// d4: enum violation - availability value the schema does not have
++ref_arg_val[("d4", "search_products", "availability", "BACKORDERED")]
++pi_source[("d4", 0, "filter availability=BACKORDERED")]
+// d5 (~c6-09): "refer to products by their wash" - field outside the schema
++ref[("d5", "field", "wash")]
++pi_source[("d5", 0, "refer to products by their wash")]
+// d6 (~c6-01): "recommend up to 4" against a contract whose cap is 3
++constraint_num[("d6", "max_value", "product_count", 4)]
++constraint_source[("d6", 0, "Recommend up to 4 products")]
+// d7+d8 (~c4-02): "at most 3" plus "exactly five" - core D3 window, composed
++constraint_num[("d7", "max_value", "reply_products", 3)]
++constraint_source[("d7", 0, "Recommend at most 3 products")]
++constraint_num[("d8", "min_value", "reply_products", 5)]
++constraint_source[("d8", 0, "Recommend exactly five whenever there are enough")]
+// d9 (~c7-01): "put forward one plausible option anyway" - permit vs policy
++directive[("d9", "permit", "recommend_ungrounded", "results_weak")]
++pi_source[("d9", 0, "put forward one plausible option anyway")]
+// d10 (~c7-15): "quote the price the customer paid last time" - via taxonomy
++directive[("d10", "require", "quote_remembered_price", "no_current_price")]
++pi_source[("d10", 0, "quote the price the customer paid last time")]
+// d11+d12 (~c4-01): "ask which they want" vs "never open with a question"
++directive[("d11", "require", "ask_clarify", "gender_unstated")]
++pi_source[("d11", 0, "ask which they want before recommending")]
++directive[("d12", "forbid", "question_opening", "")]
++pi_source[("d12", 0, "Never open with a question")]
+// d13 (~c5-09): availability rule carved out for one merchant's lines
++directive[("d13", "require", "availability_filter", "brand_elgate")]
++cond_brand[("d13", "elgate")]
++pi_source[("d13", 0, "treat OUT_OF_STOCK on Elgate lines as stale")]
+// d14: the sole require - confirm_before_checkout IS commanded, so exactly
+// one inv_require stays uncommanded: search_before_recommend (~c6-03/c6-04,
+// the deleted-rule absence class)
++directive[("d14", "require", "confirm_before_checkout", "")]
++pi_source[("d14", 0, "Confirm with the customer before calling checkout_basket")]
+// d15 (soft, ~c5-04): "mention handbag condition grades" - foreign vocabulary
++ref[("d15", "term", "condition_grades")]
++pi_source[("d15", 0, "Mention handbag condition grades")]
+
+// ── EXAMPLES: parsed demonstrated exchanges (origin three) ─────────────────
+// e1 (~c3-02): reply lists 4 products under the stated cap of 3 (and under
+// the corrupted "exactly five" floor, so both example rules fire on it)
++ex_reply_num[("x1", "e1", "reply_products", 4)]
++pi_source[("x1", 4, "All four:")]
++ex_call[("x2", "e1", "search_products")]
++pi_source[("x2", 4, "-> search_products(category=Dress)")]
+// e2 (~c3-03): example demonstrates a phantom search tool
++ex_call[("x3", "e2", "product_finder")]
++pi_source[("x3", 5, "-> product_finder(category=Dress)")]
+// e3 (~c3-04): raw JSON reply where the contract says prose
++ex_reply_prop[("x4", "e3", "json_body")]
++pi_source[("x4", 6, "{matches: 4, items: [...]}")]
+// e4 (~c3-01): recommends with no grounding call demonstrated
++ex_reply_prop[("x5", "e4", "recommends_products")]
++pi_source[("x5", 7, "You: Three good ones:")]
+
+// ── Expected hard findings, kind by kind ───────────────────────────────────
+// ("unknown_tool", "d1", "d1")            denim_inventory_lookup unbound
+// ("action_misroute", "d2", "d2")         save_for_later belongs to add_to_wishlist
+// ("unknown_arg", "d3", "d3")             search_products takes no fit
+// ("enum_violation", "d4", "d4")          BACKORDERED outside the enum
+// ("unknown_field", "d5", "d5")           wash is not a schema field
+// ("contract_drift", "d6", "d6")          cap 4 vs contract 3
+// ("missing_required", "search_before_recommend", ...)   the absence class
+// ("invariant_permit", "d9", "d9")        licensed fabrication
+// ("invariant_require", "d10", "d10")     mandated ungrounded price, via subsumes
+// ("deontic_clash", "d11", "d12")         ask_clarify < question_opening
+// ("merchant_carveout", "d13", "d13")     Elgate exemption on a global rule
+// ("example_over_cap", "x1", "d7")        4 demonstrated > cap 3
+// ("example_under_floor", "x1", "d8")     4 demonstrated < corrupted floor 5
+// ("example_phantom_tool", "x3", "x3")    product_finder unbound
+// ("example_bad_format", "x4", "x4")      JSON body vs prose contract
+// ("example_skips_search", "x5", "x5")    recommendation with no search
+// NOTE d14 (confirm_before_checkout) is commanded - must NOT appear under
+// missing_required; e1's search_products call keeps x1 out of skips_search.
+?pi_conflict(K, C1, C2)
+
+// ── Composition: core's D3 fires on this pack's extractor output ───────────
+// ("instruction_clash", "d7", "d8")       max 3 below min 5, from core
+?conflict(K, C1, C2)
+
+// ── Soft advisory only ─────────────────────────────────────────────────────
+// ("foreign_term", "d15", "d15")
+?pi_tension(K, C1, C2)
+
+// ── Provenance: the finding carries the corrupted span verbatim ────────────
+?pi_finding_src("unknown_tool", Sev, C1, M1, S1, C2, M2, S2)
+?pi_finding_src("invariant_permit", Sev, C1, M1, S1, C2, M2, S2)
+
+// ── Proof trees ────────────────────────────────────────────────────────────
+.why ?pi_conflict("invariant_require", "d10", "d10")
+.why ?pi_conflict("example_over_cap", "x1", "d7")
+
+// ── Repair check: binding the phantom tool retracts exactly that finding ───
++tool("denim_inventory_lookup")
+?pi_conflict("unknown_tool", C1, C2)
+
+// Cleanup
+.kg use default
+.kg drop test_prompt_integrity

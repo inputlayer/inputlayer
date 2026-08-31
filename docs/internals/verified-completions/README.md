@@ -182,6 +182,20 @@ study, corrupted prompts dropped a frontier model's sound outputs from 95%
 to 87%, and attaching the InputLayer finding restored 98% - with corrupted
 system prompts the standout (17% sound alone, 93% with the finding).
 
+## Prompt integrity: the same engine, pointed at the runtime
+
+consistency-core asks whether a conversation's facts can all be true at once. Its
+extension `rules/prompt-integrity.iql` asks whether a system prompt and the runtime
+it is bound to can both be right at once: the tool registry, data schema, output
+contract, and policy invariants load as trusted EDB facts (operator data, exactly
+like the ontology seeds — prompt text can never write them), demonstrated examples
+become a third origin beside conversation and output, and eighteen new finding kinds
+cover phantom tools, schema drift, rule-violating examples, deleted mandatory rules,
+and guardrail weakening — each with verbatim spans and proof trees, engine-validated
+in `examples/iql/43_prompt_integrity/`. One ontology, layered: tool calling is new
+fact relations in the same graph, not a second pack. Design and corpus mapping:
+`docs/prompt-integrity.md`.
+
 ## Where to go deeper
 
 - `docs/ontology.md` - the researcher-grade spec: extraction contract,
@@ -191,4 +205,6 @@ system prompts the standout (17% sound alone, 93% with the finding).
 - `extraction/fact-lifecycle-prompt.md` - the translation contract
 - `poc/` - the benchmark corpus, harness, verification ledger, results
 - `docs/COVERAGE-AUDIT.md` - what logic can and cannot resolve, honestly
+- `docs/prompt-integrity.md` + `rules/prompt-integrity.iql` - the prompt-vs-runtime
+  extension: trusted world layer, deontic directives, examples as an origin
 - `../../blog/consistency-ontology.md` - the gentle build-it-yourself tour
