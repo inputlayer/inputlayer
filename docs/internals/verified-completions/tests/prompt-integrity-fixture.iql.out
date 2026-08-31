@@ -243,10 +243,14 @@ Schema for 'lexicon' registered with 1 columns (persistent)
 Schema for 'contract_max' registered with 2 columns (persistent)
 > +contract_min(attr: string, bound: int)
 Schema for 'contract_min' registered with 2 columns (persistent)
+> +contract_value(attr: string, val: string)
+Schema for 'contract_value' registered with 2 columns (persistent)
 > +contract_format(fmt: string)
 Schema for 'contract_format' registered with 1 columns (persistent)
 > +format_violates(prop: string, fmt: string)
 Schema for 'format_violates' registered with 2 columns (persistent)
+> +prop_violates_inv(prop: string, action: string)
+Schema for 'prop_violates_inv' registered with 2 columns (persistent)
 > +inv_require(action: string)
 Schema for 'inv_require' registered with 1 columns (persistent)
 > +inv_forbid(action: string)
@@ -267,6 +271,8 @@ Schema for 'ref_arg_val' registered with 4 columns (persistent)
 Schema for 'routes' registered with 3 columns (persistent)
 > +cond_brand(id: string, brand: string)
 Schema for 'cond_brand' registered with 2 columns (persistent)
+> +prompt_value(id: string, attr: string, val: string)
+Schema for 'prompt_value' registered with 3 columns (persistent)
 > +pi_source(id: string, msg: int, surface: string)
 Schema for 'pi_source' registered with 3 columns (persistent)
 > +ex_call(id: string, ex: string, tool: string)
@@ -315,6 +321,8 @@ Rule 'pi_action_misroute' registered.
 Rule 'pi_drift_max' registered.
 > +pi_drift_min(K) <- constraint_num(K, "min_value", A, N), contract_min(A, M), N != M
 Rule 'pi_drift_min' registered.
+> +pi_drift_value(C) <- prompt_value(C, A, V), contract_value(A, W), V != W
+Rule 'pi_drift_value' registered.
 > +pi_missing_required(A) <- inv_require(A), directive(Dz, Mz, Az, Cz), !commanded(A)
 Rule 'pi_missing_required' registered.
 > +pi_invariant_permit(D) <- permits_up(D, A), inv_forbid(A)
@@ -333,6 +341,8 @@ Rule 'pi_example_under_floor' registered.
 Rule 'pi_example_phantom_tool' registered.
 > +pi_example_bad_format(C) <- ex_reply_prop(C, E, P), format_violates(P, F), contract_format(F)
 Rule 'pi_example_bad_format' registered.
+> +pi_example_forbidden_prop(C) <- ex_reply_prop(C, E, P), prop_violates_inv(P, A), inv_forbid(A)
+Rule 'pi_example_forbidden_prop' registered.
 > +ex_searched(E) <- ex_call(C, E, T), action_of(T, "search")
 Rule 'ex_searched' registered.
 > +pi_example_skips_search(C) <- ex_reply_prop(C, E, "recommends_products"), inv_require("search_before_recommend"), !ex_searched(E)
@@ -355,6 +365,8 @@ Rule 'pi_conflict' registered.
 Rule 'pi_conflict' registered.
 > +pi_conflict("contract_drift_min", K, K) <- pi_drift_min(K)
 Rule 'pi_conflict' registered.
+> +pi_conflict("contract_drift_value", C, C) <- pi_drift_value(C)
+Rule 'pi_conflict' registered.
 > +pi_conflict("missing_required", A, A) <- pi_missing_required(A)
 Rule 'pi_conflict' registered.
 > +pi_conflict("invariant_permit", D, D) <- pi_invariant_permit(D)
@@ -372,6 +384,8 @@ Rule 'pi_conflict' registered.
 > +pi_conflict("example_phantom_tool", C, C) <- pi_example_phantom_tool(C)
 Rule 'pi_conflict' registered.
 > +pi_conflict("example_bad_format", C, C) <- pi_example_bad_format(C)
+Rule 'pi_conflict' registered.
+> +pi_conflict("example_forbidden_prop", C, C) <- pi_example_forbidden_prop(C)
 Rule 'pi_conflict' registered.
 > +pi_conflict("example_skips_search", C, C) <- pi_example_skips_search(C)
 Rule 'pi_conflict' registered.
@@ -398,14 +412,18 @@ Inserted 5 fact(s) into 'field'.
 Inserted 5 fact(s) into 'lexicon'.
 > +contract_max[("product_count", 3)]
 Inserted 1 fact(s) into 'contract_max'.
+> +contract_value[("render_key", "sku")]
+Inserted 1 fact(s) into 'contract_value'.
 > +contract_format[("prose",)]
 Inserted 1 fact(s) into 'contract_format'.
 > +format_violates[("json_body", "prose")]
 Inserted 1 fact(s) into 'format_violates'.
+> +prop_violates_inv[("mixed_currency_total", "mix_currencies")]
+Inserted 1 fact(s) into 'prop_violates_inv'.
 > +inv_require[("search_before_recommend",), ("confirm_before_checkout",)]
 Inserted 2 fact(s) into 'inv_require'.
-> +inv_forbid[("recommend_ungrounded",), ("assert_success_unverified",)]
-Inserted 2 fact(s) into 'inv_forbid'.
+> +inv_forbid[("recommend_ungrounded",), ("assert_success_unverified",), ("mix_currencies",)]
+Inserted 3 fact(s) into 'inv_forbid'.
 > +inv_global[("availability_filter",)]
 Inserted 1 fact(s) into 'inv_global'.
 > +action_of[("search_products", "search"), ("add_to_wishlist", "save_for_later")]
@@ -470,6 +488,10 @@ Inserted 1 fact(s) into 'pi_source'.
 Inserted 1 fact(s) into 'directive'.
 > +pi_source[("d14", 0, "Confirm with the customer before calling checkout_basket")]
 Inserted 1 fact(s) into 'pi_source'.
+> +prompt_value[("d16", "render_key", "wash")]
+Inserted 1 fact(s) into 'prompt_value'.
+> +pi_source[("d16", 0, "Refer to products by their fit and wash when calling tools")]
+Inserted 1 fact(s) into 'pi_source'.
 > +ref[("d15", "term", "condition_grades")]
 Inserted 1 fact(s) into 'ref'.
 > +pi_source[("d15", 0, "Mention handbag condition grades")]
@@ -494,28 +516,34 @@ Inserted 1 fact(s) into 'pi_source'.
 Inserted 1 fact(s) into 'ex_reply_prop'.
 > +pi_source[("x5", 7, "You: Three good ones:")]
 Inserted 1 fact(s) into 'pi_source'.
+> +ex_reply_prop[("x6", "e5", "mixed_currency_total")]
+Inserted 1 fact(s) into 'ex_reply_prop'.
+> +pi_source[("x6", 8, "they'd come to GBP 24.99 plus USD 31.70")]
+Inserted 1 fact(s) into 'pi_source'.
 > ?pi_conflict(K, C1, C2)
-┌────────────────────────┬───────────────────────────┬───────────────────────────┐
-│ K                      │ C1                        │ C2                        │
-├────────────────────────┼───────────────────────────┼───────────────────────────┤
-│ "action_misroute"      │ "d2"                      │ "d2"                      │
-│ "contract_drift"       │ "d6"                      │ "d6"                      │
-│ "deontic_clash"        │ "d11"                     │ "d12"                     │
-│ "enum_violation"       │ "d4"                      │ "d4"                      │
-│ "example_bad_format"   │ "x4"                      │ "x4"                      │
-│ "example_over_cap"     │ "x1"                      │ "d7"                      │
-│ "example_phantom_tool" │ "x3"                      │ "x3"                      │
-│ "example_skips_search" │ "x5"                      │ "x5"                      │
-│ "example_under_floor"  │ "x1"                      │ "d8"                      │
-│ "invariant_permit"     │ "d9"                      │ "d9"                      │
-│ "invariant_require"    │ "d10"                     │ "d10"                     │
-│ "merchant_carveout"    │ "d13"                     │ "d13"                     │
-│ "missing_required"     │ "search_before_recommend" │ "search_before_recommend" │
-│ "unknown_arg"          │ "d3"                      │ "d3"                      │
-│ "unknown_field"        │ "d5"                      │ "d5"                      │
-│ "unknown_tool"         │ "d1"                      │ "d1"                      │
-└────────────────────────┴───────────────────────────┴───────────────────────────┘
-16 rows
+┌──────────────────────────┬───────────────────────────┬───────────────────────────┐
+│ K                        │ C1                        │ C2                        │
+├──────────────────────────┼───────────────────────────┼───────────────────────────┤
+│ "action_misroute"        │ "d2"                      │ "d2"                      │
+│ "contract_drift"         │ "d6"                      │ "d6"                      │
+│ "contract_drift_value"   │ "d16"                     │ "d16"                     │
+│ "deontic_clash"          │ "d11"                     │ "d12"                     │
+│ "enum_violation"         │ "d4"                      │ "d4"                      │
+│ "example_bad_format"     │ "x4"                      │ "x4"                      │
+│ "example_forbidden_prop" │ "x6"                      │ "x6"                      │
+│ "example_over_cap"       │ "x1"                      │ "d7"                      │
+│ "example_phantom_tool"   │ "x3"                      │ "x3"                      │
+│ "example_skips_search"   │ "x5"                      │ "x5"                      │
+│ "example_under_floor"    │ "x1"                      │ "d8"                      │
+│ "invariant_permit"       │ "d9"                      │ "d9"                      │
+│ "invariant_require"      │ "d10"                     │ "d10"                     │
+│ "merchant_carveout"      │ "d13"                     │ "d13"                     │
+│ "missing_required"       │ "search_before_recommend" │ "search_before_recommend" │
+│ "unknown_arg"            │ "d3"                      │ "d3"                      │
+│ "unknown_field"          │ "d5"                      │ "d5"                      │
+│ "unknown_tool"           │ "d1"                      │ "d1"                      │
+└──────────────────────────┴───────────────────────────┴───────────────────────────┘
+18 rows
 > ?conflict(K, C1, C2)
 ┌─────────────────────┬──────┬──────┐
 │ K                   │ C1   │ C2   │

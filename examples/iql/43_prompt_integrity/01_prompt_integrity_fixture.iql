@@ -20,10 +20,12 @@
 +field[("sku",), ("price",), ("currency",), ("size",), ("colour",)]
 +lexicon[("dress",), ("jacket",), ("denim",), ("sku",), ("basket",)]
 +contract_max[("product_count", 3)]
++contract_value[("render_key", "sku")]
 +contract_format[("prose",)]
 +format_violates[("json_body", "prose")]
++prop_violates_inv[("mixed_currency_total", "mix_currencies")]
 +inv_require[("search_before_recommend",), ("confirm_before_checkout",)]
-+inv_forbid[("recommend_ungrounded",), ("assert_success_unverified",)]
++inv_forbid[("recommend_ungrounded",), ("assert_success_unverified",), ("mix_currencies",)]
 +inv_global[("availability_filter",)]
 +action_of[("search_products", "search"), ("add_to_wishlist", "save_for_later")]
 +subsumes[("ask_clarify", "question_opening"), ("quote_remembered_price", "recommend_ungrounded")]
@@ -72,6 +74,10 @@
 // the deleted-rule absence class)
 +directive[("d14", "require", "confirm_before_checkout", "")]
 +pi_source[("d14", 0, "Confirm with the customer before calling checkout_basket")]
+// d16 (~c6-09): "refer to products by their wash" - a string contract constant
+// drifted (the render contract keys on sku)
++prompt_value[("d16", "render_key", "wash")]
++pi_source[("d16", 0, "Refer to products by their fit and wash when calling tools")]
 // d15 (soft, ~c5-04): "mention handbag condition grades" - foreign vocabulary
 +ref[("d15", "term", "condition_grades")]
 +pi_source[("d15", 0, "Mention handbag condition grades")]
@@ -92,6 +98,10 @@
 // e4 (~c3-01): recommends with no grounding call demonstrated
 +ex_reply_prop[("x5", "e4", "recommends_products")]
 +pi_source[("x5", 7, "You: Three good ones:")]
+// e5 (~c3-07): a demonstrated total across two currencies - the reply property
+// is extractor vocabulary, its mapping to a forbidden action is world data
++ex_reply_prop[("x6", "e5", "mixed_currency_total")]
++pi_source[("x6", 8, "they'd come to GBP 24.99 plus USD 31.70")]
 
 // ── Expected hard findings, kind by kind ───────────────────────────────────
 // ("unknown_tool", "d1", "d1")            denim_inventory_lookup unbound
@@ -105,6 +115,8 @@
 // ("invariant_require", "d10", "d10")     mandated ungrounded price, via subsumes
 // ("deontic_clash", "d11", "d12")         ask_clarify < question_opening
 // ("merchant_carveout", "d13", "d13")     Elgate exemption on a global rule
+// ("contract_drift_value", "d16", "d16")  render key wash vs contract sku
+// ("example_forbidden_prop", "x6", "x6")  mixed-currency total, via world map
 // ("example_over_cap", "x1", "d7")        4 demonstrated > cap 3
 // ("example_under_floor", "x1", "d8")     4 demonstrated < corrupted floor 5
 // ("example_phantom_tool", "x3", "x3")    product_finder unbound

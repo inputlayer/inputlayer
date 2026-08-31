@@ -47,8 +47,10 @@
 +lexicon(term: string)
 +contract_max(attr: string, bound: int)
 +contract_min(attr: string, bound: int)
++contract_value(attr: string, val: string)
 +contract_format(fmt: string)
 +format_violates(prop: string, fmt: string)
++prop_violates_inv(prop: string, action: string)
 +inv_require(action: string)
 +inv_forbid(action: string)
 +inv_global(action: string)
@@ -62,6 +64,7 @@
 +ref_arg_val(id: string, tool: string, arg: string, val: string)
 +routes(id: string, purpose: string, tool: string)
 +cond_brand(id: string, brand: string)
++prompt_value(id: string, attr: string, val: string)
 +pi_source(id: string, msg: int, surface: string)
 
 // -- 0c. EXAMPLE schemas (parsed from demonstrated exchanges; a third origin
@@ -106,6 +109,9 @@
 //       core's constraint_num int mirror) ---------------------------------
 +pi_drift_max(K) <- constraint_num(K, "max_value", A, N), contract_max(A, M), N != M
 +pi_drift_min(K) <- constraint_num(K, "min_value", A, N), contract_min(A, M), N != M
+// string-valued contract constants drift too ("refer to products by their wash"
+// against a render contract keyed on sku); != is type-generic
++pi_drift_value(C) <- prompt_value(C, A, V), contract_value(A, W), V != W
 
 // -- 5. Completeness (closed world over the PROMPT, the absence class:
 //       a deleted or weakened-away mandatory rule produces no wrong line to
@@ -135,7 +141,11 @@
 +pi_example_phantom_tool(C) <- ex_call(C, E, T), !tool(T)
 // E3: a demonstrated reply in a shape the output contract rules out
 +pi_example_bad_format(C) <- ex_reply_prop(C, E, P), format_violates(P, F), contract_format(F)
-// E4: a reply that recommends with no grounding call demonstrated first
+// E4: a demonstrated reply carrying a property policy forbids - the property
+// vocabulary is extractor data, the mapping to invariants is world data
+// (mixed_currency_total -> mix_currencies, recommends_out_of_stock -> ...)
++pi_example_forbidden_prop(C) <- ex_reply_prop(C, E, P), prop_violates_inv(P, A), inv_forbid(A)
+// E5: a reply that recommends with no grounding call demonstrated first
 +ex_searched(E) <- ex_call(C, E, T), action_of(T, "search")
 +pi_example_skips_search(C) <- ex_reply_prop(C, E, "recommends_products"), inv_require("search_before_recommend"), !ex_searched(E)
 
@@ -156,6 +166,7 @@
 +pi_conflict("action_misroute", C, C) <- pi_action_misroute(C)
 +pi_conflict("contract_drift", K, K) <- pi_drift_max(K)
 +pi_conflict("contract_drift_min", K, K) <- pi_drift_min(K)
++pi_conflict("contract_drift_value", C, C) <- pi_drift_value(C)
 +pi_conflict("missing_required", A, A) <- pi_missing_required(A)
 +pi_conflict("invariant_permit", D, D) <- pi_invariant_permit(D)
 +pi_conflict("invariant_require", D, D) <- pi_invariant_require(D)
@@ -165,6 +176,7 @@
 +pi_conflict("example_under_floor", C, K) <- pi_example_under_floor(C, K)
 +pi_conflict("example_phantom_tool", C, C) <- pi_example_phantom_tool(C)
 +pi_conflict("example_bad_format", C, C) <- pi_example_bad_format(C)
++pi_conflict("example_forbidden_prop", C, C) <- pi_example_forbidden_prop(C)
 +pi_conflict("example_skips_search", C, C) <- pi_example_skips_search(C)
 +pi_conflict("merchant_carveout", D, D) <- pi_merchant_carveout(D)
 +pi_tension("foreign_term", C, C) <- pi_foreign_term(C)
