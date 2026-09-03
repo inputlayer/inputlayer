@@ -10,10 +10,10 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
-    "hono": "^4.7.4",
+    "hono": "^4.13.5",
     "http-proxy": "^1.18.1",
-    "nodemailer": "^6.9.16",
-    "ws": "^8.18.0"
+    "nodemailer": "^9.1.1",
+    "ws": "^8.21.3"
   },
   "optionalDependencies": {
     "dotenv": "^16.4.7"
@@ -21,7 +21,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/http-proxy": "^1.17.15",
-    "@types/nodemailer": "^6.4.17",
+    "@types/nodemailer": "^8.0.1",
     "@types/ws": "^8.5.13",
     "tsx": "^4.19.2",
     "typescript": "^5.7.0"
