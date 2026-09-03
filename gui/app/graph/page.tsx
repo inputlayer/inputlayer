@@ -215,7 +215,7 @@ function GraphPageInner() {
           <div className="w-72 flex-shrink-0 border-r border-border/50 bg-muted/20 h-full flex flex-col">
             <div className="p-2 border-b border-border/50 flex items-center justify-between">
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider px-2">
-                KG Graph
+                Visualize
               </span>
               <Button
                 variant="ghost"

@@ -129,7 +129,7 @@ export function RelationsExplorer({
                   <ContextMenuContent>
                     <ContextMenuItem onClick={() => router.push(`/graph?select=${relation.name}`)}>
                       <Share2 className="h-3.5 w-3.5 mr-2" />
-                      Open in KG Graph
+                      Open in Visualize
                     </ContextMenuItem>
                   </ContextMenuContent>
                 </ContextMenu>
@@ -178,7 +178,7 @@ export function RelationsExplorer({
                   <ContextMenuContent>
                     <ContextMenuItem onClick={() => router.push(`/graph?select=${view.name}`)}>
                       <Share2 className="h-3.5 w-3.5 mr-2" />
-                      Open in KG Graph
+                      Open in Visualize
                     </ContextMenuItem>
                   </ContextMenuContent>
                 </ContextMenu>
