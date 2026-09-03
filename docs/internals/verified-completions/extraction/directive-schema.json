@@ -1,0 +1,114 @@
+{
+  "$comment": "Structured-output schema for the prompt-integrity extractor (extraction/prompt-directives-prompt.md). Same conventions as claim-schema.json: additionalProperties false everywhere, no regex/range constraints - verbatim-surface and id-format validity are enforced by the gateway's ingestion validator. Deterministic extractors (identifier lexer, numeric parser, example-block parser) fill refs/ref_arg_vals/examples first; the LLM pass adds directives and routes, and only classifies example reply PROPERTIES on blocks the parser already segmented.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["directives", "refs", "ref_arg_vals", "routes", "windows", "examples", "line_ledger", "taxonomy"],
+  "properties": {
+    "directives": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "modality", "action", "cond", "msg", "surface"],
+        "properties": {
+          "id":       { "type": "string", "description": "d_m<msgIdx>_<n>, ordered by appearance" },
+          "modality": { "type": "string", "enum": ["require", "forbid", "permit", "exempt"] },
+          "action":   { "type": "string", "description": "snake_case action from the shipped taxonomy; coin only when nothing fits, and register the coinage under taxonomy" },
+          "cond":     { "type": "string", "description": "normalized condition id, empty string when unconditional; conditions are DATA, never skipped" },
+          "msg":      { "type": "integer" },
+          "surface":  { "type": "string", "description": "verbatim contiguous substring of the source line" }
+        }
+      }
+    },
+    "refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "token", "msg", "surface"],
+        "properties": {
+          "id":      { "type": "string" },
+          "kind":    { "type": "string", "enum": ["tool", "field", "term"] },
+          "token":   { "type": "string", "description": "the referenced identifier, verbatim casing preserved in surface, normalized snake_case here" },
+          "msg":     { "type": "integer" },
+          "surface": { "type": "string" }
+        }
+      }
+    },
+    "ref_arg_vals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "tool", "arg", "val", "msg", "surface"],
+        "properties": {
+          "id": { "type": "string" }, "tool": { "type": "string" }, "arg": { "type": "string" },
+          "val": { "type": "string" }, "msg": { "type": "integer" }, "surface": { "type": "string" }
+        }
+      }
+    },
+    "routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "purpose", "tool", "msg", "surface"],
+        "properties": {
+          "id": { "type": "string" }, "purpose": { "type": "string", "description": "canonical purpose from the taxonomy (save_for_later, search, checkout, ...)" },
+          "tool": { "type": "string" }, "msg": { "type": "integer" }, "surface": { "type": "string" }
+        }
+      }
+    },
+    "windows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "ctype", "attr", "nval", "msg", "surface"],
+        "properties": {
+          "id": { "type": "string" }, "ctype": { "type": "string", "enum": ["max_value", "min_value"] },
+          "attr": { "type": "string" }, "nval": { "type": "integer" },
+          "msg": { "type": "integer" }, "surface": { "type": "string" }
+        },
+        "$comment": "Inserted into core's constraint_num/constraint_source so D3 clash_window and this pack's drift rules both see them."
+      }
+    },
+    "examples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ex", "calls", "reply_nums", "reply_props"],
+        "properties": {
+          "ex": { "type": "string", "description": "example-block id from the deterministic segmenter" },
+          "calls": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["id", "tool", "msg", "surface"], "properties": { "id": { "type": "string" }, "tool": { "type": "string" }, "msg": { "type": "integer" }, "surface": { "type": "string" } } } },
+          "reply_nums": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["id", "attr", "nval", "msg", "surface"], "properties": { "id": { "type": "string" }, "attr": { "type": "string" }, "nval": { "type": "integer" }, "msg": { "type": "integer" }, "surface": { "type": "string" } } } },
+          "reply_props": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["id", "prop", "msg", "surface"], "properties": { "id": { "type": "string" }, "prop": { "type": "string", "description": "controlled vocabulary: json_body, recommends_products, sku_quoted, mixed_currency_total, ..." }, "msg": { "type": "integer" }, "surface": { "type": "string" } } } }
+        }
+      }
+    },
+    "line_ledger": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["msg", "line", "status", "surface"],
+        "properties": {
+          "msg": { "type": "integer" }, "line": { "type": "integer" },
+          "status": { "type": "string", "enum": ["extracted", "inert", "unverified"] },
+          "surface": { "type": "string" }
+        },
+        "$comment": "The coverage channel: every source line is accounted for. 'extracted' lines yielded >=1 fact above; 'inert' lines are declaredly non-normative (headings, catalog prose); 'unverified' lines the extractor could not classify - surfaced to the caller as findings, never silently passed."
+      }
+    },
+    "taxonomy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actions", "subsumes"],
+      "properties": {
+        "actions": { "type": "array", "items": { "type": "string" }, "description": "newly coined actions (data, never rules)" },
+        "subsumes": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["sub", "super"], "properties": { "sub": { "type": "string" }, "super": { "type": "string" } } } }
+      }
+    }
+  }
+}

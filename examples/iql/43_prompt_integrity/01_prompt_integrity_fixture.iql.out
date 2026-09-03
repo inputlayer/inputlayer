@@ -1,0 +1,619 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+
+> .kg create test_prompt_integrity
+Knowledge graph 'test_prompt_integrity' created.
+Switched to knowledge graph: test_prompt_integrity
+> .kg use test_prompt_integrity
+Switched to knowledge graph: test_prompt_integrity
+> .load docs/internals/verified-completions/rules/consistency-core.iql
+Loading file: docs/internals/verified-completions/rules/consistency-core.iql
+> +claim(id: string, entity: string, attr: string, val: string)
+Schema for 'claim' registered with 4 columns (persistent)
+> +claim_modality(id: string, modality: string)
+Schema for 'claim_modality' registered with 2 columns (persistent)
+> +claim_source(id: string, msg: int, surface: string)
+Schema for 'claim_source' registered with 3 columns (persistent)
+> +claim_origin(id: string, origin: string)
+Schema for 'claim_origin' registered with 2 columns (persistent)
+> +claim_num(id: string, entity: string, attr: string, nval: int)
+Schema for 'claim_num' registered with 4 columns (persistent)
+> +before_claim(id: string, event_a: string, event_b: string)
+Schema for 'before_claim' registered with 3 columns (persistent)
+> +constraint(id: string, ctype: string, attr: string, val: string)
+Schema for 'constraint' registered with 4 columns (persistent)
+> +constraint_num(id: string, ctype: string, attr: string, nval: int)
+Schema for 'constraint_num' registered with 4 columns (persistent)
+> +constraint_source(id: string, msg: int, surface: string)
+Schema for 'constraint_source' registered with 3 columns (persistent)
+> +same_as(e1: string, e2: string)
+Schema for 'same_as' registered with 2 columns (persistent)
+> +functional(attr: string)
+Schema for 'functional' registered with 1 columns (persistent)
+> +inverse_functional(attr: string)
+Schema for 'inverse_functional' registered with 1 columns (persistent)
+> +disjoint_base(t1: string, t2: string)
+Schema for 'disjoint_base' registered with 2 columns (persistent)
+> +acyclic(attr: string)
+Schema for 'acyclic' registered with 1 columns (persistent)
+> +asymmetric(attr: string)
+Schema for 'asymmetric' registered with 1 columns (persistent)
+> +irreflexive(attr: string)
+Schema for 'irreflexive' registered with 1 columns (persistent)
+> +pair_order(start_attr: string, end_attr: string)
+Schema for 'pair_order' registered with 2 columns (persistent)
+> +cardinality_attr(attr: string)
+Schema for 'cardinality_attr' registered with 1 columns (persistent)
+> +attr_max(attr: string, bound: int)
+Schema for 'attr_max' registered with 2 columns (persistent)
+> +attr_min(attr: string, bound: int)
+Schema for 'attr_min' registered with 2 columns (persistent)
+> +attr_domain(attr: string, dom: string)
+Schema for 'attr_domain' registered with 2 columns (persistent)
+> +active(C, E, A, V) <- claim(C, E, A, V), claim_modality(C, "asserted")
+Rule 'active' registered.
+> +denied(C, E, A, V) <- claim(C, E, A, V), claim_modality(C, "negated")
+Rule 'denied' registered.
+> +hedged(C, E, A, V) <- claim(C, E, A, V), claim_modality(C, "hedged")
+Rule 'hedged' registered.
+> +mentioned(E) <- claim(C, E, A, V)
+Rule 'mentioned' registered.
+> +eq0(X, Y) <- same_as(X, Y)
+Rule 'eq0' registered.
+> +eq0(X, Y) <- same_as(Y, X)
+Rule 'eq0' registered.
+> +eq(X, Y) <- eq0(X, Y)
+Rule 'eq' registered.
+> +eq(X, Z) <- eq(X, Y), eq0(Y, Z)
+Rule 'eq' registered.
+> +coentity(E, E) <- mentioned(E)
+Rule 'coentity' registered.
+> +coentity(X, Y) <- eq(X, Y)
+Rule 'coentity' registered.
+> +conflict_identity_merged(C) <- active(C, E1, "distinct_from", E2), eq(E1, E2)
+Rule 'conflict_identity_merged' registered.
+> +conflict_identity_shared_id(C1, C2) <- active(CD, X, "distinct_from", Y), active(C1, X, A, V), active(C2, Y, A, V), inverse_functional(A)
+Rule 'conflict_identity_shared_id' registered.
+> +conflict_functional(C1, C2) <- active(C1, E1, A, V1), active(C2, E2, A, V2), coentity(E1, E2), functional(A), V1 != V2
+Rule 'conflict_functional' registered.
+> +conflict_polarity(C1, C2) <- active(C1, E1, A, V), denied(C2, E2, A, V), coentity(E1, E2)
+Rule 'conflict_polarity' registered.
+> +disjoint(A, B) <- disjoint_base(A, B)
+Rule 'disjoint' registered.
+> +disjoint(B, A) <- disjoint_base(A, B)
+Rule 'disjoint' registered.
+> +conflict_disjoint_class(C1, C2) <- active(C1, E1, "is_a", T1), active(C2, E2, "is_a", T2), coentity(E1, E2), disjoint(T1, T2)
+Rule 'conflict_disjoint_class' registered.
+> +conflict_domain(C1, C2) <- active(C1, E1, A, V0), attr_domain(A, T), active(C2, E2, "is_a", T2), coentity(E1, E2), disjoint(T, T2)
+Rule 'conflict_domain' registered.
+> +conflict_range_over(C) <- claim_num(C, E, A, N), claim_modality(C, "asserted"), attr_max(A, M), N > M
+Rule 'conflict_range_over' registered.
+> +conflict_range_under(C) <- claim_num(C, E, A, N), claim_modality(C, "asserted"), attr_min(A, M), N < M
+Rule 'conflict_range_under' registered.
+> +member_of(G, M) <- active(C, G, "has_member", M)
+Rule 'member_of' registered.
+> +member_tally(G, count_distinct<M>) <- member_of(G, M)
+Rule 'member_tally' registered.
+> +claimed_size(C, G, N) <- claim_num(C, G, A, N), claim_modality(C, "asserted"), cardinality_attr(A)
+Rule 'claimed_size' registered.
+> +conflict_cardinality(C) <- claimed_size(C, G, N), member_tally(G, T), T > N
+Rule 'conflict_cardinality' registered.
+> +bfe(X, Y) <- before_claim(B, X, Y)
+Rule 'bfe' registered.
+> +bf(X, Y) <- bfe(X, Y)
+Rule 'bf' registered.
+> +bf(X, Z) <- bf(X, Y), bfe(Y, Z)
+Rule 'bf' registered.
+> +conflict_cycle_before(C) <- before_claim(C, X, Y), bf(Y, X)
+Rule 'conflict_cycle_before' registered.
+> +aedge(A, X, Y) <- active(C, X, A, Y), acyclic(A)
+Rule 'aedge' registered.
+> +areach(A, X, Y) <- aedge(A, X, Y)
+Rule 'areach' registered.
+> +areach(A, X, Z) <- areach(A, X, Y), aedge(A, Y, Z)
+Rule 'areach' registered.
+> +conflict_cycle_hierarchy(C) <- active(C, X, A, Y), acyclic(A), areach(A, Y, X)
+Rule 'conflict_cycle_hierarchy' registered.
+> +conflict_asymmetry(C1, C2) <- active(C1, X, A, Y), active(C2, Y, A, X), asymmetric(A), X != Y
+Rule 'conflict_asymmetry' registered.
+> +conflict_irreflexive(C) <- active(C, X, A, Y), coentity(X, Y), irreflexive(A)
+Rule 'conflict_irreflexive' registered.
+> +conflict_interval_order(C1, C2) <- claim_num(C1, E1, As, Ns), claim_modality(C1, "asserted"), claim_num(C2, E2, Ae, Ne), claim_modality(C2, "asserted"), coentity(E1, E2), pair_order(As, Ae), Ne < Ns
+Rule 'conflict_interval_order' registered.
+> +clash_forbid_require(K1, K2) <- constraint(K1, "forbid", T, V1), constraint(K2, "require", T, V2)
+Rule 'clash_forbid_require' registered.
+> +clash_persona(K1, K2) <- constraint(K1, "persona", A, V1), constraint(K2, "persona", A, V2), V1 != V2
+Rule 'clash_persona' registered.
+> +clash_window(K1, K2) <- constraint_num(K1, "max_value", A, Vmax), constraint_num(K2, "min_value", A, Vmin), Vmax < Vmin
+Rule 'clash_window' registered.
+> +out(C, E, A, V) <- active(C, E, A, V), claim_origin(C, "output")
+Rule 'out' registered.
+> +out_topic(T) <- out(C, E, "mentions_topic", T)
+Rule 'out_topic' registered.
+> +v_forbidden_topic(C, K) <- out(C, E, "mentions_topic", T), constraint(K, "forbid", T, V1)
+Rule 'v_forbidden_topic' registered.
+> +v_persona_break(C, K) <- out(C, "assistant", A, V1), constraint(K, "persona", A, V2), V1 != V2
+Rule 'v_persona_break' registered.
+> +v_limit_exceeded(C, K) <- claim_num(C, E, A, N), claim_origin(C, "output"), claim_modality(C, "asserted"), constraint_num(K, "max_value", A, M), N > M
+Rule 'v_limit_exceeded' registered.
+> +v_floor_missed(C, K) <- claim_num(C, E, A, N), claim_origin(C, "output"), claim_modality(C, "asserted"), constraint_num(K, "min_value", A, M), N < M
+Rule 'v_floor_missed' registered.
+> +v_required_missing(K) <- constraint(K, "require", T, V1), claim_origin(Cz, "output"), !out_topic(T)
+Rule 'v_required_missing' registered.
+> +tension_hedge_vs_assert(C1, C2) <- active(C1, E1, A, V1), hedged(C2, E2, A, V2), coentity(E1, E2), functional(A), V1 != V2
+Rule 'tension_hedge_vs_assert' registered.
+> +conflict("identity", C, C) <- conflict_identity_merged(C)
+Rule 'conflict' registered.
+> +conflict("identity", C1, C2) <- conflict_identity_shared_id(C1, C2)
+Rule 'conflict' registered.
+> +conflict("functional", C1, C2) <- conflict_functional(C1, C2)
+Rule 'conflict' registered.
+> +conflict("polarity", C1, C2) <- conflict_polarity(C1, C2)
+Rule 'conflict' registered.
+> +conflict("disjoint_class", C1, C2) <- conflict_disjoint_class(C1, C2)
+Rule 'conflict' registered.
+> +conflict("domain", C1, C2) <- conflict_domain(C1, C2)
+Rule 'conflict' registered.
+> +conflict("range", C, C) <- conflict_range_over(C)
+Rule 'conflict' registered.
+> +conflict("range", C, C) <- conflict_range_under(C)
+Rule 'conflict' registered.
+> +conflict("cardinality", C, C) <- conflict_cardinality(C)
+Rule 'conflict' registered.
+> +conflict("cycle", C, C) <- conflict_cycle_before(C)
+Rule 'conflict' registered.
+> +conflict("cycle", C, C) <- conflict_cycle_hierarchy(C)
+Rule 'conflict' registered.
+> +conflict("asymmetry", C1, C2) <- conflict_asymmetry(C1, C2)
+Rule 'conflict' registered.
+> +conflict("irreflexive", C, C) <- conflict_irreflexive(C)
+Rule 'conflict' registered.
+> +conflict("interval_order", C1, C2) <- conflict_interval_order(C1, C2)
+Rule 'conflict' registered.
+> +conflict("instruction_clash", K1, K2) <- clash_forbid_require(K1, K2)
+Rule 'conflict' registered.
+> +conflict("instruction_clash", K1, K2) <- clash_persona(K1, K2)
+Rule 'conflict' registered.
+> +conflict("instruction_clash", K1, K2) <- clash_window(K1, K2)
+Rule 'conflict' registered.
+> +violation("forbidden_topic", C, K) <- v_forbidden_topic(C, K)
+Rule 'violation' registered.
+> +violation("persona_break", C, K) <- v_persona_break(C, K)
+Rule 'violation' registered.
+> +violation("limit_exceeded", C, K) <- v_limit_exceeded(C, K)
+Rule 'violation' registered.
+> +violation("floor_missed", C, K) <- v_floor_missed(C, K)
+Rule 'violation' registered.
+> +violation("required_missing", K, K) <- v_required_missing(K)
+Rule 'violation' registered.
+> +tension("hedge_vs_assert", C1, C2) <- tension_hedge_vs_assert(C1, C2)
+Rule 'tension' registered.
+> +finding(K, "hard", C1, C2) <- conflict(K, C1, C2)
+Rule 'finding' registered.
+> +finding(K, "soft", C1, C2) <- tension(K, C1, C2)
+Rule 'finding' registered.
+> +src(Id, M, S) <- claim_source(Id, M, S)
+Rule 'src' registered.
+> +src(Id, M, S) <- constraint_source(Id, M, S)
+Rule 'src' registered.
+> +finding_src(K, Sev, C1, M1, S1, C2, M2, S2) <- finding(K, Sev, C1, C2), src(C1, M1, S1), src(C2, M2, S2)
+Rule 'finding_src' registered.
+> +violation_src(K, C, Mc, Sc, Kc, Mk, Sk) <- violation(K, C, Kc), src(C, Mc, Sc), constraint_source(Kc, Mk, Sk)
+Rule 'violation_src' registered.
+> +functional[("departure_date",), ("departure_city",), ("return_date",), ("arrival_city",), ("age",), ("birth_date",), ("death_date",), ("start_date",), ("end_date",), ("check_in",), ("check_out",), ("total_price",), ("capacity",), ("capital_of",), ("ceo_of",), ("headquartered_in",), ("assistant_identity",), ("member_count",)]
+Inserted 18 fact(s) into 'functional'.
+> +inverse_functional[("passport_number",), ("ssn",)]
+Inserted 2 fact(s) into 'inverse_functional'.
+> +disjoint_base[("person", "organization"), ("person", "location"), ("person", "event"), ("organization", "location"), ("alive", "deceased")]
+Inserted 5 fact(s) into 'disjoint_base'.
+> +acyclic[("part_of",), ("located_in",), ("ancestor_of",), ("parent_of",), ("reports_to",), ("prerequisite_of",), ("caused_by",)]
+Inserted 7 fact(s) into 'acyclic'.
+> +asymmetric[("parent_of",), ("manager_of",), ("older_than",)]
+Inserted 3 fact(s) into 'asymmetric'.
+> +irreflexive[("parent_of",), ("sibling_of",), ("married_to",), ("manager_of",), ("distinct_from",)]
+Inserted 5 fact(s) into 'irreflexive'.
+> +pair_order[("departure_date", "return_date"), ("start_date", "end_date"), ("start_time", "end_time"), ("birth_date", "death_date"), ("check_in", "check_out")]
+Inserted 5 fact(s) into 'pair_order'.
+> +cardinality_attr[("member_count",), ("party_size",), ("headcount",)]
+Inserted 3 fact(s) into 'cardinality_attr'.
+> +attr_max[("age", 130), ("percentage", 100)]
+Inserted 2 fact(s) into 'attr_max'.
+> +attr_min[("age", 0), ("total_price", 0), ("capacity", 0)]
+Inserted 3 fact(s) into 'attr_min'.
+> +attr_domain[("blood_type", "person"), ("marital_status", "person"), ("passport_number", "person")]
+Inserted 3 fact(s) into 'attr_domain'.
+File loaded.
+> .load docs/internals/verified-completions/rules/prompt-integrity.iql
+Loading file: docs/internals/verified-completions/rules/prompt-integrity.iql
+> +tool(name: string)
+Schema for 'tool' registered with 1 columns (persistent)
+> +tool_arg(tool: string, arg: string)
+Schema for 'tool_arg' registered with 2 columns (persistent)
+> +arg_enum(tool: string, arg: string, val: string)
+Schema for 'arg_enum' registered with 3 columns (persistent)
+> +field(name: string)
+Schema for 'field' registered with 1 columns (persistent)
+> +lexicon(term: string)
+Schema for 'lexicon' registered with 1 columns (persistent)
+> +contract_max(attr: string, bound: int)
+Schema for 'contract_max' registered with 2 columns (persistent)
+> +contract_min(attr: string, bound: int)
+Schema for 'contract_min' registered with 2 columns (persistent)
+> +contract_value(attr: string, val: string)
+Schema for 'contract_value' registered with 2 columns (persistent)
+> +contract_format(fmt: string)
+Schema for 'contract_format' registered with 1 columns (persistent)
+> +format_violates(prop: string, fmt: string)
+Schema for 'format_violates' registered with 2 columns (persistent)
+> +prop_violates_inv(prop: string, action: string)
+Schema for 'prop_violates_inv' registered with 2 columns (persistent)
+> +inv_require(action: string)
+Schema for 'inv_require' registered with 1 columns (persistent)
+> +inv_forbid(action: string)
+Schema for 'inv_forbid' registered with 1 columns (persistent)
+> +inv_global(action: string)
+Schema for 'inv_global' registered with 1 columns (persistent)
+> +action_of(tool: string, purpose: string)
+Schema for 'action_of' registered with 2 columns (persistent)
+> +subsumes(sub: string, super: string)
+Schema for 'subsumes' registered with 2 columns (persistent)
+> +directive(id: string, modality: string, action: string, cond: string)
+Schema for 'directive' registered with 4 columns (persistent)
+> +ref(id: string, kind: string, token: string)
+Schema for 'ref' registered with 3 columns (persistent)
+> +ref_arg_val(id: string, tool: string, arg: string, val: string)
+Schema for 'ref_arg_val' registered with 4 columns (persistent)
+> +routes(id: string, purpose: string, tool: string)
+Schema for 'routes' registered with 3 columns (persistent)
+> +cond_brand(id: string, brand: string)
+Schema for 'cond_brand' registered with 2 columns (persistent)
+> +prompt_value(id: string, attr: string, val: string)
+Schema for 'prompt_value' registered with 3 columns (persistent)
+> +pi_source(id: string, msg: int, surface: string)
+Schema for 'pi_source' registered with 3 columns (persistent)
+> +roster_member(id: string, tool: string)
+Schema for 'roster_member' registered with 2 columns (persistent)
+> +ex_call(id: string, ex: string, tool: string)
+Schema for 'ex_call' registered with 3 columns (persistent)
+> +ex_reply_num(id: string, ex: string, attr: string, nval: int)
+Schema for 'ex_reply_num' registered with 4 columns (persistent)
+> +ex_reply_prop(id: string, ex: string, prop: string)
+Schema for 'ex_reply_prop' registered with 3 columns (persistent)
+> +sub0(X, Y) <- subsumes(X, Y)
+Rule 'sub0' registered.
+> +sub(X, Y) <- sub0(X, Y)
+Rule 'sub' registered.
+> +sub(X, Z) <- sub(X, Y), sub0(Y, Z)
+Rule 'sub' registered.
+> +amention(A) <- directive(D, M, A, C)
+Rule 'amention' registered.
+> +subeq(X, X) <- amention(X)
+Rule 'subeq' registered.
+> +subeq(X, Y) <- sub(X, Y)
+Rule 'subeq' registered.
+> +permits(D, A) <- directive(D, "permit", A, C)
+Rule 'permits' registered.
+> +permits(D, A) <- directive(D, "exempt", A, C)
+Rule 'permits' registered.
+> +requires_up(D, A2) <- directive(D, "require", A1, C), subeq(A1, A2)
+Rule 'requires_up' registered.
+> +permits_up(D, A2) <- permits(D, A1), subeq(A1, A2)
+Rule 'permits_up' registered.
+> +forbids_down(D, A1) <- directive(D, "forbid", A2, C), subeq(A1, A2)
+Rule 'forbids_down' registered.
+> +commanded(A2) <- requires_up(D, A2)
+Rule 'commanded' registered.
+> +pi_unknown_tool(C) <- ref(C, "tool", T), !tool(T)
+Rule 'pi_unknown_tool' registered.
+> +pi_unknown_arg(C) <- ref_arg_val(C, T, A, V), tool(T), !tool_arg(T, A)
+Rule 'pi_unknown_arg' registered.
+> +arg_has_enum(T, A) <- arg_enum(T, A, V)
+Rule 'arg_has_enum' registered.
+> +pi_enum_violation(C) <- ref_arg_val(C, T, A, V), arg_has_enum(T, A), !arg_enum(T, A, V)
+Rule 'pi_enum_violation' registered.
+> +pi_unknown_field(C) <- ref(C, "field", F), !field(F)
+Rule 'pi_unknown_field' registered.
+> +claimed_tool(T) <- roster_member(C, T)
+Rule 'claimed_tool' registered.
+> +pi_roster_understated(C) <- roster_member(C, T2), tool(T), !claimed_tool(T)
+Rule 'pi_roster_understated' registered.
+> +pi_action_misroute(D) <- routes(D, P, T), action_of(T2, P), T != T2
+Rule 'pi_action_misroute' registered.
+> +pi_drift_max(K) <- constraint_num(K, "max_value", A, N), contract_max(A, M), N != M
+Rule 'pi_drift_max' registered.
+> +pi_drift_min(K) <- constraint_num(K, "min_value", A, N), contract_min(A, M), N != M
+Rule 'pi_drift_min' registered.
+> +pi_drift_value(C) <- prompt_value(C, A, V), contract_value(A, W), V != W
+Rule 'pi_drift_value' registered.
+> +pi_missing_required(A) <- inv_require(A), directive(Dz, Mz, Az, Cz), !commanded(A)
+Rule 'pi_missing_required' registered.
+> +pi_invariant_permit(D) <- permits_up(D, A), inv_forbid(A)
+Rule 'pi_invariant_permit' registered.
+> +pi_invariant_require(D) <- requires_up(D, A), inv_forbid(A)
+Rule 'pi_invariant_require' registered.
+> +pi_invariant_forbid(D) <- forbids_down(D, A), inv_require(A)
+Rule 'pi_invariant_forbid' registered.
+> +exempts_up(D, A2) <- directive(D, "exempt", A1, C), subeq(A1, A2)
+Rule 'exempts_up' registered.
+> +pi_invariant_optional(D) <- exempts_up(D, A), inv_require(A)
+Rule 'pi_invariant_optional' registered.
+> +pi_required_exempt(D1, D2) <- requires_up(D1, A), exempts_up(D2, A)
+Rule 'pi_required_exempt' registered.
+> +pi_deontic_clash(D1, D2) <- requires_up(D1, A), forbids_down(D2, A)
+Rule 'pi_deontic_clash' registered.
+> +pi_example_over_cap(C, K) <- ex_reply_num(C, E, A, N), constraint_num(K, "max_value", A, M), N > M
+Rule 'pi_example_over_cap' registered.
+> +pi_example_under_floor(C, K) <- ex_reply_num(C, E, A, N), constraint_num(K, "min_value", A, M), N < M
+Rule 'pi_example_under_floor' registered.
+> +pi_example_phantom_tool(C) <- ex_call(C, E, T), !tool(T)
+Rule 'pi_example_phantom_tool' registered.
+> +pi_example_bad_format(C) <- ex_reply_prop(C, E, P), format_violates(P, F), contract_format(F)
+Rule 'pi_example_bad_format' registered.
+> +pi_example_forbidden_prop(C) <- ex_reply_prop(C, E, P), prop_violates_inv(P, A), inv_forbid(A)
+Rule 'pi_example_forbidden_prop' registered.
+> +ex_searched(E) <- ex_call(C, E, T), action_of(T, "search")
+Rule 'ex_searched' registered.
+> +pi_example_skips_search(C) <- ex_reply_prop(C, E, "recommends_products"), inv_require("search_before_recommend"), !ex_searched(E)
+Rule 'pi_example_skips_search' registered.
+> +pi_merchant_carveout(D) <- cond_brand(D, B), directive(D, M, A, C2)
+Rule 'pi_merchant_carveout' registered.
+> +pi_foreign_term(C) <- ref(C, "term", W), !lexicon(W)
+Rule 'pi_foreign_term' registered.
+> +pi_conflict("unknown_tool", C, C) <- pi_unknown_tool(C)
+Rule 'pi_conflict' registered.
+> +pi_conflict("unknown_arg", C, C) <- pi_unknown_arg(C)
+Rule 'pi_conflict' registered.
+> +pi_conflict("enum_violation", C, C) <- pi_enum_violation(C)
+Rule 'pi_conflict' registered.
+> +pi_conflict("unknown_field", C, C) <- pi_unknown_field(C)
+Rule 'pi_conflict' registered.
+> +pi_conflict("action_misroute", C, C) <- pi_action_misroute(C)
+Rule 'pi_conflict' registered.
+> +pi_conflict("roster_understated", C, C) <- pi_roster_understated(C)
+Rule 'pi_conflict' registered.
+> +pi_conflict("contract_drift", K, K) <- pi_drift_max(K)
+Rule 'pi_conflict' registered.
+> +pi_conflict("contract_drift_min", K, K) <- pi_drift_min(K)
+Rule 'pi_conflict' registered.
+> +pi_conflict("contract_drift_value", C, C) <- pi_drift_value(C)
+Rule 'pi_conflict' registered.
+> +pi_conflict("missing_required", A, A) <- pi_missing_required(A)
+Rule 'pi_conflict' registered.
+> +pi_conflict("invariant_permit", D, D) <- pi_invariant_permit(D)
+Rule 'pi_conflict' registered.
+> +pi_conflict("invariant_require", D, D) <- pi_invariant_require(D)
+Rule 'pi_conflict' registered.
+> +pi_conflict("invariant_forbid", D, D) <- pi_invariant_forbid(D)
+Rule 'pi_conflict' registered.
+> +pi_conflict("invariant_optional", D, D) <- pi_invariant_optional(D)
+Rule 'pi_conflict' registered.
+> +pi_conflict("required_exempt", D1, D2) <- pi_required_exempt(D1, D2)
+Rule 'pi_conflict' registered.
+> +pi_conflict("deontic_clash", D1, D2) <- pi_deontic_clash(D1, D2)
+Rule 'pi_conflict' registered.
+> +pi_conflict("example_over_cap", C, K) <- pi_example_over_cap(C, K)
+Rule 'pi_conflict' registered.
+> +pi_conflict("example_under_floor", C, K) <- pi_example_under_floor(C, K)
+Rule 'pi_conflict' registered.
+> +pi_conflict("example_phantom_tool", C, C) <- pi_example_phantom_tool(C)
+Rule 'pi_conflict' registered.
+> +pi_conflict("example_bad_format", C, C) <- pi_example_bad_format(C)
+Rule 'pi_conflict' registered.
+> +pi_conflict("example_forbidden_prop", C, C) <- pi_example_forbidden_prop(C)
+Rule 'pi_conflict' registered.
+> +pi_conflict("example_skips_search", C, C) <- pi_example_skips_search(C)
+Rule 'pi_conflict' registered.
+> +pi_conflict("merchant_carveout", D, D) <- pi_merchant_carveout(D)
+Rule 'pi_conflict' registered.
+> +pi_tension("foreign_term", C, C) <- pi_foreign_term(C)
+Rule 'pi_tension' registered.
+> +pi_finding(K, "hard", C1, C2) <- pi_conflict(K, C1, C2)
+Rule 'pi_finding' registered.
+> +pi_finding(K, "soft", C1, C2) <- pi_tension(K, C1, C2)
+Rule 'pi_finding' registered.
+> +pi_finding_src(K, Sev, C1, M1, S1, C2, M2, S2) <- pi_finding(K, Sev, C1, C2), pi_source(C1, M1, S1), pi_source(C2, M2, S2)
+Rule 'pi_finding_src' registered.
+File loaded.
+> +tool[("search_products",), ("list_facets",), ("add_to_basket",), ("add_to_wishlist",), ("checkout_basket",)]
+Inserted 5 fact(s) into 'tool'.
+> +tool_arg[("search_products", "category"), ("search_products", "gender"), ("search_products", "availability"), ("add_to_basket", "sku"), ("add_to_basket", "quantity")]
+Inserted 5 fact(s) into 'tool_arg'.
+> +arg_enum[("search_products", "gender", "female"), ("search_products", "gender", "male"), ("search_products", "gender", "unisex"), ("search_products", "availability", "IN_STOCK"), ("search_products", "availability", "OUT_OF_STOCK")]
+Inserted 5 fact(s) into 'arg_enum'.
+> +field[("sku",), ("price",), ("currency",), ("size",), ("colour",)]
+Inserted 5 fact(s) into 'field'.
+> +lexicon[("dress",), ("jacket",), ("denim",), ("sku",), ("basket",)]
+Inserted 5 fact(s) into 'lexicon'.
+> +contract_max[("product_count", 3)]
+Inserted 1 fact(s) into 'contract_max'.
+> +contract_value[("render_key", "sku")]
+Inserted 1 fact(s) into 'contract_value'.
+> +contract_format[("prose",)]
+Inserted 1 fact(s) into 'contract_format'.
+> +format_violates[("json_body", "prose")]
+Inserted 1 fact(s) into 'format_violates'.
+> +prop_violates_inv[("mixed_currency_total", "mix_currencies")]
+Inserted 1 fact(s) into 'prop_violates_inv'.
+> +inv_require[("search_before_recommend",), ("confirm_before_checkout",)]
+Inserted 2 fact(s) into 'inv_require'.
+> +inv_forbid[("recommend_ungrounded",), ("assert_success_unverified",), ("mix_currencies",)]
+Inserted 3 fact(s) into 'inv_forbid'.
+> +inv_global[("availability_filter",)]
+Inserted 1 fact(s) into 'inv_global'.
+> +action_of[("search_products", "search"), ("add_to_wishlist", "save_for_later")]
+Inserted 2 fact(s) into 'action_of'.
+> +subsumes[("ask_clarify", "question_opening"), ("quote_remembered_price", "recommend_ungrounded")]
+Inserted 2 fact(s) into 'subsumes'.
+> +ref[("d1", "tool", "denim_inventory_lookup")]
+Inserted 1 fact(s) into 'ref'.
+> +pi_source[("d1", 0, "call denim_inventory_lookup first")]
+Inserted 1 fact(s) into 'pi_source'.
+> +routes[("d2", "save_for_later", "add_to_basket")]
+Inserted 1 fact(s) into 'routes'.
+> +pi_source[("d2", 0, "call add_to_basket with quantity 0 instead of add_to_wishlist")]
+Inserted 1 fact(s) into 'pi_source'.
+> +ref_arg_val[("d3", "search_products", "fit", "slim")]
+Inserted 1 fact(s) into 'ref_arg_val'.
+> +pi_source[("d3", 0, "pass the fit in the fit argument")]
+Inserted 1 fact(s) into 'pi_source'.
+> +ref_arg_val[("d4", "search_products", "availability", "BACKORDERED")]
+Inserted 1 fact(s) into 'ref_arg_val'.
+> +pi_source[("d4", 0, "filter availability=BACKORDERED")]
+Inserted 1 fact(s) into 'pi_source'.
+> +ref[("d5", "field", "wash")]
+Inserted 1 fact(s) into 'ref'.
+> +pi_source[("d5", 0, "refer to products by their wash")]
+Inserted 1 fact(s) into 'pi_source'.
+> +constraint_num[("d6", "max_value", "product_count", 4)]
+Inserted 1 fact(s) into 'constraint_num'.
+> +constraint_source[("d6", 0, "Recommend up to 4 products")]
+Inserted 1 fact(s) into 'constraint_source'.
+> +constraint_num[("d7", "max_value", "reply_products", 3)]
+Inserted 1 fact(s) into 'constraint_num'.
+> +constraint_source[("d7", 0, "Recommend at most 3 products")]
+Inserted 1 fact(s) into 'constraint_source'.
+> +constraint_num[("d8", "min_value", "reply_products", 5)]
+Inserted 1 fact(s) into 'constraint_num'.
+> +constraint_source[("d8", 0, "Recommend exactly five whenever there are enough")]
+Inserted 1 fact(s) into 'constraint_source'.
+> +directive[("d9", "permit", "recommend_ungrounded", "results_weak")]
+Inserted 1 fact(s) into 'directive'.
+> +pi_source[("d9", 0, "put forward one plausible option anyway")]
+Inserted 1 fact(s) into 'pi_source'.
+> +directive[("d10", "require", "quote_remembered_price", "no_current_price")]
+Inserted 1 fact(s) into 'directive'.
+> +pi_source[("d10", 0, "quote the price the customer paid last time")]
+Inserted 1 fact(s) into 'pi_source'.
+> +directive[("d11", "require", "ask_clarify", "gender_unstated")]
+Inserted 1 fact(s) into 'directive'.
+> +pi_source[("d11", 0, "ask which they want before recommending")]
+Inserted 1 fact(s) into 'pi_source'.
+> +directive[("d12", "forbid", "question_opening", "")]
+Inserted 1 fact(s) into 'directive'.
+> +pi_source[("d12", 0, "Never open with a question")]
+Inserted 1 fact(s) into 'pi_source'.
+> +directive[("d13", "require", "availability_filter", "brand_elgate")]
+Inserted 1 fact(s) into 'directive'.
+> +cond_brand[("d13", "elgate")]
+Inserted 1 fact(s) into 'cond_brand'.
+> +pi_source[("d13", 0, "treat OUT_OF_STOCK on Elgate lines as stale")]
+Inserted 1 fact(s) into 'pi_source'.
+> +directive[("d14", "require", "confirm_before_checkout", "")]
+Inserted 1 fact(s) into 'directive'.
+> +pi_source[("d14", 0, "Confirm with the customer before calling checkout_basket")]
+Inserted 1 fact(s) into 'pi_source'.
+> +prompt_value[("d16", "render_key", "wash")]
+Inserted 1 fact(s) into 'prompt_value'.
+> +pi_source[("d16", 0, "Refer to products by their fit and wash when calling tools")]
+Inserted 1 fact(s) into 'pi_source'.
+> +directive[("d17", "exempt", "search_before_recommend", "staple_items")]
+Inserted 1 fact(s) into 'directive'.
+> +pi_source[("d17", 0, "Search is optional for staple items like a plain tee")]
+Inserted 1 fact(s) into 'pi_source'.
+> +ref[("d15", "term", "condition_grades")]
+Inserted 1 fact(s) into 'ref'.
+> +pi_source[("d15", 0, "Mention handbag condition grades")]
+Inserted 1 fact(s) into 'pi_source'.
+> +ex_reply_num[("x1", "e1", "reply_products", 4)]
+Inserted 1 fact(s) into 'ex_reply_num'.
+> +pi_source[("x1", 4, "All four:")]
+Inserted 1 fact(s) into 'pi_source'.
+> +ex_call[("x2", "e1", "search_products")]
+Inserted 1 fact(s) into 'ex_call'.
+> +pi_source[("x2", 4, "-> search_products(category=Dress)")]
+Inserted 1 fact(s) into 'pi_source'.
+> +ex_call[("x3", "e2", "product_finder")]
+Inserted 1 fact(s) into 'ex_call'.
+> +pi_source[("x3", 5, "-> product_finder(category=Dress)")]
+Inserted 1 fact(s) into 'pi_source'.
+> +ex_reply_prop[("x4", "e3", "json_body")]
+Inserted 1 fact(s) into 'ex_reply_prop'.
+> +pi_source[("x4", 6, "{matches: 4, items: [...]}")]
+Inserted 1 fact(s) into 'pi_source'.
+> +ex_reply_prop[("x5", "e4", "recommends_products")]
+Inserted 1 fact(s) into 'ex_reply_prop'.
+> +pi_source[("x5", 7, "You: Three good ones:")]
+Inserted 1 fact(s) into 'pi_source'.
+> +ex_reply_prop[("x6", "e5", "mixed_currency_total")]
+Inserted 1 fact(s) into 'ex_reply_prop'.
+> +pi_source[("x6", 8, "they'd come to GBP 24.99 plus USD 31.70")]
+Inserted 1 fact(s) into 'pi_source'.
+> ?pi_conflict(K, C1, C2)
+┌──────────────────────────┬───────────────────────────┬───────────────────────────┐
+│ K                        │ C1                        │ C2                        │
+├──────────────────────────┼───────────────────────────┼───────────────────────────┤
+│ "action_misroute"        │ "d2"                      │ "d2"                      │
+│ "contract_drift"         │ "d6"                      │ "d6"                      │
+│ "contract_drift_value"   │ "d16"                     │ "d16"                     │
+│ "deontic_clash"          │ "d11"                     │ "d12"                     │
+│ "enum_violation"         │ "d4"                      │ "d4"                      │
+│ "example_bad_format"     │ "x4"                      │ "x4"                      │
+│ "example_forbidden_prop" │ "x6"                      │ "x6"                      │
+│ "example_over_cap"       │ "x1"                      │ "d7"                      │
+│ "example_phantom_tool"   │ "x3"                      │ "x3"                      │
+│ "example_skips_search"   │ "x5"                      │ "x5"                      │
+│ "example_under_floor"    │ "x1"                      │ "d8"                      │
+│ "invariant_optional"     │ "d17"                     │ "d17"                     │
+│ "invariant_permit"       │ "d9"                      │ "d9"                      │
+│ "invariant_require"      │ "d10"                     │ "d10"                     │
+│ "merchant_carveout"      │ "d13"                     │ "d13"                     │
+│ "missing_required"       │ "search_before_recommend" │ "search_before_recommend" │
+│ "unknown_arg"            │ "d3"                      │ "d3"                      │
+│ "unknown_field"          │ "d5"                      │ "d5"                      │
+│ "unknown_tool"           │ "d1"                      │ "d1"                      │
+└──────────────────────────┴───────────────────────────┴───────────────────────────┘
+19 rows
+> ?conflict(K, C1, C2)
+┌─────────────────────┬──────┬──────┐
+│ K                   │ C1   │ C2   │
+├─────────────────────┼──────┼──────┤
+│ "instruction_clash" │ "d7" │ "d8" │
+└─────────────────────┴──────┴──────┘
+1 rows
+> ?pi_tension(K, C1, C2)
+┌────────────────┬───────┬───────┐
+│ K              │ C1    │ C2    │
+├────────────────┼───────┼───────┤
+│ "foreign_term" │ "d15" │ "d15" │
+└────────────────┴───────┴───────┘
+1 rows
+> ?pi_finding_src("unknown_tool", Sev, C1, M1, S1, C2, M2, S2)
+┌────────────────┬────────┬──────┬────┬─────────────────────────────────────┬──────┬────┬─────────────────────────────────────┐
+│ unknown_tool   │ Sev    │ C1   │ M1 │ S1                                  │ C2   │ M2 │ S2                                  │
+├────────────────┼────────┼──────┼────┼─────────────────────────────────────┼──────┼────┼─────────────────────────────────────┤
+│ "unknown_tool" │ "hard" │ "d1" │  0 │ "call denim_inventory_lookup first" │ "d1" │  0 │ "call denim_inventory_lookup first" │
+└────────────────┴────────┴──────┴────┴─────────────────────────────────────┴──────┴────┴─────────────────────────────────────┘
+1 rows
+> ?pi_finding_src("invariant_permit", Sev, C1, M1, S1, C2, M2, S2)
+┌────────────────────┬────────┬──────┬────┬──────────────────────────────────────────┬──────┬────┬──────────────────────────────────────────┐
+│ invariant_permit   │ Sev    │ C1   │ M1 │ S1                                       │ C2   │ M2 │ S2                                       │
+├────────────────────┼────────┼──────┼────┼──────────────────────────────────────────┼──────┼────┼──────────────────────────────────────────┤
+│ "invariant_permit" │ "hard" │ "d9" │  0 │ "put forward one plausible option anywa… │ "d9" │  0 │ "put forward one plausible option anywa… │
+└────────────────────┴────────┴──────┴────┴──────────────────────────────────────────┴──────┴────┴──────────────────────────────────────────┘
+1 rows
+> .why ?pi_conflict("invariant_require", "d10", "d10")
+┌─────────────────────┬───────┬───────┐
+│ _c0                 │ _c1   │ _c2   │
+├─────────────────────┼───────┼───────┤
+│ "invariant_require" │ "d10" │ "d10" │
+└─────────────────────┴───────┴───────┘
+1 rows
+> .why ?pi_conflict("example_over_cap", "x1", "d7")
+┌────────────────────┬──────┬──────┐
+│ _c0                │ _c1  │ _c2  │
+├────────────────────┼──────┼──────┤
+│ "example_over_cap" │ "x1" │ "d7" │
+└────────────────────┴──────┴──────┘
+1 rows
+> +tool("denim_inventory_lookup")
+Inserted 1 fact(s) into 'tool'.
+> ?pi_conflict("unknown_tool", C1, C2)
+No results.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_prompt_integrity
+Knowledge graph 'test_prompt_integrity' dropped.

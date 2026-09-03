@@ -1,0 +1,214 @@
+// ============================================================================
+// prompt-integrity.iql - Verified Completions, prompt-integrity extension
+// ============================================================================
+// Checks an agent SYSTEM PROMPT against the runtime it is bound to: the tool
+// registry, the data schema, the output contract, and the operator's policy
+// invariants. consistency-core checks whether a conversation's facts can all
+// be true at once; this pack checks whether a prompt and its runtime can both
+// be right at once. Same trust boundary, same provenance discipline, one
+// knowledge graph.
+//
+// Motivation: a 99-pair corrupted-prompt corpus (rezolved/prompt-corruption-
+// detection) whose defects overwhelmingly contradict something OUTSIDE the
+// prompt text - a tool that is not bound, a field the schema lacks, a count
+// the contract outgrew, a clause that licenses what policy forbids. The
+// COVERAGE-AUDIT excludes "world-falsity without a ground-truth KG"; for a
+// bound agent prompt the world IS a ground-truth KG - finite, machine-
+// readable, loaded below as trusted EDB facts.
+//
+// Design decision, deliberate: ONE ontology, layered - not a separate
+// tool-calling pack. Rules quantify over data, so tool calling arrives as
+// new fact relations (WORLD / DIRECTIVE / EXAMPLE) in the same graph, where
+// they can join what consistency-core already knows (an example reply that
+// exceeds a numeric cap needs the deontic constraint AND the example fact in
+// one place; two packs cannot see each other's halves). Everything here
+// composes with the core pack: deontic numeric windows reuse constraint_num,
+// so core's D3 clash_window fires unchanged on facts this pack's extractor
+// writes.
+//
+// Load order: .load consistency-core.iql, then .load prompt-integrity.iql,
+// then insert WORLD facts (operator/generator), then extracted facts. This
+// file adds NO clauses to core's derived relations (conflict/finding/src stay
+// untouched - see engine issue #91); it ships its own reporting views
+// (pi_finding, pi_finding_src) alongside core's. Gateways query both.
+//
+// Engine constraints honoured (see core header, verified in source):
+// one clause per detection relation; unions only in reporting views, each
+// clause reading a distinct relation; multi-clause helpers only over base
+// relations or the verified eq0/coentity shapes; Var < Var and Var != Var on
+// ints ride int columns; every statement one line; no .kg commands here.
+
+// -- 0a. WORLD schemas (trusted; inserted by operator or generator, never
+//        extracted from prompt text) --------------------------------------
++tool(name: string)
++tool_arg(tool: string, arg: string)
++arg_enum(tool: string, arg: string, val: string)
++field(name: string)
++lexicon(term: string)
++contract_max(attr: string, bound: int)
++contract_min(attr: string, bound: int)
++contract_value(attr: string, val: string)
++contract_format(fmt: string)
++format_violates(prop: string, fmt: string)
++prop_violates_inv(prop: string, action: string)
++inv_require(action: string)
++inv_forbid(action: string)
++inv_global(action: string)
++action_of(tool: string, purpose: string)
++subsumes(sub: string, super: string)
+
+// -- 0b. PROMPT schemas (extracted; deontic directives + lexical references;
+//        numeric windows go into core's constraint/constraint_num) ---------
++directive(id: string, modality: string, action: string, cond: string)
++ref(id: string, kind: string, token: string)
++ref_arg_val(id: string, tool: string, arg: string, val: string)
++routes(id: string, purpose: string, tool: string)
++cond_brand(id: string, brand: string)
++prompt_value(id: string, attr: string, val: string)
++pi_source(id: string, msg: int, surface: string)
+
+// -- 0c. EXAMPLE schemas (parsed from demonstrated exchanges; a third origin
+//        beside conversation and output) ----------------------------------
++roster_member(id: string, tool: string)
++ex_call(id: string, ex: string, tool: string)
++ex_reply_num(id: string, ex: string, attr: string, nval: int)
++ex_reply_prop(id: string, ex: string, prop: string)
+
+// -- 1. Action taxonomy closure (subsumes is data; sub0/subeq mirror the
+//       verified eq0/coentity shapes) --------------------------------------
++sub0(X, Y) <- subsumes(X, Y)
++sub(X, Y) <- sub0(X, Y)
++sub(X, Z) <- sub(X, Y), sub0(Y, Z)
++amention(A) <- directive(D, M, A, C)
++subeq(X, X) <- amention(X)
++subeq(X, Y) <- sub(X, Y)
+
+// -- 2. Deontic gates (the modality gate, deontic edition; permit/exempt are
+//       the weakening modalities - both open the same door) ----------------
++permits(D, A) <- directive(D, "permit", A, C)
++permits(D, A) <- directive(D, "exempt", A, C)
+// Direction matters: doing a sub-action IS doing its super, so require and
+// permit lift UP the taxonomy; forbidding a super forbids every sub, so
+// forbid propagates DOWN. Lifting forbid upward turned "never recommend
+// out-of-stock" into "never recommend" - a false clash on a clean prompt.
++requires_up(D, A2) <- directive(D, "require", A1, C), subeq(A1, A2)
++permits_up(D, A2) <- permits(D, A1), subeq(A1, A2)
++forbids_down(D, A1) <- directive(D, "forbid", A2, C), subeq(A1, A2)
++commanded(A2) <- requires_up(D, A2)
+
+// -- 3. World-reference violations (set membership against the registry) ---
+// W1: a tool the runtime does not bind (in a rule OR quoted in an example)
++pi_unknown_tool(C) <- ref(C, "tool", T), !tool(T)
+// W2: a real tool, an argument it does not take
++pi_unknown_arg(C) <- ref_arg_val(C, T, A, V), tool(T), !tool_arg(T, A)
+// W3: an enum-typed argument, a value outside its enum
++arg_has_enum(T, A) <- arg_enum(T, A, V)
++pi_enum_violation(C) <- ref_arg_val(C, T, A, V), arg_has_enum(T, A), !arg_enum(T, A, V)
+// W4: a data field the schema does not carry
++pi_unknown_field(C) <- ref(C, "field", F), !field(F)
+// W4b: the prompt claims an exhaustive tool roster smaller than the registry
+// ("the tools available are X and Y") - every named tool real, the LIST is the
+// lie; fires once per hidden tool, deduped in reporting
++claimed_tool(T) <- roster_member(C, T)
++pi_roster_understated(C) <- roster_member(C, T2), tool(T), !claimed_tool(T)
+// W5: an action routed to the wrong registered tool ("save for later" via
+// add_to_basket): both tools real, the purpose says which one is bound
++pi_action_misroute(D) <- routes(D, P, T), action_of(T2, P), T != T2
+
+// -- 4. Contract drift (stale constants; != is type-generic, values ride
+//       core's constraint_num int mirror) ---------------------------------
++pi_drift_max(K) <- constraint_num(K, "max_value", A, N), contract_max(A, M), N != M
++pi_drift_min(K) <- constraint_num(K, "min_value", A, N), contract_min(A, M), N != M
+// string-valued contract constants drift too ("refer to products by their wash"
+// against a render contract keyed on sku); != is type-generic
++pi_drift_value(C) <- prompt_value(C, A, V), contract_value(A, W), V != W
+
+// -- 5. Completeness (closed world over the PROMPT, the absence class:
+//       a deleted or weakened-away mandatory rule produces no wrong line to
+//       point at - the finding is the invariant left uncommanded; gated on
+//       extraction having produced at least one directive, core-D4 style) --
++pi_missing_required(A) <- inv_require(A), directive(Dz, Mz, Az, Cz), !commanded(A)
+
+// -- 6. Invariant polarity (guardrail weakening: the prompt licenses what
+//       policy forbids, or mandates it outright; conditions ride as data -
+//       a conditional permit against an unconditional forbid still fires,
+//       because the condition is satisfiable) ------------------------------
++pi_invariant_permit(D) <- permits_up(D, A), inv_forbid(A)
++pi_invariant_require(D) <- requires_up(D, A), inv_forbid(A)
++pi_invariant_forbid(D) <- forbids_down(D, A), inv_require(A)
+// making a required action optional IS the violation: "search is optional for
+// staple items" exempts search_before_recommend, and no forbid is in sight
++exempts_up(D, A2) <- directive(D, "exempt", A1, C), subeq(A1, A2)
++pi_invariant_optional(D) <- exempts_up(D, A), inv_require(A)
+// the prompt's own require, exempted elsewhere in the same prompt ("ask which
+// they want" ... "take the gender from their profile rather than asking"):
+// permit does not clash with require, but a targeted exemption does
++pi_required_exempt(D1, D2) <- requires_up(D1, A), exempts_up(D2, A)
+
+// -- 7. Intra-prompt deontic clash through the taxonomy (core's D1 needs
+//       string-equal topics; "ask which they want" vs "never open with a
+//       question" clash only through ask_clarify < question_opening) -------
++pi_deontic_clash(D1, D2) <- requires_up(D1, A), forbids_down(D2, A)
+
+// -- 8. Example violations (the third origin, doing what core's M3 rules do
+//       for outputs; deterministic parse feeds these, no LLM required) -----
+// E1: a demonstrated reply breaking a numeric cap the prompt itself states
++pi_example_over_cap(C, K) <- ex_reply_num(C, E, A, N), constraint_num(K, "max_value", A, M), N > M
++pi_example_under_floor(C, K) <- ex_reply_num(C, E, A, N), constraint_num(K, "min_value", A, M), N < M
+// E2: a demonstrated call to a tool the runtime does not bind
++pi_example_phantom_tool(C) <- ex_call(C, E, T), !tool(T)
+// E3: a demonstrated reply in a shape the output contract rules out
++pi_example_bad_format(C) <- ex_reply_prop(C, E, P), format_violates(P, F), contract_format(F)
+// E4: a demonstrated reply carrying a property policy forbids - the property
+// vocabulary is extractor data, the mapping to invariants is world data
+// (mixed_currency_total -> mix_currencies, recommends_out_of_stock -> ...)
++pi_example_forbidden_prop(C) <- ex_reply_prop(C, E, P), prop_violates_inv(P, A), inv_forbid(A)
+// E5: a reply that recommends with no grounding call demonstrated first
++ex_searched(E) <- ex_call(C, E, T), action_of(T, "search")
++pi_example_skips_search(C) <- ex_reply_prop(C, E, "recommends_products"), inv_require("search_before_recommend"), !ex_searched(E)
+
+// -- 9. Fences ---------------------------------------------------------------
+// F1: a shared-prompt rule carved out per merchant/brand ("treat brand X's
+// stock states as stale", "brand Y sizes run small, so...") - in a prompt
+// serving every merchant, uniformity is the invariant, so ANY brand-scoped
+// directive is the finding; inv_global remains available for deployments
+// where some rules legitimately vary per brand
++pi_merchant_carveout(D) <- cond_brand(D, B), directive(D, M, A, C2)
+// F2 (soft): vocabulary from outside the store's own lexicon - advisory,
+// because lexicons are never complete; the modality-gate lesson applied
++pi_foreign_term(C) <- ref(C, "term", W), !lexicon(W)
+
+// -- 10. Reporting views (pi_-prefixed; core's conflict/finding untouched -
+//        one clause per kind, each reading a DISTINCT relation) ------------
++pi_conflict("unknown_tool", C, C) <- pi_unknown_tool(C)
++pi_conflict("unknown_arg", C, C) <- pi_unknown_arg(C)
++pi_conflict("enum_violation", C, C) <- pi_enum_violation(C)
++pi_conflict("unknown_field", C, C) <- pi_unknown_field(C)
++pi_conflict("action_misroute", C, C) <- pi_action_misroute(C)
++pi_conflict("roster_understated", C, C) <- pi_roster_understated(C)
++pi_conflict("contract_drift", K, K) <- pi_drift_max(K)
++pi_conflict("contract_drift_min", K, K) <- pi_drift_min(K)
++pi_conflict("contract_drift_value", C, C) <- pi_drift_value(C)
++pi_conflict("missing_required", A, A) <- pi_missing_required(A)
++pi_conflict("invariant_permit", D, D) <- pi_invariant_permit(D)
++pi_conflict("invariant_require", D, D) <- pi_invariant_require(D)
++pi_conflict("invariant_forbid", D, D) <- pi_invariant_forbid(D)
++pi_conflict("invariant_optional", D, D) <- pi_invariant_optional(D)
++pi_conflict("required_exempt", D1, D2) <- pi_required_exempt(D1, D2)
++pi_conflict("deontic_clash", D1, D2) <- pi_deontic_clash(D1, D2)
++pi_conflict("example_over_cap", C, K) <- pi_example_over_cap(C, K)
++pi_conflict("example_under_floor", C, K) <- pi_example_under_floor(C, K)
++pi_conflict("example_phantom_tool", C, C) <- pi_example_phantom_tool(C)
++pi_conflict("example_bad_format", C, C) <- pi_example_bad_format(C)
++pi_conflict("example_forbidden_prop", C, C) <- pi_example_forbidden_prop(C)
++pi_conflict("example_skips_search", C, C) <- pi_example_skips_search(C)
++pi_conflict("merchant_carveout", D, D) <- pi_merchant_carveout(D)
++pi_tension("foreign_term", C, C) <- pi_foreign_term(C)
+
++pi_finding(K, "hard", C1, C2) <- pi_conflict(K, C1, C2)
++pi_finding(K, "soft", C1, C2) <- pi_tension(K, C1, C2)
+
+// Provenance: pi ids carry pi_source; ids reused from core (constraint_num
+// windows) surface through core's own finding_src, so no cross-file src
+// clause is needed
++pi_finding_src(K, Sev, C1, M1, S1, C2, M2, S2) <- pi_finding(K, Sev, C1, C2), pi_source(C1, M1, S1), pi_source(C2, M2, S2)
