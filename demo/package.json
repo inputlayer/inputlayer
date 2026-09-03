@@ -25,5 +25,8 @@
     "@types/ws": "^8.5.13",
     "tsx": "^4.19.2",
     "typescript": "^5.7.0"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1"
   }
 }

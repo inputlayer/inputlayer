@@ -16,7 +16,7 @@ Edit files in `docs/content/`. Navigation is controlled by `_meta.json` files in
 |--------|-----|
 | **GUI (InputLayer Studio)** | Navigate to `/docs` in the GUI - works without a server connection |
 | **GitHub Pages** | Deployed automatically on push to `main` |
-| **Local dev** | `cd docs/site && npm install && npm run dev` |
+| **Local dev** | `cd front && npm install && npm run dev`, then open `/docs` |
 
 ### Content Map
 
@@ -52,7 +52,7 @@ docs/content/
 
 ### Renderers
 
-- **Nextra site** (`docs/site/`) - Static site for GitHub Pages. Copies content at build time.
+- **Website** (`front/`) - Next.js site deployed to GitHub Pages. `front/scripts/bundle-docs.mjs` bundles content at build time.
 - **GUI docs viewer** (`gui/scripts/bundle-docs.mjs`) - Bundles content into the GUI at build time.
 
 ### Syntax Highlighting
