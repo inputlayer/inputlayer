@@ -28,6 +28,8 @@ enum WsResponse {
     Result {
         columns: Vec<String>,
         rows: Vec<Vec<serde_json::Value>>,
+        #[serde(default)]
+        proof_trees: Option<serde_json::Value>,
     },
     ResultStart {
         columns: Vec<String>,
@@ -51,24 +53,55 @@ pub struct QueryResult {
     #[allow(dead_code)]
     pub columns: Vec<String>,
     pub rows: Vec<Vec<serde_json::Value>>,
+    /// Engine-produced proof trees (present on `.why` results), passed
+    /// through untouched.
+    pub proof_trees: Option<serde_json::Value>,
 }
 
 impl QueryResult {
     /// The engine reports many per-statement failures as message rows inside
-    /// an Ok result rather than as error frames ("Insert rejected for ...",
-    /// "Failed to register schema ..."). Anything that must know whether its
-    /// statements actually executed has to scan for them.
+    /// an Ok result rather than as error frames. An allowlist of known
+    /// failure phrases is the wrong shape here: a phrase the list has not
+    /// seen reads as success, and reporting success for something that did
+    /// not happen is the one failure this product must never have. So this
+    /// is DENY BY DEFAULT - a single-column message row counts as a problem
+    /// unless it matches a known-good phrase.
     pub fn soft_errors(&self) -> Vec<String> {
-        const MARKERS: [&str; 4] = [
-            "Insert rejected",
-            "Failed to register schema",
-            "Create failed:",
-            "Drop failed:",
+        const SUCCESS_MARKERS: [&str; 18] = [
+            "Inserted ",
+            "Deleted ",
+            "Updated ",
+            "Conditional delete:",
+            "Relation ",
+            "Rule ",
+            "Schema ",
+            "Knowledge graph ",
+            "Switched to knowledge graph",
+            "Registered ",
+            "Type ",
+            "No facts",
+            // `.ontology` command results (engine-owned lifecycle).
+            "installed ",
+            "removed ",
+            "upgraded ",
+            "digest ",
+            "recorded ",
+            "kept ",
         ];
+        // Message rows only: real query results are not problem reports.
+        if self.columns.len() != 1 || self.columns.first().map(String::as_str) != Some("message") {
+            return Vec::new();
+        }
         self.rows
             .iter()
-            .filter_map(|row| row.first().and_then(serde_json::Value::as_str))
-            .filter(|msg| MARKERS.iter().any(|m| msg.contains(m)))
+            .filter_map(|row| row.first().and_then(|v| v.as_str()))
+            .filter(|message| {
+                let trimmed = message.trim();
+                !trimmed.is_empty()
+                    && !SUCCESS_MARKERS
+                        .iter()
+                        .any(|marker| trimmed.starts_with(marker))
+            })
             .map(str::to_string)
             .collect()
     }
@@ -137,13 +170,22 @@ impl Engine {
         let mut streamed: Option<QueryResult> = None;
         loop {
             match Self::next_response(&mut self.stream).await? {
-                WsResponse::Result { columns, rows } => {
-                    return Ok(QueryResult { columns, rows });
+                WsResponse::Result {
+                    columns,
+                    rows,
+                    proof_trees,
+                } => {
+                    return Ok(QueryResult {
+                        columns,
+                        rows,
+                        proof_trees,
+                    });
                 }
                 WsResponse::ResultStart { columns } => {
                     streamed = Some(QueryResult {
                         columns,
                         rows: Vec::new(),
+                        proof_trees: None,
                     });
                 }
                 WsResponse::ResultChunk { rows } => {

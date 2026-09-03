@@ -1,13 +1,20 @@
-//! InputLayer Gateway service.
+//! InputLayer Gateway service - the model gateway of the stack.
 //!
-//! The model gateway of the stack. `POST /v1/verify` (M0, #83) extracts a
-//! conversation into typed claims (bound to a registry ontology - never
-//! open-domain), inserts them into an ephemeral knowledge graph, and
-//! returns the ontology's findings. `POST /v1/chat/completions` (M1, #84)
-//! is the OpenAI-compatible proxy: completions come from the model
-//! provider and every response carries the same consistency block -
-//! `annotate` mode attaches findings, `enforce` mode refuses (422) to
-//! complete over a contradictory conversation.
+//! `POST /v1/chat/completions` is the ONLY ingestion path: the standard
+//! OpenAI request shape, completions from the model provider. Translation
+//! is opt-in per request: the `x-il-ontology` header lists KG/ontology
+//! PAIRS (`<kg>/<ontology>[@version]`, comma-separated; or the
+//! `il_ontology` body field); omitted, the gateway is a pure OpenAI proxy.
+//! Selected, each pair's pack translates the conversation into tuples
+//! (one extraction prompt per pack), the tuples are stored
+//! conversation-prefixed into the pair's KG (whose ontology must have been
+//! installed by the engine's `.ontology install` - the gateway NEVER
+//! deploys rules), the pack's rules evaluate incrementally, and
+//! per-ontology reports ride the response under `inputlayer.reports`.
+//!
+//! Observers subscribe per conversation: `WS /v1/events?conversation=<id>`
+//! streams translation, finding (with engine-produced proof trees), and
+//! report events.
 //!
 //! Configuration (env):
 //!   GATEWAY_HOST / GATEWAY_PORT   bind address (defaults 127.0.0.1:8081)
@@ -15,32 +22,25 @@
 //!                                 "Authorization: Bearer <key>"; unset
 //!                                 leaves them open (local dev) with a
 //!                                 startup warning
-//!   INPUTLAYER_REGISTRY / INPUTLAYER_REGISTRY_TOKEN  registry index URL
-//!                                 and access token (private registries)
+//!   INPUTLAYER_REGISTRY           HTTPS index URL, or a local filesystem
+//!                                 path to a cloned registry (no outbound
+//!                                 network); INPUTLAYER_REGISTRY_TOKEN for
+//!                                 private remotes
 //!   INPUTLAYER_URL / INPUTLAYER_API_KEY  engine access
 //!   ANTHROPIC_API_KEY             model provider key (never seen by the
 //!                                 engine); without it /v1/* return 503
-//!
-//! The gateway serves every ontology published in the registry index: all
-//! entries are resolved at startup and pinned by version and digest for the
-//! process lifetime, so a registry update never changes a running gateway.
-//! Every request MUST select an ontology (x-il-ontology header or
-//! il_ontology body field) - extraction is always bound to one, so without
-//! a selection there is nothing to translate against and the request is
-//! rejected before any model call. An x-il-trace: 1 header additionally
-//! returns the validated extraction, the mapped IQL statements, and
-//! timings inside the consistency block.
 
 use anyhow::{Context, Result};
-use axum::extract::State;
+use axum::extract::{Query, State, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use inputlayer_gateway::events::EventHub;
 use inputlayer_gateway::model::{
     render_conversation, AnthropicClient, ChatParams, Completer, Extractor,
 };
 use inputlayer_gateway::ontology::LoadedOntology;
-use inputlayer_gateway::pipeline::{run_verify, EngineConfig};
+use inputlayer_gateway::pipeline::{evaluate, EngineConfig};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -59,6 +59,7 @@ struct AppState {
     completer: Option<Arc<dyn Completer>>,
     /// Bearer token required on /v1/* when configured.
     api_key: Option<String>,
+    events: EventHub,
 }
 
 fn env_or(name: &str, default: &str) -> String {
@@ -66,7 +67,9 @@ fn env_or(name: &str, default: &str) -> String {
 }
 
 /// Load every ontology published in the registry index, pinning each at its
-/// latest version and digest for the process lifetime.
+/// latest version and digest for the process lifetime. The gateway loads
+/// pack CONTENT (prompts, schemas, mapping specs) - rules are deployed to
+/// KGs by the engine's `.ontology install`, never from here.
 async fn load_ontologies() -> Result<HashMap<String, Arc<LoadedOntology>>> {
     use inputlayer_ontology_client::registry::Registry;
     // Compose passes these through even when unset on the host; an empty
@@ -114,18 +117,18 @@ async fn main() -> Result<()> {
         .to_string();
 
     // An unreachable registry degrades gracefully: the gateway still boots
-    // (health/ready keep working) and /v1/verify answers 503 until restart.
+    // (health/ready keep working) and evaluation answers 503 until restart.
     let ontologies = load_ontologies().await.unwrap_or_else(|err| {
         println!("warning: could not load registry: {err:#}");
         HashMap::new()
     });
     if ontologies.is_empty() {
-        println!("no ontologies loaded - /v1/verify will 503");
+        println!("no ontologies loaded - evaluation requests will 503");
     }
     let model_client: Option<Arc<AnthropicClient>> = match std::env::var("ANTHROPIC_API_KEY") {
         Ok(key) if !key.trim().is_empty() => Some(Arc::new(AnthropicClient::new(key))),
         _ => {
-            println!("ANTHROPIC_API_KEY not set - /v1/verify and /v1/chat/completions will 503");
+            println!("ANTHROPIC_API_KEY not set - /v1/chat/completions will 503");
             None
         }
     };
@@ -159,13 +162,24 @@ async fn main() -> Result<()> {
         extractor,
         completer,
         api_key,
+        events: EventHub::default(),
     });
+
+    // Browser clients (the Studio) may run on a different origin than the
+    // gateway; the API is bearer-authenticated, so permissive CORS is the
+    // standard posture (same as any public model API).
+    let cors = tower_http::cors::CorsLayer::new()
+        .allow_origin(tower_http::cors::Any)
+        .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
+        .allow_headers(tower_http::cors::Any);
 
     let app = Router::new()
         .route("/health", get(health))
         .route("/ready", get(ready))
-        .route("/v1/verify", post(verify))
         .route("/v1/chat/completions", post(chat_completions))
+        .route("/v1/ontologies", get(list_ontologies))
+        .route("/v1/events", get(events_ws))
+        .layer(cors)
         .with_state(state);
 
     let addr = format!("{host}:{port}");
@@ -208,19 +222,6 @@ async fn ready(State(state): State<Arc<AppState>>) -> (StatusCode, Json<Value>) 
     }
 }
 
-#[derive(Deserialize)]
-struct VerifyRequest {
-    messages: Vec<VerifyMessage>,
-    #[serde(default)]
-    il_ontology: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct VerifyMessage {
-    role: String,
-    content: String,
-}
-
 fn bad_request(message: String) -> (StatusCode, Json<Value>) {
     (
         StatusCode::BAD_REQUEST,
@@ -231,12 +232,19 @@ fn bad_request(message: String) -> (StatusCode, Json<Value>) {
 /// Bearer auth on the /v1/* endpoints when GATEWAY_API_KEY is configured.
 /// The scheme is case-insensitive per RFC 7235; the comparison goes through
 /// SHA-256 digests so equality time does not depend on where the presented
-/// key diverges.
-fn authorize(state: &AppState, headers: &HeaderMap) -> Result<(), (StatusCode, Json<Value>)> {
+/// key diverges. `extra_token` supports browser WebSocket clients, which
+/// cannot set headers (?token=).
+fn authorize(
+    state: &AppState,
+    headers: &HeaderMap,
+    extra_token: Option<&str>,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    use sha2::Digest;
     let Some(expected) = &state.api_key else {
         return Ok(());
     };
-    let presented = headers
+    let expected_digest = sha2::Sha256::digest(expected.as_bytes());
+    let header_token = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| {
@@ -245,10 +253,10 @@ fn authorize(state: &AppState, headers: &HeaderMap) -> Result<(), (StatusCode, J
                 .eq_ignore_ascii_case("bearer")
                 .then(|| token.trim_start())
         });
-    let matches = presented.is_some_and(|token| {
-        use sha2::Digest;
-        sha2::Sha256::digest(token.as_bytes()) == sha2::Sha256::digest(expected.as_bytes())
-    });
+    let matches = header_token
+        .into_iter()
+        .chain(extra_token)
+        .any(|token| sha2::Sha256::digest(token.as_bytes()) == expected_digest);
     if matches {
         Ok(())
     } else {
@@ -260,30 +268,142 @@ fn authorize(state: &AppState, headers: &HeaderMap) -> Result<(), (StatusCode, J
     }
 }
 
-/// Both /v1/* endpoints need the model key and at least one ontology.
-fn require_configured(state: &AppState) -> Result<(), (StatusCode, Json<Value>)> {
-    if state.extractor.is_none() {
-        return Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "error": { "type": "not_configured",
-                "message": "model key not configured (ANTHROPIC_API_KEY)" } })),
-        ));
+/// The published ontology set: what a selection pair can reference.
+async fn list_ontologies(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<Value>) {
+    if let Err(response) = authorize(&state, &headers, None) {
+        return response;
     }
-    if state.ontologies.is_empty() {
-        return Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "error": { "type": "not_configured",
-                "message": "no ontologies loaded (registry unreachable at startup)" } })),
-        ));
-    }
-    Ok(())
+    let mut ontologies: Vec<Value> = state
+        .ontologies
+        .values()
+        .map(|o| {
+            json!({
+                "name": o.name,
+                "version": o.version,
+                "digest": o.digest,
+                "title": o.manifest.ontology.title,
+            })
+        })
+        .collect();
+    ontologies.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    (StatusCode::OK, Json(json!({ "ontologies": ontologies })))
 }
 
-/// Tracing is per-request opt-in: the response additionally carries the
-/// validated extraction, the mapped IQL statements, and timings - only data
-/// derived from the caller's own request. Like x-il-ontology, a malformed
-/// value is explicit intent that failed: reject it rather than silently
-/// not tracing.
+/// One selected (kg, ontology) pair.
+struct Selection {
+    kg: String,
+    ontology: Arc<LoadedOntology>,
+}
+
+/// Parse `<kg>/<ontology>[@version]` pairs from the header (comma list) or
+/// body field (string or array). The named KG must exist engine-side with
+/// the ontology installed - that is checked at evaluation time; here the
+/// pair must be well-formed and reference a published pack, with any
+/// version assertion matching the gateway's boot-time pin.
+fn parse_selection(
+    state: &AppState,
+    headers: &HeaderMap,
+    body_field: Option<&Value>,
+) -> Result<Vec<Selection>, (StatusCode, Json<Value>)> {
+    let mut specs: Vec<String> = Vec::new();
+    if let Some(value) = headers.get("x-il-ontology") {
+        match value.to_str() {
+            Ok(v) => specs.extend(
+                v.split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string),
+            ),
+            Err(_) => {
+                return Err(bad_request(
+                    "x-il-ontology header is not valid ASCII".to_string(),
+                ));
+            }
+        }
+    }
+    if specs.is_empty() {
+        match body_field {
+            None | Some(Value::Null) => {}
+            Some(Value::String(s)) => specs.extend(
+                s.split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string),
+            ),
+            Some(Value::Array(items)) => {
+                for item in items {
+                    match item.as_str() {
+                        Some(s) if !s.trim().is_empty() => specs.push(s.trim().to_string()),
+                        _ => {
+                            return Err(bad_request(
+                                "il_ontology array entries must be non-empty strings".to_string(),
+                            ));
+                        }
+                    }
+                }
+            }
+            Some(_) => {
+                return Err(bad_request(
+                    "il_ontology must be a string or an array of strings".to_string(),
+                ));
+            }
+        }
+    }
+
+    let mut selections = Vec::new();
+    for spec in specs {
+        let Some((kg, rest)) = spec.split_once('/') else {
+            return Err(bad_request(format!(
+                "selection {spec:?} must be <kg>/<ontology>[@version]"
+            )));
+        };
+        if let Err(err) =
+            inputlayer_ontology_client::registry::validate_component("knowledge graph", kg)
+        {
+            return Err(bad_request(err.to_string()));
+        }
+        let (name, version) = match rest.split_once('@') {
+            Some((n, v)) => (n, Some(v)),
+            None => (rest, None),
+        };
+        let Some(ontology) = state.ontologies.get(name) else {
+            let mut names: Vec<&str> = state.ontologies.keys().map(String::as_str).collect();
+            names.sort_unstable();
+            return Err(bad_request(format!(
+                "ontology {name:?} is not published; available: {}",
+                names.join(", ")
+            )));
+        };
+        if let Some(asserted) = version {
+            if asserted != ontology.version {
+                return Err(bad_request(format!(
+                    "ontology {name} is pinned at {}, request asserted {asserted}",
+                    ontology.version
+                )));
+            }
+        }
+        // Duplicate pairs would run two concurrent evaluations against the
+        // same KG with the same prefix, racing each other's inserts and
+        // (for one-shot requests) retractions.
+        if selections
+            .iter()
+            .any(|s: &Selection| s.kg == kg && s.ontology.name == ontology.name)
+        {
+            continue;
+        }
+        selections.push(Selection {
+            kg: kg.to_string(),
+            ontology: Arc::clone(ontology),
+        });
+    }
+    Ok(selections)
+}
+
+/// Tracing is per-request opt-in. Like x-il-ontology, a malformed value is
+/// explicit intent that failed: reject it rather than silently not tracing.
 fn parse_trace_header(headers: &HeaderMap) -> Result<bool, (StatusCode, Json<Value>)> {
     match headers.get("x-il-trace") {
         None => Ok(false),
@@ -297,171 +417,12 @@ fn parse_trace_header(headers: &HeaderMap) -> Result<bool, (StatusCode, Json<Val
     }
 }
 
-/// Run extraction + verification for a conversation and render the
-/// consistency block. Fail-open: any verifier trouble yields an
-/// "unverified" block with a reason, never an error to the caller.
-async fn consistency_block(
-    state: &AppState,
-    ontology: &LoadedOntology,
-    messages: &[(String, String)],
-    want_trace: bool,
-) -> Value {
-    let Some(extractor) = &state.extractor else {
-        // Unreachable behind require_configured; keep the honest fallback.
-        return unverified_block(ontology, "model key not configured");
-    };
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    let system_prompt = ontology.render_prompt(&today);
-    let user_content = render_conversation(messages);
-
-    let extract_started = std::time::Instant::now();
-    let extraction = match extractor
-        .extract(
-            &ontology.extraction_model,
-            &system_prompt,
-            &user_content,
-            &ontology.schema,
-        )
-        .await
-    {
-        Ok(value) => value,
-        Err(err) => return unverified_block(ontology, &err.to_string()),
-    };
-    let extract_ms = extract_started.elapsed().as_millis();
-
-    match run_verify(&state.engine, ontology, extraction, messages, want_trace).await {
-        Ok(outcome) => {
-            let mut consistency = json!({
-                "status": outcome.status,
-                "ontology": format!("{}@{}", ontology.name, ontology.version),
-                "digest": ontology.digest,
-                "findings": outcome.findings,
-                "dropped": outcome.dropped,
-            });
-            if let Some(mut trace) = outcome.trace {
-                if let Some(t) = trace.as_object_mut() {
-                    t.insert("model".to_string(), json!(ontology.extraction_model));
-                    t.insert("extract_ms".to_string(), json!(extract_ms));
-                }
-                consistency["trace"] = trace;
-            }
-            consistency
-        }
-        Err(err) => unverified_block(ontology, &err.to_string()),
-    }
-}
-
-async fn verify(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Json(request): Json<VerifyRequest>,
-) -> (StatusCode, Json<Value>) {
-    if let Err(response) = authorize(&state, &headers) {
-        return response;
-    }
-    if let Err(response) = require_configured(&state) {
-        return response;
-    }
-    let ontology = match select_ontology(&state, &headers, request.il_ontology.as_deref()) {
-        Ok(ontology) => Arc::clone(ontology),
-        Err(response) => return response,
-    };
-    let want_trace = match parse_trace_header(&headers) {
-        Ok(flag) => flag,
-        Err(response) => return response,
-    };
-    if request.messages.is_empty() {
-        return bad_request("messages must not be empty".to_string());
-    }
-    let messages: Vec<(String, String)> = request
-        .messages
-        .iter()
-        .map(|m| (m.role.clone(), m.content.clone()))
-        .collect();
-
-    let consistency = consistency_block(&state, &ontology, &messages, want_trace).await;
-    (
-        StatusCode::OK,
-        Json(json!({ "inputlayer": { "consistency": consistency } })),
-    )
-}
-
-/// Resolve the request's REQUIRED ontology selection: extraction is always
-/// bound to an ontology, so without one there is nothing to translate
-/// against. The x-il-ontology header wins over the body field; a
-/// name@version assertion must match the pinned version. A malformed header
-/// is an explicit client intent that failed - reject it rather than
-/// silently falling through.
-fn select_ontology<'a>(
-    state: &'a AppState,
-    headers: &HeaderMap,
-    body_field: Option<&str>,
-) -> Result<&'a Arc<LoadedOntology>, (StatusCode, Json<Value>)> {
-    let header_selection = match headers.get("x-il-ontology") {
-        Some(value) => match value.to_str() {
-            Ok(v) => Some(v.trim().to_string()),
-            Err(_) => {
-                return Err(bad_request(
-                    "x-il-ontology header is not valid ASCII".to_string(),
-                ));
-            }
-        },
-        None => None,
-    };
-    let selected = header_selection.filter(|v| !v.is_empty()).or_else(|| {
-        body_field
-            .map(str::trim)
-            .map(str::to_string)
-            .filter(|v| !v.is_empty())
-    });
-    let Some(spec) = selected else {
-        return Err(bad_request(format!(
-            "an ontology must be selected (x-il-ontology header or il_ontology field); \
-             available: {}",
-            available_list(state)
-        )));
-    };
-    let (name, version) = match spec.split_once('@') {
-        Some((n, v)) => (n, Some(v)),
-        None => (spec.as_str(), None),
-    };
-    let Some(ontology) = state.ontologies.get(name) else {
-        return Err(bad_request(format!(
-            "ontology {name:?} is not published; available: {}",
-            available_list(state)
-        )));
-    };
-    if let Some(asserted) = version {
-        if asserted != ontology.version {
-            return Err(bad_request(format!(
-                "ontology {name} is pinned at {}, request asserted {asserted}",
-                ontology.version
-            )));
-        }
-    }
-    Ok(ontology)
-}
-
-fn available_list(state: &AppState) -> String {
-    let mut names: Vec<&str> = state.ontologies.keys().map(String::as_str).collect();
-    names.sort_unstable();
-    names.join(", ")
-}
-
-fn unverified_block(ontology: &LoadedOntology, reason: &str) -> Value {
-    json!({
-        "status": "unverified",
-        "ontology": format!("{}@{}", ontology.name, ontology.version),
-        "reason": reason,
-    })
-}
-
 /// OpenAI chat completion request shape; unknown fields are ignored.
 #[derive(Deserialize)]
 struct ChatRequest {
     #[serde(default)]
     model: Option<String>,
-    messages: Vec<VerifyMessage>,
+    messages: Vec<ChatMessage>,
     #[serde(default)]
     max_tokens: Option<u32>,
     #[serde(default)]
@@ -473,26 +434,34 @@ struct ChatRequest {
     #[serde(default)]
     stream: Option<bool>,
     #[serde(default)]
-    il_ontology: Option<String>,
+    il_ontology: Option<Value>,
     #[serde(default)]
     il_mode: Option<String>,
+    #[serde(default)]
+    il_conversation: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct ChatMessage {
+    role: String,
+    content: String,
+}
+
+#[allow(clippy::too_many_lines)]
 async fn chat_completions(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Json(request): Json<ChatRequest>,
 ) -> (StatusCode, Json<Value>) {
-    if let Err(response) = authorize(&state, &headers) {
-        return response;
-    }
-    if let Err(response) = require_configured(&state) {
+    if let Err(response) = authorize(&state, &headers, None) {
         return response;
     }
     let Some(completer) = state.completer.clone() else {
-        // Same configuration as the extractor; unreachable behind
-        // require_configured.
-        return bad_request("model key not configured".to_string());
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": { "type": "not_configured",
+                "message": "model key not configured (ANTHROPIC_API_KEY)" } })),
+        );
     };
     if request.stream == Some(true) {
         return bad_request(
@@ -501,15 +470,30 @@ async fn chat_completions(
                 .to_string(),
         );
     }
-    let ontology = match select_ontology(&state, &headers, request.il_ontology.as_deref()) {
-        Ok(ontology) => Arc::clone(ontology),
+    // Configuration failures come FIRST: with no ontologies loaded (an
+    // unreachable registry at startup) every selection would otherwise be
+    // reported as "ontology not published", blaming the caller for the
+    // operator's outage.
+    let wants_evaluation = headers.contains_key("x-il-ontology")
+        || request.il_ontology.as_ref().is_some_and(|v| !v.is_null());
+    if wants_evaluation && state.ontologies.is_empty() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": { "type": "not_configured",
+                "message": "no ontologies loaded (registry unreachable at startup)" } })),
+        );
+    }
+    let selections = match parse_selection(&state, &headers, request.il_ontology.as_ref()) {
+        Ok(selections) => selections,
         Err(response) => return response,
     };
     let want_trace = match parse_trace_header(&headers) {
         Ok(flag) => flag,
         Err(response) => return response,
     };
-    // Mode: header wins over body field, default annotate.
+    // Mode: header wins over body field, default annotate. Enforce fails
+    // CLOSED (D4): refuse on blocking findings, refuse when any selected
+    // pair could not be evaluated.
     let mode = headers
         .get("x-il-mode")
         .and_then(|v| v.to_str().ok())
@@ -517,89 +501,471 @@ async fn chat_completions(
         .filter(|v| !v.is_empty())
         .or_else(|| request.il_mode.clone())
         .unwrap_or_else(|| "annotate".to_string());
-    if mode != "annotate" && mode != "enforce" && mode != "enforce-strict" {
+    if mode != "annotate" && mode != "enforce" {
         return bad_request(format!(
-            "il_mode must be \"annotate\", \"enforce\", or \"enforce-strict\", got {mode:?}"
+            "il_mode must be \"annotate\" or \"enforce\", got {mode:?}"
         ));
     }
     if request.messages.is_empty() {
         return bad_request("messages must not be empty".to_string());
     }
+    // Conversation identity: header wins over body field. Optional - a
+    // request without one is one-shot (synthetic prefix, retracted after).
+    let conversation = headers
+        .get("x-il-conversation")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .or_else(|| {
+            request
+                .il_conversation
+                .as_deref()
+                .map(str::trim)
+                .map(str::to_string)
+                .filter(|v| !v.is_empty())
+        });
+    if let Some(id) = &conversation {
+        if id.len() > 64
+            || inputlayer_ontology_client::registry::validate_component("conversation id", id)
+                .is_err()
+        {
+            return bad_request(
+                "il_conversation must be 1-64 characters of [A-Za-z0-9._-]".to_string(),
+            );
+        }
+    }
 
-    // Verification sees the conversation as-is, including system turns.
-    let messages: Vec<(String, String)> = request
-        .messages
-        .iter()
-        .map(|m| (m.role.clone(), m.content.clone()))
-        .collect();
-
-    let model = route_model(request.model.as_deref());
-    let params = match chat_params(&request, model) {
-        Ok(params) => params,
-        Err(response) => return response,
-    };
-
-    let response_model = params.model.clone();
-    if mode == "annotate" {
-        // annotate: completion and verification run concurrently -
-        // verification checks the incoming conversation, not the reply.
-        let (completion, consistency) = tokio::join!(
-            completer.complete(&params),
-            consistency_block(&state, &ontology, &messages, want_trace)
-        );
-        return match completion {
+    if selections.is_empty() {
+        // Pure OpenAI proxy: no translation, no engine, no extra fields.
+        if mode == "enforce" {
+            return bad_request(
+                "enforce mode requires an ontology selection (x-il-ontology)".to_string(),
+            );
+        }
+        if want_trace {
+            return bad_request(
+                "x-il-trace requires an ontology selection (there is nothing to trace)".to_string(),
+            );
+        }
+        let model = route_model(request.model.as_deref());
+        let params = match chat_params(&request, model) {
+            Ok(params) => params,
+            Err(response) => return response,
+        };
+        let response_model = params.model.clone();
+        return match completer.complete(&params).await {
             Ok(completion) => (
                 StatusCode::OK,
-                Json(openai_response(&response_model, &completion, consistency)),
+                Json(openai_response(&response_model, &completion, None)),
             ),
             Err(err) => upstream_error(&err),
         };
     }
 
-    // enforce / enforce-strict: verify FIRST, so a refused conversation
-    // never spends completion tokens.
-    let consistency = consistency_block(&state, &ontology, &messages, want_trace).await;
-    if let Some(refusal) = enforcement_refusal(&mode, consistency["status"].as_str()) {
-        let (status_code, error_type, message) = refusal;
+    // Evaluation path. The extractor exists whenever the completer does.
+    if state.ontologies.is_empty() || state.extractor.is_none() {
         return (
-            status_code,
-            Json(json!({
-                "error": { "type": error_type, "message": message },
-                "inputlayer": { "consistency": consistency },
-            })),
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": { "type": "not_configured",
+                "message": "no ontologies loaded (registry unreachable at startup)" } })),
         );
     }
-    match completer.complete(&params).await {
-        Ok(completion) => (
-            StatusCode::OK,
-            Json(openai_response(&response_model, &completion, consistency)),
-        ),
-        Err(err) => upstream_error(&err),
+    let request_id = fresh_id("req");
+    let prefix = conversation.clone().unwrap_or_else(|| request_id.clone());
+    let retract_after = conversation.is_none();
+
+    let messages: Vec<(String, String)> = request
+        .messages
+        .iter()
+        .map(|m| (m.role.clone(), m.content.clone()))
+        .collect();
+    let model = route_model(request.model.as_deref());
+    let params = match chat_params(&request, model) {
+        Ok(params) => params,
+        Err(response) => return response,
+    };
+    let response_model = params.model.clone();
+
+    let run_reports = evaluate_all(
+        &state,
+        &selections,
+        &messages,
+        &prefix,
+        want_trace,
+        retract_after,
+    );
+
+    if mode == "enforce" {
+        // Verify FIRST: a refused conversation never spends completion
+        // tokens; an unevaluatable one refuses too (fail closed).
+        let reports = run_reports.await;
+        publish_events(&state, conversation.as_deref(), &request_id, &reports);
+        if let Some(refusal) = enforcement_refusal(&reports) {
+            return refusal;
+        }
+        match completer.complete(&params).await {
+            Ok(completion) => (
+                StatusCode::OK,
+                Json(openai_response(
+                    &response_model,
+                    &completion,
+                    Some(reports_json(&reports)),
+                )),
+            ),
+            Err(err) => upstream_error(&err),
+        }
+    } else {
+        // annotate: completion and evaluation run concurrently.
+        let (completion, reports) = tokio::join!(completer.complete(&params), run_reports);
+        publish_events(&state, conversation.as_deref(), &request_id, &reports);
+        match completion {
+            Ok(completion) => (
+                StatusCode::OK,
+                Json(openai_response(
+                    &response_model,
+                    &completion,
+                    Some(reports_json(&reports)),
+                )),
+            ),
+            Err(err) => upstream_error(&err),
+        }
     }
 }
 
-/// The enforcement decision, pure for testability. `enforce` fails OPEN on
-/// an unverifiable conversation (verifier trouble must not take down caller
-/// traffic - and note this is bypassable by content engineered to break
-/// extraction, which is why the strict variant exists). `enforce-strict`
-/// fails CLOSED: no completion unless verification actually ran clean.
-fn enforcement_refusal(
-    mode: &str,
-    status: Option<&str>,
-) -> Option<(StatusCode, &'static str, &'static str)> {
-    match (mode, status) {
-        (_, Some("conflicts_found")) => Some((
+/// One evaluated pair's outcome, ready for both response and events.
+struct Report {
+    kg: String,
+    ontology: String,
+    digest: String,
+    status: &'static str,
+    reason: Option<String>,
+    findings: Vec<Value>,
+    dropped: Vec<String>,
+    notes: Vec<String>,
+    tuples: Vec<Value>,
+    trace: Option<Value>,
+}
+
+/// Extract + evaluate every selected pair concurrently. Failures become
+/// "incomplete" reports (with reason), never panics or dropped pairs.
+async fn evaluate_all(
+    state: &AppState,
+    selections: &[Selection],
+    messages: &[(String, String)],
+    prefix: &str,
+    want_trace: bool,
+    retract_after: bool,
+) -> Vec<Report> {
+    let futures = selections.iter().map(|selection| {
+        let ontology = Arc::clone(&selection.ontology);
+        let kg = selection.kg.clone();
+        async move {
+            let outcome = evaluate_one(
+                state,
+                &ontology,
+                &kg,
+                messages,
+                prefix,
+                want_trace,
+                retract_after,
+            )
+            .await;
+            match outcome {
+                Ok((findings, dropped, notes, tuples, trace)) => Report {
+                    kg,
+                    ontology: format!("{}@{}", ontology.name, ontology.version),
+                    digest: ontology.digest.clone(),
+                    status: "complete",
+                    reason: None,
+                    findings,
+                    dropped,
+                    notes,
+                    tuples,
+                    trace,
+                },
+                Err(err) => Report {
+                    kg,
+                    ontology: format!("{}@{}", ontology.name, ontology.version),
+                    digest: ontology.digest.clone(),
+                    status: "incomplete",
+                    reason: Some(err.to_string()),
+                    findings: Vec::new(),
+                    dropped: Vec::new(),
+                    notes: Vec::new(),
+                    tuples: Vec::new(),
+                    trace: None,
+                },
+            }
+        }
+    });
+    futures_util::future::join_all(futures).await
+}
+
+type EvalParts = (
+    Vec<Value>,
+    Vec<String>,
+    Vec<String>,
+    Vec<Value>,
+    Option<Value>,
+);
+
+async fn evaluate_one(
+    state: &AppState,
+    ontology: &LoadedOntology,
+    kg: &str,
+    messages: &[(String, String)],
+    prefix: &str,
+    want_trace: bool,
+    retract_after: bool,
+) -> Result<EvalParts> {
+    let extractor = state
+        .extractor
+        .as_ref()
+        .context("model key not configured")?;
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let system_prompt = ontology.render_prompt(&today);
+    let user_content = render_conversation(messages);
+    let extract_started = std::time::Instant::now();
+    let extraction = extractor
+        .extract(
+            &ontology.extraction_model,
+            &system_prompt,
+            &user_content,
+            &ontology.schema,
+        )
+        .await?;
+    let extract_ms = extract_started.elapsed().as_millis();
+    let outcome = evaluate(
+        &state.engine,
+        ontology,
+        kg,
+        prefix,
+        extraction,
+        messages,
+        want_trace,
+        retract_after,
+    )
+    .await?;
+    let trace = outcome.trace.map(|mut trace| {
+        if let Some(t) = trace.as_object_mut() {
+            t.insert("model".to_string(), json!(ontology.extraction_model));
+            t.insert("extract_ms".to_string(), json!(extract_ms));
+        }
+        trace
+    });
+    Ok((
+        outcome.findings,
+        outcome.dropped,
+        outcome.notes,
+        outcome.tuples,
+        trace,
+    ))
+}
+
+/// Enforce fails CLOSED: 422 on any blocking finding from any pair, 503
+/// when any pair could not be evaluated at all.
+fn enforcement_refusal(reports: &[Report]) -> Option<(StatusCode, Json<Value>)> {
+    let blocking_finding = reports.iter().any(|r| {
+        r.findings
+            .iter()
+            .any(|f| f["blocking"].as_bool() == Some(true))
+    });
+    if blocking_finding {
+        return Some((
             StatusCode::UNPROCESSABLE_ENTITY,
-            "consistency_violation",
-            "conversation contains contradictions; completion refused",
-        )),
-        ("enforce-strict", status) if status != Some("verified") => Some((
-            StatusCode::SERVICE_UNAVAILABLE,
-            "verification_unavailable",
-            "conversation could not be verified; completion refused (enforce-strict)",
-        )),
-        _ => None,
+            Json(json!({
+                "error": { "type": "consistency_violation",
+                    "message": "conversation triggers blocking findings; completion refused" },
+                "inputlayer": reports_json(reports),
+            })),
+        ));
     }
+    // Fail closed on ANY evaluation gap: an incomplete pair, or dropped
+    // extraction rows (a misquoted claim is exactly what an engineered
+    // bypass looks like - under enforce, partial evaluation refuses).
+    if reports
+        .iter()
+        .any(|r| r.status != "complete" || !r.dropped.is_empty())
+    {
+        return Some((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
+                "error": { "type": "verification_unavailable",
+                    "message": "conversation could not be fully evaluated; completion refused (enforce fails closed)" },
+                "inputlayer": reports_json(reports),
+            })),
+        ));
+    }
+    None
+}
+
+fn reports_json(reports: &[Report]) -> Value {
+    let list: Vec<Value> = reports
+        .iter()
+        .map(|r| {
+            let mut report = json!({
+                "kg": r.kg,
+                "ontology": r.ontology,
+                "digest": r.digest,
+                "status": r.status,
+                "findings": r.findings,
+                "dropped": r.dropped,
+            });
+            if !r.notes.is_empty() {
+                report["notes"] = json!(r.notes);
+            }
+            if let Some(reason) = &r.reason {
+                report["reason"] = json!(reason);
+            }
+            if let Some(trace) = &r.trace {
+                report["trace"] = trace.clone();
+            }
+            report
+        })
+        .collect();
+    json!({ "reports": list })
+}
+
+/// Emit translation / finding / report events for a conversation. One-shot
+/// requests (no conversation id) emit nothing - there is no stream to
+/// subscribe to.
+fn publish_events(
+    state: &AppState,
+    conversation: Option<&str>,
+    request_id: &str,
+    reports: &[Report],
+) {
+    let Some(conversation) = conversation else {
+        return;
+    };
+    for report in reports {
+        state.events.publish(
+            conversation,
+            json!({
+                "type": "translation",
+                "conversation": conversation,
+                "request": request_id,
+                "kg": report.kg,
+                "ontology": report.ontology,
+                "tuples": report.tuples,
+                "dropped": report.dropped,
+            }),
+        );
+        for finding in &report.findings {
+            let mut event = json!({
+                "type": "finding",
+                "conversation": conversation,
+                "request": request_id,
+                "kg": report.kg,
+                "ontology": report.ontology,
+            });
+            if let (Some(event_map), Some(finding_map)) =
+                (event.as_object_mut(), finding.as_object())
+            {
+                for (key, value) in finding_map {
+                    event_map.insert(key.clone(), value.clone());
+                }
+            }
+            state.events.publish(conversation, event);
+        }
+        let mut close = json!({
+            "type": "report",
+            "conversation": conversation,
+            "request": request_id,
+            "kg": report.kg,
+            "ontology": report.ontology,
+            "status": report.status,
+            "findings": report.findings.len(),
+        });
+        if let Some(reason) = &report.reason {
+            close["reason"] = json!(reason);
+        }
+        state.events.publish(conversation, close);
+    }
+}
+
+#[derive(Deserialize)]
+struct EventsQuery {
+    conversation: String,
+    #[serde(default)]
+    token: Option<String>,
+}
+
+/// Conversation-scoped event subscription: replay the ring, then stream
+/// live events until the client goes away.
+async fn events_ws(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<EventsQuery>,
+    upgrade: WebSocketUpgrade,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if let Err((code, body)) = authorize(&state, &headers, query.token.as_deref()) {
+        return (code, body).into_response();
+    }
+    if query.conversation.is_empty()
+        || query.conversation.len() > 64
+        || inputlayer_ontology_client::registry::validate_component(
+            "conversation id",
+            &query.conversation,
+        )
+        .is_err()
+    {
+        return bad_request("conversation must be 1-64 characters of [A-Za-z0-9._-]".to_string())
+            .into_response();
+    }
+    let conversation = query.conversation.clone();
+    upgrade.on_upgrade(move |mut socket| async move {
+        let (replay, mut rx) = state.events.subscribe(&conversation);
+        for event in replay {
+            if socket
+                .send(axum::extract::ws::Message::Text(event.to_string()))
+                .await
+                .is_err()
+            {
+                return;
+            }
+        }
+        loop {
+            tokio::select! {
+                event = rx.recv() => {
+                    match event {
+                        Ok(event) => {
+                            if socket
+                                .send(axum::extract::ws::Message::Text(event.to_string()))
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
+                        }
+                        // A subscriber that fell behind lost events the
+                        // replay ring can no longer supply; say so in the
+                        // stream rather than leaving a silent hole in what
+                        // is meant to be the record of evaluation.
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                            let notice =
+                                json!({ "type": "lagged", "skipped": skipped }).to_string();
+                            if socket
+                                .send(axum::extract::ws::Message::Text(notice))
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                    }
+                }
+                incoming = socket.recv() => {
+                    match incoming {
+                        Some(Ok(_)) => {} // client pings/messages: ignore
+                        _ => return,      // closed or errored
+                    }
+                }
+            }
+        }
+    })
 }
 
 /// Model routing (#84): claude-* forwarded as-is, everything else falls
@@ -668,38 +1034,42 @@ fn chat_params(
     })
 }
 
-/// Assemble the OpenAI-shaped response with the consistency block attached.
-fn openai_response(
-    model: &str,
-    completion: &inputlayer_gateway::model::ChatCompletion,
-    consistency: Value,
-) -> Value {
+/// Opaque unique id: hash of time, pid, and a per-process counter.
+fn fresh_id(prefix: &str) -> String {
     use sha2::Digest;
-    // Per-process counter so two identical completions in the same second
-    // still get distinct ids.
-    static ID_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let created = std::time::SystemTime::now()
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
-    // Opaque id; uniqueness matters, readability of inputs does not.
+        .map_or(0, |d| d.as_nanos());
     let mut hasher = sha2::Sha256::new();
-    hasher.update(created.to_le_bytes());
-    hasher.update(completion.text.as_bytes());
+    hasher.update(now.to_le_bytes());
     hasher.update(std::process::id().to_le_bytes());
     hasher.update(
-        ID_SEQ
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             .to_le_bytes(),
     );
     let digest = hasher.finalize();
-    let id: String = digest[..12]
+    digest[..8]
         .iter()
-        .fold(String::from("chatcmpl-"), |mut out, byte| {
+        .fold(format!("{prefix}-"), |mut out, byte| {
             use std::fmt::Write;
             let _ = write!(out, "{byte:02x}");
             out
-        });
-    json!({
+        })
+}
+
+/// Assemble the OpenAI-shaped response; the reports ride on an extra key
+/// and are simply absent for pure-proxy requests.
+fn openai_response(
+    model: &str,
+    completion: &inputlayer_gateway::model::ChatCompletion,
+    inputlayer: Option<Value>,
+) -> Value {
+    let created = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let id = fresh_id("chatcmpl");
+    let mut response = json!({
         "id": id,
         "object": "chat.completion",
         "created": created,
@@ -714,21 +1084,27 @@ fn openai_response(
             "completion_tokens": completion.completion_tokens,
             "total_tokens": completion.prompt_tokens + completion.completion_tokens,
         },
-        "inputlayer": { "consistency": consistency },
-    })
+    });
+    if let Some(inputlayer) = inputlayer {
+        response["inputlayer"] = inputlayer;
+    }
+    response
 }
 
-/// A provider 4xx (except 429) is the caller's own mistake (bad params the
-/// gateway does not pre-validate) and surfaces as 400; everything else is
-/// provider trouble and surfaces as 502.
+/// Map a provider error to a status that tells the truth about WHOSE
+/// problem it is: a rejected request shape (400/404/413/422) is the
+/// caller's, but the provider refusing our credentials (401/403) or rate
+/// limiting us (429) is the operator's - reporting those as 400 would send
+/// a developer hunting through their own request while the deployment's
+/// model key is what is wrong.
 fn upstream_error(err: &anyhow::Error) -> (StatusCode, Json<Value>) {
     let upstream = err
         .downcast_ref::<inputlayer_gateway::model::UpstreamStatus>()
         .map(|s| s.0);
     let (status, error_type) = match upstream {
-        Some(code) if (400..500).contains(&code) && code != 429 => {
-            (StatusCode::BAD_REQUEST, "invalid_request")
-        }
+        Some(401 | 403) => (StatusCode::BAD_GATEWAY, "model_credentials"),
+        Some(429) => (StatusCode::SERVICE_UNAVAILABLE, "model_rate_limited"),
+        Some(code) if (400..500).contains(&code) => (StatusCode::BAD_REQUEST, "invalid_request"),
         _ => (StatusCode::BAD_GATEWAY, "upstream_error"),
     };
     (
@@ -741,14 +1117,14 @@ fn upstream_error(err: &anyhow::Error) -> (StatusCode, Json<Value>) {
 mod tests {
     use super::*;
 
-    fn message(role: &str, content: &str) -> VerifyMessage {
-        VerifyMessage {
+    fn message(role: &str, content: &str) -> ChatMessage {
+        ChatMessage {
             role: role.to_string(),
             content: content.to_string(),
         }
     }
 
-    fn request(messages: Vec<VerifyMessage>) -> ChatRequest {
+    fn request(messages: Vec<ChatMessage>) -> ChatRequest {
         ChatRequest {
             model: None,
             messages,
@@ -759,6 +1135,7 @@ mod tests {
             stream: None,
             il_ontology: None,
             il_mode: None,
+            il_conversation: None,
         }
     }
 
@@ -829,20 +1206,53 @@ mod tests {
         assert_eq!(params.messages.len(), 1);
     }
 
+    fn report(status: &'static str, blocking: bool) -> Report {
+        Report {
+            kg: "kg".to_string(),
+            ontology: "o@1".to_string(),
+            digest: "sha256:x".to_string(),
+            status,
+            reason: (status != "complete").then(|| "why".to_string()),
+            findings: if blocking {
+                vec![serde_json::json!({"blocking": true})]
+            } else {
+                vec![serde_json::json!({"blocking": false})]
+            },
+            dropped: Vec::new(),
+            notes: Vec::new(),
+            tuples: Vec::new(),
+            trace: None,
+        }
+    }
+
     #[test]
     fn enforcement_decision_table() {
-        // Conflicts refuse in both enforcement modes.
-        assert!(enforcement_refusal("enforce", Some("conflicts_found")).is_some());
-        assert!(enforcement_refusal("enforce-strict", Some("conflicts_found")).is_some());
-        // enforce fails OPEN on unverified; strict fails CLOSED.
-        assert!(enforcement_refusal("enforce", Some("unverified")).is_none());
-        let strict = enforcement_refusal("enforce-strict", Some("unverified"));
+        // Blocking finding refuses with 422 even when another pair is clean.
+        let refusal = enforcement_refusal(&[report("complete", false), report("complete", true)]);
         assert_eq!(
-            strict.map(|(code, kind, _)| (code, kind)),
-            Some((StatusCode::SERVICE_UNAVAILABLE, "verification_unavailable"))
+            refusal.map(|(code, _)| code),
+            Some(StatusCode::UNPROCESSABLE_ENTITY)
         );
-        // Verified proceeds everywhere.
-        assert!(enforcement_refusal("enforce", Some("verified")).is_none());
-        assert!(enforcement_refusal("enforce-strict", Some("verified")).is_none());
+        // Any incomplete pair refuses with 503 (fail closed).
+        let refusal =
+            enforcement_refusal(&[report("complete", false), report("incomplete", false)]);
+        assert_eq!(
+            refusal.map(|(code, _)| code),
+            Some(StatusCode::SERVICE_UNAVAILABLE)
+        );
+        // All complete, only non-blocking findings: proceed.
+        assert!(enforcement_refusal(&[report("complete", false)]).is_none());
+        // Dropped extraction rows refuse under enforce (partial evaluation).
+        let mut with_drops = report("complete", false);
+        with_drops.dropped = vec!["claims: quote not verbatim".to_string()];
+        assert_eq!(
+            enforcement_refusal(&[with_drops]).map(|(code, _)| code),
+            Some(StatusCode::SERVICE_UNAVAILABLE)
+        );
+    }
+
+    #[test]
+    fn ids_are_unique() {
+        assert_ne!(fresh_id("chatcmpl"), fresh_id("chatcmpl"));
     }
 }

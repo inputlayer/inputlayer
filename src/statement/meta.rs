@@ -65,6 +65,14 @@ pub enum MetaCommand {
     AgentSetup(String),   // .agent setup <example_id> - get setup IQL for an example
     AgentExamples,        // .agent examples - list available examples
 
+    // Ontology lifecycle (engine-owned; il and the Studio delegate here).
+    // Handled asynchronously at the execute_program level because install
+    // fetches from the registry; inside a multi-statement program they are
+    // rejected.
+    OntologyInstall(String), // .ontology install <name[@version]> - into current KG
+    OntologyRemove(String),  // .ontology remove <name> - rules, relations, and pins
+    OntologyUpgrade(String), // .ontology upgrade <name[@version]> - rules re-deployed, data kept
+
     Help,
     Quit,
 
@@ -175,6 +183,9 @@ fn format_meta_debug(cmd: &MetaCommand) -> String {
         MetaCommand::AgentStart(s) => format!("AgentStart({s:?})"),
         MetaCommand::AgentSetup(s) => format!("AgentSetup({s:?})"),
         MetaCommand::AgentExamples => "AgentExamples".to_string(),
+        MetaCommand::OntologyInstall(s) => format!("OntologyInstall({s:?})"),
+        MetaCommand::OntologyRemove(s) => format!("OntologyRemove({s:?})"),
+        MetaCommand::OntologyUpgrade(s) => format!("OntologyUpgrade({s:?})"),
         MetaCommand::Help => "Help".to_string(),
         MetaCommand::Quit => "Quit".to_string(),
         MetaCommand::Load { path, mode } => {
@@ -307,6 +318,7 @@ pub fn parse_meta_command(input: &str) -> Result<MetaCommand, String> {
         }
         "help" | "?" => Ok(MetaCommand::Help),
         "quit" | "exit" | "q" => Ok(MetaCommand::Quit),
+        "ontology" => parse_ontology_command(&parts),
         "load" => parse_load_command(&parts),
         "user" => parse_user_command(&parts),
         "apikey" => parse_apikey_command(&parts),
@@ -512,6 +524,21 @@ fn parse_session_command(parts: &[&str]) -> Result<MetaCommand, String> {
                 parts[1]
             )),
         }
+    }
+}
+
+fn parse_ontology_command(parts: &[&str]) -> Result<MetaCommand, String> {
+    let usage = "Usage: .ontology install <name[@version]> | .ontology remove <name> | \
+                 .ontology upgrade <name[@version]>";
+    if parts.len() != 3 {
+        return Err(usage.to_string());
+    }
+    let arg = parts[2].to_string();
+    match parts[1].to_lowercase().as_str() {
+        "install" => Ok(MetaCommand::OntologyInstall(arg)),
+        "remove" => Ok(MetaCommand::OntologyRemove(arg)),
+        "upgrade" => Ok(MetaCommand::OntologyUpgrade(arg)),
+        _ => Err(usage.to_string()),
     }
 }
 
@@ -1322,5 +1349,30 @@ mod tests {
     fn test_parse_apikey_missing_subcommand() {
         let result = parse_meta_command(".apikey");
         assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod ontology_command_tests {
+    use super::*;
+
+    #[test]
+    fn parse_ontology_verbs() {
+        assert!(matches!(
+            parse_meta_command(".ontology install consistency-core@1.0.3"),
+            Ok(MetaCommand::OntologyInstall(s)) if s == "consistency-core@1.0.3"
+        ));
+        assert!(matches!(
+            parse_meta_command(".ontology remove consistency-core"),
+            Ok(MetaCommand::OntologyRemove(s)) if s == "consistency-core"
+        ));
+        assert!(matches!(
+            parse_meta_command(".ontology upgrade consistency-core"),
+            Ok(MetaCommand::OntologyUpgrade(s)) if s == "consistency-core"
+        ));
+        // Wrong arity and unknown verbs are usage errors.
+        assert!(parse_meta_command(".ontology install").is_err());
+        assert!(parse_meta_command(".ontology install a b").is_err());
+        assert!(parse_meta_command(".ontology explode x").is_err());
     }
 }

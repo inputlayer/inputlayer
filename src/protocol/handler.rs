@@ -3622,6 +3622,20 @@ impl QueryJob {
                                         );
                                     }
 
+                                    // Handled asynchronously at the
+                                    // execute_program level (registry
+                                    // fetch); reaching this arm means the
+                                    // command was embedded in a
+                                    // multi-statement program.
+                                    MetaCommand::OntologyInstall(_)
+                                    | MetaCommand::OntologyRemove(_)
+                                    | MetaCommand::OntologyUpgrade(_) => {
+                                        messages.push(
+                                            ".ontology commands must be run as a standalone statement."
+                                                .to_string(),
+                                        );
+                                    }
+
                                     // === Client-only commands ===
                                     MetaCommand::Help
                                     | MetaCommand::Quit
@@ -4293,7 +4307,22 @@ impl Handler {
         // Protect _internal KG from direct access.
         // Block both explicit commands AND sessions already bound to _internal.
         let session_kg_owned: Option<String> = if knowledge_graph.is_none() {
-            session_id.and_then(|sid| self.sessions.session_kg(sid).ok())
+            match session_id {
+                // A session whose KG binding cannot be read (reaped) must
+                // not silently fall through to the storage default: the
+                // per-KG ACL check keys off this value, and None skips it.
+                Some(sid) => match self.sessions.session_kg(sid) {
+                    Ok(kg) => Some(kg),
+                    Err(_) if trimmed.starts_with(".ontology") => {
+                        return Err(
+                            "session expired - reconnect before running .ontology commands"
+                                .to_string(),
+                        );
+                    }
+                    Err(_) => None,
+                },
+                None => None,
+            }
         } else {
             None
         };
@@ -4408,6 +4437,43 @@ impl Handler {
                     MetaCommand::SessionDropName(name) => {
                         let sid = session_id.ok_or_else(|| "No active session".to_string())?;
                         return self.handle_session_drop_name(sid, name);
+                    }
+
+                    // Ontology lifecycle: async (registry fetch + recursive
+                    // program execution), so it cannot run inside the sync
+                    // executor. Engine-owned; il and the Studio delegate.
+                    MetaCommand::OntologyInstall(spec) => {
+                        let spec = spec.clone();
+                        return self
+                            .handle_ontology_install(
+                                session_id,
+                                knowledge_graph,
+                                &spec,
+                                effective_auth,
+                            )
+                            .await;
+                    }
+                    MetaCommand::OntologyRemove(name) => {
+                        let name = name.clone();
+                        return self
+                            .handle_ontology_remove(
+                                session_id,
+                                knowledge_graph,
+                                &name,
+                                effective_auth,
+                            )
+                            .await;
+                    }
+                    MetaCommand::OntologyUpgrade(spec) => {
+                        let spec = spec.clone();
+                        return self
+                            .handle_ontology_upgrade(
+                                session_id,
+                                knowledge_graph,
+                                &spec,
+                                effective_auth,
+                            )
+                            .await;
                     }
 
                     // User & API key management (handled directly, not via query_program)
@@ -4642,6 +4708,632 @@ impl Handler {
             proof_trees: None,
             timing_breakdown: None,
         }
+    }
+
+    /// The registry the engine loads ontologies from: `INPUTLAYER_REGISTRY`
+    /// (HTTPS index URL, or a local filesystem path to a cloned registry for
+    /// deployments with no outbound network), token from
+    /// `INPUTLAYER_REGISTRY_TOKEN` / `GITHUB_TOKEN`.
+    fn ontology_registry() -> inputlayer_ontology_client::registry::Registry {
+        let index = std::env::var("INPUTLAYER_REGISTRY")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| inputlayer_ontology_client::registry::DEFAULT_INDEX_URL.to_string());
+        let token = std::env::var("INPUTLAYER_REGISTRY_TOKEN")
+            .ok()
+            .filter(|t| !t.trim().is_empty())
+            .or_else(|| std::env::var("GITHUB_TOKEN").ok())
+            .filter(|t| !t.trim().is_empty());
+        inputlayer_ontology_client::registry::Registry::new(index, token)
+    }
+
+    /// Current KG for an `.ontology` command: explicit param, else the
+    /// session's bound KG, else the storage default.
+    fn resolve_ontology_kg(
+        &self,
+        session_id: Option<&SessionId>,
+        knowledge_graph: Option<&String>,
+    ) -> Result<String, String> {
+        if let Some(kg) = knowledge_graph {
+            return Ok(kg.clone());
+        }
+        if let Some(sid) = session_id {
+            if let Ok(kg) = self.sessions.session_kg(sid) {
+                return Ok(kg);
+            }
+        }
+        let storage = self.storage.read();
+        storage
+            .current_knowledge_graph()
+            .map(str::to_string)
+            .ok_or_else(|| "No knowledge graph selected".to_string())
+    }
+
+    /// The engine reports many per-statement failures as message rows
+    /// inside an Ok result. Deny by default, exactly like the WS client's
+    /// classifier: an allowlist of failure phrases means any unfamiliar
+    /// phrasing reads as success, and reporting success for a statement
+    /// that did not execute is the failure this must never have.
+    fn result_problem_rows(result: &QueryResult) -> Vec<String> {
+        const SUCCESS_MARKERS: [&str; 12] = [
+            "Inserted ",
+            "Deleted ",
+            "Updated ",
+            "Conditional delete:",
+            "Relation ",
+            "Rule ",
+            "Schema ",
+            "Knowledge graph ",
+            "Switched to knowledge graph",
+            "Registered ",
+            "Type ",
+            "No facts",
+        ];
+        if result.schema.len() != 1 || result.schema[0].name != "message" {
+            return Vec::new();
+        }
+        result
+            .rows
+            .iter()
+            .filter_map(|row| match row.values.first() {
+                Some(WireValue::String(s)) => Some(s.clone()),
+                _ => None,
+            })
+            .filter(|message| {
+                let trimmed = message.trim();
+                !trimmed.is_empty()
+                    && !SUCCESS_MARKERS
+                        .iter()
+                        .any(|marker| trimmed.starts_with(marker))
+            })
+            .collect()
+    }
+
+    fn messages_result(messages: Vec<String>) -> QueryResult {
+        let rows: Vec<WireTuple> = messages
+            .into_iter()
+            .map(|msg| WireTuple {
+                values: vec![WireValue::String(msg)],
+                provenance: None,
+            })
+            .collect();
+        let total_count = rows.len();
+        QueryResult {
+            rows,
+            schema: vec![ColumnDef {
+                name: "message".to_string(),
+                data_type: WireDataType::String,
+            }],
+            total_count,
+            truncated: false,
+            execution_time_ms: 0,
+            metadata: None,
+            switched_kg: None,
+            proof_trees: None,
+            timing_breakdown: None,
+        }
+    }
+
+    /// Existing `pack_item` rows for a pack (kind, item), empty when the
+    /// relation does not exist yet.
+    async fn pack_items(
+        &self,
+        session_id: Option<&SessionId>,
+        kg: &str,
+        name: &str,
+        auth: Option<&crate::auth::AuthIdentity>,
+    ) -> Vec<(String, String)> {
+        let query = "?pack_item(P, K, I)".to_string();
+        let result =
+            Box::pin(self.execute_program(session_id, Some(kg.to_string()), query, auth)).await;
+        let Ok(result) = result else {
+            return Vec::new();
+        };
+        result
+            .rows
+            .iter()
+            .filter_map(|row| {
+                let get = |i: usize| match row.values.get(i) {
+                    Some(WireValue::String(s)) => Some(s.clone()),
+                    _ => None,
+                };
+                match (get(0), get(1), get(2)) {
+                    (Some(p), Some(k), Some(i)) if p == name => Some((k, i)),
+                    _ => None,
+                }
+            })
+            .collect()
+    }
+
+    /// Inventory items owned by packs OTHER than `name` in this KG.
+    async fn pack_items_of_others(
+        &self,
+        session_id: Option<&SessionId>,
+        kg: &str,
+        name: &str,
+        auth: Option<&crate::auth::AuthIdentity>,
+    ) -> std::collections::BTreeSet<(String, String)> {
+        let result = Box::pin(self.execute_program(
+            session_id,
+            Some(kg.to_string()),
+            "?pack_item(P, K, I)".to_string(),
+            auth,
+        ))
+        .await;
+        let Ok(result) = result else {
+            return std::collections::BTreeSet::new();
+        };
+        result
+            .rows
+            .iter()
+            .filter_map(|row| {
+                let get = |i: usize| match row.values.get(i) {
+                    Some(WireValue::String(s)) => Some(s.clone()),
+                    _ => None,
+                };
+                match (get(0), get(1), get(2)) {
+                    (Some(p), Some(k), Some(i)) if p != name => Some((k, i)),
+                    _ => None,
+                }
+            })
+            .collect()
+    }
+
+    /// The pinned (version, digest) for a pack in a KG, if any.
+    async fn pack_pin(
+        &self,
+        session_id: Option<&SessionId>,
+        kg: &str,
+        name: &str,
+        auth: Option<&crate::auth::AuthIdentity>,
+    ) -> Option<(String, String)> {
+        let result = Box::pin(self.execute_program(
+            session_id,
+            Some(kg.to_string()),
+            "?pack_meta(N, V, D)".to_string(),
+            auth,
+        ))
+        .await
+        .ok()?;
+        result.rows.iter().find_map(|row| {
+            let get = |i: usize| match row.values.get(i) {
+                Some(WireValue::String(s)) => Some(s.clone()),
+                _ => None,
+            };
+            match (get(0), get(1), get(2)) {
+                (Some(n), Some(v), Some(d)) if n == name => Some((v, d)),
+                _ => None,
+            }
+        })
+    }
+
+    /// `.ontology install <name[@version]>`: fetch the pack from the
+    /// registry (digest-verified), deploy its rules into the current KG, pin
+    /// it in `pack_meta`, and record the deployed rule/relation inventory in
+    /// `pack_item` so remove/upgrade are exact.
+    async fn handle_ontology_install(
+        &self,
+        session_id: Option<&SessionId>,
+        knowledge_graph: Option<String>,
+        spec: &str,
+        auth: Option<&crate::auth::AuthIdentity>,
+    ) -> Result<QueryResult, String> {
+        use inputlayer_ontology_client::registry;
+        let kg = self.resolve_ontology_kg(session_id, knowledge_graph.as_ref())?;
+        let reg = Self::ontology_registry();
+        let (name, entry) = reg
+            .resolve(spec)
+            .await
+            .map_err(|e| format!("ontology resolve failed: {e:#}"))?;
+        let entry_dir = reg
+            .fetch(&name, &entry)
+            .await
+            .map_err(|e| format!("ontology fetch failed: {e:#}"))?;
+        let manifest =
+            registry::read_manifest(&entry_dir).map_err(|e| format!("invalid pack: {e:#}"))?;
+        let mut program = String::new();
+        for rel in &manifest.ontology.rules {
+            let path = entry_dir.join(rel);
+            let text = std::fs::read_to_string(&path)
+                .map_err(|e| format!("cannot read pack rules file {rel}: {e}"))?;
+            program.push_str(&text);
+            program.push('\n');
+        }
+        let statement_count = program
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with("//"))
+            .count();
+
+        // A pack is DATA, not a script. Digest pinning proves the pack is
+        // what the index said - not that it is safe. Rules programs execute
+        // as multi-statement programs, which bypasses per-statement and
+        // per-KG authorization, so anything other than schema/rule/fact
+        // statements is refused before deployment: no meta commands (a
+        // `.kg use other-kg` would write into another KG, a nested
+        // `.ontology install` would recurse without bound), no deletes.
+        for line in join_continuation_lines(&strip_comments(&program)).lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            // Bookkeeping relations are the engine's, not a pack's: a pack
+            // that could insert into pack_meta would forge ANOTHER pack's
+            // pin, and a gateway trusting that pin would report "verified"
+            // over rules that were never deployed.
+            const RESERVED: [&str; 3] = ["pack_meta", "pack_item", "il_conversation"];
+            let reserved_target = match &statement::parse_statement(line) {
+                Ok(statement::Statement::Insert(op)) => RESERVED.contains(&op.relation.as_str()),
+                Ok(statement::Statement::SchemaDecl(decl)) => {
+                    RESERVED.contains(&decl.name.as_str())
+                }
+                Ok(statement::Statement::PersistentRule(rule)) => {
+                    RESERVED.contains(&rule.head.relation.as_str())
+                }
+                _ => false,
+            };
+            if reserved_target {
+                return Err(format!(
+                    "pack {name} writes a reserved relation (pack_meta, pack_item, \
+                     and il_conversation belong to the engine)"
+                ));
+            }
+            match statement::parse_statement(line) {
+                Ok(
+                    statement::Statement::SchemaDecl(_)
+                    | statement::Statement::PersistentRule(_)
+                    | statement::Statement::Insert(_)
+                    | statement::Statement::TypeDecl(_),
+                ) => {}
+                // Facts (`foo("a").`) become SESSION facts and are silently
+                // discarded, so a pack shipping them would report installed
+                // statements that do not exist afterwards.
+                Ok(statement::Statement::Fact(_)) => {
+                    return Err(format!(
+                        "pack {name} uses a session fact (`rel(...).`); packs must use \
+                         persistent inserts (`+rel[(...)]`)"
+                    ));
+                }
+                Ok(other) => {
+                    return Err(format!(
+                        "pack {name} contains a disallowed statement (packs may only declare \
+                         schemas, rules, types, and facts): {}",
+                        match other {
+                            statement::Statement::Meta(_) => "meta command",
+                            statement::Statement::Delete(_) => "delete",
+                            statement::Statement::Update(_) => "update",
+                            statement::Statement::Query(_) => "query",
+                            statement::Statement::SessionRule(_) => "session rule",
+                            statement::Statement::DeleteRelationOrRule(_) => "drop",
+                            _ => "unsupported statement",
+                        }
+                    ));
+                }
+                Err(err) => {
+                    return Err(format!("pack {name} has an unparsable statement: {err}"));
+                }
+            }
+        }
+
+        // Inventory before, so the diff identifies what this pack added.
+        let (rules_before, rels_before) = {
+            let storage = self.storage.read();
+            (
+                storage.list_rules_in(&kg).map_err(|e| e.to_string())?,
+                storage.list_relations_in(&kg).map_err(|e| e.to_string())?,
+            )
+        };
+        let prior_items = self.pack_items(session_id, &kg, &name, auth).await;
+        // Installing a DIFFERENT version over an existing one would stack
+        // both rule sets while pack_meta claims only the new one - findings
+        // attributed to rules that are not the ones that derived them.
+        if let Some((pinned_version, _)) = self.pack_pin(session_id, &kg, &name, auth).await {
+            if pinned_version != entry.version {
+                return Err(format!(
+                    "ontology '{name}' is already installed in '{kg}' at {pinned_version}; \
+                     use .ontology upgrade {name}@{} to replace it",
+                    entry.version
+                ));
+            }
+        }
+        let program_copy = program.clone();
+
+        let deploy =
+            Box::pin(self.execute_program(session_id, Some(kg.clone()), program, auth)).await?;
+        let problems = Self::result_problem_rows(&deploy);
+        if !problems.is_empty() {
+            return Err(format!(
+                "pack deployment reported {} failed statement(s); earlier statements may \
+                 remain applied - inspect the KG: {}",
+                problems.len(),
+                problems.join("; ")
+            ));
+        }
+
+        let (rules_after, rels_after) = {
+            let storage = self.storage.read();
+            (
+                storage.list_rules_in(&kg).map_err(|e| e.to_string())?,
+                storage.list_relations_in(&kg).map_err(|e| e.to_string())?,
+            )
+        };
+        // Inventory = what the pack program itself declares (parsed), plus
+        // the deploy diff, plus any previously recorded inventory. Parsing
+        // is the primary source: a declared-but-empty relation does not
+        // appear in the relation listing until its first insert, so a diff
+        // alone would miss exactly the pack's data relations.
+        let mut items: std::collections::BTreeSet<(String, String)> =
+            prior_items.into_iter().collect();
+        for line in join_continuation_lines(&strip_comments(&program_copy)).lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            match statement::parse_statement(line) {
+                Ok(statement::Statement::SchemaDecl(decl)) if decl.persistent => {
+                    items.insert(("relation".to_string(), decl.name));
+                }
+                Ok(statement::Statement::PersistentRule(rule)) => {
+                    items.insert(("rule".to_string(), rule.head.relation));
+                }
+                _ => {}
+            }
+        }
+        for rule in &rules_after {
+            if !rules_before.contains(rule) {
+                items.insert(("rule".to_string(), rule.clone()));
+            }
+        }
+        for rel in &rels_after {
+            if !rels_before.contains(rel) {
+                items.insert(("relation".to_string(), rel.clone()));
+            }
+        }
+
+        // Bookkeeping relations; the decls may already exist.
+        let _ = Box::pin(
+            self.execute_program(
+                session_id,
+                Some(kg.clone()),
+                "+pack_meta(name: string, version: string, digest: string)\n\
+             +pack_item(pack: string, kind: string, item: string)"
+                    .to_string(),
+                auth,
+            ),
+        )
+        .await;
+        // Replace any previous pin/inventory rows for this pack, then record.
+        let mut record = String::new();
+        record.push_str(&format!(
+            "-pack_meta(N, V, D) <- pack_meta(N, V, D), N = \"{name}\"\n"
+        ));
+        record.push_str(&format!(
+            "-pack_item(P, K, I) <- pack_item(P, K, I), P = \"{name}\"\n"
+        ));
+        record.push_str(&format!(
+            "+pack_meta[(\"{}\", \"{}\", \"{}\")]\n",
+            name, entry.version, entry.digest
+        ));
+        for (kind, item) in &items {
+            record.push_str(&format!(
+                "+pack_item[(\"{name}\", \"{kind}\", \"{item}\")]\n"
+            ));
+        }
+        let recorded =
+            Box::pin(self.execute_program(session_id, Some(kg.clone()), record, auth)).await?;
+        let record_problems = Self::result_problem_rows(&recorded);
+        if !record_problems.is_empty() {
+            return Err(format!(
+                "pack deployed but pin/inventory recording failed: {}",
+                record_problems.join("; ")
+            ));
+        }
+
+        Ok(Self::messages_result(vec![
+            format!(
+                "installed {}@{} into {kg} ({statement_count} statements)",
+                name, entry.version
+            ),
+            format!("digest {}", entry.digest),
+            format!(
+                "recorded {} rule(s), {} relation(s) in pack_item",
+                items.iter().filter(|(k, _)| k == "rule").count(),
+                items.iter().filter(|(k, _)| k == "relation").count()
+            ),
+        ]))
+    }
+
+    /// `.ontology remove <name>`: drop the pack's recorded rules and
+    /// relations (relations cascade their data) and clear the pins.
+    async fn handle_ontology_remove(
+        &self,
+        session_id: Option<&SessionId>,
+        knowledge_graph: Option<String>,
+        name: &str,
+        auth: Option<&crate::auth::AuthIdentity>,
+    ) -> Result<QueryResult, String> {
+        inputlayer_ontology_client::registry::validate_component("ontology name", name)
+            .map_err(|e| e.to_string())?;
+        let kg = self.resolve_ontology_kg(session_id, knowledge_graph.as_ref())?;
+        let items = self.pack_items(session_id, &kg, name, auth).await;
+        if items.is_empty() {
+            return Err(format!(
+                "ontology '{name}' is not installed in '{kg}' (no pack_item inventory)"
+            ));
+        }
+        // Rules and relations another installed pack also declares are
+        // SHARED: dropping them would delete the other pack's data and
+        // leave its rules dangling. Leave them in place and report.
+        let shared = self.pack_items_of_others(session_id, &kg, name, auth).await;
+        let (items, retained): (Vec<(String, String)>, Vec<(String, String)>) =
+            items.into_iter().partition(|item| !shared.contains(item));
+        if items.is_empty() {
+            return Err(format!(
+                "every item of '{name}' in '{kg}' is shared with another installed pack; \
+                 nothing to remove safely"
+            ));
+        }
+        // Column counts, to clear facts before dropping: `.rel drop` on a
+        // populated relation inside a large batch can report success while
+        // leaving the relation behind (engine bug, filed) - an emptied
+        // relation drops reliably.
+        let arities: std::collections::HashMap<String, usize> = {
+            let storage = self.storage.read();
+            storage
+                .list_relations_with_metadata(&kg)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|(name, columns, _)| (name, columns.len()))
+                .collect()
+        };
+        let mut program = String::new();
+        // Rules first (they depend on the relations), then relations (this
+        // deletes the data they hold - removal is destructive by design).
+        for (kind, item) in items.iter().filter(|(k, _)| k == "rule") {
+            let _ = kind;
+            program.push_str(&format!(".rule drop {item}\n"));
+        }
+        for (_, item) in items.iter().filter(|(k, _)| k == "relation") {
+            if let Some(arity) = arities.get(item).filter(|a| **a > 0) {
+                let vars: Vec<String> = (0..*arity).map(|i| format!("V{i}")).collect();
+                let vars = vars.join(", ");
+                program.push_str(&format!("-{item}({vars}) <- {item}({vars})\n"));
+            }
+            program.push_str(&format!(".rel drop {item}\n"));
+        }
+        let result =
+            Box::pin(self.execute_program(session_id, Some(kg.clone()), program, auth)).await?;
+        let mut messages = vec![format!(
+            "removed {name} from {kg} ({} rule(s), {} relation(s))",
+            items.iter().filter(|(k, _)| k == "rule").count(),
+            items.iter().filter(|(k, _)| k == "relation").count()
+        )];
+        // Surface every sub-result row: drops that fail phrase their errors
+        // in many ways, and silence here would misreport a partial removal.
+        for row in &result.rows {
+            if let Some(WireValue::String(s)) = row.values.first() {
+                messages.push(format!("  {s}"));
+            }
+        }
+        // Trust the read-back, not the drop messages: verify the pack's
+        // relations are actually gone.
+        let leftovers: Vec<String> = {
+            let storage = self.storage.read();
+            let relations = storage.list_relations_in(&kg).map_err(|e| e.to_string())?;
+            let rules = storage.list_rules_in(&kg).map_err(|e| e.to_string())?;
+            items
+                .iter()
+                .filter(|(kind, item)| match kind.as_str() {
+                    "relation" => relations.contains(item),
+                    // Rules are verified too: a `.rule drop` that failed
+                    // would otherwise leave live rules behind while the pin
+                    // and inventory are cleared, making them untrackable.
+                    "rule" => rules.contains(item),
+                    _ => false,
+                })
+                .map(|(kind, item)| format!("{kind} {item}"))
+                .collect()
+        };
+        if !leftovers.is_empty() {
+            // Pin and inventory are still intact, so the pack stays
+            // manageable (retry, or inspect) instead of becoming an
+            // untracked orphan.
+            return Err(format!(
+                "removal incomplete: still present after drop: {} \
+                 (pack_meta and pack_item left in place - retry or inspect the KG)",
+                leftovers.join(", ")
+            ));
+        }
+        // Only now that the drops are verified: clear the pin and inventory.
+        let cleanup = Box::pin(self.execute_program(
+            session_id,
+            Some(kg.clone()),
+            format!(
+                "-pack_item(P, K, I) <- pack_item(P, K, I), P = \"{name}\"\n\
+                 -pack_meta(N, V, D) <- pack_meta(N, V, D), N = \"{name}\""
+            ),
+            auth,
+        ))
+        .await?;
+        for problem in Self::result_problem_rows(&cleanup) {
+            messages.push(format!("  warning: {problem}"));
+        }
+        if !retained.is_empty() {
+            messages.push(format!(
+                "  kept {} item(s) shared with another installed pack",
+                retained.len()
+            ));
+        }
+        Ok(Self::messages_result(messages))
+    }
+
+    /// `.ontology upgrade <name[@version]>`: re-deploy the pack's rules at
+    /// the new version while KEEPING the relations and their data (that is
+    /// the point of an upgrade - conversations and facts survive).
+    async fn handle_ontology_upgrade(
+        &self,
+        session_id: Option<&SessionId>,
+        knowledge_graph: Option<String>,
+        spec: &str,
+        auth: Option<&crate::auth::AuthIdentity>,
+    ) -> Result<QueryResult, String> {
+        let name = spec.split('@').next().unwrap_or(spec).to_string();
+        inputlayer_ontology_client::registry::validate_component("ontology name", &name)
+            .map_err(|e| e.to_string())?;
+        let kg = self.resolve_ontology_kg(session_id, knowledge_graph.as_ref())?;
+        let items = self.pack_items(session_id, &kg, &name, auth).await;
+        if items.is_empty() {
+            return Err(format!(
+                "ontology '{name}' is not installed in '{kg}' - use .ontology install"
+            ));
+        }
+        let rule_items: Vec<&(String, String)> =
+            items.iter().filter(|(k, _)| k == "rule").collect();
+        let mut program = String::new();
+        // The pin goes FIRST: between dropping the old rules and deploying
+        // the new ones this KG runs no rule set, and a stale pin would tell
+        // the gateway it is safe to evaluate against rules that are not
+        // there. Unpinned means the gateway refuses - fail closed.
+        program.push_str(&format!(
+            "-pack_meta(N, V, D) <- pack_meta(N, V, D), N = \"{name}\"\n"
+        ));
+        for (_, item) in &rule_items {
+            program.push_str(&format!(".rule drop {item}\n"));
+        }
+        // Drop only the RULE inventory rows; relation rows stay attributed.
+        program.push_str(&format!(
+            "-pack_item(P, K, I) <- pack_item(P, K, I), P = \"{name}\", K = \"rule\"\n"
+        ));
+        if !program.is_empty() {
+            let result =
+                Box::pin(self.execute_program(session_id, Some(kg.clone()), program, auth)).await?;
+            let problems = Self::result_problem_rows(&result);
+            if !problems.is_empty() {
+                return Err(format!(
+                    "upgrade aborted while dropping old rules: {}",
+                    problems.join("; ")
+                ));
+            }
+        }
+        let install = self
+            .handle_ontology_install(session_id, Some(kg.clone()), spec, auth)
+            .await
+            .map_err(|err| {
+                format!(
+                    "upgrade of '{name}' in '{kg}' left the KG WITHOUT rules and unpinned \
+                     (evaluation refuses until a successful install): {err}"
+                )
+            })?;
+        let mut messages = vec![format!(
+            "upgraded {name} in {kg} (dropped {} old rule(s), data kept)",
+            rule_items.len()
+        )];
+        for row in &install.rows {
+            if let Some(WireValue::String(s)) = row.values.first() {
+                messages.push(s.clone());
+            }
+        }
+        Ok(Self::messages_result(messages))
     }
 
     /// Handle `.session` list command

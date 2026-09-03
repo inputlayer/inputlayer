@@ -1,13 +1,17 @@
 //! `il` - the InputLayer product CLI.
 //!
-//! First slice: the ontology-registry verbs. Ontologies live in a Helm-style
-//! registry (github.com/inputlayer/ontology-registry); `il` is the installer,
-//! and deployment rides the engine's WebSocket API as one atomic program.
+//! Ontologies live in a Helm-style registry
+//! (github.com/inputlayer/ontology-registry). The ENGINE owns the ontology
+//! lifecycle - il's install/remove/upgrade delegate to the engine's
+//! `.ontology` commands over its WebSocket API, so every client runs the
+//! identical implementation under the engine's own auth and ACLs.
 //!
 //! ```text
 //! il search [term]                  browse the registry index
 //! il fetch <name>[@version]         download + digest-verify into the cache
-//! il install <name>[@ver] --kg X    fetch, deploy over WS, pin pack_meta
+//! il install <name>[@ver] --kg X    engine-side .ontology install
+//! il upgrade <name>[@ver] --kg X    rules re-deployed, data kept
+//! il remove <name> --kg X           rules, relations, and data torn down
 //! il list [--kg X]                  what's installed where (via pack_meta)
 //! il migration <verb>               generate | apply | revert | status
 //! ```
@@ -62,6 +66,36 @@ enum Command {
         /// Create the knowledge graph if it does not exist
         #[arg(long)]
         create: bool,
+        /// Engine URL
+        #[arg(long, env = "INPUTLAYER_URL", default_value = "http://127.0.0.1:8080")]
+        server: String,
+        /// Engine API key
+        #[arg(long, env = "INPUTLAYER_API_KEY", hide_env_values = true)]
+        api_key: String,
+    },
+    /// Remove an installed ontology from a knowledge graph (rules,
+    /// relations, and their data)
+    Remove {
+        /// Ontology name
+        name: String,
+        /// Target knowledge graph
+        #[arg(long)]
+        kg: String,
+        /// Engine URL
+        #[arg(long, env = "INPUTLAYER_URL", default_value = "http://127.0.0.1:8080")]
+        server: String,
+        /// Engine API key
+        #[arg(long, env = "INPUTLAYER_API_KEY", hide_env_values = true)]
+        api_key: String,
+    },
+    /// Upgrade an installed ontology to a new version (rules re-deployed,
+    /// data kept)
+    Upgrade {
+        /// Ontology name, optionally pinned: name or name@version
+        spec: String,
+        /// Target knowledge graph
+        #[arg(long)]
+        kg: String,
         /// Engine URL
         #[arg(long, env = "INPUTLAYER_URL", default_value = "http://127.0.0.1:8080")]
         server: String,
@@ -159,7 +193,52 @@ async fn run() -> Result<()> {
             create,
             server,
             api_key,
-        } => install(&reg, &spec, &kg, create, &server, &api_key).await,
+        } => {
+            ontology_command(
+                &format!(".ontology install {spec}"),
+                Some(&spec),
+                &kg,
+                create,
+                true,
+                &server,
+                &api_key,
+            )
+            .await
+        }
+        Command::Remove {
+            name,
+            kg,
+            server,
+            api_key,
+        } => {
+            ontology_command(
+                &format!(".ontology remove {name}"),
+                Some(&name),
+                &kg,
+                false,
+                false,
+                &server,
+                &api_key,
+            )
+            .await
+        }
+        Command::Upgrade {
+            spec,
+            kg,
+            server,
+            api_key,
+        } => {
+            ontology_command(
+                &format!(".ontology upgrade {spec}"),
+                Some(&spec),
+                &kg,
+                false,
+                false,
+                &server,
+                &api_key,
+            )
+            .await
+        }
         Command::Migration(cmd) => migration(&cmd),
         Command::List {
             kg,
@@ -214,36 +293,28 @@ async fn fetch(reg: &Registry, spec: &str) -> Result<std::path::PathBuf> {
     Ok(dir)
 }
 
-async fn install(
-    reg: &Registry,
-    spec: &str,
+/// Ontology lifecycle delegates to the engine's `.ontology` commands -
+/// the engine owns loading (fetch, digest verification, deploy, pin,
+/// inventory), so every client runs the identical implementation.
+async fn ontology_command(
+    command: &str,
+    spec: Option<&str>,
     kg: &str,
     create: bool,
+    create_supported: bool,
     server: &str,
     api_key: &str,
 ) -> Result<()> {
-    let (name, entry) = reg.resolve(spec).await?;
-    let entry_dir = reg.fetch(&name, &entry).await?;
-    let manifest = registry::read_manifest(&entry_dir)?;
-    println!(
-        "{} {} - {} ({})",
-        manifest.ontology.name, manifest.ontology.version, manifest.ontology.title, entry.digest
-    );
-
-    let mut program = String::new();
-    for rel in &manifest.ontology.rules {
-        let path = entry_dir.join(rel);
-        let text = std::fs::read_to_string(&path)
-            .with_context(|| format!("cannot read rules file {}", path.display()))?;
-        program.push_str(&text);
-        program.push('\n');
+    registry::validate_component("knowledge graph", kg)?;
+    // The spec is interpolated into a meta command; keep it to the
+    // registry charset so it cannot become extra tokens.
+    if let Some(spec) = spec {
+        let name = spec.split('@').next().unwrap_or(spec);
+        registry::validate_component("ontology name", name)?;
+        if let Some(version) = spec.split_once('@').map(|(_, v)| v) {
+            registry::validate_component("version", version)?;
+        }
     }
-    let statement_count = program
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with("//"))
-        .count();
-
     let mut engine = ws::Engine::connect(server, api_key).await?;
     if create {
         // Tolerate an existing KG so install is idempotent under --create.
@@ -258,73 +329,31 @@ async fn install(
         .execute(&format!(".kg use {kg}"))
         .await
         .with_context(|| {
-            format!("failed to switch to knowledge graph '{kg}' (--create to create it)")
+            // The --create hint only makes sense for install; remove and
+            // upgrade have no such flag and a missing KG means the pack was
+            // never installed there.
+            if create_supported {
+                format!("failed to switch to knowledge graph '{kg}' (--create to create it)")
+            } else {
+                format!("knowledge graph '{kg}' not found - nothing installed there")
+            }
         })?;
-
-    println!(
-        "deploying {name}@{} -> {kg} ({statement_count} statements, 1 round trip) ...",
-        entry.version
-    );
-    // Parse errors reject the whole program up front; runtime failures are
-    // per-statement and reported as message rows, so both paths are checked.
-    let deploy = engine.execute(&program).await.context(
-        "pack deployment failed (parse errors reject the whole program; a mid-program \
-         runtime failure may leave earlier statements applied - inspect the KG)",
-    )?;
-    let problems = deploy.soft_errors();
+    let result = engine.execute(command).await?;
+    for row in &result.rows {
+        if let Some(text) = row.first().and_then(serde_json::Value::as_str) {
+            println!("{text}");
+        }
+    }
+    // The engine reports many failures as message rows inside an Ok
+    // result; exiting 0 over them would tell a script the install worked.
+    let problems = result.soft_errors();
     if !problems.is_empty() {
         anyhow::bail!(
-            "pack deployment reported {} failed statement(s); earlier statements may \
-             remain applied - inspect the KG:\n  {}",
+            "engine reported {} problem(s):\n  {}",
             problems.len(),
             problems.join("\n  ")
         );
     }
-
-    registry::validate_component("ontology name", &manifest.ontology.name)?;
-    registry::validate_component("version", &manifest.ontology.version)?;
-
-    // Pin the install so findings are attributable to an exact rule set and
-    // `il list` can report it. The decl may legitimately already exist; any
-    // other decl failure surfaces via the read-back below.
-    let _ = engine
-        .execute("+pack_meta(name: string, version: string, digest: string)")
-        .await;
-    let pin = engine
-        .execute(&format!(
-            "+pack_meta[(\"{}\", \"{}\", \"{}\")]",
-            manifest.ontology.name, manifest.ontology.version, entry.digest
-        ))
-        .await
-        .context("failed to pin pack_meta")?;
-    if let Some(problem) = pin.soft_errors().first() {
-        anyhow::bail!("failed to pin pack_meta: {problem}");
-    }
-
-    // Trust the read-back, not the insert's silence: the engine reports some
-    // rejections as plain messages.
-    let pinned = engine
-        .execute("?pack_meta(Name, Version, Digest)")
-        .await
-        .context("failed to verify pack_meta pin")?;
-    let confirmed = pinned.rows.iter().any(|row| {
-        row.first().and_then(serde_json::Value::as_str) == Some(manifest.ontology.name.as_str())
-            && row.get(1).and_then(serde_json::Value::as_str)
-                == Some(manifest.ontology.version.as_str())
-    });
-    if !confirmed {
-        anyhow::bail!(
-            "pack deployed, but the pack_meta pin did not verify - the KG has no \
-             ({}, {}) row",
-            manifest.ontology.name,
-            manifest.ontology.version
-        );
-    }
-
-    println!(
-        "ok {}@{} -> {kg} (pinned in pack_meta)",
-        manifest.ontology.name, manifest.ontology.version
-    );
     Ok(())
 }
 
