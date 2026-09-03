@@ -48,6 +48,15 @@ pub struct ExtractionSection {
     /// conversation id to isolate conversations inside a shared KG.
     #[serde(default)]
     pub identifier_fields: BTreeMap<String, Vec<String>>,
+    /// Per-section fields that may REFERENCE an identifier rather than
+    /// carry a literal (an entity-valued attribute: `reports_to` ->
+    /// another entity). Such a value is prefixed only when it matches an
+    /// identifier from the same extraction, so `priya_raman` becomes a
+    /// conversation-scoped reference while `2026-04-01` or `person` stay
+    /// literal. Without this, rules that walk entity to entity (cycles,
+    /// transitive closures, hierarchies) silently never join.
+    #[serde(default)]
+    pub reference_fields: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Default, Deserialize)]

@@ -762,36 +762,75 @@ async fn evaluate_one(
     ))
 }
 
-/// Enforce fails CLOSED: 422 on any blocking finding from any pair, 503
-/// when any pair could not be evaluated at all.
+/// Enforce fails CLOSED, and says WHY.
+///
+/// Two distinct refusals, because they mean different things to whoever
+/// hits them: the conversation genuinely conflicts (422, act on the
+/// finding), or this deployment could not evaluate it (503, fix the
+/// deployment - almost always a knowledge graph whose installed pack
+/// version has drifted from what the gateway serves).
+///
+/// Dropped extraction rows do NOT refuse: the quote gate drops rows whose
+/// quote is not verbatim, which is routine model noise, and refusing over
+/// it would make enforce unusable on ordinary traffic. A dropped row is a
+/// missed finding, never a false one, and the count is reported.
 fn enforcement_refusal(reports: &[Report]) -> Option<(StatusCode, Json<Value>)> {
-    let blocking_finding = reports.iter().any(|r| {
-        r.findings
-            .iter()
-            .any(|f| f["blocking"].as_bool() == Some(true))
-    });
-    if blocking_finding {
+    let blocking: Vec<String> = reports
+        .iter()
+        .flat_map(|report| {
+            report
+                .findings
+                .iter()
+                .filter(|finding| finding["blocking"].as_bool() == Some(true))
+                .map(|finding| {
+                    let title = finding["title"].as_str().unwrap_or("finding");
+                    format!("{} ({}/{})", title, report.kg, report.ontology)
+                })
+        })
+        .collect();
+    if !blocking.is_empty() {
+        let detail = if blocking.len() > 3 {
+            format!(
+                "{} and {} more",
+                blocking[..3].join(", "),
+                blocking.len() - 3
+            )
+        } else {
+            blocking.join(", ")
+        };
         return Some((
             StatusCode::UNPROCESSABLE_ENTITY,
             Json(json!({
                 "error": { "type": "consistency_violation",
-                    "message": "conversation triggers blocking findings; completion refused" },
+                    "message": format!(
+                        "completion refused: the conversation triggers {} blocking finding(s) - {}. Each finding below carries the quoted spans that conflict and the proof tree that derived it. Resolve the conflict, or use annotate mode to receive findings without blocking.",
+                        blocking.len(), detail
+                    ) },
                 "inputlayer": reports_json(reports),
             })),
         ));
     }
-    // Fail closed on ANY evaluation gap: an incomplete pair, or dropped
-    // extraction rows (a misquoted claim is exactly what an engineered
-    // bypass looks like - under enforce, partial evaluation refuses).
-    if reports
+    let unevaluated: Vec<String> = reports
         .iter()
-        .any(|r| r.status != "complete" || !r.dropped.is_empty())
-    {
+        .filter(|report| report.status != "complete")
+        .map(|report| {
+            format!(
+                "{}/{}: {}",
+                report.kg,
+                report.ontology,
+                report.reason.as_deref().unwrap_or("no reason reported")
+            )
+        })
+        .collect();
+    if !unevaluated.is_empty() {
         return Some((
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({
                 "error": { "type": "verification_unavailable",
-                    "message": "conversation could not be fully evaluated; completion refused (enforce fails closed)" },
+                    "message": format!(
+                        "completion refused because enforce mode requires a completed evaluation and this one did not complete - {}",
+                        unevaluated.join("; ")
+                    ) },
                 "inputlayer": reports_json(reports),
             })),
         ));
@@ -1242,13 +1281,13 @@ mod tests {
         );
         // All complete, only non-blocking findings: proceed.
         assert!(enforcement_refusal(&[report("complete", false)]).is_none());
-        // Dropped extraction rows refuse under enforce (partial evaluation).
+        // Dropped extraction rows are routine model noise (the quote gate
+        // doing its job) and must NOT refuse: a dropped row is a missed
+        // finding, never a false one, and refusing over it would make
+        // enforce unusable on ordinary traffic.
         let mut with_drops = report("complete", false);
         with_drops.dropped = vec!["claims: quote not verbatim".to_string()];
-        assert_eq!(
-            enforcement_refusal(&[with_drops]).map(|(code, _)| code),
-            Some(StatusCode::SERVICE_UNAVAILABLE)
-        );
+        assert!(enforcement_refusal(&[with_drops]).is_none());
     }
 
     #[test]
