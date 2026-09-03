@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.pyc
+data/
+uploads/
+benchmarks/results/
+benchmarks/inputs/*.jpg
+benchmarks/inputs/*.jpeg
+benchmarks/inputs/*.png
+.ipynb_checkpoints/
+.inputlayer-credentials.toml
+*.tsbuildinfo
+bun.lock
+uv.lock
+.env
