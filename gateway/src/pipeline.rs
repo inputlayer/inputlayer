@@ -97,6 +97,24 @@ pub fn prefix_identifiers(
     prefix: &str,
 ) -> Vec<String> {
     let mut dropped = Vec::new();
+    // Raw identifier values, collected BEFORE prefixing: a reference field
+    // is prefixed only when it names one of these.
+    let mut identifiers: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (section, fields) in &manifest.extraction.identifier_fields {
+        let Some(rows) = extraction.get(section).and_then(Value::as_array) else {
+            continue;
+        };
+        for row in rows {
+            for field in fields {
+                if let Some(Value::String(value)) = row.get(field) {
+                    if !value.trim().is_empty() {
+                        identifiers.insert(value.clone());
+                    }
+                }
+            }
+        }
+    }
+
     for (section, fields) in &manifest.extraction.identifier_fields {
         let Some(rows) = extraction.get_mut(section).and_then(Value::as_array_mut) else {
             continue;
@@ -124,6 +142,26 @@ pub fn prefix_identifiers(
             }
             true
         });
+    }
+
+    // Entity-valued attributes: prefix the reference so it joins back to
+    // the prefixed entity it names.
+    for (section, fields) in &manifest.extraction.reference_fields {
+        let Some(rows) = extraction.get_mut(section).and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for row in rows {
+            let Some(object) = row.as_object_mut() else {
+                continue;
+            };
+            for field in fields {
+                if let Some(Value::String(value)) = object.get_mut(field) {
+                    if identifiers.contains(value.as_str()) {
+                        *value = format!("{prefix}:{value}");
+                    }
+                }
+            }
+        }
     }
     dropped
 }
@@ -339,15 +377,60 @@ async fn ensure_pack_pinned(
             && row.get(1).and_then(Value::as_str) == Some(ontology.version.as_str())
             && row.get(2).and_then(Value::as_str) == Some(ontology.digest.as_str())
     });
-    anyhow::ensure!(
-        pinned,
-        "ontology {}@{} (digest {}) is not installed in '{kg}' - run .ontology install \
-         (and ensure engine and gateway use the same registry source)",
-        ontology.name,
-        ontology.version,
-        ontology.digest
-    );
-    Ok(())
+    if pinned {
+        return Ok(());
+    }
+    // Say exactly what is wrong and what to do about it. The common case is
+    // a version drift after a registry release, and "not installed" alone
+    // sends people looking in the wrong place.
+    let installed: Vec<(String, String)> = pins
+        .rows
+        .iter()
+        .filter(|row| row.first().and_then(Value::as_str) == Some(ontology.name.as_str()))
+        .filter_map(|row| {
+            Some((
+                row.get(1).and_then(Value::as_str)?.to_string(),
+                row.get(2).and_then(Value::as_str)?.to_string(),
+            ))
+        })
+        .collect();
+    match installed.as_slice() {
+        [] => anyhow::bail!(
+            "knowledge graph '{kg}' has no '{}' installed - install it first \
+             (il install {} --kg {kg}, or the Ontologies tab)",
+            ontology.name,
+            ontology.name
+        ),
+        [(version, _)] if version != &ontology.version => anyhow::bail!(
+            "version mismatch: '{kg}' has {}@{version} installed but this gateway serves \
+             {}@{} - upgrade the knowledge graph (il upgrade {}@{} --kg {kg}, or the \
+             Ontologies tab) so findings are attributable to the rules that derived them",
+            ontology.name,
+            ontology.name,
+            ontology.version,
+            ontology.name,
+            ontology.version,
+        ),
+        [(version, _)] => anyhow::bail!(
+            "digest mismatch: '{kg}' has {}@{version} installed, and this gateway loaded \
+             {}@{} from a different registry source (local clone vs published release). \
+             Point the engine and the gateway at the same INPUTLAYER_REGISTRY, then \
+             reinstall",
+            ontology.name,
+            ontology.name,
+            ontology.version
+        ),
+        many => anyhow::bail!(
+            "'{kg}' has {} pinned at {} - this gateway serves {}. Upgrade the knowledge \
+             graph to match",
+            ontology.name,
+            many.iter()
+                .map(|(version, _)| version.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            ontology.version
+        ),
+    }
 }
 
 async fn read_findings(

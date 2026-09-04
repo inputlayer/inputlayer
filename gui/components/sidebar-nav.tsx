@@ -3,13 +3,15 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { FileCode, Network, Database, BookOpen, Share2 } from "lucide-react"
+import { FileCode, Network, Database, BookOpen, Share2, Package, MessageSquare } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 const mainNavItems = [
   { title: "Query Editor", href: "/query", icon: FileCode },
   { title: "Relations", href: "/relations", icon: Network },
-  { title: "KG Graph", href: "/graph", icon: Share2 },
+  { title: "Visualize", href: "/graph", icon: Share2 },
+  { title: "Ontologies", href: "/ontologies", icon: Package },
+  { title: "Chat", href: "/chat", icon: MessageSquare },
 ]
 
 const bottomNavItems = [

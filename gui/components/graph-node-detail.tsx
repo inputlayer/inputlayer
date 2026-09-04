@@ -78,7 +78,7 @@ export function GraphNodeDetail({ node, onClose, onHoverRelation, onClickRelatio
               <ContextMenuContent>
                 <ContextMenuItem onClick={() => router.push(`/graph?select=${rel}`)} className="focus:bg-teal-500/10 focus:text-teal-600 dark:focus:text-teal-400">
                   <Share2 className="h-3.5 w-3.5 mr-2" />
-                  Open in KG Graph
+                  Open in Visualize
                 </ContextMenuItem>
                 {onClickRelation && (
                   <ContextMenuItem onClick={() => onClickRelation(rel)} className="focus:bg-teal-500/10 focus:text-teal-600 dark:focus:text-teal-400">

@@ -22,6 +22,13 @@ export interface IQLConnection {
   status: "connected" | "disconnected" | "connecting" | "reconnecting"
 }
 
+/** A pack pinned in a knowledge graph (read from pack_meta). */
+export interface InstalledOntology {
+  name: string
+  version: string
+  digest: string
+}
+
 export interface KnowledgeGraph {
   id: string
   name: string
@@ -150,6 +157,13 @@ interface IQLStore {
   whyQuery: (query: string) => Promise<string>
   whyNotQuery: (input: string) => Promise<string>
   createKnowledgeGraph: (name: string) => Promise<void>
+  // Ontology lifecycle: the ENGINE owns it (`.ontology` meta commands run
+  // under the connected user's own auth and per-KG ACLs). The Studio is
+  // just another WebSocket client sending the same commands `il` sends.
+  installOntology: (spec: string, kgName: string, create: boolean) => Promise<string[]>
+  removeOntology: (name: string, kgName: string) => Promise<string[]>
+  upgradeOntology: (spec: string, kgName: string) => Promise<string[]>
+  listInstalledOntologies: (kgName: string) => Promise<InstalledOntology[]>
   deleteKnowledgeGraph: (name: string) => Promise<void>
   deleteRelation: (name: string) => Promise<void>
   dropRule: (name: string, isSession: boolean) => Promise<void>
@@ -221,6 +235,61 @@ function clearStorage() {
 }
 
 const KG_NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/
+
+/** Registry names/versions end up in a meta command; keep them boring. */
+function validateOntologySpec(spec: string): void {
+  if (!/^[A-Za-z0-9._-]+(@[A-Za-z0-9._-]+)?$/.test(spec)) {
+    throw new Error(
+      `Invalid ontology "${spec}": use name or name@version with [A-Za-z0-9._-]`,
+    )
+  }
+}
+
+/** Single-column message rows from a meta command result. */
+function messageRows(result: { columns?: string[]; rows?: unknown[][] }): string[] {
+  const rows = result.rows ?? []
+  return rows
+    .map((row) => (row.length > 0 ? String(row[0]) : ""))
+    .filter((message) => message.length > 0)
+}
+
+/**
+ * The engine reports many failures as message rows inside a successful
+ * result. Deny by default, like the Rust clients: anything that is not a
+ * known-good phrase is a problem, because treating an unfamiliar failure
+ * as success is how a UI ends up claiming an install worked when it did
+ * not.
+ */
+const ENGINE_SUCCESS_PREFIXES = [
+  "installed ",
+  "removed ",
+  "upgraded ",
+  "digest ",
+  "recorded ",
+  "kept ",
+  "Inserted ",
+  "Deleted ",
+  "Updated ",
+  "Conditional delete:",
+  "Relation ",
+  "Rule ",
+  "Schema ",
+  "Knowledge graph ",
+  "Switched to knowledge graph",
+  "Registered ",
+  "Type ",
+  "No facts",
+]
+
+function engineProblems(messages: string[]): string[] {
+  return messages.filter((message) => {
+    const trimmed = message.trim()
+    return (
+      trimmed.length > 0 &&
+      !ENGINE_SUCCESS_PREFIXES.some((prefix) => trimmed.startsWith(prefix))
+    )
+  })
+}
 
 function validateKgName(name: string): void {
   if (!KG_NAME_RE.test(name)) {
@@ -973,6 +1042,72 @@ export const useIQLStore = create<IQLStore>((set, get) => ({
     // Refresh KG list
     const knowledgeGraphs = await fetchKnowledgeGraphs(wsClient)
     set({ knowledgeGraphs })
+  },
+
+  installOntology: async (spec: string, kgName: string, create: boolean): Promise<string[]> => {
+    if (!wsClient) throw new Error("Not connected")
+    validateKgName(kgName)
+    validateOntologySpec(spec)
+    if (create) {
+      // Tolerate an existing KG so install stays idempotent.
+      try {
+        await wsClient.execute(`.kg create ${kgName}`)
+      } catch (error) {
+        if (!String(error).toLowerCase().includes("exist")) throw error
+      }
+    }
+    await wsClient.execute(`.kg use ${kgName}`)
+    const result = await wsClient.execute(`.ontology install ${spec}`)
+    const messages = messageRows(result)
+    const problems = engineProblems(messages)
+    if (problems.length > 0) throw new Error(problems.join("\n"))
+    // The KG list and current view may both have changed.
+    const knowledgeGraphs = await fetchKnowledgeGraphs(wsClient)
+    set({ knowledgeGraphs })
+    return messages
+  },
+
+  removeOntology: async (name: string, kgName: string): Promise<string[]> => {
+    if (!wsClient) throw new Error("Not connected")
+    validateKgName(kgName)
+    validateOntologySpec(name)
+    await wsClient.execute(`.kg use ${kgName}`)
+    const result = await wsClient.execute(`.ontology remove ${name}`)
+    const messages = messageRows(result)
+    const problems = engineProblems(messages)
+    if (problems.length > 0) throw new Error(problems.join("\n"))
+    return messages
+  },
+
+  upgradeOntology: async (spec: string, kgName: string): Promise<string[]> => {
+    if (!wsClient) throw new Error("Not connected")
+    validateKgName(kgName)
+    validateOntologySpec(spec)
+    await wsClient.execute(`.kg use ${kgName}`)
+    const result = await wsClient.execute(`.ontology upgrade ${spec}`)
+    const messages = messageRows(result)
+    const problems = engineProblems(messages)
+    if (problems.length > 0) throw new Error(problems.join("\n"))
+    return messages
+  },
+
+  listInstalledOntologies: async (kgName: string): Promise<InstalledOntology[]> => {
+    if (!wsClient) throw new Error("Not connected")
+    validateKgName(kgName)
+    await wsClient.execute(`.kg use ${kgName}`)
+    try {
+      const result = await wsClient.execute("?pack_meta(N, V, D)")
+      return (result.rows ?? [])
+        .filter((row) => row.length >= 3)
+        .map((row) => ({
+          name: String(row[0]),
+          version: String(row[1]),
+          digest: String(row[2]),
+        }))
+    } catch {
+      // No pack_meta relation yet: nothing is installed here.
+      return []
+    }
   },
 
   deleteKnowledgeGraph: async (name: string): Promise<void> => {
