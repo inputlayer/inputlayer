@@ -44,7 +44,8 @@ use crate::rule_catalog::RuleCatalog;
 use crate::schema::{RelationSchema, SchemaCatalog, ValidationEngine};
 use crate::statement::{RuleDef, SerializableBodyPred};
 use crate::storage::persist::{
-    consolidate_to_current, to_tuples, FilePersist, PersistBackend, PersistConfig, Update,
+    consolidate_to_current, set_semantics_corrections, to_tuples, FilePersist, PersistBackend,
+    PersistConfig, Update,
 };
 use crate::storage::{
     KnowledgeGraphMetadata, KnowledgeGraphsMetadata, StorageError, StorageResult,
@@ -477,26 +478,29 @@ impl StorageEngine {
             }
         }
 
-        // Hold dropping_kgs read guard across the entire persist operation
-        // to prevent a TOCTOU race where a KG drop starts between the check
-        // and the persist call. The read lock allows concurrent inserts but
-        // blocks KG drops from marking the KG as dropping until we finish.
+        // The dropping_kgs read guard blocks KG drops for the whole write.
         let dropping_guard = self.dropping_kgs.read();
         if dropping_guard.contains(kg) {
             return Err(StorageError::KnowledgeGraphNotFound(kg.to_string()));
         }
+        let db = self.kg_handle(kg)?;
 
-        // Generate shard name and logical time
+        // Under the KG write lock: compute the effective delta, assign time,
+        // persist, apply. Disk and memory see writes in the same order.
+        let mut db = db.write();
+        let total = tuples.len();
+        let new_tuples = db.absent_tuples(relation, tuples);
+        if new_tuples.is_empty() {
+            return Ok((0, total));
+        }
+
         let shard = format!("{kg}:{relation}");
         let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
-
-        // Create DD-style updates (+1 diff for insert)
-        let updates: Vec<Update> = tuples
+        let updates: Vec<Update> = new_tuples
             .iter()
             .map(|data| Update::insert(data.clone(), time))
             .collect();
 
-        // Persist first (durability guarantee via WAL + batches)
         let persist_start = Instant::now();
         self.persist.ensure_shard(&shard)?;
         self.persist.append(&shard, &updates)?;
@@ -508,18 +512,10 @@ impl StorageEngine {
             persist_ms,
             "persist_append_complete"
         );
-
-        // Release dropping_kgs guard before acquiring KG write lock
         drop(dropping_guard);
 
-        // Update in-memory state
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
-
-        let mut db = db.write();
-        db.insert_in_memory(relation, tuples, time)
+        let (new_count, _) = db.insert_in_memory(relation, new_tuples, time)?;
+        Ok((new_count, total - new_count))
     }
 
     /// Delete binary tuples from a relation in the current knowledge graph
@@ -591,37 +587,38 @@ impl StorageEngine {
             return Ok(0);
         }
 
-        // Hold dropping_kgs read guard across the persist operation (same as insert)
         let dropping_guard = self.dropping_kgs.read();
         if dropping_guard.contains(kg) {
             return Err(StorageError::KnowledgeGraphNotFound(kg.to_string()));
         }
+        let db = self.kg_handle(kg)?;
 
-        // Generate shard name and logical time
+        let mut db = db.write();
+        let present = db.present_tuples(relation, &tuples);
+        if present.is_empty() {
+            return Ok(0);
+        }
+
         let shard = format!("{kg}:{relation}");
         let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
-
-        // Create DD-style updates (-1 diff for delete)
-        let updates: Vec<Update> = tuples
+        let updates: Vec<Update> = present
             .iter()
             .map(|data| Update::delete(data.clone(), time))
             .collect();
 
-        // Persist first (durability guarantee via WAL + batches)
         self.persist.ensure_shard(&shard)?;
         self.persist.append(&shard, &updates)?;
-
-        // Release dropping_kgs guard before acquiring KG write lock
         drop(dropping_guard);
 
-        // Update in-memory state
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        db.delete_in_memory(relation, &present, time)
+    }
 
-        let mut db = db.write();
-        db.delete_in_memory(relation, &tuples, time)
+    /// Clone a KG handle without holding the `DashMap` shard lock.
+    fn kg_handle(&self, kg: &str) -> StorageResult<Arc<RwLock<KnowledgeGraph>>> {
+        self.knowledge_graphs
+            .get(kg)
+            .map(|entry| Arc::clone(entry.value()))
+            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))
     }
 
     /// Execute an IQL query on the current knowledge graph
@@ -975,14 +972,14 @@ impl StorageEngine {
         kg: &str,
         prefix: &str,
     ) -> StorageResult<Vec<(String, usize)>> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
-
-        let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
+        let dropping_guard = self.dropping_kgs.read();
+        if dropping_guard.contains(kg) {
+            return Err(StorageError::KnowledgeGraphNotFound(kg.to_string()));
+        }
+        let db = self.kg_handle(kg)?;
 
         let mut db = db.write();
+        let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
         db.clear_relations_by_prefix(prefix, time, &self.persist, kg)
     }
 
@@ -1663,11 +1660,12 @@ impl StorageEngine {
         // Load each knowledge graph
         let total_kgs = kg_names.len();
         let load_start = std::time::Instant::now();
+        let mut corrections = Vec::new();
         for (i, kg_name) in kg_names.into_iter().enumerate() {
             let kg_dir = self.config.storage.data_dir.join(&kg_name);
             fs::create_dir_all(&kg_dir)?;
 
-            let kg = self.load_knowledge_graph_from_persist(&kg_name, kg_dir)?;
+            let kg = self.load_knowledge_graph_from_persist(&kg_name, kg_dir, &mut corrections)?;
             self.knowledge_graphs
                 .insert(kg_name, Arc::new(RwLock::new(kg)));
 
@@ -1684,6 +1682,16 @@ impl StorageEngine {
         // Update logical time to be after all loaded data
         let max_time = self.find_max_logical_time()?;
         self.logical_time.store(max_time + 1, Ordering::SeqCst);
+
+        // Clamp shards whose multiplicities drifted from set membership
+        if !corrections.is_empty() {
+            let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
+            for (shard, consolidated) in &corrections {
+                let fixes = set_semantics_corrections(consolidated, time);
+                tracing::warn!(shard = %shard, tuples = fixes.len(), "persist_multiplicity_clamped");
+                self.persist.append(shard, &fixes)?;
+            }
+        }
 
         // Clean up orphaned shards from incomplete drops (RC-6)
         let loaded_kgs: HashSet<String> = self
@@ -1708,6 +1716,7 @@ impl StorageEngine {
         &self,
         name: &str,
         data_dir: PathBuf,
+        corrections: &mut Vec<(String, Vec<Update>)>,
     ) -> StorageResult<KnowledgeGraph> {
         let prefix = format!("{name}:");
         let mut store = RelationStore::new();
@@ -1730,6 +1739,9 @@ impl StorageEngine {
 
                 // Extract current tuples (positive multiplicities only)
                 let tuples = to_tuples(&updates);
+                if updates.iter().any(|u| u.diff != 1) {
+                    corrections.push((shard_name.clone(), updates));
+                }
 
                 if !tuples.is_empty() {
                     // Infer schema from first tuple
@@ -2211,6 +2223,16 @@ impl KnowledgeGraph {
         }
     }
 
+    /// Distinct tuples from `tuples` not yet in `relation`, in input order.
+    fn absent_tuples(&self, relation: &str, tuples: Vec<Tuple>) -> Vec<Tuple> {
+        self.store.absent(relation, tuples)
+    }
+
+    /// Distinct tuples from `tuples` currently in `relation`.
+    fn present_tuples(&self, relation: &str, tuples: &[Tuple]) -> Vec<Tuple> {
+        self.store.present(relation, tuples)
+    }
+
     /// Insert tuples into in-memory state only
     ///
     /// Persistence is handled by `StorageEngine` via the persist layer.
@@ -2565,20 +2587,26 @@ impl KnowledgeGraph {
                     continue;
                 }
 
-                // Feed deletes to IncrementalEngine
-                if let Some(ref dd) = self.incremental {
-                    let _ = dd.delete(relation, tuples.to_vec(), time);
-                    let _ = dd.notify_base_update(relation);
-                }
-
-                // Write deletes to persist
+                // Persist before touching memory so a failed write leaves both intact
                 let shard = format!("{kg_name}:{relation}");
                 let updates: Vec<Update> = tuples
                     .iter()
                     .map(|t| Update::delete(t.clone(), time))
                     .collect();
-                let _ = persist.ensure_shard(&shard);
-                let _ = persist.append(&shard, &updates);
+                if let Err(e) = persist
+                    .ensure_shard(&shard)
+                    .and_then(|()| persist.append(&shard, &updates))
+                {
+                    if !results.is_empty() {
+                        self.publish_snapshot();
+                    }
+                    return Err(e);
+                }
+
+                if let Some(ref dd) = self.incremental {
+                    let _ = dd.delete(relation, tuples.to_vec(), time);
+                    let _ = dd.notify_base_update(relation);
+                }
 
                 self.store.clear(relation);
                 self.rebuild_indexes_for(relation);

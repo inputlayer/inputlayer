@@ -113,6 +113,24 @@ pub fn to_tuples(updates: &[Update]) -> Vec<Tuple> {
         .collect()
 }
 
+/// Corrections that clamp consolidated multiplicities to set membership.
+///
+/// A tuple is present iff its sum is positive. Returns updates at `time` that
+/// bring every sum to exactly 1 (present) or 0 (absent).
+pub fn set_semantics_corrections(consolidated: &[Update], time: u64) -> Vec<Update> {
+    consolidated
+        .iter()
+        .filter_map(|u| {
+            let target = i64::from(u.diff > 0);
+            (u.diff != target).then(|| Update {
+                data: u.data.clone(),
+                time,
+                diff: target - u.diff,
+            })
+        })
+        .collect()
+}
+
 /// Convert consolidated updates to tuples with their multiplicities.
 ///
 /// Useful for debugging or multiset semantics.
@@ -350,5 +368,49 @@ mod tests {
         assert_eq!(tuples.len(), 2);
         assert_eq!(tuples[0].to_pair(), Some((1, 2)));
         assert_eq!(tuples[1].to_pair(), Some((5, 6)));
+    }
+
+    #[test]
+    fn test_set_semantics_corrections_clamp_to_membership() {
+        let t = |a| Tuple::from_pair(a, a);
+        let mut updates = vec![
+            Update {
+                data: t(1),
+                time: 1,
+                diff: 1,
+            },
+            Update {
+                data: t(2),
+                time: 1,
+                diff: 3,
+            },
+            Update {
+                data: t(3),
+                time: 1,
+                diff: -2,
+            },
+        ];
+        let fixes = set_semantics_corrections(&updates, 9);
+        assert_eq!(
+            fixes,
+            vec![
+                Update {
+                    data: t(2),
+                    time: 9,
+                    diff: -2
+                },
+                Update {
+                    data: t(3),
+                    time: 9,
+                    diff: 2
+                },
+            ]
+        );
+        updates.extend(fixes);
+        consolidate_to_current(&mut updates);
+        assert_eq!(
+            to_tuples_with_multiplicity(&updates),
+            vec![(t(1), 1), (t(2), 1)]
+        );
     }
 }
