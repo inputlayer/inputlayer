@@ -271,11 +271,17 @@ Complete example for item recommendations:
 
 ### 2. Create HNSW Indexes
 
-For large datasets (>10K vectors):
+For large datasets (>10K vectors), index the column and query it with `hnsw_nearest`. Distance functions such as `cosine()` always scan every row.
 
 ```
 .index create doc_idx on documents(embedding) metric cosine m 16 ef_search 50
 ```
+
+```iql
+?hnsw_nearest("doc_idx", [0.1, 0.2, 0.3], 10, Id, Dist), documents(Id, Title, _)
+```
+
+See the [Indexing Guide](indexing.md).
 
 ### 3. Use Quantization for Memory
 

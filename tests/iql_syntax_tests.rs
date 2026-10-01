@@ -179,7 +179,7 @@ fn test_parse_transient_rule() {
 fn test_parse_query() {
     let stmt = parse_statement("?edge(1, X)").unwrap();
     if let Statement::Query(goal) = stmt {
-        assert_eq!(goal.goal.relation, "edge");
+        assert_eq!(goal.goal.as_ref().unwrap().relation, "edge");
     } else {
         panic!("Expected Query statement");
     }

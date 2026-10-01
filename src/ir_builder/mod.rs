@@ -249,17 +249,19 @@ impl IRBuilder {
                 ef_search,
             } = pred
             {
-                // Convert the query Term to an IRExpression
-                let ir_query = match query {
-                    Term::VectorLiteral(v) => crate::ir::IRExpression::VectorLiteral(
-                        v.iter().map(|f| *f as f32).collect(),
+                // A variable query becomes column 0 of the scan's output, so the
+                // resolved rows (QV, Id, Dist) join with whatever binds QV.
+                let (ir_query, output_schema) = match query {
+                    Term::VectorLiteral(v) => (
+                        crate::ir::IRExpression::VectorLiteral(
+                            v.iter().map(|f| *f as f32).collect(),
+                        ),
+                        vec![id_var.clone(), distance_var.clone()],
                     ),
-                    Term::Variable(name) => {
-                        // Variable query - will be resolved at execution time.
-                        // Store as a string constant placeholder containing the variable name.
-                        // The pre-DD resolution phase will handle binding.
-                        crate::ir::IRExpression::StringConstant(name.clone())
-                    }
+                    Term::Variable(name) => (
+                        crate::ir::IRExpression::Column(0),
+                        vec![name.clone(), id_var.clone(), distance_var.clone()],
+                    ),
                     _ => {
                         return Err(format!(
                             "hnsw_nearest: query must be a variable or vector literal, got {query:?}"
@@ -272,7 +274,7 @@ impl IRBuilder {
                     query: ir_query,
                     k: *k,
                     ef_search: *ef_search,
-                    output_schema: vec![id_var.clone(), distance_var.clone()],
+                    output_schema,
                 });
             }
         }
@@ -3575,9 +3577,27 @@ mod tests {
         .unwrap();
 
         let ir = builder.build_ir(&rule).unwrap();
-        // Should produce a Join between Scan(embedding) and HnswScan
-        // The exact shape depends on optimization, but it should compile
-        assert!(!ir.output_schema().is_empty());
+        fn find_hnsw(ir: &crate::ir::IRNode) -> Option<&crate::ir::IRNode> {
+            use crate::ir::IRNode;
+            match ir {
+                IRNode::HnswScan { .. } => Some(ir),
+                IRNode::Join { left, right, .. } => find_hnsw(left).or_else(|| find_hnsw(right)),
+                IRNode::Map { input, .. } | IRNode::Filter { input, .. } => find_hnsw(input),
+                _ => None,
+            }
+        }
+        // The query variable is column 0, so it joins with embedding(X, Vec).
+        match find_hnsw(&ir) {
+            Some(crate::ir::IRNode::HnswScan {
+                query,
+                output_schema,
+                ..
+            }) => {
+                assert_eq!(*query, crate::ir::IRExpression::Column(0));
+                assert_eq!(output_schema, &["Vec", "Id", "Dist"]);
+            }
+            other => panic!("Expected HnswScan, got {other:?}"),
+        }
     }
 
     #[test]

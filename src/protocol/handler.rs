@@ -10,7 +10,7 @@
 //! Test code uses `expect()` with descriptive messages for better failure diagnostics.
 
 use crate::ast::Term;
-use crate::index_manager::{DistanceMetric, HnswConfig, IndexStats, IndexType, RegisteredIndex};
+use crate::index_manager::IndexStats;
 use crate::rule_catalog::validate_rule;
 use crate::schema::{ColumnSchema, RelationSchema};
 use crate::session::{SessionConfig, SessionId, SessionManager};
@@ -192,6 +192,50 @@ pub struct Handler {
     subscription_metrics: super::subscription::SubscriptionMetrics,
 }
 
+/// `.index` command implementations shared by `Handler` and `QueryJob`.
+mod index_commands {
+    use crate::index_manager::IndexStats;
+    use crate::statement::meta::IndexCreateOptions;
+    use crate::StorageEngine;
+
+    pub(super) fn create(
+        storage: &StorageEngine,
+        kg: &str,
+        opts: &IndexCreateOptions,
+    ) -> Result<String, String> {
+        let stats = storage
+            .create_index_in(kg, opts)
+            .map_err(|e| e.to_string())?;
+        Ok(format!(
+            "Index '{}' created on {}.{} ({} vectors).",
+            stats.name, stats.relation, stats.column, stats.tuple_count
+        ))
+    }
+
+    pub(super) fn drop(storage: &StorageEngine, kg: &str, name: &str) -> Result<String, String> {
+        storage.drop_index_in(kg, name).map_err(|e| e.to_string())?;
+        Ok(format!("Index '{name}' dropped."))
+    }
+
+    pub(super) fn rebuild(storage: &StorageEngine, kg: &str, name: &str) -> Result<String, String> {
+        let stats = storage
+            .rebuild_index_in(kg, name)
+            .map_err(|e| e.to_string())?;
+        Ok(format!(
+            "Index '{name}' rebuilt ({} vectors).",
+            stats.tuple_count
+        ))
+    }
+
+    pub(super) fn stats(
+        storage: &StorageEngine,
+        kg: &str,
+        name: Option<&str>,
+    ) -> Result<Vec<IndexStats>, String> {
+        storage.index_stats_in(kg, name).map_err(|e| e.to_string())
+    }
+}
+
 /// Current epoch milliseconds.
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -362,159 +406,23 @@ impl QueryJob {
     }
 
     fn create_index(&self, kg: &str, opts: &IndexCreateOptions) -> Result<String, String> {
-        let storage = self.storage.read();
-
-        // Resolve column index from schema
-        let column_idx = {
-            let schema = storage
-                .get_schema_in(kg, &opts.relation)
-                .map_err(|e| e.to_string())?;
-            match schema {
-                Some(s) => s.column_index(&opts.column).ok_or_else(|| {
-                    format!(
-                        "Column '{}' not found in relation '{}'. Available: {:?}",
-                        opts.column,
-                        opts.relation,
-                        s.column_names()
-                    )
-                })?,
-                None => {
-                    return Err(format!(
-                        "No schema found for relation '{}'. Register a schema first.",
-                        opts.relation
-                    ));
-                }
-            }
-        };
-
-        // Validate index type
-        let index_type_str = opts.index_type.as_str();
-        if index_type_str != "hnsw" {
-            return Err(format!(
-                "Unsupported index type '{index_type_str}'. Currently only 'hnsw' is supported."
-            ));
-        }
-
-        // Parse distance metric
-        let metric = opts
-            .metric
-            .as_deref()
-            .unwrap_or("cosine")
-            .parse::<DistanceMetric>()
-            .map_err(|e| format!("Invalid metric: {e}"))?;
-
-        let m = opts.m.unwrap_or(16);
-        let ef_construction = opts.ef_construction.unwrap_or(200);
-        let ef_search = opts.ef_search.unwrap_or(50);
-
-        // Validate HNSW parameters to prevent crashes
-        if m < 2 {
-            return Err(format!("HNSW parameter m must be >= 2, got {m}"));
-        }
-        if m > 256 {
-            return Err(format!("HNSW parameter m must be <= 256, got {m}"));
-        }
-        if ef_construction < 1 {
-            return Err("HNSW parameter ef_construction must be >= 1".to_string());
-        }
-        if ef_search < 1 {
-            return Err("HNSW parameter ef_search must be >= 1".to_string());
-        }
-
-        let hnsw_config = HnswConfig {
-            m,
-            ef_construction,
-            ef_search,
-            metric,
-        };
-
-        let registered = RegisteredIndex {
-            name: opts.name.clone(),
-            relation: opts.relation.clone(),
-            column_idx,
-            column_name: opts.column.clone(),
-            index_type: IndexType::Hnsw(hnsw_config),
-        };
-
-        // Enable incremental engine and register index
-        storage
-            .with_kg_mut(kg, |kg_data| {
-                kg_data.enable_incremental().map_err(|e| e.to_string())?;
-                if let Some(dd) = kg_data.incremental() {
-                    dd.register_index(registered)
-                } else {
-                    Err("Failed to enable incremental engine".to_string())
-                }
-            })
-            .map_err(|e| e.to_string())?;
-
-        Ok(format!(
-            "Index '{}' created on {}.{}.",
-            opts.name, opts.relation, opts.column
-        ))
+        index_commands::create(&self.storage.read(), kg, opts)
     }
 
     fn drop_index(&self, kg: &str, name: &str) -> Result<String, String> {
-        let storage = self.storage.read();
-        storage
-            .with_kg_read(kg, |kg_data| {
-                if let Some(dd) = kg_data.incremental() {
-                    dd.remove_index(name)
-                } else {
-                    Err(format!("Index '{name}' not found (no incremental engine)"))
-                }
-            })
-            .map_err(|e| e.to_string())?;
-
-        Ok(format!("Index '{name}' dropped."))
+        index_commands::drop(&self.storage.read(), kg, name)
     }
 
     fn list_indexes(&self, kg: &str) -> Result<Vec<IndexStats>, String> {
-        let storage = self.storage.read();
-        storage
-            .with_kg_read(kg, |kg_data| {
-                if let Some(dd) = kg_data.incremental() {
-                    dd.get_index_stats(None)
-                } else {
-                    Ok(vec![])
-                }
-            })
-            .map_err(|e| e.to_string())
+        index_commands::stats(&self.storage.read(), kg, None)
     }
 
     fn get_index_stats(&self, kg: &str, name: &str) -> Result<Vec<IndexStats>, String> {
-        let storage = self.storage.read();
-        storage
-            .with_kg_read(kg, |kg_data| {
-                if let Some(dd) = kg_data.incremental() {
-                    dd.get_index_stats(Some(name))
-                } else {
-                    Err(format!("Index '{name}' not found (no incremental engine)"))
-                }
-            })
-            .map_err(|e| e.to_string())
+        index_commands::stats(&self.storage.read(), kg, Some(name))
     }
 
     fn rebuild_index(&self, kg: &str, name: &str) -> Result<String, String> {
-        let storage = self.storage.read();
-        storage
-            .with_kg_read(kg, |kg_data| {
-                if let Some(dd) = kg_data.incremental() {
-                    // Verify the index exists
-                    let stats = dd.get_index_stats(Some(name))?;
-                    if stats.is_empty() {
-                        return Err(format!("Index '{name}' not found"));
-                    }
-                    // Indexes are automatically rebuilt when their base relation
-                    // receives updates. Notify the base relation to trigger rebuild.
-                    Ok(format!(
-                        "Index '{name}' will be rebuilt on next data update."
-                    ))
-                } else {
-                    Err(format!("Index '{name}' not found (no incremental engine)"))
-                }
-            })
-            .map_err(|e| e.to_string())
+        index_commands::rebuild(&self.storage.read(), kg, name)
     }
 
     /// Build proof trees explaining why query results were derived.
@@ -2033,170 +1941,29 @@ impl Handler {
 
     // === Index Management API ===
 
-    /// Create an HNSW index on a knowledge graph.
-    ///
-    /// Resolves the column name to an index via the schema catalog,
-    /// enables the incremental engine if needed, and registers the index.
+    /// Create and build an HNSW index on a knowledge graph.
     pub fn create_index(&self, kg: &str, opts: &IndexCreateOptions) -> Result<String, String> {
-        let storage = self.storage.read();
-
-        // Resolve column index from schema
-        let column_idx = {
-            let schema = storage
-                .get_schema_in(kg, &opts.relation)
-                .map_err(|e| e.to_string())?;
-            match schema {
-                Some(s) => s.column_index(&opts.column).ok_or_else(|| {
-                    format!(
-                        "Column '{}' not found in relation '{}'. Available: {:?}",
-                        opts.column,
-                        opts.relation,
-                        s.column_names()
-                    )
-                })?,
-                None => {
-                    return Err(format!(
-                        "No schema found for relation '{}'. Register a schema first.",
-                        opts.relation
-                    ));
-                }
-            }
-        };
-
-        // Validate index type
-        let index_type_str = opts.index_type.as_str();
-        if index_type_str != "hnsw" {
-            return Err(format!(
-                "Unsupported index type '{index_type_str}'. Currently only 'hnsw' is supported."
-            ));
-        }
-
-        // Parse distance metric
-        let metric = opts
-            .metric
-            .as_deref()
-            .unwrap_or("cosine")
-            .parse::<DistanceMetric>()
-            .map_err(|e| format!("Invalid metric: {e}"))?;
-
-        let m = opts.m.unwrap_or(16);
-        let ef_construction = opts.ef_construction.unwrap_or(200);
-        let ef_search = opts.ef_search.unwrap_or(50);
-
-        // Validate HNSW parameters to prevent crashes
-        if m < 2 {
-            return Err(format!("HNSW parameter m must be >= 2, got {m}"));
-        }
-        if m > 256 {
-            return Err(format!("HNSW parameter m must be <= 256, got {m}"));
-        }
-        if ef_construction < 1 {
-            return Err("HNSW parameter ef_construction must be >= 1".to_string());
-        }
-        if ef_search < 1 {
-            return Err("HNSW parameter ef_search must be >= 1".to_string());
-        }
-
-        let hnsw_config = HnswConfig {
-            m,
-            ef_construction,
-            ef_search,
-            metric,
-        };
-
-        let registered = RegisteredIndex {
-            name: opts.name.clone(),
-            relation: opts.relation.clone(),
-            column_idx,
-            column_name: opts.column.clone(),
-            index_type: IndexType::Hnsw(hnsw_config),
-        };
-
-        // Enable incremental engine and register index
-        storage
-            .with_kg_mut(kg, |kg_data| {
-                kg_data.enable_incremental().map_err(|e| e.to_string())?;
-                if let Some(dd) = kg_data.incremental() {
-                    dd.register_index(registered)
-                } else {
-                    Err("Failed to enable incremental engine".to_string())
-                }
-            })
-            .map_err(|e| e.to_string())?;
-
-        Ok(format!(
-            "Index '{}' created on {}.{}.",
-            opts.name, opts.relation, opts.column
-        ))
+        index_commands::create(&self.storage.read(), kg, opts)
     }
 
-    /// Drop an index from a knowledge graph.
+    /// Drop an index.
     pub fn drop_index(&self, kg: &str, name: &str) -> Result<String, String> {
-        let storage = self.storage.read();
-        storage
-            .with_kg_read(kg, |kg_data| {
-                if let Some(dd) = kg_data.incremental() {
-                    dd.remove_index(name)
-                } else {
-                    Err(format!("Index '{name}' not found (no incremental engine)"))
-                }
-            })
-            .map_err(|e| e.to_string())?;
-
-        Ok(format!("Index '{name}' dropped."))
+        index_commands::drop(&self.storage.read(), kg, name)
     }
 
-    /// List all indexes in a knowledge graph.
-    /// Returns (name, relation, status) tuples.
+    /// List all indexes of a knowledge graph.
     pub fn list_indexes(&self, kg: &str) -> Result<Vec<IndexStats>, String> {
-        let storage = self.storage.read();
-        storage
-            .with_kg_read(kg, |kg_data| {
-                if let Some(dd) = kg_data.incremental() {
-                    dd.get_index_stats(None)
-                } else {
-                    Ok(vec![])
-                }
-            })
-            .map_err(|e| e.to_string())
+        index_commands::stats(&self.storage.read(), kg, None)
     }
 
-    /// Get stats for a specific index.
+    /// Stats for one index.
     pub fn get_index_stats(&self, kg: &str, name: &str) -> Result<Vec<IndexStats>, String> {
-        let storage = self.storage.read();
-        storage
-            .with_kg_read(kg, |kg_data| {
-                if let Some(dd) = kg_data.incremental() {
-                    dd.get_index_stats(Some(name))
-                } else {
-                    Err(format!("Index '{name}' not found (no incremental engine)"))
-                }
-            })
-            .map_err(|e| e.to_string())
+        index_commands::stats(&self.storage.read(), kg, Some(name))
     }
 
-    /// Rebuild an index by verifying it exists and notifying that it will
-    /// be rebuilt on the next data change or query.
+    /// Rebuild an index from base data, dropping tombstones.
     pub fn rebuild_index(&self, kg: &str, name: &str) -> Result<String, String> {
-        let storage = self.storage.read();
-        storage
-            .with_kg_read(kg, |kg_data| {
-                if let Some(dd) = kg_data.incremental() {
-                    // Verify the index exists
-                    let stats = dd.get_index_stats(Some(name))?;
-                    if stats.is_empty() {
-                        return Err(format!("Index '{name}' not found"));
-                    }
-                    // Indexes are automatically rebuilt when their base relation
-                    // receives updates. Notify the base relation to trigger rebuild.
-                    Ok(format!(
-                        "Index '{name}' will be rebuilt on next data update."
-                    ))
-                } else {
-                    Err(format!("Index '{name}' not found (no incremental engine)"))
-                }
-            })
-            .map_err(|e| e.to_string())
+        index_commands::rebuild(&self.storage.read(), kg, name)
     }
 
     /// Process an agent message asynchronously.
@@ -3603,10 +3370,10 @@ impl QueryJob {
                                             } else {
                                                 for s in &stats {
                                                     messages.push(format!(
-                                                            "Index '{}' on {}.{} (type: {}, metric: {}, vectors: {}, valid: {})",
+                                                            "Index '{}' on {}.{} (type: {}, metric: {}, vectors: {})",
                                                             s.name, s.relation, s.column,
                                                             s.index_type, s.metric,
-                                                            s.tuple_count, s.valid
+                                                            s.tuple_count
                                                         ));
                                                 }
                                             }
@@ -3623,11 +3390,11 @@ impl QueryJob {
                                                 info!(index = %name, count = stats.len(), "meta_index_stats_ok");
                                                 for s in &stats {
                                                     messages.push(format!(
-                                                        "Index '{}': relation={}, column={}, type={}, metric={}, vectors={}, tombstones={}, valid={}, dimension={}",
+                                                        "Index '{}': relation={}, column={}, type={}, metric={}, vectors={}, tombstones={}, dimension={}",
                                                         s.name, s.relation, s.column,
                                                         s.index_type, s.metric,
                                                         s.tuple_count, s.tombstone_count,
-                                                        s.valid, s.dimension
+                                                        s.dimension
                                                     ));
                                                 }
                                             }
@@ -5504,8 +5271,8 @@ pub(crate) fn transform_query_shorthand(program_text: &str) -> Result<QueryTrans
 
         let transformed_args: Vec<String> = goal
             .goal
-            .args
             .iter()
+            .flat_map(|g| g.args.iter())
             .enumerate()
             .map(|(i, term)| match term {
                 Term::Variable(v) => {
@@ -5562,8 +5329,11 @@ pub(crate) fn transform_query_shorthand(program_text: &str) -> Result<QueryTrans
             })
             .collect();
 
-        let body_atom = format!("{}({})", goal.goal.relation, transformed_args.join(", "));
-        let mut body_parts = vec![body_atom];
+        let mut body_parts: Vec<String> = goal
+            .goal
+            .iter()
+            .map(|g| format!("{}({})", g.relation, transformed_args.join(", ")))
+            .collect();
 
         for pred in &goal.body {
             body_parts.push(format_body_pred(pred));

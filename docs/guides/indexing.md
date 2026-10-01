@@ -4,17 +4,17 @@ InputLayer provides HNSW (Hierarchical Navigable Small World) indexes for fast a
 
 ## Why Use Indexes?
 
-Without an index, vector similarity queries perform a linear scan:
-- **10K vectors**: ~10ms
-- **100K vectors**: ~100ms
-- **1M vectors**: ~1s
+Without an index, a similarity query computes the distance to every row, so its cost grows linearly with the relation.
 
-With an HNSW index:
-- **10K vectors**: ~1ms
-- **100K vectors**: ~5ms
-- **1M vectors**: ~10ms
+Measured on 10K random 384-dim vectors, cosine, default settings (`cargo bench --bench vector_index_benchmarks`, Apple M-series):
 
-**Trade-off**: Indexes use memory and may return approximate (not exact) results.
+| Operation | Index only | Through the server |
+|---|---|---|
+| `hnsw_nearest`, k=10 | ~0.96 ms | ~2.1 ms |
+| Insert one row | ~2.6 ms | ~16 ms (incl. persistence) |
+| Build from 10K rows | ~4.3 s | - |
+
+**Trade-off**: Indexes use memory and, above 1024 entries, return approximate results (recall@10 is about 0.99 on 3K random 32-dim vectors).
 
 ---
 
@@ -41,6 +41,8 @@ With an HNSW index:
 ```
 .index create doc_emb_idx on documents(embedding)
 ```
+
+Creating the index builds it from the rows already in the relation. The relation needs a schema, the indexed column must be a vector, and the first column must be an integer id: `hnsw_nearest` returns that id.
 
 ### With Options
 
@@ -116,11 +118,7 @@ or
 
 **Output:**
 ```
-┌──────────────┬───────────┬───────────┬────────┬────────┬───────┐
-│ Name         │ Relation  │ Column    │ Type   │ Metric │ Valid │
-├──────────────┼───────────┼───────────┼────────┼────────┼───────┤
-│ doc_emb_idx  │ documents │ embedding │ hnsw   │ cosine │ yes   │
-└──────────────┴───────────┴───────────┴────────┴────────┴───────┘
+Index 'doc_emb_idx' on documents.embedding (type: hnsw, metric: cosine, vectors: 3)
 ```
 
 ### View Index Statistics
@@ -131,25 +129,20 @@ or
 
 **Output:**
 ```
-Index: doc_emb_idx
-  Relation:   documents
-  Column:     embedding
-  Type:       hnsw
-  Metric:     cosine
-  Vectors:    10000
-  Dimension:  768
-  Valid:      yes
-  Tombstones: 0
-  Built:      2024-01-15 10:30:00
+Index 'doc_emb_idx': relation=documents, column=embedding, type=hnsw, metric=cosine, vectors=3, tombstones=0, dimension=4
 ```
+
+`vectors` counts live rows; `tombstones` counts deleted or replaced entries still in the graph (see [Tombstones and Compaction](#tombstones-and-compaction)).
 
 ### Rebuild an Index
 
-After many insertions/deletions, an index may become fragmented. Rebuild to optimize:
+Rebuilds the index from the relation's current rows, dropping tombstones:
 
 ```
 .index rebuild doc_emb_idx
 ```
+
+Queries already running keep the index they started with.
 
 ### Drop an Index
 
@@ -161,22 +154,7 @@ After many insertions/deletions, an index may become fragmented. Rebuild to opti
 
 ## Using Indexes in Queries
 
-Indexes are used automatically when you perform vector similarity searches. The query optimizer detects when an index can accelerate a query. You can also invoke the HNSW index directly using the `hnsw_nearest` builtin.
-
-### Automatic Index Usage
-
-```iql
-// Query vector (from your embedding model)
-query_vec([0.11, 0.21, 0.29])
-
-// Find similar documents - index is used automatically
-+similar(Id, Title, top_k<10, Dist>) <-
-    query_vec(QV),
-    documents(Id, Title, V),
-    Dist = cosine(QV, V)
-
-?similar(Id, Title, Dist)
-```
+Query an index with the `hnsw_nearest` predicate. Distance functions such as `cosine()` never use an index; combined with `top_k` they scan every row (exact, but linear).
 
 ### Explicit HNSW Search with `hnsw_nearest`
 
@@ -192,7 +170,7 @@ hnsw_nearest("index_name", QueryVec, K, IdVar, DistVar, EfSearch)
 | Parameter | Description |
 |-----------|-------------|
 | `index_name` | Name of the HNSW index (string literal) |
-| `QueryVec` | Query vector - a variable bound to a vector value, or a vector literal |
+| `QueryVec` | Query vector - a vector literal, or a variable bound by a positive atom in the same rule body |
 | `K` | Number of nearest neighbors to return (integer, >= 1) |
 | `IdVar` | Output variable bound to the ID of each neighbor |
 | `DistVar` | Output variable bound to the distance to each neighbor |
@@ -205,8 +183,11 @@ hnsw_nearest("index_name", QueryVec, K, IdVar, DistVar, EfSearch)
 
 **Example - using a query vector from a relation:**
 ```iql
++query_embedding[([0.1, 0.2, 0.3, 0.4])]
 ?query_embedding(QV), hnsw_nearest("doc_emb_idx", QV, 5, Id, Dist)
 ```
+
+One search runs per distinct vector bound to `QV`, so `?documents(7, _, QV), hnsw_nearest("doc_emb_idx", QV, 5, Id, Dist)` finds the neighbours of document 7.
 
 **Example - joining results with the base relation:**
 ```iql
@@ -220,56 +201,40 @@ hnsw_nearest("index_name", QueryVec, K, IdVar, DistVar, EfSearch)
 ```
 
 **Notes:**
-- The index must exist and be valid; use `.index stats <name>` to check.
-- `IdVar` returns the integer ID (first column) of the indexed relation's matching rows.
-- `DistVar` returns the distance in the metric configured for the index (cosine, euclidean, dot, or manhattan).
-- The optional `EfSearch` parameter overrides the index's default `ef_search` for this query only.
-
-### Index Selection
-
-If multiple indexes exist on the same column, the one matching the distance function is preferred:
-
-```
-.index create idx_cosine on docs(emb) metric cosine
-.index create idx_l2 on docs(emb) metric l2
-```
-
-```iql
-// Uses idx_cosine (matches cosine distance function)
-?docs(Id, _, V), D = cosine([0.1, 0.2], V)
-
-// Uses idx_l2 (matches euclidean distance function)
-?docs(Id, _, V), D = euclidean([0.1, 0.2], V)
-```
+- The index must exist; `.index list` shows what is available. Unknown indexes, query vectors of the wrong dimension, and unbound query variables are reported as errors.
+- `IdVar` is the integer id (first column) of the matching row, with the same integer type as the column, so it joins with the relation.
+- `DistVar` is the distance in the index metric: cosine distance (`1 - cos`), euclidean, manhattan, or `-cos` for `dot` (vectors are normalized).
+- `EfSearch` overrides the index's `ef_search` for this query only.
+- A variable query vector is not supported inside recursive rules.
 
 ---
 
 ## Index Lifecycle
 
-### Build Phase
+### Build
 
-When you create an index, vectors are inserted incrementally:
+`.index create` builds the index from the relation's existing rows (parallel insert) and registers it. Rows the index cannot hold (non-integer id, missing or zero-norm vector for `cosine`/`dot`, wrong dimension) make the create fail with the offending row id.
 
-1. Index is registered with metadata
-2. Existing vectors are added to the HNSW structure
-3. Index is marked as valid
+### Maintenance
 
-### Invalidation
+Indexes stay current; there is no invalid state:
 
-Indexes are automatically invalidated when:
-- Base relation is modified (insert/delete)
-- Schema changes
+- **Insert**: new rows are added to the HNSW graph in the same write. A row with an existing id replaces that id's vector.
+- **Insert validation**: rows an index cannot hold are rejected before they are stored.
+- **Delete**: the row is tombstoned and never returned again.
+- **Drop relation**: indexes on it are dropped.
 
-```
-.index stats my_idx
-  Valid: no  ← Index needs rebuild
-```
+### Consistency
 
-### Rebuild
+Every query runs against a snapshot. The snapshot carries the index state from the same moment as its data, so a query never sees a row in the index that is missing from the relation, or the reverse, even while writes continue.
 
-Invalid indexes are rebuilt on:
-- Explicit `.index rebuild` command
-- Next query that uses the index
+### Restart
+
+Index definitions are saved in the knowledge graph's `indexes.json` when created or dropped. On restart each index is rebuilt from the recovered relation data, so it always matches what is on disk.
+
+### Small Indexes
+
+Indexes with up to 1024 entries are searched exhaustively, so results on small data are exact.
 
 ---
 
@@ -315,21 +280,18 @@ Where:
 
 ## Tombstones and Compaction
 
-When vectors are deleted, they're marked with a tombstone rather than removed immediately:
+Deleting or replacing a row leaves a tombstone: the old entry stays in the graph as a navigation node but is filtered from results.
 
 ```
 .index stats my_idx
-  Vectors:    10000
-  Tombstones: 500  ← Deleted entries not yet cleaned up
+  ... vectors=10000, tombstones=500, ...
 ```
 
 ### Automatic Compaction
 
-When tombstone ratio exceeds 30%, the index is automatically rebuilt during the next query.
+When tombstones exceed 30% of the graph (and number at least 64), the delete that crosses the threshold rebuilds the index from the relation.
 
 ### Manual Compaction
-
-Force a rebuild to remove tombstones:
 
 ```
 .index rebuild my_idx
@@ -363,27 +325,22 @@ Force a rebuild to remove tombstones:
 
 ### 3. Monitor Index Health
 
-Regularly check:
 ```
 .index stats my_idx
 ```
 
-Rebuild if:
-- Tombstone ratio > 30%
-- Search quality degrades
-- After bulk insertions
+Compaction runs automatically past 30% tombstones; rebuild sooner if search quality drops after heavy churn.
 
-### 4. Create Indexes Before Bulk Load
+### 4. Bulk Load, Then Create
 
-For large initial loads, create the index first:
+Creating an index over existing rows uses a parallel build, which is faster than inserting the same rows one batch at a time into an existing index:
 
 ```
-.index create my_idx on docs(emb)
-
-// Then bulk insert
 +docs[(1, "...", [0.1, ...]),
       (2, "...", [0.2, ...]),
-      ...].
+      ...]
+
+.index create my_idx on docs(emb)
 ```
 
 ### 5. Use Appropriate Vector Dimensions
@@ -400,21 +357,11 @@ Higher dimensions = more memory, slower search.
 
 ## Troubleshooting
 
-### Index Shows "Invalid"
-
-**Cause**: Base relation was modified.
-
-**Solution**:
-```
-.index rebuild my_idx
-```
-
 ### Search Returns No Results
 
 **Possible causes**:
-1. Index not yet built
-2. Query vector dimension mismatch
-3. No vectors in relation
+1. No vectors in the relation
+2. The query variable is bound to no rows (e.g. `query_vec` is empty)
 
 **Debug**:
 ```
@@ -434,8 +381,8 @@ Higher dimensions = more memory, slower search.
 // Check metric matches embedding type
 .index stats my_idx
 
-// Increase ef_search
-.index create my_idx on docs(emb) ef_search 100
+// Increase ef_search for one query
+?hnsw_nearest("my_idx", [0.1, 0.2], 10, Id, Dist, 200)
 
 // Rebuild to remove tombstones
 .index rebuild my_idx

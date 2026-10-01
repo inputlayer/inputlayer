@@ -158,6 +158,11 @@ name = "subscription_benchmarks"
 path = "benches/subscription_benchmarks.rs"
 harness = false
 
+[[bench]]
+name = "vector_index_benchmarks"
+path = "benches/vector_index_benchmarks.rs"
+harness = false
+
 [features]
 default = []
 # Enable vector similarity search operations

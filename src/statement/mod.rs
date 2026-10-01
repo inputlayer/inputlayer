@@ -227,7 +227,7 @@ mod tests {
     fn test_parse_simple_query() {
         let stmt = parse_statement("?path(1, X)").unwrap();
         if let Statement::Query(q) = stmt {
-            assert_eq!(q.goal.relation, "path");
+            assert_eq!(q.goal.as_ref().unwrap().relation, "path");
         } else {
             panic!("Expected Query");
         }
@@ -307,9 +307,11 @@ mod tests {
         // Quoted strings should work with variables
         let stmt = parse_statement("?parent(\"tom\", X)").unwrap();
         if let Statement::Query(q) = stmt {
-            assert_eq!(q.goal.relation, "parent");
-            assert!(matches!(&q.goal.args[0], Term::StringConstant(s) if s == "tom"));
-            assert!(matches!(&q.goal.args[1], Term::Variable(v) if v == "X"));
+            assert_eq!(q.goal.as_ref().unwrap().relation, "parent");
+            assert!(
+                matches!(&q.goal.as_ref().unwrap().args[0], Term::StringConstant(s) if s == "tom")
+            );
+            assert!(matches!(&q.goal.as_ref().unwrap().args[1], Term::Variable(v) if v == "X"));
         } else {
             panic!("Expected Query");
         }
@@ -334,8 +336,11 @@ mod tests {
     fn test_placeholder_underscore() {
         let stmt = parse_statement("?edge(_, X)").unwrap();
         if let Statement::Query(q) = stmt {
-            assert!(matches!(&q.goal.args[0], Term::Placeholder));
-            assert!(matches!(&q.goal.args[1], Term::Variable(v) if v == "X"));
+            assert!(matches!(
+                &q.goal.as_ref().unwrap().args[0],
+                Term::Placeholder
+            ));
+            assert!(matches!(&q.goal.as_ref().unwrap().args[1], Term::Variable(v) if v == "X"));
         } else {
             panic!("Expected Query");
         }
