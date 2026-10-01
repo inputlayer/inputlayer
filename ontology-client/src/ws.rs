@@ -40,6 +40,8 @@ enum WsResponse {
     ResultEnd {},
     Error {
         message: String,
+        #[serde(default)]
+        validation_errors: Option<serde_json::Value>,
     },
     Pong,
     Notification {},
@@ -219,7 +221,10 @@ impl Engine {
                         return Ok(acc);
                     }
                 }
-                WsResponse::Error { message } => {
+                WsResponse::Error {
+                    message,
+                    validation_errors,
+                } => {
                     // The global socket pushes connection-level errors that
                     // are not responses to the in-flight request; treating
                     // them as one fails the request spuriously.
@@ -229,7 +234,12 @@ impl Engine {
                     {
                         continue;
                     }
-                    bail!("{message}");
+                    // Parse failures name the offending lines; without
+                    // them "Program has N parse error(s)" is undebuggable.
+                    match validation_errors {
+                        Some(details) if !details.is_null() => bail!("{message}: {details}"),
+                        _ => bail!("{message}"),
+                    }
                 }
                 _ => {} // notifications, pongs: skip
             }

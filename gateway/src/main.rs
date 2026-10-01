@@ -1,7 +1,9 @@
 //! InputLayer Gateway service - the model gateway of the stack.
 //!
-//! `POST /v1/chat/completions` is the ONLY ingestion path: the standard
-//! OpenAI request shape, completions from the model provider. Translation
+//! Two ingestion paths. `POST /v1/chat/completions`: the standard OpenAI
+//! request shape, completions from the model provider. `POST
+//! /v1/conversations/{id}/turns`: extract-only, the new messages of a
+//! conversation whose ledger lives in the KG (see `turns`). Translation
 //! is opt-in per request: the `x-il-ontology` header lists KG/ontology
 //! PAIRS (`<kg>/<ontology>[@version]`, comma-separated; or the
 //! `il_ontology` body field); omitted, the gateway is a pure OpenAI proxy.
@@ -12,9 +14,10 @@
 //! deploys rules), the pack's rules evaluate incrementally, and
 //! per-ontology reports ride the response under `inputlayer.reports`.
 //!
-//! Observers subscribe per conversation: `WS /v1/events?conversation=<id>`
-//! streams translation, finding (with engine-produced proof trees), and
-//! report events.
+//! Observers subscribe per conversation:
+//! `WS /v1/events?conversation=<id>[&after_seq=N]` streams translation,
+//! finding (with engine-produced proof trees), and report events, each with
+//! a per-conversation `seq`.
 //!
 //! Configuration (env):
 //!   GATEWAY_HOST / GATEWAY_PORT   bind address (defaults 127.0.0.1:8081)
@@ -31,17 +34,19 @@
 //!                                 engine); without it /v1/* return 503
 
 use anyhow::{Context, Result};
-use axum::extract::{Query, State, WebSocketUpgrade};
+use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use inputlayer_gateway::engine_pool::EnginePool;
 use inputlayer_gateway::events::EventHub;
+use inputlayer_gateway::locks::KeyedLocks;
 use inputlayer_gateway::model::{
     render_messages, AnthropicClient, ChatParams, Completer, Extractor,
 };
 use inputlayer_gateway::ontology::{LoadedOntology, PromptSlots};
-use inputlayer_gateway::pipeline::evaluate;
+use inputlayer_gateway::pipeline::{evaluate, EvalOutcome, EvalRequest, Mode};
+use inputlayer_gateway::turns::run_turn;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -62,6 +67,8 @@ struct AppState {
     /// Bearer token required on /v1/* when configured.
     api_key: Option<String>,
     events: EventHub,
+    /// Serializes ledger writes per (kg, conversation).
+    locks: KeyedLocks,
 }
 
 fn env_or(name: &str, default: &str) -> String {
@@ -162,6 +169,7 @@ async fn main() -> Result<()> {
         completer,
         api_key,
         events: EventHub::default(),
+        locks: KeyedLocks::default(),
     });
 
     // Browser clients (the Studio) may run on a different origin than the
@@ -176,6 +184,7 @@ async fn main() -> Result<()> {
         .route("/health", get(health))
         .route("/ready", get(ready))
         .route("/v1/chat/completions", post(chat_completions))
+        .route("/v1/conversations/:id/turns", post(conversation_turns))
         .route("/v1/ontologies", get(list_ontologies))
         .route("/v1/events", get(events_ws))
         .layer(cors)
@@ -631,6 +640,195 @@ async fn chat_completions(
     }
 }
 
+/// `POST /v1/conversations/{id}/turns` body: ONLY the new messages.
+#[derive(Deserialize)]
+struct TurnsRequest {
+    messages: Vec<ChatMessage>,
+    #[serde(default)]
+    il_ontology: Option<Value>,
+    #[serde(default)]
+    il_mode: Option<String>,
+}
+
+fn not_configured(message: &str) -> (StatusCode, Json<Value>) {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(json!({ "error": { "type": "not_configured", "message": message } })),
+    )
+}
+
+/// Extract-only incremental evaluation: no completion is produced. The
+/// messages are appended to the conversation's ledger in the KG at the
+/// next global indices, only they are extracted, prior live rows are
+/// offered as retraction targets, and the result is one write batch plus
+/// the watch views. Annotate semantics only: there is no completion to
+/// withhold, so `enforce` is rejected and callers act on `blocking`.
+#[allow(clippy::too_many_lines)]
+async fn conversation_turns(
+    State(state): State<Arc<AppState>>,
+    Path(conversation): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<TurnsRequest>,
+) -> (StatusCode, Json<Value>) {
+    if let Err(response) = authorize(&state, &headers, None) {
+        return response;
+    }
+    let Some(extractor) = state.extractor.clone() else {
+        return not_configured("model key not configured (ANTHROPIC_API_KEY)");
+    };
+    if state.ontologies.is_empty() {
+        return not_configured("no ontologies loaded (registry unreachable at startup)");
+    }
+    if conversation.len() > 64
+        || inputlayer_ontology_client::registry::validate_component(
+            "conversation id",
+            &conversation,
+        )
+        .is_err()
+    {
+        return bad_request(
+            "conversation id must be 1-64 characters of [A-Za-z0-9._-]".to_string(),
+        );
+    }
+    let mut selections = match parse_selection(&state, &headers, request.il_ontology.as_ref()) {
+        Ok(selections) => selections,
+        Err(response) => return response,
+    };
+    // One pair per turn: the message ledger lives in the pair's KG, and
+    // two KGs would each allocate (and could disagree on) global indices.
+    if selections.len() != 1 {
+        return bad_request(format!(
+            "turns take exactly one <kg>/<ontology> selection (x-il-ontology or \
+             il_ontology), got {}",
+            selections.len()
+        ));
+    }
+    let selection = selections.remove(0);
+    let want_trace = match parse_trace_header(&headers) {
+        Ok(flag) => flag,
+        Err(response) => return response,
+    };
+    let mode = headers
+        .get("x-il-mode")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .or_else(|| request.il_mode.clone());
+    match mode.as_deref() {
+        None | Some("annotate") => {}
+        Some("enforce") => {
+            return bad_request(
+                "turns are extract-only: there is no completion for enforce to withhold; \
+                 use annotate and act on findings[].blocking"
+                    .to_string(),
+            );
+        }
+        Some(other) => {
+            return bad_request(format!("il_mode must be \"annotate\", got {other:?}"));
+        }
+    }
+    if request.messages.is_empty() {
+        return bad_request("messages must not be empty".to_string());
+    }
+    let messages: Vec<(String, String)> = request
+        .messages
+        .iter()
+        .map(|m| (m.role.clone(), m.content.clone()))
+        .collect();
+
+    let request_id = fresh_id("turn");
+    let ontology = Arc::clone(&selection.ontology);
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let outcome = {
+        let _guard = state
+            .locks
+            .lock(&format!("{}/{conversation}", selection.kg))
+            .await;
+        run_turn(
+            &state.engine,
+            extractor.as_ref(),
+            &ontology,
+            &selection.kg,
+            &conversation,
+            &messages,
+            &today,
+            want_trace,
+        )
+        .await
+    };
+    let label = format!("{}@{}", ontology.name, ontology.version);
+    match outcome {
+        Ok(turn) => {
+            let report = Report {
+                kg: selection.kg.clone(),
+                ontology: label.clone(),
+                digest: ontology.digest.clone(),
+                status: "complete",
+                reason: None,
+                findings: turn.eval.findings,
+                dropped: turn.eval.dropped,
+                notes: turn.eval.notes,
+                retracted: turn.eval.retracted,
+                tuples: turn.eval.tuples,
+                trace: turn.eval.trace,
+            };
+            publish_events(
+                &state,
+                Some(&conversation),
+                &request_id,
+                std::slice::from_ref(&report),
+            );
+            let mut body = json!({
+                "conversation": conversation,
+                "kg": selection.kg,
+                "ontology": label,
+                "messages": { "first_index": turn.first_index, "count": turn.count },
+                "inserted": turn.eval.inserted,
+                "retracted": report.retracted,
+                "dropped": report.dropped,
+                "findings": report.findings,
+                "status": "complete",
+            });
+            if !report.notes.is_empty() {
+                body["notes"] = json!(report.notes);
+            }
+            if let Some(trace) = report.trace {
+                body["trace"] = trace;
+            }
+            (StatusCode::OK, Json(body))
+        }
+        Err(err) => {
+            let reason = format!("{err:#}");
+            let report = Report {
+                kg: selection.kg.clone(),
+                ontology: label.clone(),
+                digest: ontology.digest.clone(),
+                status: "incomplete",
+                reason: Some(reason.clone()),
+                findings: Vec::new(),
+                dropped: Vec::new(),
+                notes: Vec::new(),
+                retracted: Vec::new(),
+                tuples: Vec::new(),
+                trace: None,
+            };
+            publish_events(&state, Some(&conversation), &request_id, &[report]);
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({
+                    "error": { "type": "verification_unavailable",
+                        "message": format!("turn not recorded: {reason}") },
+                    "conversation": conversation,
+                    "kg": selection.kg,
+                    "ontology": label,
+                    "status": "incomplete",
+                    "reason": reason,
+                })),
+            )
+        }
+    }
+}
+
 /// One evaluated pair's outcome, ready for both response and events.
 struct Report {
     kg: String,
@@ -641,6 +839,8 @@ struct Report {
     findings: Vec<Value>,
     dropped: Vec<String>,
     notes: Vec<String>,
+    /// Retraction targets applied (ids as the model named them).
+    retracted: Vec<String>,
     tuples: Vec<Value>,
     trace: Option<Value>,
 }
@@ -670,17 +870,18 @@ async fn evaluate_all(
             )
             .await;
             match outcome {
-                Ok((findings, dropped, notes, tuples, trace)) => Report {
+                Ok(outcome) => Report {
                     kg,
                     ontology: format!("{}@{}", ontology.name, ontology.version),
                     digest: ontology.digest.clone(),
                     status: "complete",
                     reason: None,
-                    findings,
-                    dropped,
-                    notes,
-                    tuples,
-                    trace,
+                    findings: outcome.findings,
+                    dropped: outcome.dropped,
+                    notes: outcome.notes,
+                    retracted: outcome.retracted,
+                    tuples: outcome.tuples,
+                    trace: outcome.trace,
                 },
                 Err(err) => Report {
                     kg,
@@ -691,6 +892,7 @@ async fn evaluate_all(
                     findings: Vec::new(),
                     dropped: Vec::new(),
                     notes: Vec::new(),
+                    retracted: Vec::new(),
                     tuples: Vec::new(),
                     trace: None,
                 },
@@ -700,14 +902,6 @@ async fn evaluate_all(
     futures_util::future::join_all(futures).await
 }
 
-type EvalParts = (
-    Vec<Value>,
-    Vec<String>,
-    Vec<String>,
-    Vec<Value>,
-    Option<Value>,
-);
-
 async fn evaluate_one(
     state: &AppState,
     ontology: &LoadedOntology,
@@ -716,11 +910,18 @@ async fn evaluate_one(
     prefix: &str,
     want_trace: bool,
     retract_after: bool,
-) -> Result<EvalParts> {
+) -> Result<EvalOutcome> {
     let extractor = state
         .extractor
         .as_ref()
         .context("model key not configured")?;
+    // A conversation's ledger writes (retraction lookup, then write) are
+    // serialized; one-shot prefixes are unique per request.
+    let _guard = if retract_after {
+        None
+    } else {
+        Some(state.locks.lock(&format!("{kg}/{prefix}")).await)
+    };
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let new_messages = render_messages(0, messages);
     let prompt = ontology.render_prompt(&PromptSlots {
@@ -739,32 +940,25 @@ async fn evaluate_one(
         )
         .await?;
     let extract_ms = extract_started.elapsed().as_millis();
-    let outcome = evaluate(
-        &state.engine,
-        ontology,
+    let request = EvalRequest {
         kg,
         prefix,
-        extraction.output,
         messages,
+        first_index: 0,
+        mode: if retract_after {
+            Mode::OneShot
+        } else {
+            Mode::Conversation
+        },
         want_trace,
-        retract_after,
-    )
-    .await?;
-    let trace = outcome.trace.map(|mut trace| {
-        if let Some(t) = trace.as_object_mut() {
-            t.insert("model".to_string(), json!(ontology.extraction_model));
-            t.insert("extract_ms".to_string(), json!(extract_ms));
-            t.insert("usage".to_string(), extraction.usage.clone());
-        }
-        trace
-    });
-    Ok((
-        outcome.findings,
-        outcome.dropped,
-        outcome.notes,
-        outcome.tuples,
-        trace,
-    ))
+    };
+    let mut outcome = evaluate(&state.engine, ontology, &request, extraction.output).await?;
+    if let Some(t) = outcome.trace.as_mut().and_then(Value::as_object_mut) {
+        t.insert("model".to_string(), json!(ontology.extraction_model));
+        t.insert("extract_ms".to_string(), json!(extract_ms));
+        t.insert("usage".to_string(), extraction.usage);
+    }
+    Ok(outcome)
 }
 
 /// Enforce fails CLOSED: 422 on any blocking finding from any pair, 503
@@ -818,6 +1012,9 @@ fn reports_json(reports: &[Report]) -> Value {
             });
             if !r.notes.is_empty() {
                 report["notes"] = json!(r.notes);
+            }
+            if !r.retracted.is_empty() {
+                report["retracted"] = json!(r.retracted);
             }
             if let Some(reason) = &r.reason {
                 report["reason"] = json!(reason);
@@ -1244,6 +1441,7 @@ mod tests {
             },
             dropped: Vec::new(),
             notes: Vec::new(),
+            retracted: Vec::new(),
             tuples: Vec::new(),
             trace: None,
         }
