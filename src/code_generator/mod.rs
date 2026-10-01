@@ -1806,81 +1806,21 @@ impl CodeGenerator {
                     .and_then(super::value::Value::as_bool)
                     .is_none_or(|b| b != val)
             }),
-            // Column comparisons
-            Predicate::ColumnsEq(left, right) => Box::new(move |tuple: &Tuple| {
-                let lv = tuple.get(left);
-                let rv = tuple.get(right);
-                lv == rv
-            }),
-            Predicate::ColumnsNe(left, right) => Box::new(move |tuple: &Tuple| {
-                let lv = tuple.get(left);
-                let rv = tuple.get(right);
-                lv != rv
-            }),
-            // Column-to-column ordering comparisons
-            Predicate::ColumnsLt(left, right) => Box::new(move |tuple: &Tuple| {
-                match (tuple.get(left), tuple.get(right)) {
-                    (Some(lv), Some(rv)) => {
-                        // Try integer comparison first
-                        if let (Some(li), Some(ri)) = (lv.as_i64(), rv.as_i64()) {
-                            return li < ri;
-                        }
-                        // Fall back to float comparison
-                        if let (Some(lf), Some(rf)) = (lv.as_f64(), rv.as_f64()) {
-                            return lf < rf;
-                        }
-                        false
-                    }
-                    _ => false,
-                }
-            }),
+            // Column-to-column comparisons share `Value::query_cmp` / `query_eq`
+            // so every value type orders the same way as in provenance.
+            Predicate::ColumnsEq(left, right) => Self::columns_eq_fn(left, right, true),
+            Predicate::ColumnsNe(left, right) => Self::columns_eq_fn(left, right, false),
+            Predicate::ColumnsLt(left, right) => {
+                Self::columns_cmp_fn(left, right, std::cmp::Ordering::is_lt)
+            }
             Predicate::ColumnsGt(left, right) => {
-                Box::new(
-                    move |tuple: &Tuple| match (tuple.get(left), tuple.get(right)) {
-                        (Some(lv), Some(rv)) => {
-                            if let (Some(li), Some(ri)) = (lv.as_i64(), rv.as_i64()) {
-                                return li > ri;
-                            }
-                            if let (Some(lf), Some(rf)) = (lv.as_f64(), rv.as_f64()) {
-                                return lf > rf;
-                            }
-                            false
-                        }
-                        _ => false,
-                    },
-                )
+                Self::columns_cmp_fn(left, right, std::cmp::Ordering::is_gt)
             }
             Predicate::ColumnsLe(left, right) => {
-                Box::new(
-                    move |tuple: &Tuple| match (tuple.get(left), tuple.get(right)) {
-                        (Some(lv), Some(rv)) => {
-                            if let (Some(li), Some(ri)) = (lv.as_i64(), rv.as_i64()) {
-                                return li <= ri;
-                            }
-                            if let (Some(lf), Some(rf)) = (lv.as_f64(), rv.as_f64()) {
-                                return lf <= rf;
-                            }
-                            false
-                        }
-                        _ => false,
-                    },
-                )
+                Self::columns_cmp_fn(left, right, std::cmp::Ordering::is_le)
             }
             Predicate::ColumnsGe(left, right) => {
-                Box::new(
-                    move |tuple: &Tuple| match (tuple.get(left), tuple.get(right)) {
-                        (Some(lv), Some(rv)) => {
-                            if let (Some(li), Some(ri)) = (lv.as_i64(), rv.as_i64()) {
-                                return li >= ri;
-                            }
-                            if let (Some(lf), Some(rf)) = (lv.as_f64(), rv.as_f64()) {
-                                return lf >= rf;
-                            }
-                            false
-                        }
-                        _ => false,
-                    },
-                )
+                Self::columns_cmp_fn(left, right, std::cmp::Ordering::is_ge)
             }
             // Logical combinations
             Predicate::And(p1, p2) => {
@@ -1959,6 +1899,35 @@ impl CodeGenerator {
             Predicate::True => Box::new(|_| true),
             Predicate::False => Box::new(|_| false),
         }
+    }
+
+    /// Column-vs-column equality filter. Missing columns compare as `None`.
+    fn columns_eq_fn(
+        left: usize,
+        right: usize,
+        want_equal: bool,
+    ) -> Box<dyn Fn(&Tuple) -> bool + Send + Sync + 'static> {
+        Box::new(move |tuple: &Tuple| {
+            let equal = match (tuple.get(left), tuple.get(right)) {
+                (Some(lv), Some(rv)) => lv.query_eq(rv),
+                (lv, rv) => lv == rv,
+            };
+            equal == want_equal
+        })
+    }
+
+    /// Column-vs-column ordering filter. Incomparable values are false.
+    fn columns_cmp_fn(
+        left: usize,
+        right: usize,
+        accept: fn(std::cmp::Ordering) -> bool,
+    ) -> Box<dyn Fn(&Tuple) -> bool + Send + Sync + 'static> {
+        Box::new(
+            move |tuple: &Tuple| match (tuple.get(left), tuple.get(right)) {
+                (Some(lv), Some(rv)) => lv.query_cmp(rv).is_some_and(accept),
+                _ => false,
+            },
+        )
     }
 
     /// Evaluate an arithmetic expression at runtime using tuple values
@@ -6488,6 +6457,55 @@ mod tests {
                 "No results should have name='alice'"
             );
         }
+    }
+
+    #[test]
+    fn test_columns_ordering_strings_compare_lexicographically() {
+        let pair = |a: Value, b: Value| Tuple::new(vec![a, b]);
+        let s = |v: &str| Value::String(Arc::from(v));
+        let cases: [(Predicate, [bool; 3]); 6] = [
+            (Predicate::ColumnsLt(0, 1), [true, false, false]),
+            (Predicate::ColumnsLe(0, 1), [true, true, false]),
+            (Predicate::ColumnsGt(0, 1), [false, false, true]),
+            (Predicate::ColumnsGe(0, 1), [false, true, true]),
+            (Predicate::ColumnsEq(0, 1), [false, true, false]),
+            (Predicate::ColumnsNe(0, 1), [true, false, true]),
+        ];
+        let rows = [
+            pair(s("apple"), s("banana")),
+            pair(s("kiwi"), s("kiwi")),
+            pair(s("pear"), s("fig")),
+        ];
+        for (predicate, expected) in cases {
+            let f = CodeGenerator::predicate_to_tuple_fn(&predicate);
+            let got: Vec<bool> = rows.iter().map(&f).collect();
+            assert_eq!(got, expected, "{predicate:?}");
+        }
+    }
+
+    #[test]
+    fn test_columns_ordering_mixed_types() {
+        let pair = |a: Value, b: Value| Tuple::new(vec![a, b]);
+        let lt = CodeGenerator::predicate_to_tuple_fn(&Predicate::ColumnsLt(0, 1));
+        let ge = CodeGenerator::predicate_to_tuple_fn(&Predicate::ColumnsGe(0, 1));
+        let eq = CodeGenerator::predicate_to_tuple_fn(&Predicate::ColumnsEq(0, 1));
+        let ne = CodeGenerator::predicate_to_tuple_fn(&Predicate::ColumnsNe(0, 1));
+
+        let int_float = pair(Value::Int32(2), Value::Float64(2.5));
+        assert!(lt(&int_float));
+        let ts = pair(Value::Timestamp(10), Value::Timestamp(20));
+        assert!(lt(&ts));
+        let widths = pair(Value::Int64(3), Value::Int32(3));
+        assert!(ge(&widths) && eq(&widths) && !ne(&widths));
+
+        // Incomparable types: every ordering is false, `!=` is true.
+        let str_int = pair(Value::String(Arc::from("5")), Value::Int32(1));
+        assert!(!lt(&str_int) && !ge(&str_int) && !eq(&str_int) && ne(&str_int));
+        let vectors = pair(
+            Value::Vector(Arc::new(vec![1.0])),
+            Value::Vector(Arc::new(vec![2.0])),
+        );
+        assert!(!lt(&vectors) && !ge(&vectors) && ne(&vectors));
     }
 
     fn run_float_filter_test(

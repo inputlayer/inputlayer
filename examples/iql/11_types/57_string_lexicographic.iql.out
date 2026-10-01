@@ -13,10 +13,30 @@ Switched to knowledge graph: test_string_lex_n11t57
 > +words[("apple",), ("banana",), ("cherry",), ("apricot",)]
 Inserted 4 fact(s) into 'words'.
 > ordered(A, B) <- words(A), words(B), A < B
-No results.
+┌───────────┬───────────┐
+│ X         │ Y         │
+├───────────┼───────────┤
+│ "apple"   │ "apricot" │
+│ "apple"   │ "banana"  │
+│ "apple"   │ "cherry"  │
+│ "apricot" │ "banana"  │
+│ "apricot" │ "cherry"  │
+│ "banana"  │ "cherry"  │
+└───────────┴───────────┘
+6 rows
 (session: 1 rule(s))
 > ?ordered(A, B)
-No results.
+┌───────────┬───────────┐
+│ A         │ B         │
+├───────────┼───────────┤
+│ "apple"   │ "apricot" │
+│ "apple"   │ "banana"  │
+│ "apple"   │ "cherry"  │
+│ "apricot" │ "banana"  │
+│ "apricot" │ "cherry"  │
+│ "banana"  │ "cherry"  │
+└───────────┴───────────┘
+6 rows
 > +min_word(min<W>) <- words(W)
 Rule 'min_word' registered.
 > +max_word(max<W>) <- words(W)

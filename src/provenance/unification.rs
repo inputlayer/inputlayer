@@ -151,13 +151,14 @@ pub fn evaluate_comparison(
     let left = resolve_to_value(lhs, bindings)?;
     let right = resolve_to_value(rhs, bindings)?;
 
+    let ordering = left.query_cmp(&right);
     let result = match op {
-        ComparisonOp::Equal => values_equal(&left, &right),
-        ComparisonOp::NotEqual => !values_equal(&left, &right),
-        ComparisonOp::LessThan => value_cmp(&left, &right)? == std::cmp::Ordering::Less,
-        ComparisonOp::LessOrEqual => value_cmp(&left, &right)? != std::cmp::Ordering::Greater,
-        ComparisonOp::GreaterThan => value_cmp(&left, &right)? == std::cmp::Ordering::Greater,
-        ComparisonOp::GreaterOrEqual => value_cmp(&left, &right)? != std::cmp::Ordering::Less,
+        ComparisonOp::Equal => left.query_eq(&right),
+        ComparisonOp::NotEqual => !left.query_eq(&right),
+        ComparisonOp::LessThan => ordering.is_some_and(std::cmp::Ordering::is_lt),
+        ComparisonOp::LessOrEqual => ordering.is_some_and(std::cmp::Ordering::is_le),
+        ComparisonOp::GreaterThan => ordering.is_some_and(std::cmp::Ordering::is_gt),
+        ComparisonOp::GreaterOrEqual => ordering.is_some_and(std::cmp::Ordering::is_ge),
     };
     Ok(result)
 }
@@ -246,22 +247,6 @@ fn values_equal(a: &Value, b: &Value) -> bool {
         (Value::Null, Value::Null) => true,
         (Value::Timestamp(x), Value::Timestamp(y)) => x == y,
         _ => a == b,
-    }
-}
-
-/// Compare two Values for ordering.
-fn value_cmp(a: &Value, b: &Value) -> Result<std::cmp::Ordering, String> {
-    match (a, b) {
-        (Value::Int32(x), Value::Int32(y)) => Ok(x.cmp(y)),
-        (Value::Int64(x), Value::Int64(y)) => Ok(x.cmp(y)),
-        (Value::Int32(x), Value::Int64(y)) => Ok(i64::from(*x).cmp(y)),
-        (Value::Int64(x), Value::Int32(y)) => Ok(x.cmp(&i64::from(*y))),
-        (Value::Float64(x), Value::Float64(y)) => {
-            x.partial_cmp(y).ok_or_else(|| "NaN comparison".to_string())
-        }
-        (Value::String(x), Value::String(y)) => Ok(x.cmp(y)),
-        (Value::Timestamp(x), Value::Timestamp(y)) => Ok(x.cmp(y)),
-        _ => Ok(a.cmp(b)),
     }
 }
 
@@ -485,6 +470,29 @@ mod tests {
             &bindings,
         )
         .expect("should evaluate"));
+    }
+
+    #[test]
+    fn test_evaluate_comparison_strings_and_mixed_types() {
+        let mut bindings = Bindings::new();
+        bindings.insert("A".to_string(), Value::String(Arc::from("apple")));
+        bindings.insert("B".to_string(), Value::String(Arc::from("banana")));
+        bindings.insert("N".to_string(), Value::Int32(1));
+        let cmp = |l: &str, op: ComparisonOp, r: &str| {
+            evaluate_comparison(
+                &Term::Variable(l.to_string()),
+                &op,
+                &Term::Variable(r.to_string()),
+                &bindings,
+            )
+            .expect("should evaluate")
+        };
+        assert!(cmp("A", ComparisonOp::LessThan, "B"));
+        assert!(!cmp("A", ComparisonOp::GreaterOrEqual, "B"));
+        // Mixed types are incomparable, not ordered by type rank.
+        assert!(!cmp("N", ComparisonOp::LessThan, "A"));
+        assert!(!cmp("N", ComparisonOp::GreaterThan, "A"));
+        assert!(cmp("N", ComparisonOp::NotEqual, "A"));
     }
 
     #[test]
