@@ -35,9 +35,19 @@ Rule 'odd' registered.
 > +even(X) <- odd(Y), edge(Y, X)
 Rule 'even' registered.
 > ?odd(X)
-No results.
+┌───┐
+│ X │
+├───┤
+│ 2 │
+└───┘
+1 rows
 > ?even(X)
-No results.
+┌───┐
+│ X │
+├───┤
+│ 3 │
+└───┘
+1 rows
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_syntax_recursion_n28t10

@@ -27,9 +27,19 @@ Rule 'is_odd' registered.
 > +is_odd(N) <- succ(M, N), is_even(M)
 Rule 'is_odd' registered.
 > ?is_even(X)
-No results.
+┌───┐
+│ X │
+├───┤
+│ 0 │
+└───┘
+1 rows
 > ?is_odd(X)
-No results.
+┌───┐
+│ X │
+├───┤
+│ 1 │
+└───┘
+1 rows
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_mutual_recursion_n09t08

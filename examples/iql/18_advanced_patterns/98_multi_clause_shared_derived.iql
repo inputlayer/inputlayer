@@ -1,0 +1,28 @@
+// Test: Multi-clause rules whose clauses share a derived relation (issue #91)
+
+.kg create test_multi_clause_n18t98
+.kg use test_multi_clause_n18t98
+
++claim(id: string, entity: string, attr: string, val: string)
++claim_modality(id: string, modality: string)
++link(x: string, y: string)
++claim[("c1", "e1", "attr", "v1"), ("c2", "e2", "attr", "v2"), ("c5", "anna_1", "distinct_from", "anna_2")]
++claim_modality[("c1", "asserted"), ("c2", "asserted"), ("c5", "asserted")]
++link[("e1", "e2")]
++active(C, E, A, V) <- claim(C, E, A, V), claim_modality(C, "asserted")
+
+// Clauses share variable names E1/E2 and a constant-filtered derived atom
++r("bridge", C1, C2) <- active(C1, E1, A1, V1), active(C2, E2, A2, V2), link(E1, E2)
++r("solo", C, C) <- active(C, E1, "distinct_from", E2)
+?r(K, C1, C2)
+
+// Self-join clause plus projection clause keeps head arity
++ca(c: string, e: string)
++ca[("c1", "e1"), ("c2", "e1")]
++a(C, E) <- ca(C, E)
++s("joined", C1, C2) <- a(C1, E), a(C2, E), C1 != C2
++s("solo", C, C) <- a(C, E)
+?s(K, C1, C2)
+
+.kg use default
+.kg drop test_multi_clause_n18t98

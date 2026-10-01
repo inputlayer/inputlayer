@@ -58,17 +58,17 @@ Query Plan:
   IR nodes: 7 -> 8 (0 eliminated)
 
   Rule 1 Optimized IR:
-    Distinct
-      Join[L:[0, 2], R:[1, 0]] -> [Y, Z, X]
-      |- Left:
+    Union (2 inputs)
+    |- Input 1:
+        Scan(edge)[X, Y]
+    |- Input 2:
+        Map[[2, 1]] -> [X, Z]
           Distinct
             Join[L:[0], R:[1]] -> [Y, Z, X]
             |- Left:
                 Scan(path)[Y, Z]
             `- Right:
                 Scan(edge)[X, Y]
-      `- Right:
-          Scan(edge)[X, Y]
 
   Rule 2 Optimized IR:
     Scan(path)[X, Y]

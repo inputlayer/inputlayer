@@ -81,15 +81,10 @@ impl JoinGraph {
     /// Build join graph from IR nodes (extracts scans and analyzes joins)
     pub fn from_ir(ir: &IRNode) -> Self {
         let mut graph = JoinGraph::new();
-        let scans = Self::extract_scans(ir);
-
         // Add nodes
-        for (_relation, schema, ir_node) in &scans {
-            let variables: HashSet<String> = schema.iter().cloned().collect();
-            graph.nodes.push(JoinGraphNode {
-                variables,
-                ir_node: ir_node.clone(),
-            });
+        for ir_node in Self::extract_scans(ir) {
+            let variables: HashSet<String> = ir_node.output_schema().into_iter().collect();
+            graph.nodes.push(JoinGraphNode { variables, ir_node });
         }
 
         // Add edges based on shared variables
@@ -128,30 +123,21 @@ impl JoinGraph {
         self.edges.push(edge);
     }
 
-    /// Extract all scans from an IR tree
-    fn extract_scans(ir: &IRNode) -> Vec<(String, Vec<String>, IRNode)> {
+    /// Extract the leaves of the join block rooted at `ir`
+    fn extract_scans(ir: &IRNode) -> Vec<IRNode> {
         let mut scans = Vec::new();
         Self::extract_scans_recursive(ir, &mut scans);
         scans
     }
 
-    fn extract_scans_recursive(ir: &IRNode, scans: &mut Vec<(String, Vec<String>, IRNode)>) {
+    fn extract_scans_recursive(ir: &IRNode, scans: &mut Vec<IRNode>) {
         match ir {
-            IRNode::Scan { relation, schema } => {
-                scans.push((relation.clone(), schema.clone(), ir.clone()));
-            }
+            IRNode::Scan { .. } => scans.push(ir.clone()),
             IRNode::Map { input, .. } => Self::extract_scans_recursive(input, scans),
             // Preserve Filter chains wrapping Scan nodes as single leaf nodes
             // so constant filters (e.g., ColumnEqStr for string constants in atoms)
             // are not lost during join reordering.
-            IRNode::Filter { .. }
-                if Self::find_scan_relation(ir).is_some() && Self::is_filter_scan_chain(ir) =>
-            {
-                let schema = ir.output_schema();
-                let relation = Self::find_scan_relation(ir)
-                    .expect("find_scan_relation guaranteed Some by guard condition above");
-                scans.push((relation, schema, ir.clone()));
-            }
+            IRNode::Filter { .. } if Self::is_filter_scan_chain(ir) => scans.push(ir.clone()),
             IRNode::Filter { input, .. } => Self::extract_scans_recursive(input, scans),
             IRNode::Join { left, right, .. } => {
                 Self::extract_scans_recursive(left, scans);
@@ -162,11 +148,9 @@ impl JoinGraph {
                 Self::extract_scans_recursive(right, scans);
             }
             IRNode::Distinct { input } => Self::extract_scans_recursive(input, scans),
-            IRNode::Union { inputs } => {
-                for input in inputs {
-                    Self::extract_scans_recursive(input, scans);
-                }
-            }
+            // Union branches are separate rule bodies: their variables are
+            // scoped per branch, so a nested Union is one opaque leaf.
+            IRNode::Union { .. } => scans.push(ir.clone()),
             IRNode::Aggregate { input, .. } => Self::extract_scans_recursive(input, scans),
             IRNode::Compute { input, .. } => Self::extract_scans_recursive(input, scans),
             IRNode::HnswScan { .. } => {} // HNSW scans are not part of join graph
@@ -175,15 +159,6 @@ impl JoinGraph {
                 Self::extract_scans_recursive(left, scans);
                 Self::extract_scans_recursive(right, scans);
             }
-        }
-    }
-
-    /// Find the relation name from a (possibly Filter-wrapped) Scan node
-    fn find_scan_relation(ir: &IRNode) -> Option<String> {
-        match ir {
-            IRNode::Scan { relation, .. } => Some(relation.clone()),
-            IRNode::Filter { input, .. } => Self::find_scan_relation(input),
-            _ => None,
         }
     }
 
@@ -498,6 +473,13 @@ impl JoinPlanner {
     pub fn plan_joins(&self, ir: IRNode) -> IRNode {
         if !self.enable_reordering {
             return ir;
+        }
+
+        // Each branch of a multi-clause rule is an independent join block.
+        if let IRNode::Union { inputs } = ir {
+            return IRNode::Union {
+                inputs: inputs.into_iter().map(|b| self.plan_joins(b)).collect(),
+            };
         }
 
         // Only optimize if there are joins
@@ -1696,5 +1678,62 @@ mod tests {
         assert_eq!(*jst.join_order.last().unwrap(), 0);
         // Root has one child (node 1), join_order should contain both nodes
         assert_eq!(jst.join_order.len(), 2);
+    }
+
+    /// Two clauses of one rule share variable names (`y`) but are separate
+    /// join blocks; planning must keep them as separate Union branches.
+    #[test]
+    fn test_plan_joins_union_branches_planned_independently() {
+        let planner = JoinPlanner::new();
+        let join_branch = IRNode::Map {
+            input: Box::new(make_join(
+                make_scan("a", &["x", "y"]),
+                make_scan("a", &["z", "y"]),
+                "y",
+            )),
+            projection: vec![0, 2],
+            output_schema: vec!["x".to_string(), "z".to_string()],
+        };
+        let solo_branch = IRNode::Map {
+            input: Box::new(make_scan("a", &["x", "y"])),
+            projection: vec![0, 0],
+            output_schema: vec!["x".to_string(), "x".to_string()],
+        };
+        let ir = IRNode::Union {
+            inputs: vec![join_branch, solo_branch.clone()],
+        };
+
+        let IRNode::Union { inputs } = planner.plan_joins(ir) else {
+            panic!("Union must survive join planning");
+        };
+        assert_eq!(inputs.len(), 2);
+        assert_eq!(inputs[0].output_schema(), vec!["x", "z"]);
+        assert_eq!(count_scans(&inputs[0]), 2);
+        assert_eq!(inputs[1], solo_branch);
+    }
+
+    #[test]
+    fn test_join_graph_nested_union_is_single_leaf() {
+        let union = IRNode::Union {
+            inputs: vec![make_scan("R", &["x", "y"]), make_scan("S", &["x", "y"])],
+        };
+        let ir = IRNode::Join {
+            left: Box::new(make_scan("T", &["y", "z"])),
+            right: Box::new(union),
+            left_keys: vec![0],
+            right_keys: vec![1],
+            output_schema: vec!["y".to_string(), "z".to_string(), "x".to_string()],
+        };
+        let graph = JoinGraph::from_ir(&ir);
+        assert_eq!(graph.nodes.len(), 2);
+    }
+
+    fn count_scans(ir: &IRNode) -> usize {
+        match ir {
+            IRNode::Scan { .. } => 1,
+            IRNode::Join { left, right, .. } => count_scans(left) + count_scans(right),
+            IRNode::Map { input, .. } => count_scans(input),
+            other => panic!("unexpected node in planned branch: {other:?}"),
+        }
     }
 }

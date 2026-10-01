@@ -31,11 +31,27 @@ Rule 'two_mod' registered.
 > +two_mod(N) <- succ(M, N), one_mod(M)
 Rule 'two_mod' registered.
 > ?zero_mod(X)
-No results.
+┌───┐
+│ X │
+├───┤
+│ 0 │
+│ 3 │
+└───┘
+2 rows
 > ?one_mod(X)
-No results.
+┌───┐
+│ X │
+├───┤
+│ 1 │
+└───┘
+1 rows
 > ?two_mod(X)
-No results.
+┌───┐
+│ X │
+├───┤
+│ 2 │
+└───┘
+1 rows
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_three_way_mutual_n09t09
