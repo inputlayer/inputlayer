@@ -246,5 +246,7 @@ redundant_closure_for_method_calls = "allow"
 approx_constant = "allow"
 # Only fires in tests: exact float asserts on exactly representable values.
 float_cmp = "allow"
+# clippy 1.99: its `assert_eq!(x, [] as [T; 0])` rewrite is noisier than `assert!(x.is_empty())`.
+assert_is_empty = "allow"
 # Short names (a, b, c...) are the convention in vector math code and tests.
 many_single_char_names = "allow"
