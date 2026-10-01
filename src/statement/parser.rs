@@ -13,8 +13,8 @@ pub enum SortDirection {
 /// Query goal: ?- atom.
 #[derive(Debug, Clone)]
 pub struct QueryGoal {
-    /// The goal atom to query
-    pub goal: Atom,
+    /// The goal atom to query (None for a standalone `hnsw_nearest(...)` search)
+    pub goal: Option<Atom>,
     /// Additional body predicates (for complex queries)
     pub body: Vec<BodyPredicate>,
     /// Ordering annotations: (variable_name, direction)
@@ -467,23 +467,25 @@ pub fn parse_query(input: &str) -> Result<QueryGoal, String> {
         return Err("Query must have at least one goal".to_string());
     }
 
-    // The first positive atom is the main goal
-    let goal = rule
-        .body
-        .iter()
-        .find_map(|p| match p {
-            BodyPredicate::Positive(atom) => Some(atom.clone()),
+    // The first positive atom is the main goal. A standalone
+    // `hnsw_nearest(...)` search has none.
+    let mut preds = rule.body;
+    let goal = match preds.iter().position(BodyPredicate::is_positive) {
+        Some(i) => match preds.remove(i) {
+            BodyPredicate::Positive(atom) => Some(atom),
             _ => None,
-        })
-        .ok_or_else(|| "Query must have at least one positive goal".to_string())?;
+        },
+        None if preds.iter().any(BodyPredicate::is_hnsw_nearest) => None,
+        None => return Err("Query must have at least one positive goal".to_string()),
+    };
 
-    // Remaining body predicates (excluding the first goal).
+    // Remaining body predicates (excluding the goal).
     // Extract limit(...) as a special pseudo-predicate.
     let mut body = Vec::new();
     let mut limit = None;
     let mut offset = None;
 
-    for pred in rule.body.into_iter().skip(1) {
+    for pred in preds {
         if let BodyPredicate::Positive(ref atom) = pred {
             if atom.relation == "limit" {
                 // limit(N) or limit(N, Offset)
@@ -966,15 +968,37 @@ mod tests {
     #[test]
     fn test_parse_query_simple() {
         let result = parse_query("edge(X, Y)").unwrap();
-        assert_eq!(result.goal.relation, "edge");
-        assert_eq!(result.goal.args.len(), 2);
+        assert_eq!(result.goal.as_ref().unwrap().relation, "edge");
+        assert_eq!(result.goal.as_ref().unwrap().args.len(), 2);
     }
 
     #[test]
     fn test_parse_query_with_extra_body() {
         let result = parse_query("edge(X, Y), X > 1").unwrap();
-        assert_eq!(result.goal.relation, "edge");
+        assert_eq!(result.goal.as_ref().unwrap().relation, "edge");
         assert!(!result.body.is_empty());
+    }
+
+    #[test]
+    fn test_parse_query_standalone_hnsw_has_no_goal() {
+        let result = parse_query(r#"hnsw_nearest("idx", [1.0, 0.0], 3, Id, D)"#).unwrap();
+        assert!(result.goal.is_none());
+        assert_eq!(result.body.len(), 1);
+        assert!(result.body[0].is_hnsw_nearest());
+    }
+
+    #[test]
+    fn test_parse_query_goal_after_hnsw_keeps_hnsw() {
+        let result = parse_query(r#"hnsw_nearest("idx", [1.0], 3, Id, D), docs(Id, T)"#).unwrap();
+        assert_eq!(result.goal.as_ref().unwrap().relation, "docs");
+        assert_eq!(result.body.len(), 1);
+        assert!(result.body[0].is_hnsw_nearest());
+    }
+
+    #[test]
+    fn test_parse_query_without_positive_goal_errors() {
+        let err = parse_query("X = 1").unwrap_err();
+        assert!(err.contains("at least one positive goal"), "{err}");
     }
 
     // === parse_transient_rule / parse_persistent_rule ===
@@ -1056,7 +1080,7 @@ mod tests {
     #[test]
     fn test_parse_query_with_limit() {
         let result = parse_query("data(X), limit(3)").unwrap();
-        assert_eq!(result.goal.relation, "data");
+        assert_eq!(result.goal.as_ref().unwrap().relation, "data");
         assert_eq!(result.limit, Some(3));
         assert_eq!(result.offset, None);
         // limit pseudo-predicate should NOT appear in body
@@ -1066,7 +1090,7 @@ mod tests {
     #[test]
     fn test_parse_query_with_limit_and_offset() {
         let result = parse_query("data(X), limit(5, 2)").unwrap();
-        assert_eq!(result.goal.relation, "data");
+        assert_eq!(result.goal.as_ref().unwrap().relation, "data");
         assert_eq!(result.limit, Some(5));
         assert_eq!(result.offset, Some(2));
         assert!(result.body.is_empty());

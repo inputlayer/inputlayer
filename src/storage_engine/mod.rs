@@ -31,11 +31,13 @@
 //! ```
 
 mod snapshot;
+mod vector_index;
 pub use snapshot::KnowledgeGraphSnapshot;
 
 use crate::config::Config;
 use crate::derived_relations::CompiledRule;
 use crate::incremental::IncrementalEngine;
+use crate::index_manager::IndexManager;
 use crate::rule_catalog::RuleCatalog;
 use crate::schema::{RelationSchema, SchemaCatalog, ValidationEngine};
 use crate::statement::{RuleDef, SerializableBodyPred};
@@ -102,6 +104,8 @@ pub struct KnowledgeGraph {
     snapshot: ArcSwap<KnowledgeGraphSnapshot>,
     /// Persistent DD computation for incremental updates (shadow writes)
     incremental: Option<IncrementalEngine>,
+    /// Vector indexes, kept in sync with base relations on every write
+    indexes: IndexManager,
     /// Number of workers for parallel query execution
     num_workers: usize,
     /// Maximum result rows per query (0 = unlimited)
@@ -442,6 +446,8 @@ impl StorageEngine {
                      Use a base relation or drop the rule first with '.rule drop {relation}'."
                 )));
             }
+            db.validate_index_rows(relation, &tuples)
+                .map_err(StorageError::Other)?;
         }
 
         // Check arity consistency
@@ -742,22 +748,8 @@ impl StorageEngine {
         let (snapshot, index_metrics) = {
             let db_guard = db.read();
             let snap = db_guard.snapshot();
-            // Collect index metric info for HNSW proof enrichment
-            let metrics: std::collections::HashMap<String, String> =
-                if let Some(dd) = db_guard.incremental() {
-                    let idx_mgr = dd.index_manager();
-                    let guard = idx_mgr.lock();
-                    guard
-                        .registered_indexes()
-                        .iter()
-                        .map(|(name, idx)| {
-                            let crate::index_manager::IndexType::Hnsw(ref cfg) = idx.index_type;
-                            (name.clone(), format!("{:?}", cfg.metric).to_lowercase())
-                        })
-                        .collect()
-                } else {
-                    std::collections::HashMap::new()
-                };
+            // Index metrics for HNSW proof enrichment
+            let metrics = db_guard.index_metrics();
             (snap, metrics)
         };
 
@@ -811,20 +803,6 @@ impl StorageEngine {
 
         // Sync to disk
         self.persist.sync()?;
-
-        // Save HNSW indexes for this knowledge graph (#19)
-        if let Some(kg_arc) = self.knowledge_graphs.get(name) {
-            let kg = kg_arc.read();
-            if let Some(ref dd) = kg.incremental {
-                let idx_mgr = dd.index_manager();
-                let idx_guard = idx_mgr.lock();
-                if idx_guard.index_count() > 0 {
-                    if let Err(e) = idx_guard.save_indexes(&kg.data_dir) {
-                        tracing::warn!(kg = name, error = %e, "failed_to_save_indexes");
-                    }
-                }
-            }
-        }
 
         Ok(())
     }
@@ -1790,7 +1768,7 @@ impl StorageEngine {
         initial.optimization = self.config.optimization.clone();
         let snapshot = ArcSwap::from_pointee(initial);
 
-        Ok(KnowledgeGraph {
+        let mut kg = KnowledgeGraph {
             name: name.to_string(),
             engine,
             metadata,
@@ -1799,11 +1777,17 @@ impl StorageEngine {
             schema_catalog,
             snapshot,
             incremental: None,
+            indexes: IndexManager::new(),
             num_workers,
             max_result_rows: self.config.storage.performance.max_result_rows,
             max_query_cost: self.config.storage.performance.max_query_cost,
             optimization: self.config.optimization.clone(),
-        })
+        };
+        kg.restore_indexes();
+        if !kg.indexes.is_empty() {
+            kg.publish_snapshot();
+        }
+        Ok(kg)
     }
 
     /// Find the maximum logical time across all shards
@@ -2051,6 +2035,7 @@ impl KnowledgeGraph {
             schema_catalog,
             snapshot,
             incremental: None,
+            indexes: IndexManager::new(),
             num_workers,
             max_result_rows: 0,
             max_query_cost: 0,
@@ -2071,7 +2056,7 @@ impl KnowledgeGraph {
     ///
     /// Creates a persistent DD computation worker thread for this knowledge graph.
     /// Once enabled, all inserts and deletes are shadow-written to DD.
-    /// This is required for reading from arrangements and HNSW indexing.
+    /// This is required for reading from arrangements.
     ///
     /// # Errors
     /// Returns error if worker thread fails to spawn or replaying existing data fails.
@@ -2089,26 +2074,6 @@ impl KnowledgeGraph {
                         .map_err(StorageError::IncrementalEngineError)?;
                 }
             }
-
-            // Load persisted HNSW indexes (#19)
-            let idx_mgr = dd.index_manager();
-            let mut guard = idx_mgr.lock();
-            match guard.load_indexes(&self.data_dir) {
-                Ok(count) if count > 0 => {
-                    tracing::info!(
-                        kg = %self.name, loaded = count,
-                        "hnsw_indexes_restored_from_persist"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        kg = %self.name, error = %e,
-                        "hnsw_index_restore_failed"
-                    );
-                }
-                _ => {}
-            }
-            drop(guard);
 
             self.incremental = Some(dd);
         }
@@ -2166,9 +2131,6 @@ impl KnowledgeGraph {
             // Create AND publish snapshot while still holding the lock
             // This ensures no concurrent invalidation can occur between
             // reading materializations and making them visible to readers.
-            // Build HNSW search closure if any indexes are materialized
-            let hnsw_fn = self.build_hnsw_search_fn();
-
             let mut new_snapshot = KnowledgeGraphSnapshot::new_with_materializations(
                 input_tuples,
                 rules,
@@ -2178,7 +2140,7 @@ impl KnowledgeGraph {
             new_snapshot.max_result_rows = self.max_result_rows;
             new_snapshot.max_query_cost = self.max_query_cost;
             new_snapshot.optimization = self.optimization.clone();
-            new_snapshot.hnsw_search_fn = hnsw_fn;
+            new_snapshot.hnsw_search_fn = self.hnsw_search_fn();
             self.snapshot.store(Arc::new(new_snapshot));
 
             // Lock drops here AFTER publication - this is the fix for TOCTOU
@@ -2193,6 +2155,7 @@ impl KnowledgeGraph {
             new_snapshot.max_result_rows = self.max_result_rows;
             new_snapshot.max_query_cost = self.max_query_cost;
             new_snapshot.optimization = self.optimization.clone();
+            new_snapshot.hnsw_search_fn = self.hnsw_search_fn();
             self.snapshot.store(Arc::new(new_snapshot));
         }
 
@@ -2204,42 +2167,16 @@ impl KnowledgeGraph {
         );
     }
 
-    /// Build an HNSW search closure that captures the IndexManager Arc.
+    /// HNSW search over the indexes as of now (None without indexes).
     ///
-    /// Returns `None` if no IncrementalEngine or no materialized indexes exist.
-    fn build_hnsw_search_fn(
-        &self,
-    ) -> Option<
-        Arc<
-            dyn Fn(&str, &[f32], usize, Option<usize>) -> Result<Vec<(i64, f64)>, String>
-                + Send
-                + Sync,
-        >,
-    > {
-        let dd = self.incremental.as_ref()?;
-        let idx_mgr = dd.index_manager();
-
-        // Check if there are any indexes
-        {
-            let guard = idx_mgr.lock();
-            if guard.index_count() == 0 {
-                return None;
-            }
+    /// Captures each index at its current epoch, which matches the base data
+    /// being published: both change only under this KG's write lock.
+    fn hnsw_search_fn(&self) -> Option<crate::index_manager::HnswSearchFn> {
+        if self.indexes.is_empty() {
+            None
+        } else {
+            Some(crate::index_manager::search_fn(self.indexes.views()))
         }
-
-        Some(Arc::new(
-            move |index_name: &str, query: &[f32], k: usize, ef: Option<usize>| {
-                let guard = idx_mgr.lock();
-                let mat = guard.get_materialized(index_name).ok_or_else(|| {
-                    format!("HNSW index '{index_name}' not found or not materialized")
-                })?;
-                let results = mat.index.search(query, k, ef);
-                Ok(results
-                    .into_iter()
-                    .map(|(id, dist)| (id as i64, dist))
-                    .collect())
-            },
-        ))
     }
 
     /// Get the current snapshot for lock-free reads
@@ -2323,14 +2260,12 @@ impl KnowledgeGraph {
         // Uses the logical timestamp from StorageEngine for proper time tracking.
         // Time advancement is lazy  -  only happens when a consistent read is requested.
         if !new_tuples_for_dd.is_empty() {
+            self.index_inserted(relation, &new_tuples_for_dd);
             if let Some(dd) = &self.incremental {
                 dd.insert(relation, new_tuples_for_dd, time)
                     .map_err(StorageError::IncrementalEngineError)?;
                 // Invalidate derived relations that depend on this base
                 dd.notify_base_update(relation)
-                    .map_err(StorageError::IncrementalEngineError)?;
-                // Invalidate indexes that depend on this base relation
-                dd.notify_indexes_base_update(relation)
                     .map_err(StorageError::IncrementalEngineError)?;
             }
         }
@@ -2404,14 +2339,12 @@ impl KnowledgeGraph {
             // Shadow write deletes to IncrementalEngine (only if DD exists).
             // Uses the logical timestamp from StorageEngine.
             if !deleted_tuples_for_dd.is_empty() {
+                self.index_deleted(relation, &deleted_tuples_for_dd);
                 if let Some(dd) = &self.incremental {
                     dd.delete(relation, deleted_tuples_for_dd, time)
                         .map_err(StorageError::IncrementalEngineError)?;
                     // Invalidate derived relations that depend on this base
                     dd.notify_base_update(relation)
-                        .map_err(StorageError::IncrementalEngineError)?;
-                    // Invalidate indexes that depend on this base relation
-                    dd.notify_indexes_base_update(relation)
                         .map_err(StorageError::IncrementalEngineError)?;
                 }
             }
@@ -2607,6 +2540,9 @@ impl KnowledgeGraph {
             let _ = dd.remove_rule(name);
         }
 
+        // 6. Drop vector indexes on the relation
+        self.drop_indexes_for(name);
+
         self.publish_snapshot();
         Ok(())
     }
@@ -2671,7 +2607,6 @@ impl KnowledgeGraph {
                 if let Some(ref dd) = self.incremental {
                     let _ = dd.delete(relation, tuples.clone(), time);
                     let _ = dd.notify_base_update(relation);
-                    let _ = dd.notify_indexes_base_update(relation);
                 }
 
                 // Write deletes to persist
@@ -2684,6 +2619,7 @@ impl KnowledgeGraph {
                 let _ = persist.append(&shard, &updates);
 
                 tuples.clear();
+                self.rebuild_indexes_for(relation);
 
                 // Update metadata
                 let schema = self

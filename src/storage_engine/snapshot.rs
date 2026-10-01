@@ -11,6 +11,7 @@
 //! - Readers get consistent snapshots without holding locks
 
 use crate::ast::Rule;
+use crate::index_manager::HnswSearchFn;
 use crate::value::Tuple;
 use crate::{IQLEngine, OptimizationConfig};
 use std::collections::{HashMap, HashSet};
@@ -67,16 +68,9 @@ pub struct KnowledgeGraphSnapshot {
     /// Optimizer passes for engines built from this snapshot
     pub optimization: OptimizationConfig,
 
-    /// Optional HNSW search function for resolving nearest-neighbor queries.
-    /// Wrapped in Arc for cheap cloning. Signature:
-    /// `(index_name, query_vector, k, ef_search) -> Vec<(tuple_id, distance)>`
-    pub hnsw_search_fn: Option<
-        Arc<
-            dyn Fn(&str, &[f32], usize, Option<usize>) -> Result<Vec<(i64, f64)>, String>
-                + Send
-                + Sync,
-        >,
-    >,
+    /// HNSW search over the index views captured when this snapshot was
+    /// published, so `hnsw_nearest` sees the same data as `input_tuples`.
+    pub hnsw_search_fn: Option<HnswSearchFn>,
 }
 
 impl KnowledgeGraphSnapshot {
@@ -419,8 +413,7 @@ impl KnowledgeGraphSnapshot {
     /// Configure HNSW search on a IQLEngine if available.
     fn configure_hnsw(&self, engine: &mut IQLEngine) {
         if let Some(ref search_fn) = self.hnsw_search_fn {
-            let f = Arc::clone(search_fn);
-            engine.set_hnsw_search_fn(Box::new(move |idx, query, k, ef| f(idx, query, k, ef)));
+            engine.set_hnsw_search_fn(Arc::clone(search_fn));
         }
     }
 

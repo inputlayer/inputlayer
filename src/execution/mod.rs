@@ -3,6 +3,7 @@
 //! Provides production-grade query execution with:
 //! - Timeout enforcement via cooperative cancellation
 
+pub mod hnsw_resolve;
 mod timeout;
 pub mod timing;
 

@@ -19,9 +19,9 @@ Index error: No schema found for relation 'embeddings'. Register a schema first.
 > .index list
 No indexes.
 > .index stats emb_idx
-Index error: Index 'emb_idx' not found (no incremental engine)
+Index error: Index 'emb_idx' not found. Available indexes: []
 > .index drop emb_idx
-Index error: Index 'emb_idx' not found (no incremental engine)
+Index error: Index 'emb_idx' not found. Available indexes: []
 > .index list
 No indexes.
 > .kg use default

@@ -24,7 +24,7 @@ impl Dependencies {
     /// Compute the dependency closure of `goal` through `rules`.
     pub fn for_query(goal: &QueryGoal, rules: &[Rule]) -> Self {
         let mut deps = Self::default();
-        let mut frontier = vec![goal.goal.relation.clone()];
+        let mut frontier: Vec<String> = goal.goal.iter().map(|g| g.relation.clone()).collect();
         deps.collect_body(&goal.body, &mut frontier);
         while let Some(relation) = frontier.pop() {
             if deps.relations.contains(&relation) {

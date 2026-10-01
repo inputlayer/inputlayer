@@ -265,8 +265,8 @@ pub use session::{
 // Re-export index types
 pub use hnsw_index::HnswIndex;
 pub use index_manager::{
-    DistanceMetric, HnswConfig, Index, IndexManager, IndexStats, IndexType, MaterializedIndex,
-    RegisteredIndex, TupleId,
+    DistanceMetric, HnswConfig, HnswSearchFn, IdType, IndexManager, IndexStats, IndexType,
+    IndexView, ManagedIndex, RegisteredIndex, TupleId,
 };
 
 // Re-export recursion utilities
@@ -335,15 +335,8 @@ pub struct IQLEngine {
     /// Arc-wrapped shared input data (set by snapshot for zero-copy query execution)
     shared_input: Option<Arc<HashMap<String, Vec<Tuple>>>>,
 
-    /// Optional HNSW search function for resolving HnswScan IR nodes before DD execution.
-    /// Signature: (index_name, query_vector, k, ef_search) -> Vec<(tuple_id, distance)>
-    hnsw_search_fn: Option<
-        Box<
-            dyn Fn(&str, &[f32], usize, Option<usize>) -> Result<Vec<(i64, f64)>, String>
-                + Send
-                + Sync,
-        >,
-    >,
+    /// HNSW search callback for `hnsw_nearest` (resolved before each rule runs).
+    hnsw_search_fn: Option<HnswSearchFn>,
 
     /// Timing mode for query profiling (default: Summary)
     timing_mode: execution::TimingMode,
@@ -442,18 +435,11 @@ impl IQLEngine {
         self.shared_input = Some(data);
     }
 
-    /// Set the HNSW search callback for resolving nearest-neighbor queries.
+    /// Set the HNSW search callback used by `hnsw_nearest`.
     ///
-    /// The callback is invoked for each `HnswScan` IR node during query execution.
-    /// Results are injected as base facts before DD computation begins.
-    pub fn set_hnsw_search_fn(
-        &mut self,
-        f: Box<
-            dyn Fn(&str, &[f32], usize, Option<usize>) -> Result<Vec<(i64, f64)>, String>
-                + Send
-                + Sync,
-        >,
-    ) {
+    /// Each rule's `HnswScan` nodes are searched right before the rule runs;
+    /// results are loaded as synthetic base relations.
+    pub fn set_hnsw_search_fn(&mut self, f: HnswSearchFn) {
         self.hnsw_search_fn = Some(f);
     }
 
@@ -1290,136 +1276,6 @@ impl IQLEngine {
         }
     }
 
-    /// Resolve all HnswScan nodes in the IR tree.
-    ///
-    /// For each HnswScan, executes the HNSW search via the registered callback,
-    /// injects the results as a synthetic base relation, and replaces the
-    /// HnswScan node with a Scan over that relation.
-    fn resolve_hnsw_scans(&mut self) -> Result<(), String> {
-        let search_fn = match &self.hnsw_search_fn {
-            Some(f) => f,
-            None => {
-                // No search function registered - check if any HnswScan nodes exist
-                let has_hnsw = self.ir_nodes.iter().any(Self::contains_hnsw_scan);
-                if has_hnsw {
-                    return Err(
-                        "Query contains hnsw_nearest() but no HNSW index is available".into(),
-                    );
-                }
-                return Ok(());
-            }
-        };
-
-        let mut counter = 0usize;
-        for ir in &mut self.ir_nodes {
-            Self::resolve_hnsw_in_node(ir, search_fn, &mut self.input_tuples, &mut counter)?;
-        }
-
-        // Update shared_input if we injected any results
-        if counter > 0 {
-            if let Some(ref mut shared) = self.shared_input {
-                // Re-create shared input with the new synthetic relations
-                *shared = Arc::new(self.input_tuples.clone());
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Check if an IR tree contains any HnswScan nodes
-    fn contains_hnsw_scan(ir: &IRNode) -> bool {
-        match ir {
-            IRNode::HnswScan { .. } => true,
-            IRNode::Map { input, .. }
-            | IRNode::Filter { input, .. }
-            | IRNode::Distinct { input }
-            | IRNode::Aggregate { input, .. }
-            | IRNode::Compute { input, .. }
-            | IRNode::FlatMap { input, .. } => Self::contains_hnsw_scan(input),
-            IRNode::Join { left, right, .. }
-            | IRNode::Antijoin { left, right, .. }
-            | IRNode::JoinFlatMap { left, right, .. } => {
-                Self::contains_hnsw_scan(left) || Self::contains_hnsw_scan(right)
-            }
-            IRNode::Union { inputs } => inputs.iter().any(Self::contains_hnsw_scan),
-            IRNode::Scan { .. } => false,
-        }
-    }
-
-    /// Recursively resolve HnswScan nodes within an IR tree.
-    ///
-    /// Replaces each HnswScan with a Scan over a synthetic relation containing
-    /// the search results (id, distance) as base tuples.
-    fn resolve_hnsw_in_node(
-        ir: &mut IRNode,
-        search_fn: &dyn Fn(&str, &[f32], usize, Option<usize>) -> Result<Vec<(i64, f64)>, String>,
-        input_tuples: &mut HashMap<String, Vec<Tuple>>,
-        counter: &mut usize,
-    ) -> Result<(), String> {
-        match ir {
-            IRNode::HnswScan {
-                index_name,
-                query,
-                k,
-                ef_search,
-                output_schema,
-            } => {
-                // Extract query vector from the IR expression
-                let query_vec = match query {
-                    ir::IRExpression::VectorLiteral(v) => v.clone(),
-                    _ => {
-                        return Err(
-                            "hnsw_nearest: only literal vector queries are supported".into()
-                        );
-                    }
-                };
-
-                // Execute the HNSW search
-                let results = search_fn(index_name, &query_vec, *k, *ef_search)?;
-
-                // Convert results to tuples and inject as a synthetic relation
-                let synthetic_name = format!("__hnsw_result_{counter}__");
-                *counter += 1;
-
-                let tuples: Vec<Tuple> = results
-                    .into_iter()
-                    .map(|(id, dist)| Tuple::new(vec![Value::Int64(id), Value::Float64(dist)]))
-                    .collect();
-
-                input_tuples.insert(synthetic_name.clone(), tuples);
-
-                // Replace HnswScan with Scan over the synthetic relation
-                *ir = IRNode::Scan {
-                    relation: synthetic_name,
-                    schema: output_schema.clone(),
-                };
-
-                Ok(())
-            }
-            IRNode::Map { input, .. }
-            | IRNode::Filter { input, .. }
-            | IRNode::Distinct { input }
-            | IRNode::Aggregate { input, .. }
-            | IRNode::Compute { input, .. }
-            | IRNode::FlatMap { input, .. } => {
-                Self::resolve_hnsw_in_node(input, search_fn, input_tuples, counter)
-            }
-            IRNode::Join { left, right, .. }
-            | IRNode::Antijoin { left, right, .. }
-            | IRNode::JoinFlatMap { left, right, .. } => {
-                Self::resolve_hnsw_in_node(left, search_fn, input_tuples, counter)?;
-                Self::resolve_hnsw_in_node(right, search_fn, input_tuples, counter)
-            }
-            IRNode::Union { inputs } => {
-                for input in inputs {
-                    Self::resolve_hnsw_in_node(input, search_fn, input_tuples, counter)?;
-                }
-                Ok(())
-            }
-            IRNode::Scan { .. } => Ok(()),
-        }
-    }
-
     /// Execute the full pipeline returning tuples of arbitrary arity
     ///
     /// This is the main entry point for queries that may return non-binary tuples.
@@ -1507,7 +1363,7 @@ impl IQLEngine {
         // Detect recursion BEFORE optimization (optimization destroys Union structure)
         let rule_heads = self.get_rule_heads();
         let recursive_info = self.detect_recursion_info(&rule_heads);
-        let unoptimized_ir_nodes = self.ir_nodes.clone();
+        let mut unoptimized_ir_nodes = self.ir_nodes.clone();
 
         // Optimize (for non-recursive nodes)
         let (opt_result, opt_us) = collector.time(|| self.optimize_ir(collector.is_detailed()));
@@ -1519,10 +1375,6 @@ impl IQLEngine {
         if self.ir_nodes.is_empty() {
             return Err("No IR nodes to execute".to_string());
         }
-
-        // Resolve HNSW nearest-neighbor scans before DD execution (#20).
-        // HnswScan nodes are replaced with Scan nodes over injected result relations.
-        self.resolve_hnsw_scans()?;
 
         // Query cost check (#47): reject queries exceeding configured cost threshold
         if self.max_query_cost > 0 {
@@ -1577,9 +1429,35 @@ impl IQLEngine {
                 let i = *i;
                 let head_name = rule_heads.get(i).cloned().unwrap_or_default();
 
+                let is_recursive = recursive_info.get(i).is_some_and(Option::is_some);
+
+                // HNSW searches run outside DD; their results become synthetic inputs.
+                let hnsw_inputs = {
+                    let ir = if is_recursive {
+                        &mut unoptimized_ir_nodes[i]
+                    } else {
+                        &mut self.ir_nodes[i]
+                    };
+                    let inputs = execution::hnsw_resolve::RuleInputs {
+                        derived: &accumulated_results,
+                        base: &self.input_tuples,
+                    };
+                    execution::hnsw_resolve::resolve_rule(
+                        ir,
+                        self.hnsw_search_fn.as_ref(),
+                        &inputs,
+                        i,
+                        is_recursive,
+                    )?
+                };
+                let hnsw_names: Vec<String> = hnsw_inputs.iter().map(|(n, _)| n.clone()).collect();
+                accumulated_results.extend(hnsw_inputs);
+
                 // Create fresh CodeGenerator for each rule (avoids timely state issues)
                 let codegen = self.rule_codegen(&[i], &accumulated_results);
-                let is_recursive = recursive_info.get(i).is_some_and(Option::is_some);
+                for name in &hnsw_names {
+                    accumulated_results.remove(name);
+                }
 
                 // Use unoptimized IR for recursive nodes, optimized for others
                 let (exec_result, rule_us) = collector.time(|| {
@@ -1620,11 +1498,30 @@ impl IQLEngine {
             } else {
                 // Mutually recursive relations: one joint semi-naive fixpoint.
                 // Unoptimized IR keeps each relation's clause Union intact.
+                let mut hnsw_names = Vec::new();
+                for &i in group {
+                    let inputs = execution::hnsw_resolve::RuleInputs {
+                        derived: &accumulated_results,
+                        base: &self.input_tuples,
+                    };
+                    let resolved = execution::hnsw_resolve::resolve_rule(
+                        &mut unoptimized_ir_nodes[i],
+                        self.hnsw_search_fn.as_ref(),
+                        &inputs,
+                        i,
+                        true,
+                    )?;
+                    hnsw_names.extend(resolved.iter().map(|(n, _)| n.clone()));
+                    accumulated_results.extend(resolved);
+                }
                 let members: Vec<(String, IRNode)> = group
                     .iter()
                     .map(|&i| (rule_heads[i].clone(), unoptimized_ir_nodes[i].clone()))
                     .collect();
                 let codegen = self.rule_codegen(group, &accumulated_results);
+                for name in &hnsw_names {
+                    accumulated_results.remove(name);
+                }
                 let (exec_result, scc_us) =
                     collector.time(|| codegen.execute_recursive_scc(&members));
                 let mut results = exec_result?;
@@ -2788,11 +2685,13 @@ mod tests {
         let mut engine = IQLEngine::new();
 
         // Register a mock HNSW search function
-        engine.set_hnsw_search_fn(Box::new(
+        engine.set_hnsw_search_fn(Arc::new(
             |index_name: &str, _query: &[f32], k: usize, _ef: Option<usize>| {
                 assert_eq!(index_name, "test_idx");
                 // Return k fake results
-                Ok((0..k as i64).map(|i| (i + 1, (i as f64) * 0.1)).collect())
+                Ok((0..k as i64)
+                    .map(|i| (Value::Int64(i + 1), (i as f64) * 0.1))
+                    .collect())
             },
         ));
 
@@ -2830,9 +2729,9 @@ mod tests {
         );
 
         // Mock HNSW returns ids 1 and 3
-        engine.set_hnsw_search_fn(Box::new(
+        engine.set_hnsw_search_fn(Arc::new(
             |_idx: &str, _q: &[f32], _k: usize, _ef: Option<usize>| {
-                Ok(vec![(1_i64, 0.1), (3_i64, 0.3)])
+                Ok(vec![(Value::Int64(1), 0.1), (Value::Int64(3), 0.3)])
             },
         ));
 
@@ -2863,7 +2762,7 @@ mod tests {
         let mut engine = IQLEngine::new();
 
         // Search function that returns error for unknown index
-        engine.set_hnsw_search_fn(Box::new(
+        engine.set_hnsw_search_fn(Arc::new(
             |index_name: &str, _q: &[f32], _k: usize, _ef: Option<usize>| {
                 Err(format!("Index '{index_name}' not found"))
             },
@@ -2880,7 +2779,7 @@ mod tests {
     fn test_hnsw_nearest_empty_results() {
         let mut engine = IQLEngine::new();
 
-        engine.set_hnsw_search_fn(Box::new(
+        engine.set_hnsw_search_fn(Arc::new(
             |_idx: &str, _q: &[f32], _k: usize, _ef: Option<usize>| Ok(vec![]),
         ));
 
@@ -2898,6 +2797,70 @@ mod tests {
         // No HNSW search function, but query doesn't use hnsw_nearest - should be fine
         let results = engine.execute_tuples("result(X, Y) <- edge(X, Y)").unwrap();
         assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_hnsw_nearest_bound_variable_query() {
+        let mut engine = IQLEngine::new();
+        engine.add_tuple(
+            "query_vec",
+            Tuple::new(vec![Value::Vector(Arc::new(vec![7.0, 0.0]))]),
+        );
+        engine.add_tuple(
+            "doc",
+            Tuple::new(vec![Value::Int64(7), Value::string("seven")]),
+        );
+        // The mock returns the query's first component as the id.
+        engine.set_hnsw_search_fn(Arc::new(|_idx: &str, q: &[f32], _k, _ef| {
+            Ok(vec![(Value::Int64(q[0] as i64), 0.25)])
+        }));
+        let results = engine
+            .execute_tuples(
+                r#"result(Title, Dist) <- query_vec(QV), hnsw_nearest("idx", QV, 1, Id, Dist), doc(Id, Title)"#,
+            )
+            .unwrap();
+        assert_eq!(
+            results,
+            vec![Tuple::new(vec![
+                Value::string("seven"),
+                Value::Float64(0.25)
+            ])]
+        );
+    }
+
+    #[test]
+    fn test_hnsw_nearest_bound_variable_from_derived_relation() {
+        let mut engine = IQLEngine::new();
+        engine.add_tuple(
+            "doc_vec",
+            Tuple::new(vec![Value::Int64(1), Value::Vector(Arc::new(vec![2.0]))]),
+        );
+        engine.add_tuple(
+            "doc_vec",
+            Tuple::new(vec![Value::Int64(5), Value::Vector(Arc::new(vec![3.0]))]),
+        );
+        engine.set_hnsw_search_fn(Arc::new(|_idx: &str, q: &[f32], _k, _ef| {
+            Ok(vec![(Value::Int64(q[0] as i64 * 10), 0.0)])
+        }));
+        let results = engine
+            .execute_tuples(
+                "picked(V) <- doc_vec(1, V)\n\
+                 result(Id) <- picked(QV), hnsw_nearest(\"idx\", QV, 1, Id, D)",
+            )
+            .unwrap();
+        // Only the vector of doc 1 is a query.
+        assert_eq!(results, vec![Tuple::new(vec![Value::Int64(20)])]);
+    }
+
+    #[test]
+    fn test_hnsw_nearest_unbound_variable_errors() {
+        let mut engine = IQLEngine::new();
+        engine.add_tuple("other", Tuple::new(vec![Value::Int64(1)]));
+        engine.set_hnsw_search_fn(Arc::new(|_: &str, _: &[f32], _, _| Ok(vec![])));
+        let err = engine
+            .execute_tuples(r#"result(Id) <- other(X), hnsw_nearest("idx", QV, 1, Id, D)"#)
+            .unwrap_err();
+        assert!(err.contains("must be bound"), "{err}");
     }
 
     // ====== Magic Sets Integration Tests ======

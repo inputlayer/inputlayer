@@ -687,11 +687,13 @@ impl SubplanSharer {
 
             IRNode::HnswScan {
                 index_name,
+                query,
                 k,
                 ef_search,
                 ..
             } => {
                 index_name.hash(hasher);
+                format!("{query:?}").hash(hasher);
                 k.hash(hasher);
                 ef_search.hash(hasher);
             }
@@ -753,7 +755,9 @@ impl SubplanSharer {
             IRNode::Union { inputs } => inputs
                 .iter()
                 .any(|i| Self::references_derived_relation(i, derived_relations)),
-            IRNode::HnswScan { .. } => false,
+            // Search results are injected per rule at execution time, so like a
+            // derived relation they do not exist when shared views run.
+            IRNode::HnswScan { .. } => true,
         }
     }
 

@@ -1,0 +1,80 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+
+> .kg create test_hnsw_lifecycle_n33t16
+Knowledge graph 'test_hnsw_lifecycle_n33t16' created.
+Switched to knowledge graph: test_hnsw_lifecycle_n33t16
+> .kg use test_hnsw_lifecycle_n33t16
+Switched to knowledge graph: test_hnsw_lifecycle_n33t16
+> +docs(id: int, title: string, emb: vector)
+Schema for 'docs' registered with 3 columns (persistent)
+> +docs[(1, "x", [1.0, 0.0, 0.0]), (2, "y", [0.0, 1.0, 0.0]), (3, "z", [0.0, 0.0, 1.0]), (4, "xy", [0.7, 0.7, 0.0])]
+Inserted 4 fact(s) into 'docs'.
+> .index create doc_idx on docs(emb) metric cosine
+Index 'doc_idx' created on docs.emb (4 vectors).
+> .index stats doc_idx
+Index 'doc_idx': relation=docs, column=emb, type=hnsw, metric=cosine, vectors=4, tombstones=0, dimension=3
+> ?hnsw_nearest("doc_idx", [1.0, 0.1, 0.0], 2, Id, Dist), docs(Id, Title, _)
+┌────┬───────┬──────────────────────────────────────────┬──────────────────────┐
+│ Id │ Title │ _                                        │ Dist                 │
+├────┼───────┼──────────────────────────────────────────┼──────────────────────┤
+│  1 │ "x"   │ [1.0, 0.0, 0.0]                          │ 0.004962809953870551 │
+│  4 │ "xy"  │ [0.699999988079071, 0.699999988079071, … │  0.22604268334112732 │
+└────┴───────┴──────────────────────────────────────────┴──────────────────────┘
+2 rows
+> +docs[(5, "neg", [-1.0, 0.0, 0.0])]
+Inserted 1 fact(s) into 'docs'.
+> ?hnsw_nearest("doc_idx", [-1.0, 0.05, 0.0], 1, Id, Dist), docs(Id, Title, _)
+┌────┬───────┬──────────────────┬──────────────────────┐
+│ Id │ Title │ _                │ Dist                 │
+├────┼───────┼──────────────────┼──────────────────────┤
+│  5 │ "neg" │ [-1.0, 0.0, 0.0] │ 0.001247661277365704 │
+└────┴───────┴──────────────────┴──────────────────────┘
+1 rows
+> -docs(1, "x", [1.0, 0.0, 0.0])
+Deleted 1 facts from 'docs'.
+> ?hnsw_nearest("doc_idx", [1.0, 0.0, 0.0], 2, Id, Dist), docs(Id, Title, _)
+┌────┬───────┬──────────────────────────────────────────┬─────────────────────┐
+│ Id │ Title │ _                                        │ Dist                │
+├────┼───────┼──────────────────────────────────────────┼─────────────────────┤
+│  2 │ "y"   │ [0.0, 1.0, 0.0]                          │  0.9999999657714582 │
+│  4 │ "xy"  │ [0.699999988079071, 0.699999988079071, … │ 0.29289320928715945 │
+└────┴───────┴──────────────────────────────────────────┴─────────────────────┘
+2 rows
+> .index stats doc_idx
+Index 'doc_idx': relation=docs, column=emb, type=hnsw, metric=cosine, vectors=4, tombstones=1, dimension=3
+> .index rebuild doc_idx
+Index 'doc_idx' rebuilt (4 vectors).
+> .index stats doc_idx
+Index 'doc_idx': relation=docs, column=emb, type=hnsw, metric=cosine, vectors=4, tombstones=0, dimension=3
+> +query_vec[([0.0, 0.1, 1.0])]
+Inserted 1 fact(s) into 'query_vec'.
+> ?query_vec(QV), hnsw_nearest("doc_idx", QV, 1, Id, Dist), docs(Id, Title, _)
+┌─────────────────────────────────┬────┬──────────────────────┬───────┐
+│ QV                              │ Id │ Dist                 │ Title │
+├─────────────────────────────────┼────┼──────────────────────┼───────┤
+│ [0.0, 0.10000000149011612, 1.0] │  3 │ 0.004962809953870551 │ "z"   │
+└─────────────────────────────────┴────┴──────────────────────┴───────┘
+1 rows
+> ?hnsw_nearest("missing_idx", [1.0, 0.0, 0.0], 1, Id, Dist)
+Query execution failed: hnsw_nearest: index 'missing_idx' does not exist. Available indexes: [doc_idx]. Create one with `.index create missing_idx on <relation>(<column>)`.
+> ?hnsw_nearest("doc_idx", [1.0, 0.0], 1, Id, Dist)
+Query execution failed: hnsw_nearest on index 'doc_idx': query vector has dimension 2, but the index has dimension 3
+> +docs[(9, "bad", [1.0, 0.0])]
+index 'doc_idx': row id=9: vector has dimension 2, but the index has dimension 3
+> .index create title_idx on docs(title)
+Index error: Column 'title' of 'docs' has type String; an HNSW index needs a vector column.
+> .index rebuild missing_idx
+Index error: Index 'missing_idx' not found. Available indexes: [doc_idx]
+> .index drop doc_idx
+Index 'doc_idx' dropped.
+> .index list
+No indexes.
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_hnsw_lifecycle_n33t16
+Knowledge graph 'test_hnsw_lifecycle_n33t16' dropped.

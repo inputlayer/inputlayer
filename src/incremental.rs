@@ -3,7 +3,7 @@
 //! `IncrementalEngine` provides persistent incremental computation for one
 //! knowledge graph. It owns a timely worker thread with Differential Dataflow
 //! InputSessions for base relations, and coordinates derived relation
-//! materialization and index management.
+//! materialization.
 //!
 //! ## Architecture
 //!
@@ -12,7 +12,6 @@
 //!                              ├─ InputSessions (one per base relation)
 //!                              ├─ Arrangements (queryable via cursor)
 //!                              ├─ DerivedRelationsManager (rule tracking)
-//!                              ├─ IndexManager (HNSW indexes)
 //!                              └─ Command loop (blocking recv + batch)
 //! ```
 //!
@@ -23,7 +22,6 @@
 //! exclusively through the command channel.
 
 use crate::derived_relations::{CompiledRule, DerivedRelationsManager};
-use crate::index_manager::{Index, IndexManager, IndexStats, RegisteredIndex, TupleId};
 use crate::value::Tuple;
 use crossbeam_channel as channel;
 use parking_lot::Mutex;
@@ -80,36 +78,6 @@ enum EngineCommand {
     GetDerivedStats {
         response: channel::Sender<(usize, usize, usize)>,
     },
-
-    // === Index Management ===
-    RegisterIndex {
-        index: RegisteredIndex,
-        response: channel::Sender<Result<(), String>>,
-    },
-    RemoveIndex {
-        name: String,
-        response: channel::Sender<Result<(), String>>,
-    },
-    SetIndexMaterialized {
-        name: String,
-        index: Box<dyn Index + Send + Sync>,
-        tuple_count: usize,
-        response: channel::Sender<()>,
-    },
-    GetIndexStats {
-        name: Option<String>,
-        response: channel::Sender<Vec<IndexStats>>,
-    },
-    UpdateIndex {
-        name: String,
-        inserts: Vec<(TupleId, Vec<f32>)>,
-        deletes: Vec<TupleId>,
-        response: channel::Sender<Result<(), String>>,
-    },
-    NotifyIndexesBaseUpdate {
-        relation: String,
-        response: channel::Sender<Vec<String>>,
-    },
 }
 
 /// Handle to the incremental computation engine for one knowledge graph.
@@ -124,7 +92,6 @@ pub struct IncrementalEngine {
     max_write_time: Arc<AtomicU64>,
     known_relations: Mutex<HashSet<String>>,
     derived_relations: Arc<Mutex<DerivedRelationsManager>>,
-    index_manager: Arc<Mutex<IndexManager>>,
 }
 
 impl IncrementalEngine {
@@ -138,13 +105,11 @@ impl IncrementalEngine {
         let known_relations = Mutex::new(relations.iter().cloned().collect());
         let derived_relations = Arc::new(Mutex::new(DerivedRelationsManager::new()));
         let derived_clone = Arc::clone(&derived_relations);
-        let index_manager = Arc::new(Mutex::new(IndexManager::new()));
-        let index_clone = Arc::clone(&index_manager);
 
         let worker_handle = std::thread::Builder::new()
             .name("incremental-worker".to_string())
             .spawn(move || {
-                Self::worker_loop(relations, command_rx, derived_clone, index_clone);
+                Self::worker_loop(relations, command_rx, derived_clone);
             })
             .map_err(|e| format!("Failed to spawn worker thread: {e}"))?;
 
@@ -155,7 +120,6 @@ impl IncrementalEngine {
             max_write_time,
             known_relations,
             derived_relations,
-            index_manager,
         })
     }
 
@@ -167,7 +131,6 @@ impl IncrementalEngine {
         relations: Vec<String>,
         command_rx: channel::Receiver<EngineCommand>,
         derived_relations: Arc<Mutex<DerivedRelationsManager>>,
-        index_manager: Arc<Mutex<IndexManager>>,
     ) {
         use differential_dataflow::input::Input;
         use differential_dataflow::trace::cursor::Cursor;
@@ -326,71 +289,6 @@ impl IncrementalEngine {
                                 stats.materialized_count,
                                 stats.invalid_count,
                             ));
-                        }
-
-                        // === Index Management ===
-                        EngineCommand::RegisterIndex { index, response } => {
-                            let mut mgr = index_manager.lock();
-                            let result = mgr.register_index(index);
-                            let _ = response.send(result);
-                        }
-
-                        EngineCommand::RemoveIndex { name, response } => {
-                            let mut mgr = index_manager.lock();
-                            let result = mgr.remove_index(&name);
-                            let _ = response.send(result);
-                        }
-
-                        EngineCommand::SetIndexMaterialized {
-                            name,
-                            index,
-                            tuple_count,
-                            response,
-                        } => {
-                            let mut mgr = index_manager.lock();
-                            mgr.set_materialized(&name, index, tuple_count);
-                            let _ = response.send(());
-                        }
-
-                        EngineCommand::GetIndexStats { name, response } => {
-                            let mgr = index_manager.lock();
-                            let stats = match name {
-                                Some(n) => mgr.get_stats(&n).into_iter().collect(),
-                                None => mgr.get_all_stats(),
-                            };
-                            let _ = response.send(stats);
-                        }
-
-                        EngineCommand::UpdateIndex {
-                            name,
-                            inserts,
-                            deletes,
-                            response,
-                        } => {
-                            let mut mgr = index_manager.lock();
-                            let result = if let Some(mat) = mgr.get_materialized_mut(&name) {
-                                for id in deletes {
-                                    mat.index.delete(id);
-                                }
-                                let mut insert_result = Ok(());
-                                for (id, vector) in inserts {
-                                    if let Err(e) = mat.index.insert(id, &vector) {
-                                        insert_result = Err(e);
-                                        break;
-                                    }
-                                }
-                                mat.tuple_count = mat.index.len();
-                                insert_result
-                            } else {
-                                Err(format!("Index '{name}' not found or invalid"))
-                            };
-                            let _ = response.send(result);
-                        }
-
-                        EngineCommand::NotifyIndexesBaseUpdate { relation, response } => {
-                            let mut mgr = index_manager.lock();
-                            let invalidated = mgr.notify_base_update(&relation);
-                            let _ = response.send(invalidated);
                         }
                     }
                 }
@@ -580,110 +478,6 @@ impl IncrementalEngine {
     /// Get direct access to the derived relations manager.
     pub fn derived_relations(&self) -> Arc<Mutex<DerivedRelationsManager>> {
         Arc::clone(&self.derived_relations)
-    }
-
-    // === Index Management API ===
-
-    /// Register a new index (metadata only, does not build).
-    pub fn register_index(&self, index: RegisteredIndex) -> Result<(), String> {
-        let (tx, rx) = channel::bounded(1);
-        self.command_tx
-            .send(EngineCommand::RegisterIndex {
-                index,
-                response: tx,
-            })
-            .map_err(|_| "Worker disconnected".to_string())?;
-        rx.recv()
-            .map_err(|_| "Worker disconnected while registering index".to_string())?
-    }
-
-    /// Remove an index.
-    pub fn remove_index(&self, name: &str) -> Result<(), String> {
-        let (tx, rx) = channel::bounded(1);
-        self.command_tx
-            .send(EngineCommand::RemoveIndex {
-                name: name.to_string(),
-                response: tx,
-            })
-            .map_err(|_| "Worker disconnected".to_string())?;
-        rx.recv()
-            .map_err(|_| "Worker disconnected while removing index".to_string())?
-    }
-
-    /// Store a built index.
-    pub fn set_index_materialized(
-        &self,
-        name: &str,
-        index: Box<dyn Index + Send + Sync>,
-        tuple_count: usize,
-    ) -> Result<(), String> {
-        let (tx, rx) = channel::bounded(1);
-        self.command_tx
-            .send(EngineCommand::SetIndexMaterialized {
-                name: name.to_string(),
-                index,
-                tuple_count,
-                response: tx,
-            })
-            .map_err(|_| "Worker disconnected".to_string())?;
-        rx.recv()
-            .map_err(|_| "Worker disconnected while setting index".to_string())
-    }
-
-    /// Get index statistics.
-    pub fn get_index_stats(&self, name: Option<&str>) -> Result<Vec<IndexStats>, String> {
-        let (tx, rx) = channel::bounded(1);
-        self.command_tx
-            .send(EngineCommand::GetIndexStats {
-                name: name.map(String::from),
-                response: tx,
-            })
-            .map_err(|_| "Worker disconnected".to_string())?;
-        rx.recv()
-            .map_err(|_| "Worker disconnected while getting index stats".to_string())
-    }
-
-    /// Apply incremental updates to an index.
-    pub fn update_index(
-        &self,
-        name: &str,
-        inserts: Vec<(TupleId, Vec<f32>)>,
-        deletes: Vec<TupleId>,
-    ) -> Result<(), String> {
-        let (tx, rx) = channel::bounded(1);
-        self.command_tx
-            .send(EngineCommand::UpdateIndex {
-                name: name.to_string(),
-                inserts,
-                deletes,
-                response: tx,
-            })
-            .map_err(|_| "Worker disconnected".to_string())?;
-        rx.recv()
-            .map_err(|_| "Worker disconnected while updating index".to_string())?
-    }
-
-    /// Notify indexes that a base relation was updated.
-    pub fn notify_indexes_base_update(&self, relation: &str) -> Result<Vec<String>, String> {
-        let (tx, rx) = channel::bounded(1);
-        self.command_tx
-            .send(EngineCommand::NotifyIndexesBaseUpdate {
-                relation: relation.to_string(),
-                response: tx,
-            })
-            .map_err(|_| "Worker disconnected".to_string())?;
-        rx.recv()
-            .map_err(|_| "Worker disconnected while notifying indexes".to_string())
-    }
-
-    /// Check if an index exists.
-    pub fn has_index(&self, name: &str) -> bool {
-        self.index_manager.lock().has_index(name)
-    }
-
-    /// Get direct access to the index manager.
-    pub fn index_manager(&self) -> Arc<Mutex<IndexManager>> {
-        Arc::clone(&self.index_manager)
     }
 
     /// Shut down the computation cleanly.
@@ -933,39 +727,6 @@ mod tests {
         engine.set_materialized("path", vec![]).unwrap();
         let (total, mat, inv) = engine.get_derived_stats().unwrap();
         assert_eq!((total, mat, inv), (1, 1, 0));
-        engine.shutdown().unwrap();
-    }
-
-    fn make_registered_index(name: &str, relation: &str) -> RegisteredIndex {
-        use crate::index_manager::{HnswConfig, IndexType};
-        RegisteredIndex {
-            name: name.to_string(),
-            relation: relation.to_string(),
-            column_idx: 1,
-            column_name: "embedding".to_string(),
-            index_type: IndexType::Hnsw(HnswConfig::default()),
-        }
-    }
-
-    #[test]
-    fn test_register_index() {
-        let engine = IncrementalEngine::new(vec![]).unwrap();
-        let idx = make_registered_index("doc_emb", "documents");
-        engine.register_index(idx).unwrap();
-        assert!(engine.has_index("doc_emb"));
-        assert!(!engine.has_index("nonexistent"));
-        engine.shutdown().unwrap();
-    }
-
-    #[test]
-    fn test_index_stats() {
-        let engine = IncrementalEngine::new(vec![]).unwrap();
-        assert!(engine.get_index_stats(None).unwrap().is_empty());
-        let idx = make_registered_index("test_idx", "docs");
-        engine.register_index(idx).unwrap();
-        let stats = engine.get_index_stats(None).unwrap();
-        assert_eq!(stats.len(), 1);
-        assert_eq!(stats[0].name, "test_idx");
         engine.shutdown().unwrap();
     }
 
@@ -1346,28 +1107,6 @@ mod tests {
     // Batch 20: Index lifecycle, accessors, edge cases
 
     #[test]
-    fn test_remove_index_registered() {
-        let engine = IncrementalEngine::new(vec!["data".to_string()]).unwrap();
-
-        let index = make_registered_index("test_idx", "data");
-        engine.register_index(index).unwrap();
-        assert!(engine.has_index("test_idx"));
-
-        engine.remove_index("test_idx").unwrap();
-        assert!(!engine.has_index("test_idx"));
-
-        engine.shutdown().unwrap();
-    }
-
-    #[test]
-    fn test_remove_index_nonexistent() {
-        let engine = IncrementalEngine::new(vec!["data".to_string()]).unwrap();
-        let result = engine.remove_index("no_such_index");
-        assert!(result.is_err());
-        engine.shutdown().unwrap();
-    }
-
-    #[test]
     fn test_current_time_after_advance() {
         let engine = IncrementalEngine::new(vec!["data".to_string()]).unwrap();
         assert_eq!(engine.current_time(), 0);
@@ -1398,49 +1137,6 @@ mod tests {
         let dr = engine.derived_relations();
         // Just verify the accessor returns an Arc and we can lock it
         let _guard = dr.lock();
-        engine.shutdown().unwrap();
-    }
-
-    #[test]
-    fn test_index_manager_accessor() {
-        let engine = IncrementalEngine::new(vec!["data".to_string()]).unwrap();
-        let im = engine.index_manager();
-        // Just verify the accessor returns an Arc and we can lock it
-        let _guard = im.lock();
-        engine.shutdown().unwrap();
-    }
-
-    #[test]
-    fn test_notify_indexes_base_update() {
-        let engine = IncrementalEngine::new(vec!["data".to_string()]).unwrap();
-
-        let index = make_registered_index("my_idx", "data");
-        engine.register_index(index).unwrap();
-
-        // A freshly registered (non-materialized) index won't appear as invalidated
-        // because it was never materialized/valid in the first place.
-        let invalidated = engine.notify_indexes_base_update("data").unwrap();
-        assert!(
-            invalidated.is_empty(),
-            "Non-materialized index should not appear as invalidated"
-        );
-
-        engine.shutdown().unwrap();
-    }
-
-    #[test]
-    fn test_notify_indexes_unrelated_relation() {
-        let engine = IncrementalEngine::new(vec!["data".to_string(), "other".to_string()]).unwrap();
-
-        let index = make_registered_index("my_idx", "data");
-        engine.register_index(index).unwrap();
-
-        let invalidated = engine.notify_indexes_base_update("other").unwrap();
-        assert!(
-            invalidated.is_empty(),
-            "Index on 'data' should not be invalidated by 'other' update"
-        );
-
         engine.shutdown().unwrap();
     }
 

@@ -1,0 +1,44 @@
+// Test: HNSW index lifecycle on the server path
+// create -> query -> insert -> delete -> rebuild -> bound query vector -> errors
+.kg create test_hnsw_lifecycle_n33t16
+.kg use test_hnsw_lifecycle_n33t16
+
++docs(id: int, title: string, emb: vector)
++docs[(1, "x", [1.0, 0.0, 0.0]), (2, "y", [0.0, 1.0, 0.0]), (3, "z", [0.0, 0.0, 1.0]), (4, "xy", [0.7, 0.7, 0.0])]
+
+// Create builds the index from existing rows
+.index create doc_idx on docs(emb) metric cosine
+.index stats doc_idx
+
+// Nearest neighbours of a literal query vector
+?hnsw_nearest("doc_idx", [1.0, 0.1, 0.0], 2, Id, Dist), docs(Id, Title, _)
+
+// Inserted rows are searchable immediately
++docs[(5, "neg", [-1.0, 0.0, 0.0])]
+?hnsw_nearest("doc_idx", [-1.0, 0.05, 0.0], 1, Id, Dist), docs(Id, Title, _)
+
+// Deleted rows are never returned
+-docs(1, "x", [1.0, 0.0, 0.0])
+?hnsw_nearest("doc_idx", [1.0, 0.0, 0.0], 2, Id, Dist), docs(Id, Title, _)
+.index stats doc_idx
+
+// Rebuild drops tombstones
+.index rebuild doc_idx
+.index stats doc_idx
+
+// Query vector bound from a relation
++query_vec[([0.0, 0.1, 1.0])]
+?query_vec(QV), hnsw_nearest("doc_idx", QV, 1, Id, Dist), docs(Id, Title, _)
+
+// Errors
+?hnsw_nearest("missing_idx", [1.0, 0.0, 0.0], 1, Id, Dist)
+?hnsw_nearest("doc_idx", [1.0, 0.0], 1, Id, Dist)
++docs[(9, "bad", [1.0, 0.0])]
+.index create title_idx on docs(title)
+.index rebuild missing_idx
+
+.index drop doc_idx
+.index list
+
+.kg use default
+.kg drop test_hnsw_lifecycle_n33t16
