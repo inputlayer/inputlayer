@@ -5,9 +5,13 @@
 //! binary runs. The pipeline is: extract (model, ontology-bound) -> validate
 //! quotes -> map to IQL -> deploy + insert into an ephemeral KG -> report.
 
+pub mod batch;
 pub mod engine_pool;
 pub mod events;
+pub mod ledger;
+pub mod locks;
 pub mod mapper;
 pub mod model;
 pub mod ontology;
 pub mod pipeline;
+pub mod turns;

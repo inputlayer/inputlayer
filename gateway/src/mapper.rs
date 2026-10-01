@@ -9,6 +9,9 @@ use serde_json::Value;
 
 pub struct MapOutcome {
     pub statements: Vec<String>,
+    /// Per statement: the `id` of the extracted object it came from (the
+    /// owner a retraction targets). Same length as `statements`.
+    pub owners: Vec<Option<String>>,
     pub skipped: Vec<String>,
 }
 
@@ -139,6 +142,7 @@ fn when_matches(clause: &str, object: &Value) -> Option<Option<i64>> {
 /// Map one extraction document to IQL statements per the manifest.
 pub fn map_extraction(manifest: &Manifest, extraction: &Value) -> MapOutcome {
     let mut statements = Vec::new();
+    let mut owners = Vec::new();
     let mut skipped = Vec::new();
 
     for (section, rules) in &manifest.map {
@@ -147,6 +151,7 @@ pub fn map_extraction(manifest: &Manifest, extraction: &Value) -> MapOutcome {
         };
         if section == "ontology" {
             map_ontology(rules, section_value, &mut statements, &mut skipped);
+            owners.resize(statements.len(), None);
             continue;
         }
         let Some(objects) = section_value.as_array() else {
@@ -155,11 +160,17 @@ pub fn map_extraction(manifest: &Manifest, extraction: &Value) -> MapOutcome {
         };
         for object in objects {
             map_object(section, rules, object, &mut statements, &mut skipped);
+            let owner = object
+                .get(crate::ontology::OWNER_FIELD)
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            owners.resize(statements.len(), owner);
         }
     }
 
     MapOutcome {
         statements,
+        owners,
         skipped,
     }
 }
@@ -293,6 +304,31 @@ insert = ['+constraint[("{id}", "{type}", "{attr}", "{value}")]']
             ]
         );
         assert!(out.skipped.is_empty());
+        assert_eq!(out.owners, vec![Some("c1".to_string()); 3]);
+    }
+
+    #[test]
+    fn owners_track_each_object() {
+        let m = manifest(MAP_TOML);
+        let extraction = serde_json::json!({
+            "claims": [
+                {"id": "c1", "entity": "e", "attribute": "a", "value": "v", "msg": 0, "surface": "s"},
+                {"id": "c2", "entity": "e", "attribute": "a", "value": "w", "msg": 1, "surface": "t"}
+            ],
+            "retractions": [{"target": "c1", "kind": "claim", "msg": 1, "surface": "t"}]
+        });
+        let out = map_extraction(&m, &extraction);
+        // Retractions are not a mapped section: they never become inserts.
+        assert_eq!(out.statements.len(), 4);
+        assert_eq!(
+            out.owners,
+            vec![
+                Some("c1".to_string()),
+                Some("c1".to_string()),
+                Some("c2".to_string()),
+                Some("c2".to_string()),
+            ]
+        );
     }
 
     #[test]

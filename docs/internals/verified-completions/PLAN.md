@@ -135,6 +135,21 @@ survive. Session pinning header, TTL + LRU eviction, SSE streaming with
 findings in one final chunk, and an `il verify` CLI for CI use.
 Demo: 40-turn conversation, per-turn verification cost flat.
 
+Delivered so far (extract-only path for real-time agents):
+- `POST /v1/conversations/{id}/turns`: only new messages, extracted once
+  each - the per-turn cost is flat by construction. Session state lives in
+  the KG, not the gateway: `il_message` (global message indices),
+  `il_row` (live rows, rendered as CLAIMS_SO_FAR), `il_fact` (inserted
+  statements per owner id). Restart-safe. The chained-hash prefix match is
+  not needed on this path: the conversation id pins the session.
+- Retractions (consistency-core 1.0.7 schema + manifest `retract_by`):
+  a correction deletes exactly the tuples of the claim it revises, replayed
+  from the ledger, on turns and on chat with a conversation id.
+- Pooled engine connections, prompt-cached extraction head, and
+  `/v1/events` resume (`seq`, `after_seq`, `lagged` / `resync`).
+Open: chat-side hash matching and edited-history retraction (index >= k),
+TTL/LRU eviction of conversation data, SSE streaming, `il verify`.
+
 ### 6. M3: output verification  (#86, needs 5)
 
 Check the generated completion against system prompt constraints

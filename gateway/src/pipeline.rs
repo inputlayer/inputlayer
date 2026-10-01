@@ -7,11 +7,14 @@
 //! tuples, and reads the pack's watch views (findings filtered to the
 //! conversation) plus engine-produced proof trees for the events stream.
 
+use crate::batch::{dedupe_ids, ledger_rows, take_retractions};
 use crate::engine_pool::{EnginePool, PooledEngine};
+use crate::ledger::{self, PriorState};
 use crate::mapper::{map_extraction, MapOutcome};
-use crate::ontology::LoadedOntology;
+use crate::ontology::{LoadedOntology, RETRACTIONS};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
+use std::collections::HashSet;
 
 pub struct EvalOutcome {
     pub findings: Vec<Value>,
@@ -19,6 +22,10 @@ pub struct EvalOutcome {
     /// Operational problems that do not invalidate the evaluation itself
     /// (for example an incomplete one-shot retraction).
     pub notes: Vec<String>,
+    /// Fact statements inserted (ledger rows excluded).
+    pub inserted: usize,
+    /// Retraction targets applied, as the model named them.
+    pub retracted: Vec<String>,
     /// The stored tuples with their provenance, for the translation event.
     pub tuples: Vec<Value>,
     pub trace: Option<Value>,
@@ -30,6 +37,7 @@ pub fn validate_quotes(
     manifest: &crate::ontology::Manifest,
     extraction: &mut Value,
     messages: &[(String, String)],
+    first_index: usize,
 ) -> Vec<String> {
     let Some(rule) = &manifest.validate.quote else {
         return Vec::new();
@@ -58,11 +66,17 @@ pub fn validate_quotes(
                 };
                 // An empty surface is verbatim in everything; it proves
                 // nothing and must not pass as a quoted span.
-                #[allow(clippy::cast_possible_truncation)]
-                let ok = !surface.trim().is_empty()
-                    && messages
-                        .get(msg as usize)
-                        .is_some_and(|(_, content)| content.contains(surface));
+                let Some(local) = usize::try_from(msg)
+                    .ok()
+                    .and_then(|m| m.checked_sub(first_index))
+                    .filter(|m| *m < messages.len())
+                else {
+                    dropped.push(format!(
+                        "{section}: cites message {msg}, which is not in this request"
+                    ));
+                    return false;
+                };
+                let ok = !surface.trim().is_empty() && messages[local].1.contains(surface);
                 if !ok {
                     dropped.push(format!(
                         "{section}: quote not verbatim in message {msg}: {surface:?}"
@@ -149,32 +163,91 @@ fn row_in_conversation(
     })
 }
 
-/// Evaluate one (kg, ontology) pair for a conversation turn.
+/// How a request relates to the conversation's state in the KG.
+pub enum Mode<'a> {
+    /// No conversation id: synthetic prefix, every fact retracted after
+    /// the findings are read. No ledger.
+    OneShot,
+    /// Chat with a conversation id: the request carries the whole
+    /// conversation (indices from 0). Facts are ledgered so retractions
+    /// replay from the KG.
+    Conversation,
+    /// Turns endpoint: only new messages, starting at the ledger's next
+    /// global index. Messages are appended to the ledger, and ids already
+    /// used in the conversation are renamed apart.
+    Turn { prior: &'a PriorState },
+}
+
+pub struct EvalRequest<'a> {
+    pub kg: &'a str,
+    /// Conversation namespace (the conversation id, or a one-shot id).
+    pub prefix: &'a str,
+    /// Messages the extraction may cite; `messages[i]` is global index
+    /// `first_index + i`.
+    pub messages: &'a [(String, String)],
+    pub first_index: usize,
+    pub mode: Mode<'a>,
+    pub want_trace: bool,
+}
+
+/// Checkout, verify the pack pin, and read the conversation's ledger
+/// (turns: before extraction, so a KG without the pack never costs a
+/// model call).
+pub async fn read_prior(
+    pool: &EnginePool,
+    ontology: &LoadedOntology,
+    kg: &str,
+    conversation: &str,
+) -> Result<PriorState> {
+    let mut engine = pool.checkout(kg).await?;
+    ensure_pack_pinned(&mut engine, ontology, kg).await?;
+    ledger::declare(&mut engine).await;
+    ledger::read_prior(&mut engine, conversation).await
+}
+
+/// Evaluate one (kg, ontology) pair for a request.
+///
+/// Order: quote gate (claims AND retractions, against the global index
+/// they cite) -> retractions taken out -> ids renamed apart (turns) ->
+/// namespacing -> mapping -> ONE write batch (retracted owners' replayed
+/// deletes, ledger rows, facts) -> watch views.
 ///
 /// Preconditions enforced here: the KG must have the ontology installed
 /// (`pack_meta` pin matching name, version, AND digest - a mismatched rule
 /// set would attribute findings to rules that are not the ones deployed).
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)]
 pub async fn evaluate(
     pool: &EnginePool,
     ontology: &LoadedOntology,
-    kg: &str,
-    prefix: &str,
+    request: &EvalRequest<'_>,
     mut extraction: Value,
-    messages: &[(String, String)],
-    want_trace: bool,
-    retract_after: bool,
 ) -> Result<EvalOutcome> {
-    let mut dropped = validate_quotes(&ontology.manifest, &mut extraction, messages);
-    dropped.extend(prefix_identifiers(
-        &ontology.manifest,
+    let manifest = &ontology.manifest;
+    let prefix = request.prefix;
+    let kg = request.kg;
+    let mut dropped = validate_quotes(
+        manifest,
         &mut extraction,
-        prefix,
-    ));
+        request.messages,
+        request.first_index,
+    );
+    let targets = take_retractions(manifest, &mut extraction, prefix, &mut dropped);
+    let mut notes: Vec<String> = Vec::new();
+    if let Mode::Turn { prior } = &request.mode {
+        let marker = format!("{prefix}:");
+        let mut taken: HashSet<String> = prior
+            .owners()
+            .iter()
+            .map(|o| o.strip_prefix(&marker).unwrap_or(o).to_string())
+            .collect();
+        notes.extend(dedupe_ids(manifest, &mut extraction, &mut taken));
+    }
+    dropped.extend(prefix_identifiers(manifest, &mut extraction, prefix));
     let MapOutcome {
         statements,
+        owners,
         skipped,
-    } = map_extraction(&ontology.manifest, &extraction);
+    } = map_extraction(manifest, &extraction);
     // A mapping skip means the extraction and the manifest disagree (schema
     // drift). Evaluating over partially mapped facts would misreport;
     // fail closed into "incomplete".
@@ -184,42 +257,102 @@ pub async fn evaluate(
             skipped.join("; ")
         );
     }
+    let ledgered = !matches!(request.mode, Mode::OneShot);
+    let msg_field = manifest.validate.quote.as_ref().map(|q| q.within.as_str());
+    let mut rows = if ledgered {
+        ledger_rows(manifest, &extraction, msg_field)
+    } else {
+        Vec::new()
+    };
+
+    // A retraction of an object in this same batch (chat re-extracts the
+    // whole conversation, so the revised claim reappears): never insert it.
+    let target_ids: HashSet<&str> = targets.iter().map(|(t, _)| t.as_str()).collect();
+    let mut facts: Vec<(Option<String>, String)> = Vec::new();
+    let mut in_batch: HashSet<String> = HashSet::new();
+    for (statement, owner) in statements.into_iter().zip(owners) {
+        match owner {
+            Some(o) if target_ids.contains(o.as_str()) => {
+                in_batch.insert(o);
+            }
+            owner => facts.push((owner, statement)),
+        }
+    }
+    rows.retain(|r| !target_ids.contains(r.owner.as_str()));
 
     let mut engine = pool.checkout(kg).await?;
-
     ensure_pack_pinned(&mut engine, ontology, kg).await?;
-
-    let mut notes: Vec<String> = Vec::new();
     let started = std::time::Instant::now();
     // Conversation tracking: instantiated and queryable like anything else.
     let _ = engine
         .execute("+il_conversation(id: string, ontology: string)")
         .await;
-    let tracking = engine
-        .execute(&format!(
-            "+il_conversation[(\"{prefix}\", \"{}@{}\")]",
-            ontology.name, ontology.version
-        ))
-        .await
-        .context("recording conversation")?;
-    if let Some(problem) = tracking.soft_errors().first() {
-        anyhow::bail!("recording conversation failed: {problem}");
+    if ledgered {
+        ledger::declare(&mut engine).await;
     }
 
-    if !statements.is_empty() {
-        let insert = engine
-            .execute(&statements.join("\n"))
-            .await
-            .context("storing extracted tuples")?;
-        let problems = insert.soft_errors();
-        if !problems.is_empty() {
-            anyhow::bail!("tuple store reported failures: {}", problems.join("; "));
+    // Retractions against earlier requests replay the target's ledgered
+    // statements, negated. Unknown targets are dropped, never guessed.
+    let mut program: Vec<String> = Vec::new();
+    let mut retracted: Vec<String> = Vec::new();
+    for (target, named) in &targets {
+        let prior = if ledgered {
+            ledger::owner_facts(&mut engine, prefix, target).await?
+        } else {
+            Vec::new()
+        };
+        if prior.is_empty() && !in_batch.contains(target) {
+            dropped.push(format!(
+                "{RETRACTIONS}: target {named:?} is not a live object of this conversation"
+            ));
+            continue;
         }
+        program.extend(prior.iter().map(|stmt| format!("-{stmt}")));
+        if ledgered {
+            program.extend(ledger::owner_deletes(prefix, target));
+        }
+        retracted.push(named.clone());
+    }
+    program.push(format!(
+        "+il_conversation[({}, {})]",
+        ledger::literal(prefix),
+        ledger::literal(&format!("{}@{}", ontology.name, ontology.version))
+    ));
+    if let Mode::Turn { .. } = request.mode {
+        for (offset, (role, content)) in request.messages.iter().enumerate() {
+            program.push(ledger::message_insert(
+                prefix,
+                request.first_index + offset,
+                role,
+                content,
+            ));
+        }
+    }
+    for row in &rows {
+        program.push(ledger::row_insert(prefix, row));
+    }
+    if ledgered {
+        for (owner, statement) in &facts {
+            if let Some(owner) = owner {
+                program.push(ledger::fact_insert(prefix, owner, statement));
+            }
+        }
+    }
+    let statements: Vec<String> = facts.into_iter().map(|(_, s)| s).collect();
+    program.extend(statements.iter().cloned());
+
+    let write = engine
+        .execute(&program.join("\n"))
+        .await
+        .context("storing extracted tuples")?;
+    let problems = write.soft_errors();
+    if !problems.is_empty() {
+        anyhow::bail!("tuple store reported failures: {}", problems.join("; "));
     }
 
     let findings = read_findings(&mut engine, ontology, prefix, &mut notes).await;
 
-    if retract_after {
+    if matches!(request.mode, Mode::OneShot) {
         notes.extend(retract_conversation(&mut engine, prefix, &statements).await);
     }
 
@@ -230,12 +363,14 @@ pub async fn evaluate(
     // fields of the row it came from are already inside the statement
     // literals; expose the statements verbatim.
     let tuples: Vec<Value> = statements.iter().map(|s| json!(s)).collect();
-    let trace = want_trace.then(|| {
+    let trace = request.want_trace.then(|| {
         json!({
             "extraction": extraction,
             "statements": statements,
+            "retracted": retracted,
             "kg": kg,
             "conversation": prefix,
+            "first_index": request.first_index,
             "engine_ms": engine_ms,
         })
     });
@@ -243,6 +378,8 @@ pub async fn evaluate(
         findings,
         dropped,
         notes,
+        inserted: statements.len(),
+        retracted,
         tuples,
         trace,
     })
@@ -538,9 +675,36 @@ within = "msg"
             {"id": "d", "surface": 7, "msg": 0},
             {"id": "e", "surface": "August 14th"},
         ]});
-        let dropped = validate_quotes(&manifest, &mut extraction, &geneva_messages());
+        let dropped = validate_quotes(&manifest, &mut extraction, &geneva_messages(), 0);
         assert_eq!(dropped.len(), 5, "{dropped:?}");
         assert_eq!(extraction["claims"].as_array().map(Vec::len), Some(0));
+    }
+
+    #[test]
+    fn quote_gate_uses_global_message_indices() {
+        let manifest = manifest(QUOTE_TOML);
+        // This request carries messages 7 and 8 of the conversation.
+        let messages = vec![
+            ("user".to_string(), "We leave on the 12th.".to_string()),
+            ("user".to_string(), "Actually, scratch that.".to_string()),
+        ];
+        let mut extraction = json!({
+            "claims": [
+                {"id": "a", "surface": "on the 12th", "msg": 7},
+                {"id": "b", "surface": "on the 12th", "msg": 0},
+                {"id": "c", "surface": "on the 12th", "msg": 8},
+                {"id": "d", "surface": "x", "msg": 9},
+            ],
+            "retractions": [
+                {"target": "a", "msg": 8, "surface": "Actually, scratch that"},
+                {"target": "a", "msg": 8, "surface": "not quoted"},
+            ]
+        });
+        let dropped = validate_quotes(&manifest, &mut extraction, &messages, 7);
+        assert_eq!(dropped.len(), 4, "{dropped:?}");
+        assert_eq!(extraction["claims"].as_array().map(Vec::len), Some(1));
+        assert_eq!(extraction["claims"][0]["id"], "a");
+        assert_eq!(extraction["retractions"].as_array().map(Vec::len), Some(1));
     }
 
     #[test]
@@ -551,7 +715,7 @@ within = "msg"
             {"id": "b", "surface": "   ", "msg": 0},
             {"id": "c", "surface": "August 14th", "msg": 0},
         ]});
-        let dropped = validate_quotes(&manifest, &mut extraction, &geneva_messages());
+        let dropped = validate_quotes(&manifest, &mut extraction, &geneva_messages(), 0);
         assert_eq!(dropped.len(), 2, "{dropped:?}");
         assert_eq!(extraction["claims"].as_array().map(Vec::len), Some(1));
     }
@@ -562,7 +726,7 @@ within = "msg"
         let mut extraction = json!({ "constraints": [
             {"id": "k1", "type": "max_value", "attr": "price", "value": "2000"},
         ]});
-        let dropped = validate_quotes(&manifest, &mut extraction, &geneva_messages());
+        let dropped = validate_quotes(&manifest, &mut extraction, &geneva_messages(), 0);
         assert!(dropped.is_empty());
         assert_eq!(extraction["constraints"].as_array().map(Vec::len), Some(1));
     }

@@ -48,7 +48,17 @@ pub struct ExtractionSection {
     /// conversation id to isolate conversations inside a shared KG.
     #[serde(default)]
     pub identifier_fields: BTreeMap<String, Vec<String>>,
+    /// Field of a `retractions` row naming the id of a previously inserted
+    /// object to retract. Unset: the pack has no retractions, and any the
+    /// model emits are ignored (reported as dropped).
+    #[serde(default)]
+    pub retract_by: Option<String>,
 }
+
+/// Extraction section carrying retractions (the prompt contract).
+pub const RETRACTIONS: &str = "retractions";
+/// Field holding an extracted object's own id: its tuples' owner.
+pub const OWNER_FIELD: &str = "id";
 
 #[derive(Debug, Default, Deserialize)]
 pub struct ValidateSection {

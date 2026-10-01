@@ -170,9 +170,60 @@ finding functional - hard
 report
 ```
 
-Three event kinds per evaluated request, per ontology: `translation` (the stored tuples), `finding` (the watch-view row with spans and the engine proof tree), and `report` (the per-ontology close). A ring buffer replays recent events to late subscribers. Everything traceable in the stream comes from the engine; the gateway relays.
+Three event kinds per evaluated request, per ontology: `translation` (the stored tuples), `finding` (the watch-view row with spans and the engine proof tree), and `report` (the per-ontology close). Everything traceable in the stream comes from the engine; the gateway relays.
 
-## 4. Enforce - and fail closed
+Every event carries `seq`, increasing by one per conversation. A ring buffer (256 events per conversation) replays recent events to late subscribers; to resume after a disconnect, pass the last `seq` you processed:
+
+```
+ws://127.0.0.1:8081/v1/events?conversation=trip-42&after_seq=41&token=gw-secret
+```
+
+You receive only events with `seq > 41`. Two control events say when that is not the whole story:
+
+| Event | When | What to do |
+|---|---|---|
+| `{"type": "lagged", "after_seq": N, "skipped": K}` | Events N+1..N+K left the ring (or were dropped live while you fell behind) | Treat them as lost; resume from the next `seq` you receive |
+| `{"type": "resync", "after_seq": N, "latest_seq": L}` | N is ahead of the stream: the gateway restarted or evicted the conversation | Reset your cursor; the full ring follows |
+
+## 4. Extract-only turns for real-time agents
+
+A voice agent (or any caller that produces its own replies) does not want a completion - it wants each new utterance checked against everything said so far, at the cost of that utterance only. `POST /v1/conversations/{id}/turns` does exactly that:
+
+```bash
+curl -s http://127.0.0.1:8081/v1/conversations/call-7/turns \
+  -H "Authorization: Bearer gw-secret" \
+  -H "x-il-ontology: support/consistency-core" \
+  -d '{"messages": [{"role": "user", "content": "Since we leave on the 12th, check visas."}]}'
+```
+
+```json
+{
+  "conversation": "call-7",
+  "kg": "support",
+  "ontology": "consistency-core@1.0.7",
+  "messages": { "first_index": 2, "count": 1 },
+  "inserted": 5,
+  "retracted": [],
+  "dropped": [],
+  "findings": [ { "title": "functional - hard", "blocking": true, "spans": [...], "proof": {...} } ],
+  "status": "complete"
+}
+```
+
+- **Only new messages.** The body carries the messages since the last turn. The gateway appends them to a message ledger kept in the KG (`il_message(conv, idx, role, content)`), so indices are global, survive gateway restarts, and claims cite them (`c_m2_1` quotes message 2).
+- **Prior state from the KG.** Live claims of the conversation (`il_row`) are rendered into the extraction prompt as `CLAIMS_SO_FAR`, the last 8 messages as read-only context. One extraction call per turn, whatever the history length; the prompt's static head is prompt-cached.
+- **One write batch.** Facts, ledger rows, and any retractions land in one program; the watch views are evaluated and `translation` / `finding` / `report` events go out on `/v1/events` as for chat. `findings` is the conversation's full current set.
+- **Selection and auth** are the chat forms: `x-il-ontology` or `il_ontology`, exactly one `<kg>/<ontology>` pair (the message ledger lives in that KG). `x-il-trace: 1` adds a `trace` with the extraction, statements, rendered prompt, and model usage.
+- **Annotate semantics only.** There is no completion to withhold, so `il_mode: enforce` is a 400; act on `findings[].blocking` yourself.
+- **Failure records nothing.** Extraction or engine failure returns 503 `verification_unavailable` with `status: "incomplete"` and `reason`; resend the same messages.
+
+Serve one conversation from one gateway replica at a time: turns of a conversation are serialized in-process (index allocation is read-then-write).
+
+## 5. Corrections retract
+
+"Actually, scratch that - we leave on the 14th" is a revision, not a contradiction. The extractor reports it as a retraction targeting the earlier claim's id (`{target, kind, msg, surface}`, packs declaring `retract_by`), and the gateway deletes every tuple it inserted for that id - replayed from the ledger in the KG (`il_fact(conv, owner, stmt)`), not from gateway memory. The finding that depended on the claim disappears; the retracted id is listed in `retracted`. Retractions pass the same quote gate as claims (the revision marker must be quoted verbatim from the message it cites), reach only their own conversation's ids, and an unknown target is dropped, never guessed. This works on turns and on chat requests that carry a conversation id.
+
+## 6. Enforce - and fail closed
 
 `x-il-mode: enforce` (or `il_mode` in the body) verifies before completing, and it fails CLOSED:
 
@@ -195,4 +246,4 @@ Errors you can act on: `400` for malformed pairs, unknown ontologies, version mi
 
 ## Where this is going
 
-Streaming completions and richer session lifecycle (retention TTLs, edited-history retraction) are M2 ([#85](https://github.com/inputlayer/inputlayer/issues/85)); checking the model's own reply before it is returned, with repair mode, is M3 ([#86](https://github.com/inputlayer/inputlayer/issues/86)). The registry grows independently: each new pack published becomes available to every gateway restart and every `.ontology install`, pinned and digest-verified.
+Streaming completions and the rest of the session lifecycle (retention TTLs, edited-history retraction for chat, conversation purge) are M2 ([#85](https://github.com/inputlayer/inputlayer/issues/85)); checking the model's own reply before it is returned, with repair mode, is M3 ([#86](https://github.com/inputlayer/inputlayer/issues/86)). The registry grows independently: each new pack published becomes available to every gateway restart and every `.ontology install`, pinned and digest-verified.
