@@ -228,6 +228,40 @@ fn validate_session_rule_stratification(
     crate::rule_catalog::validate_rules_stratification(&rules)
 }
 
+/// Compile a query (parse, IR, optimize) without executing it; returns the
+/// formatted plan trace and the optimization passes applied.
+fn debug_query(
+    storage: &StorageEngine,
+    knowledge_graph: Option<&str>,
+    query: &str,
+) -> Result<(String, Vec<String>), String> {
+    let kg_name = if let Some(kg) = knowledge_graph {
+        storage
+            .ensure_knowledge_graph(kg)
+            .map_err(|e| format!("Knowledge graph not found: {e}"))?;
+        kg.to_string()
+    } else {
+        storage
+            .current_knowledge_graph()
+            .ok_or("No knowledge graph selected")?
+            .to_string()
+    };
+
+    let trace = storage
+        .debug_query_on(&kg_name, query)
+        .map_err(|e| format!("{e}"))?;
+
+    let optimizations = storage
+        .config()
+        .optimization
+        .enabled_passes()
+        .into_iter()
+        .map(String::from)
+        .collect();
+
+    Ok((trace.format_trace(), optimizations))
+}
+
 /// Self-contained snapshot of Handler state for executing a single query on a blocking thread.
 /// All fields are `Arc`-wrapped (`Send + Sync`), allowing the job to be moved into
 /// `tokio::task::spawn_blocking` without holding any `!Send` lock guards across `.await` points.
@@ -481,40 +515,6 @@ impl QueryJob {
                 }
             })
             .map_err(|e| e.to_string())
-    }
-
-    fn debug_query(
-        &self,
-        knowledge_graph: Option<String>,
-        query: String,
-    ) -> Result<(String, Vec<String>), String> {
-        let storage = self.storage.read();
-
-        let kg_name = if let Some(ref kg) = knowledge_graph {
-            storage
-                .ensure_knowledge_graph(kg)
-                .map_err(|e| format!("Knowledge graph not found: {e}"))?;
-            kg.clone()
-        } else {
-            storage
-                .current_knowledge_graph()
-                .ok_or("No knowledge graph selected")?
-                .to_string()
-        };
-
-        let trace = storage
-            .debug_query_on(&kg_name, &query)
-            .map_err(|e| format!("{e}"))?;
-
-        let optimizations = storage
-            .config()
-            .optimization
-            .enabled_passes()
-            .into_iter()
-            .map(String::from)
-            .collect();
-
-        Ok((trace.format_trace(), optimizations))
     }
 
     /// Build proof trees explaining why query results were derived.
@@ -3465,11 +3465,13 @@ impl QueryJob {
                                     // === Debug command ===
                                     MetaCommand::Debug(query) => {
                                         // Transform ?shorthand before debug
-                                        let debug_query = match transform_query_shorthand(&query) {
+                                        let debug_src = match transform_query_shorthand(&query) {
                                             Ok(t) => t.query,
                                             Err(_) => query,
                                         };
-                                        match self.debug_query(Some(kg.to_string()), debug_query) {
+                                        let debug_result =
+                                            debug_query(&self.storage.read(), Some(kg), &debug_src);
+                                        match debug_result {
                                             Ok((plan, optimizations)) => {
                                                 messages.push("Query Plan:".to_string());
                                                 messages.push(plan);
@@ -3933,33 +3935,7 @@ impl Handler {
         knowledge_graph: Option<String>,
         query: String,
     ) -> Result<(String, Vec<String>), String> {
-        let storage = self.storage.read();
-
-        let kg_name = if let Some(ref kg) = knowledge_graph {
-            storage
-                .ensure_knowledge_graph(kg)
-                .map_err(|e| format!("Knowledge graph not found: {e}"))?;
-            kg.clone()
-        } else {
-            storage
-                .current_knowledge_graph()
-                .ok_or("No knowledge graph selected")?
-                .to_string()
-        };
-
-        let trace = storage
-            .debug_query_on(&kg_name, &query)
-            .map_err(|e| format!("{e}"))?;
-
-        let optimizations = storage
-            .config()
-            .optimization
-            .enabled_passes()
-            .into_iter()
-            .map(String::from)
-            .collect();
-
-        Ok((trace.format_trace(), optimizations))
+        debug_query(&self.storage.read(), knowledge_graph.as_deref(), &query)
     }
 
     /// Execute a query within a session context.
