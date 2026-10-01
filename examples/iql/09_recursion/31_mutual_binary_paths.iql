@@ -1,0 +1,18 @@
+// Test: Mutually recursive binary relations with a bound first argument
+// Verifies: odd/even path lengths over a graph with a cycle
+
+.kg create test_mutual_paths_n09t31
+.kg use test_mutual_paths_n09t31
+
++edge[(1, 2), (2, 3), (3, 1), (3, 4)]
+
++odd_path(X, Y) <- edge(X, Y)
++odd_path(X, Z) <- even_path(X, Y), edge(Y, Z)
++even_path(X, Z) <- odd_path(X, Y), edge(Y, Z)
+
+?odd_path(1, Y)
+?even_path(1, Y)
+?even_path(X, 4)
+
+.kg use default
+.kg drop test_mutual_paths_n09t31

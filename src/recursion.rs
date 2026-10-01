@@ -13,6 +13,7 @@
 //!
 use crate::ast::{BodyPredicate, Program, Rule};
 use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 
 // Dependency Types for Stratification
 /// Type of dependency between relations
@@ -152,9 +153,30 @@ pub fn is_recursive_rule(rule: &Rule) -> bool {
     false
 }
 
-/// Check if a program contains any recursive rules
+/// Check if a program contains any recursive rules (self or mutual)
 pub fn has_recursion(program: &Program) -> bool {
-    program.rules.iter().any(is_recursive_rule)
+    !recursive_relations(program).is_empty()
+}
+
+/// Relations on a dependency cycle: self-recursive relations and members of
+/// multi-relation SCCs. Cycles through negation count too.
+pub fn recursive_relations(program: &Program) -> HashSet<String> {
+    let graph = build_extended_dependency_graph(program).to_simple_graph();
+    find_sccs(&graph)
+        .into_iter()
+        .filter(|scc| scc.len() > 1 || graph.get(&scc[0]).is_some_and(|d| d.contains(&scc[0])))
+        .flatten()
+        .collect()
+}
+
+/// Members of SCCs that contain more than one relation (mutual recursion).
+pub fn mutually_recursive_relations(program: &Program) -> HashSet<String> {
+    let graph = build_extended_dependency_graph(program).to_simple_graph();
+    find_sccs(&graph)
+        .into_iter()
+        .filter(|scc| scc.len() > 1)
+        .flatten()
+        .collect()
 }
 
 /// Build extended relation dependency graph with positive/negative edges
@@ -233,16 +255,16 @@ pub fn build_dependency_graph(program: &Program) -> HashMap<String, HashSet<Stri
 ///
 /// Uses Tarjan's algorithm: DFS with discovery times, low-link tracking,
 /// and stack-based cycle detection.
-pub fn find_sccs(graph: &HashMap<String, HashSet<String>>) -> Vec<Vec<String>> {
+pub fn find_sccs<N: Clone + Eq + Hash>(graph: &HashMap<N, HashSet<N>>) -> Vec<Vec<N>> {
     let mut index = 0;
     let mut stack = Vec::new();
-    let mut indices: HashMap<String, usize> = HashMap::new();
-    let mut lowlinks: HashMap<String, usize> = HashMap::new();
-    let mut on_stack: HashSet<String> = HashSet::new();
+    let mut indices: HashMap<N, usize> = HashMap::new();
+    let mut lowlinks: HashMap<N, usize> = HashMap::new();
+    let mut on_stack: HashSet<N> = HashSet::new();
     let mut sccs = Vec::new();
 
     // Get all nodes from the graph
-    let mut nodes: HashSet<String> = HashSet::new();
+    let mut nodes: HashSet<N> = HashSet::new();
     for (node, neighbors) in graph {
         nodes.insert(node.clone());
         for neighbor in neighbors {
@@ -270,22 +292,23 @@ pub fn find_sccs(graph: &HashMap<String, HashSet<String>>) -> Vec<Vec<String>> {
 }
 
 /// Helper function for Tarjan's algorithm
-fn strongconnect(
-    v: &str,
-    graph: &HashMap<String, HashSet<String>>,
+#[allow(clippy::too_many_arguments)]
+fn strongconnect<N: Clone + Eq + Hash>(
+    v: &N,
+    graph: &HashMap<N, HashSet<N>>,
     index: &mut usize,
-    stack: &mut Vec<String>,
-    indices: &mut HashMap<String, usize>,
-    lowlinks: &mut HashMap<String, usize>,
-    on_stack: &mut HashSet<String>,
-    sccs: &mut Vec<Vec<String>>,
+    stack: &mut Vec<N>,
+    indices: &mut HashMap<N, usize>,
+    lowlinks: &mut HashMap<N, usize>,
+    on_stack: &mut HashSet<N>,
+    sccs: &mut Vec<Vec<N>>,
 ) {
     // Set the depth index for v
-    indices.insert(v.to_string(), *index);
-    lowlinks.insert(v.to_string(), *index);
+    indices.insert(v.clone(), *index);
+    lowlinks.insert(v.clone(), *index);
     *index += 1;
-    stack.push(v.to_string());
-    on_stack.insert(v.to_string());
+    stack.push(v.clone());
+    on_stack.insert(v.clone());
 
     // Consider successors of v
     if let Some(neighbors) = graph.get(v) {
@@ -295,12 +318,12 @@ fn strongconnect(
                 strongconnect(w, graph, index, stack, indices, lowlinks, on_stack, sccs);
                 let w_lowlink = lowlinks[w];
                 let v_lowlink = lowlinks[v];
-                lowlinks.insert(v.to_string(), v_lowlink.min(w_lowlink));
+                lowlinks.insert(v.clone(), v_lowlink.min(w_lowlink));
             } else if on_stack.contains(w) {
                 // Successor w is on stack and hence in current SCC
                 let w_index = indices[w];
                 let v_lowlink = lowlinks[v];
-                lowlinks.insert(v.to_string(), v_lowlink.min(w_index));
+                lowlinks.insert(v.clone(), v_lowlink.min(w_index));
             }
         }
     }
@@ -313,13 +336,70 @@ fn strongconnect(
                 .pop()
                 .expect("stack is non-empty: v was pushed and loop breaks when w == v");
             on_stack.remove(&w);
-            scc.push(w.clone());
-            if w == v {
+            let done = w == *v;
+            scc.push(w);
+            if done {
                 break;
             }
         }
         sccs.push(scc);
     }
+}
+
+/// Group nodes `0..deps.len()` into strongly connected components and order
+/// the groups so each runs after every group it depends on.
+///
+/// `deps[i]` holds the nodes `i` reads. Members of a group are ascending;
+/// independent groups run in ascending order of their first member, so the
+/// order is deterministic.
+pub fn scc_execution_order(deps: &[HashSet<usize>]) -> Vec<Vec<usize>> {
+    let n = deps.len();
+    let graph: HashMap<usize, HashSet<usize>> = deps.iter().cloned().enumerate().collect();
+    let mut groups: Vec<Vec<usize>> = find_sccs(&graph)
+        .into_iter()
+        .map(|mut scc| {
+            scc.sort_unstable();
+            scc
+        })
+        .filter(|scc| scc[0] < n)
+        .collect();
+    groups.sort_by_key(|g| g[0]);
+
+    let mut group_of = vec![0usize; n];
+    for (g, members) in groups.iter().enumerate() {
+        for &m in members {
+            group_of[m] = g;
+        }
+    }
+
+    // Kahn's algorithm over the condensation DAG.
+    let mut in_degree = vec![0usize; groups.len()];
+    let mut dependents: Vec<HashSet<usize>> = vec![HashSet::new(); groups.len()];
+    for (i, dep_set) in deps.iter().enumerate() {
+        for &j in dep_set {
+            let (gi, gj) = (group_of[i], group_of[j]);
+            if gi != gj && dependents[gj].insert(gi) {
+                in_degree[gi] += 1;
+            }
+        }
+    }
+    let mut ready: std::collections::BinaryHeap<std::cmp::Reverse<usize>> = in_degree
+        .iter()
+        .enumerate()
+        .filter(|(_, &d)| d == 0)
+        .map(|(g, _)| std::cmp::Reverse(g))
+        .collect();
+    let mut order = Vec::with_capacity(groups.len());
+    while let Some(std::cmp::Reverse(g)) = ready.pop() {
+        order.push(g);
+        for &d in &dependents[g] {
+            in_degree[d] -= 1;
+            if in_degree[d] == 0 {
+                ready.push(std::cmp::Reverse(d));
+            }
+        }
+    }
+    order.into_iter().map(|g| groups[g].clone()).collect()
 }
 
 /// Stratification result with potential error
@@ -1609,33 +1689,63 @@ mod tests {
     }
 
     #[test]
-    fn test_has_recursion_mutual_not_detected() {
-        // has_recursion only checks DIRECT self-recursion (head in own body)
-        // Mutual recursion (a→b, b→a) is NOT detected by has_recursion
+    fn test_has_recursion_detects_mutual() {
         let mut program = Program::new();
+        let x = || vec![Term::Variable("x".to_string())];
         // a(x) <- b(x)
         program.add_rule(Rule::new_simple(
-            Atom::new("a".to_string(), vec![Term::Variable("x".to_string())]),
-            vec![Atom::new(
-                "b".to_string(),
-                vec![Term::Variable("x".to_string())],
-            )],
+            Atom::new("a".to_string(), x()),
+            vec![Atom::new("b".to_string(), x())],
         ));
         // b(x) <- a(x)
         program.add_rule(Rule::new_simple(
-            Atom::new("b".to_string(), vec![Term::Variable("x".to_string())]),
-            vec![Atom::new(
-                "a".to_string(),
-                vec![Term::Variable("x".to_string())],
-            )],
+            Atom::new("b".to_string(), x()),
+            vec![Atom::new("a".to_string(), x())],
         ));
-        // Mutual recursion is NOT detected by has_recursion()
-        assert!(!has_recursion(&program));
+        assert!(has_recursion(&program));
+        let expected: HashSet<String> = ["a", "b"].iter().map(ToString::to_string).collect();
+        assert_eq!(recursive_relations(&program), expected);
+        assert_eq!(mutually_recursive_relations(&program), expected);
+    }
 
-        // But SCC detection does find the cycle
-        let graph = build_dependency_graph(&program);
-        let sccs = find_sccs(&graph);
-        let has_cycle = sccs.iter().any(|scc| scc.len() > 1);
-        assert!(has_cycle, "SCC detection should find mutual recursion");
+    #[test]
+    fn test_mutually_recursive_excludes_self_recursion() {
+        let mut program = Program::new();
+        let xy =
+            |a: &str, b: &str| vec![Term::Variable(a.to_string()), Term::Variable(b.to_string())];
+        // tc(x, z) <- tc(x, y), e(y, z)
+        program.add_rule(Rule::new_simple(
+            Atom::new("tc".to_string(), xy("x", "z")),
+            vec![
+                Atom::new("tc".to_string(), xy("x", "y")),
+                Atom::new("e".to_string(), xy("y", "z")),
+            ],
+        ));
+        assert!(recursive_relations(&program).contains("tc"));
+        assert!(mutually_recursive_relations(&program).is_empty());
+    }
+
+    fn deps(edges: &[&[usize]]) -> Vec<HashSet<usize>> {
+        edges.iter().map(|e| e.iter().copied().collect()).collect()
+    }
+
+    #[test]
+    fn test_scc_execution_order_groups_cycles() {
+        // 0 <- 2, 2 <- 1, 1 <- 2 (cycle {1,2}), 3 <- 0
+        let order = scc_execution_order(&deps(&[&[2], &[2], &[1], &[0]]));
+        assert_eq!(order, vec![vec![1, 2], vec![0], vec![3]]);
+    }
+
+    #[test]
+    fn test_scc_execution_order_three_way_and_independent() {
+        // 0 -> 1 -> 2 -> 0 cycle; 3 independent; 4 reads 3 and 0
+        let order = scc_execution_order(&deps(&[&[1], &[2], &[0], &[], &[3, 0]]));
+        assert_eq!(order, vec![vec![0, 1, 2], vec![3], vec![4]]);
+    }
+
+    #[test]
+    fn test_scc_execution_order_self_loop_is_singleton() {
+        let order = scc_execution_order(&deps(&[&[0], &[0]]));
+        assert_eq!(order, vec![vec![0], vec![1]]);
     }
 }

@@ -539,19 +539,15 @@ fn rewrite_body_references(rule: &Rule, bindings: &HashMap<String, QueryBinding>
     Rule::new(rule.head.clone(), new_body)
 }
 
-/// Compute the set of recursive relations from a program
+/// Relations Magic Sets may adorn: recursive relations outside any
+/// multi-relation SCC. Adornment and magic propagation are per relation, so a
+/// binding cannot be carried across mutually recursive relations; those are
+/// evaluated unbound (full SCC fixpoint, then filtered by the query).
 pub fn find_recursive_relations(program: &Program) -> HashSet<String> {
-    let dep_graph = recursion::build_dependency_graph(program);
-    let sccs = recursion::find_sccs(&dep_graph);
-    sccs.iter()
-        .filter(|scc| {
-            scc.len() > 1
-                || (scc.len() == 1
-                    && dep_graph
-                        .get(&scc[0])
-                        .is_some_and(|deps| deps.contains(&scc[0])))
-        })
-        .flat_map(|scc| scc.iter().cloned())
+    let mutual = recursion::mutually_recursive_relations(program);
+    recursion::recursive_relations(program)
+        .into_iter()
+        .filter(|r| !mutual.contains(r))
         .collect()
 }
 
@@ -894,6 +890,22 @@ mod tests {
         );
         let recursive = find_recursive_relations(&program);
         assert!(!recursive.contains("path")); // path is not recursive
+        let bindings = MagicSetRewriter::detect_query_bindings(&program, &recursive);
+        assert!(bindings.is_empty());
+    }
+
+    #[test]
+    fn test_mutual_recursion_not_adorned() {
+        // A binding on a mutually recursive relation cannot be propagated
+        // across the cycle, so Magic Sets leaves the SCC unbound.
+        let program = parse(
+            "ev(N) <- zero(N)\n\
+             ev(N) <- succ(M, N), od(M)\n\
+             od(N) <- succ(M, N), ev(M)\n\
+             __query__(_c0) <- ev(_c0), _c0 = 4",
+        );
+        let recursive = find_recursive_relations(&program);
+        assert!(!recursive.contains("ev") && !recursive.contains("od"));
         let bindings = MagicSetRewriter::detect_query_bindings(&program, &recursive);
         assert!(bindings.is_empty());
     }

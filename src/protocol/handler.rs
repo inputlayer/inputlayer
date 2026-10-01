@@ -210,6 +210,24 @@ fn set_notification_seq(notif: &mut PersistentNotification, seq: u64) {
     }
 }
 
+/// Reject a session rule that puts negation inside a recursive cycle,
+/// checked against the KG's persistent rules and the session's rules.
+fn validate_session_rule_stratification(
+    storage: &StorageEngine,
+    kg: Option<&str>,
+    session_rules: &[crate::ast::Rule],
+    rule: &crate::ast::Rule,
+) -> Result<(), String> {
+    let kg = kg.or_else(|| storage.current_knowledge_graph());
+    let mut rules: Vec<crate::ast::Rule> = kg
+        .and_then(|kg| storage.get_snapshot_for(kg).ok())
+        .map(|snapshot| snapshot.rules.to_vec())
+        .unwrap_or_default();
+    rules.extend(session_rules.iter().cloned());
+    rules.push(rule.clone());
+    crate::rule_catalog::validate_rules_stratification(&rules)
+}
+
 /// Self-contained snapshot of Handler state for executing a single query on a blocking thread.
 /// All fields are `Arc`-wrapped (`Send + Sync`), allowing the job to be moved into
 /// `tokio::task::spawn_blocking` without holding any `!Send` lock guards across `.await` points.
@@ -2962,6 +2980,12 @@ impl QueryJob {
                                     &session_rules_parsed,
                                     &rule,
                                 )?;
+                                validate_session_rule_stratification(
+                                    &storage,
+                                    Some(&kg_name),
+                                    &session_rules_parsed,
+                                    &rule,
+                                )?;
 
                                 let rule_text = format_rule_text(&rule);
                                 session_rules.push(rule_text.clone());
@@ -4602,6 +4626,12 @@ impl Handler {
                             .sessions
                             .with_session(sid, |session| session.rules().to_vec())?;
                         crate::rule_catalog::validate_session_rule_compatibility(
+                            &existing_rules,
+                            rule,
+                        )?;
+                        validate_session_rule_stratification(
+                            &self.get_storage(),
+                            current_kg,
                             &existing_rules,
                             rule,
                         )?;

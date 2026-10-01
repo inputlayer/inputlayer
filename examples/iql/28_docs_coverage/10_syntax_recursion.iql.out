@@ -39,15 +39,17 @@ Rule 'even' registered.
 │ X │
 ├───┤
 │ 2 │
+│ 4 │
 └───┘
-1 rows
+2 rows
 > ?even(X)
 ┌───┐
 │ X │
 ├───┤
 │ 3 │
+│ 5 │
 └───┘
-1 rows
+2 rows
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_syntax_recursion_n28t10

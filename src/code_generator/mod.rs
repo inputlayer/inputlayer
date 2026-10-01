@@ -40,6 +40,8 @@ use crate::temporal_ops;
 use crate::value::{Tuple, Value};
 use crate::vector_ops;
 
+mod scc;
+
 // Thread-local cancellation flag for cooperative query timeout.
 // Set by Handler before DD computation, checked in spin loops.
 thread_local! {
@@ -1020,6 +1022,58 @@ impl CodeGenerator {
         }
     }
 
+    /// Min/max aggregate to apply inside a fixpoint loop: `Some` when every
+    /// recursive input has the same single top-level min or max aggregate.
+    /// The aggregate is then stripped from the bodies and applied to the
+    /// combined (base + recursive) collection each iteration.
+    fn minmax_in_loop(recursive_inputs: &[IRNode]) -> Option<(Vec<usize>, usize, bool)> {
+        let first = Self::extract_minmax_aggregation(recursive_inputs.first()?)?;
+        recursive_inputs[1..]
+            .iter()
+            .all(|ri| Self::extract_minmax_aggregation(ri).as_ref() == Some(&first))
+            .then_some(first)
+    }
+
+    /// Deduplicate one fixpoint step: keep the min/max tuple per group when
+    /// aggregating in the loop, otherwise set semantics via distinct.
+    fn fixpoint_dedup<G, R: DiffType>(
+        combined: Collection<G, Tuple, R>,
+        agg_in_loop: Option<&(Vec<usize>, usize, bool)>,
+    ) -> Collection<G, Tuple, R>
+    where
+        G: Scope,
+        G::Timestamp: Lattice + Ord,
+    {
+        let Some((group_by, agg_col, is_min)) = agg_in_loop else {
+            return combined.distinct_core::<R>();
+        };
+        let (group_by, agg_col, is_min) = (group_by.clone(), *agg_col, *is_min);
+        combined
+            .map(move |tuple| {
+                let key: Vec<Value> = group_by
+                    .iter()
+                    .map(|&i| tuple.get(i).cloned().unwrap_or(Value::Null))
+                    .collect();
+                (Tuple::new(key), tuple)
+            })
+            .reduce(move |_key, input, output| {
+                let value_at = |t: &Tuple| t.get(agg_col).cloned().unwrap_or(Value::Null);
+                let best = if is_min {
+                    input
+                        .iter()
+                        .min_by(|(a, _), (b, _)| value_at(a).cmp(&value_at(b)))
+                } else {
+                    input
+                        .iter()
+                        .max_by(|(a, _), (b, _)| value_at(a).cmp(&value_at(b)))
+                };
+                if let Some((tuple, _count)) = best {
+                    output.push(((*tuple).clone(), R::one()));
+                }
+            })
+            .map(|(_key, tuple)| tuple)
+    }
+
     /// Strip the top-level Aggregate node from an IR, returning the inner input.
     /// Used when we want to apply aggregation at a different point (e.g., in the
     /// fixpoint loop instead of inside the recursive body).
@@ -1036,29 +1090,8 @@ impl CodeGenerator {
         recursive_inputs: &[IRNode],
         recursive_rel: &str,
     ) -> Result<Vec<Tuple>, String> {
-        // Check if we can use aggregation-in-loop optimization for min/max.
-        // If ALL recursive inputs have a top-level min or max aggregate with the
-        // same group_by and agg_col, we strip the aggregate from the recursive body
-        // and apply it to the combined (base + recursive) result in the loop.
-        // This prunes non-optimal paths early, reducing intermediate data.
-        let agg_in_loop = if recursive_inputs.len() == 1 {
-            Self::extract_minmax_aggregation(&recursive_inputs[0])
-        } else {
-            // For multiple recursive inputs, check if ALL have the same aggregation
-            let first = Self::extract_minmax_aggregation(&recursive_inputs[0]);
-            if let Some(ref first_agg) = first {
-                let all_same = recursive_inputs[1..].iter().all(|ri| {
-                    Self::extract_minmax_aggregation(ri).is_some_and(|a| a == *first_agg)
-                });
-                if all_same {
-                    first
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        };
+        // Min/max aggregation-in-loop prunes non-optimal paths early.
+        let agg_in_loop = Self::minmax_in_loop(recursive_inputs);
 
         // Build the recursive IR, optionally stripping the aggregate
         let effective_recursive_inputs: Vec<IRNode> = if agg_in_loop.is_some() {
@@ -1151,44 +1184,7 @@ impl CodeGenerator {
                         // Combine base + recursive results
                         let combined = base_in_scope.concat(recursive_result);
 
-                        // Apply deduplication strategy based on aggregation mode
-                        let next = if let Some((ref group_by, agg_col, is_min)) = agg_in_loop {
-                            // Min/Max aggregation-in-loop: instead of distinct(), apply
-                            // reduce() with min/max logic. This prunes non-optimal paths
-                            // at each iteration, reducing intermediate data volume.
-                            let group_by = group_by.clone();
-                            combined
-                                .map(move |tuple| {
-                                    let key: Vec<Value> = group_by
-                                        .iter()
-                                        .map(|&i| tuple.get(i).cloned().unwrap_or(Value::Null))
-                                        .collect();
-                                    (Tuple::new(key), tuple)
-                                })
-                                .reduce(move |_key, input, output| {
-                                    // Find the tuple with min/max value at agg_col
-                                    let best = if is_min {
-                                        input.iter().min_by(|(a, _), (b, _)| {
-                                            let va = a.get(agg_col).cloned().unwrap_or(Value::Null);
-                                            let vb = b.get(agg_col).cloned().unwrap_or(Value::Null);
-                                            va.cmp(&vb)
-                                        })
-                                    } else {
-                                        input.iter().max_by(|(a, _), (b, _)| {
-                                            let va = a.get(agg_col).cloned().unwrap_or(Value::Null);
-                                            let vb = b.get(agg_col).cloned().unwrap_or(Value::Null);
-                                            va.cmp(&vb)
-                                        })
-                                    };
-                                    if let Some((tuple, _count)) = best {
-                                        output.push(((*tuple).clone(), R::one()));
-                                    }
-                                })
-                                .map(|(_key, tuple)| tuple)
-                        } else {
-                            // Standard deduplication with distinct
-                            combined.distinct_core::<R>()
-                        };
+                        let next = Self::fixpoint_dedup(combined, agg_in_loop.as_ref());
 
                         // Set variable for next iteration
                         variable.set(next.clone());
