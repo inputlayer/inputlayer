@@ -108,6 +108,8 @@ pub struct KnowledgeGraph {
     max_result_rows: usize,
     /// Maximum query cost score (0 = unlimited)
     max_query_cost: u64,
+    /// Optimizer passes for every engine this KG builds
+    optimization: crate::OptimizationConfig,
 }
 
 impl StorageEngine {
@@ -219,6 +221,7 @@ impl StorageEngine {
                     KnowledgeGraph::new_with_workers(name.to_string(), db_dir, num_workers);
                 kg.max_result_rows = self.config.storage.performance.max_result_rows;
                 kg.max_query_cost = self.config.storage.performance.max_query_cost;
+                kg.set_optimization(self.config.optimization.clone());
 
                 vacant.insert(Arc::new(RwLock::new(kg)));
             }
@@ -708,7 +711,7 @@ impl StorageEngine {
             format!("{}{}", snapshot.rule_prefix(), program)
         };
 
-        let mut engine = crate::IQLEngine::new();
+        let mut engine = snapshot.new_engine();
         engine.input_tuples_mut().clone_from(&snapshot.input_tuples);
 
         engine
@@ -1725,7 +1728,7 @@ impl StorageEngine {
         data_dir: PathBuf,
     ) -> StorageResult<KnowledgeGraph> {
         let prefix = format!("{name}:");
-        let mut engine = IQLEngine::new();
+        let mut engine = IQLEngine::with_config(self.config.optimization.clone());
         let mut metadata = KnowledgeGraphMetadata::new(name.to_string());
 
         // Find all shards for this knowledge graph
@@ -1779,11 +1782,13 @@ impl StorageEngine {
 
         // Create initial snapshot from loaded data
         let num_workers = self.config.storage.performance.num_threads;
-        let snapshot = ArcSwap::from_pointee(KnowledgeGraphSnapshot::new_with_workers(
+        let mut initial = KnowledgeGraphSnapshot::new_with_workers(
             engine.input_tuples.clone(),
             rule_catalog.all_rules(),
             num_workers,
-        ));
+        );
+        initial.optimization = self.config.optimization.clone();
+        let snapshot = ArcSwap::from_pointee(initial);
 
         Ok(KnowledgeGraph {
             name: name.to_string(),
@@ -1797,6 +1802,7 @@ impl StorageEngine {
             num_workers,
             max_result_rows: self.config.storage.performance.max_result_rows,
             max_query_cost: self.config.storage.performance.max_query_cost,
+            optimization: self.config.optimization.clone(),
         })
     }
 
@@ -2048,7 +2054,17 @@ impl KnowledgeGraph {
             num_workers,
             max_result_rows: 0,
             max_query_cost: 0,
+            optimization: crate::OptimizationConfig::default(),
         }
+    }
+
+    /// Set the optimizer passes for this KG's engines and published snapshots.
+    fn set_optimization(&mut self, config: crate::OptimizationConfig) {
+        self.engine.set_config(config.clone());
+        let mut snapshot = (**self.snapshot.load()).clone();
+        snapshot.optimization = config.clone();
+        self.snapshot.store(Arc::new(snapshot));
+        self.optimization = config;
     }
 
     /// Enable the IncrementalEngine for incremental updates.
@@ -2161,6 +2177,7 @@ impl KnowledgeGraph {
             );
             new_snapshot.max_result_rows = self.max_result_rows;
             new_snapshot.max_query_cost = self.max_query_cost;
+            new_snapshot.optimization = self.optimization.clone();
             new_snapshot.hnsw_search_fn = hnsw_fn;
             self.snapshot.store(Arc::new(new_snapshot));
 
@@ -2175,6 +2192,7 @@ impl KnowledgeGraph {
             );
             new_snapshot.max_result_rows = self.max_result_rows;
             new_snapshot.max_query_cost = self.max_query_cost;
+            new_snapshot.optimization = self.optimization.clone();
             self.snapshot.store(Arc::new(new_snapshot));
         }
 
@@ -2485,7 +2503,7 @@ impl KnowledgeGraph {
 
         // Execute using a fresh engine with cloned data (like snapshot execution)
         // This avoids needing &mut self
-        let mut temp_engine = crate::IQLEngine::new();
+        let mut temp_engine = crate::IQLEngine::with_config(self.optimization.clone());
         temp_engine
             .input_tuples
             .clone_from(&self.engine.input_tuples);

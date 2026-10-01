@@ -488,12 +488,13 @@ impl QueryJob {
             .debug_query_on(&kg_name, &query)
             .map_err(|e| format!("{e}"))?;
 
-        let optimizations = vec![
-            "Join Planning (spanning tree reordering)".to_string(),
-            "SIP Rewriting (semijoin reduction)".to_string(),
-            "Subplan Sharing (common subexpression elimination)".to_string(),
-            "Basic Optimizations (identity elimination, filter simplification)".to_string(),
-        ];
+        let optimizations = storage
+            .config()
+            .optimization
+            .enabled_passes()
+            .into_iter()
+            .map(String::from)
+            .collect();
 
         Ok((trace.format_trace(), optimizations))
     }
@@ -3926,12 +3927,13 @@ impl Handler {
             .debug_query_on(&kg_name, &query)
             .map_err(|e| format!("{e}"))?;
 
-        let optimizations = vec![
-            "Join Planning (spanning tree reordering)".to_string(),
-            "SIP Rewriting (semijoin reduction)".to_string(),
-            "Subplan Sharing (common subexpression elimination)".to_string(),
-            "Basic Optimizations (identity elimination, filter simplification)".to_string(),
-        ];
+        let optimizations = storage
+            .config()
+            .optimization
+            .enabled_passes()
+            .into_iter()
+            .map(String::from)
+            .collect();
 
         Ok((trace.format_trace(), optimizations))
     }

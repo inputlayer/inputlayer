@@ -12,7 +12,7 @@
 
 use crate::ast::Rule;
 use crate::value::Tuple;
-use crate::IQLEngine;
+use crate::{IQLEngine, OptimizationConfig};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -63,6 +63,9 @@ pub struct KnowledgeGraphSnapshot {
 
     /// Maximum query cost score (0 = unlimited)
     pub max_query_cost: u64,
+
+    /// Optimizer passes for engines built from this snapshot
+    pub optimization: OptimizationConfig,
 
     /// Optional HNSW search function for resolving nearest-neighbor queries.
     /// Wrapped in Arc for cheap cloning. Signature:
@@ -129,6 +132,7 @@ impl KnowledgeGraphSnapshot {
             rule_prefix: Arc::new(prefix),
             max_result_rows: 0,
             max_query_cost: 0,
+            optimization: OptimizationConfig::default(),
             hnsw_search_fn: None,
         }
     }
@@ -161,13 +165,9 @@ impl KnowledgeGraphSnapshot {
     /// Creates a fresh `IQLEngine` with the snapshot's data.
     /// The snapshot is immutable so this is thread-safe without locks.
     pub fn execute(&self, program: &str) -> Result<Vec<(i32, i32)>, String> {
-        let mut engine = IQLEngine::new();
-        engine.set_num_workers(self.num_workers);
-        engine.set_max_result_rows(self.max_result_rows);
-        engine.set_max_query_cost(self.max_query_cost);
+        let mut engine = self.new_engine();
         engine.input_tuples.clone_from(&self.input_tuples);
         engine.set_shared_input(Arc::clone(&self.input_tuples));
-        self.configure_hnsw(&mut engine);
         engine.execute(program)
     }
 
@@ -186,13 +186,9 @@ impl KnowledgeGraphSnapshot {
 
     /// Execute a query returning arbitrary-arity tuples
     pub fn execute_tuples(&self, program: &str) -> Result<Vec<Tuple>, String> {
-        let mut engine = IQLEngine::new();
+        let mut engine = self.new_engine();
         engine.input_tuples.clone_from(&self.input_tuples);
         engine.set_shared_input(Arc::clone(&self.input_tuples));
-        engine.set_num_workers(self.num_workers);
-        engine.set_max_result_rows(self.max_result_rows);
-        engine.set_max_query_cost(self.max_query_cost);
-        self.configure_hnsw(&mut engine);
         engine.execute_tuples(program)
     }
 
@@ -264,12 +260,8 @@ impl KnowledgeGraphSnapshot {
             format!("{}{}", self.rule_prefix, program)
         };
 
-        let mut engine = IQLEngine::new();
-        engine.set_num_workers(self.num_workers);
-        engine.set_max_result_rows(self.max_result_rows);
-        engine.set_max_query_cost(self.max_query_cost);
+        let mut engine = self.new_engine();
         engine.set_timing_mode(timing_mode);
-        self.configure_hnsw(&mut engine);
 
         // Use shared input for zero-copy
         engine.input_tuples.clone_from(&self.input_tuples);
@@ -312,11 +304,7 @@ impl KnowledgeGraphSnapshot {
         let start = Instant::now();
         let session_fact_count = session_facts.len();
         // Create a fresh engine with cloned data
-        let mut engine = IQLEngine::new();
-        engine.set_num_workers(self.num_workers);
-        engine.set_max_result_rows(self.max_result_rows);
-        engine.set_max_query_cost(self.max_query_cost);
-        self.configure_hnsw(&mut engine);
+        let mut engine = self.new_engine();
 
         // Copy-on-write: only clone relation vectors that receive session facts.
         // Relations without session facts share the same underlying data via Arc.
@@ -375,12 +363,8 @@ impl KnowledgeGraphSnapshot {
     ) -> Result<(Vec<Tuple>, Option<crate::execution::TimingBreakdown>), String> {
         let start = Instant::now();
         let session_fact_count = session_facts.len();
-        let mut engine = IQLEngine::new();
-        engine.set_num_workers(self.num_workers);
-        engine.set_max_result_rows(self.max_result_rows);
-        engine.set_max_query_cost(self.max_query_cost);
+        let mut engine = self.new_engine();
         engine.set_timing_mode(timing_mode);
-        self.configure_hnsw(&mut engine);
 
         // Copy-on-write: only clone relation vectors that receive session facts.
         let mut needs_mutation: HashMap<String, Vec<Tuple>> = HashMap::new();
@@ -419,6 +403,17 @@ impl KnowledgeGraphSnapshot {
             "snapshot_execute_with_session_facts_profiled"
         );
         result
+    }
+
+    /// Build an engine with this snapshot's optimizer passes, limits, worker
+    /// count and HNSW search. Callers load the input data.
+    pub fn new_engine(&self) -> IQLEngine {
+        let mut engine = IQLEngine::with_config(self.optimization.clone());
+        engine.set_num_workers(self.num_workers);
+        engine.set_max_result_rows(self.max_result_rows);
+        engine.set_max_query_cost(self.max_query_cost);
+        self.configure_hnsw(&mut engine);
+        engine
     }
 
     /// Configure HNSW search on a IQLEngine if available.

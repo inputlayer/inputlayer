@@ -144,6 +144,8 @@ Optimization passes:
   - Join Planning (spanning tree reordering)
   - SIP Rewriting (semijoin reduction)
   - Subplan Sharing (common subexpression elimination)
+  - Boolean Specialization (semiring selection)
+  - Magic Sets (demand-driven recursion)
   - Basic Optimizations (identity elimination, filter simplification)
 > .kg use default
 Switched to knowledge graph: default

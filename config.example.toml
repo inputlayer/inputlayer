@@ -93,7 +93,7 @@ max_query_cost = 0
 enable_join_planning = true
 
 # Enable SIP rewriting (Yannakakis semijoin reduction)
-# Optimizes recursive query evaluation
+# Filters intermediate join results early
 enable_sip_rewriting = true
 
 # Enable subplan sharing across rules
@@ -101,8 +101,10 @@ enable_sip_rewriting = true
 enable_subplan_sharing = true
 
 # Enable boolean specialization (semiring selection)
-# Optimizes queries with boolean constants
-enable_boolean_specialization = false
+enable_boolean_specialization = true
+
+# Enable Magic Sets demand-driven rewriting for recursive queries
+enable_magic_sets = true
 
 [logging]
 # Log level: "trace" | "debug" | "info" | "warn" | "error"

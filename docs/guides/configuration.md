@@ -102,17 +102,21 @@ max_query_cost = 0
 # QUERY OPTIMIZATION
 # =============================================================================
 [optimization]
-# Enable join order planning (experimental, disabled by default)
-enable_join_planning = false
+# Every pass defaults to on.
+# Enable join order planning
+enable_join_planning = true
 
-# Enable SIP (Sideways Information Passing) rewriting (experimental)
-enable_sip_rewriting = false
+# Enable SIP (Sideways Information Passing) rewriting
+enable_sip_rewriting = true
 
 # Enable subplan sharing across rules
 enable_subplan_sharing = true
 
 # Enable boolean specialization optimizations
 enable_boolean_specialization = true
+
+# Enable Magic Sets demand-driven rewriting for recursive queries
+enable_magic_sets = true
 
 # =============================================================================
 # LOGGING
