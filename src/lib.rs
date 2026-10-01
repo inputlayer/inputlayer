@@ -387,10 +387,9 @@ impl IQLEngine {
 
     /// Set the number of worker threads for parallel execution
     ///
-    /// When `num_workers > 1`, non-recursive queries without joins use
-    /// Rayon-based parallel execution with data partitioning.
-    /// Recursive and join-containing queries always use single-worker
-    /// DD execution for correctness.
+    /// When `num_workers > 1`, non-recursive per-tuple rules (scan, filter,
+    /// map, compute) run hash-partitioned on Rayon. Joins, negation,
+    /// aggregates, distinct and recursion run on a single worker.
     pub fn set_num_workers(&mut self, num_workers: usize) {
         self.num_workers = num_workers.max(1);
     }

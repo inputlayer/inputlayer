@@ -58,6 +58,11 @@ pub fn set_query_cancel_flag(flag: Option<Arc<AtomicBool>>) {
     });
 }
 
+/// The current thread's query cancellation flag.
+fn current_query_cancel_flag() -> Option<Arc<AtomicBool>> {
+    QUERY_CANCEL.with(|cell| cell.borrow().clone())
+}
+
 /// Check if the current query has been cancelled.
 fn is_query_cancelled() -> bool {
     QUERY_CANCEL.with(|cell| {
@@ -1142,78 +1147,88 @@ impl CodeGenerator {
         self.execute_recursive_fixpoint_tuples(ir, recursive_rel)
     }
 
-    /// Execute with Rayon-based parallelism. Falls back to single-worker for joins
-    /// (data must be co-located). Scan/filter/map queries partition data across workers.
+    /// Execute with Rayon-based parallelism. Only per-tuple IR (scan, filter,
+    /// map, compute, union) is hash-partitioned across workers; everything
+    /// else runs on a single worker.
     pub fn execute_with_config(
         &self,
         ir: &IRNode,
         config: ExecutionConfig,
     ) -> Result<Vec<Tuple>, String> {
         use rayon::prelude::*;
-        use std::collections::HashSet;
 
-        if config.num_workers == 1 {
-            // Fall back to direct execution for single worker
+        if config.num_workers == 1 || !Self::is_partitionable(ir) {
             return self.generate_and_execute_tuples(ir);
         }
 
-        // Check if the IR contains joins - if so, use single-worker for correctness
-        // Joins require coordinated data exchange which our simple partitioning doesn't handle
-        if Self::contains_join(ir) {
-            return self.generate_and_execute_tuples(ir);
-        }
-
-        // For queries without joins, we can partition and process in parallel
         let num_workers = config.num_workers;
-
-        // Partition input data across workers
         let partitioned_inputs: Vec<RelationMap> = (0..num_workers)
             .map(|worker_idx| {
                 Self::partition_data_for_worker(&self.input_tuples, worker_idx, num_workers)
             })
             .collect();
 
-        let ir_clone = ir.clone();
+        let cancel = current_query_cancel_flag();
+        let limit = self.max_result_rows;
         let semiring_type = self.semiring_type;
 
-        // Execute in parallel using Rayon
-        let all_results: Vec<Vec<Tuple>> = partitioned_inputs
+        let all_results: Vec<Result<Vec<Tuple>, String>> = partitioned_inputs
             .into_par_iter()
             .map(|partition| {
-                // Create a temporary code generator with this partition
+                let prev = current_query_cancel_flag();
+                set_query_cancel_flag(cancel.clone());
                 let mut temp_codegen = CodeGenerator::new();
                 temp_codegen.set_semiring_type(semiring_type);
+                temp_codegen.set_max_result_rows(limit);
                 temp_codegen.set_inputs(partition);
-                temp_codegen
-                    .generate_and_execute_tuples(&ir_clone)
-                    .unwrap_or_default()
+                let result = temp_codegen.generate_and_execute_tuples(ir);
+                set_query_cancel_flag(prev);
+                result
             })
             .collect();
 
-        // Merge and deduplicate results
         let mut combined: HashSet<Tuple> = HashSet::new();
-        for results in all_results {
-            combined.extend(results);
+        let mut first_err = None;
+        for result in all_results {
+            match result {
+                Ok(tuples) => combined.extend(tuples),
+                Err(e) => {
+                    first_err.get_or_insert(e);
+                }
+            }
         }
 
-        Ok(combined.into_iter().collect())
+        // A worker reaching the row limit cancels its siblings; that is not an error.
+        let hit_limit = limit > 0 && combined.len() >= limit;
+        if let Some(e) = first_err {
+            if !(hit_limit && is_query_cancelled()) {
+                return Err(e);
+            }
+        }
+
+        let mut rows: Vec<Tuple> = combined.into_iter().collect();
+        if limit > 0 {
+            rows.truncate(limit);
+        }
+        Ok(rows)
     }
 
-    /// Check if IR tree contains any join operations
-    fn contains_join(ir: &IRNode) -> bool {
+    /// True when the IR is per-tuple, so evaluating hash partitions
+    /// independently and unioning the results equals evaluating the whole.
+    fn is_partitionable(ir: &IRNode) -> bool {
         match ir {
-            IRNode::Scan { .. } => false,
-            IRNode::HnswScan { .. } => false,
-            IRNode::Map { input, .. } => Self::contains_join(input),
-            IRNode::Filter { input, .. } => Self::contains_join(input),
-            IRNode::Join { .. } => true,
-            IRNode::Distinct { input } => Self::contains_join(input),
-            IRNode::Union { inputs } => inputs.iter().any(Self::contains_join),
-            IRNode::Aggregate { input, .. } => Self::contains_join(input),
-            IRNode::Antijoin { .. } => true, // Antijoin is also a join-like operation
-            IRNode::Compute { input, .. } => Self::contains_join(input),
-            IRNode::FlatMap { input, .. } => Self::contains_join(input),
-            IRNode::JoinFlatMap { .. } => true,
+            IRNode::Scan { .. } => true,
+            IRNode::Map { input, .. }
+            | IRNode::Filter { input, .. }
+            | IRNode::Compute { input, .. }
+            | IRNode::FlatMap { input, .. } => Self::is_partitionable(input),
+            IRNode::Union { inputs } => inputs.iter().all(Self::is_partitionable),
+            IRNode::Join { .. }
+            | IRNode::JoinFlatMap { .. }
+            | IRNode::Antijoin { .. }
+            | IRNode::Aggregate { .. }
+            | IRNode::Distinct { .. }
+            | IRNode::HnswScan { .. } => false,
         }
     }
 
@@ -8349,6 +8364,74 @@ mod tests {
         assert!(!detect(bound_base(), swapped));
         // An unguarded base would seed from every edge
         assert!(!detect(scan("edge", 2), bound_recursive()));
+    }
+
+    #[test]
+    fn test_is_partitionable() {
+        let per_tuple = filter_ne(project(scan("r", 2), vec![1]), 0, 1);
+        assert!(CodeGenerator::is_partitionable(&per_tuple));
+        let aggregate = IRNode::Aggregate {
+            input: Box::new(scan("r", 2)),
+            group_by: vec![],
+            aggregations: vec![(AggregateFunction::Count, 1)],
+            output_schema: vec!["n".to_string()],
+        };
+        assert!(!CodeGenerator::is_partitionable(&aggregate));
+        let distinct = IRNode::Distinct {
+            input: Box::new(scan("r", 2)),
+        };
+        assert!(!CodeGenerator::is_partitionable(&distinct));
+        assert!(!CodeGenerator::is_partitionable(&join(
+            scan("r", 2),
+            scan("s", 2),
+            1,
+            0
+        )));
+    }
+
+    #[test]
+    fn test_execute_with_config_aggregate_is_global() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "r".to_string(),
+            (0..20)
+                .map(|i| Tuple::new(vec![Value::Int64(1), Value::Int64(i)]))
+                .collect(),
+        );
+        let ir = IRNode::Aggregate {
+            input: Box::new(scan("r", 2)),
+            group_by: vec![],
+            aggregations: vec![(AggregateFunction::Sum, 1)],
+            output_schema: vec!["s".to_string()],
+        };
+        let rows = codegen
+            .execute_with_config(&ir, ExecutionConfig::with_workers(4))
+            .unwrap();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+    }
+
+    #[test]
+    fn test_execute_with_config_honors_cancel_and_row_limit() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "r".to_string(),
+            (0..200)
+                .map(|i| Tuple::new(vec![Value::Int64(i)]))
+                .collect(),
+        );
+        let config = ExecutionConfig::with_workers(4);
+
+        let flag = Arc::new(AtomicBool::new(true));
+        set_query_cancel_flag(Some(Arc::clone(&flag)));
+        let cancelled = codegen.execute_with_config(&scan("r", 1), config.clone());
+        set_query_cancel_flag(None);
+        assert!(cancelled.is_err(), "cancel flag must reach workers");
+
+        codegen.set_max_result_rows(10);
+        set_query_cancel_flag(Some(Arc::new(AtomicBool::new(false))));
+        let limited = codegen.execute_with_config(&scan("r", 1), config);
+        set_query_cancel_flag(None);
+        assert_eq!(limited.unwrap().len(), 10);
     }
 
     #[test]
