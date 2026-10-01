@@ -16,6 +16,8 @@
 //! - Recursive evaluation via `.iterative()` scopes with `Variable`
 //! - Semi-naive evaluation for efficient fixpoint computation
 
+mod static_input;
+
 use crate::boolean_specialization::SemiringType;
 use crate::ir::{AggregateFunction, ArithOp, BuiltinFunction, IRExpression, IRNode, Predicate};
 use crate::semiring_types::{BooleanDiff, DiffType};
@@ -1377,6 +1379,9 @@ impl CodeGenerator {
         G: Scope,
         G::Timestamp: Lattice + Ord + Default,
     {
+        if let Some(collection) = Self::prefiltered_scan::<G, R>(scope, ir, input_data, live) {
+            return collection;
+        }
         match ir {
             IRNode::Scan { relation, .. } => {
                 Self::generate_scan_tuples::<G, R>(scope, relation, input_data, live)
@@ -1977,8 +1982,18 @@ impl CodeGenerator {
         G: Scope,
         G::Timestamp: Lattice + Ord + Default,
     {
-        let left_coll = Self::generate_collection_tuples::<G, R>(scope, left, input_data, live);
-        let right_coll = Self::generate_collection_tuples::<G, R>(scope, right, input_data, live);
+        let (left_coll, right_coll) = match Self::prefiltered_join_inputs::<G, R>(
+            left, right, left_keys, right_keys, input_data, live,
+        ) {
+            Some((l, r)) => (
+                Self::collection_from_tuples::<G, R>(scope, l),
+                Self::collection_from_tuples::<G, R>(scope, r),
+            ),
+            None => (
+                Self::generate_collection_tuples::<G, R>(scope, left, input_data, live),
+                Self::generate_collection_tuples::<G, R>(scope, right, input_data, live),
+            ),
+        };
 
         // CARTESIAN PRODUCT FIX: When both key arrays are empty, we need a
         // Cartesian product (cross join). Using empty tuples as keys causes
