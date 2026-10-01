@@ -32,6 +32,8 @@
 //! parse(source) -> SIP Rewriting -> [Magic Sets] -> build_ir() -> optimize -> execute
 //! ```
 
+pub mod specialize;
+
 use crate::ast::{Atom, BodyPredicate, ComparisonOp, Program, Rule, Term};
 use crate::recursion;
 use crate::value::{Tuple, Value};

@@ -524,6 +524,7 @@ fn test_sip_chain_join_correctness() {
         enable_subplan_sharing: true,
         enable_boolean_specialization: true,
         enable_magic_sets: true,
+        enable_constant_specialization: true,
     };
 
     let mut engine = IQLEngine::with_config(config);
@@ -554,6 +555,7 @@ fn test_sip_two_way_join_correctness() {
         enable_subplan_sharing: true,
         enable_boolean_specialization: true,
         enable_magic_sets: true,
+        enable_constant_specialization: true,
     };
 
     let mut engine = IQLEngine::with_config(config);
@@ -582,6 +584,7 @@ fn test_sip_with_dangling_tuples() {
         enable_subplan_sharing: true,
         enable_boolean_specialization: true,
         enable_magic_sets: true,
+        enable_constant_specialization: true,
     };
 
     let mut engine = IQLEngine::with_config(config);

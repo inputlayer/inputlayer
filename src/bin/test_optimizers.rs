@@ -12,6 +12,7 @@ fn main() {
         enable_subplan_sharing: false,
         enable_boolean_specialization: false,
         enable_magic_sets: false,
+        enable_constant_specialization: false,
     };
     let mut engine = IQLEngine::with_config(config_none);
     engine.add_fact("edge", edges.clone());
@@ -26,6 +27,7 @@ fn main() {
         enable_subplan_sharing: false,
         enable_boolean_specialization: false,
         enable_magic_sets: false,
+        enable_constant_specialization: false,
     };
     let mut engine = IQLEngine::with_config(config_jp);
     engine.add_fact("edge", edges.clone());
@@ -40,6 +42,7 @@ fn main() {
         enable_subplan_sharing: false,
         enable_boolean_specialization: false,
         enable_magic_sets: false,
+        enable_constant_specialization: false,
     };
     let mut engine = IQLEngine::with_config(config_sip);
     engine.add_fact("edge", edges.clone());
@@ -54,6 +57,7 @@ fn main() {
         enable_subplan_sharing: true,
         enable_boolean_specialization: false,
         enable_magic_sets: false,
+        enable_constant_specialization: false,
     };
     let mut engine = IQLEngine::with_config(config_ss);
     engine.add_fact("edge", edges.clone());
@@ -68,6 +72,7 @@ fn main() {
         enable_subplan_sharing: false,
         enable_boolean_specialization: true,
         enable_magic_sets: false,
+        enable_constant_specialization: false,
     };
     let mut engine = IQLEngine::with_config(config_bs);
     engine.add_fact("edge", edges.clone());

@@ -635,6 +635,28 @@ impl IQLEngine {
         }
     }
 
+    /// Apply constant specialization (see `magic_sets::specialize`).
+    fn apply_constant_specialization(&mut self) {
+        if !self.optimization_config.enable_constant_specialization {
+            return;
+        }
+        let Some(rewritten) = self
+            .program
+            .as_ref()
+            .and_then(magic_sets::specialize::specialize_constants)
+        else {
+            return;
+        };
+        if std::env::var("INPUTLAYER_DEBUG").is_ok() {
+            for (i, rule) in rewritten.rules.iter().enumerate() {
+                eprintln!("DEBUG specialize rule[{i}]: {rule}");
+            }
+        }
+        self.has_recursion = recursion::has_recursion(&rewritten);
+        self.strata = recursion::stratify(&rewritten);
+        self.program = Some(rewritten);
+    }
+
     /// Apply Magic Sets transformation for recursive queries with bound arguments.
     ///
     /// Rewrites recursive rules so that the fixpoint computation is restricted to
@@ -1327,6 +1349,9 @@ impl IQLEngine {
         info!(source_len, parse_ms, "engine_parse_complete");
         collector.breakdown.parse_us = parse_us;
 
+        let ((), spec_us) = collector.time(|| self.apply_constant_specialization());
+        info!(source_len, spec_us, "engine_specialize_complete");
+
         let ((), sip_us) = collector.time(|| self.apply_sip_rewriting());
         let sip_ms = sip_us / 1000;
         info!(source_len, sip_ms, "engine_sip_complete");
@@ -1955,6 +1980,7 @@ mod tests {
             enable_subplan_sharing: false,
             enable_boolean_specialization: false,
             enable_magic_sets: false,
+            enable_constant_specialization: false,
         };
         let engine = IQLEngine::with_config(config.clone());
         assert!(!engine.config().enable_join_planning);
@@ -1972,6 +1998,7 @@ mod tests {
             enable_subplan_sharing: true,
             enable_boolean_specialization: true,
             enable_magic_sets: true,
+            enable_constant_specialization: true,
         };
         engine.set_config(config);
         assert!(!engine.config().enable_join_planning);
@@ -2395,6 +2422,7 @@ mod tests {
             enable_subplan_sharing: false,
             enable_boolean_specialization: false,
             enable_magic_sets: false,
+            enable_constant_specialization: false,
         };
         let mut engine = IQLEngine::with_config(config);
         engine.add_tuples(
@@ -2928,6 +2956,7 @@ mod tests {
         // With magic sets disabled, bound query still works (just slower)
         let config = OptimizationConfig {
             enable_magic_sets: false,
+            enable_constant_specialization: false,
             ..Default::default()
         };
         let mut engine = IQLEngine::with_config(config);

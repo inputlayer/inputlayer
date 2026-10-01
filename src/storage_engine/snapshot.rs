@@ -74,6 +74,14 @@ pub struct KnowledgeGraphSnapshot {
     pub hnsw_search_fn: Option<HnswSearchFn>,
 }
 
+/// Whether the caller reads derived relations by their original names
+/// (provenance). Constant specialization renames them, so it is off then.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Output {
+    Result,
+    WithDerived,
+}
+
 /// Rules a query is evaluated with.
 #[derive(Clone, Copy)]
 enum RuleSet {
@@ -167,6 +175,7 @@ impl KnowledgeGraphSnapshot {
         &self,
         program: &str,
         rule_set: RuleSet,
+        output: Output,
         session_facts: Vec<(String, Tuple)>,
         timing_mode: TimingMode,
     ) -> Result<(IQLEngine, Program), String> {
@@ -204,6 +213,11 @@ impl KnowledgeGraphSnapshot {
 
         let mut engine = self.new_engine();
         engine.set_timing_mode(timing_mode);
+        if output == Output::WithDerived {
+            let mut config = engine.config().clone();
+            config.enable_constant_specialization = false;
+            engine.set_config(config);
+        }
         engine.set_inputs(inputs);
         Ok((engine, combined))
     }
@@ -227,12 +241,14 @@ impl KnowledgeGraphSnapshot {
         &self,
         program: &str,
         rule_set: RuleSet,
+        output: Output,
         session_facts: Vec<(String, Tuple)>,
         timing_mode: TimingMode,
     ) -> Result<(Vec<Tuple>, RelationMap, Option<TimingBreakdown>), String> {
         let start = Instant::now();
         let session_fact_count = session_facts.len();
-        let (mut engine, combined) = self.prepare(program, rule_set, session_facts, timing_mode)?;
+        let (mut engine, combined) =
+            self.prepare(program, rule_set, output, session_facts, timing_mode)?;
         let rules = combined.rules.len();
         let result = engine.execute_program_profiled(combined);
         info!(
@@ -264,8 +280,14 @@ impl KnowledgeGraphSnapshot {
 
     /// Execute a query (without persistent rules) returning arbitrary-arity tuples
     pub fn execute_tuples(&self, program: &str) -> Result<Vec<Tuple>, String> {
-        self.run(program, RuleSet::QueryOnly, Vec::new(), TimingMode::Off)
-            .map(|(tuples, _, _)| tuples)
+        self.run(
+            program,
+            RuleSet::QueryOnly,
+            Output::Result,
+            Vec::new(),
+            TimingMode::Off,
+        )
+        .map(|(tuples, _, _)| tuples)
     }
 
     /// Execute a query with persistent rules, returning arbitrary-arity tuples
@@ -273,6 +295,7 @@ impl KnowledgeGraphSnapshot {
         self.run(
             program,
             RuleSet::WithPersistent,
+            Output::Result,
             Vec::new(),
             TimingMode::Off,
         )
@@ -290,6 +313,7 @@ impl KnowledgeGraphSnapshot {
         self.run(
             program,
             RuleSet::WithPersistent,
+            Output::WithDerived,
             Vec::new(),
             TimingMode::Off,
         )
@@ -302,8 +326,14 @@ impl KnowledgeGraphSnapshot {
         program: &str,
         timing_mode: TimingMode,
     ) -> Result<(Vec<Tuple>, Option<TimingBreakdown>), String> {
-        self.run(program, RuleSet::WithPersistent, Vec::new(), timing_mode)
-            .map(|(tuples, _, timing)| (tuples, timing))
+        self.run(
+            program,
+            RuleSet::WithPersistent,
+            Output::Result,
+            Vec::new(),
+            timing_mode,
+        )
+        .map(|(tuples, _, timing)| (tuples, timing))
     }
 
     /// Execute a query with rules, returning tuples, all derived relation data,
@@ -313,7 +343,13 @@ impl KnowledgeGraphSnapshot {
         program: &str,
         timing_mode: TimingMode,
     ) -> Result<(Vec<Tuple>, RelationMap, Option<TimingBreakdown>), String> {
-        self.run(program, RuleSet::WithPersistent, Vec::new(), timing_mode)
+        self.run(
+            program,
+            RuleSet::WithPersistent,
+            Output::WithDerived,
+            Vec::new(),
+            timing_mode,
+        )
     }
 
     /// Execute a query with temporary session facts that don't affect the shared store
@@ -339,6 +375,7 @@ impl KnowledgeGraphSnapshot {
         self.run(
             program,
             RuleSet::WithPersistent,
+            Output::Result,
             session_facts,
             TimingMode::Off,
         )
@@ -352,8 +389,14 @@ impl KnowledgeGraphSnapshot {
         session_facts: Vec<(String, Tuple)>,
         timing_mode: TimingMode,
     ) -> Result<(Vec<Tuple>, Option<TimingBreakdown>), String> {
-        self.run(program, RuleSet::WithPersistent, session_facts, timing_mode)
-            .map(|(tuples, _, timing)| (tuples, timing))
+        self.run(
+            program,
+            RuleSet::WithPersistent,
+            Output::Result,
+            session_facts,
+            timing_mode,
+        )
+        .map(|(tuples, _, timing)| (tuples, timing))
     }
 
     /// Get the number of relations in this snapshot
