@@ -28,7 +28,7 @@ use crate::recursion::{build_extended_dependency_graph, find_sccs};
 use crate::statement::serialize::SerializableTerm;
 use crate::statement::{RuleDef, SerializableRule};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 
@@ -500,14 +500,14 @@ impl RuleDefinition {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CatalogFile {
     version: u32,
-    rules: HashMap<String, RuleDefinition>,
+    rules: BTreeMap<String, RuleDefinition>,
 }
 
 impl Default for CatalogFile {
     fn default() -> Self {
         CatalogFile {
             version: 1,
-            rules: HashMap::new(),
+            rules: BTreeMap::new(),
         }
     }
 }
@@ -516,7 +516,7 @@ impl Default for CatalogFile {
 #[derive(Debug)]
 pub struct RuleCatalog {
     /// Rules indexed by name
-    rules: HashMap<String, RuleDefinition>,
+    rules: BTreeMap<String, RuleDefinition>,
     /// Path to the catalog file
     catalog_path: PathBuf,
     /// Whether the catalog has been modified since last save
@@ -527,7 +527,7 @@ impl RuleCatalog {
     /// Create an empty rule catalog (for error recovery when loading fails)
     pub fn empty() -> Self {
         RuleCatalog {
-            rules: HashMap::new(),
+            rules: BTreeMap::new(),
             catalog_path: PathBuf::new(),
             dirty: false,
         }
@@ -539,7 +539,7 @@ impl RuleCatalog {
         let catalog_path = rules_dir.join("catalog.json");
 
         let mut catalog = RuleCatalog {
-            rules: HashMap::new(),
+            rules: BTreeMap::new(),
             catalog_path,
             dirty: false,
         };
