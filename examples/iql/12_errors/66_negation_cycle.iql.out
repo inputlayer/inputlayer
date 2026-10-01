@@ -21,8 +21,7 @@ Inserted 1 fact(s) into 'base'.
 1 rows
 (session: 1 rule(s))
 > b(X) <- base(X), !a(X)
-No results.
-(session: 2 rule(s))
+Unstratified negation: 'a' negates 'b' within a recursive cycle. Negation through recursion is not supported. Cycle: [a, b]
 > ?a(X)
 ┌───┐
 │ X │
@@ -32,6 +31,6 @@ No results.
 1 rows
 > .kg use default
 Switched to knowledge graph: default
-(Cleared 2 session rule(s), 0 session fact(s))
+(Cleared 1 session rule(s), 0 session fact(s))
 > .kg drop test_neg_cycle_n12t66
 Knowledge graph 'test_neg_cycle_n12t66' dropped.

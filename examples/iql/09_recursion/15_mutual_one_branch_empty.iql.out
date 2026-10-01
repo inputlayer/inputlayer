@@ -52,14 +52,16 @@ No results.
 > +b_base[(10), (20)]
 Inserted 2 fact(s) into 'b_base'.
 > ?a_derived(X)
-┌───┐
-│ X │
-├───┤
-│ 1 │
-│ 2 │
-│ 3 │
-└───┘
-3 rows
+┌────┐
+│ X  │
+├────┤
+│  1 │
+│  2 │
+│  3 │
+│ 10 │
+│ 20 │
+└────┘
+5 rows
 > ?b_derived(X)
 ┌────┐
 │ X  │

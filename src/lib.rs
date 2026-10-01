@@ -612,6 +612,10 @@ impl IQLEngine {
             }
         }
 
+        // Negation inside a recursive cycle has no stratified meaning: reject it
+        // here so every entry point (persistent, session, REST) agrees.
+        rule_catalog::validate_rules_stratification(&program.rules)?;
+
         // Recursion detection
         self.has_recursion = recursion::has_recursion(&program);
 
@@ -636,21 +640,8 @@ impl IQLEngine {
         if let Some(program) = &self.program {
             let mut sip_rewriter = sip_rewriting::SipRewriter::new();
 
-            // Compute recursive relations so SIP skips them.
-            // A relation is recursive if it's in an SCC with a cycle.
-            let dep_graph = recursion::build_dependency_graph(program);
-            let sccs = recursion::find_sccs(&dep_graph);
-            let recursive_rels: std::collections::HashSet<String> = sccs
-                .iter()
-                .filter(|scc| {
-                    scc.len() > 1
-                        || (scc.len() == 1
-                            && dep_graph
-                                .get(&scc[0])
-                                .is_some_and(|deps| deps.contains(&scc[0])))
-                })
-                .flat_map(|scc| scc.iter().cloned())
-                .collect();
+            // SIP skips relations on a dependency cycle.
+            let recursive_rels = recursion::recursive_relations(program);
             if std::env::var("INPUTLAYER_DEBUG").is_ok() && !recursive_rels.is_empty() {
                 eprintln!("DEBUG SIP: skipping recursive relations: {recursive_rels:?}");
             }
@@ -1104,6 +1095,36 @@ impl IQLEngine {
             .collect()
     }
 
+    /// Fresh `CodeGenerator` for the rules at `indices`, loaded with base data
+    /// and the relations computed so far. A group shares one semiring: the
+    /// rules' common one, or Counting when they differ.
+    fn rule_codegen(
+        &self,
+        indices: &[usize],
+        accumulated: &HashMap<String, Vec<Tuple>>,
+    ) -> CodeGenerator {
+        use boolean_specialization::SemiringType;
+        let semiring_of = |i: usize| {
+            self.semiring_annotations
+                .get(i)
+                .map_or(SemiringType::Counting, |a| a.semiring)
+        };
+        let first = indices
+            .first()
+            .map_or(SemiringType::Counting, |&i| semiring_of(i));
+        let semiring = if indices.iter().all(|&i| semiring_of(i) == first) {
+            first
+        } else {
+            SemiringType::Counting
+        };
+
+        let mut codegen = CodeGenerator::new();
+        codegen.set_max_result_rows(self.max_result_rows);
+        codegen.set_semiring_type(semiring);
+        self.load_inputs_into_codegen(&mut codegen, accumulated);
+        codegen
+    }
+
     /// Load all input data into a `CodeGenerator`
     fn load_inputs_into_codegen(
         &self,
@@ -1245,97 +1266,41 @@ impl IQLEngine {
         Ok(results)
     }
 
-    /// Collect all relation names referenced by Scan nodes in an IR tree
-    /// Topologically sort IR nodes by their scan dependencies.
+    /// Group IR nodes into strongly connected components of the rule
+    /// dependency graph, in execution order.
     ///
-    /// If node A scans a relation produced by node B, then B must execute before A.
-    /// For cycles (recursive mutual dependencies), nodes are kept in their original
-    /// order. The last node always stays last (it's the query).
-    fn topological_sort_ir_nodes(&self, rule_heads: &[String]) -> Vec<usize> {
-        let n = self.ir_nodes.len();
-        if n <= 1 {
-            return (0..n).collect();
-        }
-
-        // Build name->index map for rule heads
+    /// Node A depends on node B when A scans B's head. Each group runs after
+    /// every group it reads; a group with more than one node is a set of
+    /// mutually recursive relations evaluated to a joint fixpoint.
+    fn execution_groups(ir_nodes: &[IRNode], rule_heads: &[String]) -> Vec<Vec<usize>> {
         let head_to_idx: HashMap<&str, usize> = rule_heads
             .iter()
             .enumerate()
             .map(|(i, name)| (name.as_str(), i))
             .collect();
 
-        // Build dependency graph: deps[i] = set of indices that must execute before i
-        let mut deps: Vec<std::collections::HashSet<usize>> =
-            vec![std::collections::HashSet::new(); n];
-        for (i, ir) in self.ir_nodes.iter().enumerate() {
-            let mut scans = Vec::new();
-            Self::collect_scan_relations(ir, &mut scans);
-            for scan_name in &scans {
-                if let Some(&j) = head_to_idx.get(scan_name.as_str()) {
-                    if j != i {
-                        deps[i].insert(j);
-                    }
-                }
-            }
-        }
+        let deps: Vec<std::collections::HashSet<usize>> = ir_nodes
+            .iter()
+            .enumerate()
+            .map(|(i, ir)| {
+                let mut scans = Vec::new();
+                Self::collect_scan_relations(ir, &mut scans);
+                scans
+                    .iter()
+                    .filter_map(|scan| head_to_idx.get(scan.as_str()).copied())
+                    .filter(|&j| j != i)
+                    .collect()
+            })
+            .collect();
 
-        // Topological sort by in-degree reduction
-        let mut in_degree: Vec<usize> = deps.iter().map(std::collections::HashSet::len).collect();
-        let mut reverse_deps: Vec<Vec<usize>> = vec![Vec::new(); n];
-        for (i, dep_set) in deps.iter().enumerate() {
-            for &j in dep_set {
-                reverse_deps[j].push(i);
-            }
-        }
-
-        // Start with nodes that have no dependencies
-        // Use a BinaryHeap with Reverse to process lower indices first (deterministic)
-        let mut queue: std::collections::BinaryHeap<std::cmp::Reverse<usize>> =
-            std::collections::BinaryHeap::new();
-        for (i, &deg) in in_degree.iter().enumerate() {
-            if deg == 0 {
-                queue.push(std::cmp::Reverse(i));
-            }
-        }
-
-        let mut order: Vec<usize> = Vec::with_capacity(n);
-        while let Some(std::cmp::Reverse(i)) = queue.pop() {
-            order.push(i);
-            for &dependent in &reverse_deps[i] {
-                in_degree[dependent] = in_degree[dependent].saturating_sub(1);
-                if in_degree[dependent] == 0 {
-                    queue.push(std::cmp::Reverse(dependent));
-                }
-            }
-        }
-
-        // If cycle detected (not all nodes included), add remaining in original order
-        if order.len() < n {
-            let in_order: std::collections::HashSet<usize> = order.iter().copied().collect();
-            for i in 0..n {
-                if !in_order.contains(&i) {
-                    order.push(i);
-                }
-            }
-        }
-
-        // Ensure the last IR node (the query) stays last in execution order.
-        // The query is always the last parsed rule and must execute after all others.
-        let last_idx = n - 1;
-        if let Some(pos) = order.iter().position(|&i| i == last_idx) {
-            if pos != order.len() - 1 {
-                order.remove(pos);
-                order.push(last_idx);
-            }
-        }
-
+        let groups = recursion::scc_execution_order(&deps);
         if std::env::var("INPUTLAYER_DEBUG").is_ok() {
-            eprintln!("DEBUG topological_sort_ir_nodes: execution order = {order:?}");
+            eprintln!("DEBUG execution_groups: {groups:?}");
         }
-
-        order
+        groups
     }
 
+    /// Collect all relation names referenced by Scan nodes in an IR tree
     fn collect_scan_relations(ir: &IRNode, scans: &mut Vec<String>) {
         match ir {
             IRNode::Scan { relation, .. } => {
@@ -1602,9 +1567,16 @@ impl IQLEngine {
 
         // Query cost check (#47): reject queries exceeding configured cost threshold
         if self.max_query_cost > 0 {
+            let mutual = self
+                .program
+                .as_ref()
+                .map(recursion::mutually_recursive_relations)
+                .unwrap_or_default();
             let total_cost: u64 = self.ir_nodes.iter().map(IRNode::estimate_cost).sum();
             // Add recursion multiplier for recursive queries
-            let recursion_multiplier = recursive_info.iter().filter(|r| r.is_some()).count() as u64;
+            let recursion_multiplier = (0..self.ir_nodes.len())
+                .filter(|&i| recursive_info[i].is_some() || mutual.contains(&rule_heads[i]))
+                .count() as u64;
             let adjusted_cost = if recursion_multiplier > 0 {
                 total_cost.saturating_mul(10 * recursion_multiplier)
             } else {
@@ -1636,61 +1608,91 @@ impl IQLEngine {
         );
         collector.breakdown.shared_views_us = shared_us;
 
-        // Execute main rules in dependency order (topological sort)
-        let execution_order = self.topological_sort_ir_nodes(&rule_heads);
+        // Execute rules one SCC at a time, in dependency order
+        let execution_groups = Self::execution_groups(&unoptimized_ir_nodes, &rule_heads);
+        let query_idx = self.ir_nodes.len() - 1;
         let mut last_result: Vec<Tuple> = Vec::new();
 
-        for &i in &execution_order {
-            let head_name = rule_heads.get(i).cloned().unwrap_or_default();
+        for group in &execution_groups {
+            if let [i] = group.as_slice() {
+                let i = *i;
+                let head_name = rule_heads.get(i).cloned().unwrap_or_default();
 
-            // Create fresh CodeGenerator for each rule (avoids timely state issues)
-            let mut codegen = CodeGenerator::new();
-            codegen.set_max_result_rows(self.max_result_rows);
-            // Set per-rule semiring type from boolean specialization
-            let semiring = self
-                .semiring_annotations
-                .get(i)
-                .map_or(boolean_specialization::SemiringType::Counting, |a| {
-                    a.semiring
+                // Create fresh CodeGenerator for each rule (avoids timely state issues)
+                let codegen = self.rule_codegen(&[i], &accumulated_results);
+                let is_recursive = recursive_info.get(i).is_some_and(Option::is_some);
+
+                // Use unoptimized IR for recursive nodes, optimized for others
+                let (exec_result, rule_us) = collector.time(|| {
+                    if let Some(Some(recursive_rel)) = recursive_info.get(i) {
+                        codegen.execute_recursive(&unoptimized_ir_nodes[i], recursive_rel)
+                    } else if self.num_workers > 1 {
+                        // Use parallel execution when configured for multi-worker
+                        let config =
+                            code_generator::ExecutionConfig::with_workers(self.num_workers);
+                        codegen.execute_with_config(&self.ir_nodes[i], config)
+                    } else {
+                        codegen.execute(&self.ir_nodes[i])
+                    }
                 });
-            codegen.set_semiring_type(semiring);
-            self.load_inputs_into_codegen(&mut codegen, &accumulated_results);
+                let result = exec_result?;
 
-            let is_recursive = recursive_info.get(i).is_some_and(Option::is_some);
-
-            // Use unoptimized IR for recursive nodes, optimized for others
-            let (exec_result, rule_us) = collector.time(|| {
-                if let Some(Some(recursive_rel)) = recursive_info.get(i) {
-                    codegen.execute_recursive(&unoptimized_ir_nodes[i], recursive_rel)
-                } else if self.num_workers > 1 {
-                    // Use parallel execution when configured for multi-worker
-                    let config = code_generator::ExecutionConfig::with_workers(self.num_workers);
-                    codegen.execute_with_config(&self.ir_nodes[i], config)
-                } else {
-                    codegen.execute(&self.ir_nodes[i])
+                if i == query_idx {
+                    last_result.clone_from(&result);
                 }
-            });
-            let result = exec_result?;
 
-            last_result.clone_from(&result);
+                // Store results for subsequent rules
+                if !head_name.is_empty() {
+                    accumulated_results.insert(head_name.clone(), result);
+                }
 
-            // Store results for subsequent rules
-            if !head_name.is_empty() {
-                accumulated_results.insert(head_name.clone(), result);
+                collector.record_rule(head_name.clone(), rule_us, is_recursive, self.num_workers);
+
+                let rule_ms = rule_us / 1000;
+                info!(
+                    source_len,
+                    rule_idx = i,
+                    rule_head = %head_name,
+                    rule_ms,
+                    recursive = is_recursive,
+                    workers = self.num_workers,
+                    "engine_rule_complete"
+                );
+            } else {
+                // Mutually recursive relations: one joint semi-naive fixpoint.
+                // Unoptimized IR keeps each relation's clause Union intact.
+                let members: Vec<(String, IRNode)> = group
+                    .iter()
+                    .map(|&i| (rule_heads[i].clone(), unoptimized_ir_nodes[i].clone()))
+                    .collect();
+                let codegen = self.rule_codegen(group, &accumulated_results);
+                let (exec_result, scc_us) =
+                    collector.time(|| codegen.execute_recursive_scc(&members));
+                let mut results = exec_result?;
+
+                for &i in group {
+                    let result = results.remove(&rule_heads[i]).unwrap_or_default();
+                    if i == query_idx {
+                        last_result.clone_from(&result);
+                    }
+                    accumulated_results.insert(rule_heads[i].clone(), result);
+                }
+
+                let scc_head = group
+                    .iter()
+                    .map(|&i| rule_heads[i].as_str())
+                    .collect::<Vec<_>>()
+                    .join("+");
+                collector.record_rule(scc_head.clone(), scc_us, true, self.num_workers);
+                info!(
+                    source_len,
+                    rule_head = %scc_head,
+                    rule_ms = scc_us / 1000,
+                    recursive = true,
+                    members = group.len(),
+                    "engine_scc_complete"
+                );
             }
-
-            collector.record_rule(head_name.clone(), rule_us, is_recursive, self.num_workers);
-
-            let rule_ms = rule_us / 1000;
-            info!(
-                source_len,
-                rule_idx = i,
-                rule_head = %head_name,
-                rule_ms,
-                recursive = is_recursive,
-                workers = self.num_workers,
-                "engine_rule_complete"
-            );
         }
 
         info!(
@@ -1718,7 +1720,10 @@ impl IQLEngine {
         // Execute rules in dependency order, chaining intermediate results so SIP
         // intermediate rules feed into subsequent rules.
         let rule_heads = self.get_rule_heads();
-        let execution_order = self.topological_sort_ir_nodes(&rule_heads);
+        let execution_order: Vec<usize> = Self::execution_groups(&self.ir_nodes, &rule_heads)
+            .into_iter()
+            .flatten()
+            .collect();
         let mut accumulated: HashMap<String, Vec<Tuple>> = HashMap::new();
         let mut results = HashMap::new();
 
@@ -2475,19 +2480,19 @@ mod tests {
     }
 
     #[test]
-    fn test_topological_sort_single_node() {
+    fn test_execution_groups_single_node() {
         let mut engine = IQLEngine::new();
         engine.add_fact("edge", vec![(1, 2)]);
         engine.parse("result(X, Y) <- edge(X, Y)").unwrap();
         engine.build_ir(false).unwrap();
 
         let rule_heads = engine.get_rule_heads();
-        let order = engine.topological_sort_ir_nodes(&rule_heads);
-        assert_eq!(order, vec![0]);
+        let order = IQLEngine::execution_groups(engine.ir_nodes(), &rule_heads);
+        assert_eq!(order, vec![vec![0]]);
     }
 
     #[test]
-    fn test_topological_sort_dependency_chain() {
+    fn test_execution_groups_dependency_chain() {
         let mut engine = IQLEngine::new();
         engine.add_tuples(
             "edge",
@@ -2501,12 +2506,9 @@ mod tests {
         engine.build_ir(false).unwrap();
 
         let rule_heads = engine.get_rule_heads();
-        let order = engine.topological_sort_ir_nodes(&rule_heads);
-        // mid (idx 0) should execute before result (idx 1)
-        assert_eq!(order.len(), 2);
-        let mid_pos = order.iter().position(|&i| i == 0).unwrap();
-        let result_pos = order.iter().position(|&i| i == 1).unwrap();
-        assert!(mid_pos < result_pos);
+        let order = IQLEngine::execution_groups(engine.ir_nodes(), &rule_heads);
+        // mid (idx 0) executes before result (idx 1)
+        assert_eq!(order, vec![vec![0], vec![1]]);
     }
 
     #[test]
@@ -3158,5 +3160,35 @@ mod tests {
                 panic!("BUG: Union with self-join + arithmetic hung for >10s");
             }
         }
+    }
+
+    #[test]
+    fn test_mutual_recursion_joint_fixpoint() {
+        let mut engine = IQLEngine::new();
+        let int = Value::Int64;
+        let succ = (0..5)
+            .map(|i| Tuple::new(vec![int(i), int(i + 1)]))
+            .collect();
+        engine.add_tuples("succ", succ);
+        engine.add_tuples("zero", vec![Tuple::new(vec![int(0)])]);
+        let program = "ev(N) <- zero(N)\n\
+                       ev(N) <- succ(M, N), od(M)\n\
+                       od(N) <- succ(M, N), ev(M)\n\
+                       __query__(X) <- ev(X)";
+        let (results, derived) = engine.execute_tuples_with_derived(program).unwrap();
+        assert!(engine.is_recursive());
+        let mut evens: Vec<i64> = results.iter().filter_map(|t| t.get(0)?.as_i64()).collect();
+        evens.sort_unstable();
+        assert_eq!(evens, vec![0, 2, 4]);
+        assert_eq!(derived["od"].len(), 3);
+    }
+
+    #[test]
+    fn test_parse_rejects_negation_through_recursion() {
+        let mut engine = IQLEngine::new();
+        let err = engine
+            .parse("a(X) <- base(X), !b(X)\nb(X) <- base(X), !a(X)")
+            .unwrap_err();
+        assert!(err.contains("Unstratified negation"), "{err}");
     }
 }

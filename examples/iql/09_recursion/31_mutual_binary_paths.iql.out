@@ -1,0 +1,53 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+
+> .kg create test_mutual_paths_n09t31
+Knowledge graph 'test_mutual_paths_n09t31' created.
+Switched to knowledge graph: test_mutual_paths_n09t31
+> .kg use test_mutual_paths_n09t31
+Switched to knowledge graph: test_mutual_paths_n09t31
+> +edge[(1, 2), (2, 3), (3, 1), (3, 4)]
+Inserted 4 fact(s) into 'edge'.
+> +odd_path(X, Y) <- edge(X, Y)
+Rule 'odd_path' registered.
+> +odd_path(X, Z) <- even_path(X, Y), edge(Y, Z)
+Rule 'odd_path' registered.
+> +even_path(X, Z) <- odd_path(X, Y), edge(Y, Z)
+Rule 'even_path' registered.
+> ?odd_path(1, Y)
+┌───┬───┐
+│ 1 │ Y │
+├───┼───┤
+│ 1 │ 1 │
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 1 │ 4 │
+└───┴───┘
+4 rows
+> ?even_path(1, Y)
+┌───┬───┐
+│ 1 │ Y │
+├───┼───┤
+│ 1 │ 1 │
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 1 │ 4 │
+└───┴───┘
+4 rows
+> ?even_path(X, 4)
+┌───┬───┐
+│ X │ 4 │
+├───┼───┤
+│ 1 │ 4 │
+│ 2 │ 4 │
+│ 3 │ 4 │
+└───┴───┘
+3 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_mutual_paths_n09t31
+Knowledge graph 'test_mutual_paths_n09t31' dropped.

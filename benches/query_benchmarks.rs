@@ -1,4 +1,4 @@
-//! Query performance benchmarks: scan, join, and recursive closure.
+//! Query performance benchmarks: scan, join, recursive closure, mutual recursion.
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use inputlayer::{protocol::handler::Handler, Config};
@@ -99,11 +99,39 @@ fn bench_recursive_closure(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_mutual_recursion(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+
+    let mut group = c.benchmark_group("mutual_recursion");
+    for size in [50u32, 200] {
+        let (handler, _tmp) = make_bench_handler();
+
+        rt.block_on(async {
+            // Chain 0->1->...->size, even/odd by alternating hops
+            let succ: Vec<String> = (0..size).map(|i| format!("({i}, {})", i + 1)).collect();
+            for program in [
+                format!("+succ[{}]", succ.join(", ")),
+                "+zero[(0)]".to_string(),
+                "+is_even(N) <- zero(N)".to_string(),
+                "+is_even(N) <- succ(M, N), is_odd(M)".to_string(),
+                "+is_odd(N) <- succ(M, N), is_even(M)".to_string(),
+            ] {
+                handler.query_program(None, program).await.unwrap();
+            }
+        });
+
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
+            b.iter(|| rt.block_on(handler.query_program(None, "?is_even(X)".to_string())));
+        });
+    }
+    group.finish();
+}
+
 criterion_group! {
     name = benches;
     config = Criterion::default()
         .measurement_time(Duration::from_secs(10))
         .warm_up_time(Duration::from_secs(3));
-    targets = bench_simple_scan, bench_two_way_join, bench_recursive_closure
+    targets = bench_simple_scan, bench_two_way_join, bench_recursive_closure, bench_mutual_recursion
 }
 criterion_main!(benches);

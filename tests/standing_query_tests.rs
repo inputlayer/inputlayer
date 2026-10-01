@@ -465,3 +465,29 @@ async fn test_burst_of_writes_coalesces_to_correct_final_state() {
         "at most one evaluation per commit, got {evaluations}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_mutual_recursion_subscription_tracks_joint_fixpoint() {
+    let server = start_server(64).await;
+    server
+        .write("+succ[(0, 1), (1, 2), (2, 3)]\n+zero[(0)]")
+        .await;
+    server
+        .write(
+            "+is_even(N) <- zero(N)\n+is_even(N) <- succ(M, N), is_odd(M)\n+is_odd(N) <- succ(M, N), is_even(M)",
+        )
+        .await;
+    let mut client = Client::connect(&server).await;
+    let snapshot = client.subscribe("ev", "?is_even(X)").await;
+    assert_eq!(rows(&snapshot["rows"]), vec![json!([0]), json!([2])]);
+
+    // Extending the chain derives across both relations
+    server.write("+succ[(3, 4), (4, 5)]").await;
+    let delta = client.next_push_for("ev").await;
+    assert_eq!(rows(&delta["inserted"]), vec![json!([4])]);
+    assert!(rows(&delta["retracted"]).is_empty());
+
+    server.write("-succ(1, 2)").await;
+    let delta = client.next_push_for("ev").await;
+    assert_eq!(rows(&delta["retracted"]), vec![json!([2]), json!([4])]);
+}

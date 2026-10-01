@@ -137,7 +137,10 @@ Rules can reference each other:
 +even_path(X) <- odd_path(Y), edge(Y, X)
 ```
 
-These rules depend on each other and are computed together.
+These rules depend on each other and are computed together: every relation in the cycle is iterated to one shared fixpoint.
+
+- Negation inside the cycle (`a` negates `b` while `b` depends on `a`) is rejected as unstratified. Negating a mutually recursive relation from a rule *outside* the cycle is fine.
+- A bound query such as `?odd_path(4)` computes the whole cycle, then filters. Demand-driven (magic sets) evaluation applies to self-recursive rules only.
 
 ## Practical Examples
 

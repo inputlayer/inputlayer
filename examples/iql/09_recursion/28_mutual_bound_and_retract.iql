@@ -1,0 +1,36 @@
+// Test: Mutual recursion with bound queries, retraction and negation above
+// Verifies: even/odd SCC reaches its fixpoint, bound queries filter it,
+// a base retraction shrinks both relations, and a higher stratum negates it
+
+.kg create test_mutual_bound_n09t28
+.kg use test_mutual_bound_n09t28
+
++succ[(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6)]
++zero[(0)]
++number[(0), (1), (2), (3), (4), (5), (6)]
+
++is_even(N) <- zero(N)
++is_even(N) <- succ(M, N), is_odd(M)
++is_odd(N) <- succ(M, N), is_even(M)
+
+// Negation of the SCC from a higher stratum
++not_even(N) <- number(N), !is_even(N)
+
+?is_even(X)
+?is_odd(X)
+?is_even(4)
+?is_odd(4)
+?not_even(X)
+
+// Session rule over the persistent SCC
+big_odd(N) <- is_odd(N), N > 2
+?big_odd(X)
+
+// Retract a base edge: everything past 3 is no longer reachable
+-succ(3, 4)
+?is_even(X)
+?is_odd(X)
+?not_even(X)
+
+.kg use default
+.kg drop test_mutual_bound_n09t28

@@ -5816,3 +5816,93 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod incremental_scc_tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::value::Value;
+    use tempfile::TempDir;
+
+    fn storage_with_incremental(temp: &TempDir) -> StorageEngine {
+        let mut config = Config::default();
+        config.storage.data_dir = temp.path().to_path_buf();
+        let mut storage = StorageEngine::new(config).unwrap();
+        storage.use_knowledge_graph("default").unwrap();
+        let kg = storage.knowledge_graphs.get("default").unwrap();
+        kg.write().enable_incremental().unwrap();
+        drop(kg);
+        storage
+    }
+
+    fn ints(values: &[i64]) -> Vec<Tuple> {
+        values
+            .iter()
+            .map(|&v| Tuple::new(vec![Value::Int64(v)]))
+            .collect()
+    }
+
+    fn pairs(values: &[(i64, i64)]) -> Vec<Tuple> {
+        values
+            .iter()
+            .map(|&(a, b)| Tuple::new(vec![Value::Int64(a), Value::Int64(b)]))
+            .collect()
+    }
+
+    fn register(storage: &StorageEngine, text: &str) {
+        let def = crate::statement::parse_rule_definition(text).unwrap();
+        storage.register_rule(&def).unwrap();
+    }
+
+    fn query(storage: &StorageEngine, q: &str) -> Vec<i64> {
+        let mut out: Vec<i64> = storage
+            .execute_query_with_rules_tuples(q)
+            .unwrap()
+            .iter()
+            .map(|t| match t.get(0) {
+                Some(Value::Int64(v)) => *v,
+                Some(Value::Int32(v)) => i64::from(*v),
+                other => panic!("unexpected value {other:?}"),
+            })
+            .collect();
+        out.sort_unstable();
+        out
+    }
+
+    #[test]
+    fn test_incremental_kg_mutual_recursion_is_full_fixpoint() {
+        let temp = TempDir::new().unwrap();
+        let storage = storage_with_incremental(&temp);
+        storage
+            .insert_tuples("succ", pairs(&[(0, 1), (1, 2), (2, 3), (3, 4)]))
+            .unwrap();
+        storage.insert_tuples("zero", ints(&[0])).unwrap();
+        register(&storage, "is_even(N) <- zero(N)");
+        register(&storage, "is_even(N) <- succ(M, N), is_odd(M)");
+        register(&storage, "is_odd(N) <- succ(M, N), is_even(M)");
+
+        assert_eq!(query(&storage, "q(X) <- is_even(X)"), vec![0, 2, 4]);
+        assert_eq!(query(&storage, "q(X) <- is_odd(X)"), vec![1, 3]);
+
+        storage
+            .delete_tuples_from("default", "succ", pairs(&[(2, 3)]))
+            .unwrap();
+        assert_eq!(query(&storage, "q(X) <- is_even(X)"), vec![0, 2]);
+        assert_eq!(query(&storage, "q(X) <- is_odd(X)"), vec![1]);
+    }
+
+    #[test]
+    fn test_incremental_kg_rule_chain_sees_upstream_rules() {
+        let temp = TempDir::new().unwrap();
+        let storage = storage_with_incremental(&temp);
+        storage.insert_tuples("base", ints(&[1, 2])).unwrap();
+        register(&storage, "a(X) <- base(X)");
+        register(&storage, "b(X) <- a(X)");
+        register(&storage, "c(X) <- b(X)");
+        assert_eq!(query(&storage, "q(X) <- c(X)"), vec![1, 2]);
+
+        storage.insert_tuples("base", ints(&[3])).unwrap();
+        assert_eq!(query(&storage, "q(X) <- c(X)"), vec![1, 2, 3]);
+    }
+}

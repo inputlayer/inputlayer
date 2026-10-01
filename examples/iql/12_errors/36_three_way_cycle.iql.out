@@ -29,17 +29,11 @@ Inserted 1 fact(s) into 'base'.
 1 rows
 (session: 2 rule(s))
 > cycle_c(X) <- base(X), !cycle_a(X)
-No results.
-(session: 3 rule(s))
+Unstratified negation: 'cycle_a' negates 'cycle_b' within a recursive cycle. Negation through recursion is not supported. Cycle: [cycle_a, cycle_b, cycle_c]
 > ?cycle_a(X)
-┌───┐
-│ X │
-├───┤
-│ 1 │
-└───┘
-1 rows
+No results.
 > .kg use default
 Switched to knowledge graph: default
-(Cleared 3 session rule(s), 0 session fact(s))
+(Cleared 2 session rule(s), 0 session fact(s))
 > .kg drop test_3way_cycle_n12t36
 Knowledge graph 'test_3way_cycle_n12t36' dropped.
