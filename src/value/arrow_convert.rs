@@ -6,9 +6,9 @@
 use super::{DataType, Tuple, TupleSchema, Value};
 use arrow::array::{
     Array, ArrayRef, BooleanArray, FixedSizeListArray, Float32Array, Float64Array, Int32Array,
-    Int64Array, Int8Array, LargeListArray, ListArray, StringArray,
+    Int64Array, Int8Array, LargeListArray, ListArray, NullArray, StringArray,
 };
-use arrow::buffer::OffsetBuffer;
+use arrow::buffer::{NullBuffer, OffsetBuffer};
 use arrow::datatypes::{DataType as ArrowDataType, Field};
 use arrow::record_batch::RecordBatch;
 use std::sync::Arc;
@@ -111,151 +111,191 @@ pub fn record_batch_to_tuples(
     Ok((tuples, schema))
 }
 
-/// Build a column array from tuple values
+/// Build a column array from tuple values.
+///
+/// Fails if a non-null value does not exactly match `col_type`; never stores a lossy NULL.
 fn build_column_array(
     tuples: &[Tuple],
     col_idx: usize,
     col_type: &DataType,
 ) -> Result<ArrayRef, ArrowConvertError> {
     match col_type {
-        DataType::Int32 => {
-            let values: Vec<Option<i32>> = tuples
-                .iter()
-                .map(|t| t.get(col_idx).and_then(super::Value::as_i32))
-                .collect();
-            Ok(Arc::new(Int32Array::from(values)))
-        }
-        DataType::Int64 => {
-            let values: Vec<Option<i64>> = tuples
-                .iter()
-                .map(|t| t.get(col_idx).and_then(super::Value::as_i64))
-                .collect();
-            Ok(Arc::new(Int64Array::from(values)))
-        }
-        DataType::Float64 => {
-            let values: Vec<Option<f64>> = tuples
-                .iter()
-                .map(|t| t.get(col_idx).and_then(super::Value::as_f64))
-                .collect();
-            Ok(Arc::new(Float64Array::from(values)))
-        }
-        DataType::String => {
-            let values: Vec<Option<&str>> = tuples
-                .iter()
-                .map(|t| t.get(col_idx).and_then(|v| v.as_str()))
-                .collect();
-            Ok(Arc::new(StringArray::from(values)))
-        }
-        DataType::Bool => {
-            let values: Vec<Option<bool>> = tuples
-                .iter()
-                .map(|t| t.get(col_idx).and_then(super::Value::as_bool))
-                .collect();
-            Ok(Arc::new(BooleanArray::from(values)))
-        }
+        DataType::Int32 => Ok(Arc::new(Int32Array::from(scalar_column(
+            tuples,
+            col_idx,
+            col_type,
+            |v| match v {
+                Value::Int32(x) => Some(*x),
+                _ => None,
+            },
+        )?))),
+        DataType::Int64 => Ok(Arc::new(Int64Array::from(scalar_column(
+            tuples,
+            col_idx,
+            col_type,
+            |v| match v {
+                Value::Int64(x) => Some(*x),
+                _ => None,
+            },
+        )?))),
+        DataType::Float64 => Ok(Arc::new(Float64Array::from(scalar_column(
+            tuples,
+            col_idx,
+            col_type,
+            |v| match v {
+                Value::Float64(x) => Some(*x),
+                _ => None,
+            },
+        )?))),
+        DataType::String => Ok(Arc::new(StringArray::from(scalar_column(
+            tuples,
+            col_idx,
+            col_type,
+            |v| match v {
+                Value::String(s) => Some(s.as_ref()),
+                _ => None,
+            },
+        )?))),
+        DataType::Bool => Ok(Arc::new(BooleanArray::from(scalar_column(
+            tuples,
+            col_idx,
+            col_type,
+            |v| match v {
+                Value::Bool(b) => Some(*b),
+                _ => None,
+            },
+        )?))),
+        DataType::Timestamp => Ok(Arc::new(Int64Array::from(scalar_column(
+            tuples,
+            col_idx,
+            col_type,
+            |v| match v {
+                Value::Timestamp(t) => Some(*t),
+                _ => None,
+            },
+        )?))),
         DataType::Null => {
-            // All nulls
-            let values: Vec<Option<i32>> = vec![None; tuples.len()];
-            Ok(Arc::new(Int32Array::from(values)))
+            scalar_column(tuples, col_idx, col_type, |_| None::<()>)?;
+            Ok(Arc::new(NullArray::new(tuples.len())))
         }
         DataType::Vector { dim } => {
-            // Build array from vectors - use FixedSizeList when dimension is known
-            let mut all_values: Vec<f32> = Vec::new();
             let field = Arc::new(Field::new("item", ArrowDataType::Float32, false));
-
-            if let Some(fixed_dim) = dim {
-                // Use FixedSizeListArray for known dimensions
-                for tuple in tuples {
-                    if let Some(vec) = tuple.get(col_idx).and_then(|v| v.as_vector()) {
-                        all_values.extend_from_slice(vec);
-                    } else {
-                        // Null vector - pad with zeros
-                        all_values.extend(std::iter::repeat_n(0.0f32, *fixed_dim));
-                    }
-                }
-                let values_array = Arc::new(Float32Array::from(all_values));
-                let list_array = arrow::array::FixedSizeListArray::new(
-                    field,
-                    *fixed_dim as i32,
-                    values_array,
-                    None,
-                );
-                Ok(Arc::new(list_array))
-            } else {
-                // Use LargeListArray for variable dimensions
-                let mut offsets: Vec<i64> = vec![0];
-                for tuple in tuples {
-                    if let Some(vec) = tuple.get(col_idx).and_then(|v| v.as_vector()) {
-                        all_values.extend_from_slice(vec);
-                        offsets.push(all_values.len() as i64);
-                    } else {
-                        // Null vector - offset stays the same
-                        offsets.push(all_values.len() as i64);
-                    }
-                }
-                let values_array = Float32Array::from(all_values);
-                let offset_buffer = OffsetBuffer::new(offsets.into());
-                let list_array =
-                    LargeListArray::new(field, offset_buffer, Arc::new(values_array), None);
-                Ok(Arc::new(list_array))
-            }
-        }
-        DataType::Timestamp => {
-            // Timestamps stored as Int64 (Unix milliseconds)
-            let values: Vec<Option<i64>> = tuples
-                .iter()
-                .map(|t| t.get(col_idx).and_then(super::Value::as_timestamp))
-                .collect();
-            Ok(Arc::new(Int64Array::from(values)))
+            let (values, offsets, nulls) =
+                vector_column(tuples, col_idx, col_type, *dim, |v| match v {
+                    Value::Vector(x) => Some(x.as_slice()),
+                    _ => None,
+                })?;
+            Ok(list_array(
+                field,
+                *dim,
+                Arc::new(Float32Array::from(values)),
+                offsets,
+                nulls,
+            ))
         }
         DataType::VectorInt8 { dim } => {
-            // Build array from int8 vectors - use FixedSizeList when dimension is known
-            let mut all_values: Vec<i8> = Vec::new();
             let field = Arc::new(Field::new("item", ArrowDataType::Int8, false));
+            let (values, offsets, nulls) =
+                vector_column(tuples, col_idx, col_type, *dim, |v| match v {
+                    Value::VectorInt8(x) => Some(x.as_slice()),
+                    _ => None,
+                })?;
+            Ok(list_array(
+                field,
+                *dim,
+                Arc::new(Int8Array::from(values)),
+                offsets,
+                nulls,
+            ))
+        }
+    }
+}
 
-            if let Some(fixed_dim) = dim {
-                // Use FixedSizeListArray for known dimensions
-                for tuple in tuples {
-                    if let Some(vec) = tuple.get(col_idx).and_then(|v| v.as_vector_int8()) {
-                        all_values.extend_from_slice(vec);
-                    } else {
-                        // Null vector - pad with zeros
-                        all_values.extend(std::iter::repeat_n(0i8, *fixed_dim));
-                    }
-                }
-                let values_array = Arc::new(Int8Array::from(all_values));
-                let list_array = arrow::array::FixedSizeListArray::new(
-                    field,
-                    *fixed_dim as i32,
-                    values_array,
-                    None,
-                );
-                Ok(Arc::new(list_array))
-            } else {
-                // Use LargeListArray for variable dimensions
-                let mut offsets: Vec<i64> = vec![0];
-                for tuple in tuples {
-                    if let Some(vec) = tuple.get(col_idx).and_then(|v| v.as_vector_int8()) {
-                        all_values.extend_from_slice(vec);
-                        offsets.push(all_values.len() as i64);
-                    } else {
-                        // Null vector - offset stays the same
-                        offsets.push(all_values.len() as i64);
-                    }
-                }
-                let values_array = Int8Array::from(all_values);
-                let offset_buffer = OffsetBuffer::new(offsets.into());
-                let list_array =
-                    LargeListArray::new(field, offset_buffer, Arc::new(values_array), None);
-                Ok(Arc::new(list_array))
+fn type_mismatch(
+    col_idx: usize,
+    row: usize,
+    value: &Value,
+    col_type: &DataType,
+) -> ArrowConvertError {
+    ArrowConvertError::SchemaMismatch(format!(
+        "column {col_idx} row {row}: {value:?} does not fit {col_type:?}"
+    ))
+}
+
+/// Extract one column, mapping `Value::Null` to `None` and failing on any other mismatch.
+fn scalar_column<'a, T>(
+    tuples: &'a [Tuple],
+    col_idx: usize,
+    col_type: &DataType,
+    extract: impl Fn(&'a Value) -> Option<T>,
+) -> Result<Vec<Option<T>>, ArrowConvertError> {
+    tuples
+        .iter()
+        .enumerate()
+        .map(|(row, t)| match t.get(col_idx) {
+            None | Some(Value::Null) => Ok(None),
+            Some(v) => extract(v)
+                .map(Some)
+                .ok_or_else(|| type_mismatch(col_idx, row, v, col_type)),
+        })
+        .collect()
+}
+
+type VectorParts<T> = (Vec<T>, Vec<i64>, Option<NullBuffer>);
+
+/// Flatten one vector column into values, offsets and a validity mask.
+/// Null rows of a fixed-dim column are zero-padded and marked invalid.
+fn vector_column<'a, T: Copy + Default + 'a>(
+    tuples: &'a [Tuple],
+    col_idx: usize,
+    col_type: &DataType,
+    dim: Option<usize>,
+    extract: impl Fn(&'a Value) -> Option<&'a [T]>,
+) -> Result<VectorParts<T>, ArrowConvertError> {
+    let mut values = Vec::new();
+    let mut offsets = vec![0i64];
+    let mut valid = Vec::with_capacity(tuples.len());
+    for (row, t) in tuples.iter().enumerate() {
+        match t.get(col_idx) {
+            None | Some(Value::Null) => {
+                values.extend(std::iter::repeat_n(T::default(), dim.unwrap_or(0)));
+                valid.push(false);
+            }
+            Some(v) => {
+                let vec = extract(v)
+                    .filter(|x| dim.is_none_or(|d| x.len() == d))
+                    .ok_or_else(|| type_mismatch(col_idx, row, v, col_type))?;
+                values.extend_from_slice(vec);
+                valid.push(true);
             }
         }
+        offsets.push(values.len() as i64);
+    }
+    let nulls = valid.contains(&false).then(|| NullBuffer::from(valid));
+    Ok((values, offsets, nulls))
+}
+
+fn list_array(
+    field: Arc<Field>,
+    dim: Option<usize>,
+    values: ArrayRef,
+    offsets: Vec<i64>,
+    nulls: Option<NullBuffer>,
+) -> ArrayRef {
+    match dim {
+        Some(d) => Arc::new(FixedSizeListArray::new(field, d as i32, values, nulls)),
+        None => Arc::new(LargeListArray::new(
+            field,
+            OffsetBuffer::new(offsets.into()),
+            values,
+            nulls,
+        )),
     }
 }
 
 /// Extract a Value from an Arrow array at a given index
 fn extract_value_from_array(array: &dyn Array, row_idx: usize) -> Result<Value, ArrowConvertError> {
-    if array.is_null(row_idx) {
+    if array.is_null(row_idx) || array.data_type() == &ArrowDataType::Null {
         return Ok(Value::Null);
     }
 
@@ -335,7 +375,7 @@ fn empty_array_for_type(dt: &DataType) -> ArrayRef {
         DataType::Float64 => Arc::new(Float64Array::from(Vec::<f64>::new())),
         DataType::String => Arc::new(StringArray::from(Vec::<&str>::new())),
         DataType::Bool => Arc::new(BooleanArray::from(Vec::<bool>::new())),
-        DataType::Null => Arc::new(Int32Array::from(Vec::<Option<i32>>::new())),
+        DataType::Null => Arc::new(NullArray::new(0)),
         DataType::Vector { dim } => {
             let field = Arc::new(Field::new("item", ArrowDataType::Float32, false));
             if let Some(fixed_dim) = dim {
@@ -415,11 +455,10 @@ mod tests {
 
     #[test]
     fn test_tuples_to_record_batch_int32() {
-        let tuples = vec![
-            Tuple::from_pair(1, 2),
-            Tuple::from_pair(3, 4),
-            Tuple::from_pair(5, 6),
-        ];
+        let tuples: Vec<Tuple> = [(1, 2), (3, 4), (5, 6)]
+            .into_iter()
+            .map(|(a, b)| Tuple::new(vec![Value::Int32(a), Value::Int32(b)]))
+            .collect();
 
         let schema = TupleSchema::new(vec![
             ("a".to_string(), DataType::Int32),
@@ -793,5 +832,49 @@ mod tests {
         let batch = tuples_to_record_batch(&tuples, &schema).unwrap();
         assert_eq!(batch.num_rows(), 0);
         assert_eq!(batch.num_columns(), 2);
+    }
+
+    #[test]
+    fn test_mismatched_type_fails_instead_of_nulling() {
+        let schema = TupleSchema::new(vec![("v".to_string(), DataType::Int64)]);
+        for bad in [Value::string("Sam"), Value::Float64(1.5), Value::Int32(1)] {
+            let tuples = vec![Tuple::new(vec![Value::Int64(30)]), Tuple::new(vec![bad])];
+            assert!(matches!(
+                tuples_to_record_batch(&tuples, &schema),
+                Err(ArrowConvertError::SchemaMismatch(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn test_mismatched_vector_dim_fails() {
+        let schema = TupleSchema::new(vec![("v".to_string(), DataType::Vector { dim: Some(2) })]);
+        let tuples = vec![
+            Tuple::new(vec![Value::vector(vec![1.0, 2.0])]),
+            Tuple::new(vec![Value::vector(vec![1.0, 2.0, 3.0])]),
+        ];
+        assert!(tuples_to_record_batch(&tuples, &schema).is_err());
+    }
+
+    #[test]
+    fn test_nulls_roundtrip_in_every_column_kind() {
+        let schema = TupleSchema::new(vec![
+            ("i".to_string(), DataType::Int32),
+            ("v".to_string(), DataType::Vector { dim: Some(2) }),
+            ("q".to_string(), DataType::VectorInt8 { dim: None }),
+            ("n".to_string(), DataType::Null),
+        ]);
+        let tuples = vec![
+            Tuple::new(vec![
+                Value::Int32(1),
+                Value::vector(vec![1.0, 2.0]),
+                Value::vector_int8(vec![3]),
+                Value::Null,
+            ]),
+            Tuple::new(vec![Value::Null, Value::Null, Value::Null, Value::Null]),
+        ];
+        let batch = tuples_to_record_batch(&tuples, &schema).unwrap();
+        let (result, _) = record_batch_to_tuples(&batch).unwrap();
+        assert_eq!(result, tuples);
     }
 }
