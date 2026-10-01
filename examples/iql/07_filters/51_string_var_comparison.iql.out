@@ -1,0 +1,78 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+
+> .kg create test_str_var_cmp_n07t51
+Knowledge graph 'test_str_var_cmp_n07t51' created.
+Switched to knowledge graph: test_str_var_cmp_n07t51
+> .kg use test_str_var_cmp_n07t51
+Switched to knowledge graph: test_str_var_cmp_n07t51
+> +pair(a: string, b: string)
+Schema for 'pair' registered with 2 columns (persistent)
+> +pair[("apple", "banana"), ("kiwi", "kiwi"), ("pear", "fig")]
+Inserted 3 fact(s) into 'pair'.
+> ?pair(A, B), A < B
+┌─────────┬──────────┐
+│ a       │ b        │
+├─────────┼──────────┤
+│ "apple" │ "banana" │
+└─────────┴──────────┘
+1 rows
+> ?pair(A, B), A <= B
+┌─────────┬──────────┐
+│ a       │ b        │
+├─────────┼──────────┤
+│ "apple" │ "banana" │
+│ "kiwi"  │ "kiwi"   │
+└─────────┴──────────┘
+2 rows
+> ?pair(A, B), A > B
+┌────────┬───────┐
+│ a      │ b     │
+├────────┼───────┤
+│ "pear" │ "fig" │
+└────────┴───────┘
+1 rows
+> ?pair(A, B), A >= B
+┌────────┬────────┐
+│ a      │ b      │
+├────────┼────────┤
+│ "kiwi" │ "kiwi" │
+│ "pear" │ "fig"  │
+└────────┴────────┘
+2 rows
+> +ordered(A, B) <- pair(A, B), A < B
+Rule 'ordered' registered.
+> ?ordered(A, B)
+┌─────────┬──────────┐
+│ A       │ B        │
+├─────────┼──────────┤
+│ "apple" │ "banana" │
+└─────────┴──────────┘
+1 rows
+> +mixed[(1, "a"), (2, 3.5)]
+Inserted 2 fact(s) into 'mixed'.
+> ?mixed(X, Y), X < Y
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 2 │ 3.5 │
+└───┴─────┘
+1 rows
+> ?mixed(X, Y), X >= Y
+No results.
+> ?mixed(X, Y), X != Y
+┌───┬─────┐
+│ X │ Y   │
+├───┼─────┤
+│ 1 │ "a" │
+│ 2 │ 3.5 │
+└───┴─────┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_str_var_cmp_n07t51
+Knowledge graph 'test_str_var_cmp_n07t51' dropped.

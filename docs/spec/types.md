@@ -190,6 +190,25 @@ InputLayer performs limited automatic type coercion:
 ?data(X, Y), Z = X + 3.14  // X (int) coerced to float
 ```
 
+## Comparison Semantics
+
+`=`, `!=`, `<`, `<=`, `>`, `>=` behave the same between two variables and between a variable and a constant:
+
+| Operands | Ordering |
+|----------|----------|
+| int or timestamp, int or timestamp | Numeric |
+| int, float | Numeric (as float) |
+| string, string | Lexicographic (byte order) |
+| bool, bool | `false < true` (ordering against a bool constant is rejected) |
+| Anything else (mixed types, vectors, null) | Incomparable |
+
+Incomparable values make every ordering comparison false. `=` falls back to exact equality (identical vectors are equal), so mismatched types are never equal and `!=` holds.
+
+```iql
+?pair(A, B), A < B        // strings: "apple" < "banana"
+?mixed(X, Y), X < Y       // 1 vs "a": false
+```
+
 ## Type in Schemas
 
 When declaring schemas, use these type names:

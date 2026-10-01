@@ -24,6 +24,7 @@
 //! ```
 
 pub mod arrow_convert;
+mod compare;
 
 pub use arrow_convert::{
     infer_schema_from_tuples, record_batch_to_tuples, tuples_to_record_batch, ArrowConvertError,

@@ -1,0 +1,25 @@
+// Test: Variable-vs-variable comparison on strings and mixed types
+// Description: A < B between two string variables orders lexicographically;
+// mixed-type pairs are incomparable (every ordering is false, != is true)
+
+.kg create test_str_var_cmp_n07t51
+.kg use test_str_var_cmp_n07t51
+
++pair(a: string, b: string)
++pair[("apple", "banana"), ("kiwi", "kiwi"), ("pear", "fig")]
+
+?pair(A, B), A < B
+?pair(A, B), A <= B
+?pair(A, B), A > B
+?pair(A, B), A >= B
+
++ordered(A, B) <- pair(A, B), A < B
+?ordered(A, B)
+
++mixed[(1, "a"), (2, 3.5)]
+?mixed(X, Y), X < Y
+?mixed(X, Y), X >= Y
+?mixed(X, Y), X != Y
+
+.kg use default
+.kg drop test_str_var_cmp_n07t51
