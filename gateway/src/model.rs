@@ -29,15 +29,24 @@ impl std::fmt::Display for UpstreamStatus {
 
 impl std::error::Error for UpstreamStatus {}
 
+/// A structured extraction plus the provider's token accounting (cache
+/// hits show up here: `cache_read_input_tokens`).
+pub struct Extraction {
+    pub output: Value,
+    pub usage: Value,
+}
+
 #[async_trait::async_trait]
 pub trait Extractor: Send + Sync {
+    /// `system_prompt` must be byte-stable across calls (it is the cached
+    /// prefix); everything per-call belongs in `user_content`.
     async fn extract(
         &self,
         model: &str,
         system_prompt: &str,
         user_content: &str,
         schema: &Value,
-    ) -> Result<Value>;
+    ) -> Result<Extraction>;
 }
 
 /// Parameters for a chat completion, mapped from the OpenAI request shape.
@@ -97,15 +106,8 @@ impl Extractor for AnthropicClient {
         system_prompt: &str,
         user_content: &str,
         schema: &Value,
-    ) -> Result<Value> {
-        let body = json!({
-            "model": model,
-            "max_tokens": 8192,
-            "temperature": 0,
-            "system": system_prompt,
-            "messages": [{ "role": "user", "content": user_content }],
-            "output_config": { "format": { "type": "json_schema", "schema": schema } },
-        });
+    ) -> Result<Extraction> {
+        let body = extraction_body(model, system_prompt, user_content, schema);
         let response = self
             .http
             .post(format!("{}/v1/messages", self.base_url))
@@ -135,8 +137,32 @@ impl Extractor for AnthropicClient {
         let text = payload["content"][0]["text"]
             .as_str()
             .ok_or_else(|| anyhow!("extraction response has no text content"))?;
-        serde_json::from_str(text).context("extraction output is not valid JSON")
+        Ok(Extraction {
+            output: serde_json::from_str(text).context("extraction output is not valid JSON")?,
+            usage: payload["usage"].clone(),
+        })
     }
+}
+
+/// The extraction request. The pack prompt's static head is one system
+/// block marked `cache_control: ephemeral`, so repeated calls (every turn,
+/// every conversation on the pack) read it from the prompt cache; the
+/// schema in `output_config` is equally stable, so it never invalidates
+/// the prefix. A prefix below the model's cacheable minimum is simply
+/// not cached - the marker is harmless, never an error.
+fn extraction_body(model: &str, system_prompt: &str, user_content: &str, schema: &Value) -> Value {
+    json!({
+        "model": model,
+        "max_tokens": 8192,
+        "temperature": 0,
+        "system": [{
+            "type": "text",
+            "text": system_prompt,
+            "cache_control": { "type": "ephemeral" },
+        }],
+        "messages": [{ "role": "user", "content": user_content }],
+        "output_config": { "format": { "type": "json_schema", "schema": schema } },
+    })
 }
 
 #[async_trait::async_trait]
@@ -222,13 +248,38 @@ impl Completer for AnthropicClient {
     }
 }
 
-/// Render the conversation for the extraction user turn: numbered messages,
-/// matching the message-index convention the packs' prompts teach.
-pub fn render_conversation(messages: &[(String, String)]) -> String {
-    let mut out = String::from("Messages (index - role - content):\n");
-    for (index, (role, content)) in messages.iter().enumerate() {
-        out.push_str(&format!("[{index}] {role}: {content}\n"));
+/// Render messages for the extraction prompt, numbered by their GLOBAL
+/// conversation index (the index claims cite in `msg`).
+pub fn render_messages(first_index: usize, messages: &[(String, String)]) -> String {
+    let mut out = String::new();
+    for (offset, (role, content)) in messages.iter().enumerate() {
+        out.push_str(&format!("[{}] {role}: {content}\n", first_index + offset));
     }
-    out.push_str("\nExtract from ALL messages above.");
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extraction_system_prompt_is_a_cached_block() {
+        let body = extraction_body("m", "STATIC", "per call", &json!({"type": "object"}));
+        assert_eq!(body["system"][0]["text"], "STATIC");
+        assert_eq!(body["system"][0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(body["messages"][0]["content"], "per call");
+        assert_eq!(body["output_config"]["format"]["type"], "json_schema");
+    }
+
+    #[test]
+    fn messages_carry_global_indices() {
+        let rendered = render_messages(
+            7,
+            &[
+                ("user".to_string(), "a".to_string()),
+                ("assistant".to_string(), "b".to_string()),
+            ],
+        );
+        assert_eq!(rendered, "[7] user: a\n[8] assistant: b\n");
+    }
 }

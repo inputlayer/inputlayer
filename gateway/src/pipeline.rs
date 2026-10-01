@@ -7,16 +7,11 @@
 //! tuples, and reads the pack's watch views (findings filtered to the
 //! conversation) plus engine-produced proof trees for the events stream.
 
+use crate::engine_pool::{EnginePool, PooledEngine};
 use crate::mapper::{map_extraction, MapOutcome};
 use crate::ontology::LoadedOntology;
 use anyhow::{Context, Result};
-use inputlayer_ontology_client::ws::Engine;
 use serde_json::{json, Value};
-
-pub struct EngineConfig {
-    pub url: String,
-    pub api_key: String,
-}
 
 pub struct EvalOutcome {
     pub findings: Vec<Value>,
@@ -161,7 +156,7 @@ fn row_in_conversation(
 /// set would attribute findings to rules that are not the ones deployed).
 #[allow(clippy::too_many_arguments)]
 pub async fn evaluate(
-    engine_config: &EngineConfig,
+    pool: &EnginePool,
     ontology: &LoadedOntology,
     kg: &str,
     prefix: &str,
@@ -190,13 +185,7 @@ pub async fn evaluate(
         );
     }
 
-    let mut engine = Engine::connect(&engine_config.url, &engine_config.api_key)
-        .await
-        .context("engine unreachable")?;
-    engine
-        .execute(&format!(".kg use {kg}"))
-        .await
-        .with_context(|| format!("knowledge graph '{kg}' not available"))?;
+    let mut engine = pool.checkout(kg).await?;
 
     ensure_pack_pinned(&mut engine, ontology, kg).await?;
 
@@ -267,7 +256,7 @@ pub async fn evaluate(
 /// delete the pack's own seeds and silently disable detection for every
 /// other conversation in the knowledge graph, permanently.
 async fn retract_conversation(
-    engine: &mut Engine,
+    engine: &mut PooledEngine<'_>,
     prefix: &str,
     statements: &[String],
 ) -> Vec<String> {
@@ -326,7 +315,7 @@ async fn retract_conversation(
 /// than proceeding, because findings attributed to a rule set that is not
 /// the deployed one are worse than no findings.
 async fn ensure_pack_pinned(
-    engine: &mut Engine,
+    engine: &mut PooledEngine<'_>,
     ontology: &LoadedOntology,
     kg: &str,
 ) -> Result<()> {
@@ -351,7 +340,7 @@ async fn ensure_pack_pinned(
 }
 
 async fn read_findings(
-    engine: &mut Engine,
+    engine: &mut PooledEngine<'_>,
     ontology: &LoadedOntology,
     prefix: &str,
     notes: &mut Vec<String>,

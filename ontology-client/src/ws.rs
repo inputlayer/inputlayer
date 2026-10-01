@@ -114,6 +114,24 @@ pub struct Engine {
     stream: WsStream,
 }
 
+/// Transport-level failure: the socket is gone (closed, reset, or the server
+/// hung up). Attached to the error chain so callers holding a pooled
+/// connection can tell "reconnect" apart from "the statement failed".
+#[derive(Debug, Clone, Copy)]
+pub struct Disconnected;
+
+impl std::fmt::Display for Disconnected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("engine connection lost")
+    }
+}
+
+impl std::error::Error for Disconnected {}
+
+fn disconnected(detail: impl std::fmt::Display) -> anyhow::Error {
+    anyhow::Error::new(Disconnected).context(detail.to_string())
+}
+
 /// `http(s)://host:port` -> `ws(s)://host:port/ws`; scheme-less input
 /// defaults to `ws://`.
 pub fn ws_url(server: &str) -> String {
@@ -165,7 +183,10 @@ impl Engine {
         let req = serde_json::to_string(&WsRequest::Execute {
             program: program.to_string(),
         })?;
-        self.stream.send(tungstenite::Message::Text(req)).await?;
+        self.stream
+            .send(tungstenite::Message::Text(req))
+            .await
+            .map_err(|err| disconnected(format!("send failed: {err}")))?;
 
         let mut streamed: Option<QueryResult> = None;
         loop {
@@ -215,18 +236,34 @@ impl Engine {
         }
     }
 
+    /// Drain frames the server pushed while this connection sat idle
+    /// (notifications, pings, a close) without blocking. Returns false when
+    /// the socket is closed or errored - the connection must not be reused.
+    pub fn drain_idle(&mut self) -> bool {
+        use futures_util::FutureExt;
+        loop {
+            match self.stream.next().now_or_never() {
+                None => return true,
+                Some(Some(Ok(tungstenite::Message::Close(_)) | Err(_)) | None) => return false,
+                Some(Some(Ok(_))) => {}
+            }
+        }
+    }
+
     async fn next_response(stream: &mut WsStream) -> Result<WsResponse> {
         loop {
             let frame = tokio::time::timeout(std::time::Duration::from_secs(120), stream.next())
                 .await
                 .map_err(|_| anyhow!("server response timeout (120s)"))?
-                .ok_or_else(|| anyhow!("connection closed"))?
-                .context("websocket error")?;
+                .ok_or_else(|| disconnected("connection closed"))?
+                .map_err(|err| disconnected(format!("websocket error: {err}")))?;
             match frame {
                 tungstenite::Message::Text(text) => {
                     return serde_json::from_str(&text).context("unexpected server message");
                 }
-                tungstenite::Message::Close(_) => bail!("connection closed by server"),
+                tungstenite::Message::Close(_) => {
+                    return Err(disconnected("connection closed by server"))
+                }
                 _ => {} // binary/ping/pong: skip
             }
         }

@@ -10,8 +10,9 @@
 //!   INPUTLAYER_REGISTRY=<same registry the engine uses> (for pack load)
 //! Skips silently when unset.
 
+use inputlayer_gateway::engine_pool::EnginePool;
 use inputlayer_gateway::ontology::LoadedOntology;
-use inputlayer_gateway::pipeline::{evaluate, EngineConfig};
+use inputlayer_gateway::pipeline::evaluate;
 use inputlayer_ontology_client::registry::Registry;
 use inputlayer_ontology_client::ws::Engine;
 use serde_json::json;
@@ -99,10 +100,7 @@ async fn conversations_are_isolated_namespaces_with_proofs() {
         install.rows
     );
 
-    let engine_config = EngineConfig {
-        url: server,
-        api_key,
-    };
+    let engine_config = EnginePool::new(server, api_key);
 
     // Conversation A has contradictory dates; conversation B is clean.
     let a = evaluate(

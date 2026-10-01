@@ -35,12 +35,13 @@ use axum::extract::{Query, State, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use inputlayer_gateway::engine_pool::EnginePool;
 use inputlayer_gateway::events::EventHub;
 use inputlayer_gateway::model::{
-    render_conversation, AnthropicClient, ChatParams, Completer, Extractor,
+    render_messages, AnthropicClient, ChatParams, Completer, Extractor,
 };
-use inputlayer_gateway::ontology::LoadedOntology;
-use inputlayer_gateway::pipeline::{evaluate, EngineConfig};
+use inputlayer_gateway::ontology::{LoadedOntology, PromptSlots};
+use inputlayer_gateway::pipeline::evaluate;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -53,7 +54,8 @@ const DEFAULT_CHAT_MODEL: &str = "claude-sonnet-5";
 struct AppState {
     http: reqwest::Client,
     engine_url: String,
-    engine: EngineConfig,
+    /// Authenticated engine connections reused across requests.
+    engine: EnginePool,
     ontologies: HashMap<String, Arc<LoadedOntology>>,
     extractor: Option<Arc<dyn Extractor>>,
     completer: Option<Arc<dyn Completer>>,
@@ -154,10 +156,7 @@ async fn main() -> Result<()> {
     let state = Arc::new(AppState {
         http,
         engine_url: engine_url.clone(),
-        engine: EngineConfig {
-            url: engine_url,
-            api_key: env_or("INPUTLAYER_API_KEY", ""),
-        },
+        engine: EnginePool::new(engine_url, env_or("INPUTLAYER_API_KEY", "")),
         ontologies,
         extractor,
         completer,
@@ -723,14 +722,19 @@ async fn evaluate_one(
         .as_ref()
         .context("model key not configured")?;
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    let system_prompt = ontology.render_prompt(&today);
-    let user_content = render_conversation(messages);
+    let new_messages = render_messages(0, messages);
+    let prompt = ontology.render_prompt(&PromptSlots {
+        current_date: &today,
+        claims_digest: "",
+        prior_messages: "",
+        new_messages: &new_messages,
+    });
     let extract_started = std::time::Instant::now();
     let extraction = extractor
         .extract(
             &ontology.extraction_model,
-            &system_prompt,
-            &user_content,
+            &prompt.system,
+            &prompt.user,
             &ontology.schema,
         )
         .await?;
@@ -740,7 +744,7 @@ async fn evaluate_one(
         ontology,
         kg,
         prefix,
-        extraction,
+        extraction.output,
         messages,
         want_trace,
         retract_after,
@@ -750,6 +754,7 @@ async fn evaluate_one(
         if let Some(t) = trace.as_object_mut() {
             t.insert("model".to_string(), json!(ontology.extraction_model));
             t.insert("extract_ms".to_string(), json!(extract_ms));
+            t.insert("usage".to_string(), extraction.usage.clone());
         }
         trace
     });
@@ -889,10 +894,14 @@ struct EventsQuery {
     conversation: String,
     #[serde(default)]
     token: Option<String>,
+    /// Resume point: only events with a greater `seq` are delivered.
+    #[serde(default)]
+    after_seq: Option<u64>,
 }
 
-/// Conversation-scoped event subscription: replay the ring, then stream
-/// live events until the client goes away.
+/// Conversation-scoped event subscription: replay the ring (or what is
+/// newer than `after_seq`), then stream live events until the client goes
+/// away.
 async fn events_ws(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -915,9 +924,14 @@ async fn events_ws(
             .into_response();
     }
     let conversation = query.conversation.clone();
+    let after_seq = query.after_seq;
     upgrade.on_upgrade(move |mut socket| async move {
-        let (replay, mut rx) = state.events.subscribe(&conversation);
+        let (replay, mut rx) = state.events.subscribe(&conversation, after_seq);
+        let mut last_seq = after_seq.unwrap_or(0);
         for event in replay {
+            if let Some(seq) = event["seq"].as_u64() {
+                last_seq = seq;
+            }
             if socket
                 .send(axum::extract::ws::Message::Text(event.to_string()))
                 .await
@@ -931,6 +945,11 @@ async fn events_ws(
                 event = rx.recv() => {
                     match event {
                         Ok(event) => {
+                            let seq = event["seq"].as_u64().unwrap_or(0);
+                            if seq <= last_seq {
+                                continue;
+                            }
+                            last_seq = seq;
                             if socket
                                 .send(axum::extract::ws::Message::Text(event.to_string()))
                                 .await
@@ -939,13 +958,18 @@ async fn events_ws(
                                 return;
                             }
                         }
-                        // A subscriber that fell behind lost events the
-                        // replay ring can no longer supply; say so in the
-                        // stream rather than leaving a silent hole in what
-                        // is meant to be the record of evaluation.
+                        // A subscriber that fell behind lost live events;
+                        // say so (with the resume point) rather than
+                        // leaving a silent hole in the record. Reconnecting
+                        // with after_seq recovers whatever the ring holds.
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                            let notice =
-                                json!({ "type": "lagged", "skipped": skipped }).to_string();
+                            let notice = inputlayer_gateway::events::lagged(
+                                &conversation,
+                                last_seq,
+                                skipped,
+                            )
+                            .to_string();
+                            last_seq += skipped;
                             if socket
                                 .send(axum::extract::ws::Message::Text(notice))
                                 .await
