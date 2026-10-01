@@ -1887,10 +1887,7 @@ mod tests {
 
         // Should contain a join (might be wrapped in a Map for projection)
         match &ir {
-            IRNode::Join { .. } => {
-                // Direct join
-                assert!(true);
-            }
+            IRNode::Join { .. } => {}
             IRNode::Map { input, .. } => {
                 // Join wrapped in projection
                 assert!(input.is_join(), "Expected join inside map");
@@ -1934,8 +1931,7 @@ mod tests {
         let ir = builder.build_ir(&rule);
         assert!(
             ir.is_ok(),
-            "Expected successful IR build for string constant in body atom: {:?}",
-            ir
+            "Expected successful IR build for string constant in body atom: {ir:?}"
         );
 
         // The IR should contain a Filter with ColumnEqStr predicate
@@ -1959,8 +1955,7 @@ mod tests {
 
         assert!(
             contains_string_filter(&ir),
-            "Expected IR to contain ColumnEqStr filter for 'true', got: {:?}",
-            ir
+            "Expected IR to contain ColumnEqStr filter for 'true', got: {ir:?}"
         );
     }
 
@@ -1988,8 +1983,7 @@ mod tests {
         let ir = builder.build_ir(&rule);
         assert!(
             ir.is_ok(),
-            "Expected successful IR build for integer constant in head: {:?}",
-            ir
+            "Expected successful IR build for integer constant in head: {ir:?}"
         );
 
         // The IR should contain a Compute node with IntConstant expression
@@ -2011,8 +2005,7 @@ mod tests {
 
         assert!(
             contains_compute_int_constant(&ir),
-            "Expected IR to contain Compute with IntConstant(42), got: {:?}",
-            ir
+            "Expected IR to contain Compute with IntConstant(42), got: {ir:?}"
         );
     }
 
@@ -2040,8 +2033,7 @@ mod tests {
         let ir = builder.build_ir(&rule);
         assert!(
             ir.is_ok(),
-            "Expected successful IR build for float constant in head: {:?}",
-            ir
+            "Expected successful IR build for float constant in head: {ir:?}"
         );
 
         // The IR should contain a Compute node with FloatConstant expression
@@ -2063,8 +2055,7 @@ mod tests {
 
         assert!(
             contains_compute_float_constant(&ir),
-            "Expected IR to contain Compute with FloatConstant(3.14), got: {:?}",
-            ir
+            "Expected IR to contain Compute with FloatConstant(3.14), got: {ir:?}"
         );
     }
 
@@ -2095,8 +2086,7 @@ mod tests {
         let ir = builder.build_ir(&rule);
         assert!(
             ir.is_ok(),
-            "Expected successful IR build for string constant in head: {:?}",
-            ir
+            "Expected successful IR build for string constant in head: {ir:?}"
         );
 
         // The IR should contain a Compute node with StringConstant expression
@@ -2118,8 +2108,7 @@ mod tests {
 
         assert!(
             contains_compute_string_constant(&ir),
-            "Expected IR to contain Compute with StringConstant(\"active\"), got: {:?}",
-            ir
+            "Expected IR to contain Compute with StringConstant(\"active\"), got: {ir:?}"
         );
     }
 
@@ -2152,8 +2141,7 @@ mod tests {
         let ir = builder.build_ir(&rule);
         assert!(
             ir.is_ok(),
-            "Expected successful IR build for mixed constants in head: {:?}",
-            ir
+            "Expected successful IR build for mixed constants in head: {ir:?}"
         );
 
         // The IR should contain a Compute node with all three constant types
@@ -2220,8 +2208,7 @@ mod tests {
         let ir = builder.build_ir(&rule);
         assert!(
             ir.is_ok(),
-            "Expected successful IR build for float constant in body atom: {:?}",
-            ir
+            "Expected successful IR build for float constant in body atom: {ir:?}"
         );
 
         // The IR should contain a Filter with ColumnEqFloat predicate
@@ -2246,8 +2233,7 @@ mod tests {
 
         assert!(
             contains_float_filter(&ir),
-            "Expected IR to contain ColumnEqFloat filter for 9.99, got: {:?}",
-            ir
+            "Expected IR to contain ColumnEqFloat filter for 9.99, got: {ir:?}"
         );
     }
 
@@ -2415,8 +2401,7 @@ mod tests {
         }
         assert!(
             contains_antijoin(&ir),
-            "Expected antijoin for negated predicate, got: {:?}",
-            ir
+            "Expected antijoin for negated predicate, got: {ir:?}"
         );
     }
 

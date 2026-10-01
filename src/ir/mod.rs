@@ -1709,7 +1709,7 @@ mod tests {
 
     #[test]
     fn test_predicate_referenced_columns_all_types() {
-        let predicates = vec![
+        let predicates = [
             Predicate::ColumnEqConst(0, 1),
             Predicate::ColumnNeConst(1, 2),
             Predicate::ColumnGtConst(2, 3),
@@ -1994,7 +1994,7 @@ mod tests {
     #[test]
     fn test_predicate_debug() {
         let pred = Predicate::ColumnEqConst(0, 42);
-        let debug_str = format!("{:?}", pred);
+        let debug_str = format!("{pred:?}");
         assert!(debug_str.contains("ColumnEqConst"));
         assert!(debug_str.contains("42"));
     }

@@ -7,10 +7,10 @@ use inputlayer::{Config, StorageEngine};
 use tempfile::TempDir;
 
 fn create_test_handler() -> (Handler, TempDir) {
-    let temp = TempDir::new().unwrap();
+    let temp = TempDir::new().expect("create temp dir");
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
-    let storage = StorageEngine::new(config).unwrap();
+    let storage = StorageEngine::new(config).expect("create storage engine");
     let handler = Handler::new(storage);
     (handler, temp)
 }

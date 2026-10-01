@@ -6409,7 +6409,7 @@ mod tests {
         let (handler, _tmp) = handler_with_kg("empty_prog_test");
         // Empty program has no IR nodes to execute
         let result = handler
-            .query_program(Some("empty_prog_test".to_string()), "".to_string())
+            .query_program(Some("empty_prog_test".to_string()), String::new())
             .await;
         assert!(result.is_err() || result.expect("operation should succeed").rows.len() <= 1);
     }
@@ -8083,8 +8083,7 @@ mod tests {
         let joined = join_continuation_lines(&stripped);
         assert_eq!(
             joined, "+edge[(1,2)]\n+edge[(2,3)]\nreachable(X, Y) <- edge(X, Y).\n?reachable(X, Y)",
-            "Joined output: {:?}",
-            joined,
+            "Joined output: {joined:?}",
         );
     }
 

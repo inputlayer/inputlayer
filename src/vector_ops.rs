@@ -1657,8 +1657,8 @@ mod tests {
         // Different tables should (usually) give different buckets
         // This isn't guaranteed, but is very likely for random data
         // Just verify they're valid i64 values
-        assert!(b1 >= 0 && b1 < 256); // 8 bits = 256 possible values
-        assert!(b2 >= 0 && b2 < 256);
+        assert!((0..256).contains(&b1)); // 8 bits = 256 possible values
+        assert!((0..256).contains(&b2));
     }
 
     #[test]
@@ -1674,8 +1674,8 @@ mod tests {
         // This test may occasionally fail due to randomness, but should usually pass
         // In practice, with very similar vectors and few hyperplanes, they often match
         // We just verify the function works without crashing
-        assert!(b1 >= 0 && b1 < 16);
-        assert!(b2 >= 0 && b2 < 16);
+        assert!((0..16).contains(&b1));
+        assert!((0..16).contains(&b2));
     }
 
     #[test]
@@ -1684,7 +1684,7 @@ mod tests {
         let buckets = lsh_buckets(&v, 4, 8);
         assert_eq!(buckets.len(), 4);
         for &b in &buckets {
-            assert!(b >= 0 && b < 256);
+            assert!((0..256).contains(&b));
         }
     }
 
@@ -1834,8 +1834,7 @@ mod tests {
         for i in 1..result.len() {
             assert!(
                 result[i - 1].score >= result[i].score,
-                "Results not in descending order at index {}",
-                i
+                "Results not in descending order at index {i}"
             );
         }
 
@@ -2137,16 +2136,9 @@ mod tests {
     fn test_lsh_bucket_negative_table_idx() {
         // Negative table indices should work (used for different hash families)
         let v = vec![1.0, 2.0, 3.0];
-        let result_neg = lsh_bucket(&v, -1, 8);
-        let result_pos = lsh_bucket(&v, 1, 8);
-        // Different table indices should produce different results (usually)
-        // Just verify no panic
-        assert!(
-            result_neg >= 0 || result_neg < 0,
-            "Negative table_idx should not panic"
-        );
-        // They might be the same or different depending on hash, just verify they work
-        let _ = result_pos;
+        // Results may or may not differ by table index; just verify no panic.
+        let _ = lsh_bucket(&v, -1, 8);
+        let _ = lsh_bucket(&v, 1, 8);
     }
 
     #[test]
@@ -2353,8 +2345,7 @@ mod tests {
             let expected = lsh_bucket(&v, table_idx as i64, num_hyperplanes);
             assert_eq!(
                 bucket, expected,
-                "Bucket {} should match lsh_bucket",
-                table_idx
+                "Bucket {table_idx} should match lsh_bucket"
             );
         }
 
@@ -2400,10 +2391,7 @@ mod tests {
         // If cache was cleared, they're regenerated but content is identical
         let arc_shared = Arc::ptr_eq(&h1.data, &h2.data);
 
-        if arc_shared {
-            // Fast path worked - same Arc
-            assert!(true);
-        } else {
+        if !arc_shared {
             // Cache was cleared - verify content is still identical (deterministic)
             assert_eq!(h1.data.len(), h2.data.len(), "Data length should match");
             assert_eq!(h1.num_hyperplanes, h2.num_hyperplanes);
@@ -2673,8 +2661,8 @@ mod tests {
             expected: 3,
             got: 5,
         });
-        assert!(err.to_string().contains("3"));
-        assert!(err.to_string().contains("5"));
+        assert!(err.to_string().contains('3'));
+        assert!(err.to_string().contains('5'));
     }
 
     // Int8 Quantization Tests
@@ -2846,7 +2834,7 @@ mod tests {
     fn test_lsh_bucket_int8_basic() {
         let v = vec![10i8, 20, 30];
         let bucket = lsh_bucket_int8(&v, 0, 8);
-        assert!(bucket >= 0 && bucket < 256);
+        assert!((0..256).contains(&bucket));
 
         // Should be deterministic
         let bucket2 = lsh_bucket_int8(&v, 0, 8);
@@ -2892,11 +2880,7 @@ mod tests {
 
         // Check monotonicity preserved
         for i in 1..d.len() {
-            assert!(
-                d[i] >= d[i - 1],
-                "Monotonicity not preserved at index {}",
-                i
-            );
+            assert!(d[i] >= d[i - 1], "Monotonicity not preserved at index {i}");
         }
     }
 
@@ -2942,10 +2926,10 @@ mod tests {
         assert_eq!(probes[0], bucket);
 
         // Next 8 should differ by exactly 1 bit
-        for i in 1..9 {
-            let diff = probes[i] ^ bucket;
+        for (i, probe) in probes.iter().enumerate().take(9).skip(1) {
+            let diff = probe ^ bucket;
             // diff should have exactly one bit set (Hamming distance 1)
-            assert_eq!(diff.count_ones(), 1, "Probe {} has HD != 1", i);
+            assert_eq!(diff.count_ones(), 1, "Probe {i} has HD != 1");
         }
     }
 
@@ -2958,15 +2942,15 @@ mod tests {
         assert_eq!(probes[0], bucket);
 
         // HD=1 probes (indices 1-4)
-        for i in 1..5 {
-            let diff = probes[i] ^ bucket;
+        for probe in &probes[1..5] {
+            let diff = probe ^ bucket;
             assert_eq!(diff.count_ones(), 1);
         }
 
         // HD=2 probes (indices 5-10)
-        for i in 5..11 {
-            let diff = probes[i] ^ bucket;
-            assert_eq!(diff.count_ones(), 2, "Probe {} should have HD=2", i);
+        for (i, probe) in probes.iter().enumerate().take(11).skip(5) {
+            let diff = probe ^ bucket;
+            assert_eq!(diff.count_ones(), 2, "Probe {i} should have HD=2");
         }
     }
 
@@ -3152,10 +3136,7 @@ mod tests {
             if hamming <= 2 {
                 assert!(
                     query_probes.contains(&similar_bucket),
-                    "Similar vector bucket {} not found in probes for query bucket {} (HD={})",
-                    similar_bucket,
-                    query_bucket,
-                    hamming
+                    "Similar vector bucket {similar_bucket} not found in probes for query bucket {query_bucket} (HD={hamming})"
                 );
             }
         }
@@ -3199,8 +3180,8 @@ mod tests {
         assert_eq!(probes[0], bucket);
 
         // All HD=1 probes should be powers of 2
-        for i in 1..10 {
-            let diff = probes[i] ^ bucket;
+        for probe in &probes[1..10] {
+            let diff = probe ^ bucket;
             assert_eq!(diff.count_ones(), 1);
         }
     }

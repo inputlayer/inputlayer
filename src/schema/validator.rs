@@ -400,7 +400,7 @@ mod tests {
             violations: vec![],
         };
         assert!(err.to_string().contains("user"));
-        assert!(err.to_string().contains("5"));
+        assert!(err.to_string().contains('5'));
 
         let err = ValidationError::Internal("oops".to_string());
         assert!(err.to_string().contains("oops"));
@@ -494,10 +494,5 @@ mod tests {
         if let Err(ValidationError::BatchRejected { violations, .. }) = result {
             assert_eq!(violations.len(), 2);
         }
-    }
-
-    #[test]
-    fn test_validation_engine_default() {
-        let _engine = ValidationEngine::default();
     }
 }

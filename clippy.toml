@@ -1,0 +1,2 @@
+# Tests may panic on unexpected values; `unwrap` is the clearest assertion there.
+allow-unwrap-in-tests = true

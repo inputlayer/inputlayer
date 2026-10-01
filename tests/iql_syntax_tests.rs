@@ -21,9 +21,9 @@ fn create_test_config(data_dir: std::path::PathBuf) -> Config {
 }
 
 fn create_test_storage() -> (StorageEngine, TempDir) {
-    let temp = TempDir::new().unwrap();
+    let temp = TempDir::new().expect("create temp dir");
     let config = create_test_config(temp.path().to_path_buf());
-    let storage = StorageEngine::new(config).unwrap();
+    let storage = StorageEngine::new(config).expect("create storage engine");
     (storage, temp)
 }
 

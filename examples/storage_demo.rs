@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = Config::default();
     config.storage.data_dir = temp_dir.path().to_path_buf();
 
-    println!("Data directory: {:?}", config.storage.data_dir);
+    println!("Data directory: {}", config.storage.data_dir.display());
     println!(
         "Thread pool size: {} (0 = all CPUs)\n",
         config.storage.performance.num_threads
@@ -44,7 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     storage.create_knowledge_graph("production")?;
 
     let databases = storage.list_knowledge_graphs();
-    println!("Created databases: {:?}\n", databases);
+    println!("Created databases: {databases:?}\n");
 
     // ========================================================================
     // Demo 2: Insert Data into Analytics Database
@@ -54,7 +54,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     storage.use_knowledge_graph("analytics")?;
     println!(
         "Switched to database: {}",
-        storage.current_knowledge_graph().unwrap()
+        storage
+            .current_knowledge_graph()
+            .expect("knowledge graph selected")
     );
 
     // Insert edge data
@@ -81,7 +83,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let results = storage.execute_query("result(x,y) :- edge(x,y), x > 2.")?;
     println!("\nQuery: result(x,y) :- edge(x,y), x > 2.");
     println!("Results: {} tuples", results.len());
-    println!("Sample: {:?}", results);
+    println!("Sample: {results:?}");
 
     // ========================================================================
     // Demo 3: Database Isolation
@@ -92,13 +94,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     storage.use_knowledge_graph("isolated")?;
     println!(
         "Switched to database: {}",
-        storage.current_knowledge_graph().unwrap()
+        storage
+            .current_knowledge_graph()
+            .expect("knowledge graph selected")
     );
 
     // Try to query edge (should fail - no data in this database)
     match storage.execute_query("result(x,y) :- edge(x,y).") {
         Ok(results) => println!("Unexpected success with {} results", results.len()),
-        Err(e) => println!("Expected error (database isolation works): {}", e),
+        Err(e) => println!("Expected error (database isolation works): {e}"),
     }
 
     // Add some data to isolated database
@@ -136,7 +140,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!(
         "\nCurrent database is still: {}",
-        storage.current_knowledge_graph().unwrap()
+        storage
+            .current_knowledge_graph()
+            .expect("knowledge graph selected")
     );
 
     // ========================================================================
@@ -146,7 +152,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let databases = storage.list_knowledge_graphs();
     println!("Total databases: {}", databases.len());
     for db in &databases {
-        println!("  - {}", db);
+        println!("  - {db}");
     }
 
     println!("\n✅ Storage engine demo completed successfully!");

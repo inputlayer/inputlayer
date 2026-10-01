@@ -12,9 +12,9 @@ fn create_test_config(data_dir: std::path::PathBuf) -> Config {
 }
 
 fn create_test_storage() -> (StorageEngine, TempDir) {
-    let temp = TempDir::new().unwrap();
+    let temp = TempDir::new().expect("create temp dir");
     let config = create_test_config(temp.path().to_path_buf());
-    let storage = StorageEngine::new(config).unwrap();
+    let storage = StorageEngine::new(config).expect("create storage engine");
     (storage, temp)
 }
 
@@ -81,7 +81,7 @@ fn test_use_nonexistent_knowledge_graph() {
 
 #[test]
 fn test_drop_knowledge_graph() {
-    let (mut storage, _temp) = create_test_storage();
+    let (storage, _temp) = create_test_storage();
 
     storage.create_knowledge_graph("temp_kg").unwrap();
     assert!(storage
@@ -96,7 +96,7 @@ fn test_drop_knowledge_graph() {
 
 #[test]
 fn test_cannot_drop_default_knowledge_graph() {
-    let (mut storage, _temp) = create_test_storage();
+    let (storage, _temp) = create_test_storage();
 
     let result = storage.drop_knowledge_graph("default");
     assert!(result.is_err());
@@ -329,7 +329,7 @@ fn test_parallel_queries_on_knowledge_graphs() {
 
     // Create multiple knowledge graphs with data
     for i in 1..=3 {
-        let kg_name = format!("kg{}", i);
+        let kg_name = format!("kg{i}");
         storage.create_knowledge_graph(&kg_name).unwrap();
         storage
             .insert_into(&kg_name, "edge", vec![(i, i + 1)])
@@ -362,7 +362,7 @@ fn test_same_query_on_multiple_knowledge_graphs() {
 
     // Create knowledge graphs with different data
     for i in 1..=3 {
-        let kg_name = format!("kg{}", i);
+        let kg_name = format!("kg{i}");
         storage.create_knowledge_graph(&kg_name).unwrap();
         storage
             .insert_into(&kg_name, "edge", vec![(i * 10, i * 10 + 1)])

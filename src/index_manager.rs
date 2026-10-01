@@ -784,7 +784,7 @@ mod tests {
             self.vectors.len()
         }
 
-        fn index_type(&self) -> &str {
+        fn index_type(&self) -> &'static str {
             "mock"
         }
 
@@ -797,7 +797,7 @@ mod tests {
         }
 
         fn dimension(&self) -> usize {
-            self.vectors.values().next().map(|v| v.len()).unwrap_or(0)
+            self.vectors.values().next().map_or(0, |v| v.len())
         }
 
         fn as_any(&self) -> &dyn std::any::Any {
@@ -810,7 +810,7 @@ mod tests {
             name: name.to_string(),
             relation: relation.to_string(),
             column_idx,
-            column_name: format!("col{}", column_idx),
+            column_name: format!("col{column_idx}"),
             index_type: IndexType::Hnsw(HnswConfig::default()),
         }
     }

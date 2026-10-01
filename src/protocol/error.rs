@@ -185,7 +185,7 @@ mod tests {
             (std::io::ErrorKind::AlreadyExists, "entity already exists"),
         ];
         for (kind, expected_substr) in kinds {
-            let io_err = std::io::Error::new(kind, format!("sensitive path /var/data/{:?}", kind));
+            let io_err = std::io::Error::new(kind, format!("sensitive path /var/data/{kind:?}"));
             let err: InputLayerError = io_err.into();
             let msg = err.to_string();
             assert!(

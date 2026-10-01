@@ -1,5 +1,8 @@
 //! Aggregation performance benchmarks: COUNT, SUM, MIN, MAX over varying dataset sizes.
 
+// Benchmark setup aborts on failure; `unwrap` is the intended behavior.
+#![allow(clippy::unwrap_used)]
+
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use inputlayer::{protocol::handler::Handler, Config};
 use std::time::Duration;
@@ -114,7 +117,7 @@ fn bench_min_max_aggregation(c: &mut Criterion) {
                         .query_program(None, "?scores_max(G, V)".to_string())
                         .await
                         .unwrap();
-                })
+                });
             });
         });
     }

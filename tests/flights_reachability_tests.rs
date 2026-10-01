@@ -17,10 +17,10 @@ use inputlayer::Config;
 use tempfile::TempDir;
 
 fn create_test_handler() -> (Handler, TempDir) {
-    let temp = TempDir::new().unwrap();
+    let temp = TempDir::new().expect("create temp dir");
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
-    let storage = inputlayer::StorageEngine::new(config).unwrap();
+    let storage = inputlayer::StorageEngine::new(config).expect("create storage engine");
     let handler = Handler::new(storage);
     (handler, temp)
 }
@@ -33,37 +33,9 @@ async fn exec(handler: &Handler, program: &str) -> inputlayer::protocol::wire::Q
         .unwrap_or_else(|e| panic!("Failed to execute '{program}': {e}"))
 }
 
-/// Helper: collect result rows as Vec<Vec<String>> for easy assertions.
-fn rows_as_strings(result: &inputlayer::protocol::wire::QueryResult) -> Vec<Vec<String>> {
-    result
-        .rows
-        .iter()
-        .map(|row| {
-            row.values
-                .iter()
-                .map(|v| format!("{v}"))
-                .collect::<Vec<_>>()
-        })
-        .collect()
-}
-
 /// Helper: get column names from the schema.
 fn column_names(result: &inputlayer::protocol::wire::QueryResult) -> Vec<String> {
     result.schema.iter().map(|c| c.name.clone()).collect()
-}
-
-/// Helper: collect a specific column's values as sorted strings.
-fn column_values_sorted(
-    result: &inputlayer::protocol::wire::QueryResult,
-    col_idx: usize,
-) -> Vec<String> {
-    let mut vals: Vec<String> = result
-        .rows
-        .iter()
-        .map(|row| format!("{}", row.values[col_idx]))
-        .collect();
-    vals.sort();
-    vals
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -153,8 +125,7 @@ async fn test_step2_define_rules_and_query_reachability() {
     assert_eq!(
         ny_dests.len(),
         4,
-        "New York should reach 4 destinations, got: {:?}",
-        ny_dests
+        "New York should reach 4 destinations, got: {ny_dests:?}"
     );
 }
 
@@ -234,8 +205,7 @@ async fn test_step3_add_routes_incremental() {
         .collect();
     assert!(
         ny_after.contains(&"\"dubai\"".to_string()),
-        "NY should now reach Dubai, got: {:?}",
-        ny_after
+        "NY should now reach Dubai, got: {ny_after:?}"
     );
     assert_eq!(ny_after.len(), 5, "NY reaches 5 cities after new route");
 }
@@ -447,7 +417,7 @@ async fn test_step5_why_not_unreachable() {
     let result = exec(&handler, r#".why_not can_reach("new_york", "sao_paulo")"#).await;
     // why_not returns explanation rows
     assert!(
-        result.rows.len() > 0,
+        !result.rows.is_empty(),
         ".why_not should return at least one explanation row"
     );
 }

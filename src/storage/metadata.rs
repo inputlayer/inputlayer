@@ -452,7 +452,7 @@ mod tests {
         let entries: Vec<_> = fs::read_dir(temp.path())
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().to_str().is_some_and(|s| s.ends_with(".tmp")))
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "tmp"))
             .collect();
         assert!(
             entries.is_empty(),
@@ -528,7 +528,7 @@ mod tests {
         let tmp_files: Vec<_> = fs::read_dir(temp.path())
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().to_str().is_some_and(|s| s.ends_with(".tmp")))
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "tmp"))
             .collect();
         assert!(
             tmp_files.is_empty(),

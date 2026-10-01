@@ -474,7 +474,7 @@ fmt-check:
 
 # Run clippy lints
 lint:
-	cargo clippy --workspace --all-features -- -D warnings
+	cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 # Check compilation + formatting + lints (quality gate)
 check: fmt-check lint

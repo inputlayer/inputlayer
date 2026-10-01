@@ -882,7 +882,7 @@ mod tests {
 
         // tc forms a SCC with itself (self-loop)
         // edge is in its own SCC
-        assert!(sccs.len() >= 1);
+        assert!(!sccs.is_empty());
 
         // Find the SCC containing "tc"
         let tc_scc = sccs.iter().find(|scc| scc.contains(&"tc".to_string()));

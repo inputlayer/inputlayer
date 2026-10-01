@@ -244,8 +244,7 @@ mod tests {
         // Should be after 2020-01-01 (1577836800000 ms)
         assert!(
             now > 1577836800000,
-            "time_now should return post-2020 timestamp, got {}",
-            now
+            "time_now should return post-2020 timestamp, got {now}"
         );
         // Should be before 2100-01-01 (4102444800000 ms)
         assert!(
@@ -314,11 +313,7 @@ mod tests {
         let half_life = 3600000i64; // 1 hour
         let one_hour_ago = now - half_life;
         let weight = time_decay(one_hour_ago, now, half_life);
-        assert!(
-            (weight - 0.5).abs() < 0.0001,
-            "Expected ~0.5, got {}",
-            weight
-        );
+        assert!((weight - 0.5).abs() < 0.0001, "Expected ~0.5, got {weight}");
     }
 
     #[test]
@@ -329,8 +324,7 @@ mod tests {
         let weight = time_decay(two_hours_ago, now, half_life);
         assert!(
             (weight - 0.25).abs() < 0.0001,
-            "Expected ~0.25, got {}",
-            weight
+            "Expected ~0.25, got {weight}"
         );
     }
 
@@ -363,8 +357,7 @@ mod tests {
         let weight = time_decay(very_old, now, half_life);
         assert!(
             weight < 1e-20,
-            "Very old timestamp should have near-zero weight, got {}",
-            weight
+            "Very old timestamp should have near-zero weight, got {weight}"
         );
     }
 
@@ -380,11 +373,7 @@ mod tests {
         let max_age = 3600000i64;
         let half_max_ago = now - max_age / 2;
         let weight = time_decay_linear(half_max_ago, now, max_age);
-        assert!(
-            (weight - 0.5).abs() < 0.0001,
-            "Expected ~0.5, got {}",
-            weight
-        );
+        assert!((weight - 0.5).abs() < 0.0001, "Expected ~0.5, got {weight}");
     }
 
     #[test]
@@ -616,15 +605,11 @@ mod tests {
 
         assert!(
             w_recent > w_old,
-            "Recent should have higher weight: {} > {}",
-            w_recent,
-            w_old
+            "Recent should have higher weight: {w_recent} > {w_old}"
         );
         assert!(
             w_old > w_very_old,
-            "Old should have higher weight than very old: {} > {}",
-            w_old,
-            w_very_old
+            "Old should have higher weight than very old: {w_old} > {w_very_old}"
         );
     }
 
@@ -641,9 +626,7 @@ mod tests {
 
         assert!(
             w_recent > w_old,
-            "Recent should have higher weight: {} > {}",
-            w_recent,
-            w_old
+            "Recent should have higher weight: {w_recent} > {w_old}"
         );
     }
 }

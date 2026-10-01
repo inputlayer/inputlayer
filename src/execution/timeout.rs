@@ -282,8 +282,8 @@ mod tests {
             elapsed: Duration::from_secs(6),
         };
         let msg = err.to_string();
-        assert!(msg.contains("5"));
-        assert!(msg.contains("6"));
+        assert!(msg.contains('5'));
+        assert!(msg.contains('6'));
     }
 
     #[test]

@@ -4644,9 +4644,7 @@ mod tests {
         for (x, y) in expected_pairs {
             assert!(
                 results.contains(&Tuple::pair(x, y)),
-                "Missing path ({}, {})",
-                x,
-                y
+                "Missing path ({x}, {y})"
             );
         }
     }
@@ -4743,7 +4741,7 @@ mod tests {
         let results = codegen.execute_transitive_closure_dd("edge").unwrap();
 
         // Should contain just (1, 1)
-        assert!(results.len() >= 1, "Expected at least 1 path");
+        assert!(!results.is_empty(), "Expected at least 1 path");
         assert!(results.contains(&Tuple::pair(1, 1)), "Missing (1,1)");
     }
 
@@ -5633,8 +5631,8 @@ mod tests {
         // Sort both for comparison (order may differ)
         let mut sorted_single: Vec<_> = single_results.iter().collect();
         let mut sorted_multi: Vec<_> = multi_results.iter().collect();
-        sorted_single.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
-        sorted_multi.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
+        sorted_single.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
+        sorted_multi.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
 
         assert_eq!(sorted_single, sorted_multi, "Results should match");
     }
@@ -5676,7 +5674,7 @@ mod tests {
             .collect();
 
         for x in [4, 5, 6] {
-            assert!(x_values.contains(&x), "Row with x={} should be present", x);
+            assert!(x_values.contains(&x), "Row with x={x} should be present");
         }
     }
 
@@ -5785,8 +5783,7 @@ mod tests {
         let dist1 = first.get(3).unwrap().to_f64();
         assert!(
             (dist1 - 5.0).abs() < 0.001,
-            "Expected dist 5.0, got {}",
-            dist1
+            "Expected dist 5.0, got {dist1}"
         );
 
         // Second tuple: distance between (1,1) and (2,2) = sqrt(2)
@@ -5795,9 +5792,7 @@ mod tests {
         let expected = (2.0_f64).sqrt();
         assert!(
             (dist2 - expected).abs() < 0.001,
-            "Expected dist {}, got {}",
-            expected,
-            dist2
+            "Expected dist {expected}, got {dist2}"
         );
     }
 
@@ -5840,18 +5835,13 @@ mod tests {
 
         // Same direction: cosine distance = 0
         let dist1 = results[0].get(3).unwrap().to_f64();
-        assert!(
-            dist1.abs() < 0.001,
-            "Expected cosine dist ~0, got {}",
-            dist1
-        );
+        assert!(dist1.abs() < 0.001, "Expected cosine dist ~0, got {dist1}");
 
         // Orthogonal: cosine distance = 1
         let dist2 = results[1].get(3).unwrap().to_f64();
         assert!(
             (dist2 - 1.0).abs() < 0.001,
-            "Expected cosine dist ~1, got {}",
-            dist2
+            "Expected cosine dist ~1, got {dist2}"
         );
     }
 
@@ -5899,7 +5889,7 @@ mod tests {
         // All buckets should be valid (0-15 for 4 hyperplanes)
         for result in &results {
             let bucket = result.get(2).unwrap().to_i64();
-            assert!(bucket >= 0 && bucket < 16, "Invalid bucket: {}", bucket);
+            assert!((0..16).contains(&bucket), "Invalid bucket: {bucket}");
         }
 
         // Similar vectors (1 and 2) might have same bucket (not guaranteed but likely)
@@ -6206,7 +6196,7 @@ mod tests {
         // Both should be above threshold (5.0 and 8.0)
         for result in &results {
             let score = result.get(1).unwrap().to_f64();
-            assert!(score >= 4.0, "Score {} is below threshold 4.0", score);
+            assert!(score >= 4.0, "Score {score} is below threshold 4.0");
         }
     }
 
@@ -6248,7 +6238,7 @@ mod tests {
         // All should have distance <= 0.5
         for result in &results {
             let dist = result.get(1).unwrap().to_f64();
-            assert!(dist <= 0.5, "Distance {} is outside radius 0.5", dist);
+            assert!(dist <= 0.5, "Distance {dist} is outside radius 0.5");
         }
     }
 
@@ -8206,7 +8196,7 @@ mod tests {
         // Division always returns Float64
         match result {
             Value::Float64(f) => assert!((f - 3.333333).abs() < 0.001),
-            other => panic!("Expected Float64, got {:?}", other),
+            other => panic!("Expected Float64, got {other:?}"),
         }
     }
 
@@ -8240,7 +8230,7 @@ mod tests {
         );
         match result {
             Value::Float64(f) => assert!((f - 3.8).abs() < 1e-10),
-            other => panic!("Expected Float64, got {:?}", other),
+            other => panic!("Expected Float64, got {other:?}"),
         }
     }
 
@@ -8253,7 +8243,7 @@ mod tests {
         );
         match result {
             Value::Float64(f) => assert!((f - 4.5).abs() < 1e-10),
-            other => panic!("Expected Float64, got {:?}", other),
+            other => panic!("Expected Float64, got {other:?}"),
         }
     }
 

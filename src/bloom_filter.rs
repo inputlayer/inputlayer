@@ -401,7 +401,7 @@ mod tests {
             filter.insert(v);
         }
         for v in &values {
-            assert!(filter.might_contain(v), "Should contain {}", v);
+            assert!(filter.might_contain(v), "Should contain {v}");
         }
     }
 
@@ -413,7 +413,7 @@ mod tests {
             filter.insert(&i);
         }
         for i in 0..10000 {
-            assert!(filter.might_contain(&i), "False negative for {}", i);
+            assert!(filter.might_contain(&i), "False negative for {i}");
         }
     }
 
@@ -479,7 +479,7 @@ mod tests {
         }
         // Still must have zero false negatives (FP rate increases, but no FN)
         for i in 0..2000 {
-            assert!(filter.might_contain(&i), "False negative for {}", i);
+            assert!(filter.might_contain(&i), "False negative for {i}");
         }
     }
 
@@ -525,7 +525,7 @@ mod tests {
 
         let fp_rate = false_positives as f64 / 10000.0;
         // Allow 5x tolerance (0.01 target -> accept up to 0.05)
-        assert!(fp_rate < 0.05, "FP rate {} exceeds threshold", fp_rate);
+        assert!(fp_rate < 0.05, "FP rate {fp_rate} exceeds threshold");
     }
 
     #[test]
@@ -536,7 +536,7 @@ mod tests {
         }
 
         let estimated = filter.estimated_false_positive_rate();
-        assert!(estimated < 0.1, "Estimated FP rate {} too high", estimated);
+        assert!(estimated < 0.1, "Estimated FP rate {estimated} too high");
     }
 
     #[test]

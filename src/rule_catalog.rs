@@ -1494,8 +1494,7 @@ mod tests {
         let err = result.unwrap_err();
         assert!(
             err.contains("Unstratified") || err.contains("negates itself"),
-            "Error message should mention unstratified negation: {}",
-            err
+            "Error message should mention unstratified negation: {err}"
         );
     }
 
@@ -1534,8 +1533,7 @@ mod tests {
                 || err.contains("range")
                 || err.contains("Range")
                 || err.contains("not bound"),
-            "Error message should mention unsafe rule or unsafe negation: {}",
-            err
+            "Error message should mention unsafe rule or unsafe negation: {err}"
         );
     }
 
@@ -1564,8 +1562,7 @@ mod tests {
         let err = result.unwrap_err();
         assert!(
             err.contains("Unsafe rule") || err.contains("not bound"),
-            "Error message should mention unsafe rule: {}",
-            err
+            "Error message should mention unsafe rule: {err}"
         );
     }
 
@@ -1601,8 +1598,7 @@ mod tests {
         let result = catalog.register_rule(&rule_def);
         assert!(
             result.is_ok(),
-            "Safe negation with bound variables should be accepted: {:?}",
-            result
+            "Safe negation with bound variables should be accepted: {result:?}"
         );
     }
 
@@ -1820,8 +1816,7 @@ mod tests {
         let result = catalog.register_rule(&def2);
         assert!(
             result.is_ok(),
-            "Compatible top_k with same params should be accepted: {:?}",
-            result
+            "Compatible top_k with same params should be accepted: {result:?}"
         );
     }
 
@@ -1934,8 +1929,7 @@ mod tests {
         let result = catalog.register_rule(&def2);
         assert!(
             result.is_ok(),
-            "Different simple aggregates should be accepted: {:?}",
-            result
+            "Different simple aggregates should be accepted: {result:?}"
         );
     }
 

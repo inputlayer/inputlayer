@@ -190,8 +190,10 @@ fn test_proof_tree_depth_50_limit() {
     ];
     let data = base_data(vec![("link", links)]);
 
-    let mut config = ProofConfig::default();
-    config.max_depth = 50;
+    let config = ProofConfig {
+        max_depth: 50,
+        ..Default::default()
+    };
     let ctx = ProofContext::new(&rules, &data, config);
 
     // Should not hang or panic
@@ -295,7 +297,7 @@ fn test_proof_tree_flights_no_truncation() {
         )
         .expect("rule2");
 
-    let query = r#"can_reach(A, B) <- can_reach(A, B)"#;
+    let query = r"can_reach(A, B) <- can_reach(A, B)";
     let (result_tuples, rules, base_data, derived_data, _metrics) = storage
         .execute_and_get_context("flights_test", query)
         .expect("execute_and_get_context failed");
@@ -536,14 +538,14 @@ async fn test_proof_tree_via_handler() {
     handler
         .query_program(
             None,
-            r#"+can_reach(A, B) <- direct_flight(A, B, _, _)"#.into(),
+            r"+can_reach(A, B) <- direct_flight(A, B, _, _)".into(),
         )
         .await
         .expect("rule1");
     handler
         .query_program(
             None,
-            r#"+can_reach(A, C) <- direct_flight(A, B, _, _), can_reach(B, C)"#.into(),
+            r"+can_reach(A, C) <- direct_flight(A, B, _, _), can_reach(B, C)".into(),
         )
         .await
         .expect("rule2");
@@ -629,13 +631,12 @@ async fn test_proof_tree_via_handler() {
         }
     }
 
-    if !errors.is_empty() {
-        panic!(
-            "Proof tree errors ({}):\n  {}",
-            errors.len(),
-            errors.join("\n  ")
-        );
-    }
+    assert!(
+        errors.is_empty(),
+        "Proof tree errors ({}):\n  {}",
+        errors.len(),
+        errors.join("\n  ")
+    );
 }
 
 /// Verify EVERY node in every proof tree has correct arity and structure.
@@ -733,7 +734,7 @@ fn test_proof_tree_node_correctness() {
         )
         .expect("rule2");
 
-    let query = r#"can_reach(A, B) <- can_reach(A, B)"#;
+    let query = r"can_reach(A, B) <- can_reach(A, B)";
     let (result_tuples, rules, base_data, derived_data, _) = storage
         .execute_and_get_context("verify_test", query)
         .expect("execute failed");
@@ -781,13 +782,11 @@ fn test_proof_tree_node_correctness() {
                                 "{label}: node {node_id}: direct_flight fact should have 4 args, got {arity}"
                             ));
                         }
-                    } else if pred == "can_reach" {
-                        if arity != 2 {
-                            errors.push(format!(
+                    } else if pred == "can_reach" && arity != 2 {
+                        errors.push(format!(
                                 "{label}: node {node_id}: can_reach fact should have 2 args, got {arity}: {:?}",
                                 node.conclusion.args
                             ));
-                        }
                     }
                 }
                 NodeKind::Rule => {
@@ -852,13 +851,12 @@ fn test_proof_tree_node_correctness() {
         }
     }
 
-    if !errors.is_empty() {
-        panic!(
-            "Proof tree correctness errors ({}):\n  {}",
-            errors.len(),
-            errors.join("\n  ")
-        );
-    }
+    assert!(
+        errors.is_empty(),
+        "Proof tree correctness errors ({}):\n  {}",
+        errors.len(),
+        errors.join("\n  ")
+    );
 }
 
 /// Test aggregation via the handler path - verifies sample_inputs arity
@@ -894,27 +892,27 @@ async fn test_proof_tree_aggregation_via_handler() {
     handler
         .query_program(
             None,
-            r#"+can_reach(A, B) <- direct_flight(A, B, _, _)"#.into(),
+            r"+can_reach(A, B) <- direct_flight(A, B, _, _)".into(),
         )
         .await
         .unwrap();
     handler
         .query_program(
             None,
-            r#"+can_reach(A, C) <- direct_flight(A, B, _, _), can_reach(B, C)"#.into(),
+            r"+can_reach(A, C) <- direct_flight(A, B, _, _), can_reach(B, C)".into(),
         )
         .await
         .unwrap();
     handler
         .query_program(
             None,
-            r#"+reachable_count(City, count<Dest>) <- can_reach(City, Dest)"#.into(),
+            r"+reachable_count(City, count<Dest>) <- can_reach(City, Dest)".into(),
         )
         .await
         .unwrap();
 
     let result = handler
-        .query_program(None, r#".why ?reachable_count(City, N)"#.into())
+        .query_program(None, r".why ?reachable_count(City, N)".into())
         .await
         .unwrap();
     let graphs = result.proof_trees.expect("should have graphs");
@@ -973,13 +971,12 @@ async fn test_proof_tree_aggregation_via_handler() {
         }
     }
 
-    if !errors.is_empty() {
-        panic!(
-            "Aggregation proof tree errors ({}):\n  {}",
-            errors.len(),
-            errors.join("\n  ")
-        );
-    }
+    assert!(
+        errors.is_empty(),
+        "Aggregation proof tree errors ({}):\n  {}",
+        errors.len(),
+        errors.join("\n  ")
+    );
 }
 
 /// Test that .agent start returns the first step and .agent next advances.

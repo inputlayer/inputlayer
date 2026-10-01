@@ -528,7 +528,7 @@ mod validation_tests {
             Value::string("not_int"),
         ]);
 
-        let result = engine.validate_batch(&schema, &[tuple.clone()]);
+        let result = engine.validate_batch(&schema, std::slice::from_ref(&tuple));
 
         if let Err(ValidationError::BatchRejected { violations, .. }) = result {
             // Violation should contain the original tuple
@@ -765,7 +765,7 @@ mod relation_schema_tests {
             .with_column(ColumnSchema::new("name", SchemaType::String))
             .with_column(ColumnSchema::new("active", SchemaType::Bool));
 
-        let display = format!("{}", schema);
+        let display = format!("{schema}");
         assert_eq!(display, "Person(id: int, name: string, active: bool)");
     }
 
@@ -915,12 +915,12 @@ mod edge_case_tests {
         // Schema with many columns
         let mut schema = RelationSchema::new("Wide");
         for i in 0..20 {
-            schema = schema.with_column(ColumnSchema::new(format!("col{}", i), SchemaType::Int));
+            schema = schema.with_column(ColumnSchema::new(format!("col{i}"), SchemaType::Int));
         }
 
         let mut engine = ValidationEngine::new();
 
-        let values: Vec<Value> = (0..20).map(|i| Value::Int64(i)).collect();
+        let values: Vec<Value> = (0..20).map(Value::Int64).collect();
         let tuple = Tuple::new(values);
 
         let result = engine.validate_batch(&schema, &[tuple]);

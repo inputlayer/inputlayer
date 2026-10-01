@@ -9,11 +9,11 @@ use tempfile::TempDir;
 
 // Test Helpers
 fn create_test_storage() -> (StorageEngine, TempDir) {
-    let temp = TempDir::new().unwrap();
+    let temp = TempDir::new().expect("create temp dir");
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
     config.storage.performance.num_threads = 4;
-    let storage = StorageEngine::new(config).unwrap();
+    let storage = StorageEngine::new(config).expect("create storage engine");
     (storage, temp)
 }
 
@@ -129,7 +129,7 @@ fn test_lock_contention_no_starvation() {
         let handle = thread::spawn(move || {
             let mut i = 0i32;
             while running_clone.load(Ordering::Relaxed) {
-                let tuple_id = writer_id as i32 * 100000 + i;
+                let tuple_id = writer_id * 100000 + i;
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let _ = storage_guard.insert_into(
                     "starvation_test",
@@ -227,7 +227,7 @@ fn test_concurrent_kg_create_delete() {
         let storage_clone = Arc::clone(&storage);
         let handle = thread::spawn(move || {
             for i in 0..operations_per_thread {
-                let kg_name = format!("temp_kg_{}_{}", thread_id, i);
+                let kg_name = format!("temp_kg_{thread_id}_{i}");
 
                 // Create
                 {
@@ -238,12 +238,12 @@ fn test_concurrent_kg_create_delete() {
                 // Write some data
                 {
                     let storage_guard = storage_clone.write().expect("Lock failed");
-                    let _ = storage_guard.insert_into(&kg_name, "data", vec![(i as i32, i as i32)]);
+                    let _ = storage_guard.insert_into(&kg_name, "data", vec![(i, i)]);
                 }
 
                 // Delete
                 {
-                    let mut storage_guard = storage_clone.write().expect("Lock failed");
+                    let storage_guard = storage_clone.write().expect("Lock failed");
                     let _ = storage_guard.drop_knowledge_graph(&kg_name);
                 }
             }
@@ -273,7 +273,7 @@ fn test_concurrent_kg_switch_under_load() {
 
     // Create multiple KGs with different data
     for i in 0..5 {
-        let kg_name = format!("switch_kg_{}", i);
+        let kg_name = format!("switch_kg_{i}");
         storage.create_knowledge_graph(&kg_name).unwrap();
         let data: Vec<(i32, i32)> = (0..=i).map(|j| (j, j * 10)).collect();
         storage.insert_into(&kg_name, "data", data).unwrap();
@@ -292,7 +292,7 @@ fn test_concurrent_kg_switch_under_load() {
             for i in 0..switches_per_thread {
                 // Switch between KGs based on iteration
                 let kg_idx = (thread_id + i) % 5;
-                let kg_name = format!("switch_kg_{}", kg_idx);
+                let kg_name = format!("switch_kg_{kg_idx}");
 
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let results = storage_guard
@@ -353,7 +353,7 @@ fn test_concurrent_rule_modification() {
                 // Try to drop non-existent rules (should not error)
                 {
                     let storage_guard = storage_clone.write().expect("Lock failed");
-                    let rule_name = format!("test_rule_{}_{}", thread_id, i);
+                    let rule_name = format!("test_rule_{thread_id}_{i}");
                     let _ = storage_guard.drop_rule_in("rule_mod", &rule_name);
                 }
             }
@@ -651,7 +651,7 @@ fn test_no_data_loss_during_concurrent_operations() {
                     );
                 } else {
                     // Writer - add to different relation
-                    let tuple_id = (thread_id * 1000 + i) as i32;
+                    let tuple_id = thread_id * 1000 + i;
                     storage_guard
                         .insert_into("no_loss_test", "new_data", vec![(tuple_id, tuple_id)])
                         .expect("Insert failed");

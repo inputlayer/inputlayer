@@ -1,5 +1,8 @@
 //! Insert performance benchmarks: single, small batch, and large batch.
 
+// Benchmark setup aborts on failure; `unwrap` is the intended behavior.
+#![allow(clippy::unwrap_used)]
+
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use inputlayer::{protocol::handler::Handler, Config};
 use std::time::Duration;

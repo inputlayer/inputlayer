@@ -11,6 +11,9 @@
 //! 8. Aggregation Queries
 //! 9. Persistence Round-Trip (WAL + Recovery)
 
+// Benchmark setup aborts on failure; `unwrap` is the intended behavior.
+#![allow(clippy::unwrap_used)]
+
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use inputlayer::{protocol::handler::Handler, Config, DurabilityMode};
 use rand::prelude::*;
@@ -236,7 +239,7 @@ fn bench_transitive_closure(c: &mut Criterion) {
                 .unwrap();
         });
 
-        group.bench_with_input(BenchmarkId::new("materialize", &label), &(), |b, _| {
+        group.bench_with_input(BenchmarkId::new("materialize", &label), &(), |b, ()| {
             b.iter(|| rt.block_on(handler.query_program(None, "?reach(X, Y)".to_string())));
         });
     }
@@ -274,17 +277,17 @@ fn bench_magic_sets(c: &mut Criterion) {
         });
 
         // Benchmark: Full TC (unbound) - baseline
-        group.bench_with_input(BenchmarkId::new("full_tc", &label), &(), |b, _| {
+        group.bench_with_input(BenchmarkId::new("full_tc", &label), &(), |b, ()| {
             b.iter(|| rt.block_on(handler.query_program(None, "?reach(X, Y)".to_string())));
         });
 
         // Benchmark: Bound query ?reach(1, Y) - should be much faster with magic sets
-        group.bench_with_input(BenchmarkId::new("bound_from_1", &label), &(), |b, _| {
+        group.bench_with_input(BenchmarkId::new("bound_from_1", &label), &(), |b, ()| {
             b.iter(|| rt.block_on(handler.query_program(None, "?reach(1, Y)".to_string())));
         });
 
         // Benchmark: Point query ?reach(1, 42)
-        group.bench_with_input(BenchmarkId::new("point_1_42", &label), &(), |b, _| {
+        group.bench_with_input(BenchmarkId::new("point_1_42", &label), &(), |b, ()| {
             b.iter(|| rt.block_on(handler.query_program(None, "?reach(1, 42)".to_string())));
         });
     }
@@ -310,7 +313,7 @@ fn bench_incremental_updates(c: &mut Criterion) {
 
         // We need a fresh handler per iteration for the incremental insert,
         // so we use iter_custom to control timing precisely.
-        group.bench_with_input(BenchmarkId::new("requery", &label), &(), |b, _| {
+        group.bench_with_input(BenchmarkId::new("requery", &label), &(), |b, ()| {
             b.iter_custom(|iters| {
                 let mut total = Duration::ZERO;
                 for i in 0..iters {
@@ -406,7 +409,7 @@ fn bench_multi_hop_deduction(c: &mut Criterion) {
         });
 
         // Query: what's relevant for a specific city?
-        group.bench_with_input(BenchmarkId::new("city_lookup", &label), &(), |b, _| {
+        group.bench_with_input(BenchmarkId::new("city_lookup", &label), &(), |b, ()| {
             b.iter(|| {
                 rt.block_on(
                     handler.query_program(None, "?relevant(Id, Text, \"city_42\")".to_string()),
@@ -443,7 +446,7 @@ fn bench_three_way_join(c: &mut Criterion) {
         });
 
         // 3-way join + filter
-        group.bench_with_input(BenchmarkId::new("join_filter", &label), &(), |b, _| {
+        group.bench_with_input(BenchmarkId::new("join_filter", &label), &(), |b, ()| {
             b.iter(|| {
                 rt.block_on(handler.query_program(
                     None,
@@ -489,7 +492,7 @@ fn bench_vector_search(c: &mut Criterion) {
         let query_vec = generate_random_vectors(1, dims, 999);
         let query_lit = format_vector(&query_vec[0]);
 
-        group.bench_with_input(BenchmarkId::new("cosine_search", &label), &(), |b, _| {
+        group.bench_with_input(BenchmarkId::new("cosine_search", &label), &(), |b, ()| {
             b.iter(|| {
                 rt.block_on(handler.query_program(
                     None,
@@ -587,7 +590,7 @@ fn bench_persistence(c: &mut Criterion) {
                 {
                     let (handler, _tmp2) = {
                         let mut config = Config::default();
-                        config.storage.data_dir = data_dir.clone();
+                        config.storage.data_dir.clone_from(&data_dir);
                         config.storage.performance.query_timeout_ms = 0;
                         config.storage.performance.max_insert_tuples = 0;
                         config.storage.performance.max_result_rows = 0;
@@ -832,12 +835,8 @@ fn bench_incremental_aggregation(c: &mut Criterion) {
                             .unwrap();
 
                         // Insert new employees with offset IDs to avoid duplicates
-                        let delta = generate_employees(
-                            delta_count,
-                            departments,
-                            5000 + i as u64,
-                            base_employees,
-                        );
+                        let delta =
+                            generate_employees(delta_count, departments, 5000 + i, base_employees);
                         handler.query_program(None, delta).await.unwrap();
                     });
                     let start = Instant::now();

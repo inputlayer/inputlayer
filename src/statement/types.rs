@@ -658,7 +658,7 @@ mod tests {
     fn test_parse_type_decl_no_colon() {
         let result = parse_type_decl("type Email string");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains(":"));
+        assert!(result.unwrap_err().contains(':'));
     }
 
     #[test]

@@ -2220,10 +2220,10 @@ mod tests {
             .collect();
 
         // 10 inserters
-        for i in 0..10 {
+        for (i, id) in shared_ids.iter().enumerate() {
             let mgr = Arc::clone(&mgr);
             let barrier = Arc::clone(&barrier);
-            let id = shared_ids[i].clone();
+            let id = id.clone();
             handles.push(std::thread::spawn(move || {
                 barrier.wait();
                 mgr.insert_ephemeral(&id, "data", vec![make_tuple(vec![i as i64])])
@@ -2232,10 +2232,10 @@ mod tests {
         }
 
         // 10 metadata readers
-        for i in 0..10 {
+        for id in &shared_ids {
             let mgr = Arc::clone(&mgr);
             let barrier = Arc::clone(&barrier);
-            let id = shared_ids[i].clone();
+            let id = id.clone();
             handles.push(std::thread::spawn(move || {
                 barrier.wait();
                 let _ = mgr.get_query_metadata(&id);

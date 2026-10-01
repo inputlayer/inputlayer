@@ -1031,7 +1031,7 @@ mod tests {
                 }
             ));
         } else {
-            panic!("Expected arithmetic term, got {:?}", term);
+            panic!("Expected arithmetic term, got {term:?}");
         }
     }
 
@@ -1047,7 +1047,7 @@ mod tests {
                 }
             ));
         } else {
-            panic!("Expected arithmetic term, got {:?}", term);
+            panic!("Expected arithmetic term, got {term:?}");
         }
     }
 
@@ -1063,7 +1063,7 @@ mod tests {
                 }
             ));
         } else {
-            panic!("Expected arithmetic term, got {:?}", term);
+            panic!("Expected arithmetic term, got {term:?}");
         }
     }
 
@@ -1079,7 +1079,7 @@ mod tests {
                 }
             ));
         } else {
-            panic!("Expected arithmetic term, got {:?}", term);
+            panic!("Expected arithmetic term, got {term:?}");
         }
     }
 
@@ -1095,7 +1095,7 @@ mod tests {
                 }
             ));
         } else {
-            panic!("Expected arithmetic term, got {:?}", term);
+            panic!("Expected arithmetic term, got {term:?}");
         }
     }
 
@@ -1114,7 +1114,7 @@ mod tests {
                 }
             ));
         } else {
-            panic!("Expected arithmetic term, got {:?}", term);
+            panic!("Expected arithmetic term, got {term:?}");
         }
     }
 
@@ -1128,7 +1128,7 @@ mod tests {
             if let ArithExpr::Binary { op: inner_op, .. } = *left {
                 assert_eq!(inner_op, ArithOp::Add, "Inner op should be Add");
             } else {
-                panic!("Expected Add as left of Mul, got {:?}", left);
+                panic!("Expected Add as left of Mul, got {left:?}");
             }
             // Right should be Variable C
             assert!(
@@ -1136,7 +1136,7 @@ mod tests {
                 "Right should be C"
             );
         } else {
-            panic!("Expected multiplication, got {:?}", term);
+            panic!("Expected multiplication, got {term:?}");
         }
     }
 
@@ -1149,8 +1149,7 @@ mod tests {
         if let BodyPredicate::Comparison(ref left, ComparisonOp::Equal, ref right) = rule.body[1] {
             assert!(
                 matches!(left, Term::Variable(ref v) if v == "R"),
-                "Left should be R, got {:?}",
-                left
+                "Left should be R, got {left:?}"
             );
             if let Term::Arithmetic(ArithExpr::Binary {
                 op: ArithOp::Mul,
@@ -1171,16 +1170,15 @@ mod tests {
                     );
                     assert!(matches!(**add_right, ArithExpr::Constant(5)), "Should be 5");
                 } else {
-                    panic!("Expected Add(X, 5) as left of Mul, got {:?}", left);
+                    panic!("Expected Add(X, 5) as left of Mul, got {left:?}");
                 }
                 // Right of Mul should be Constant(2)
                 assert!(
                     matches!(**right, ArithExpr::Constant(2)),
-                    "Should be 2, got {:?}",
-                    right
+                    "Should be 2, got {right:?}"
                 );
             } else {
-                panic!("Expected Arithmetic Mul, got {:?}", right);
+                panic!("Expected Arithmetic Mul, got {right:?}");
             }
         } else {
             panic!("Expected Comparison, got {:?}", rule.body[1]);
@@ -1328,7 +1326,7 @@ mod tests {
             assert!((values[1] - 2.0).abs() < f64::EPSILON);
             assert!((values[2] - 3.0).abs() < f64::EPSILON);
         } else {
-            panic!("Expected VectorLiteral, got {:?}", term);
+            panic!("Expected VectorLiteral, got {term:?}");
         }
     }
 
@@ -1371,7 +1369,7 @@ mod tests {
             assert!(matches!(args[0], Term::Variable(ref v) if v == "V1"));
             assert!(matches!(args[1], Term::Variable(ref v) if v == "V2"));
         } else {
-            panic!("Expected FunctionCall, got {:?}", term);
+            panic!("Expected FunctionCall, got {term:?}");
         }
     }
 
@@ -1446,7 +1444,7 @@ mod tests {
         if let Term::FloatConstant(v) = term {
             assert!((v - 3.14).abs() < f64::EPSILON);
         } else {
-            panic!("Expected FloatConstant, got {:?}", term);
+            panic!("Expected FloatConstant, got {term:?}");
         }
     }
 
@@ -1456,7 +1454,7 @@ mod tests {
         if let Term::FloatConstant(v) = term {
             assert!((v - (-0.5)).abs() < f64::EPSILON);
         } else {
-            panic!("Expected FloatConstant, got {:?}", term);
+            panic!("Expected FloatConstant, got {term:?}");
         }
     }
 
@@ -1480,7 +1478,7 @@ mod tests {
             assert_eq!(output_vars, vec!["Score"]);
             assert!(descending); // default for top_k is desc
         } else {
-            panic!("Expected TopK aggregate, got {:?}", term);
+            panic!("Expected TopK aggregate, got {term:?}");
         }
     }
 
@@ -1547,7 +1545,7 @@ mod tests {
             assert_eq!(output_vars, vec!["Name", "Score"]);
             assert!(descending);
         } else {
-            panic!("Expected TopK aggregate, got {:?}", term);
+            panic!("Expected TopK aggregate, got {term:?}");
         }
     }
 
@@ -1571,7 +1569,7 @@ mod tests {
             assert!((threshold - 0.8).abs() < f64::EPSILON);
             assert!(descending); // default desc
         } else {
-            panic!("Expected TopKThreshold aggregate, got {:?}", term);
+            panic!("Expected TopKThreshold aggregate, got {term:?}");
         }
     }
 
@@ -1591,7 +1589,7 @@ mod tests {
             assert_eq!(distance_var, "Dist");
             assert!((max_distance - 0.5).abs() < f64::EPSILON);
         } else {
-            panic!("Expected WithinRadius aggregate, got {:?}", term);
+            panic!("Expected WithinRadius aggregate, got {term:?}");
         }
     }
 
@@ -1750,7 +1748,7 @@ mod tests {
         // New syntax: Points:desc annotation inside aggregate
         let result =
             parse_rule("top_players(Player, top_k<3, Points:desc>) <- score(Player, Points)");
-        println!("Result: {:?}", result);
+        println!("Result: {result:?}");
         let rule = result.unwrap();
         assert_eq!(rule.head.relation, "top_players");
         assert_eq!(rule.head.args.len(), 2); // Player, top_k<3, Points:desc>
@@ -1831,7 +1829,7 @@ mod tests {
         assert!(parse_rule(r#"r(X) <- hnsw_nearest("idx", [1.0], 5, X)"#).is_err());
 
         // Non-string index name
-        assert!(parse_rule(r#"r(X, D) <- hnsw_nearest(idx, [1.0], 5, X, D)"#).is_err());
+        assert!(parse_rule(r"r(X, D) <- hnsw_nearest(idx, [1.0], 5, X, D)").is_err());
 
         // k = 0
         assert!(parse_rule(r#"r(X, D) <- hnsw_nearest("idx", [1.0], 0, X, D)"#).is_err());

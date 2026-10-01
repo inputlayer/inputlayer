@@ -95,7 +95,7 @@ fn test_triangle_detection() {
         .unwrap();
 
     // Triangle 1-2-3 should be detected
-    assert!(results.len() >= 1);
+    assert!(!results.is_empty());
 }
 
 // pipeline_demo.rs tests

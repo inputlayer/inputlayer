@@ -429,7 +429,7 @@ mod tests {
     use crate::value::Value;
 
     fn make_tuple(values: Vec<i32>) -> Tuple {
-        Tuple::new(values.into_iter().map(|v| Value::Int32(v)).collect())
+        Tuple::new(values.into_iter().map(Value::Int32).collect())
     }
 
     fn make_compiled_rule(name: &str, deps: Vec<&str>, stratum: usize) -> CompiledRule {

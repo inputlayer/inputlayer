@@ -31,7 +31,7 @@ fn simple_rule(head: &str, args: Vec<&str>, body: Vec<BodyPredicate>) -> Rule {
     Rule {
         head: Atom {
             relation: head.to_string(),
-            args: args.into_iter().map(|s| var(s)).collect(),
+            args: args.into_iter().map(var).collect(),
         },
         body,
     }
@@ -40,7 +40,7 @@ fn simple_rule(head: &str, args: Vec<&str>, body: Vec<BodyPredicate>) -> Rule {
 fn pos(rel: &str, args: Vec<&str>) -> BodyPredicate {
     BodyPredicate::Positive(Atom {
         relation: rel.to_string(),
-        args: args.into_iter().map(|s| var(s)).collect(),
+        args: args.into_iter().map(var).collect(),
     })
 }
 

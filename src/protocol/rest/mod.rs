@@ -436,6 +436,27 @@ pub async fn start_http_server(
     Ok(())
 }
 
+/// Wait for a shutdown signal (SIGINT or SIGTERM).
+async fn shutdown_signal() {
+    let ctrl_c = tokio::signal::ctrl_c();
+
+    #[cfg(unix)]
+    {
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler");
+        tokio::select! {
+            _ = ctrl_c => { info!("Received SIGINT, shutting down..."); }
+            _ = sigterm.recv() => { info!("Received SIGTERM, shutting down..."); }
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        ctrl_c.await.expect("failed to listen for ctrl-c");
+        info!("Received SIGINT, shutting down...");
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -681,26 +702,5 @@ mod tests {
             StatusCode::UNAUTHORIZED,
             "Unauthenticated request to /metrics must get 401"
         );
-    }
-}
-
-/// Wait for a shutdown signal (SIGINT or SIGTERM).
-async fn shutdown_signal() {
-    let ctrl_c = tokio::signal::ctrl_c();
-
-    #[cfg(unix)]
-    {
-        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install SIGTERM handler");
-        tokio::select! {
-            _ = ctrl_c => { info!("Received SIGINT, shutting down..."); }
-            _ = sigterm.recv() => { info!("Received SIGTERM, shutting down..."); }
-        }
-    }
-
-    #[cfg(not(unix))]
-    {
-        ctrl_c.await.expect("failed to listen for ctrl-c");
-        info!("Received SIGINT, shutting down...");
     }
 }

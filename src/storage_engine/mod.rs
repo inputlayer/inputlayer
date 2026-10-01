@@ -3088,7 +3088,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let config = create_test_config(temp.path().to_path_buf());
 
-        let mut storage = StorageEngine::new(config).unwrap();
+        let storage = StorageEngine::new(config).unwrap();
 
         let result = storage.drop_knowledge_graph("default");
         assert!(matches!(result, Err(StorageError::CannotDropDefault)));
@@ -3184,7 +3184,7 @@ mod tests {
 
         // Check views are registered
         let views = storage.list_rules().unwrap();
-        println!("Views: {:?}", views);
+        println!("Views: {views:?}");
         assert!(
             views.contains(&"connected".to_string()),
             "View 'connected' should exist"
@@ -3213,7 +3213,7 @@ mod tests {
         let result = storage
             .execute_query_with_rules("result(X,Y) <- connected(X,Y)")
             .unwrap();
-        println!("All connected pairs: {:?}", result);
+        println!("All connected pairs: {result:?}");
 
         // Expected transitive closure: (1,2), (2,3), (3,4), (1,3), (2,4), (1,4)
         assert!(
@@ -3242,7 +3242,7 @@ mod tests {
         let specific_result = storage
             .execute_query_with_rules("result(1, 3) <- connected(1, 3)")
             .unwrap();
-        println!("connected(1, 3): {:?}", specific_result);
+        println!("connected(1, 3): {specific_result:?}");
         assert_eq!(
             specific_result.len(),
             1,
@@ -4264,7 +4264,7 @@ mod tests {
     fn test_drop_nonexistent_knowledge_graph() {
         let temp = TempDir::new().unwrap();
         let config = create_test_config(temp.path().to_path_buf());
-        let mut storage = StorageEngine::new(config).unwrap();
+        let storage = StorageEngine::new(config).unwrap();
 
         let result = storage.drop_knowledge_graph("nonexistent");
         assert!(matches!(
@@ -4277,7 +4277,7 @@ mod tests {
     fn test_drop_knowledge_graph_success() {
         let temp = TempDir::new().unwrap();
         let config = create_test_config(temp.path().to_path_buf());
-        let mut storage = StorageEngine::new(config).unwrap();
+        let storage = StorageEngine::new(config).unwrap();
 
         storage.create_knowledge_graph("to_drop").unwrap();
         assert!(storage
@@ -4295,7 +4295,7 @@ mod tests {
     fn test_drop_knowledge_graph_cleans_persist_shards() {
         let temp = TempDir::new().unwrap();
         let config = create_test_config(temp.path().to_path_buf());
-        let mut storage = StorageEngine::new(config.clone()).unwrap();
+        let storage = StorageEngine::new(config.clone()).unwrap();
 
         // Create a KG and insert some data to create persist shards
         storage.create_knowledge_graph("shard_test").unwrap();
@@ -4499,7 +4499,7 @@ mod tests {
         assert!(desc.is_some());
         let desc = desc.unwrap();
         assert!(desc.contains("edge"));
-        assert!(desc.contains("2")); // tuple count
+        assert!(desc.contains('2')); // tuple count
     }
 
     #[test]
@@ -5050,7 +5050,7 @@ mod tests {
     fn test_drop_knowledge_graph() {
         let temp = TempDir::new().unwrap();
         let config = create_test_config(temp.path().to_path_buf());
-        let mut storage = StorageEngine::new(config).unwrap();
+        let storage = StorageEngine::new(config).unwrap();
 
         storage.create_knowledge_graph("drop_kg").unwrap();
         storage.drop_knowledge_graph("drop_kg").unwrap();
@@ -5062,7 +5062,7 @@ mod tests {
     fn test_drop_nonexistent_kg() {
         let temp = TempDir::new().unwrap();
         let config = create_test_config(temp.path().to_path_buf());
-        let mut storage = StorageEngine::new(config).unwrap();
+        let storage = StorageEngine::new(config).unwrap();
 
         let result = storage.drop_knowledge_graph("nope_kg");
         assert!(result.is_err());
@@ -5442,7 +5442,7 @@ mod tests {
     fn test_clear_rule_in() {
         let temp = TempDir::new().unwrap();
         let config = create_test_config(temp.path().to_path_buf());
-        let mut storage = StorageEngine::new(config).unwrap();
+        let storage = StorageEngine::new(config).unwrap();
 
         storage.create_knowledge_graph("clear_rule_kg").unwrap();
         let rule_def = make_simple_rule_def("reach", "edge");

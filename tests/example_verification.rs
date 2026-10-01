@@ -32,9 +32,10 @@ fn find_iql_files(dir: &Path) -> Vec<std::path::PathBuf> {
 fn test_all_iql_examples_present() {
     let examples_dir = Path::new("examples/iql");
 
-    if !examples_dir.exists() {
-        panic!("examples/iql directory does not exist!");
-    }
+    assert!(
+        examples_dir.exists(),
+        "examples/iql directory does not exist!"
+    );
 
     let iql_files = find_iql_files(examples_dir);
 
@@ -57,8 +58,7 @@ fn test_all_iql_examples_present() {
         let category_path = examples_dir.join(category);
         assert!(
             category_path.exists(),
-            "Missing test category directory: {}",
-            category
+            "Missing test category directory: {category}"
         );
     }
 
@@ -105,9 +105,10 @@ fn test_all_test_files_have_output_snapshots() {
 fn test_all_rust_examples_present() {
     let examples_dir = Path::new("examples/rust");
 
-    if !examples_dir.exists() {
-        panic!("examples/rust directory does not exist!");
-    }
+    assert!(
+        examples_dir.exists(),
+        "examples/rust directory does not exist!"
+    );
 
     let entries = fs::read_dir(examples_dir).expect("Failed to read examples/rust directory");
 
@@ -142,7 +143,7 @@ fn test_examples_not_empty() {
 
     for path in iql_files {
         let content =
-            fs::read_to_string(&path).unwrap_or_else(|_| panic!("Failed to read {:?}", path));
+            fs::read_to_string(&path).unwrap_or_else(|_| panic!("Failed to read {path:?}"));
 
         assert!(
             !content.trim().is_empty(),
@@ -167,7 +168,7 @@ fn test_output_files_not_empty() {
         let out_file = iql_file.with_extension("iql.out");
         if out_file.exists() {
             let content = fs::read_to_string(&out_file)
-                .unwrap_or_else(|_| panic!("Failed to read {:?}", out_file));
+                .unwrap_or_else(|_| panic!("Failed to read {out_file:?}"));
 
             assert!(
                 !content.trim().is_empty(),
@@ -234,7 +235,7 @@ fn extract_rules_from_test(content: &str) -> Vec<String> {
         .filter_map(|line| {
             let trimmed = line.trim();
             // Keep lines that look like persistent rule declarations (start with "+" and contain "<-")
-            if trimmed.starts_with("+") && trimmed.contains("<-") {
+            if trimmed.starts_with('+') && trimmed.contains("<-") {
                 Some(trimmed.to_string())
             } else {
                 None
@@ -307,8 +308,8 @@ fn test_example_statistics() {
     let iql_count = find_iql_files(iql_dir).len();
 
     println!("\n=== Example Statistics ===");
-    println!("Rust examples: {}", rust_count);
-    println!("IQL test files: {}", iql_count);
+    println!("Rust examples: {rust_count}");
+    println!("IQL test files: {iql_count}");
     println!("Total examples: {}", rust_count + iql_count);
 
     // Verify minimum counts

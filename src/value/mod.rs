@@ -1270,13 +1270,13 @@ mod tests {
     #[test]
     fn test_vector_display() {
         let v_small = Value::vector(vec![1.0, 2.0, 3.0]);
-        let display = format!("{}", v_small);
+        let display = format!("{v_small}");
         assert!(display.contains("1.0000"));
         assert!(display.contains("2.0000"));
         assert!(display.contains("3.0000"));
 
         let v_large = Value::vector(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
-        let display_large = format!("{}", v_large);
+        let display_large = format!("{v_large}");
         assert!(display_large.contains("... 3 more"));
     }
 
@@ -1355,7 +1355,7 @@ mod tests {
     #[test]
     fn test_timestamp_display() {
         let ts = Value::Timestamp(1700000000000i64);
-        let display = format!("{}", ts);
+        let display = format!("{ts}");
         assert!(display.contains("1700000000000"));
         assert!(display.contains("ms"));
     }
@@ -1575,8 +1575,8 @@ mod tests {
             expected: 3,
             got: 2,
         };
-        assert!(err.to_string().contains("3"));
-        assert!(err.to_string().contains("2"));
+        assert!(err.to_string().contains('3'));
+        assert!(err.to_string().contains('2'));
 
         let err = SchemaValidationError::TypeMismatch {
             column: "foo".to_string(),

@@ -732,7 +732,7 @@ mod tests {
             mat_names,
         );
 
-        let debug_str = format!("{:?}", snapshot);
+        let debug_str = format!("{snapshot:?}");
         assert!(debug_str.contains("materialized: 2"));
     }
 
@@ -899,7 +899,7 @@ mod tests {
         );
 
         let snapshot = KnowledgeGraphSnapshot::new(input_tuples, Vec::new());
-        let debug = format!("{:?}", snapshot);
+        let debug = format!("{snapshot:?}");
         assert!(debug.contains("KnowledgeGraphSnapshot"));
         assert!(debug.contains("relations: 1"));
         assert!(debug.contains("tuples: 1"));

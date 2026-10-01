@@ -11,8 +11,6 @@
 //! - Collection size boundaries
 
 use inputlayer::{Tuple, Value};
-use std::i32;
-use std::i64;
 use std::sync::Arc;
 
 // Integer Boundary Tests
@@ -196,21 +194,21 @@ fn test_binary_tuple() {
 
 #[test]
 fn test_high_arity_tuple_10() {
-    let values: Vec<Value> = (0..10).map(|i| Value::Int32(i)).collect();
+    let values: Vec<Value> = (0..10).map(Value::Int32).collect();
     let tuple = Tuple::new(values);
     assert_eq!(tuple.arity(), 10);
 }
 
 #[test]
 fn test_high_arity_tuple_20() {
-    let values: Vec<Value> = (0..20).map(|i| Value::Int32(i)).collect();
+    let values: Vec<Value> = (0..20).map(Value::Int32).collect();
     let tuple = Tuple::new(values);
     assert_eq!(tuple.arity(), 20);
 }
 
 #[test]
 fn test_high_arity_tuple_100() {
-    let values: Vec<Value> = (0..100).map(|i| Value::Int32(i)).collect();
+    let values: Vec<Value> = (0..100).map(Value::Int32).collect();
     let tuple = Tuple::new(values);
     assert_eq!(tuple.arity(), 100);
 }
