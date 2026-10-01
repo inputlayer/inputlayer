@@ -4,9 +4,8 @@
 //! persistent rules that define them. A change outside this set cannot alter
 //! the query's result.
 
-use std::collections::BTreeSet;
-
-use crate::ast::{BodyPredicate, Rule};
+use crate::ast::dependencies::DependencyClosure;
+use crate::ast::Rule;
 use crate::statement::QueryGoal;
 
 use super::ChangeSet;
@@ -14,45 +13,24 @@ use super::ChangeSet;
 /// Relations a standing query reads.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Dependencies {
-    relations: BTreeSet<String>,
-    /// Set when the query reads state not tracked by relation name (HNSW
-    /// indexes), so every change must be treated as relevant.
-    every_change: bool,
+    closure: DependencyClosure,
 }
 
 impl Dependencies {
     /// Compute the dependency closure of `goal` through `rules`.
     pub fn for_query(goal: &QueryGoal, rules: &[Rule]) -> Self {
-        let mut deps = Self::default();
-        let mut frontier: Vec<String> = goal.goal.iter().map(|g| g.relation.clone()).collect();
-        deps.collect_body(&goal.body, &mut frontier);
-        while let Some(relation) = frontier.pop() {
-            if deps.relations.contains(&relation) {
-                continue;
-            }
-            for rule in rules.iter().filter(|r| r.head.relation == relation) {
-                deps.collect_body(&rule.body, &mut frontier);
-            }
-            deps.relations.insert(relation);
+        let mut closure = DependencyClosure::default();
+        if let Some(atom) = &goal.goal {
+            closure.add_relation(&atom.relation);
         }
-        deps
-    }
-
-    fn collect_body(&mut self, body: &[BodyPredicate], frontier: &mut Vec<String>) {
-        for predicate in body {
-            match predicate {
-                BodyPredicate::Positive(atom) | BodyPredicate::Negated(atom) => {
-                    frontier.push(atom.relation.clone());
-                }
-                BodyPredicate::HnswNearest { .. } => self.every_change = true,
-                BodyPredicate::Comparison(..) => {}
-            }
-        }
+        closure.add_body(&goal.body);
+        closure.close_over(rules);
+        Self { closure }
     }
 
     /// Relations in the closure, sorted.
     pub fn relations(&self) -> impl Iterator<Item = &str> {
-        self.relations.iter().map(String::as_str)
+        self.closure.relations()
     }
 
     /// Whether `change` can alter a result with these dependencies.
@@ -60,7 +38,8 @@ impl Dependencies {
         match change {
             ChangeSet::Everything => true,
             ChangeSet::Relations(changed) => {
-                self.every_change || changed.iter().any(|r| self.relations.contains(r))
+                self.closure.reads_untracked_state()
+                    || changed.iter().any(|r| self.closure.contains(r))
             }
         }
     }

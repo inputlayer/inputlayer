@@ -30,8 +30,10 @@
 //! storage.save_knowledge_graph("analytics").unwrap();
 //! ```
 
+mod relation_store;
 mod snapshot;
 mod vector_index;
+pub use relation_store::RelationStore;
 pub use snapshot::KnowledgeGraphSnapshot;
 
 use crate::config::Config;
@@ -47,8 +49,8 @@ use crate::storage::persist::{
 use crate::storage::{
     KnowledgeGraphMetadata, KnowledgeGraphsMetadata, StorageError, StorageResult,
 };
-use crate::value::Tuple;
-use crate::IQLEngine;
+use crate::value::relation::to_vec_map;
+use crate::value::{Relation, Tuple};
 use arc_swap::ArcSwap;
 use chrono::Utc;
 use dashmap::DashMap;
@@ -92,7 +94,8 @@ pub struct StorageEngine {
 /// Single knowledge graph instance
 pub struct KnowledgeGraph {
     name: String,
-    engine: IQLEngine,
+    /// Base relations with dedup indexes; snapshots share its tuples.
+    store: RelationStore,
     metadata: KnowledgeGraphMetadata,
     /// Data directory for this knowledge graph (used for rule and schema persistence)
     data_dir: PathBuf,
@@ -718,7 +721,7 @@ impl StorageEngine {
         };
 
         let mut engine = snapshot.new_engine();
-        engine.input_tuples_mut().clone_from(&snapshot.input_tuples);
+        engine.set_inputs(snapshot.input_tuples.as_ref().clone());
 
         engine
             .debug(&combined)
@@ -758,7 +761,8 @@ impl StorageEngine {
             .map_err(|e| StorageError::Other(format!("Query execution failed: {e}")))?;
 
         let rules = snapshot.rules.as_ref().clone();
-        let base_data = snapshot.input_tuples.as_ref().clone();
+        let base_data = to_vec_map(&snapshot.input_tuples);
+        let derived_data = to_vec_map(&derived_data);
 
         Ok((result_tuples, rules, base_data, derived_data, index_metrics))
     }
@@ -782,7 +786,7 @@ impl StorageEngine {
         };
 
         let rules = snapshot.rules.as_ref().clone();
-        let base_data = snapshot.input_tuples.as_ref().clone();
+        let base_data = to_vec_map(&snapshot.input_tuples);
         Ok((rules, base_data))
     }
 
@@ -1706,7 +1710,7 @@ impl StorageEngine {
         data_dir: PathBuf,
     ) -> StorageResult<KnowledgeGraph> {
         let prefix = format!("{name}:");
-        let mut engine = IQLEngine::with_config(self.config.optimization.clone());
+        let mut store = RelationStore::new();
         let mut metadata = KnowledgeGraphMetadata::new(name.to_string());
 
         // Find all shards for this knowledge graph
@@ -1736,7 +1740,7 @@ impl StorageEngine {
                     // Update metadata with relation info
                     metadata.add_relation(relation.to_string(), schema, tuple_count);
 
-                    engine.add_tuples(relation, tuples);
+                    store.set(relation, tuples);
                 }
             }
         }
@@ -1761,7 +1765,7 @@ impl StorageEngine {
         // Create initial snapshot from loaded data
         let num_workers = self.config.storage.performance.num_threads;
         let mut initial = KnowledgeGraphSnapshot::new_with_workers(
-            engine.input_tuples.clone(),
+            store.relations().clone(),
             rule_catalog.all_rules(),
             num_workers,
         );
@@ -1770,7 +1774,7 @@ impl StorageEngine {
 
         let mut kg = KnowledgeGraph {
             name: name.to_string(),
-            engine,
+            store,
             metadata,
             data_dir,
             rule_catalog,
@@ -2028,7 +2032,7 @@ impl KnowledgeGraph {
 
         KnowledgeGraph {
             name: name.clone(),
-            engine: IQLEngine::new(),
+            store: RelationStore::new(),
             metadata: KnowledgeGraphMetadata::new(name),
             data_dir,
             rule_catalog,
@@ -2045,7 +2049,6 @@ impl KnowledgeGraph {
 
     /// Set the optimizer passes for this KG's engines and published snapshots.
     fn set_optimization(&mut self, config: crate::OptimizationConfig) {
-        self.engine.set_config(config.clone());
         let mut snapshot = (**self.snapshot.load()).clone();
         snapshot.optimization = config.clone();
         self.snapshot.store(Arc::new(snapshot));
@@ -2068,9 +2071,9 @@ impl KnowledgeGraph {
             // Replay existing data into IncrementalEngine so arrangements are
             // populated immediately. This handles the case where data was
             // loaded from persistence before IncrementalEngine was enabled.
-            for (relation, tuples) in &self.engine.input_tuples {
+            for (relation, tuples) in self.store.relations() {
                 if !tuples.is_empty() {
-                    dd.insert(relation, tuples.clone(), 0)
+                    dd.insert(relation, tuples.to_vec(), 0)
                         .map_err(StorageError::IncrementalEngineError)?;
                 }
             }
@@ -2090,7 +2093,8 @@ impl KnowledgeGraph {
     /// Publish a new snapshot atomically
     ///
     /// Called after data modifications to make changes visible to readers.
-    /// This is O(1) - just an atomic pointer swap.
+    /// Relations are shared with the store, so this copies no tuples (apart
+    /// from merging valid materializations).
     ///
     /// If IncrementalEngine has valid materializations, includes them
     /// in the snapshot. Materialized tuples are merged into input_tuples,
@@ -2103,7 +2107,7 @@ impl KnowledgeGraph {
     fn publish_snapshot(&self) {
         let snapshot_start = Instant::now();
         // Start with base relation data
-        let mut input_tuples = self.engine.input_tuples.clone();
+        let mut input_tuples = self.store.relations().clone();
         let rules = self.rule_catalog.all_rules();
 
         // Gather valid materializations from IncrementalEngine
@@ -2160,7 +2164,7 @@ impl KnowledgeGraph {
         }
 
         info!(
-            relations = self.engine.input_tuples.len(),
+            relations = self.store.relations().len(),
             rules = self.rule_catalog.all_rules().len(),
             snapshot_ms = snapshot_start.elapsed().as_millis() as u64,
             "snapshot_publish_complete"
@@ -2229,28 +2233,9 @@ impl KnowledgeGraph {
             vec!["col0".to_string(), "col1".to_string()]
         };
 
-        // Update in-memory production format (input_tuples)
-        let mut new_count = 0;
-        let mut dup_count = 0;
-        let mut new_tuples_for_dd = Vec::new();
-
-        // Get or create the relation's tuple storage
-        let existing_tuples = self
-            .engine
-            .input_tuples
-            .entry(relation.to_string())
-            .or_default();
-
-        for tuple in tuples {
-            if existing_tuples.contains(&tuple) {
-                dup_count += 1;
-            } else {
-                new_tuples_for_dd.push(tuple.clone());
-                existing_tuples.push(tuple);
-                new_count += 1;
-            }
-        }
-        let tuple_count = existing_tuples.len();
+        let (new_tuples_for_dd, dup_count) = self.store.insert(relation, tuples);
+        let new_count = new_tuples_for_dd.len();
+        let tuple_count = self.store.get(relation).map_or(0, Relation::len);
 
         // Update metadata
         self.metadata
@@ -2306,30 +2291,10 @@ impl KnowledgeGraph {
             |r| r.schema.clone(),
         );
 
-        let mut found = false;
-        let mut final_count = 0;
-        let mut deleted_count = 0;
-
-        // Collect actually-deleted tuples for DD shadow write
-        let mut deleted_tuples_for_dd = Vec::new();
-
-        // Update production format (input_tuples)
-        if let Some(existing) = self.engine.input_tuples.get_mut(relation) {
-            // Deduplicate the remove set for consistent DD shadow writes
-            let remove_set: std::collections::HashSet<&Tuple> = tuples_to_remove.iter().collect();
-            // Find which unique tuples will actually be deleted
-            for t in &remove_set {
-                if existing.contains(t) {
-                    deleted_tuples_for_dd.push((*t).clone());
-                }
-            }
-            let count_before = existing.len();
-            // Remove tuples - O(n) scan with O(1) per-element lookup
-            existing.retain(|tuple| !remove_set.contains(tuple));
-            final_count = existing.len();
-            deleted_count = count_before - final_count;
-            found = true;
-        }
+        let found = self.store.contains_relation(relation);
+        let deleted_tuples_for_dd = self.store.delete(relation, tuples_to_remove);
+        let deleted_count = deleted_tuples_for_dd.len();
+        let final_count = self.store.get(relation).map_or(0, Relation::len);
 
         // Update metadata and DD only if data actually changed
         if found && deleted_count > 0 {
@@ -2437,9 +2402,7 @@ impl KnowledgeGraph {
         // Execute using a fresh engine with cloned data (like snapshot execution)
         // This avoids needing &mut self
         let mut temp_engine = crate::IQLEngine::with_config(self.optimization.clone());
-        temp_engine
-            .input_tuples
-            .clone_from(&self.engine.input_tuples);
+        temp_engine.set_inputs(self.store.relations().clone());
         temp_engine.set_num_workers(self.num_workers);
         let tuples = temp_engine.execute_tuples(&program)?;
 
@@ -2515,7 +2478,7 @@ impl KnowledgeGraph {
     pub fn drop_relation(&mut self, name: &str) -> Result<(), String> {
         // Check the relation exists (in metadata or as data)
         let has_metadata = self.metadata.relations.contains_key(name);
-        let has_data = self.engine.input_tuples.contains_key(name);
+        let has_data = self.store.contains_relation(name);
         let has_rule = self.rule_catalog.exists(name);
         let has_schema = self.schema_catalog.get(name).is_some();
 
@@ -2524,7 +2487,7 @@ impl KnowledgeGraph {
         }
 
         // 1. Remove data from engine
-        self.engine.input_tuples.remove(name);
+        self.store.remove(name);
 
         // 2. Remove from metadata
         self.metadata.relations.remove(name);
@@ -2582,9 +2545,8 @@ impl KnowledgeGraph {
     ) -> StorageResult<Vec<(String, usize)>> {
         // Find all relations matching the prefix (sorted for deterministic output)
         let mut matching: Vec<String> = self
-            .engine
-            .input_tuples
-            .keys()
+            .store
+            .names()
             .filter(|name| name.starts_with(prefix))
             .cloned()
             .collect();
@@ -2597,7 +2559,7 @@ impl KnowledgeGraph {
         let mut results = Vec::new();
 
         for relation in &matching {
-            if let Some(tuples) = self.engine.input_tuples.get_mut(relation) {
+            if let Some(tuples) = self.store.get(relation) {
                 let count = tuples.len();
                 if count == 0 {
                     continue;
@@ -2605,7 +2567,7 @@ impl KnowledgeGraph {
 
                 // Feed deletes to IncrementalEngine
                 if let Some(ref dd) = self.incremental {
-                    let _ = dd.delete(relation, tuples.clone(), time);
+                    let _ = dd.delete(relation, tuples.to_vec(), time);
                     let _ = dd.notify_base_update(relation);
                 }
 
@@ -2618,7 +2580,7 @@ impl KnowledgeGraph {
                 let _ = persist.ensure_shard(&shard);
                 let _ = persist.append(&shard, &updates);
 
-                tuples.clear();
+                self.store.clear(relation);
                 self.rebuild_indexes_for(relation);
 
                 // Update metadata
@@ -2694,105 +2656,18 @@ impl KnowledgeGraph {
         self.rule_catalog.rule_arity(name)
     }
 
-    /// Execute a query with views prepended
-    ///
-    /// This prepends all view rules to the query, allowing DD to incrementally
-    /// compute view results based on base facts.
+    /// Execute a query with persistent rules on the current snapshot.
     ///
     /// Rules for materialized relations are skipped - their data is already
     /// present in the snapshot as base facts.
-    pub fn execute_with_rules(&mut self, program: &str) -> Result<Vec<(i32, i32)>, String> {
-        // Get all view rules
-        let rule_defs = self.rule_catalog.all_rules();
-
-        if rule_defs.is_empty() {
-            // No views, just execute normally
-            return self.engine.execute(program);
-        }
-
-        // Get materialized relation names (skip their rules)
-        let materialized: HashSet<String> = if let Some(ref dd) = self.incremental {
-            let manager = dd.derived_relations();
-            let guard = manager.lock();
-            guard.get_materialized_relation_names()
-        } else {
-            HashSet::new()
-        };
-
-        // Build the combined program: view rules + query
-        // Skip rules whose head relation is materialized
-        let mut combined = String::new();
-
-        // Add view rules (skip materialized)
-        for rule in &rule_defs {
-            if materialized.contains(&rule.head.relation) {
-                continue; // Data already available as base facts
-            }
-            combined.push_str(&format_rule(rule));
-            combined.push('\n');
-        }
-
-        // Add the query
-        combined.push_str(program);
-
-        // Execute combined program
-        self.engine.execute(&combined)
+    pub fn execute_with_rules(&self, program: &str) -> Result<Vec<(i32, i32)>, String> {
+        self.snapshot().execute_with_rules(program)
     }
 
-    /// Execute a query with views prepended, returning tuples of arbitrary arity
-    ///
-    /// This prepends all view rules to the query, allowing DD to incrementally
-    /// compute view results based on base facts.
-    ///
-    /// Rules for materialized relations are skipped - their data is already
-    /// present in the snapshot as base facts.
-    pub fn execute_with_rules_tuples(&mut self, program: &str) -> Result<Vec<Tuple>, String> {
-        // Get all view rules
-        let rule_defs = self.rule_catalog.all_rules();
-
-        if rule_defs.is_empty() {
-            // No views, just execute normally
-            return self.engine.execute_tuples(program);
-        }
-
-        // Get materialized relation names (skip their rules)
-        let materialized: HashSet<String> = if let Some(ref dd) = self.incremental {
-            let manager = dd.derived_relations();
-            let guard = manager.lock();
-            guard.get_materialized_relation_names()
-        } else {
-            HashSet::new()
-        };
-
-        // Build the combined program: view rules + query
-        // Skip rules whose head relation is materialized
-        let mut combined = String::new();
-        let mut skipped_count = 0;
-
-        // Add view rules (skip materialized)
-        for rule in &rule_defs {
-            if materialized.contains(&rule.head.relation) {
-                skipped_count += 1;
-                continue; // Data already available as base facts
-            }
-            combined.push_str(&format_rule(rule));
-            combined.push('\n');
-        }
-
-        // Add the query
-        combined.push_str(program);
-
-        if std::env::var("INPUTLAYER_DEBUG").is_ok() {
-            eprintln!(
-                "DEBUG execute_with_rules_tuples: {} view rules ({} skipped as materialized), program = {}",
-                rule_defs.len(),
-                skipped_count,
-                combined.replace('\n', " | ")
-            );
-        }
-
-        // Execute combined program
-        self.engine.execute_tuples(&combined)
+    /// Execute a query with persistent rules on the current snapshot,
+    /// returning tuples of arbitrary arity.
+    pub fn execute_with_rules_tuples(&self, program: &str) -> Result<Vec<Tuple>, String> {
+        self.snapshot().execute_with_rules_tuples(program)
     }
 
     /// Get reference to view catalog
@@ -3392,7 +3267,7 @@ mod tests {
         let kg = kg.read();
 
         // HashMap state
-        let hashmap_tuples = kg.engine.input_tuples.get("edge").unwrap();
+        let hashmap_tuples = &kg.store.get("edge").unwrap().to_vec();
 
         // DD arrangement state
         let dd = kg.incremental().unwrap();
@@ -3461,7 +3336,7 @@ mod tests {
         // Verify parity
         let kg = storage.knowledge_graphs.get("default").unwrap();
         let kg = kg.read();
-        let hashmap_tuples = kg.engine.input_tuples.get("data").unwrap();
+        let hashmap_tuples = &kg.store.get("data").unwrap().to_vec();
         let dd = kg.incremental().unwrap();
         let mut dd_tuples = dd.read_relation_consistent("data").unwrap();
         dd_tuples.sort();
@@ -3520,7 +3395,7 @@ mod tests {
         // Verify parity
         let kg = storage.knowledge_graphs.get("default").unwrap();
         let kg = kg.read();
-        let hashmap_tuples = kg.engine.input_tuples.get("mixed").unwrap();
+        let hashmap_tuples = &kg.store.get("mixed").unwrap().to_vec();
         let dd = kg.incremental().unwrap();
         let mut dd_tuples = dd.read_relation_consistent("mixed").unwrap();
         dd_tuples.sort();
@@ -3579,7 +3454,7 @@ mod tests {
         let dd = kg.incremental().unwrap();
 
         for rel_name in &["edges", "nodes"] {
-            let hashmap_tuples = kg.engine.input_tuples.get(*rel_name).unwrap();
+            let hashmap_tuples = &kg.store.get(rel_name).unwrap().to_vec();
             let mut dd_tuples = dd.read_relation_consistent(rel_name).unwrap();
             dd_tuples.sort();
 
@@ -3714,7 +3589,7 @@ mod tests {
         // Verify exact parity between DD and HashMap
         let kg = storage.knowledge_graphs.get("default").unwrap();
         let kg = kg.read();
-        let hashmap_tuples = kg.engine.input_tuples.get("data").unwrap();
+        let hashmap_tuples = &kg.store.get("data").unwrap().to_vec();
         let dd = kg.incremental().unwrap();
         let mut dd_tuples = dd.read_relation_consistent("data").unwrap();
         dd_tuples.sort();
@@ -3781,7 +3656,7 @@ mod tests {
         );
 
         // Verify parity with HashMap
-        let mut hashmap_sorted: Vec<_> = kg.engine.input_tuples.get("items").unwrap().clone();
+        let mut hashmap_sorted: Vec<_> = kg.store.get("items").unwrap().to_vec();
         hashmap_sorted.sort();
 
         assert_eq!(

@@ -13,23 +13,24 @@
 
 use crate::index_manager::HnswSearchFn;
 use crate::ir::{IRExpression, IRNode};
-use crate::value::{Tuple, Value};
-use std::collections::{HashMap, HashSet};
+use crate::value::{Relation, RelationMap, Tuple, Value};
+use std::collections::HashSet;
 
 /// Relation data visible to the rule being resolved.
 pub struct RuleInputs<'a> {
     /// Results of previously executed rules (searched first).
-    pub derived: &'a HashMap<String, Vec<Tuple>>,
+    pub derived: &'a RelationMap,
     /// Base facts.
-    pub base: &'a HashMap<String, Vec<Tuple>>,
+    pub base: &'a RelationMap,
 }
 
 impl RuleInputs<'_> {
-    fn relation(&self, name: &str) -> &[Tuple] {
+    fn relation(&self, name: &str) -> &Relation {
+        static EMPTY: Relation = Relation::new();
         self.derived
             .get(name)
             .or_else(|| self.base.get(name))
-            .map_or(&[], Vec::as_slice)
+            .unwrap_or(&EMPTY)
     }
 }
 
@@ -43,7 +44,7 @@ pub fn resolve_rule(
     inputs: &RuleInputs<'_>,
     rule_idx: usize,
     recursive: bool,
-) -> Result<Vec<(String, Vec<Tuple>)>, String> {
+) -> Result<Vec<(String, Relation)>, String> {
     if !contains_hnsw_scan(ir) {
         return Ok(Vec::new());
     }
@@ -87,7 +88,7 @@ struct Resolver<'a> {
     inputs: &'a RuleInputs<'a>,
     rule_idx: usize,
     recursive: bool,
-    relations: Vec<(String, Vec<Tuple>)>,
+    relations: Vec<(String, Relation)>,
 }
 
 /// A positive scan that may bind a query variable: (relation, schema).
@@ -105,7 +106,8 @@ impl Resolver<'_> {
         match ir {
             IRNode::HnswScan { .. } => {
                 let (relation, schema, tuples) = self.search_node(ir, bindings)?;
-                self.relations.push((relation.clone(), tuples));
+                self.relations
+                    .push((relation.clone(), Relation::from(tuples)));
                 *ir = IRNode::Scan { relation, schema };
                 Ok(())
             }
@@ -280,12 +282,12 @@ mod tests {
 
     #[test]
     fn test_resolve_variable_query_searches_each_distinct_binding() {
-        let mut base = HashMap::new();
+        let mut base = RelationMap::new();
         base.insert(
             "q".to_string(),
-            vec![vec_tuple(&[1.0]), vec_tuple(&[2.0]), vec_tuple(&[1.0])],
+            vec![vec_tuple(&[1.0]), vec_tuple(&[2.0]), vec_tuple(&[1.0])].into(),
         );
-        let derived = HashMap::new();
+        let derived = RelationMap::new();
         let inputs = RuleInputs {
             derived: &derived,
             base: &base,
@@ -300,7 +302,7 @@ mod tests {
 
     #[test]
     fn test_resolve_unbound_variable_errors() {
-        let empty = HashMap::new();
+        let empty = RelationMap::new();
         let inputs = RuleInputs {
             derived: &empty,
             base: &empty,
@@ -312,9 +314,9 @@ mod tests {
 
     #[test]
     fn test_resolve_negated_atom_does_not_bind() {
-        let mut base = HashMap::new();
-        base.insert("neg".to_string(), vec![vec_tuple(&[1.0])]);
-        let derived = HashMap::new();
+        let mut base = RelationMap::new();
+        base.insert("neg".to_string(), vec![vec_tuple(&[1.0])].into());
+        let derived = RelationMap::new();
         let inputs = RuleInputs {
             derived: &derived,
             base: &base,
@@ -332,7 +334,7 @@ mod tests {
 
     #[test]
     fn test_resolve_variable_in_recursive_rule_errors() {
-        let empty = HashMap::new();
+        let empty = RelationMap::new();
         let inputs = RuleInputs {
             derived: &empty,
             base: &empty,
@@ -344,9 +346,12 @@ mod tests {
 
     #[test]
     fn test_resolve_non_vector_binding_errors() {
-        let mut base = HashMap::new();
-        base.insert("q".to_string(), vec![Tuple::new(vec![Value::Int64(1)])]);
-        let derived = HashMap::new();
+        let mut base = RelationMap::new();
+        base.insert(
+            "q".to_string(),
+            vec![Tuple::new(vec![Value::Int64(1)])].into(),
+        );
+        let derived = RelationMap::new();
         let inputs = RuleInputs {
             derived: &derived,
             base: &base,
@@ -358,7 +363,7 @@ mod tests {
 
     #[test]
     fn test_resolve_without_search_fn_errors() {
-        let empty = HashMap::new();
+        let empty = RelationMap::new();
         let inputs = RuleInputs {
             derived: &empty,
             base: &empty,

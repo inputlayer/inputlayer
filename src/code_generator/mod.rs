@@ -37,7 +37,7 @@ use timely::order::Product;
 use tracing::info;
 
 use crate::temporal_ops;
-use crate::value::{Tuple, Value};
+use crate::value::{Relation, RelationMap, Tuple, Value};
 use crate::vector_ops;
 
 mod scc;
@@ -130,9 +130,9 @@ impl ExecutionConfig {
 
 /// Executes IR trees using Differential Dataflow.
 pub struct CodeGenerator {
-    /// Input data for base relations (Arc-wrapped for cheap cloning into DD closures).
-    /// Using Arc avoids deep-cloning potentially large datasets on every query.
-    input_tuples: Arc<HashMap<String, Vec<Tuple>>>,
+    /// Input data for base relations. Relations share tuples structurally, so
+    /// cloning the map into DD closures copies no tuples.
+    input_tuples: RelationMap,
     /// Semiring annotations (debug tracing only).
     #[allow(dead_code)]
     semiring_annotations: Vec<crate::boolean_specialization::SemiringAnnotation>,
@@ -147,7 +147,7 @@ impl CodeGenerator {
     /// Create a new code generator
     pub fn new() -> Self {
         CodeGenerator {
-            input_tuples: Arc::new(HashMap::new()),
+            input_tuples: RelationMap::new(),
             semiring_annotations: Vec::new(),
             semiring_type: SemiringType::Counting, // safe default
             max_result_rows: 0,                    // unlimited
@@ -183,11 +183,16 @@ impl CodeGenerator {
 
     /// Add input data for a relation
     pub fn add_input(&mut self, relation: String, data: Vec<Tuple>) {
-        Arc::make_mut(&mut self.input_tuples).insert(relation, data);
+        self.input_tuples.insert(relation, Relation::from(data));
     }
 
-    /// Set shared input data from an Arc (avoids deep clone for snapshot queries)
-    pub fn set_shared_input(&mut self, data: Arc<HashMap<String, Vec<Tuple>>>) {
+    /// Add a shared relation as input (no tuple copy).
+    pub fn add_relation(&mut self, relation: String, data: Relation) {
+        self.input_tuples.insert(relation, data);
+    }
+
+    /// Replace all input data with a shared relation map (no tuple copy).
+    pub fn set_inputs(&mut self, data: RelationMap) {
         self.input_tuples = data;
     }
 
@@ -631,7 +636,7 @@ impl CodeGenerator {
 
         // Verify edge relation has 2-column tuples in input_tuples
         let edge_tuples = self.input_tuples.get(edge_rel)?;
-        if edge_tuples.is_empty() || edge_tuples[0].values().len() != 2 {
+        if edge_tuples.get(0).is_none_or(|t| t.values().len() != 2) {
             return None;
         }
 
@@ -676,7 +681,7 @@ impl CodeGenerator {
             return None;
         }
 
-        Some((edge_rel.to_string(), magic_tuples.clone(), 0))
+        Some((edge_rel.to_string(), magic_tuples.to_vec(), 0))
     }
 
     /// Optimized transitive closure using DD's native .`iterative()` scope
@@ -709,7 +714,7 @@ impl CodeGenerator {
         let edges: Vec<Tuple> = self
             .input_tuples
             .get(edge_relation)
-            .cloned()
+            .map(Relation::to_vec)
             .unwrap_or_default();
 
         if edges.is_empty() {
@@ -871,7 +876,7 @@ impl CodeGenerator {
         let all_edges: Vec<Tuple> = self
             .input_tuples
             .get(edge_relation)
-            .cloned()
+            .map(Relation::to_vec)
             .unwrap_or_default();
 
         if all_edges.is_empty() {
@@ -1155,7 +1160,7 @@ impl CodeGenerator {
                         // - All base relations entered into the iterative scope
                         // - The recursive relation backed by the Variable
                         let mut live: HashMap<String, Collection<_, Tuple, R>> = HashMap::new();
-                        for (name, tuples) in input_data.iter() {
+                        for (name, tuples) in &input_data {
                             let coll: Collection<_, Tuple, R> = Collection::new(
                                 tuples
                                     .clone()
@@ -1277,7 +1282,7 @@ impl CodeGenerator {
         let num_workers = config.num_workers;
 
         // Partition input data across workers
-        let partitioned_inputs: Vec<HashMap<String, Vec<Tuple>>> = (0..num_workers)
+        let partitioned_inputs: Vec<RelationMap> = (0..num_workers)
             .map(|worker_idx| {
                 Self::partition_data_for_worker(&self.input_tuples, worker_idx, num_workers)
             })
@@ -1293,9 +1298,7 @@ impl CodeGenerator {
                 // Create a temporary code generator with this partition
                 let mut temp_codegen = CodeGenerator::new();
                 temp_codegen.set_semiring_type(semiring_type);
-                for (relation, tuples) in partition {
-                    temp_codegen.add_input_tuples(relation, tuples);
-                }
+                temp_codegen.set_inputs(partition);
                 temp_codegen
                     .generate_and_execute_tuples(&ir_clone)
                     .unwrap_or_default()
@@ -1338,10 +1341,10 @@ impl CodeGenerator {
     ///
     /// Each worker gets tuples where `hash(tuple) % num_workers == worker_index`
     fn partition_data_for_worker(
-        input_data: &HashMap<String, Vec<Tuple>>,
+        input_data: &RelationMap,
         worker_index: usize,
         num_workers: usize,
-    ) -> HashMap<String, Vec<Tuple>> {
+    ) -> RelationMap {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
@@ -1358,7 +1361,7 @@ impl CodeGenerator {
                     })
                     .cloned()
                     .collect();
-                (relation.clone(), partitioned)
+                (relation.clone(), Relation::from(partitioned))
             })
             .collect()
     }
@@ -1367,7 +1370,7 @@ impl CodeGenerator {
     fn generate_collection_tuples<G, R: DiffType>(
         scope: &mut G,
         ir: &IRNode,
-        input_data: &HashMap<String, Vec<Tuple>>,
+        input_data: &RelationMap,
         live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
     ) -> Collection<G, Tuple, R>
     where
@@ -1566,7 +1569,7 @@ impl CodeGenerator {
     fn generate_scan_tuples<G, R: DiffType>(
         scope: &mut G,
         relation: &str,
-        input_data: &HashMap<String, Vec<Tuple>>,
+        input_data: &RelationMap,
         live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
     ) -> Collection<G, Tuple, R>
     where
@@ -1601,7 +1604,7 @@ impl CodeGenerator {
         scope: &mut G,
         input: &IRNode,
         projection: &[usize],
-        input_data: &HashMap<String, Vec<Tuple>>,
+        input_data: &RelationMap,
         live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
     ) -> Collection<G, Tuple, R>
     where
@@ -1619,7 +1622,7 @@ impl CodeGenerator {
         scope: &mut G,
         input: &IRNode,
         predicate: &Predicate,
-        input_data: &HashMap<String, Vec<Tuple>>,
+        input_data: &RelationMap,
         live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
     ) -> Collection<G, Tuple, R>
     where
@@ -1967,7 +1970,7 @@ impl CodeGenerator {
         left_keys: &[usize],
         right_keys: &[usize],
         _output_schema: &[String],
-        input_data: &HashMap<String, Vec<Tuple>>,
+        input_data: &RelationMap,
         live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
     ) -> Collection<G, Tuple, R>
     where
@@ -2053,7 +2056,7 @@ impl CodeGenerator {
         right: &IRNode,
         left_keys: &[usize],
         right_keys: &[usize],
-        input_data: &HashMap<String, Vec<Tuple>>,
+        input_data: &RelationMap,
         live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
     ) -> Collection<G, Tuple, R>
     where
@@ -2086,7 +2089,7 @@ impl CodeGenerator {
     /// (derived relations from recursive/session scopes).
     fn collect_tuples_from_ir<G, R: DiffType>(
         node: &IRNode,
-        input_data: &HashMap<String, Vec<Tuple>>,
+        input_data: &RelationMap,
         live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
         key_indices: &[usize],
         result: &mut std::collections::HashSet<Tuple>,
@@ -2144,7 +2147,7 @@ impl CodeGenerator {
     /// through so that derived relations are available during execution.
     fn execute_subquery_for_antijoin<G, R: DiffType>(
         node: &IRNode,
-        input_data: &HashMap<String, Vec<Tuple>>,
+        input_data: &RelationMap,
         _live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
     ) -> Vec<Tuple>
     where
@@ -2202,7 +2205,7 @@ impl CodeGenerator {
     fn generate_distinct_tuples<G, R: DiffType>(
         scope: &mut G,
         input: &IRNode,
-        input_data: &HashMap<String, Vec<Tuple>>,
+        input_data: &RelationMap,
         live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
     ) -> Collection<G, Tuple, R>
     where
@@ -2221,7 +2224,7 @@ impl CodeGenerator {
     fn generate_union_tuples<G, R: DiffType>(
         scope: &mut G,
         inputs: &[IRNode],
-        input_data: &HashMap<String, Vec<Tuple>>,
+        input_data: &RelationMap,
         live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
     ) -> Collection<G, Tuple, R>
     where
@@ -2381,7 +2384,7 @@ impl CodeGenerator {
         input: &IRNode,
         group_by: &[usize],
         aggregations: &[(AggregateFunction, usize)],
-        input_data: &HashMap<String, Vec<Tuple>>,
+        input_data: &RelationMap,
         live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
     ) -> Collection<G, Tuple, R>
     where
@@ -2690,7 +2693,7 @@ impl CodeGenerator {
         scope: &mut G,
         input: &IRNode,
         expressions: &[(String, IRExpression)],
-        input_data: &HashMap<String, Vec<Tuple>>,
+        input_data: &RelationMap,
         live: Option<&HashMap<String, Collection<G, Tuple, R>>>,
     ) -> Collection<G, Tuple, R>
     where
@@ -3688,7 +3691,7 @@ impl CodeGenerator {
         let edges: Vec<Tuple> = self
             .input_tuples
             .get(edge_relation)
-            .cloned()
+            .map(Relation::to_vec)
             .unwrap_or_default();
 
         if edges.is_empty() {
@@ -3816,14 +3819,14 @@ impl CodeGenerator {
         let sources: Vec<Tuple> = self
             .input_tuples
             .get(source_relation)
-            .cloned()
+            .map(Relation::to_vec)
             .unwrap_or_default();
 
         // Get edges
         let edges: Vec<Tuple> = self
             .input_tuples
             .get(edge_relation)
-            .cloned()
+            .map(Relation::to_vec)
             .unwrap_or_default();
 
         if sources.is_empty() {
@@ -8282,11 +8285,11 @@ mod tests {
         let mut data = HashMap::new();
         data.insert(
             "rel".to_string(),
-            vec![
+            Relation::from(vec![
                 Tuple::new(vec![Value::Int32(1)]),
                 Tuple::new(vec![Value::Int32(2)]),
                 Tuple::new(vec![Value::Int32(3)]),
-            ],
+            ]),
         );
         let partitioned = CodeGenerator::partition_data_for_worker(&data, 0, 1);
         // Single worker gets all data
@@ -8299,7 +8302,7 @@ mod tests {
         let tuples: Vec<Tuple> = (0..100)
             .map(|i| Tuple::new(vec![Value::Int32(i)]))
             .collect();
-        data.insert("rel".to_string(), tuples);
+        data.insert("rel".to_string(), Relation::from(tuples));
 
         let num_workers = 4;
         let mut total = 0;
@@ -8549,56 +8552,30 @@ mod tests {
         set_query_cancel_flag(None);
     }
 
-    /// Regression: set_shared_input() provides data via Arc without deep clone.
-    /// Verifies the Arc path produces correct query results.
+    /// Inputs share tuples with the caller's map; adding a relation to the
+    /// generator never changes the caller's data.
     #[test]
-    fn test_set_shared_input_produces_correct_results() {
-        let mut data = HashMap::new();
+    fn test_set_inputs_shares_data_and_add_input_does_not_mutate_caller() {
+        let mut data = RelationMap::new();
         data.insert(
             "edge".to_string(),
-            vec![
+            Relation::from(vec![
                 Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
                 Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
-            ],
+            ]),
         );
-        let shared = Arc::new(data);
 
         let mut codegen = CodeGenerator::new();
-        codegen.set_shared_input(Arc::clone(&shared));
+        codegen.set_inputs(data.clone());
+        codegen.add_input("node".to_string(), vec![Tuple::new(vec![Value::Int64(10)])]);
 
         let ir = IRNode::Scan {
             relation: "edge".to_string(),
             schema: vec!["x".to_string(), "y".to_string()],
         };
-        let results = codegen.execute(&ir).unwrap();
-        assert_eq!(
-            results.len(),
-            2,
-            "set_shared_input should provide data for queries"
-        );
-    }
-
-    /// Regression: add_input after set_shared_input uses copy-on-write (Arc::make_mut).
-    /// The original Arc must not be mutated.
-    #[test]
-    fn test_add_input_after_shared_does_not_mutate_original() {
-        let mut data = HashMap::new();
-        data.insert(
-            "edge".to_string(),
-            vec![Tuple::new(vec![Value::Int64(1), Value::Int64(2)])],
-        );
-        let shared = Arc::new(data);
-
-        let mut codegen = CodeGenerator::new();
-        codegen.set_shared_input(Arc::clone(&shared));
-
-        // add_input triggers Arc::make_mut (copy-on-write)
-        codegen.add_input("node".to_string(), vec![Tuple::new(vec![Value::Int64(10)])]);
-
-        // Original Arc should still only have "edge"
-        assert_eq!(shared.len(), 1, "Original Arc must not be mutated");
-        assert!(shared.contains_key("edge"));
-        assert!(!shared.contains_key("node"));
+        assert_eq!(codegen.execute(&ir).unwrap().len(), 2);
+        assert_eq!(data.len(), 1);
+        assert!(!data.contains_key("node"));
     }
 
     /// Regression test: Union with Cartesian-product self-join must not hang.

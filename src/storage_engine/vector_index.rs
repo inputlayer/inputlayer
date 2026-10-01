@@ -129,14 +129,10 @@ impl KnowledgeGraph {
 
     /// Build a fresh index for `def` from the relation's current rows.
     fn build_index(&self, def: RegisteredIndex) -> Result<ManagedIndex, String> {
-        let tuples = self
-            .engine
-            .input_tuples
-            .get(&def.relation)
-            .map_or(&[][..], Vec::as_slice);
+        let tuples = self.store.get(&def.relation);
         let mut id_type = IdType::default();
-        let mut rows = Vec::with_capacity(tuples.len());
-        for tuple in tuples {
+        let mut rows = Vec::with_capacity(tuples.map_or(0, |t| t.len()));
+        for tuple in tuples.into_iter().flatten() {
             let (id, t, vector) = index_row(&def, tuple)?;
             id_type = t;
             rows.push((id, vector.to_vec()));
@@ -287,8 +283,7 @@ impl KnowledgeGraph {
             }
             let deleted_ids: HashSet<TupleId> = deletes.iter().copied().collect();
             let survivors: Vec<(TupleId, Vec<f32>)> = self
-                .engine
-                .input_tuples
+                .store
                 .get(relation)
                 .into_iter()
                 .flatten()

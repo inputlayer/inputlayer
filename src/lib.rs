@@ -149,7 +149,9 @@ pub mod execution; // Query timeout, resource limits, caching
 pub mod value;
 
 // Re-export value types for convenience
-pub use value::{DataType, SchemaValidationError, Tuple, TupleSchema, Value};
+pub use value::{
+    DataType, Relation, RelationMap, SchemaValidationError, Tuple, TupleSchema, Value,
+};
 
 // Schema validation module
 pub mod schema;
@@ -285,16 +287,19 @@ pub use recursion::{
 };
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Instant;
 use tracing::info;
+
+/// Query result, all derived relations, and optional timing breakdown.
+pub type ExecutionOutput =
+    Result<(Vec<Tuple>, RelationMap, Option<execution::TimingBreakdown>), String>;
 
 /// Main IQL engine that orchestrates the entire pipeline
 pub struct IQLEngine {
     /// Input data for base relations (`relation_name` -> tuples)
     /// Supports arbitrary arity tuples with mixed types (int, float, string, vector)
     /// Use `input_tuples()` and `input_tuples_mut()` for access.
-    input_tuples: HashMap<String, Vec<Tuple>>,
+    input_tuples: RelationMap,
 
     /// Parsed program (after parsing)
     program: Option<Program>,
@@ -332,9 +337,6 @@ pub struct IQLEngine {
     /// are rejected before DD execution.
     max_query_cost: u64,
 
-    /// Arc-wrapped shared input data (set by snapshot for zero-copy query execution)
-    shared_input: Option<Arc<HashMap<String, Vec<Tuple>>>>,
-
     /// HNSW search callback for `hnsw_nearest` (resolved before each rule runs).
     hnsw_search_fn: Option<HnswSearchFn>,
 
@@ -346,7 +348,7 @@ impl IQLEngine {
     /// Default optimization config.
     pub fn new() -> Self {
         IQLEngine {
-            input_tuples: HashMap::new(),
+            input_tuples: RelationMap::new(),
             program: None,
             ir_nodes: Vec::new(),
             catalog: Catalog::new(),
@@ -358,7 +360,6 @@ impl IQLEngine {
             num_workers: 1,
             max_result_rows: 0,
             max_query_cost: 0,
-            shared_input: None,
             hnsw_search_fn: None,
             timing_mode: execution::TimingMode::default(),
         }
@@ -367,7 +368,7 @@ impl IQLEngine {
     /// Create a new IQL engine with custom optimization configuration
     pub fn with_config(config: OptimizationConfig) -> Self {
         IQLEngine {
-            input_tuples: HashMap::new(),
+            input_tuples: RelationMap::new(),
             program: None,
             ir_nodes: Vec::new(),
             catalog: Catalog::new(),
@@ -379,7 +380,6 @@ impl IQLEngine {
             num_workers: 1,
             max_result_rows: 0,
             max_query_cost: 0,
-            shared_input: None,
             hnsw_search_fn: None,
             timing_mode: execution::TimingMode::default(),
         }
@@ -430,9 +430,9 @@ impl IQLEngine {
         self.max_query_cost = max;
     }
 
-    /// Set shared input data from Arc (avoids deep clone from snapshot)
-    pub fn set_shared_input(&mut self, data: Arc<HashMap<String, Vec<Tuple>>>) {
-        self.shared_input = Some(data);
+    /// Replace all input data. Relations share tuples, so this copies none.
+    pub fn set_inputs(&mut self, data: RelationMap) {
+        self.input_tuples = data;
     }
 
     /// Set the HNSW search callback used by `hnsw_nearest`.
@@ -449,17 +449,17 @@ impl IQLEngine {
     }
 
     /// Get immutable reference to input tuples
-    pub fn input_tuples(&self) -> &HashMap<String, Vec<Tuple>> {
+    pub fn input_tuples(&self) -> &RelationMap {
         &self.input_tuples
     }
 
     /// Get mutable reference to input tuples
-    pub fn input_tuples_mut(&mut self) -> &mut HashMap<String, Vec<Tuple>> {
+    pub fn input_tuples_mut(&mut self) -> &mut RelationMap {
         &mut self.input_tuples
     }
 
     /// Get tuples for a specific relation
-    pub fn get_relation(&self, relation: &str) -> Option<&Vec<Tuple>> {
+    pub fn get_relation(&self, relation: &str) -> Option<&Relation> {
         self.input_tuples.get(relation)
     }
 
@@ -474,7 +474,7 @@ impl IQLEngine {
     /// ```
     pub fn add_fact(&mut self, relation: &str, data: Vec<(i32, i32)>) {
         // Convert to Tuple format
-        let tuples: Vec<Tuple> = data.iter().map(|&(a, b)| Tuple::from_pair(a, b)).collect();
+        let tuples: Relation = data.iter().map(|&(a, b)| Tuple::from_pair(a, b)).collect();
         self.input_tuples.insert(relation.to_string(), tuples);
 
         // Register schema in catalog if not already registered
@@ -525,7 +525,8 @@ impl IQLEngine {
             self.catalog.register_relation(relation.to_string(), schema);
         }
 
-        self.input_tuples.insert(relation.to_string(), tuples);
+        self.input_tuples
+            .insert(relation.to_string(), Relation::from(tuples));
     }
 
     /// Parse an IQL program string into AST
@@ -539,9 +540,13 @@ impl IQLEngine {
     /// 3. Detect recursive rules
     /// 4. Compute stratification (evaluation order)
     pub fn parse(&mut self, source: &str) -> Result<&Program, String> {
-        // Parse source into AST
         let program = parser::parse_program(source)?;
+        self.load_program(program)
+    }
 
+    /// Install an already-parsed program: validates safety, detects recursion
+    /// and computes stratification, exactly as [`Self::parse`] does after parsing.
+    pub fn load_program(&mut self, program: Program) -> Result<&Program, String> {
         // Validate safety - all head variables must appear in positive body atoms
         for rule in &program.rules {
             if !rule.is_safe() {
@@ -965,14 +970,7 @@ impl IQLEngine {
             codegen.set_semiring_annotations(self.semiring_annotations.clone());
         }
 
-        // Load input tuples - use shared Arc if available (avoids deep clone)
-        if let Some(ref shared) = self.shared_input {
-            codegen.set_shared_input(Arc::clone(shared));
-        } else {
-            for (relation, data) in &self.input_tuples {
-                codegen.add_input(relation.clone(), data.clone());
-            }
-        }
+        codegen.set_inputs(self.input_tuples.clone());
 
         // Execute and return Tuples
         codegen.execute(ir)
@@ -1043,11 +1041,7 @@ impl IQLEngine {
     /// Fresh `CodeGenerator` for the rules at `indices`, loaded with base data
     /// and the relations computed so far. A group shares one semiring: the
     /// rules' common one, or Counting when they differ.
-    fn rule_codegen(
-        &self,
-        indices: &[usize],
-        accumulated: &HashMap<String, Vec<Tuple>>,
-    ) -> CodeGenerator {
+    fn rule_codegen(&self, indices: &[usize], accumulated: &RelationMap) -> CodeGenerator {
         use boolean_specialization::SemiringType;
         let semiring_of = |i: usize| {
             self.semiring_annotations
@@ -1071,16 +1065,11 @@ impl IQLEngine {
     }
 
     /// Load all input data into a `CodeGenerator`
-    fn load_inputs_into_codegen(
-        &self,
-        codegen: &mut CodeGenerator,
-        accumulated: &HashMap<String, Vec<Tuple>>,
-    ) {
+    fn load_inputs_into_codegen(&self, codegen: &mut CodeGenerator, accumulated: &RelationMap) {
         let debug = std::env::var("INPUTLAYER_DEBUG").is_ok();
 
-        // Load input tuples
-        for (relation, data) in &self.input_tuples {
-            if debug {
+        if debug {
+            for (relation, data) in &self.input_tuples {
                 eprintln!(
                     "DEBUG: loading input_tuples['{}'] = {} tuples",
                     relation,
@@ -1090,8 +1079,8 @@ impl IQLEngine {
                     eprintln!("  - {t:?}");
                 }
             }
-            codegen.add_input(relation.clone(), data.clone());
         }
+        codegen.set_inputs(self.input_tuples.clone());
 
         // Load accumulated results from previously executed rules
         for (rel_name, rel_data) in accumulated {
@@ -1102,7 +1091,7 @@ impl IQLEngine {
                     rel_data.len()
                 );
             }
-            codegen.add_input(rel_name.clone(), rel_data.clone());
+            codegen.add_relation(rel_name.clone(), rel_data.clone());
         }
     }
 
@@ -1111,9 +1100,9 @@ impl IQLEngine {
     /// Shared views may reference each other (cascading sharing), so we execute
     /// them in dependency order using topological sort: views that reference no
     /// other views first, then views that depend on already-computed views.
-    fn execute_shared_views(&self) -> Result<HashMap<String, Vec<Tuple>>, String> {
+    fn execute_shared_views(&self) -> Result<RelationMap, String> {
         let debug = std::env::var("INPUTLAYER_DEBUG").is_ok();
-        let mut results: HashMap<String, Vec<Tuple>> = HashMap::new();
+        let mut results = RelationMap::new();
 
         if self.shared_views.is_empty() {
             return Ok(results);
@@ -1205,7 +1194,7 @@ impl IQLEngine {
                 );
             }
 
-            results.insert(view_name.clone(), view_results);
+            results.insert(view_name.clone(), Relation::from(view_results));
         }
 
         Ok(results)
@@ -1294,7 +1283,7 @@ impl IQLEngine {
     pub fn execute_tuples_with_derived(
         &mut self,
         source: &str,
-    ) -> Result<(Vec<Tuple>, HashMap<String, Vec<Tuple>>), String> {
+    ) -> Result<(Vec<Tuple>, RelationMap), String> {
         self.execute_tuples_profiled(source)
             .map(|(tuples, derived, _)| (tuples, derived))
     }
@@ -1302,32 +1291,38 @@ impl IQLEngine {
     /// Execute the full pipeline returning tuples, all accumulated derived
     /// relation contents, and an optional timing breakdown.
     ///
-    /// The derived data (`HashMap<String, Vec<Tuple>>`) contains all intermediate
-    /// relation results computed during evaluation. This is used by the provenance
-    /// system to avoid expensive re-derivation during backward chaining.
-    pub fn execute_tuples_profiled(
-        &mut self,
-        source: &str,
-    ) -> Result<
-        (
-            Vec<Tuple>,
-            HashMap<String, Vec<Tuple>>,
-            Option<execution::TimingBreakdown>,
-        ),
-        String,
-    > {
-        let debug = std::env::var("INPUTLAYER_DEBUG").is_ok();
-        if debug {
-            eprintln!("DEBUG execute_tuples: starting");
-        }
-        let mut collector = execution::TimingCollector::new(self.timing_mode);
-        let exec_start = Instant::now();
+    /// The derived data contains all intermediate relation results computed
+    /// during evaluation. This is used by the provenance system to avoid
+    /// expensive re-derivation during backward chaining.
+    pub fn execute_tuples_profiled(&mut self, source: &str) -> ExecutionOutput {
+        let collector = execution::TimingCollector::new(self.timing_mode);
         let source_len = source.len();
         info!(source_len, "engine_execute_start");
-
-        // Parse, apply SIP rewriting, and build IR
-        let (parse_result, parse_us) = collector.time(|| self.parse(source));
+        let (parse_result, parse_us) = collector.time(|| self.parse(source).map(|_| ()));
         parse_result?;
+        self.run_loaded_program(collector, parse_us, source_len)
+    }
+
+    /// Like [`Self::execute_tuples_profiled`], for an already-parsed program
+    /// (e.g. cached persistent rules followed by the parsed query).
+    pub fn execute_program_profiled(&mut self, program: Program) -> ExecutionOutput {
+        let collector = execution::TimingCollector::new(self.timing_mode);
+        let source_len = program.rules.len();
+        info!(rules = source_len, "engine_execute_start");
+        let (load_result, parse_us) = collector.time(|| self.load_program(program).map(|_| ()));
+        load_result?;
+        self.run_loaded_program(collector, parse_us, source_len)
+    }
+
+    /// Run the pipeline after parsing: SIP, magic sets, IR, optimize, execute.
+    fn run_loaded_program(
+        &mut self,
+        mut collector: execution::TimingCollector,
+        parse_us: u64,
+        source_len: usize,
+    ) -> ExecutionOutput {
+        let debug = std::env::var("INPUTLAYER_DEBUG").is_ok();
+        let exec_start = Instant::now();
         let parse_ms = parse_us / 1000;
         info!(source_len, parse_ms, "engine_parse_complete");
         collector.breakdown.parse_us = parse_us;
@@ -1480,7 +1475,7 @@ impl IQLEngine {
 
                 // Store results for subsequent rules
                 if !head_name.is_empty() {
-                    accumulated_results.insert(head_name.clone(), result);
+                    accumulated_results.insert(head_name.clone(), Relation::from(result));
                 }
 
                 collector.record_rule(head_name.clone(), rule_us, is_recursive, self.num_workers);
@@ -1531,7 +1526,7 @@ impl IQLEngine {
                     if i == query_idx {
                         last_result.clone_from(&result);
                     }
-                    accumulated_results.insert(rule_heads[i].clone(), result);
+                    accumulated_results.insert(rule_heads[i].clone(), Relation::from(result));
                 }
 
                 let scc_head = group
@@ -1580,7 +1575,7 @@ impl IQLEngine {
             .into_iter()
             .flatten()
             .collect();
-        let mut accumulated: HashMap<String, Vec<Tuple>> = HashMap::new();
+        let mut accumulated = RelationMap::new();
         let mut results = HashMap::new();
 
         for &i in &execution_order {
@@ -1597,14 +1592,7 @@ impl IQLEngine {
                     a.semiring
                 });
             codegen.set_semiring_type(semiring);
-            // Load base facts
-            for (relation, data) in &self.input_tuples {
-                codegen.add_input(relation.clone(), data.clone());
-            }
-            // Load accumulated intermediate results
-            for (rel, data) in &accumulated {
-                codegen.add_input(rel.clone(), data.clone());
-            }
+            self.load_inputs_into_codegen(&mut codegen, &accumulated);
 
             let rule_tuples = codegen.execute(ir)?;
             let rule_results: Vec<(i32, i32)> =
@@ -1613,7 +1601,7 @@ impl IQLEngine {
 
             // Store for subsequent rules
             if !head_name.is_empty() {
-                accumulated.insert(head_name, rule_tuples);
+                accumulated.insert(head_name, Relation::from(rule_tuples));
             }
         }
 
@@ -1761,7 +1749,7 @@ impl IQLEngine {
         // Execute
         let mut codegen = CodeGenerator::new();
         if let Some(data) = self.input_tuples.get(relation) {
-            codegen.add_input(relation.to_string(), data.clone());
+            codegen.add_relation(relation.to_string(), data.clone());
         }
 
         let result_tuples = codegen.execute(&optimized_ir)?;
@@ -1791,6 +1779,7 @@ impl Default for IQLEngine {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn test_engine_creation() {

@@ -141,7 +141,7 @@ impl CodeGenerator {
 
                     let outputs = scope.iterative::<Iter, _, _>(|inner| {
                         let mut live: HashMap<String, Collection<_, Tuple, R>> = HashMap::new();
-                        for (name, tuples) in input_data.iter() {
+                        for (name, tuples) in &input_data {
                             let coll: Collection<_, Tuple, R> = Collection::new(
                                 tuples
                                     .clone()
