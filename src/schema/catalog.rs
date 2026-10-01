@@ -579,7 +579,7 @@ mod tests {
             .unwrap();
 
         let mut relations = catalog.relations();
-        relations.sort();
+        relations.sort_unstable();
         assert_eq!(relations, vec!["A", "B"]);
     }
 

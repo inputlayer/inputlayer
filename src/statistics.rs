@@ -628,8 +628,7 @@ mod tests {
         // Selectivity should be approximately 1/100 (larger distinct count)
         assert!(
             selectivity > 0.005 && selectivity < 0.05,
-            "Selectivity {} not in expected range",
-            selectivity
+            "Selectivity {selectivity} not in expected range"
         );
     }
 
@@ -646,7 +645,7 @@ mod tests {
         let cardinality = manager.estimate_join_cardinality("left", &[0], "right", &[0]);
 
         // Should estimate reasonable cardinality (not 100*50=5000, but ~50-100)
-        assert!(cardinality < 500, "Cardinality {} too high", cardinality);
+        assert!(cardinality < 500, "Cardinality {cardinality} too high");
     }
 
     #[test]
@@ -674,8 +673,7 @@ mod tests {
 
         assert!(
             selectivity > 0.05 && selectivity < 0.2,
-            "Selectivity {} not in expected range",
-            selectivity
+            "Selectivity {selectivity} not in expected range"
         );
     }
 
@@ -691,8 +689,7 @@ mod tests {
 
         assert!(
             selectivity > 0.8 && selectivity < 1.0,
-            "Selectivity {} not in expected range",
-            selectivity
+            "Selectivity {selectivity} not in expected range"
         );
     }
 

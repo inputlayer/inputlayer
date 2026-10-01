@@ -18,7 +18,7 @@ fn execute_two_column_rule(
     catalog.register_relation("result".to_string(), vec!["Y".to_string(), "V".to_string()]);
 
     // Build IR
-    let rule = parse_rule(rule_str).map_err(|e| format!("Parse error: {:?}", e))?;
+    let rule = parse_rule(rule_str).map_err(|e| format!("Parse error: {e:?}"))?;
     let builder = IRBuilder::new(catalog);
     let ir = builder.build_ir(&rule)?;
 
@@ -61,7 +61,7 @@ fn _execute_simple_arithmetic(
     catalog.register_relation("output".to_string(), vec!["X".to_string(), "R".to_string()]);
 
     // Build IR
-    let rule = parse_rule(rule_str).map_err(|e| format!("Parse error: {:?}", e))?;
+    let rule = parse_rule(rule_str).map_err(|e| format!("Parse error: {e:?}"))?;
     let builder = IRBuilder::new(catalog);
     let ir = builder.build_ir(&rule)?;
 
@@ -113,7 +113,7 @@ proptest! {
     /// Test that D+constant produces correct results
     #[test]
     fn prop_add_constant_correct(base in -1000i32..1000, constant in 1i32..100) {
-        let rule = format!("result(Y, D+{}) <- data(X, D), link(X, Y)", constant);
+        let rule = format!("result(Y, D+{constant}) <- data(X, D), link(X, Y)");
         let results = execute_two_column_rule(
             vec![(1, base)],
             vec![(1, 100)],
@@ -171,7 +171,7 @@ proptest! {
     /// Test that D*constant produces correct results for multiplication
     #[test]
     fn prop_multiplication_correct(base in -100i32..100, factor in 1i32..10) {
-        let rule = format!("result(Y, D*{}) <- data(X, D), link(X, Y)", factor);
+        let rule = format!("result(Y, D*{factor}) <- data(X, D), link(X, Y)");
         let results = execute_two_column_rule(
             vec![(1, base)],
             vec![(1, 100)],

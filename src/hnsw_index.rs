@@ -756,9 +756,7 @@ mod tests {
             // id=0 is an exact match for the query - must be in top-5
             assert!(
                 results.iter().any(|(id, _)| *id == 0),
-                "id=0 should be in top-5 for {:?}, got {:?}",
-                metric,
-                results,
+                "id=0 should be in top-5 for {metric:?}, got {results:?}",
             );
         }
     }
@@ -968,13 +966,11 @@ mod tests {
 
             // Search should work - use ef_search=200 for reliable results
             let results = index.search(&[10.0, 0.0], 5, Some(200));
-            assert_eq!(results.len(), 5, "m={}: expected 5 results", m);
+            assert_eq!(results.len(), 5, "m={m}: expected 5 results");
             // Nearest neighbor of [10.0, 0.0] must be vector #10 (distance 0)
             assert!(
                 results.iter().any(|r| r.0 == 10),
-                "m={}: expected vector 10 in results, got {:?}",
-                m,
-                results
+                "m={m}: expected vector 10 in results, got {results:?}"
             );
         }
     }

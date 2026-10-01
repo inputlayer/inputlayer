@@ -277,7 +277,7 @@ mod tests {
             assert_eq!(op.deletes[0].relation, "edge");
             assert_eq!(op.inserts[0].relation, "edge");
         } else {
-            panic!("Expected Update, got {:?}", stmt);
+            panic!("Expected Update, got {stmt:?}");
         }
     }
 
@@ -396,7 +396,7 @@ mod tests {
             };
             assert!(matches!(&body_atom.args[0], Term::StringConstant(s) if s == "mary"));
         } else {
-            panic!("Expected PersistentRule, got {:?}", stmt);
+            panic!("Expected PersistentRule, got {stmt:?}");
         }
     }
 
@@ -458,7 +458,7 @@ mod tests {
             assert_eq!(decl.columns[0].name, "id");
             assert_eq!(decl.columns[1].name, "name");
         } else {
-            panic!("Expected SchemaDecl, got {:?}", stmt);
+            panic!("Expected SchemaDecl, got {stmt:?}");
         }
     }
 
@@ -470,7 +470,7 @@ mod tests {
             assert!(!decl.persistent);
             assert_eq!(decl.columns.len(), 2);
         } else {
-            panic!("Expected SchemaDecl, got {:?}", stmt);
+            panic!("Expected SchemaDecl, got {stmt:?}");
         }
     }
 
@@ -481,7 +481,7 @@ mod tests {
             assert_eq!(rule.head.relation, "reachable");
             assert_eq!(rule.body.len(), 1);
         } else {
-            panic!("Expected PersistentRule, got {:?}", stmt);
+            panic!("Expected PersistentRule, got {stmt:?}");
         }
     }
 
@@ -492,7 +492,7 @@ mod tests {
             assert_eq!(rule.head.relation, "reachable");
             assert_eq!(rule.body.len(), 2);
         } else {
-            panic!("Expected PersistentRule, got {:?}", stmt);
+            panic!("Expected PersistentRule, got {stmt:?}");
         }
     }
 
@@ -508,7 +508,7 @@ mod tests {
             assert_eq!(rule.head.effective_arity(), 2);
             assert!(rule.head.has_aggregates());
         } else {
-            panic!("Expected PersistentRule, got {:?}", stmt);
+            panic!("Expected PersistentRule, got {stmt:?}");
         }
     }
 
@@ -518,7 +518,7 @@ mod tests {
         if let Statement::DeleteRelationOrRule(name) = stmt {
             assert_eq!(name, "reachable");
         } else {
-            panic!("Expected DeleteRelationOrRule, got {:?}", stmt);
+            panic!("Expected DeleteRelationOrRule, got {stmt:?}");
         }
     }
 
@@ -529,7 +529,7 @@ mod tests {
             assert_eq!(decl.name, "user");
             assert!(decl.persistent);
         } else {
-            panic!("Expected SchemaDecl, got {:?}", stmt);
+            panic!("Expected SchemaDecl, got {stmt:?}");
         }
     }
 
@@ -540,7 +540,7 @@ mod tests {
             assert_eq!(op.relation, "person");
             assert!(matches!(&op.tuples[0][0], Term::Constant(1)));
         } else {
-            panic!("Expected Insert, got {:?}", stmt);
+            panic!("Expected Insert, got {stmt:?}");
         }
     }
 
@@ -550,7 +550,7 @@ mod tests {
         if let Statement::Fact(rule) = stmt {
             assert_eq!(rule.head.relation, "person");
         } else {
-            panic!("Expected Fact, got {:?}", stmt);
+            panic!("Expected Fact, got {stmt:?}");
         }
     }
 
@@ -579,7 +579,7 @@ mod tests {
             assert_eq!(op.relation, "person");
             assert!(matches!(op.pattern, DeletePattern::Conditional { .. }));
         } else {
-            panic!("Expected Delete, got {:?}", stmt);
+            panic!("Expected Delete, got {stmt:?}");
         }
     }
 
@@ -593,7 +593,7 @@ mod tests {
             assert_eq!(decl.columns[1].name, "email");
             assert_eq!(decl.columns[2].name, "active");
         } else {
-            panic!("Expected SchemaDecl, got {:?}", stmt);
+            panic!("Expected SchemaDecl, got {stmt:?}");
         }
     }
 
@@ -604,7 +604,7 @@ mod tests {
             assert_eq!(path, "file.iql");
             assert_eq!(mode, LoadMode::Default);
         } else {
-            panic!("Expected Load, got {:?}", stmt);
+            panic!("Expected Load, got {stmt:?}");
         }
     }
 
@@ -615,7 +615,7 @@ mod tests {
             assert_eq!(path, "views.iql");
             assert_eq!(mode, LoadMode::Replace);
         } else {
-            panic!("Expected Load with Replace, got {:?}", stmt);
+            panic!("Expected Load with Replace, got {stmt:?}");
         }
     }
 
@@ -626,7 +626,7 @@ mod tests {
             assert_eq!(path, "data.iql");
             assert_eq!(mode, LoadMode::Merge);
         } else {
-            panic!("Expected Load with Merge, got {:?}", stmt);
+            panic!("Expected Load with Merge, got {stmt:?}");
         }
     }
 
@@ -636,7 +636,7 @@ mod tests {
         use super::*;
         use proptest::prelude::*;
 
-        /// Parser must never panic on arbitrary input.
+        // Parser must never panic on arbitrary input.
         proptest! {
             #![proptest_config(ProptestConfig {
                 failure_persistence: Some(Box::new(proptest::test_runner::FileFailurePersistence::SourceParallel("proptest-regressions"))),

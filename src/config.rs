@@ -1296,11 +1296,13 @@ mod tests {
     /// Regression: Zero values for rate limit fields mean "unlimited".
     #[test]
     fn test_rate_limit_zero_means_unlimited() {
-        let mut rl = RateLimitConfig::default();
-        rl.max_connections = 0;
-        rl.max_ws_connections = 0;
-        rl.ws_max_messages_per_sec = 0;
-        rl.ws_max_lifetime_secs = 0;
+        let rl = RateLimitConfig {
+            max_connections: 0,
+            max_ws_connections: 0,
+            ws_max_messages_per_sec: 0,
+            ws_max_lifetime_secs: 0,
+            ..Default::default()
+        };
 
         let config = Config {
             http: HttpConfig {

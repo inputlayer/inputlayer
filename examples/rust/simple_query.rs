@@ -20,7 +20,7 @@ fn main() {
     println!("Adding base facts (edges):");
     let edges = vec![(1, 2), (2, 3), (3, 4), (4, 5), (5, 6)];
     for (src, dst) in &edges {
-        println!("  edge({}, {})", src, dst);
+        println!("  edge({src}, {dst})");
     }
     engine.add_fact("edge", edges);
     println!();
@@ -33,7 +33,7 @@ fn main() {
     let results = engine.execute(program1).expect("Query 1 failed");
     println!("Results ({} tuples):", results.len());
     for (x, y) in &results {
-        println!("  result({}, {})", x, y);
+        println!("  result({x}, {y})");
     }
     // Assertion: Should return all 5 edges
     assert_eq!(results.len(), 5, "Simple scan should return 5 tuples");
@@ -53,7 +53,7 @@ fn main() {
     let results = engine.execute(program2).expect("Query 2 failed");
     println!("Results ({} tuples):", results.len());
     for (x, y) in &results {
-        println!("  result({}, {})", x, y);
+        println!("  result({x}, {y})");
     }
     // Assertion: Should return edges where x > 2: (3,4), (4,5), (5,6)
     assert_eq!(results.len(), 3, "Filter x > 2 should return 3 tuples");
@@ -71,7 +71,7 @@ fn main() {
     let results = engine.execute(program3).expect("Query 3 failed");
     println!("Results ({} tuples):", results.len());
     for (x, y) in &results {
-        println!("  result({}, {})", x, y);
+        println!("  result({x}, {y})");
     }
     // Assertion: Should return edges where x > 1 AND y < 5: (2,3), (3,4)
     assert_eq!(results.len(), 2, "Multiple filters should return 2 tuples");
@@ -88,7 +88,7 @@ fn main() {
     let results = engine.execute(program4).expect("Query 4 failed");
     println!("Results ({} tuples):", results.len());
     for (y, x) in &results {
-        println!("  result({}, {})", y, x);
+        println!("  result({y}, {x})");
     }
     // Assertion: Should return 5 tuples with columns swapped
     assert_eq!(results.len(), 5, "Projection should return 5 tuples");
@@ -108,7 +108,7 @@ fn main() {
     let results = engine.execute(program5).expect("Query 5 failed");
     println!("Results ({} tuples):", results.len());
     for (x, y) in &results {
-        println!("  result({}, {})", x, y);
+        println!("  result({x}, {y})");
     }
     // Assertion: Should return edges where x != 3: all except (3,4)
     assert_eq!(results.len(), 4, "Inequality should return 4 tuples");

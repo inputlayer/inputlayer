@@ -293,7 +293,7 @@ mod tests {
             .with_column(ColumnSchema::new("id", SchemaType::Symbol))
             .with_column(ColumnSchema::new("age", SchemaType::Int));
 
-        let display = format!("{}", schema);
+        let display = format!("{schema}");
         assert_eq!(display, "User(id: symbol, age: int)");
     }
 
@@ -430,7 +430,7 @@ mod tests {
     #[test]
     fn test_column_schema_display() {
         let col = ColumnSchema::new("age", SchemaType::Int);
-        assert_eq!(format!("{}", col), "age: int");
+        assert_eq!(format!("{col}"), "age: int");
     }
 
     #[test]

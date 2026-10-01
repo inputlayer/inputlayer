@@ -24,7 +24,7 @@ mod tests {
         let ir = builder.build_ir(&rule).unwrap();
 
         eprintln!("IR output schema: {:?}", ir.output_schema());
-        eprintln!("Full IR: {:#?}", ir);
+        eprintln!("Full IR: {ir:#?}");
 
         // Setup input data
         let mut input_data: HashMap<String, Vec<Tuple>> = HashMap::new();
@@ -49,7 +49,7 @@ mod tests {
 
         let results = codegen.generate_and_execute_tuples(&ir).unwrap();
 
-        eprintln!("Results: {:?}", results);
+        eprintln!("Results: {results:?}");
 
         // Expected: (2, 1) - node 2 is at distance 1 (which is 0+1)
         assert_eq!(results.len(), 1);
@@ -62,7 +62,7 @@ mod tests {
             .map(|v| v.as_i32().unwrap_or(-999))
             .collect();
 
-        eprintln!("Result values: {:?}", values);
+        eprintln!("Result values: {values:?}");
 
         // Y=2 (from edge.Y), D+1=1 (from dist.D=0 + 1)
         assert_eq!(values[0], 2, "First column should be Y=2");
@@ -102,7 +102,7 @@ mod tests {
 
         let results = codegen.generate_and_execute_tuples(&ir).unwrap();
 
-        eprintln!("Join results: {:?}", results);
+        eprintln!("Join results: {results:?}");
 
         assert_eq!(results.len(), 1);
         let values: Vec<i32> = results[0]

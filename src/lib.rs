@@ -1966,7 +1966,7 @@ mod tests {
 
         let query = r#"duration(Id, D) <- events(Id, "start", S), events(Id, "end", E), D = E - S"#;
         let results = engine.execute_tuples(query).unwrap();
-        eprintln!("Self-join results: {:?}", results);
+        eprintln!("Self-join results: {results:?}");
         assert_eq!(
             results.len(),
             2,
@@ -1997,7 +1997,7 @@ mod tests {
 
         let query = "common(A) <- ancestor(8, A), ancestor(10, A)";
         let results = engine.execute_tuples(query).unwrap();
-        eprintln!("Common ancestor results: {:?}", results);
+        eprintln!("Common ancestor results: {results:?}");
         // Common ancestor of 8 and 10 is just: 1
         assert_eq!(
             results.len(),
@@ -2040,7 +2040,7 @@ mod tests {
             "__query__(_c0, X) <- descendant(_c0, X), _c0 = 2\n",
         );
         let results = engine.execute_tuples(program).unwrap();
-        eprintln!("Recursive descendant results: {:?}", results);
+        eprintln!("Recursive descendant results: {results:?}");
         // Descendants of node 2: {4, 5, 8, 9, 10, 11}
         assert!(
             results.len() >= 2,
@@ -2338,8 +2338,7 @@ mod tests {
         assert_eq!(
             first.values()[0],
             Value::Int64(1),
-            "First column should be OrdId=1, got {:?}",
-            first
+            "First column should be OrdId=1, got {first:?}"
         );
     }
 
@@ -2700,8 +2699,10 @@ mod tests {
 
     #[test]
     fn test_config_with_join_planning_disabled() {
-        let mut config = OptimizationConfig::default();
-        config.enable_join_planning = false;
+        let config = OptimizationConfig {
+            enable_join_planning: false,
+            ..Default::default()
+        };
         let mut engine = IQLEngine::with_config(config);
         engine.add_fact("edge", vec![(1, 2)]);
         let results = engine.execute("result(X, Y) <- edge(X, Y)").unwrap();
@@ -2710,8 +2711,10 @@ mod tests {
 
     #[test]
     fn test_config_with_sip_disabled() {
-        let mut config = OptimizationConfig::default();
-        config.enable_sip_rewriting = false;
+        let config = OptimizationConfig {
+            enable_sip_rewriting: false,
+            ..Default::default()
+        };
         let mut engine = IQLEngine::with_config(config);
         engine.add_fact("edge", vec![(1, 2)]);
         let results = engine.execute("result(X, Y) <- edge(X, Y)").unwrap();
@@ -2720,8 +2723,10 @@ mod tests {
 
     #[test]
     fn test_config_with_subplan_sharing_disabled() {
-        let mut config = OptimizationConfig::default();
-        config.enable_subplan_sharing = false;
+        let config = OptimizationConfig {
+            enable_subplan_sharing: false,
+            ..Default::default()
+        };
         let mut engine = IQLEngine::with_config(config);
         engine.add_fact("edge", vec![(1, 2)]);
         let results = engine.execute("result(X, Y) <- edge(X, Y)").unwrap();
@@ -2730,8 +2735,10 @@ mod tests {
 
     #[test]
     fn test_config_with_boolean_specialization_disabled() {
-        let mut config = OptimizationConfig::default();
-        config.enable_boolean_specialization = false;
+        let config = OptimizationConfig {
+            enable_boolean_specialization: false,
+            ..Default::default()
+        };
         let mut engine = IQLEngine::with_config(config);
         engine.add_fact("edge", vec![(1, 2)]);
         let results = engine.execute("result(X, Y) <- edge(X, Y)").unwrap();

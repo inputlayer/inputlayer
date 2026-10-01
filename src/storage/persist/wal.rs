@@ -646,8 +646,7 @@ mod tests {
             .collect();
         assert!(
             archived_files.is_empty(),
-            "No .archived files should be created; found {:?}",
-            archived_files
+            "No .archived files should be created; found {archived_files:?}"
         );
     }
 
@@ -720,6 +719,7 @@ mod tests {
             use std::io::Write;
             let mut file = OpenOptions::new()
                 .create(true)
+                .truncate(false)
                 .write(true)
                 .open(&wal_file)
                 .unwrap();
@@ -848,6 +848,7 @@ mod tests {
             let json = serde_json::to_string(&entry).unwrap();
             let mut file = OpenOptions::new()
                 .create(true)
+                .truncate(false)
                 .write(true)
                 .open(&wal_file)
                 .unwrap();

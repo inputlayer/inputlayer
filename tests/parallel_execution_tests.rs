@@ -5,11 +5,11 @@ use tempfile::TempDir;
 
 // Test Helpers
 fn create_test_storage() -> (StorageEngine, TempDir) {
-    let temp = TempDir::new().unwrap();
+    let temp = TempDir::new().expect("create temp dir");
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
     config.storage.performance.num_threads = 4; // Use 4 threads for tests
-    let storage = StorageEngine::new(config).unwrap();
+    let storage = StorageEngine::new(config).expect("create storage engine");
     (storage, temp)
 }
 
@@ -56,7 +56,7 @@ fn test_execute_queries_on_multiple_knowledge_graphs_concurrently() {
 
     // Create 4 knowledge_graphs with different data
     for i in 1..=4 {
-        let db_name = format!("db{}", i);
+        let db_name = format!("db{i}");
         storage.create_knowledge_graph(&db_name).unwrap();
         storage
             .insert_into(&db_name, "edge", vec![(i, i * 10)])
@@ -91,7 +91,7 @@ fn test_same_query_on_multiple_knowledge_graphs() {
 
     // Create knowledge_graphs with increasing amounts of data
     for i in 1..=3 {
-        let db_name = format!("db{}", i);
+        let db_name = format!("db{i}");
         storage.create_knowledge_graph(&db_name).unwrap();
 
         let edges: Vec<(i32, i32)> = (0..i).map(|j| (j, j + 1)).collect();
@@ -223,7 +223,7 @@ fn test_parallel_queries_handle_empty_results() {
 
     // Create knowledge_graphs with no data
     for i in 1..=3 {
-        let db_name = format!("empty_db{}", i);
+        let db_name = format!("empty_db{i}");
         storage.create_knowledge_graph(&db_name).unwrap();
     }
 
@@ -252,7 +252,7 @@ fn test_parallel_execution_with_many_knowledge_graphs() {
     // Create 10 knowledge_graphs
     let num_knowledge_graphs = 10;
     for i in 1..=num_knowledge_graphs {
-        let db_name = format!("db{}", i);
+        let db_name = format!("db{i}");
         storage.create_knowledge_graph(&db_name).unwrap();
         storage
             .insert_into(&db_name, "data", vec![(i, i * 100)])
@@ -261,7 +261,7 @@ fn test_parallel_execution_with_many_knowledge_graphs() {
 
     // Execute queries on all knowledge_graphs in parallel
     let queries: Vec<(&str, &str)> = (1..=num_knowledge_graphs)
-        .map(|i| (format!("db{}", i), "result(X,Y) <- data(X,Y)"))
+        .map(|i| (format!("db{i}"), "result(X,Y) <- data(X,Y)"))
         .map(|(db, q)| (Box::leak(db.into_boxed_str()) as &str, q))
         .collect();
 
@@ -322,7 +322,7 @@ fn test_concurrent_queries_do_not_deadlock() {
 
     // Create multiple knowledge_graphs
     for i in 1..=5 {
-        let db_name = format!("db{}", i);
+        let db_name = format!("db{i}");
         storage.create_knowledge_graph(&db_name).unwrap();
         storage.insert_into(&db_name, "data", vec![(i, i)]).unwrap();
     }
@@ -330,7 +330,7 @@ fn test_concurrent_queries_do_not_deadlock() {
     // Execute many parallel queries (more than thread pool size)
     let queries: Vec<(&str, &str)> = (1..=5)
         .flat_map(|i| {
-            let db = format!("db{}", i);
+            let db = format!("db{i}");
             vec![
                 (
                     Box::leak(db.clone().into_boxed_str()) as &str,

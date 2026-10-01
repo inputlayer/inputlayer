@@ -1443,7 +1443,7 @@ mod tests {
     /// After save_shard_meta, no .json.tmp files should remain.
     #[test]
     fn test_metadata_atomic_write_no_temp_files() {
-        let (_temp, persist) = create_test_persist();
+        let (temp, persist) = create_test_persist();
 
         persist.ensure_shard("db:test").unwrap();
         persist
@@ -1452,7 +1452,7 @@ mod tests {
         persist.flush("db:test").unwrap();
 
         // Check no .json.tmp files exist in shards directory
-        let shards_dir = _temp.path().join("shards");
+        let shards_dir = temp.path().join("shards");
         let tmp_files: Vec<_> = fs::read_dir(&shards_dir)
             .unwrap()
             .filter_map(|e| e.ok())
@@ -1543,7 +1543,7 @@ mod tests {
     /// Verifies the shard .json file is durably deleted (not resurrectable on crash).
     #[test]
     fn test_delete_shard_metadata_file_removed() {
-        let (_temp, persist) = create_test_persist();
+        let (temp, persist) = create_test_persist();
 
         persist.ensure_shard("db:edge").unwrap();
         persist
@@ -1552,7 +1552,7 @@ mod tests {
         persist.flush("db:edge").unwrap();
 
         // Verify shard metadata file exists
-        let meta_path = _temp.path().join("shards").join("db_edge.json");
+        let meta_path = temp.path().join("shards").join("db_edge.json");
         assert!(
             meta_path.exists(),
             "Shard metadata file must exist before deletion"
@@ -1570,7 +1570,7 @@ mod tests {
     /// Regression: After delete_shard, batch files must be removed from disk.
     #[test]
     fn test_delete_shard_batch_files_removed() {
-        let (_temp, persist) = create_test_persist();
+        let (temp, persist) = create_test_persist();
 
         persist.ensure_shard("db:edge").unwrap();
         for i in 0..3 {
@@ -1584,7 +1584,7 @@ mod tests {
         persist.flush("db:edge").unwrap();
 
         // Verify batch files exist
-        let batches_dir = _temp.path().join("batches");
+        let batches_dir = temp.path().join("batches");
         let batch_count_before = fs::read_dir(&batches_dir)
             .unwrap()
             .filter_map(|e| e.ok())
@@ -1612,7 +1612,7 @@ mod tests {
     /// Regression: Compaction must delete old batch files and leave only new compacted one.
     #[test]
     fn test_compaction_deletes_old_batch_files() {
-        let (_temp, persist) = create_test_persist();
+        let (temp, persist) = create_test_persist();
 
         persist.ensure_shard("db:edge").unwrap();
 
@@ -1627,7 +1627,7 @@ mod tests {
             .unwrap();
         persist.flush("db:edge").unwrap();
 
-        let batches_dir = _temp.path().join("batches");
+        let batches_dir = temp.path().join("batches");
         let batch_count_before = fs::read_dir(&batches_dir)
             .unwrap()
             .filter_map(|e| e.ok())
@@ -1660,7 +1660,7 @@ mod tests {
     /// No .tmp files should remain after save.
     #[test]
     fn test_shard_meta_atomic_write() {
-        let (_temp, persist) = create_test_persist();
+        let (temp, persist) = create_test_persist();
 
         persist.ensure_shard("db:atomic_test").unwrap();
         persist
@@ -1672,7 +1672,7 @@ mod tests {
         persist.flush("db:atomic_test").unwrap();
 
         // Verify no .tmp files in shards dir
-        let shards_dir = _temp.path().join("shards");
+        let shards_dir = temp.path().join("shards");
         let tmp_files: Vec<_> = fs::read_dir(&shards_dir)
             .unwrap()
             .filter_map(|e| e.ok())
@@ -1716,7 +1716,7 @@ mod tests {
 
         // After the WAL size limit is hit, data should have been flushed to batch files.
         // The WAL should be much smaller now (entries cleared for flushed shards).
-        let wal_size = persist.wal.lock().file_size();
+        let _wal_size = persist.wal.lock().file_size();
         // After flush, WAL entries for this shard are removed
         // (exact size depends on implementation, but should be much less than
         // what 20 entries would produce without any flushing)

@@ -938,7 +938,7 @@ mod tests {
                         "Expected shared view reference, got '{relation}'"
                     );
                 }
-                _ => panic!("Expected Scan referencing shared view, got {:?}", ir),
+                _ => panic!("Expected Scan referencing shared view, got {ir:?}"),
             }
         }
     }
@@ -1281,7 +1281,7 @@ mod tests {
         let (rewritten, shared_views) = sharer.share_subplans(vec![ir1, ir2, ir3], &no_derived());
 
         // Should have shared views for both the Join and the Map(Join)
-        assert!(shared_views.len() >= 1, "Expected at least 1 shared view");
+        assert!(!shared_views.is_empty(), "Expected at least 1 shared view");
         assert_eq!(rewritten.len(), 3);
     }
 

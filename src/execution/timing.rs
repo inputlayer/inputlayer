@@ -362,13 +362,24 @@ mod tests {
         collector.record_rule("result".into(), 500, false, 1);
         collector.record_rule("tc".into(), 2000, true, 4);
 
+        // Backdate the start so `finish` has a known lower bound to measure.
+        collector.start = Some(
+            Instant::now()
+                .checked_sub(std::time::Duration::from_millis(5))
+                .unwrap(),
+        );
+
         let breakdown = collector.finish().unwrap();
         assert_eq!(breakdown.rules.len(), 2);
         assert_eq!(breakdown.rules[0].rule_head, "result");
+        assert_eq!(breakdown.rules[0].execution_us, 500);
         assert!(!breakdown.rules[0].is_recursive);
+        assert_eq!(breakdown.rules[0].workers, 1);
         assert_eq!(breakdown.rules[1].rule_head, "tc");
+        assert_eq!(breakdown.rules[1].execution_us, 2000);
         assert!(breakdown.rules[1].is_recursive);
-        assert!(breakdown.total_us > 0);
+        assert_eq!(breakdown.rules[1].workers, 4);
+        assert!(breakdown.total_us >= 5_000);
     }
 
     #[test]

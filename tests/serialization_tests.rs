@@ -1,7 +1,6 @@
 //! JSON serialization round-trips for Value types, DTOs, and edge cases.
 
 use inputlayer::value::{DataType, Tuple, Value};
-use serde_json;
 use std::sync::Arc;
 
 // Value Serialization Tests
@@ -21,8 +20,7 @@ fn test_int32_json_roundtrip() {
         let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
         assert_eq!(
             original, deserialized,
-            "Int32 roundtrip failed for {:?}",
-            original
+            "Int32 roundtrip failed for {original:?}"
         );
     }
 }
@@ -44,8 +42,7 @@ fn test_int64_json_roundtrip() {
         let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
         assert_eq!(
             original, deserialized,
-            "Int64 roundtrip failed for {:?}",
-            original
+            "Int64 roundtrip failed for {original:?}"
         );
     }
 }
@@ -74,9 +71,7 @@ fn test_float64_json_roundtrip() {
                 if a.is_finite() && b.is_finite() {
                     assert!(
                         (a - b).abs() < 1e-10 || (a - b).abs() / a.abs().max(b.abs()) < 1e-10,
-                        "Float64 roundtrip failed: {} vs {}",
-                        a,
-                        b
+                        "Float64 roundtrip failed: {a} vs {b}"
                     );
                 } else {
                     // For infinity/special values, use exact comparison
@@ -106,8 +101,7 @@ fn test_string_json_roundtrip() {
         let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
         assert_eq!(
             original, deserialized,
-            "String roundtrip failed for {:?}",
-            original
+            "String roundtrip failed for {original:?}"
         );
     }
 }
@@ -121,8 +115,7 @@ fn test_bool_json_roundtrip() {
         let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
         assert_eq!(
             original, deserialized,
-            "Bool roundtrip failed for {:?}",
-            original
+            "Bool roundtrip failed for {original:?}"
         );
     }
 }
@@ -157,9 +150,7 @@ fn test_vector_json_roundtrip() {
                     // Use 1e-5 tolerance for f32 (has ~7 significant digits)
                     assert!(
                         (va - vb).abs() < 1e-5,
-                        "Vector element mismatch: {} vs {}",
-                        va,
-                        vb
+                        "Vector element mismatch: {va} vs {vb}"
                     );
                 }
             }
@@ -201,8 +192,7 @@ fn test_timestamp_json_roundtrip() {
         let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
         assert_eq!(
             original, deserialized,
-            "Timestamp roundtrip failed for {:?}",
-            original
+            "Timestamp roundtrip failed for {original:?}"
         );
     }
 }
@@ -282,18 +272,15 @@ fn test_special_float_values_serialization() {
     // Serialization should succeed (converting to null or similar representation)
     assert!(
         inf_result.is_ok(),
-        "Infinity should serialize (typically to null): {:?}",
-        inf_result
+        "Infinity should serialize (typically to null): {inf_result:?}"
     );
     assert!(
         neg_inf_result.is_ok(),
-        "Negative infinity should serialize (typically to null): {:?}",
-        neg_inf_result
+        "Negative infinity should serialize (typically to null): {neg_inf_result:?}"
     );
     assert!(
         nan_result.is_ok(),
-        "NaN should serialize (typically to null): {:?}",
-        nan_result
+        "NaN should serialize (typically to null): {nan_result:?}"
     );
 
     // Verify the serialized values contain null for the value field
@@ -303,18 +290,15 @@ fn test_special_float_values_serialization() {
 
     assert!(
         inf_json.contains("null"),
-        "Infinity should serialize value as null: {}",
-        inf_json
+        "Infinity should serialize value as null: {inf_json}"
     );
     assert!(
         neg_inf_json.contains("null"),
-        "Neg infinity should serialize value as null: {}",
-        neg_inf_json
+        "Neg infinity should serialize value as null: {neg_inf_json}"
     );
     assert!(
         nan_json.contains("null"),
-        "NaN should serialize value as null: {}",
-        nan_json
+        "NaN should serialize value as null: {nan_json}"
     );
 }
 
@@ -338,8 +322,7 @@ fn test_unicode_string_serialization() {
         let deserialized: Value = serde_json::from_str(&json).expect("Deserialization failed");
         assert_eq!(
             original, deserialized,
-            "Unicode roundtrip failed for {:?}",
-            original
+            "Unicode roundtrip failed for {original:?}"
         );
     }
 }
@@ -388,7 +371,7 @@ fn test_deeply_nested_tuple_serialization() {
             0 => Value::Int32(i),
             1 => Value::Int64(i as i64 * 1000),
             2 => Value::Float64(i as f64 * 0.1),
-            3 => Value::String(Arc::from(format!("item_{}", i))),
+            3 => Value::String(Arc::from(format!("item_{i}"))),
             _ => Value::Bool(i % 2 == 0),
         })
         .collect();
@@ -403,7 +386,7 @@ fn test_deeply_nested_tuple_serialization() {
             (Some(Value::Float64(a)), Some(Value::Float64(b))) => {
                 assert!((a - b).abs() < 1e-10);
             }
-            (a, b) => assert_eq!(a, b, "Mismatch at index {}", i),
+            (a, b) => assert_eq!(a, b, "Mismatch at index {i}"),
         }
     }
 }
@@ -427,7 +410,7 @@ fn test_datatype_serialization() {
 
     for original in types {
         // DataType should be Debug-able at minimum
-        let debug_str = format!("{:?}", original);
+        let debug_str = format!("{original:?}");
         assert!(!debug_str.is_empty());
     }
 }
@@ -555,10 +538,7 @@ fn test_float_boundary_values() {
                 };
                 assert!(
                     relative_error < 1e-10,
-                    "Float boundary roundtrip failed: {} vs {} (error: {})",
-                    a,
-                    b,
-                    relative_error
+                    "Float boundary roundtrip failed: {a} vs {b} (error: {relative_error})"
                 );
             }
             _ => panic!("Expected Float64"),
@@ -572,7 +552,7 @@ fn test_concurrent_serialization() {
     use std::sync::Arc;
     use std::thread;
 
-    let values: Vec<Value> = (0..100).map(|i| Value::Int32(i)).collect();
+    let values: Vec<Value> = (0..100).map(Value::Int32).collect();
     let values = Arc::new(values);
 
     let handles: Vec<_> = (0..10)
@@ -602,7 +582,7 @@ fn test_serialization_performance_sanity() {
         .flat_map(|i| {
             vec![
                 Value::Int32(i),
-                Value::String(Arc::from(format!("item_{}", i))),
+                Value::String(Arc::from(format!("item_{i}"))),
                 Value::Float64(i as f64 * 0.1),
             ]
         })
@@ -619,7 +599,6 @@ fn test_serialization_performance_sanity() {
     // Should complete 1000 roundtrips in reasonable time (< 5 seconds)
     assert!(
         elapsed.as_secs() < 5,
-        "Serialization too slow: {:?} for 1000 roundtrips",
-        elapsed
+        "Serialization too slow: {elapsed:?} for 1000 roundtrips"
     );
 }

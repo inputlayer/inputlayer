@@ -503,14 +503,14 @@ mod tests {
     fn pos(rel: &str, args: Vec<&str>) -> BodyPredicate {
         BodyPredicate::Positive(Atom {
             relation: rel.to_string(),
-            args: args.into_iter().map(|s| var(s)).collect(),
+            args: args.into_iter().map(var).collect(),
         })
     }
 
     fn neg(rel: &str, args: Vec<&str>) -> BodyPredicate {
         BodyPredicate::Negated(Atom {
             relation: rel.to_string(),
-            args: args.into_iter().map(|s| var(s)).collect(),
+            args: args.into_iter().map(var).collect(),
         })
     }
 
@@ -518,7 +518,7 @@ mod tests {
         crate::ast::Rule {
             head: Atom {
                 relation: head.to_string(),
-                args: args.into_iter().map(|s| var(s)).collect(),
+                args: args.into_iter().map(var).collect(),
             },
             body,
         }

@@ -390,7 +390,7 @@ impl DiffType for MaxDiff {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use differential_dataflow::difference::{Monoid, Semigroup};
+    use differential_dataflow::difference::Monoid;
 
     // BooleanDiff arithmetic
     #[test]
@@ -513,7 +513,7 @@ mod tests {
 
     #[test]
     fn test_min_diff_is_not_abelian() {
-        assert!(!MinDiff::IS_ABELIAN);
+        const { assert!(!MinDiff::IS_ABELIAN) };
     }
 
     // MaxDiff
@@ -563,17 +563,17 @@ mod tests {
 
     #[test]
     fn test_max_diff_is_not_abelian() {
-        assert!(!MaxDiff::IS_ABELIAN);
+        const { assert!(!MaxDiff::IS_ABELIAN) };
     }
 
     // IS_ABELIAN
     #[test]
     fn test_isize_is_abelian() {
-        assert!(isize::IS_ABELIAN);
+        const { assert!(isize::IS_ABELIAN) };
     }
 
     #[test]
     fn test_boolean_diff_is_abelian() {
-        assert!(BooleanDiff::IS_ABELIAN);
+        const { assert!(BooleanDiff::IS_ABELIAN) };
     }
 }

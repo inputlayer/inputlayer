@@ -35,7 +35,7 @@ fn test_self_join_with_filter() {
     assert!(!results.is_empty());
     // All results should satisfy x < z
     for (x, z) in &results {
-        assert!(x < z, "Expected x < z, got {} < {}", x, z);
+        assert!(x < z, "Expected x < z, got {x} < {z}");
     }
 }
 
@@ -85,13 +85,11 @@ fn test_variable_reuse_in_body() {
     // (4,4) is self-loop
     assert!(
         result_set.contains(&(1, 2)) || result_set.contains(&(2, 1)),
-        "Expected (1,2) or (2,1) cycle but got {:?}",
-        result_set
+        "Expected (1,2) or (2,1) cycle but got {result_set:?}"
     );
     assert!(
         result_set.contains(&(4, 4)),
-        "Expected self-loop (4,4) but got {:?}",
-        result_set
+        "Expected self-loop (4,4) but got {result_set:?}"
     );
 }
 
@@ -138,8 +136,7 @@ fn test_safety_violation_detection() {
     let err = result.unwrap_err();
     assert!(
         err.contains("Unsafe") || err.contains("not found"),
-        "Error should mention safety: {}",
-        err
+        "Error should mention safety: {err}"
     );
 }
 
@@ -405,7 +402,7 @@ fn test_aggregation_count() {
         match category {
             "electronics" => assert_eq!(count, 3),
             "clothing" => assert_eq!(count, 2),
-            _ => panic!("Unexpected category: {}", category),
+            _ => panic!("Unexpected category: {category}"),
         }
     }
 }
@@ -450,7 +447,7 @@ fn test_aggregation_sum() {
         match category {
             "electronics" => assert_eq!(total, 300), // 100 + 200
             "clothing" => assert_eq!(total, 125),    // 50 + 75
-            _ => panic!("Unexpected category: {}", category),
+            _ => panic!("Unexpected category: {category}"),
         }
     }
 }
@@ -510,7 +507,7 @@ fn test_aggregation_min_max() {
                 assert_eq!(min_score, 88);
                 assert_eq!(max_score, 90);
             }
-            _ => panic!("Unexpected student: {}", student),
+            _ => panic!("Unexpected student: {student}"),
         }
     }
 }

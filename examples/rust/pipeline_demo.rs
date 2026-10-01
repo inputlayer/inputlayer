@@ -21,7 +21,7 @@ fn main() {
     engine.add_fact("edge", edges.clone());
     println!("Added {} edge facts:", edges.len());
     for (x, y) in &edges {
-        println!("  edge({}, {})", x, y);
+        println!("  edge({x}, {y})");
     }
     println!();
 
@@ -47,7 +47,7 @@ fn main() {
             println!("  Rules parsed: {}", parsed.rules.len());
 
             for (i, rule) in parsed.rules.iter().enumerate() {
-                println!("\n  Rule {}:", i);
+                println!("\n  Rule {i}:");
                 println!(
                     "    Head: {} with {} args",
                     rule.head.relation,
@@ -64,7 +64,7 @@ fn main() {
             }
         }
         Err(e) => {
-            println!("✗ Parsing failed: {}", e);
+            println!("✗ Parsing failed: {e}");
             return;
         }
     }
@@ -82,7 +82,7 @@ fn main() {
             println!("  IR nodes created: {}", ir_nodes.len());
 
             for (i, ir) in ir_nodes.iter().enumerate() {
-                println!("\n  IR Node {}:", i);
+                println!("\n  IR Node {i}:");
                 print_ir_structure(ir, 4);
             }
 
@@ -91,12 +91,12 @@ fn main() {
             let catalog = engine.catalog();
             for relation in catalog.all_relations() {
                 if let Some(schema) = catalog.get_schema(&relation) {
-                    println!("    {} → {:?}", relation, schema);
+                    println!("    {relation} → {schema:?}");
                 }
             }
         }
         Err(e) => {
-            println!("✗ IR building failed: {}", e);
+            println!("✗ IR building failed: {e}");
             return;
         }
     }
@@ -127,7 +127,7 @@ fn main() {
             print_ir_structure(ir_after, 4);
         }
         Err(e) => {
-            println!("✗ Optimization failed: {}", e);
+            println!("✗ Optimization failed: {e}");
             return;
         }
     }
@@ -147,7 +147,7 @@ fn main() {
                 println!("    (no results)");
             } else {
                 for (x, y) in &results {
-                    println!("    result({}, {})", x, y);
+                    println!("    result({x}, {y})");
                 }
             }
 
@@ -158,7 +158,7 @@ fn main() {
             println!("    Result: (2, 4)");
         }
         Err(e) => {
-            println!("✗ Execution failed: {}", e);
+            println!("✗ Execution failed: {e}");
             return;
         }
     }
@@ -174,23 +174,23 @@ fn print_ir_structure(ir: &IRNode, indent: usize) {
 
     match ir {
         IRNode::Scan { relation, schema } => {
-            println!("{}Scan({})", prefix, relation);
-            println!("{}  schema: {:?}", prefix, schema);
+            println!("{prefix}Scan({relation})");
+            println!("{prefix}  schema: {schema:?}");
         }
         IRNode::Map {
             input,
             projection,
             output_schema,
         } => {
-            println!("{}Map", prefix);
-            println!("{}  projection: {:?}", prefix, projection);
-            println!("{}  output: {:?}", prefix, output_schema);
-            println!("{}  input:", prefix);
+            println!("{prefix}Map");
+            println!("{prefix}  projection: {projection:?}");
+            println!("{prefix}  output: {output_schema:?}");
+            println!("{prefix}  input:");
             print_ir_structure(input, indent + 4);
         }
         IRNode::Filter { input, predicate } => {
-            println!("{}Filter({:?})", prefix, predicate);
-            println!("{}  input:", prefix);
+            println!("{prefix}Filter({predicate:?})");
+            println!("{prefix}  input:");
             print_ir_structure(input, indent + 4);
         }
         IRNode::Join {
@@ -200,24 +200,24 @@ fn print_ir_structure(ir: &IRNode, indent: usize) {
             right_keys,
             output_schema,
         } => {
-            println!("{}Join", prefix);
-            println!("{}  left_keys: {:?}", prefix, left_keys);
-            println!("{}  right_keys: {:?}", prefix, right_keys);
-            println!("{}  output: {:?}", prefix, output_schema);
-            println!("{}  left:", prefix);
+            println!("{prefix}Join");
+            println!("{prefix}  left_keys: {left_keys:?}");
+            println!("{prefix}  right_keys: {right_keys:?}");
+            println!("{prefix}  output: {output_schema:?}");
+            println!("{prefix}  left:");
             print_ir_structure(left, indent + 4);
-            println!("{}  right:", prefix);
+            println!("{prefix}  right:");
             print_ir_structure(right, indent + 4);
         }
         IRNode::Distinct { input } => {
-            println!("{}Distinct", prefix);
-            println!("{}  input:", prefix);
+            println!("{prefix}Distinct");
+            println!("{prefix}  input:");
             print_ir_structure(input, indent + 4);
         }
         IRNode::Union { inputs } => {
-            println!("{}Union", prefix);
+            println!("{prefix}Union");
             for (i, input) in inputs.iter().enumerate() {
-                println!("{}  input {}:", prefix, i);
+                println!("{prefix}  input {i}:");
                 print_ir_structure(input, indent + 4);
             }
         }
@@ -227,11 +227,8 @@ fn print_ir_structure(ir: &IRNode, indent: usize) {
             aggregations,
             ..
         } => {
-            println!(
-                "{}Aggregate group_by={:?} aggs={:?}",
-                prefix, group_by, aggregations
-            );
-            println!("{}  input:", prefix);
+            println!("{prefix}Aggregate group_by={group_by:?} aggs={aggregations:?}");
+            println!("{prefix}  input:");
             print_ir_structure(input, indent + 4);
         }
         IRNode::Antijoin {
@@ -241,23 +238,23 @@ fn print_ir_structure(ir: &IRNode, indent: usize) {
             right_keys,
             output_schema,
         } => {
-            println!("{}Antijoin", prefix);
-            println!("{}  left_keys: {:?}", prefix, left_keys);
-            println!("{}  right_keys: {:?}", prefix, right_keys);
-            println!("{}  output: {:?}", prefix, output_schema);
-            println!("{}  left:", prefix);
+            println!("{prefix}Antijoin");
+            println!("{prefix}  left_keys: {left_keys:?}");
+            println!("{prefix}  right_keys: {right_keys:?}");
+            println!("{prefix}  output: {output_schema:?}");
+            println!("{prefix}  left:");
             print_ir_structure(left, indent + 4);
-            println!("{}  right:", prefix);
+            println!("{prefix}  right:");
             print_ir_structure(right, indent + 4);
         }
         IRNode::Compute { input, expressions } => {
-            println!("{}Compute", prefix);
+            println!("{prefix}Compute");
             println!(
                 "{}  expressions: {:?}",
                 prefix,
                 expressions.iter().map(|(n, _)| n).collect::<Vec<_>>()
             );
-            println!("{}  input:", prefix);
+            println!("{prefix}  input:");
             print_ir_structure(input, indent + 4);
         }
         IRNode::HnswScan {
@@ -266,9 +263,9 @@ fn print_ir_structure(ir: &IRNode, indent: usize) {
             output_schema,
             ..
         } => {
-            println!("{}HnswScan({})", prefix, index_name);
-            println!("{}  k: {}", prefix, k);
-            println!("{}  output: {:?}", prefix, output_schema);
+            println!("{prefix}HnswScan({index_name})");
+            println!("{prefix}  k: {k}");
+            println!("{prefix}  output: {output_schema:?}");
         }
         IRNode::FlatMap {
             input,
@@ -276,11 +273,11 @@ fn print_ir_structure(ir: &IRNode, indent: usize) {
             filter_predicate,
             output_schema,
         } => {
-            println!("{}FlatMap", prefix);
-            println!("{}  projection: {:?}", prefix, projection);
-            println!("{}  filter: {:?}", prefix, filter_predicate);
-            println!("{}  output: {:?}", prefix, output_schema);
-            println!("{}  input:", prefix);
+            println!("{prefix}FlatMap");
+            println!("{prefix}  projection: {projection:?}");
+            println!("{prefix}  filter: {filter_predicate:?}");
+            println!("{prefix}  output: {output_schema:?}");
+            println!("{prefix}  input:");
             print_ir_structure(input, indent + 4);
         }
         IRNode::JoinFlatMap {
@@ -292,15 +289,15 @@ fn print_ir_structure(ir: &IRNode, indent: usize) {
             filter_predicate,
             output_schema,
         } => {
-            println!("{}JoinFlatMap", prefix);
-            println!("{}  left_keys: {:?}", prefix, left_keys);
-            println!("{}  right_keys: {:?}", prefix, right_keys);
-            println!("{}  projection: {:?}", prefix, projection);
-            println!("{}  filter: {:?}", prefix, filter_predicate);
-            println!("{}  output: {:?}", prefix, output_schema);
-            println!("{}  left:", prefix);
+            println!("{prefix}JoinFlatMap");
+            println!("{prefix}  left_keys: {left_keys:?}");
+            println!("{prefix}  right_keys: {right_keys:?}");
+            println!("{prefix}  projection: {projection:?}");
+            println!("{prefix}  filter: {filter_predicate:?}");
+            println!("{prefix}  output: {output_schema:?}");
+            println!("{prefix}  left:");
             print_ir_structure(left, indent + 4);
-            println!("{}  right:", prefix);
+            println!("{prefix}  right:");
             print_ir_structure(right, indent + 4);
         }
     }

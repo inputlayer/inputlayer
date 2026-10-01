@@ -262,9 +262,4 @@ mod tests {
         let result = h.highlight_prompt("plain", false);
         assert_eq!(result.as_ref(), "plain");
     }
-
-    #[test]
-    fn test_iql_helper_default() {
-        let _h = IQLHelper::default();
-    }
 }

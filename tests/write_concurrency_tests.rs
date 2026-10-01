@@ -8,11 +8,11 @@ use tempfile::TempDir;
 
 // Test Helpers
 fn create_test_storage() -> (StorageEngine, TempDir) {
-    let temp = TempDir::new().unwrap();
+    let temp = TempDir::new().expect("create temp dir");
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
     config.storage.performance.num_threads = 4;
-    let storage = StorageEngine::new(config).unwrap();
+    let storage = StorageEngine::new(config).expect("create storage engine");
     (storage, temp)
 }
 
@@ -71,9 +71,7 @@ fn test_concurrent_inserts_to_different_kgs() {
 
     // Create multiple KGs
     for i in 0..5 {
-        storage
-            .create_knowledge_graph(&format!("kg_{}", i))
-            .unwrap();
+        storage.create_knowledge_graph(&format!("kg_{i}")).unwrap();
     }
 
     let storage = Arc::new(RwLock::new(storage));
@@ -104,7 +102,7 @@ fn test_concurrent_inserts_to_different_kgs() {
     // Verify each KG has correct number of tuples
     let storage_guard = storage.write().expect("Lock failed");
     for i in 0..5 {
-        let kg_name = format!("kg_{}", i);
+        let kg_name = format!("kg_{i}");
         let results = storage_guard
             .execute_query_on(&kg_name, "result(X,Y) <- data(X,Y)")
             .expect("Query failed");
@@ -254,7 +252,7 @@ fn test_concurrent_deletes_to_same_kg() {
         let handle = thread::spawn(move || {
             // Each thread deletes tuples where id % num_threads == thread_id
             for i in 0..10 {
-                let tuple_id = (thread_id * 10 + i) as i32;
+                let tuple_id = thread_id * 10 + i;
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 // Use delete with specific tuple
                 let _ = storage_guard.delete_from(
@@ -285,7 +283,7 @@ fn test_concurrent_deletes_to_different_kgs() {
 
     // Create and populate multiple KGs
     for i in 0..5 {
-        let kg_name = format!("delete_kg_{}", i);
+        let kg_name = format!("delete_kg_{i}");
         storage.create_knowledge_graph(&kg_name).unwrap();
         let data: Vec<(i32, i32)> = (0..20).map(|j| (j, j * 10)).collect();
         storage.insert_into(&kg_name, "data", data).unwrap();
@@ -298,7 +296,7 @@ fn test_concurrent_deletes_to_different_kgs() {
     for kg_id in 0..5 {
         let storage_clone = Arc::clone(&storage);
         let handle = thread::spawn(move || {
-            let kg_name = format!("delete_kg_{}", kg_id);
+            let kg_name = format!("delete_kg_{kg_id}");
             for i in 0..20 {
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let _ = storage_guard.delete_from(&kg_name, "data", vec![(i, i * 10)]);
@@ -314,11 +312,11 @@ fn test_concurrent_deletes_to_different_kgs() {
     // Verify all KGs are empty
     let storage_guard = storage.write().expect("Lock failed");
     for i in 0..5 {
-        let kg_name = format!("delete_kg_{}", i);
+        let kg_name = format!("delete_kg_{i}");
         let results = storage_guard
             .execute_query_on(&kg_name, "result(X,Y) <- data(X,Y)")
             .expect("Query failed");
-        assert_eq!(results.len(), 0, "KG {} should be empty", kg_name);
+        assert_eq!(results.len(), 0, "KG {kg_name} should be empty");
     }
 }
 
@@ -342,7 +340,7 @@ fn test_delete_nonexistent_concurrent() {
     for thread_id in 0..num_threads {
         let storage_clone = Arc::clone(&storage);
         let handle = thread::spawn(move || {
-            let tuple_id = (thread_id + 100) as i32; // IDs 100-109 don't exist
+            let tuple_id = thread_id + 100; // IDs 100-109 don't exist
             let storage_guard = storage_clone.write().expect("Lock failed");
             // Should not error, just do nothing
             let result = storage_guard.delete_from(
@@ -575,8 +573,7 @@ fn test_snapshot_visibility_after_write() {
                 // Should see at least our own tuple
                 assert!(
                     results.iter().any(|t| *t == (tuple_id, tuple_id * 2)),
-                    "Thread {} should see its own write",
-                    thread_id
+                    "Thread {thread_id} should see its own write"
                 );
             }
         });
@@ -649,7 +646,7 @@ fn test_100_concurrent_writers_10_kgs() {
     // Create 10 KGs
     for i in 0..10 {
         storage
-            .create_knowledge_graph(&format!("stress_kg_{}", i))
+            .create_knowledge_graph(&format!("stress_kg_{i}"))
             .unwrap();
     }
 
@@ -691,7 +688,7 @@ fn test_100_concurrent_writers_10_kgs() {
     let storage_guard = storage.write().expect("Lock failed");
     let mut total = 0;
     for i in 0..10 {
-        let kg_name = format!("stress_kg_{}", i);
+        let kg_name = format!("stress_kg_{i}");
         let results = storage_guard
             .execute_query_on(&kg_name, "result(X,Y) <- data(X,Y)")
             .expect("Query failed");
@@ -763,7 +760,7 @@ fn test_concurrent_rule_drop() {
     for thread_id in 0..num_threads {
         let storage_clone = Arc::clone(&storage);
         let handle = thread::spawn(move || {
-            let rule_name = format!("rule_{}", thread_id);
+            let rule_name = format!("rule_{thread_id}");
             let storage_guard = storage_clone.write().expect("Lock failed");
             // This should not panic, even if rule doesn't exist
             let _ = storage_guard.drop_rule_in("rule_drop_test", &rule_name);
@@ -792,7 +789,7 @@ fn test_write_error_doesnt_corrupt_state() {
     for thread_id in 0..5 {
         let storage_clone = Arc::clone(&storage);
         let handle = thread::spawn(move || {
-            let tuple_id = (thread_id + 10) as i32;
+            let tuple_id = thread_id + 10;
             let storage_guard = storage_clone.write().expect("Lock failed");
             storage_guard
                 .insert_into("error_test", "data", vec![(tuple_id, tuple_id * 10)])
@@ -886,7 +883,7 @@ fn test_concurrent_kg_creation_and_writes() {
     for thread_id in 0..num_threads {
         let storage_clone = Arc::clone(&storage);
         let handle = thread::spawn(move || {
-            let kg_name = format!("created_kg_{}", thread_id);
+            let kg_name = format!("created_kg_{thread_id}");
 
             // Create KG
             {
@@ -898,7 +895,7 @@ fn test_concurrent_kg_creation_and_writes() {
 
             // Write to it
             for i in 0..10 {
-                let tuple_id = (thread_id * 100 + i) as i32;
+                let tuple_id = thread_id * 100 + i;
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 storage_guard
                     .insert_into(&kg_name, "data", vec![(tuple_id, tuple_id)])
@@ -915,7 +912,7 @@ fn test_concurrent_kg_creation_and_writes() {
     // Verify all KGs exist and have data
     let storage_guard = storage.write().expect("Lock failed");
     for i in 0..num_threads {
-        let kg_name = format!("created_kg_{}", i);
+        let kg_name = format!("created_kg_{i}");
         let results = storage_guard
             .execute_query_on(&kg_name, "result(X,Y) <- data(X,Y)")
             .expect("Query failed");

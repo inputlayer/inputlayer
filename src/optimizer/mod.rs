@@ -41,13 +41,11 @@ impl Optimizer {
     pub fn optimize(&self, ir: IRNode) -> IRNode {
         let mut current = ir;
 
-        for _iteration in 0..self.max_iterations {
+        for _ in 0..self.max_iterations {
             let optimized = self.apply_all_rules(current.clone());
 
             // Check if we reached fixpoint
             if Self::ir_equals(&optimized, &current) {
-                #[cfg(test)]
-                println!("Optimizer reached fixpoint at iteration {}", _iteration);
                 break;
             }
 

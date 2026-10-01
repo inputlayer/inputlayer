@@ -277,12 +277,7 @@ mod tests {
     fn base_data_with(entries: Vec<(&str, Vec<Vec<Value>>)>) -> HashMap<String, Vec<Tuple>> {
         entries
             .into_iter()
-            .map(|(name, rows)| {
-                (
-                    name.to_string(),
-                    rows.into_iter().map(|r| Tuple::new(r)).collect(),
-                )
-            })
+            .map(|(name, rows)| (name.to_string(), rows.into_iter().map(Tuple::new).collect()))
             .collect()
     }
 
@@ -310,7 +305,7 @@ mod tests {
         let tuple = make_tuple(vec![int_val(1), int_val(42)]);
         let bindings = unify_head(&tuple, &head).expect("should unify");
         assert_eq!(bindings.get("Y"), Some(&int_val(42)));
-        assert!(bindings.get("X").is_none());
+        assert!(!bindings.contains_key("X"));
     }
 
     #[test]
@@ -589,8 +584,8 @@ mod tests {
             BoundTerm::Concrete(Value::String(Arc::from("hello"))),
         ];
         let s = format_bound_terms(&terms);
-        assert!(s.contains("1"), "got: {s}");
-        assert!(s.contains("Y"), "got: {s}");
+        assert!(s.contains('1'), "got: {s}");
+        assert!(s.contains('Y'), "got: {s}");
         assert!(s.contains("\"hello\""), "got: {s}");
     }
 }

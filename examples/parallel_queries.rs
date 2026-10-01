@@ -18,9 +18,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== InputLayer Parallel Query Execution Demo ===\n");
 
     // Use temporary directory for demo (idempotent - can run multiple times)
-    let _temp_dir = TempDir::new()?;
+    let temp_dir = TempDir::new()?;
     let mut config = Config::default();
-    config.storage.data_dir = _temp_dir.path().to_path_buf();
+    config.storage.data_dir = temp_dir.path().to_path_buf();
 
     let mut storage = StorageEngine::new(config)?;
 
@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let edges: Vec<(i32, i32)> = (0..size).map(|j| (j as i32, (j + 1) as i32)).collect();
 
         storage.insert("edge", edges)?;
-        println!("  {} - Inserted {} edges", name, size);
+        println!("  {name} - Inserted {size} edges");
     }
 
     println!();
@@ -71,7 +71,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (db, result) in &results {
         println!("  {} returned {} tuples", db, result.len());
     }
-    println!("Time: {:?}\n", duration);
+    println!("Time: {duration:?}\n");
 
     // ========================================================================
     // Demo 2: Same Query on Multiple Databases
@@ -85,12 +85,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         storage.execute_query_on_multiple_knowledge_graphs(database_names.clone(), query)?;
     let duration = start.elapsed();
 
-    println!("Query: {}", query);
+    println!("Query: {query}");
     println!("Executed on {} databases in parallel", results.len());
     for (db, result) in &results {
         println!("  {} returned {} tuples", db, result.len());
     }
-    println!("Time: {:?}\n", duration);
+    println!("Time: {duration:?}\n");
 
     // ========================================================================
     // Demo 3: Multiple Queries on Same Database
@@ -112,7 +112,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (i, result) in results.iter().enumerate() {
         println!("  Query {} returned {} tuples", i + 1, result.len());
     }
-    println!("Time: {:?}\n", duration);
+    println!("Time: {duration:?}\n");
 
     // ========================================================================
     // Demo 4: Performance Comparison (Sequential vs Parallel)
@@ -128,7 +128,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = storage.execute_query_on(db, test_query)?;
     }
     let seq_duration = start.elapsed();
-    println!("  Time: {:?}", seq_duration);
+    println!("  Time: {seq_duration:?}");
 
     // Parallel execution
     println!("Parallel execution:");
@@ -136,11 +136,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ =
         storage.execute_query_on_multiple_knowledge_graphs(database_names.clone(), test_query)?;
     let par_duration = start.elapsed();
-    println!("  Time: {:?}", par_duration);
+    println!("  Time: {par_duration:?}");
 
     if seq_duration > par_duration {
         let speedup = seq_duration.as_secs_f64() / par_duration.as_secs_f64();
-        println!("  Speedup: {:.2}x faster", speedup);
+        println!("  Speedup: {speedup:.2}x faster");
     }
 
     println!();
@@ -151,7 +151,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("--- Demo 5: Scaling with More Databases ---");
 
     // Create more databases for scaling test
-    let large_db_names: Vec<String> = (1..=8).map(|i| format!("scale_db{}", i)).collect();
+    let large_db_names: Vec<String> = (1..=8).map(|i| format!("scale_db{i}")).collect();
 
     for (i, name) in large_db_names.iter().enumerate() {
         storage.create_knowledge_graph(name)?;
@@ -176,7 +176,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Total tuples returned: {}",
         results.iter().map(|(_, r)| r.len()).sum::<usize>()
     );
-    println!("Time: {:?}", duration);
+    println!("Time: {duration:?}");
     println!(
         "Average time per database: {:?}",
         duration / results.len() as u32

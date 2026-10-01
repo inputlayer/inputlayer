@@ -309,8 +309,7 @@ fn test_config_valid_formats() {
         format_str.contains("Parquet")
             || format_str.contains("Csv")
             || format_str.contains("Bincode"),
-        "Invalid format: {}",
-        format_str
+        "Invalid format: {format_str}"
     );
 }
 
@@ -324,8 +323,7 @@ fn test_config_valid_compression() {
         compression_str.contains("Snappy")
             || compression_str.contains("Gzip")
             || compression_str.contains("None"),
-        "Invalid compression: {}",
-        compression_str
+        "Invalid compression: {compression_str}"
     );
 }
 
@@ -341,8 +339,7 @@ fn test_config_valid_log_level() {
             || level == "info"
             || level == "warn"
             || level == "error",
-        "Invalid log level: {}",
-        level
+        "Invalid log level: {level}"
     );
 }
 
@@ -354,8 +351,7 @@ fn test_config_valid_log_format() {
     // Should be one of the valid formats
     assert!(
         format == "text" || format == "json",
-        "Invalid log format: {}",
-        format
+        "Invalid log format: {format}"
     );
 }
 
@@ -396,7 +392,7 @@ fn test_config_can_be_cloned() {
 #[test]
 fn test_config_can_be_debugged() {
     let config = Config::default();
-    let debug_str = format!("{:?}", config);
+    let debug_str = format!("{config:?}");
 
     // Should contain some config information
     assert!(debug_str.contains("storage") || debug_str.contains("Config"));

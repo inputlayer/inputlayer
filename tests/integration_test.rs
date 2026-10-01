@@ -241,7 +241,7 @@ fn test_triangles_query() {
     let results = engine.execute(program).unwrap();
 
     // Should find the triangle edges
-    assert!(results.len() > 0);
+    assert!(!results.is_empty());
 }
 
 #[test]
@@ -300,8 +300,8 @@ fn test_optimization_config() {
     };
 
     let engine = IQLEngine::with_config(config.clone());
-    assert_eq!(engine.config().enable_join_planning, true);
-    assert_eq!(engine.config().enable_subplan_sharing, false);
+    assert!(engine.config().enable_join_planning);
+    assert!(!engine.config().enable_subplan_sharing);
 }
 
 // Negation (Antijoin) Tests
@@ -327,8 +327,7 @@ fn test_simple_negation() {
     assert_eq!(
         results.len(),
         3,
-        "Expected 3 active employees, got {:?}",
-        results
+        "Expected 3 active employees, got {results:?}"
     );
     assert!(results.contains(&(1, 10)), "Employee 1 should be active");
     assert!(results.contains(&(3, 20)), "Employee 3 should be active");
@@ -369,8 +368,7 @@ fn test_negation_with_join() {
     assert_eq!(
         results.len(),
         3,
-        "Expected 3 active employee-manager pairs, got {:?}",
-        results
+        "Expected 3 active employee-manager pairs, got {results:?}"
     );
     assert!(
         results.contains(&(1, 100)),
@@ -409,11 +407,11 @@ fn test_negation_on_view() {
     // source_node(X, Y) <- edge(X, Y)             -- wraps edge
     // target_node(Y, X) <- edge(X, Y)             -- swaps X and Y from edge
     // pure_source(X, Y) <- source_node(X, Y), !target_node(X, _)   -- negation on a view
-    let program = r#"
+    let program = r"
         source_node(X, Y) <- edge(X, Y)
         target_node(Y, X) <- edge(X, Y)
         pure_source(X, Y) <- source_node(X, Y), !target_node(X, _)
-    "#;
+    ";
 
     let results = engine.execute(program).unwrap();
 
@@ -432,8 +430,7 @@ fn test_negation_on_view() {
     assert_eq!(
         results.len(),
         2,
-        "Expected 2 pure source nodes, got {:?}",
-        results
+        "Expected 2 pure source nodes, got {results:?}"
     );
     assert!(
         results.contains(&(1, 2)),
@@ -501,7 +498,7 @@ fn test_sip_four_way_join() {
     let program = "full_user_info(Name, Email, Role, Dept) <- users(Id, Name), emails(Id, Email), roles(Id, Role), departments(Id, Dept)";
 
     let results = engine.execute_tuples(program).unwrap();
-    eprintln!("SIP four-way join results: {:?}", results);
+    eprintln!("SIP four-way join results: {results:?}");
     assert_eq!(
         results.len(),
         2,
@@ -533,7 +530,7 @@ fn test_sip_self_join() {
     let program = "connected(X, Z) <- edge(X, Y), edge(Y, Z)";
 
     let results = engine.execute_tuples(program).unwrap();
-    eprintln!("SIP self-join results: {:?}", results);
+    eprintln!("SIP self-join results: {results:?}");
     assert_eq!(
         results.len(),
         2,
@@ -633,7 +630,7 @@ fn test_boolean_diff_full_pipeline() {
     engine.add_fact("edge", vec![(1, 2), (2, 3), (3, 4)]);
 
     let mut results = engine.execute("path(X, Y) <- edge(X, Y)").unwrap();
-    results.sort();
+    results.sort_unstable();
 
     // Boolean specialization is always on; verify results are correct
     assert_eq!(results, vec![(1, 2), (2, 3), (3, 4)]);
@@ -651,7 +648,7 @@ fn test_boolean_diff_transitive_closure() {
              path(X, Z) <- path(X, Y), edge(Y, Z)",
         )
         .unwrap();
-    results.sort();
+    results.sort_unstable();
 
     // Should find all transitive pairs
     let expected = vec![(1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4)];

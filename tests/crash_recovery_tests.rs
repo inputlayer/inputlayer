@@ -600,17 +600,13 @@ fn test_data_integrity_after_multiple_restarts() {
         assert_eq!(
             tuples.len(),
             expected_data.len(),
-            "Restart {} should preserve data count",
-            i
+            "Restart {i} should preserve data count"
         );
 
         for (a, b) in &expected_data {
             assert!(
                 tuples.contains(&Tuple::from_pair(*a, *b)),
-                "Restart {} should preserve tuple ({}, {})",
-                i,
-                a,
-                b
+                "Restart {i} should preserve tuple ({a}, {b})"
             );
         }
     }
@@ -1011,7 +1007,7 @@ fn test_recovery_with_many_shards() {
     {
         let persist = create_test_persist_with_config(path.clone(), 100);
         for i in 0..num_shards {
-            let shard = format!("db:shard_{}", i);
+            let shard = format!("db:shard_{i}");
             persist.ensure_shard(&shard).unwrap();
             persist
                 .append(&shard, &[Update::insert(Tuple::from_pair(i, i), 10)])
@@ -1026,8 +1022,8 @@ fn test_recovery_with_many_shards() {
     assert_eq!(shards.len(), num_shards as usize);
 
     for i in 0..num_shards {
-        let shard = format!("db:shard_{}", i);
+        let shard = format!("db:shard_{i}");
         let updates = persist.read(&shard, 0).unwrap();
-        assert_eq!(updates.len(), 1, "Shard {} should have data", i);
+        assert_eq!(updates.len(), 1, "Shard {i} should have data");
     }
 }

@@ -7,10 +7,10 @@ use tempfile::TempDir;
 
 // Test Helpers
 fn create_test_storage() -> (StorageEngine, TempDir) {
-    let temp = TempDir::new().unwrap();
+    let temp = TempDir::new().expect("create temp dir");
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
-    let storage = StorageEngine::new(config).unwrap();
+    let storage = StorageEngine::new(config).expect("create storage engine");
     (storage, temp)
 }
 
@@ -49,7 +49,7 @@ fn test_unbalanced_parens_returns_error() {
 
     for query in test_cases {
         let result = engine.execute(query);
-        assert!(result.is_err(), "Query '{}' should return error", query);
+        assert!(result.is_err(), "Query '{query}' should return error");
     }
 }
 
@@ -75,7 +75,7 @@ fn test_invalid_rule_syntax_returns_error() {
     for query in test_cases {
         let result = engine.execute(query);
         // Should return error, not panic
-        assert!(result.is_err(), "Query '{}' should return error", query);
+        assert!(result.is_err(), "Query '{query}' should return error");
     }
 }
 
@@ -101,7 +101,7 @@ fn test_malformed_aggregation_returns_error() {
     for query in test_cases {
         let result = engine.execute(query);
         // Should error, not panic
-        assert!(result.is_err(), "Query '{}' should return error", query);
+        assert!(result.is_err(), "Query '{query}' should return error");
     }
 }
 
@@ -153,7 +153,7 @@ fn test_delete_from_nonexistent_kg_returns_error() {
 
 #[test]
 fn test_drop_nonexistent_kg_returns_error() {
-    let (mut storage, _temp) = create_test_storage();
+    let (storage, _temp) = create_test_storage();
 
     let result = storage.drop_knowledge_graph("nonexistent_kg");
     assert!(result.is_err(), "Drop non-existent KG should return error");
@@ -278,11 +278,7 @@ fn test_concurrent_errors_dont_cause_panic() {
                 let _ = storage_guard.execute_query_on("nonexistent_kg", "result(X) <- data(X)");
             } else {
                 // Half do valid operations
-                let _ = storage_guard.insert_into(
-                    "concurrent_errors",
-                    "data",
-                    vec![(i as i32, i as i32)],
-                );
+                let _ = storage_guard.insert_into("concurrent_errors", "data", vec![(i, i)]);
                 let _ =
                     storage_guard.execute_query_on("concurrent_errors", "result(X,Y) <- data(X,Y)");
             }
@@ -298,11 +294,11 @@ fn test_concurrent_errors_dont_cause_panic() {
 
 #[test]
 fn test_rapid_kg_create_drop_cycle() {
-    let (mut storage, _temp) = create_test_storage();
+    let (storage, _temp) = create_test_storage();
 
     // Rapid create/drop cycle should not cause issues
     for i in 0..50 {
-        let kg_name = format!("rapid_cycle_{}", i);
+        let kg_name = format!("rapid_cycle_{i}");
         storage.create_knowledge_graph(&kg_name).unwrap();
         storage.insert_into(&kg_name, "data", vec![(i, i)]).unwrap();
         storage.drop_knowledge_graph(&kg_name).unwrap();
@@ -384,7 +380,7 @@ fn test_very_long_query_handled() {
     let long_query = format!(
         "result(X) <- {}",
         (0..100)
-            .map(|i| format!("rel{}(X)", i))
+            .map(|i| format!("rel{i}(X)"))
             .collect::<Vec<_>>()
             .join(", ")
     );
@@ -401,7 +397,7 @@ fn test_deeply_nested_arithmetic_handled() {
 
     // Deeply nested arithmetic
     let nested = "(((((X+1)+1)+1)+1)+1)";
-    let query = format!("result(Y) <- data(X), Y = {}", nested);
+    let query = format!("result(Y) <- data(X), Y = {nested}");
 
     let result = engine.execute(&query);
     // Should succeed or error, but not panic

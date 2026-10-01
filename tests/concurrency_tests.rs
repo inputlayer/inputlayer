@@ -7,11 +7,11 @@ use tempfile::TempDir;
 
 // Test Helpers
 fn create_test_storage() -> (StorageEngine, TempDir) {
-    let temp = TempDir::new().unwrap();
+    let temp = TempDir::new().expect("create temp dir");
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
     config.storage.performance.num_threads = 4;
-    let storage = StorageEngine::new(config).unwrap();
+    let storage = StorageEngine::new(config).expect("create storage engine");
     (storage, temp)
 }
 
@@ -48,7 +48,7 @@ fn test_concurrent_reads_do_not_block() {
                 let storage_guard = storage_clone.write().expect("Lock acquisition failed");
                 let results = storage_guard
                     .execute_query_on("concurrent_test", "result(X,Y) <- edge(X,Y)")
-                    .expect(&format!("Reader {} failed to execute query", i));
+                    .unwrap_or_else(|_| panic!("Reader {i} failed to execute query"));
                 assert_eq!(results.len(), 5);
             }
         });
@@ -67,7 +67,7 @@ fn test_concurrent_reads_across_multiple_kgs() {
 
     // Create multiple KGs with data
     for i in 1..=5 {
-        let kg_name = format!("kg{}", i);
+        let kg_name = format!("kg{i}");
         storage.create_knowledge_graph(&kg_name).unwrap();
         storage
             .insert_into(&kg_name, "data", vec![(i, i * 10)])
@@ -81,7 +81,7 @@ fn test_concurrent_reads_across_multiple_kgs() {
     for kg_num in 1..=5i32 {
         for _ in 0..3 {
             let storage_clone = Arc::clone(&storage);
-            let kg_name = format!("kg{}", kg_num);
+            let kg_name = format!("kg{kg_num}");
             let handle = thread::spawn(move || {
                 for _ in 0..10 {
                     let storage_guard = storage_clone.write().expect("Lock failed");
@@ -175,7 +175,7 @@ fn test_high_contention_many_readers() {
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let results = storage_guard
                     .execute_query_on("contention_test", "result(X,Y) <- edge(X,Y)")
-                    .expect(&format!("Thread {} query {} failed", thread_id, query_num));
+                    .unwrap_or_else(|_| panic!("Thread {thread_id} query {query_num} failed"));
                 assert_eq!(results.len(), 100);
             }
             thread_id
@@ -198,7 +198,7 @@ fn test_no_deadlock_with_cross_kg_queries() {
 
     // Create KGs
     for i in 1..=4 {
-        let kg_name = format!("deadlock_test_kg{}", i);
+        let kg_name = format!("deadlock_test_kg{i}");
         storage.create_knowledge_graph(&kg_name).unwrap();
         storage
             .insert_into(&kg_name, "data", vec![(i, i * 100)])
@@ -217,7 +217,7 @@ fn test_no_deadlock_with_cross_kg_queries() {
                 // Query KGs in rotating order
                 for offset in 0..4 {
                     let kg_num = ((pattern + offset) % 4) + 1;
-                    let kg_name = format!("deadlock_test_kg{}", kg_num);
+                    let kg_name = format!("deadlock_test_kg{kg_num}");
                     let storage_guard = storage_clone.write().expect("Lock failed");
                     let results = storage_guard
                         .execute_query_on(&kg_name, "result(X,Y) <- data(X,Y)")
@@ -308,7 +308,7 @@ fn test_list_kgs_under_read_contention() {
     // Create several KGs
     for i in 1..=5 {
         storage
-            .create_knowledge_graph(&format!("list_test_kg{}", i))
+            .create_knowledge_graph(&format!("list_test_kg{i}"))
             .unwrap();
     }
 
@@ -354,7 +354,7 @@ fn test_parallel_api_under_concurrent_access() {
 
     // Create KGs
     for i in 1..=4 {
-        let kg_name = format!("parallel_api_kg{}", i);
+        let kg_name = format!("parallel_api_kg{i}");
         storage.create_knowledge_graph(&kg_name).unwrap();
         storage
             .insert_into(&kg_name, "data", vec![(i, i * 10)])
@@ -417,7 +417,7 @@ fn test_sustained_concurrent_load() {
                 let storage_guard = storage_clone.write().expect("Lock failed");
                 let results = storage_guard
                     .execute_query_on("sustained_test", "result(X,Y) <- values(X,Y)")
-                    .expect(&format!("Thread {} iteration {} failed", thread_id, iter));
+                    .unwrap_or_else(|_| panic!("Thread {thread_id} iteration {iter} failed"));
                 assert_eq!(results.len(), 50);
             }
         });

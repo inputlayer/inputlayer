@@ -8,19 +8,19 @@ use tempfile::TempDir;
 
 // Test Helpers
 fn create_test_handler() -> (Handler, TempDir) {
-    let temp = TempDir::new().unwrap();
+    let temp = TempDir::new().expect("create temp dir");
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
-    let storage = StorageEngine::new(config).unwrap();
+    let storage = StorageEngine::new(config).expect("create storage engine");
     let handler = Handler::new(storage);
     (handler, temp)
 }
 
 fn create_handler_with_config(config: Config) -> (Handler, TempDir) {
-    let temp = TempDir::new().unwrap();
+    let temp = TempDir::new().expect("create temp dir");
     let mut config = config;
     config.storage.data_dir = temp.path().to_path_buf();
-    let storage = StorageEngine::new(config).unwrap();
+    let storage = StorageEngine::new(config).expect("create storage engine");
     let handler = Handler::new(storage);
     (handler, temp)
 }
@@ -298,7 +298,7 @@ async fn test_concurrent_queries() {
     // Wait for all queries
     for handle in handles {
         let (idx, success) = handle.await.unwrap();
-        assert!(success, "Query {} failed", idx);
+        assert!(success, "Query {idx} failed");
     }
 
     // All queries should have been counted - exactly 5 queries were executed
@@ -510,7 +510,7 @@ async fn test_query_result_with_different_types() {
 async fn test_query_empty_program() {
     let (handler, _temp) = create_test_handler();
 
-    let result = handler.query_program(None, "".to_string()).await;
+    let result = handler.query_program(None, String::new()).await;
 
     // Empty program might parse as no-op or error - either is acceptable
     let _ = result;
@@ -782,7 +782,7 @@ fn test_create_after_synchronous_drop_succeeds() {
     let temp = TempDir::new().unwrap();
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
-    let mut storage = inputlayer::StorageEngine::new(config).unwrap();
+    let storage = inputlayer::StorageEngine::new(config).unwrap();
 
     storage.create_knowledge_graph("race_kg").unwrap();
     storage.drop_knowledge_graph("race_kg").unwrap();
@@ -797,7 +797,7 @@ fn test_drop_knowledge_graph_cleanup_idempotent() {
     let temp = TempDir::new().unwrap();
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
-    let mut storage = inputlayer::StorageEngine::new(config).unwrap();
+    let storage = inputlayer::StorageEngine::new(config).unwrap();
 
     storage.create_knowledge_graph("drop_test").unwrap();
     storage.drop_knowledge_graph("drop_test").unwrap();

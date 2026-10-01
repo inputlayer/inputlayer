@@ -7,10 +7,10 @@ use inputlayer::{Config, StorageEngine};
 use tempfile::TempDir;
 
 fn create_test_handler() -> (Handler, TempDir) {
-    let temp = TempDir::new().unwrap();
+    let temp = TempDir::new().expect("create temp dir");
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
-    let storage = StorageEngine::new(config).unwrap();
+    let storage = StorageEngine::new(config).expect("create storage engine");
     let handler = Handler::new(storage);
     (handler, temp)
 }
@@ -20,22 +20,22 @@ fn create_handler_with_limits(
     max_insert_tuples: usize,
     max_string_bytes: usize,
 ) -> (Handler, TempDir) {
-    let temp = TempDir::new().unwrap();
+    let temp = TempDir::new().expect("create temp dir");
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
     config.storage.performance.max_query_size_bytes = max_query_size;
     config.storage.performance.max_insert_tuples = max_insert_tuples;
     config.storage.performance.max_string_value_bytes = max_string_bytes;
-    let storage = StorageEngine::new(config).unwrap();
+    let storage = StorageEngine::new(config).expect("create storage engine");
     let handler = Handler::new(storage);
     (handler, temp)
 }
 
 fn create_test_storage() -> (StorageEngine, TempDir) {
-    let temp = TempDir::new().unwrap();
+    let temp = TempDir::new().expect("create temp dir");
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
-    let storage = StorageEngine::new(config).unwrap();
+    let storage = StorageEngine::new(config).expect("create storage engine");
     (storage, temp)
 }
 
@@ -305,7 +305,7 @@ async fn test_vector_schema_declared_dimension_enforced_over() {
         Err(e) => assert!(
             e.contains("dimension")
                 || e.contains("vector")
-                || e.contains("3")
+                || e.contains('3')
                 || e.contains("type"),
             "Error should mention dimension mismatch, got: {e}"
         ),
@@ -334,7 +334,7 @@ async fn test_vector_schema_declared_dimension_enforced_under() {
         Err(e) => assert!(
             e.contains("dimension")
                 || e.contains("vector")
-                || e.contains("3")
+                || e.contains('3')
                 || e.contains("type"),
             "Error should mention dimension mismatch, got: {e}"
         ),
