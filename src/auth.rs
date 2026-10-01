@@ -251,6 +251,8 @@ fn authorize_kg_editor(stmt: &Statement) -> Result<(), String> {
             | MetaCommand::Why(_)
             | MetaCommand::WhyFull(_)
             | MetaCommand::WhyNot(_)
+            | MetaCommand::Subscribe { .. }
+            | MetaCommand::Unsubscribe(_)
             | MetaCommand::Status
             | MetaCommand::Help
             | MetaCommand::Quit => Ok(()),
@@ -306,6 +308,8 @@ fn authorize_kg_viewer(stmt: &Statement) -> Result<(), String> {
             | MetaCommand::Why(_)
             | MetaCommand::WhyFull(_)
             | MetaCommand::WhyNot(_)
+            | MetaCommand::Subscribe { .. }
+            | MetaCommand::Unsubscribe(_)
             | MetaCommand::Status
             | MetaCommand::Help
             | MetaCommand::Quit
@@ -444,6 +448,8 @@ fn authorize_non_admin_meta(role: &Role, cmd: &MetaCommand) -> Result<(), String
         | MetaCommand::Why(_)
         | MetaCommand::WhyFull(_)
         | MetaCommand::WhyNot(_)
+        | MetaCommand::Subscribe { .. }
+        | MetaCommand::Unsubscribe(_)
         | MetaCommand::Status
         | MetaCommand::Help
         | MetaCommand::Quit => Ok(()),

@@ -430,6 +430,22 @@ Explain why a specific tuple was NOT derived. For each rule that could produce t
 .why_not safe(2)
 ```
 
+### `.subscribe <id> ?<query>`
+
+Register a standing query on the current `/ws` connection. Replies with the current result, then pushes `subscription_delta` messages as the result changes. Persistent data only. See [Standing Queries](/docs/guides/websocket-api#standing-queries).
+
+```iql
+.subscribe late ?late(Order, Customer)
+```
+
+### `.unsubscribe <id>`
+
+Remove a standing query from the current connection.
+
+```iql
+.unsubscribe late
+```
+
 ### `.compact`
 
 Compact storage by consolidating WAL and batch files.

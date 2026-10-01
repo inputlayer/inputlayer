@@ -24,10 +24,12 @@
 //! - `error` - Protocol error types
 //! - `handler` - Handler implementing business logic
 //! - `rest` - HTTP handlers and routing
+//! - `subscription` - Standing queries (`.subscribe`) with derived deltas
 
 pub mod error;
 pub mod handler;
 pub mod rest;
+pub mod subscription;
 pub mod wire;
 
 // Re-export error types

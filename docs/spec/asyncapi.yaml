@@ -31,7 +31,7 @@ info:
     3. If `last_seq` was provided, server replays missed notifications
     4. Client sends `execute` messages → Server responds with `result` or `error`
     5. For large results (>1 MB), the server streams: `result_start` → `result_chunk` (×N) → `result_end`
-    6. Server may push `notification` messages when persistent data changes
+    6. Server may push change notifications (`persistent_update`, `rule_change`, ...) and, for `.subscribe`d queries, `subscription_delta` / `subscription_error`
     7. Client disconnects → Server auto-closes session
 
     ## Raw Text Protocol
@@ -100,6 +100,10 @@ channels:
         $ref: '#/components/messages/Pong'
       notification:
         $ref: '#/components/messages/Notification'
+      subscription_delta:
+        $ref: '#/components/messages/SubscriptionDelta'
+      subscription_error:
+        $ref: '#/components/messages/SubscriptionError'
 
 operations:
   login:
@@ -152,6 +156,7 @@ operations:
       - `.index list` / `.index create ...` / `.index drop <name>` - Index management
       - `.clear prefix <prefix>` - Clear relations by prefix
       - `.debug <query>` - Show query plan without executing
+      - `.subscribe <id> ?<query>` / `.unsubscribe <id>` - Standing queries (replies with the initial snapshot; pushes `subscription_delta`)
       - `.help` - Show available commands
       - `.status` - Server status
       - `.compact` - Trigger compaction
@@ -252,6 +257,27 @@ operations:
       Notifications are filtered to only include changes for the session's active KG.
     messages:
       - $ref: '#/channels/ws/messages/notification'
+
+  onSubscriptionDelta:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: Change to a standing query's result
+    description: |
+      Pushed after a committed persistent change to a relation the subscribed
+      query depends on (directly or through persistent rules) altered its result.
+      Set semantics; `seq` starts at 1 per subscription. Persistent data only.
+    messages:
+      - $ref: '#/channels/ws/messages/subscription_delta'
+
+  onSubscriptionError:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: Standing query re-evaluation failed
+    description: The subscription stays registered.
+    messages:
+      - $ref: '#/channels/ws/messages/subscription_error'
 
 components:
   messages:
@@ -359,7 +385,78 @@ components:
       payload:
         $ref: '#/components/schemas/NotificationResponse'
 
+    SubscriptionDelta:
+      name: subscription_delta
+      title: Subscription Delta
+      summary: Rows that entered and left a standing query's result
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SubscriptionDeltaResponse'
+
+    SubscriptionError:
+      name: subscription_error
+      title: Subscription Error
+      summary: Standing query re-evaluation failed
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SubscriptionErrorResponse'
+
   schemas:
+    SubscriptionDeltaResponse:
+      type: object
+      required: [type, subscription, knowledge_graph, seq, columns, inserted, retracted]
+      properties:
+        type:
+          type: string
+          const: subscription_delta
+        subscription:
+          type: string
+          description: Client-chosen id from `.subscribe`
+        knowledge_graph:
+          type: string
+        seq:
+          type: integer
+          format: int64
+          description: Per-subscription delta number, starting at 1
+        columns:
+          type: array
+          items:
+            type: string
+        inserted:
+          type: array
+          description: Rows now in the result, sorted
+          items:
+            type: array
+        retracted:
+          type: array
+          description: Rows no longer in the result, sorted
+          items:
+            type: array
+      examples:
+        - type: subscription_delta
+          subscription: late_orders
+          knowledge_graph: default
+          seq: 1
+          columns: [Order, Customer]
+          inserted: [[1042, acme]]
+          retracted: []
+
+    SubscriptionErrorResponse:
+      type: object
+      required: [type, subscription, message]
+      properties:
+        type:
+          type: string
+          const: subscription_error
+        subscription:
+          type: string
+        message:
+          type: string
+      examples:
+        - type: subscription_error
+          subscription: late_orders
+          message: Access denied
+
     ExecuteRequest:
       type: object
       required:
