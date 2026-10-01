@@ -4,8 +4,9 @@
 //! file, and stored batches as typed columns inferred from the first row. Migration rewrites
 //! each v1 batch in place as v2, saves the metadata under its v2 name, then removes the v1
 //! file. Each step is atomic and re-runnable, so a crash mid-migration resumes on restart.
-//! Batch files no shard references are moved to `batches/quarantine/`, not deleted: a v1
-//! name collision may have orphaned another shard's data.
+//! Before any v1 file is touched, batch files no shard references are moved to
+//! `batches/quarantine/`, not deleted: a v1 name collision may have orphaned another shard's
+//! data.
 
 use super::batch::SHARD_META_VERSION;
 use super::{
@@ -13,7 +14,7 @@ use super::{
     write_shard_meta, write_updates_parquet, ShardMeta,
 };
 use crate::storage::{StorageError, StorageResult};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -62,7 +63,8 @@ pub(super) fn migrate_v1(root: &Path) -> StorageResult<()> {
     }
 
     tracing::info!(shards = v1.len(), "persist_migrate_v1_start");
-    for (path, mut meta) in v1 {
+    quarantine_orphans(&shards_dir, &batches_dir)?;
+    for (path, mut meta) in order_v1(&shards_dir, v1)? {
         let target = shard_meta_path(&shards_dir, &meta.name);
         if !migrated.contains(&meta.name) {
             rebase_batch_paths(&mut meta, &batches_dir);
@@ -91,10 +93,49 @@ pub(super) fn migrate_v1(root: &Path) -> StorageResult<()> {
     }
     sync_directory(&batches_dir);
     sync_directory(&shards_dir);
-
-    quarantine_orphans(&shards_dir, &batches_dir)?;
     tracing::info!("persist_migrate_v1_done");
     Ok(())
+}
+
+/// Order v1 shards so a shard whose v1 file sits on another shard's v2 path is migrated, and
+/// its v1 file removed, before that path is written. Paths compare case-insensitively, as on
+/// case-insensitive filesystems.
+fn order_v1(
+    shards_dir: &Path,
+    mut pending: Vec<(PathBuf, ShardMeta)>,
+) -> StorageResult<Vec<(PathBuf, ShardMeta)>> {
+    let key = |p: &Path| p.to_string_lossy().to_lowercase();
+    let mut v1_paths: HashMap<String, usize> = HashMap::new();
+    for (path, _) in &pending {
+        *v1_paths.entry(key(path)).or_default() += 1;
+    }
+
+    let mut ordered = Vec::with_capacity(pending.len());
+    while !pending.is_empty() {
+        let (ready, blocked): (Vec<_>, Vec<_>) = pending.into_iter().partition(|(path, meta)| {
+            let target = key(&shard_meta_path(shards_dir, &meta.name));
+            let own = usize::from(key(path) == target);
+            v1_paths.get(&target).copied().unwrap_or(0) == own
+        });
+        if ready.is_empty() {
+            return Err(StorageError::Other(format!(
+                "v1 shard files and their v2 names overlap in a cycle ({}); refusing to migrate",
+                blocked
+                    .iter()
+                    .map(|(path, _)| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+        }
+        for (path, _) in &ready {
+            if let Some(n) = v1_paths.get_mut(&key(path)) {
+                *n -= 1;
+            }
+        }
+        ordered.extend(ready);
+        pending = blocked;
+    }
+    Ok(ordered)
 }
 
 fn quarantine_orphans(shards_dir: &Path, batches_dir: &Path) -> StorageResult<()> {

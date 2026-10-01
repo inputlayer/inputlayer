@@ -354,3 +354,89 @@ fn duplicate_shard_meta_blocks_orphan_cleanup() {
     .is_err());
     assert!(path.join("batches/77.parquet").exists());
 }
+
+#[test]
+fn v1_orphans_are_quarantined_before_v1_metas_are_removed() {
+    let temp = v1_fixture();
+    let path = temp.path().to_path_buf();
+    let person_batch = path.join("batches/3.parquet");
+    let original = std::fs::read(&person_batch).unwrap();
+    std::fs::copy(
+        path.join("batches/1.parquet"),
+        path.join("batches/99.parquet"),
+    )
+    .unwrap();
+    std::fs::write(&person_batch, b"corrupt").unwrap();
+
+    assert!(FilePersist::new(PersistConfig {
+        path: path.clone(),
+        ..Default::default()
+    })
+    .is_err());
+    assert!(path.join("shards/fx_person.json").exists());
+    assert!(path.join("batches/quarantine/99.parquet").exists());
+
+    std::fs::write(&person_batch, original).unwrap();
+    let p = persist(path.clone());
+    assert_v1_fixture_contents(&p);
+    assert!(path.join("batches/quarantine/99.parquet").exists());
+}
+
+fn write_v1_meta(path: &Path, file: &str, name: &str, batch: u32) {
+    let meta = serde_json::json!({
+        "version": 1,
+        "name": name,
+        "batches": [{
+            "id": batch.to_string(),
+            "path": format!("/v1-fixture/batches/{batch}.parquet"),
+            "lower": 0,
+            "upper": 10,
+            "len": 2
+        }],
+        "since": 0,
+        "upper": 10,
+        "total_updates": 2
+    });
+    std::fs::write(path.join("shards").join(file), meta.to_string()).expect("write v1 meta");
+}
+
+#[test]
+fn v1_meta_on_another_shards_v2_path_migrates_both() {
+    let fixture = v1_fixture();
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().to_path_buf();
+    std::fs::create_dir_all(path.join("shards")).unwrap();
+    std::fs::create_dir_all(path.join("batches")).unwrap();
+    for b in ["1", "2"] {
+        std::fs::copy(
+            fixture.path().join(format!("batches/{b}.parquet")),
+            path.join(format!("batches/{b}.parquet")),
+        )
+        .unwrap();
+    }
+    // v2 path of `a:b_c` is `a%3Ab_c.json`, the v1 path of `a%3Ab:c`.
+    write_v1_meta(&path, "a_b_c.json", "a:b_c", 1);
+    write_v1_meta(&path, "a%3Ab_c.json", "a%3Ab:c", 2);
+
+    let expected = |batch: &str| {
+        let solo = TempDir::new().unwrap();
+        std::fs::create_dir_all(solo.path().join("shards")).unwrap();
+        std::fs::create_dir_all(solo.path().join("batches")).unwrap();
+        std::fs::copy(
+            fixture.path().join(format!("batches/{batch}.parquet")),
+            solo.path().join(format!("batches/{batch}.parquet")),
+        )
+        .unwrap();
+        write_v1_meta(solo.path(), "s.json", "s:s", batch.parse().unwrap());
+        current(&persist(solo.path().to_path_buf()), "s:s")
+    };
+
+    for _ in 0..2 {
+        let p = persist(path.clone());
+        assert_eq!(current(&p, "a:b_c"), expected("1"));
+        assert_eq!(current(&p, "a%3Ab:c"), expected("2"));
+        assert!(!current(&p, "a:b_c").is_empty());
+        assert!(!current(&p, "a%3Ab:c").is_empty());
+    }
+    assert!(!path.join("batches/quarantine").exists());
+}

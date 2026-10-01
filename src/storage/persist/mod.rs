@@ -824,6 +824,21 @@ fn write_updates_parquet(path: &Path, updates: &[Update]) -> StorageResult<()> {
 fn read_updates_parquet(path: &Path) -> StorageResult<Vec<Update>> {
     let file = fs::File::open(path)?;
     let builder = ParquetRecordBatchReaderBuilder::try_new(file).map_err(StorageError::Parquet)?;
+    let v2 = match builder
+        .schema()
+        .metadata()
+        .get(FORMAT_KEY)
+        .map(String::as_str)
+    {
+        None => false,
+        Some(BATCH_FORMAT) => true,
+        Some(other) => {
+            return Err(StorageError::Other(format!(
+                "Unsupported batch format '{other}' in '{}'",
+                path.display()
+            )))
+        }
+    };
 
     let reader = builder.build().map_err(StorageError::Parquet)?;
 
@@ -855,7 +870,13 @@ fn read_updates_parquet(path: &Path) -> StorageResult<Vec<Update>> {
             .downcast_ref::<Int64Array>()
             .ok_or_else(|| StorageError::Other("Invalid diff column type".to_string()))?;
 
-        if time_col_idx == 1 && batch.schema().field(0).name() == TUPLE_COLUMN {
+        if v2 {
+            if time_col_idx != 1 || batch.schema().field(0).name() != TUPLE_COLUMN {
+                return Err(StorageError::Other(format!(
+                    "Invalid v2 batch layout in '{}'",
+                    path.display()
+                )));
+            }
             let encoded = batch
                 .column(0)
                 .as_any()
@@ -1209,6 +1230,50 @@ mod tests {
         assert_eq!(tuples.len(), 2);
         assert!(tuples.iter().any(|t| t.to_pair() == Some((1, 2))));
         assert!(tuples.iter().any(|t| t.to_pair() == Some((3, 4))));
+    }
+
+    fn write_batch_with_format(path: &Path, format: Option<&str>) {
+        let metadata = format
+            .map(|f| HashMap::from([(FORMAT_KEY.to_string(), f.to_string())]))
+            .unwrap_or_default();
+        let mut buf = Vec::new();
+        codec::encode_tuple(&Tuple::from_pair(1, 2), &mut buf);
+        let schema = Arc::new(Schema::new_with_metadata(
+            vec![
+                Field::new(TUPLE_COLUMN, ArrowDataType::LargeBinary, false),
+                Field::new("time", ArrowDataType::UInt64, false),
+                Field::new("diff", ArrowDataType::Int64, false),
+            ],
+            metadata,
+        ));
+        let columns: Vec<ArrayRef> = vec![
+            Arc::new(LargeBinaryArray::from_vec(vec![buf.as_slice()])),
+            Arc::new(UInt64Array::from(vec![1u64])),
+            Arc::new(Int64Array::from(vec![1i64])),
+        ];
+        let batch = RecordBatch::try_new(schema.clone(), columns).unwrap();
+        let mut writer =
+            ArrowWriter::try_new(fs::File::create(path).unwrap(), schema, None).unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+    }
+
+    #[test]
+    fn test_read_parquet_honours_format_key() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("b.parquet");
+
+        write_batch_with_format(&path, Some(BATCH_FORMAT));
+        let read = read_updates_parquet(&path).unwrap();
+        assert_eq!(read[0].data, Tuple::from_pair(1, 2));
+
+        write_batch_with_format(&path, Some("3"));
+        let err = read_updates_parquet(&path).unwrap_err().to_string();
+        assert!(err.contains("Unsupported batch format '3'"), "{err}");
+
+        // Without the key the file is v1, whose columns are typed values, not encoded tuples.
+        write_batch_with_format(&path, None);
+        assert!(read_updates_parquet(&path).is_err());
     }
 
     #[test]
