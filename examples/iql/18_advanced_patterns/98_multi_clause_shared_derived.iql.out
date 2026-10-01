@@ -1,0 +1,62 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+
+> .kg create test_multi_clause_n18t98
+Knowledge graph 'test_multi_clause_n18t98' created.
+Switched to knowledge graph: test_multi_clause_n18t98
+> .kg use test_multi_clause_n18t98
+Switched to knowledge graph: test_multi_clause_n18t98
+> +claim(id: string, entity: string, attr: string, val: string)
+Schema for 'claim' registered with 4 columns (persistent)
+> +claim_modality(id: string, modality: string)
+Schema for 'claim_modality' registered with 2 columns (persistent)
+> +link(x: string, y: string)
+Schema for 'link' registered with 2 columns (persistent)
+> +claim[("c1", "e1", "attr", "v1"), ("c2", "e2", "attr", "v2"), ("c5", "anna_1", "distinct_from", "anna_2")]
+Inserted 3 fact(s) into 'claim'.
+> +claim_modality[("c1", "asserted"), ("c2", "asserted"), ("c5", "asserted")]
+Inserted 3 fact(s) into 'claim_modality'.
+> +link[("e1", "e2")]
+Inserted 1 fact(s) into 'link'.
+> +active(C, E, A, V) <- claim(C, E, A, V), claim_modality(C, "asserted")
+Rule 'active' registered.
+> +r("bridge", C1, C2) <- active(C1, E1, A1, V1), active(C2, E2, A2, V2), link(E1, E2)
+Rule 'r' registered.
+> +r("solo", C, C) <- active(C, E1, "distinct_from", E2)
+Rule 'r' registered.
+> ?r(K, C1, C2)
+┌──────────┬──────┬──────┐
+│ K        │ C1   │ C2   │
+├──────────┼──────┼──────┤
+│ "bridge" │ "c1" │ "c2" │
+│ "solo"   │ "c5" │ "c5" │
+└──────────┴──────┴──────┘
+2 rows
+> +ca(c: string, e: string)
+Schema for 'ca' registered with 2 columns (persistent)
+> +ca[("c1", "e1"), ("c2", "e1")]
+Inserted 2 fact(s) into 'ca'.
+> +a(C, E) <- ca(C, E)
+Rule 'a' registered.
+> +s("joined", C1, C2) <- a(C1, E), a(C2, E), C1 != C2
+Rule 's' registered.
+> +s("solo", C, C) <- a(C, E)
+Rule 's' registered.
+> ?s(K, C1, C2)
+┌──────────┬──────┬──────┐
+│ K        │ C1   │ C2   │
+├──────────┼──────┼──────┤
+│ "joined" │ "c1" │ "c2" │
+│ "joined" │ "c2" │ "c1" │
+│ "solo"   │ "c1" │ "c1" │
+│ "solo"   │ "c2" │ "c2" │
+└──────────┴──────┴──────┘
+4 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_multi_clause_n18t98
+Knowledge graph 'test_multi_clause_n18t98' dropped.
