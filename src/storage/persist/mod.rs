@@ -20,13 +20,15 @@
 //! ## Recovery
 //!
 //! On startup:
-//! 1. Load shard metadata
+//! 1. Migrate v1 data (see [`migrate`]) and load shard metadata
 //! 2. Read batch files
 //! 3. Replay WAL (uncommitted updates)
 //! 4. Consolidate to get current state
 
 pub mod batch;
+pub mod codec;
 pub mod consolidate;
+mod migrate;
 pub mod wal;
 
 pub use batch::{Batch, BatchRef, ShardInfo, ShardMeta, Update};
@@ -36,15 +38,16 @@ pub use consolidate::{
 pub use wal::PersistWal;
 
 use crate::storage::{StorageError, StorageResult};
-use crate::value::{record_batch_to_tuples, tuples_to_record_batch, DataType, Tuple, TupleSchema};
+use crate::value::record_batch_to_tuples;
 use parking_lot::{Mutex, RwLock};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 // Parquet I/O for batches
-use arrow::array::{ArrayRef, Int64Array, UInt64Array};
+use arrow::array::{Array, ArrayRef, Int64Array, LargeBinaryArray, UInt64Array};
 use arrow::datatypes::{DataType as ArrowDataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -132,6 +135,7 @@ impl FilePersist {
         fs::create_dir_all(config.path.join("batches"))?;
 
         let wal = PersistWal::new(config.path.join("wal"))?;
+        migrate::migrate_v1(&config.path)?;
 
         let mut persist = FilePersist {
             config,
@@ -178,6 +182,7 @@ impl FilePersist {
             return Ok(());
         }
 
+        let batches_dir = self.config.path.join("batches");
         let mut shards = self.shards.write();
 
         for entry in fs::read_dir(&shards_dir)? {
@@ -185,19 +190,31 @@ impl FilePersist {
             let path = entry.path();
 
             if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                let content = fs::read_to_string(&path)?;
-                let meta: ShardMeta = serde_json::from_str(&content).map_err(|e| {
-                    StorageError::Other(format!("Failed to parse shard metadata: {e}"))
-                })?;
+                let mut meta = read_shard_meta(&path)?;
 
-                // Validate format version
-                if meta.version > batch::SHARD_META_VERSION {
+                if meta.version != batch::SHARD_META_VERSION {
                     return Err(StorageError::Other(format!(
-                        "Shard '{}' has format version {} but this server only supports up to version {}. \
+                        "Shard '{}' has format version {} but this server reads version {}. \
                          Please upgrade the server or downgrade the data.",
-                        meta.name, meta.version, batch::SHARD_META_VERSION
+                        meta.name,
+                        meta.version,
+                        batch::SHARD_META_VERSION
                     )));
                 }
+
+                // A meta under a foreign filename means two shards may share a file.
+                // Refuse to start rather than let orphan cleanup delete their batches.
+                let expected = shard_meta_path(&shards_dir, &meta.name);
+                if path != expected || shards.contains_key(&meta.name) {
+                    return Err(StorageError::Other(format!(
+                        "Shard metadata '{}' holds shard '{}' whose metadata belongs at '{}'; \
+                         refusing to load to avoid deleting batch files",
+                        path.display(),
+                        meta.name,
+                        expected.display()
+                    )));
+                }
+                rebase_batch_paths(&mut meta, &batches_dir);
 
                 // Update next_batch_id if needed
                 for batch in &meta.batches {
@@ -225,7 +242,6 @@ impl FilePersist {
                         removed_count += 1;
                     }
                 }
-                let mut meta = meta;
                 if removed_count > 0 {
                     meta.batches = valid_batches;
                     meta.total_updates = meta.batches.iter().map(|b| b.len).sum();
@@ -312,42 +328,9 @@ impl FilePersist {
         Ok(count)
     }
 
-    /// Save shard metadata to disk using atomic write-to-temp+rename.
-    ///
-    /// Writes to `{name}.json.tmp`, calls `sync_all()`, then renames to `{name}.json`.
-    /// Rename is atomic on POSIX, so the metadata file is always either the old
-    /// or new version - never a corrupt half-written state.
+    /// Save shard metadata to disk; see [`write_shard_meta`].
     fn save_shard_meta(&self, meta: &ShardMeta) -> StorageResult<()> {
-        let dir = self.config.path.join("shards");
-        let final_path = dir.join(format!("{}.json", sanitize_name(&meta.name)));
-        let tmp_path = dir.join(format!("{}.json.tmp", sanitize_name(&meta.name)));
-        let content = serde_json::to_string_pretty(meta)
-            .map_err(|e| StorageError::Other(format!("Failed to serialize shard metadata: {e}")))?;
-
-        // Write to temp file
-        if let Err(e) = fs::write(&tmp_path, &content) {
-            eprintln!(
-                "[persist] ERROR save_shard_meta: path={}, parent_exists={}, error={}",
-                tmp_path.display(),
-                tmp_path.parent().is_some_and(std::path::Path::exists),
-                e
-            );
-            return Err(e.into());
-        }
-
-        // Sync to disk before rename
-        if let Err(e) = fs::File::open(&tmp_path).and_then(|f| f.sync_all()) {
-            let _ = fs::remove_file(&tmp_path);
-            return Err(e.into());
-        }
-
-        // Atomic rename
-        if let Err(e) = fs::rename(&tmp_path, &final_path) {
-            let _ = fs::remove_file(&tmp_path);
-            return Err(e.into());
-        }
-
-        Ok(())
+        write_shard_meta(&self.config.path.join("shards"), meta)
     }
 
     /// Generate a unique batch ID
@@ -651,11 +634,7 @@ impl PersistBackend for FilePersist {
 
         // Step 4: Delete metadata file LAST (crash-safe ordering)
         // After this, the shard is fully removed from disk.
-        let meta_path = self
-            .config
-            .path
-            .join("shards")
-            .join(format!("{}.json", sanitize_name(shard)));
+        let meta_path = shard_meta_path(&self.config.path.join("shards"), shard);
         if meta_path.exists() {
             let _ = fs::remove_file(&meta_path);
             sync_directory(&self.config.path.join("shards"));
@@ -665,70 +644,138 @@ impl PersistBackend for FilePersist {
     }
 }
 
-// Parquet I/O for Update batches
-/// Infer schema from updates - needed because we don't have stored schema yet
-fn infer_schema_from_updates(updates: &[Update]) -> TupleSchema {
-    if updates.is_empty() {
-        // Default to 2-column Int32 schema for backwards compatibility
-        return TupleSchema::new(vec![
-            ("col0".to_string(), DataType::Int32),
-            ("col1".to_string(), DataType::Int32),
-        ]);
+// Shard metadata files
+
+/// Longest filename stem kept verbatim; longer names get a hashed stem.
+const MAX_META_STEM: usize = 200;
+
+/// Injective filename stem for a shard name.
+///
+/// Bytes outside `[a-z0-9_.-]` are percent-encoded, so ':' and '_' never alias and names
+/// differing only in case stay distinct on case-insensitive filesystems. Stems over
+/// [`MAX_META_STEM`] are truncated and suffixed with `~` plus a SHA-256 of the full name;
+/// `~` is always escaped otherwise, so the two forms cannot collide.
+fn shard_file_stem(name: &str) -> String {
+    let mut stem = String::with_capacity(name.len());
+    for b in name.bytes() {
+        if b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'_' | b'.' | b'-') {
+            stem.push(b as char);
+        } else {
+            stem.push_str(&format!("%{b:02X}"));
+        }
     }
-
-    let first = &updates[0].data;
-    let fields: Vec<(String, DataType)> = first
-        .values()
-        .iter()
-        .enumerate()
-        .map(|(i, v)| (format!("col{i}"), v.data_type()))
-        .collect();
-
-    TupleSchema::new(fields)
+    if stem.len() > MAX_META_STEM {
+        let digest = Sha256::digest(name.as_bytes());
+        stem.truncate(MAX_META_STEM - 65);
+        stem.push('~');
+        for b in digest {
+            stem.push_str(&format!("{b:02x}"));
+        }
+    }
+    stem
 }
 
-/// Write updates to a Parquet file
+fn shard_meta_path(shards_dir: &Path, name: &str) -> PathBuf {
+    shards_dir.join(format!("{}.json", shard_file_stem(name)))
+}
+
+fn read_shard_meta(path: &Path) -> StorageResult<ShardMeta> {
+    let content = fs::read_to_string(path)?;
+    serde_json::from_str(&content).map_err(|e| {
+        StorageError::Other(format!(
+            "Failed to parse shard metadata '{}': {e}",
+            path.display()
+        ))
+    })
+}
+
+/// Point batch refs at `batches_dir`, so a data dir stays valid after it moves.
+fn rebase_batch_paths(meta: &mut ShardMeta, batches_dir: &Path) {
+    for batch_ref in &mut meta.batches {
+        if let Some(file) = batch_ref.path.file_name() {
+            batch_ref.path = batches_dir.join(file);
+        }
+    }
+}
+
+/// Save shard metadata atomically: write `{stem}.json.tmp`, fsync, rename to `{stem}.json`.
+/// The file is always either the old or the new version, never half-written.
+fn write_shard_meta(shards_dir: &Path, meta: &ShardMeta) -> StorageResult<()> {
+    let final_path = shard_meta_path(shards_dir, &meta.name);
+    let tmp_path = final_path.with_extension("json.tmp");
+    let content = serde_json::to_string_pretty(meta)
+        .map_err(|e| StorageError::Other(format!("Failed to serialize shard metadata: {e}")))?;
+
+    if let Err(e) = fs::write(&tmp_path, &content) {
+        eprintln!(
+            "[persist] ERROR save_shard_meta: path={}, parent_exists={}, error={}",
+            tmp_path.display(),
+            tmp_path.parent().is_some_and(Path::exists),
+            e
+        );
+        return Err(e.into());
+    }
+
+    if let Err(e) = fs::File::open(&tmp_path).and_then(|f| f.sync_all()) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(e.into());
+    }
+
+    if let Err(e) = fs::rename(&tmp_path, &final_path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(e.into());
+    }
+
+    Ok(())
+}
+
+// Parquet I/O for Update batches
+
+/// Parquet key-value metadata key holding the batch format version.
+const FORMAT_KEY: &str = "inputlayer.persist.format";
+/// Batch format written by this server.
+const BATCH_FORMAT: &str = "2";
+/// v2 column holding each tuple encoded by [`codec::encode_tuple`].
+const TUPLE_COLUMN: &str = "tuple";
+
+/// Write updates to a Parquet file.
 ///
-/// The file format is:
-/// - N data columns (from the Tuple)
-/// - time column (`UInt64`)
-/// - diff column (Int64)
-fn write_updates_parquet(path: &PathBuf, updates: &[Update]) -> StorageResult<()> {
+/// Columns: `tuple` (`LargeBinary`, losslessly encoded), `time` (`UInt64`), `diff` (`Int64`).
+fn write_updates_parquet(path: &Path, updates: &[Update]) -> StorageResult<()> {
     if updates.is_empty() {
         // No data to write - skip creating the file entirely.
         // The caller handles absence of batch files gracefully.
         return Ok(());
     }
 
-    // Infer schema from the data
-    let tuple_schema = infer_schema_from_updates(updates);
+    let mut buf = Vec::new();
+    let mut offsets = Vec::with_capacity(updates.len() + 1);
+    offsets.push(0i64);
+    for u in updates {
+        codec::encode_tuple(&u.data, &mut buf);
+        offsets.push(buf.len() as i64);
+    }
+    let tuples = LargeBinaryArray::new(
+        arrow::buffer::OffsetBuffer::new(offsets.into()),
+        buf.into(),
+        None,
+    );
 
-    // Extract tuples for conversion
-    let tuples: Vec<Tuple> = updates.iter().map(|u| u.data.clone()).collect();
-
-    // Convert tuples to record batch
-    let data_batch = tuples_to_record_batch(&tuples, &tuple_schema)
-        .map_err(|e| StorageError::Other(format!("Arrow conversion error: {e}")))?;
-
-    // Build full schema with time and diff columns
-    let mut fields: Vec<Field> = data_batch
-        .schema()
-        .fields()
-        .iter()
-        .map(|f| f.as_ref().clone())
-        .collect();
-    fields.push(Field::new("time", ArrowDataType::UInt64, false));
-    fields.push(Field::new("diff", ArrowDataType::Int64, false));
-    let full_schema = Arc::new(Schema::new(fields));
-
-    // Build columns array
-    let mut columns: Vec<ArrayRef> = data_batch.columns().to_vec();
-
-    // Add time and diff columns
+    let full_schema = Arc::new(Schema::new_with_metadata(
+        vec![
+            Field::new(TUPLE_COLUMN, ArrowDataType::LargeBinary, false),
+            Field::new("time", ArrowDataType::UInt64, false),
+            Field::new("diff", ArrowDataType::Int64, false),
+        ],
+        HashMap::from([(FORMAT_KEY.to_string(), BATCH_FORMAT.to_string())]),
+    ));
     let times: Vec<u64> = updates.iter().map(|u| u.time).collect();
     let diffs: Vec<i64> = updates.iter().map(|u| u.diff).collect();
-    columns.push(Arc::new(UInt64Array::from(times)));
-    columns.push(Arc::new(Int64Array::from(diffs)));
+    let columns: Vec<ArrayRef> = vec![
+        Arc::new(tuples),
+        Arc::new(UInt64Array::from(times)),
+        Arc::new(Int64Array::from(diffs)),
+    ];
 
     let batch = RecordBatch::try_new(full_schema.clone(), columns).map_err(StorageError::Arrow)?;
 
@@ -773,8 +820,8 @@ fn write_updates_parquet(path: &PathBuf, updates: &[Update]) -> StorageResult<()
     Ok(())
 }
 
-/// Read updates from a Parquet file
-fn read_updates_parquet(path: &PathBuf) -> StorageResult<Vec<Update>> {
+/// Read updates from a Parquet file in either the v2 or the legacy typed-column format.
+fn read_updates_parquet(path: &Path) -> StorageResult<Vec<Update>> {
     let file = fs::File::open(path)?;
     let builder = ParquetRecordBatchReaderBuilder::try_new(file).map_err(StorageError::Parquet)?;
 
@@ -808,7 +855,35 @@ fn read_updates_parquet(path: &PathBuf) -> StorageResult<Vec<Update>> {
             .downcast_ref::<Int64Array>()
             .ok_or_else(|| StorageError::Other("Invalid diff column type".to_string()))?;
 
-        // Create a sub-batch with only data columns
+        if time_col_idx == 1 && batch.schema().field(0).name() == TUPLE_COLUMN {
+            let encoded = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<LargeBinaryArray>()
+                .ok_or_else(|| StorageError::Other("Invalid tuple column type".to_string()))?;
+            for i in 0..batch.num_rows() {
+                if encoded.is_null(i) {
+                    return Err(StorageError::Other(format!(
+                        "Null tuple in batch '{}' row {i}",
+                        path.display()
+                    )));
+                }
+                let data = codec::decode_tuple(encoded.value(i)).map_err(|e| {
+                    StorageError::Other(format!(
+                        "Corrupt tuple in batch '{}' row {i}: {e}",
+                        path.display()
+                    ))
+                })?;
+                updates.push(Update {
+                    data,
+                    time: times.value(i),
+                    diff: diffs.value(i),
+                });
+            }
+            continue;
+        }
+
+        // Legacy (v1) batch: one typed column per tuple position
         let data_schema = Arc::new(Schema::new(
             batch.schema().fields()[..time_col_idx]
                 .iter()
@@ -853,17 +928,12 @@ fn sync_directory(dir: &std::path::Path) {
     }
 }
 
-/// Sanitize a shard name for use as a filename
-fn sanitize_name(name: &str) -> String {
-    name.replace([':', '/'], "_")
-}
-
 // Tests
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::Value;
+    use crate::{Tuple, Value};
     use tempfile::TempDir;
 
     fn create_test_persist() -> (TempDir, FilePersist) {
@@ -1150,11 +1220,32 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitize_name() {
-        assert_eq!(sanitize_name("db:edge"), "db_edge");
-        assert_eq!(sanitize_name("db/test/edge"), "db_test_edge");
-        assert_eq!(sanitize_name("simple"), "simple");
-        assert_eq!(sanitize_name("a:b/c:d"), "a_b_c_d");
+    fn test_shard_file_stem() {
+        assert_eq!(shard_file_stem("db:edge"), "db%3Aedge");
+        assert_eq!(shard_file_stem("db/test/edge"), "db%2Ftest%2Fedge");
+        assert_eq!(shard_file_stem("simple_1.x-y"), "simple_1.x-y");
+        assert_eq!(shard_file_stem("Db:E"), "%44b%3A%45");
+        assert_eq!(shard_file_stem("100%~"), "100%25%7E");
+    }
+
+    #[test]
+    fn test_shard_file_stem_is_injective() {
+        let names = [
+            "a:b_c", "a_b:c", "a%3Ab_c", "kg:Edge", "kg:edge", "a:b/c", "a:b%2Fc",
+        ];
+        let stems: std::collections::HashSet<String> =
+            names.iter().map(|n| shard_file_stem(n)).collect();
+        assert_eq!(stems.len(), names.len());
+    }
+
+    #[test]
+    fn test_shard_file_stem_long_names_are_bounded_and_distinct() {
+        let a = format!("kg:{}a", "x".repeat(300));
+        let b = format!("kg:{}b", "x".repeat(300));
+        let (sa, sb) = (shard_file_stem(&a), shard_file_stem(&b));
+        assert!(sa.len() <= MAX_META_STEM);
+        assert_ne!(sa, sb);
+        assert!(sa.contains('~'));
     }
 
     #[test]
@@ -1234,27 +1325,6 @@ mod tests {
 
         // Sync should not error
         persist.sync().unwrap();
-    }
-
-    #[test]
-    fn test_infer_schema_from_updates_empty() {
-        let schema = infer_schema_from_updates(&[]);
-        // Should return default 2-column Int32 schema
-        assert_eq!(schema.arity(), 2);
-    }
-
-    #[test]
-    fn test_infer_schema_from_updates_with_data() {
-        let updates = vec![Update::insert(
-            Tuple::new(vec![
-                Value::Int32(1),
-                Value::string("hello"),
-                Value::Float64(3.14),
-            ]),
-            10,
-        )];
-        let schema = infer_schema_from_updates(&updates);
-        assert_eq!(schema.arity(), 3);
     }
 
     #[test]
@@ -1552,7 +1622,7 @@ mod tests {
         persist.flush("db:edge").unwrap();
 
         // Verify shard metadata file exists
-        let meta_path = temp.path().join("shards").join("db_edge.json");
+        let meta_path = shard_meta_path(&temp.path().join("shards"), "db:edge");
         assert!(
             meta_path.exists(),
             "Shard metadata file must exist before deletion"
@@ -1684,7 +1754,7 @@ mod tests {
         );
 
         // Verify the final metadata file is valid
-        let meta_path = shards_dir.join("db_atomic_test.json");
+        let meta_path = shard_meta_path(&shards_dir, "db:atomic_test");
         assert!(meta_path.exists());
         let content = fs::read_to_string(&meta_path).unwrap();
         let _: ShardMeta = serde_json::from_str(&content).unwrap();

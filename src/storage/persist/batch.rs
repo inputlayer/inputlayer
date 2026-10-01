@@ -113,9 +113,11 @@ pub struct BatchRef {
     pub len: usize,
 }
 
-/// Current shard metadata format version.
-/// Increment when making breaking changes to ShardMeta serialization.
-pub const SHARD_META_VERSION: u32 = 1;
+/// Current persist format version, covering shard metadata, its filename and batch files.
+///
+/// v2: percent-encoded metadata filenames and losslessly encoded batch tuples.
+/// Older data is upgraded on startup by `persist::migrate`.
+pub const SHARD_META_VERSION: u32 = 2;
 
 /// Shard metadata - represents a persistent Time-Varying Collection.
 ///

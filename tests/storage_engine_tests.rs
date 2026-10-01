@@ -314,11 +314,11 @@ fn test_persistence_metadata() {
 
     // Check metadata files exist (DD-native persistence layout)
     // - metadata/knowledge_graphs.json: knowledge graph registry
-    // - persist/shards/test_edge.json: shard metadata (sanitized from "test:edge")
+    // - persist/shards/test%3Aedge.json: shard metadata (percent-encoded "test:edge")
     // - persist/batches/*.parquet: batch files (created on flush)
     // - persist/wal/: WAL directory
     assert!(temp.path().join("metadata/knowledge_graphs.json").exists());
-    assert!(temp.path().join("persist/shards/test_edge.json").exists());
+    assert!(temp.path().join("persist/shards/test%3Aedge.json").exists());
     assert!(temp.path().join("persist/batches").exists());
 }
 
