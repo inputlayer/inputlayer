@@ -220,7 +220,7 @@ mod test_arithmetic;
 // Re-export public types
 pub use catalog::Catalog;
 pub use code_generator::CodeGenerator;
-pub use config::{Config, DurabilityMode};
+pub use config::{Config, DurabilityMode, OptimizationConfig};
 pub use ir_builder::IRBuilder;
 pub use optimizer::Optimizer;
 pub use pipeline_trace::{OptimizationStats, PipelineTrace};
@@ -288,47 +288,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::info;
-
-/// Configuration for advanced optimizations
-#[derive(Debug, Clone)]
-pub struct OptimizationConfig {
-    /// Enable join spanning tree planning
-    pub enable_join_planning: bool,
-
-    /// Enable SIP rewriting (semijoin reduction)
-    pub enable_sip_rewriting: bool,
-
-    /// Enable subplan sharing (common subexpression elimination)
-    pub enable_subplan_sharing: bool,
-
-    /// Enable boolean specialization (semiring selection)
-    pub enable_boolean_specialization: bool,
-
-    /// Enable Magic Sets transformation for recursive queries with bound arguments.
-    /// Restricts fixpoint computation to only demanded tuples when query has constants.
-    /// Example: `?reach(1, Y)` only computes reachability from node 1, not the full TC.
-    pub enable_magic_sets: bool,
-}
-
-impl Default for OptimizationConfig {
-    fn default() -> Self {
-        OptimizationConfig {
-            // Join planning is enabled - the code generator supports arbitrary arity
-            // tuples (N-tuples) via the Value/Tuple type system. Join planning optimizes
-            // join order using Maximum Spanning Tree algorithm.
-            enable_join_planning: true,
-            // SIP (Sideways Information Passing) - semijoin reduction.
-            // Rewrites multi-join rules into chains of semijoin reduction rules that
-            // filter intermediate results early. Skipped for recursive rules.
-            enable_sip_rewriting: true,
-            // Subplan sharing extracts common subexpressions into shared views.
-            // The shared views are executed before main rules to materialize their data.
-            enable_subplan_sharing: true,
-            enable_boolean_specialization: true,
-            enable_magic_sets: true,
-        }
-    }
-}
 
 /// Main IQL engine that orchestrates the entire pipeline
 pub struct IQLEngine {

@@ -259,27 +259,80 @@ pub struct PerformanceConfig {
     pub timing_mode: crate::execution::TimingMode,
 }
 
-/// Optimization configuration (re-use existing from lib.rs)
+/// Query optimizer passes applied by every `IQLEngine` the server builds.
+///
+/// Every pass defaults to on, whether the section or a key is omitted.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OptimizationConfig {
-    /// NOTE: Disabled by default - code generator only supports 2-tuples
-    #[serde(default)]
+    /// Join order planning (maximum spanning tree)
+    #[serde(default = "default_true")]
     pub enable_join_planning: bool,
 
-    /// SIP (Sideways Information Passing) - semijoin reduction
-    #[serde(default)]
+    /// SIP (Sideways Information Passing) semijoin reduction
+    #[serde(default = "default_true")]
     pub enable_sip_rewriting: bool,
 
+    /// Subplan sharing (common subexpression elimination)
     #[serde(default = "default_true")]
     pub enable_subplan_sharing: bool,
 
+    /// Boolean specialization (semiring selection)
     #[serde(default = "default_true")]
     pub enable_boolean_specialization: bool,
 
-    /// Magic Sets demand-driven rewriting for recursive queries
+    /// Magic Sets demand-driven rewriting for recursive queries with bound
+    /// arguments, e.g. `?reach(1, Y)` only computes reachability from node 1.
     #[serde(default = "default_true")]
     pub enable_magic_sets: bool,
+}
+
+impl Default for OptimizationConfig {
+    fn default() -> Self {
+        OptimizationConfig {
+            enable_join_planning: true,
+            enable_sip_rewriting: true,
+            enable_subplan_sharing: true,
+            enable_boolean_specialization: true,
+            enable_magic_sets: true,
+        }
+    }
+}
+
+impl OptimizationConfig {
+    /// Human-readable names of the passes a query goes through, for plan/debug
+    /// output. Basic optimizations always run.
+    pub fn enabled_passes(&self) -> Vec<&'static str> {
+        [
+            (
+                self.enable_join_planning,
+                "Join Planning (spanning tree reordering)",
+            ),
+            (
+                self.enable_sip_rewriting,
+                "SIP Rewriting (semijoin reduction)",
+            ),
+            (
+                self.enable_subplan_sharing,
+                "Subplan Sharing (common subexpression elimination)",
+            ),
+            (
+                self.enable_boolean_specialization,
+                "Boolean Specialization (semiring selection)",
+            ),
+            (
+                self.enable_magic_sets,
+                "Magic Sets (demand-driven recursion)",
+            ),
+            (
+                true,
+                "Basic Optimizations (identity elimination, filter simplification)",
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(enabled, name)| enabled.then_some(name))
+        .collect()
+    }
 }
 
 /// Logging configuration
@@ -740,13 +793,7 @@ impl Config {
                 },
                 max_knowledge_graphs: 1000,
             },
-            optimization: OptimizationConfig {
-                enable_join_planning: true,
-                enable_sip_rewriting: true,
-                enable_subplan_sharing: true,
-                enable_boolean_specialization: true,
-                enable_magic_sets: true,
-            },
+            optimization: OptimizationConfig::default(),
             logging: LoggingConfig {
                 level: "info".to_string(),
                 format: "text".to_string(),
@@ -904,8 +951,8 @@ mod tests {
         // semantics), not the hand-written Default impl values.
         figment::Jail::expect_with(|_jail| {
             let config = Config::load().expect("no-file load");
-            assert!(!config.optimization.enable_join_planning);
-            assert!(!config.optimization.enable_sip_rewriting);
+            assert!(config.optimization.enable_join_planning);
+            assert!(config.optimization.enable_sip_rewriting);
             assert_eq!(config.storage.performance.max_result_rows, 0);
             assert!(!config.http.enabled);
             Ok(())
