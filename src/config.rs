@@ -400,6 +400,10 @@ pub struct RateLimitConfig {
     #[serde(default = "default_ws_max_lifetime_secs")]
     pub ws_max_lifetime_secs: u64,
 
+    /// Maximum standing-query subscriptions per WebSocket connection (0 = unlimited)
+    #[serde(default = "default_ws_max_subscriptions")]
+    pub ws_max_subscriptions: usize,
+
     /// Notification broadcast channel buffer size (per-subscriber queue depth)
     #[serde(default = "default_notification_buffer_size")]
     pub notification_buffer_size: usize,
@@ -479,6 +483,9 @@ fn default_ws_max_messages_per_sec() -> u32 {
 fn default_ws_max_lifetime_secs() -> u64 {
     86400
 } // 24 hours
+fn default_ws_max_subscriptions() -> usize {
+    64
+}
 fn default_notification_buffer_size() -> usize {
     4096
 }
@@ -493,6 +500,7 @@ impl Default for RateLimitConfig {
             max_ws_connections: default_max_ws_connections(),
             ws_max_messages_per_sec: default_ws_max_messages_per_sec(),
             ws_max_lifetime_secs: default_ws_max_lifetime_secs(),
+            ws_max_subscriptions: default_ws_max_subscriptions(),
             notification_buffer_size: default_notification_buffer_size(),
             per_ip_max_rps: default_per_ip_max_rps(),
         }
@@ -1076,6 +1084,7 @@ mod tests {
         assert_eq!(rl.max_ws_connections, 1024);
         assert_eq!(rl.ws_max_messages_per_sec, 100);
         assert_eq!(rl.ws_max_lifetime_secs, 86400);
+        assert_eq!(rl.ws_max_subscriptions, 64);
         assert_eq!(rl.per_ip_max_rps, 100);
     }
 

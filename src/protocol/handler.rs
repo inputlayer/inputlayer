@@ -78,6 +78,10 @@ fn term_to_value(term: &Term) -> Result<Value, String> {
     }
 }
 
+/// Reply when `.subscribe`/`.unsubscribe` reach the generic executor.
+const SUBSCRIPTION_WS_ONLY: &str =
+    ".subscribe and .unsubscribe are only available as standalone commands on the global /ws endpoint.";
+
 /// Prefix used to encode structured validation errors in error strings.
 /// WebSocket handlers can detect this prefix to extract per-line error info.
 pub const VALIDATION_ERROR_PREFIX: &str = "VALIDATION_ERRORS:";
@@ -184,6 +188,8 @@ pub struct Handler {
     timing_histograms: Arc<crate::execution::timing::TimingHistograms>,
     /// Teaching agent for guided onboarding.
     agent: Arc<crate::agent::AgentManager>,
+    /// Standing-query counters (evaluations, active subscriptions).
+    subscription_metrics: super::subscription::SubscriptionMetrics,
 }
 
 /// Current epoch milliseconds.
@@ -772,6 +778,7 @@ impl Handler {
             agent: Arc::new(crate::agent::AgentManager::new(
                 crate::agent::AgentConfig::default(),
             )),
+            subscription_metrics: super::subscription::SubscriptionMetrics::default(),
         }
     }
 
@@ -809,6 +816,7 @@ impl Handler {
             agent: Arc::new(crate::agent::AgentManager::new(
                 crate::agent::AgentConfig::default(),
             )),
+            subscription_metrics: super::subscription::SubscriptionMetrics::default(),
         }
     }
 
@@ -830,6 +838,11 @@ impl Handler {
     /// Get reference to the handler's configuration.
     pub fn config(&self) -> &crate::Config {
         &self.config
+    }
+
+    /// Standing-query counters.
+    pub fn subscription_metrics(&self) -> &super::subscription::SubscriptionMetrics {
+        &self.subscription_metrics
     }
 
     /// Subscribe to persistent data change notifications.
@@ -2962,7 +2975,10 @@ impl QueryJob {
                             }
                             statement::Statement::DeleteRelationOrRule(name) => {
                                 match storage.drop_rule_in(&kg_name, &name) {
-                                    Ok(()) => messages.push(format!("Rule '{name}' dropped.")),
+                                    Ok(()) => {
+                                        self.notify_rule_change(&kg_name, &name, "dropped");
+                                        messages.push(format!("Rule '{name}' dropped."));
+                                    }
                                     Err(_) => {
                                         messages.push(format!("'{name}' not found as rule."));
                                     }
@@ -3290,6 +3306,11 @@ impl QueryJob {
                                                         "No rules matching prefix '{prefix}'."
                                                     ));
                                                 } else {
+                                                    for name in &dropped {
+                                                        self.notify_rule_change(
+                                                            kg, name, "dropped",
+                                                        );
+                                                    }
                                                     messages.push(format!(
                                                         "Dropped {} rule(s) with prefix '{prefix}': {}",
                                                         dropped.len(),
@@ -3317,6 +3338,7 @@ impl QueryJob {
                                     MetaCommand::RuleRemove { name, index } => {
                                         match storage.remove_rule_clause_in(kg, &name, index) {
                                             Ok(rule_deleted) => {
+                                                self.notify_rule_change(kg, &name, "removed");
                                                 if rule_deleted {
                                                     messages.push(format!("Rule '{name}' deleted (last clause removed)."));
                                                 } else {
@@ -3332,6 +3354,7 @@ impl QueryJob {
                                     MetaCommand::RuleClear(name) => {
                                         match storage.clear_rule_in(kg, &name) {
                                             Ok(()) => {
+                                                self.notify_rule_change(kg, &name, "removed");
                                                 messages.push(format!("Rule '{name}' cleared."));
                                             }
                                             Err(e) => messages.push(format!("Error: {e}")),
@@ -3353,6 +3376,11 @@ impl QueryJob {
                                                         "No relations matching prefix '{prefix}'."
                                                     ));
                                                 } else {
+                                                    for (name, count) in &cleared {
+                                                        self.notify_persistent_update(
+                                                            kg, name, "delete", *count,
+                                                        );
+                                                    }
                                                     let total: usize =
                                                         cleared.iter().map(|(_, c)| c).sum();
                                                     let detail: Vec<String> = cleared
@@ -3634,6 +3662,12 @@ impl QueryJob {
                                             ".ontology commands must be run as a standalone statement."
                                                 .to_string(),
                                         );
+                                    }
+
+                                    // Owned by the /ws connection, which
+                                    // intercepts them before execution.
+                                    MetaCommand::Subscribe { .. } | MetaCommand::Unsubscribe(_) => {
+                                        messages.push(SUBSCRIPTION_WS_ONLY.to_string());
                                     }
 
                                     // === Client-only commands ===
@@ -5632,7 +5666,8 @@ fn format_term(term: &Term) -> String {
 /// Other errors (delete, insert validation) stay as messages (soft errors).
 fn is_error_message(msg: &str) -> bool {
     // KG management errors (historically mapped to HTTP 400/404 responses)
-    msg.starts_with("Cannot drop current knowledge graph")
+    msg == SUBSCRIPTION_WS_ONLY
+        || msg.starts_with("Cannot drop current knowledge graph")
         || msg.starts_with("Create failed:")
         || msg.starts_with("Drop failed:")
         || (msg.starts_with("Knowledge graph") && msg.contains("not found"))

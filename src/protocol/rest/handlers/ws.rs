@@ -20,7 +20,12 @@
 //! - `{"type": "error", "message": "..."}`
 //! - `{"type": "ack", "message": "..."}`
 //! - `{"type": "pong"}`
-//! - `{"type": "notification", "event": "persistent_update", "relation": "..."}`
+//! - `{"type": "persistent_update", "knowledge_graph": "...", "relation": "...", ...}`
+//!   (also `rule_change`, `schema_change`, `kg_change`)
+//!
+//! The global `/ws` endpoint additionally supports standing queries
+//! (`.subscribe` / `.unsubscribe`), pushing `subscription_delta` and
+//! `subscription_error`; see [`crate::protocol::subscription`].
 
 use std::sync::Arc;
 
@@ -41,8 +46,10 @@ use crate::protocol::handler::{PersistentNotification, ValidationError, VALIDATI
 use crate::protocol::rest::dto::SessionQueryMetadataDto;
 use crate::protocol::rest::error::RestError;
 use crate::protocol::rest::WsSemaphore;
+use crate::protocol::subscription::{ConnectionSubscriptions, Push};
 use crate::protocol::Handler;
 use crate::protocol::MAX_MESSAGE_SIZE;
+use crate::statement::{MetaCommand, Statement};
 
 /// Threshold in bytes: results whose single-message JSON exceeds this are
 /// streamed as `result_start` / `result_chunk` / `result_end` messages.
@@ -160,8 +167,8 @@ enum WsResponse {
 ///
 /// **Notification** - Push notification when persistent data changes in the session's KG:
 /// ```json
-/// {"type": "notification", "event": "persistent_update", "knowledge_graph": "default",
-///  "relation": "edge", "operation": "insert", "count": 5}
+/// {"type": "persistent_update", "knowledge_graph": "default", "relation": "edge",
+///  "operation": "insert", "count": 5, "timestamp_ms": 1700000000000, "seq": 42}
 /// ```
 ///
 /// ### Backpressure
@@ -776,8 +783,19 @@ enum GlobalWsResponse {
 ///
 /// **Notification** - Push notification for persistent data changes:
 /// ```json
-/// {"type": "notification", "event": "persistent_update", ...}
+/// {"type": "persistent_update", "knowledge_graph": "default", "relation": "edge",
+///  "operation": "insert", "count": 5, "timestamp_ms": 1700000000000, "seq": 42}
 /// ```
+///
+/// **Standing queries** - `{"type": "execute", "program": ".subscribe <id> ?<query>"}`
+/// replies with a normal `result` (the initial snapshot); afterwards the server
+/// pushes changes to the result:
+/// ```json
+/// {"type": "subscription_delta", "subscription": "<id>", "knowledge_graph": "default",
+///  "seq": 1, "columns": ["X"], "inserted": [[3]], "retracted": []}
+/// {"type": "subscription_error", "subscription": "<id>", "message": "..."}
+/// ```
+/// `.unsubscribe <id>` removes one; disconnecting or switching KG removes all.
 pub async fn global_websocket(
     Extension(handler): Extension<Arc<Handler>>,
     Extension(ws_sem): Extension<WsSemaphore>,
@@ -963,6 +981,8 @@ async fn handle_global_ws_connection(
 
     let mut notify_rx = handler.subscribe_notifications();
     let mut request_seq: u64 = 0;
+    let mut subscriptions =
+        ConnectionSubscriptions::new(Arc::clone(&handler), Some(auth_identity.clone()));
 
     // Replay missed notifications on reconnect (#39)
     if let Some(since_seq) = last_seq {
@@ -1115,6 +1135,7 @@ async fn handle_global_ws_connection(
                         );
                         let send_ok = process_and_send_global_ws_message(
                             &handler, &session_id, &text, &auth_identity, &mut sender,
+                            &mut subscriptions,
                         )
                         .instrument(span)
                         .await;
@@ -1143,6 +1164,14 @@ async fn handle_global_ws_connection(
                     break; // Connection dead
                 }
             }
+            // Standing-query evaluation finished
+            completion = subscriptions.next_completion() => {
+                if let Some(push) = subscriptions.on_completion(completion) {
+                    if !send_subscription_push(&mut sender, &push, &session_id).await {
+                        break;
+                    }
+                }
+            }
             // Push notification
             notification = notify_rx.recv() => {
                 match notification {
@@ -1168,8 +1197,10 @@ async fn handle_global_ws_connection(
                                 }
                             }
                         }
+                        subscriptions.on_notification(notif);
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                        subscriptions.on_missed_notifications();
                         total_lagged += count;
                         if total_lagged > max_lag {
                             warn!(session_id = %session_id, total_lagged, max_lag, "ws_slow_subscriber_disconnected");
@@ -1271,6 +1302,7 @@ async fn process_and_send_global_ws_message(
     text: &str,
     auth: &crate::auth::AuthIdentity,
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    subscriptions: &mut ConnectionSubscriptions,
 ) -> bool {
     let request: GlobalWsRequest = match serde_json::from_str(text) {
         Ok(r) => r,
@@ -1290,7 +1322,31 @@ async fn process_and_send_global_ws_message(
 
     match request {
         GlobalWsRequest::Execute { program } => {
-            send_global_execute(handler, session_id, program, auth, sender).await
+            if let Some(command) = subscription_command(&program) {
+                return send_subscription_command(
+                    handler,
+                    session_id,
+                    command,
+                    subscriptions,
+                    sender,
+                )
+                .await;
+            }
+            let kg_before = handler
+                .session_manager()
+                .session_kg(&session_id.to_string())
+                .ok();
+            let alive = send_global_execute(handler, session_id, program, auth, sender).await;
+            // Subscriptions are scoped to the connection's KG: switching drops them.
+            if handler
+                .session_manager()
+                .session_kg(&session_id.to_string())
+                .ok()
+                != kg_before
+            {
+                subscriptions.clear();
+            }
+            alive
         }
         GlobalWsRequest::Ping => {
             send_global_response(sender, &GlobalWsResponse::Pong, session_id).await
@@ -1308,6 +1364,108 @@ async fn process_and_send_global_ws_message(
             .await
         }
     }
+}
+
+/// Extract `.subscribe` / `.unsubscribe` from an Execute program.
+fn subscription_command(program: &str) -> Option<MetaCommand> {
+    let trimmed = program.trim();
+    if !trimmed.starts_with(".subscribe") && !trimmed.starts_with(".unsubscribe") {
+        return None;
+    }
+    match crate::statement::parse_statement(trimmed) {
+        Ok(Statement::Meta(
+            command @ (MetaCommand::Subscribe { .. } | MetaCommand::Unsubscribe(_)),
+        )) => Some(command),
+        _ => None,
+    }
+}
+
+/// Run `.subscribe` / `.unsubscribe` against this connection's subscriptions.
+async fn send_subscription_command(
+    handler: &Arc<Handler>,
+    session_id: &str,
+    command: MetaCommand,
+    subscriptions: &mut ConnectionSubscriptions,
+    sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+) -> bool {
+    let start = std::time::Instant::now();
+    let outcome = match command {
+        MetaCommand::Subscribe { id, query } => {
+            match handler
+                .session_manager()
+                .session_kg(&session_id.to_string())
+            {
+                Ok(kg) => subscriptions
+                    .subscribe(&kg, &id, &query)
+                    .await
+                    .map(|snapshot| (snapshot.columns, snapshot.inserted)),
+                Err(e) => Err(e),
+            }
+        }
+        MetaCommand::Unsubscribe(id) => subscriptions.unsubscribe(&id).map(|()| {
+            let message = format!("Unsubscribed '{id}'.");
+            (
+                vec!["message".to_string()],
+                vec![vec![serde_json::Value::String(message)]],
+            )
+        }),
+        _ => Err("Not a subscription command".to_string()),
+    };
+    let response = match outcome {
+        Ok((columns, rows)) => GlobalWsResponse::Result {
+            columns,
+            row_count: rows.len(),
+            total_count: rows.len(),
+            rows,
+            truncated: false,
+            execution_time_ms: start.elapsed().as_millis() as u64,
+            row_provenance: Vec::new(),
+            metadata: None,
+            switched_kg: None,
+            proof_trees: None,
+            timing_breakdown: None,
+        },
+        Err(message) => GlobalWsResponse::Error {
+            message,
+            validation_errors: None,
+        },
+    };
+    send_global_response(sender, &response, session_id).await
+}
+
+/// Send a subscription push; an oversized delta becomes a `subscription_error`.
+/// Returns `false` if the connection is dead.
+async fn send_subscription_push(
+    sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    push: &Push,
+    session_id: &str,
+) -> bool {
+    let json = match serde_json::to_string(push) {
+        Ok(json) if json.len() <= MAX_MESSAGE_SIZE => json,
+        result => {
+            let reason = match result {
+                Ok(json) => format!(
+                    "Delta too large ({} bytes, max {MAX_MESSAGE_SIZE}); narrow the query",
+                    json.len()
+                ),
+                Err(e) => format!("Failed to serialize delta: {e}"),
+            };
+            warn!(session_id = %session_id, %reason, "ws_subscription_push_failed");
+            let subscription = match push {
+                Push::SubscriptionDelta { subscription, .. }
+                | Push::SubscriptionError { subscription, .. } => subscription.clone(),
+            };
+            let error = Push::SubscriptionError {
+                subscription,
+                message: reason,
+            };
+            serde_json::to_string(&error).unwrap_or_else(|_| {
+                r#"{"type":"subscription_error","message":"Internal serialization error"}"#
+                    .to_string()
+            })
+        }
+    };
+    sender.send(Message::Text(json)).await.is_ok()
 }
 
 /// Handle an Execute message on the global WebSocket.

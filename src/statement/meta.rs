@@ -59,6 +59,15 @@ pub enum MetaCommand {
     Why(String),     // .why <query> - show proof trees for query results
     WhyFull(String), // .why full <query> - show full proof trees (all contributors)
     WhyNot(String),  // .why_not <relation>(<values>) - explain missing derivation
+
+    // Standing queries (global /ws only; owned by the connection)
+    Subscribe {
+        // .subscribe <id> ?<query>
+        id: String,
+        query: String,
+    },
+    Unsubscribe(String), // .unsubscribe <id>
+
     // Teaching agent commands
     AgentMessage(String), // .agent <message> - send message to teaching agent
     AgentStart(String),   // .agent start <example_id> - start a teaching example
@@ -179,6 +188,10 @@ fn format_meta_debug(cmd: &MetaCommand) -> String {
         MetaCommand::Why(s) => format!("Why({s:?})"),
         MetaCommand::WhyFull(s) => format!("WhyFull({s:?})"),
         MetaCommand::WhyNot(s) => format!("WhyNot({s:?})"),
+        MetaCommand::Subscribe { id, query } => {
+            format!("Subscribe {{ id: {id:?}, query: {query:?} }}")
+        }
+        MetaCommand::Unsubscribe(id) => format!("Unsubscribe({id:?})"),
         MetaCommand::AgentMessage(s) => format!("AgentMessage({s:?})"),
         MetaCommand::AgentStart(s) => format!("AgentStart({s:?})"),
         MetaCommand::AgentSetup(s) => format!("AgentSetup({s:?})"),
@@ -304,6 +317,11 @@ pub fn parse_meta_command(input: &str) -> Result<MetaCommand, String> {
                 Ok(MetaCommand::Why(rest))
             }
         }
+        "subscribe" => parse_subscribe_command(input),
+        "unsubscribe" => match parts.as_slice() {
+            [_, id] => Ok(MetaCommand::Unsubscribe(parse_subscription_id(id)?)),
+            _ => Err("Usage: .unsubscribe <id>".to_string()),
+        },
         "agent" => {
             let rest = input.strip_prefix("agent").unwrap_or("").trim().to_string();
             if rest.is_empty() || rest == "examples" {
@@ -324,6 +342,37 @@ pub fn parse_meta_command(input: &str) -> Result<MetaCommand, String> {
         "apikey" => parse_apikey_command(&parts),
         _ => Err(format!("Unknown meta command: .{}", parts[0])),
     }
+}
+
+/// Maximum length of a subscription id.
+const MAX_SUBSCRIPTION_ID_LEN: usize = 128;
+
+/// Parse `.subscribe <id> ?<query>` (input has the leading `.` stripped).
+fn parse_subscribe_command(input: &str) -> Result<MetaCommand, String> {
+    const USAGE: &str = "Usage: .subscribe <id> ?<query>";
+    let rest = input.get("subscribe".len()..).unwrap_or("").trim_start();
+    let (id, query) = rest
+        .split_once(char::is_whitespace)
+        .ok_or_else(|| USAGE.to_string())?;
+    let query = query.trim();
+    if !query.starts_with('?') {
+        return Err(format!("{USAGE} (the query must start with '?')"));
+    }
+    Ok(MetaCommand::Subscribe {
+        id: parse_subscription_id(id)?,
+        query: query.to_string(),
+    })
+}
+
+/// Validate a client-chosen subscription id: 1-128 chars of `[A-Za-z0-9_.:-]`.
+fn parse_subscription_id(id: &str) -> Result<String, String> {
+    let valid_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | ':');
+    if id.is_empty() || id.len() > MAX_SUBSCRIPTION_ID_LEN || !id.chars().all(valid_char) {
+        return Err(format!(
+            "Invalid subscription id '{id}': use 1-{MAX_SUBSCRIPTION_ID_LEN} characters from [A-Za-z0-9_.:-]"
+        ));
+    }
+    Ok(id.to_string())
 }
 
 fn parse_kg_command(parts: &[&str]) -> Result<MetaCommand, String> {
@@ -1374,5 +1423,42 @@ mod ontology_command_tests {
         assert!(parse_meta_command(".ontology install").is_err());
         assert!(parse_meta_command(".ontology install a b").is_err());
         assert!(parse_meta_command(".ontology explode x").is_err());
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod subscription_command_tests {
+    use super::*;
+
+    #[test]
+    fn test_meta_subscribe_parses_id_and_query() {
+        assert_eq!(
+            parse_meta_command(".subscribe alerts ?reach(1, X), X != 3").unwrap(),
+            MetaCommand::Subscribe {
+                id: "alerts".to_string(),
+                query: "?reach(1, X), X != 3".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_meta_subscribe_rejects_bad_input() {
+        assert!(parse_meta_command(".subscribe").is_err());
+        assert!(parse_meta_command(".subscribe only_id").is_err());
+        assert!(parse_meta_command(".subscribe id reach(X)").is_err());
+        assert!(parse_meta_command(".subscribe bad/id ?reach(X)").is_err());
+        let long_id = "a".repeat(MAX_SUBSCRIPTION_ID_LEN + 1);
+        assert!(parse_meta_command(&format!(".subscribe {long_id} ?r(X)")).is_err());
+    }
+
+    #[test]
+    fn test_meta_unsubscribe_parses_id() {
+        assert_eq!(
+            parse_meta_command(".unsubscribe s-1").unwrap(),
+            MetaCommand::Unsubscribe("s-1".to_string())
+        );
+        assert!(parse_meta_command(".unsubscribe").is_err());
+        assert!(parse_meta_command(".unsubscribe a b").is_err());
     }
 }
