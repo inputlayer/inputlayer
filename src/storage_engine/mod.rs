@@ -88,7 +88,7 @@ pub struct StorageEngine {
     persist: Arc<FilePersist>,
     /// Logical timestamp for DD updates (monotonically increasing)
     logical_time: AtomicU64,
-    /// KG names pending async cleanup - prevents same-name recreation and blocks persist writes
+    /// KG names pending async cleanup - prevents same-name recreation
     dropping_kgs: parking_lot::RwLock<HashSet<String>>,
 }
 
@@ -118,6 +118,8 @@ pub struct KnowledgeGraph {
     max_query_cost: u64,
     /// Optimizer passes for every engine this KG builds
     optimization: crate::OptimizationConfig,
+    /// Set by drop under the write lock; writers holding a stale handle bail
+    dropped: bool,
 }
 
 impl StorageEngine {
@@ -269,8 +271,11 @@ impl StorageEngine {
         // Add to tombstone BEFORE removing from DashMap (ordering matters for RC-2)
         self.dropping_kgs.write().insert(name.to_string());
 
-        // Remove from in-memory DashMap (instant)
-        self.knowledge_graphs.remove(name);
+        // Remove from the DashMap, then mark dropped under the KG lock: this
+        // waits for in-flight writes, and writers still holding a handle bail.
+        if let Some((_, db)) = self.knowledge_graphs.remove(name) {
+            db.write().dropped = true;
+        }
 
         // Save metadata JSON (small file write, fast)
         self.save_knowledge_graphs_metadata()?;
@@ -478,16 +483,10 @@ impl StorageEngine {
             }
         }
 
-        // The dropping_kgs read guard blocks KG drops for the whole write.
-        let dropping_guard = self.dropping_kgs.read();
-        if dropping_guard.contains(kg) {
-            return Err(StorageError::KnowledgeGraphNotFound(kg.to_string()));
-        }
-        let db = self.kg_handle(kg)?;
-
         // Under the KG write lock: compute the effective delta, assign time,
         // persist, apply. Disk and memory see writes in the same order.
-        let mut db = db.write();
+        let db = self.kg_handle(kg)?;
+        let mut db = Self::lock_live(&db, kg)?;
         let total = tuples.len();
         let new_tuples = db.absent_tuples(relation, tuples);
         if new_tuples.is_empty() {
@@ -512,9 +511,9 @@ impl StorageEngine {
             persist_ms,
             "persist_append_complete"
         );
-        drop(dropping_guard);
 
-        let (new_count, _) = db.insert_in_memory(relation, new_tuples, time)?;
+        let new_count = new_tuples.len();
+        db.insert_in_memory(relation, new_tuples, time)?;
         Ok((new_count, total - new_count))
     }
 
@@ -587,13 +586,8 @@ impl StorageEngine {
             return Ok(0);
         }
 
-        let dropping_guard = self.dropping_kgs.read();
-        if dropping_guard.contains(kg) {
-            return Err(StorageError::KnowledgeGraphNotFound(kg.to_string()));
-        }
         let db = self.kg_handle(kg)?;
-
-        let mut db = db.write();
+        let mut db = Self::lock_live(&db, kg)?;
         let present = db.present_tuples(relation, &tuples);
         if present.is_empty() {
             return Ok(0);
@@ -608,9 +602,8 @@ impl StorageEngine {
 
         self.persist.ensure_shard(&shard)?;
         self.persist.append(&shard, &updates)?;
-        drop(dropping_guard);
 
-        db.delete_in_memory(relation, &present, time)
+        db.delete_in_memory(relation, present, time)
     }
 
     /// Clone a KG handle without holding the `DashMap` shard lock.
@@ -619,6 +612,18 @@ impl StorageEngine {
             .get(kg)
             .map(|entry| Arc::clone(entry.value()))
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))
+    }
+
+    /// Write-lock a KG handle, failing if the KG was dropped while waiting.
+    fn lock_live<'a>(
+        db: &'a RwLock<KnowledgeGraph>,
+        kg: &str,
+    ) -> StorageResult<parking_lot::RwLockWriteGuard<'a, KnowledgeGraph>> {
+        let db = db.write();
+        if db.dropped {
+            return Err(StorageError::KnowledgeGraphNotFound(kg.to_string()));
+        }
+        Ok(db)
     }
 
     /// Execute an IQL query on the current knowledge graph
@@ -967,18 +972,14 @@ impl StorageEngine {
     /// Clear all facts from relations matching a prefix in a knowledge graph.
     ///
     /// Returns list of (relation_name, count_deleted) for each affected relation.
+    /// See [`KnowledgeGraph::clear_relations_by_prefix`] for partial failure.
     pub fn clear_relations_by_prefix_in(
         &self,
         kg: &str,
         prefix: &str,
     ) -> StorageResult<Vec<(String, usize)>> {
-        let dropping_guard = self.dropping_kgs.read();
-        if dropping_guard.contains(kg) {
-            return Err(StorageError::KnowledgeGraphNotFound(kg.to_string()));
-        }
         let db = self.kg_handle(kg)?;
-
-        let mut db = db.write();
+        let mut db = Self::lock_live(&db, kg)?;
         let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
         db.clear_relations_by_prefix(prefix, time, &self.persist, kg)
     }
@@ -1686,10 +1687,10 @@ impl StorageEngine {
         // Clamp shards whose multiplicities drifted from set membership
         if !corrections.is_empty() {
             let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
-            for (shard, consolidated) in &corrections {
-                let fixes = set_semantics_corrections(consolidated, time);
+            for (shard, mut fixes) in corrections {
+                fixes.iter_mut().for_each(|u| u.time = time);
                 tracing::warn!(shard = %shard, tuples = fixes.len(), "persist_multiplicity_clamped");
-                self.persist.append(shard, &fixes)?;
+                self.persist.append(&shard, &fixes)?;
             }
         }
 
@@ -1739,8 +1740,9 @@ impl StorageEngine {
 
                 // Extract current tuples (positive multiplicities only)
                 let tuples = to_tuples(&updates);
-                if updates.iter().any(|u| u.diff != 1) {
-                    corrections.push((shard_name.clone(), updates));
+                let fixes = set_semantics_corrections(&updates, 0);
+                if !fixes.is_empty() {
+                    corrections.push((shard_name.clone(), fixes));
                 }
 
                 if !tuples.is_empty() {
@@ -1798,6 +1800,7 @@ impl StorageEngine {
             max_result_rows: self.config.storage.performance.max_result_rows,
             max_query_cost: self.config.storage.performance.max_query_cost,
             optimization: self.config.optimization.clone(),
+            dropped: false,
         };
         kg.restore_indexes();
         if !kg.indexes.is_empty() {
@@ -2056,6 +2059,7 @@ impl KnowledgeGraph {
             max_result_rows: 0,
             max_query_cost: 0,
             optimization: crate::OptimizationConfig::default(),
+            dropped: false,
         }
     }
 
@@ -2235,8 +2239,8 @@ impl KnowledgeGraph {
 
     /// Insert tuples into in-memory state only
     ///
-    /// Persistence is handled by `StorageEngine` via the persist layer.
-    /// Returns (`new_count`, `duplicate_count`) for caller to report.
+    /// `tuples` should be the effective delta (see `absent_tuples`); the store
+    /// still dedups. Persistence is handled by `StorageEngine`.
     ///
     /// # Errors
     /// Returns error if DD shadow write fails.
@@ -2245,7 +2249,7 @@ impl KnowledgeGraph {
         relation: &str,
         tuples: Vec<Tuple>,
         time: u64,
-    ) -> StorageResult<(usize, usize)> {
+    ) -> StorageResult<()> {
         // Infer schema from first tuple if available
         let schema = if let Some(first) = tuples.first() {
             (0..first.arity())
@@ -2255,8 +2259,8 @@ impl KnowledgeGraph {
             vec!["col0".to_string(), "col1".to_string()]
         };
 
-        let (new_tuples_for_dd, dup_count) = self.store.insert(relation, tuples);
-        let new_count = new_tuples_for_dd.len();
+        let (added, _) = self.store.insert(relation, tuples);
+        let new_count = added.len();
         let tuple_count = self.store.get(relation).map_or(0, Relation::len);
 
         // Update metadata
@@ -2266,79 +2270,70 @@ impl KnowledgeGraph {
         // Shadow write new tuples to IncrementalEngine (if enabled).
         // Uses the logical timestamp from StorageEngine for proper time tracking.
         // Time advancement is lazy  -  only happens when a consistent read is requested.
-        if !new_tuples_for_dd.is_empty() {
-            self.index_inserted(relation, &new_tuples_for_dd);
+        if new_count > 0 {
+            self.index_inserted(relation, &added);
             if let Some(dd) = &self.incremental {
-                dd.insert(relation, new_tuples_for_dd, time)
+                dd.insert(relation, added, time)
                     .map_err(StorageError::IncrementalEngineError)?;
                 // Invalidate derived relations that depend on this base
                 dd.notify_base_update(relation)
                     .map_err(StorageError::IncrementalEngineError)?;
             }
-        }
-
-        // Publish new snapshot for lock-free reads (only if data actually changed)
-        if new_count > 0 {
+            // Publish new snapshot for lock-free reads
             self.publish_snapshot();
         }
 
         info!(
             relation = %relation,
             new_count,
-            dup_count,
             time,
             "insert_in_memory_complete"
         );
 
-        Ok((new_count, dup_count))
+        Ok(())
     }
 
     /// Delete tuples from in-memory state only
     ///
-    /// Persistence is handled by `StorageEngine` via the persist layer.
-    /// Returns the count of actually deleted tuples.
+    /// `tuples` should be the effective delta (see `present_tuples`).
+    /// Persistence is handled by `StorageEngine`. Returns the count of
+    /// deleted tuples.
     ///
     /// # Errors
     /// Returns error if DD shadow write fails.
     fn delete_in_memory(
         &mut self,
         relation: &str,
-        tuples_to_remove: &[Tuple],
+        tuples: Vec<Tuple>,
         time: u64,
     ) -> StorageResult<usize> {
+        let removed = self.store.delete(relation, &tuples);
+        if removed.is_empty() {
+            return Ok(0);
+        }
+        let final_count = self.store.get(relation).map_or(0, Relation::len);
+
         // Get schema from metadata (which has the correct arity from insert time)
         // Avoid using catalog which may not have the schema for base facts
         let schema = self.metadata.relations.get(relation).map_or_else(
             || vec!["col0".to_string(), "col1".to_string()],
             |r| r.schema.clone(),
         );
+        self.metadata
+            .add_relation(relation.to_string(), schema, final_count);
 
-        let found = self.store.contains_relation(relation);
-        let deleted_tuples_for_dd = self.store.delete(relation, tuples_to_remove);
-        let deleted_count = deleted_tuples_for_dd.len();
-        let final_count = self.store.get(relation).map_or(0, Relation::len);
-
-        // Update metadata and DD only if data actually changed
-        if found && deleted_count > 0 {
-            self.metadata
-                .add_relation(relation.to_string(), schema, final_count);
-
-            // Shadow write deletes to IncrementalEngine (only if DD exists).
-            // Uses the logical timestamp from StorageEngine.
-            if !deleted_tuples_for_dd.is_empty() {
-                self.index_deleted(relation, &deleted_tuples_for_dd);
-                if let Some(dd) = &self.incremental {
-                    dd.delete(relation, deleted_tuples_for_dd, time)
-                        .map_err(StorageError::IncrementalEngineError)?;
-                    // Invalidate derived relations that depend on this base
-                    dd.notify_base_update(relation)
-                        .map_err(StorageError::IncrementalEngineError)?;
-                }
-            }
-
-            // Publish new snapshot for lock-free reads
-            self.publish_snapshot();
+        let deleted_count = removed.len();
+        self.index_deleted(relation, &removed);
+        if let Some(dd) = &self.incremental {
+            dd.delete(relation, removed, time)
+                .map_err(StorageError::IncrementalEngineError)?;
+            // Invalidate derived relations that depend on this base
+            dd.notify_base_update(relation)
+                .map_err(StorageError::IncrementalEngineError)?;
         }
+
+        // Publish new snapshot for lock-free reads
+        self.publish_snapshot();
 
         Ok(deleted_count)
     }
@@ -2558,6 +2553,11 @@ impl KnowledgeGraph {
     ///
     /// Returns a list of (relation_name, deleted_count) for each affected relation.
     /// Does NOT remove the relations themselves or their schemas - only clears data.
+    ///
+    /// # Errors
+    /// Relations are cleared in name order, each persisted before memory is
+    /// touched. A persist failure returns the error; relations before the
+    /// failing one stay cleared, it and later ones stay intact.
     pub fn clear_relations_by_prefix(
         &mut self,
         prefix: &str,
@@ -2826,6 +2826,49 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use tempfile::TempDir;
+
+    #[test]
+    fn test_clear_by_prefix_persist_failure_keeps_memory() {
+        let temp = TempDir::new().unwrap();
+        let persist = FilePersist::new(PersistConfig {
+            path: temp.path().join("persist"),
+            ..PersistConfig::default()
+        })
+        .unwrap();
+        let mut kg = KnowledgeGraph::new_with_workers("kg".into(), temp.path().join("kg"), 1);
+        for rel in ["p_a", "p_b"] {
+            kg.insert_in_memory(rel, vec![Tuple::from_pair(1, 2), Tuple::from_pair(3, 4)], 1)
+                .unwrap();
+        }
+        // p_a's shard exists; creating p_b's fails because shards/ is a file.
+        persist.ensure_shard("kg:p_a").unwrap();
+        let shards = temp.path().join("persist").join("shards");
+        fs::remove_dir_all(&shards).unwrap();
+        fs::write(&shards, b"").unwrap();
+
+        assert!(kg
+            .clear_relations_by_prefix("p_", 2, &persist, "kg")
+            .is_err());
+        assert!(kg.store.get("p_a").unwrap().is_empty());
+        assert_eq!(kg.store.get("p_b").unwrap().len(), 2);
+        let snapshot = kg.snapshot.load();
+        assert!(snapshot.input_tuples["p_a"].is_empty());
+        assert_eq!(snapshot.input_tuples["p_b"].len(), 2);
+    }
+
+    #[test]
+    fn test_stale_handle_rejected_after_drop() {
+        let temp = TempDir::new().unwrap();
+        let storage = StorageEngine::new(create_test_config(temp.path().to_path_buf())).unwrap();
+        storage.create_knowledge_graph("x").unwrap();
+        let stale = storage.kg_handle("x").unwrap();
+        storage.drop_knowledge_graph("x").unwrap();
+        storage.create_knowledge_graph("x").unwrap();
+
+        assert!(StorageEngine::lock_live(&stale, "x").is_err());
+        let live = storage.kg_handle("x").unwrap();
+        assert!(StorageEngine::lock_live(&live, "x").is_ok());
+    }
 
     fn create_test_config(data_dir: PathBuf) -> Config {
         let mut config = Config::default();
