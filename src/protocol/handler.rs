@@ -5340,19 +5340,6 @@ impl Handler {
                  nothing to remove safely"
             ));
         }
-        // Column counts, to clear facts before dropping: `.rel drop` on a
-        // populated relation inside a large batch can report success while
-        // leaving the relation behind (engine bug, filed) - an emptied
-        // relation drops reliably.
-        let arities: std::collections::HashMap<String, usize> = {
-            let storage = self.storage.read();
-            storage
-                .list_relations_with_metadata(&kg)
-                .map_err(|e| e.to_string())?
-                .into_iter()
-                .map(|(name, columns, _)| (name, columns.len()))
-                .collect()
-        };
         let mut program = String::new();
         // Rules first (they depend on the relations), then relations (this
         // deletes the data they hold - removal is destructive by design).
@@ -5361,11 +5348,6 @@ impl Handler {
             program.push_str(&format!(".rule drop {item}\n"));
         }
         for (_, item) in items.iter().filter(|(k, _)| k == "relation") {
-            if let Some(arity) = arities.get(item).filter(|a| **a > 0) {
-                let vars: Vec<String> = (0..*arity).map(|i| format!("V{i}")).collect();
-                let vars = vars.join(", ");
-                program.push_str(&format!("-{item}({vars}) <- {item}({vars})\n"));
-            }
             program.push_str(&format!(".rel drop {item}\n"));
         }
         // Failed drops are caught by the read-back below.
