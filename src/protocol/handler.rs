@@ -2048,6 +2048,16 @@ impl Handler {
         knowledge_graph: Option<String>,
         program: String,
     ) -> Result<QueryResult, String> {
+        self.run_program(knowledge_graph, program, None).await
+    }
+
+    /// `query_program` with `statements` already parsed by `parse_program`.
+    async fn run_program(
+        &self,
+        knowledge_graph: Option<String>,
+        program: String,
+        statements: Option<Vec<statement::Statement>>,
+    ) -> Result<QueryResult, String> {
         // Intercept .agent commands - these need async context for Claude API calls
         let trimmed = program.trim();
         if trimmed.starts_with(".agent ") || trimmed == ".agent" {
@@ -2189,7 +2199,7 @@ impl Handler {
         // The permit is moved into the blocking task so it's released when DD finishes.
         let blocking_task = tokio::task::spawn_blocking(move || {
             crate::code_generator::set_query_cancel_flag(Some(cancel_flag_clone));
-            let result = job.execute(knowledge_graph, program);
+            let result = job.execute(knowledge_graph, program, statements);
             crate::code_generator::set_query_cancel_flag(None);
             drop(permit); // Explicit drop; semaphore slot returned here
             result
@@ -2254,10 +2264,12 @@ impl QueryJob {
     /// Execute an IQL program synchronously on the current thread.
     /// Called from `Handler::query_program` via `tokio::task::spawn_blocking`
     /// so that Tokio worker threads are never blocked by DD computation.
+    /// `statements`, when given, must be `parse_program(&program)`'s output.
     fn execute(
         self,
         knowledge_graph: Option<String>,
         program: String,
+        statements: Option<Vec<statement::Statement>>,
     ) -> Result<QueryResult, String> {
         self.inc_query_count();
         let start = Instant::now();
@@ -2269,6 +2281,10 @@ impl QueryJob {
         // KgDrop and RuleClear use interior mutability, so no write lock is needed.
         // `mut` is needed because MetaCommand::Compact releases and re-acquires the lock.
         let mut storage = self.storage.read();
+
+        if knowledge_graph.as_deref() == Some(crate::auth::INTERNAL_KG) {
+            return Err(internal_kg_denied());
+        }
 
         // Determine target knowledge graph name
         let mut kg_name = if let Some(ref kg) = knowledge_graph {
@@ -2290,41 +2306,26 @@ impl QueryJob {
         let program_text = join_continuation_lines(&strip_comments(&program));
 
         // Phase 1: Parse-all-first validation.
-        // Parse every statement upfront. If ANY statement fails to parse,
-        // reject the ENTIRE program with structured error info.
-        // This prevents partial state from partial execution.
-        // Note: join_continuation_lines() already merged indented continuation
-        // lines into single logical lines, so line-by-line parsing is correct.
+        // If ANY statement fails to parse, reject the ENTIRE program with
+        // structured error info, so nothing executes partially.
         let parse_start = Instant::now();
-        {
-            let mut parse_errors: Vec<ValidationError> = Vec::new();
-            let mut stmt_index: usize = 0;
-            for (line_num, line) in program_text.lines().enumerate() {
-                let line = line.trim();
-                if line.is_empty() {
-                    continue;
-                }
-                if let Err(e) = statement::parse_statement(line) {
-                    parse_errors.push(ValidationError {
-                        line: line_num + 1,
-                        statement_index: stmt_index,
-                        error: e,
-                    });
-                }
-                stmt_index += 1;
-            }
-            let parse_ms = parse_start.elapsed().as_millis() as u64;
-            info!(
-                program_len,
-                statements = stmt_index,
-                parse_ms,
-                "query_parse_complete"
-            );
-            if !parse_errors.is_empty() {
+        let statements = match statements.map_or_else(|| parse_program(&program), Ok) {
+            Ok(statements) => statements,
+            Err(parse_errors) => {
                 let errors_json = serde_json::to_string(&parse_errors).unwrap_or_default();
                 return Err(format!("{VALIDATION_ERROR_PREFIX}{errors_json}"));
             }
+        };
+        info!(
+            program_len,
+            statements = statements.len(),
+            parse_ms = parse_start.elapsed().as_millis() as u64,
+            "query_parse_complete"
+        );
+        if kg_name == crate::auth::INTERNAL_KG || statements.iter().any(targets_internal_kg) {
+            return Err(internal_kg_denied());
         }
+        let mut statements = statements.into_iter();
 
         // Phase 2: Execute statements (all guaranteed to parse successfully)
         let mut messages = Vec::new();
@@ -2352,7 +2353,7 @@ impl QueryJob {
             {
                 let stmt_text = current_stmt.trim();
                 if !stmt_text.is_empty() {
-                    if let Ok(stmt) = statement::parse_statement(stmt_text) {
+                    if let Some(stmt) = statements.next() {
                         match stmt {
                             statement::Statement::SchemaDecl(decl) => {
                                 // Build RelationSchema from SchemaDecl
@@ -3474,7 +3475,7 @@ impl QueryJob {
                             }
                         }
                     } else {
-                        query_to_execute = Some(stmt_text.to_string());
+                        return Err("Internal error: statement count mismatch".to_string());
                     }
                 }
                 current_stmt.clear();
@@ -3718,6 +3719,19 @@ impl Handler {
         session_id: &SessionId,
         program: String,
     ) -> Result<QueryResult, String> {
+        self.run_program_with_session(session_id, None, program, None)
+            .await
+    }
+
+    /// `query_program_with_session` on `kg` instead of the session's binding,
+    /// including when the session is gone.
+    async fn run_program_with_session(
+        &self,
+        session_id: &SessionId,
+        kg: Option<String>,
+        program: String,
+        statements: Option<Vec<statement::Statement>>,
+    ) -> Result<QueryResult, String> {
         // Input size validation (same as query_program)
         let perf = &self.config.storage.performance;
         if perf.max_query_size_bytes > 0 && program.len() > perf.max_query_size_bytes {
@@ -3732,16 +3746,19 @@ impl Handler {
         // If session was reaped (e.g., WS reconnect), fall back to non-session query.
         if self.sessions.touch_session(session_id).is_err() {
             tracing::debug!(session_id = %session_id, "session_gone_fallback_to_query_program");
-            return self.query_program(None, program).await;
+            return self.run_program(kg, program, statements).await;
         }
 
         // Check if session is clean → fast path
         let is_clean = self.sessions.is_session_clean(session_id)?;
-        let kg = self.sessions.session_kg(session_id)?;
+        let kg = match kg {
+            Some(kg) => kg,
+            None => self.sessions.session_kg(session_id)?,
+        };
 
         if is_clean {
             // Fast path: no ephemeral state, use global snapshot directly
-            return self.query_program(Some(kg), program).await;
+            return self.run_program(Some(kg), program, statements).await;
         }
 
         // Slow path: combine ephemeral + persistent data
@@ -4100,13 +4117,6 @@ impl Handler {
         };
         let effective_auth = refreshed_identity.as_ref().or(auth);
 
-        // Authorization check: if auth is provided, validate the statement
-        if let Some(identity) = effective_auth {
-            if let Ok(ref stmt) = statement::parse_statement(trimmed) {
-                crate::auth::authorize_statement(&identity.role, stmt)?;
-            }
-        }
-
         // Protect _internal KG from direct access.
         // Block both explicit commands AND sessions already bound to _internal.
         let session_kg_owned: Option<String> = if knowledge_graph.is_none() {
@@ -4129,76 +4139,44 @@ impl Handler {
         } else {
             None
         };
-        let current_kg = knowledge_graph.as_deref().or(session_kg_owned.as_deref());
+        // The KG the program runs on: authorization and execution both use it.
+        let exec_kg: Option<String> = knowledge_graph.clone().or(session_kg_owned).or_else(|| {
+            self.storage
+                .read()
+                .current_knowledge_graph()
+                .map(str::to_string)
+        });
+        let current_kg = exec_kg.as_deref();
 
         if let Some(identity) = effective_auth {
             if identity.role != crate::auth::Role::Admin
                 && current_kg == Some(crate::auth::INTERNAL_KG)
             {
-                return Err(format!(
-                    "Access denied: '{}' is a system knowledge graph",
-                    crate::auth::INTERNAL_KG
-                ));
-            }
-        }
-        if let Ok(ref stmt) = statement::parse_statement(trimmed) {
-            match stmt {
-                statement::Statement::Meta(
-                    statement::MetaCommand::KgUse(name)
-                    | statement::MetaCommand::KgDrop(name)
-                    | statement::MetaCommand::KgCreate(name),
-                ) if name == crate::auth::INTERNAL_KG => {
-                    return Err(format!(
-                        "Access denied: '{}' is a system knowledge graph",
-                        crate::auth::INTERNAL_KG
-                    ));
-                }
-                _ => {}
+                return Err(internal_kg_denied());
             }
         }
 
-        // Per-KG authorization: check if user has access to the target KG.
-        if let Some(identity) = effective_auth {
-            if identity.role != crate::auth::Role::Admin {
-                if let Ok(ref stmt) = statement::parse_statement(trimmed) {
-                    // Determine which KG the operation targets
-                    let target_kg = match stmt {
-                        statement::Statement::Meta(
-                            statement::MetaCommand::KgDrop(name)
-                            | statement::MetaCommand::KgUse(name),
-                        ) => Some(name.as_str()),
-                        statement::Statement::Meta(
-                            statement::MetaCommand::KgAclGrant { ref kg_name, .. }
-                            | statement::MetaCommand::KgAclRevoke { ref kg_name, .. },
-                        ) => Some(kg_name.as_str()),
-                        statement::Statement::Meta(statement::MetaCommand::KgAclList(
-                            ref kg_opt,
-                        )) => kg_opt.as_deref(),
-                        // KG create doesn't target an existing KG; list/show/help are global
-                        statement::Statement::Meta(
-                            statement::MetaCommand::KgCreate(_)
-                            | statement::MetaCommand::KgList
-                            | statement::MetaCommand::KgShow
-                            | statement::MetaCommand::Help
-                            | statement::MetaCommand::Quit
-                            | statement::MetaCommand::Status,
-                        ) => None,
-                        // All other statements operate on the current KG
-                        _ => current_kg,
-                    };
-
-                    if let Some(kg) = target_kg {
-                        if let Some(kg_role) =
-                            self.get_kg_role_for_user(kg, &identity.username, &identity.role)
-                        {
-                            crate::auth::authorize_kg_operation(&kg_role, stmt)?;
-                        } else {
-                            return Err("Access denied".to_string());
-                        }
-                    }
-                }
-            }
+        // Parsed once: these exact statements are authorized and executed.
+        let statements = parse_program(&program).ok();
+        let stmts = statements.as_deref().unwrap_or_default();
+        self.authorize_program(effective_auth, current_kg, stmts)?;
+        if stmts.len() > 1
+            && stmts.iter().any(|stmt| {
+                matches!(
+                    stmt,
+                    statement::Statement::Meta(MetaCommand::KgCreate(_) | MetaCommand::KgDrop(_))
+                )
+            })
+        {
+            return Err(
+                "'.kg create' and '.kg drop' must be sent as a single statement".to_string(),
+            );
         }
+        // The single statement the intercepts below handle.
+        let parsed = match stmts {
+            [stmt] => Some(stmt),
+            _ => None,
+        };
 
         // Any session-bound activity should keep the session alive.
         // If the session was reaped (e.g., after WS reconnect), log and continue
@@ -4212,7 +4190,7 @@ impl Handler {
 
         // Fast path: intercept session meta commands that need SessionManager
         if trimmed.starts_with('.') {
-            if let Ok(statement::Statement::Meta(ref meta)) = statement::parse_statement(trimmed) {
+            if let Some(statement::Statement::Meta(meta)) = parsed {
                 match meta {
                     MetaCommand::SessionList => {
                         let sid = session_id.ok_or_else(|| "No active session".to_string())?;
@@ -4348,7 +4326,7 @@ impl Handler {
         // In the WS protocol each statement is a separate request, so we must
         // persist them in the SessionManager (not in a request-local vector).
         if let Some(sid) = session_id {
-            if let Ok(ref stmt) = statement::parse_statement(trimmed) {
+            if let Some(stmt) = parsed {
                 match stmt {
                     statement::Statement::SessionRule(rule) => {
                         // Reject reserved '__' prefix to prevent shadowing internal relations.
@@ -4410,15 +4388,6 @@ impl Handler {
             }
         }
 
-        // Determine effective KG: use provided, or session's KG, or default
-        let effective_kg = if knowledge_graph.is_some() {
-            knowledge_graph
-        } else if let Some(sid) = session_id {
-            Some(self.sessions.session_kg(sid)?)
-        } else {
-            None
-        };
-
         // Only queries need session-aware execution (to prepend ephemeral rules).
         // All other statements (meta commands, inserts, deletes, persistent rules)
         // must go through query_program() directly because query_program_with_session()
@@ -4431,24 +4400,27 @@ impl Handler {
         // Detect KG create/drop before program is moved into query_program.
         // Extracting these from the parsed statement avoids fragile string matching
         // on the result messages.
-        let (kg_create_name, kg_drop_name) = match statement::parse_statement(trimmed) {
-            Ok(statement::Statement::Meta(statement::MetaCommand::KgCreate(name))) => {
-                (Some(name), None)
+        let (kg_create_name, kg_drop_name) = match parsed {
+            Some(statement::Statement::Meta(statement::MetaCommand::KgCreate(name))) => {
+                (Some(name.clone()), None)
             }
-            Ok(statement::Statement::Meta(statement::MetaCommand::KgDrop(name))) => {
-                (None, Some(name))
+            Some(statement::Statement::Meta(statement::MetaCommand::KgDrop(name))) => {
+                (None, Some(name.clone()))
             }
             _ => (None, None),
         };
 
-        let result = if is_query {
-            if let Some(sid) = session_id {
-                self.query_program_with_session(sid, program).await?
-            } else {
-                self.query_program(effective_kg, program).await?
+        // A non-query on a reaped session errors instead of running on the
+        // storage default.
+        if let (Some(sid), None, false) = (session_id, &knowledge_graph, is_query) {
+            self.sessions.session_kg(sid)?;
+        }
+        let result = match session_id {
+            Some(sid) if is_query => {
+                self.run_program_with_session(sid, exec_kg, program, statements)
+                    .await?
             }
-        } else {
-            self.query_program(effective_kg, program).await?
+            _ => self.run_program(exec_kg, program, statements).await?,
         };
 
         // If KG was switched, update session binding
@@ -4496,6 +4468,82 @@ impl Handler {
         }
 
         Ok(result)
+    }
+
+    /// Authorize every statement against the KG in effect at that statement.
+    ///
+    /// A failed `.kg use` leaves the previous KG active, so statements after a
+    /// switch are checked against every KG that may be current. With no
+    /// statements (unparseable program), the caller still needs a role on the
+    /// current KG.
+    fn authorize_program(
+        &self,
+        auth: Option<&crate::auth::AuthIdentity>,
+        current_kg: Option<&str>,
+        statements: &[statement::Statement],
+    ) -> Result<(), String> {
+        use crate::auth::{self, Role, INTERNAL_KG};
+        use statement::Statement;
+
+        let mut kgs: Vec<String> = current_kg.map(str::to_string).into_iter().collect();
+        let non_admin = auth.filter(|identity| identity.role != Role::Admin);
+        let kg_role = |kg: &str, identity: &auth::AuthIdentity| {
+            if kg == INTERNAL_KG {
+                return Err(internal_kg_denied());
+            }
+            self.get_kg_role_for_user(kg, &identity.username, &identity.role)
+                .ok_or_else(|| "Access denied".to_string())
+        };
+
+        if statements.is_empty() {
+            if let Some(identity) = non_admin {
+                for kg in &kgs {
+                    kg_role(kg, identity)?;
+                }
+            }
+        }
+
+        for stmt in statements {
+            if let Some(identity) = non_admin {
+                auth::authorize_statement(&identity.role, stmt)?;
+            }
+            if targets_internal_kg(stmt) {
+                return Err(internal_kg_denied());
+            }
+            if let Some(identity) = non_admin {
+                let targets: Vec<&str> = match stmt {
+                    Statement::Meta(MetaCommand::KgDrop(name) | MetaCommand::KgUse(name)) => {
+                        vec![name.as_str()]
+                    }
+                    Statement::Meta(
+                        MetaCommand::KgAclGrant { kg_name, .. }
+                        | MetaCommand::KgAclRevoke { kg_name, .. },
+                    ) => vec![kg_name.as_str()],
+                    Statement::Meta(MetaCommand::KgAclList(kg_opt)) => {
+                        kg_opt.iter().map(String::as_str).collect()
+                    }
+                    // Create targets no existing KG; list/show/help are global.
+                    Statement::Meta(
+                        MetaCommand::KgCreate(_)
+                        | MetaCommand::KgList
+                        | MetaCommand::KgShow
+                        | MetaCommand::Help
+                        | MetaCommand::Quit
+                        | MetaCommand::Status,
+                    ) => Vec::new(),
+                    _ => kgs.iter().map(String::as_str).collect(),
+                };
+                for kg in targets {
+                    auth::authorize_kg_operation(&kg_role(kg, identity)?, stmt)?;
+                }
+            }
+            if let Statement::Meta(MetaCommand::KgUse(name) | MetaCommand::KgCreate(name)) = stmt {
+                if !kgs.contains(name) {
+                    kgs.push(name.clone());
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Build a single-message QueryResult
@@ -5419,6 +5467,50 @@ fn join_continuation_lines(program: &str) -> String {
         result.push(line.to_string());
     }
     result.join("\n")
+}
+
+/// Split a program into statements the way `QueryJob` executes it: comments
+/// stripped, continuation lines joined, one statement per non-empty line.
+fn parse_program(program: &str) -> Result<Vec<statement::Statement>, Vec<ValidationError>> {
+    let mut statements = Vec::new();
+    let mut errors = Vec::new();
+    let text = join_continuation_lines(&strip_comments(program));
+    for (line_num, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        match statement::parse_statement(line) {
+            Ok(stmt) => statements.push(stmt),
+            Err(error) => errors.push(ValidationError {
+                line: line_num + 1,
+                statement_index: statements.len() + errors.len(),
+                error,
+            }),
+        }
+    }
+    if errors.is_empty() {
+        Ok(statements)
+    } else {
+        Err(errors)
+    }
+}
+
+/// Whether a statement creates, switches to or drops the system KG.
+fn targets_internal_kg(stmt: &statement::Statement) -> bool {
+    matches!(
+        stmt,
+        statement::Statement::Meta(
+            MetaCommand::KgUse(name) | MetaCommand::KgDrop(name) | MetaCommand::KgCreate(name),
+        ) if name == crate::auth::INTERNAL_KG
+    )
+}
+
+fn internal_kg_denied() -> String {
+    format!(
+        "Access denied: '{}' is a system knowledge graph",
+        crate::auth::INTERNAL_KG
+    )
 }
 
 /// Format a rule as IQL text (uses Rule's Display impl)
