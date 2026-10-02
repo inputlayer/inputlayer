@@ -684,7 +684,7 @@ impl IQLEngine {
             let debug = std::env::var("INPUTLAYER_DEBUG").is_ok();
             if debug {
                 eprintln!(
-                    "DEBUG Magic Sets: rewrote {} relations, {} magic seeds",
+                    "DEBUG Magic Sets: adorned {} atoms, {} magic seeds",
                     bindings.len(),
                     magic_seeds.len()
                 );

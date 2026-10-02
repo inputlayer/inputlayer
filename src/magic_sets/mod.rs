@@ -78,9 +78,15 @@ impl Adornment {
     }
 }
 
-/// Info about a detected binding on a recursive relation in the query
+/// A recursive atom in a `__query__` rule with constant-bound arguments.
 #[derive(Debug, Clone)]
 pub(crate) struct QueryBinding {
+    /// Index of the `__query__` rule in the program
+    rule: usize,
+    /// Index of the atom in that rule's body
+    body: usize,
+    /// Relation of the atom
+    relation: String,
     /// The adornment pattern
     adornment: Adornment,
     /// Map from bound position index to the constant Term from the equality constraint
@@ -94,8 +100,8 @@ impl MagicSetRewriter {
     /// Detect query bindings on recursive relations.
     ///
     /// Scans `__query__` rules for equality constraints (`_c0 = 1`) that bind
-    /// arguments of recursive body atoms. Returns a map from relation name to
-    /// its adornment and bound constants.
+    /// arguments of recursive body atoms. Returns one binding per bound atom,
+    /// so a relation used several times gets one entry per use.
     ///
     /// A position is only marked "bound" if the variable at that position is
     /// **invariant** across recursion - i.e., the same variable appears at the
@@ -105,14 +111,14 @@ impl MagicSetRewriter {
     pub fn detect_query_bindings(
         program: &Program,
         recursive_relations: &HashSet<String>,
-    ) -> HashMap<String, QueryBinding> {
+    ) -> Vec<QueryBinding> {
         // Pre-compute which argument positions are invariant across recursion
         // for each recursive relation.
         let invariant_positions = compute_invariant_positions(program, recursive_relations);
 
-        let mut result = HashMap::new();
+        let mut result = Vec::new();
 
-        for rule in &program.rules {
+        for (rule_idx, rule) in program.rules.iter().enumerate() {
             if rule.head.relation != "__query__" {
                 continue;
             }
@@ -138,7 +144,7 @@ impl MagicSetRewriter {
             }
 
             // For each recursive body atom, compute adornment
-            for pred in &rule.body {
+            for (body_idx, pred) in rule.body.iter().enumerate() {
                 if let BodyPredicate::Positive(atom) = pred {
                     if !recursive_relations.contains(&atom.relation) {
                         continue;
@@ -173,13 +179,13 @@ impl MagicSetRewriter {
 
                     let adornment = Adornment::new(adornment_positions);
                     if adornment.has_bound() {
-                        result.insert(
-                            atom.relation.clone(),
-                            QueryBinding {
-                                adornment,
-                                bound_constants,
-                            },
-                        );
+                        result.push(QueryBinding {
+                            rule: rule_idx,
+                            body: body_idx,
+                            relation: atom.relation.clone(),
+                            adornment,
+                            bound_constants,
+                        });
                     }
                 }
             }
@@ -190,55 +196,72 @@ impl MagicSetRewriter {
 
     /// Rewrite the program with Magic Sets transformation.
     ///
+    /// Each bound atom is renamed to its adorned relation (`reach_bf`), which
+    /// gets its own guarded copy of the rules and a seed holding the constants
+    /// of every atom with that adornment. Other uses of the relation keep
+    /// reading the original, whose rules are kept whenever such a use exists.
+    ///
     /// Returns the rewritten program and a map of magic seed relation names to their
     /// seed tuples (to be injected into `input_tuples`).
     pub fn rewrite_program(
         program: &Program,
-        bindings: &HashMap<String, QueryBinding>,
+        bindings: &[QueryBinding],
     ) -> (Program, HashMap<String, Vec<Tuple>>) {
-        let mut new_rules: Vec<Rule> = Vec::new();
         let mut magic_seeds: HashMap<String, Vec<Tuple>> = HashMap::new();
+        let mut adornments: HashMap<&str, Vec<&QueryBinding>> = HashMap::new();
+        let mut renamed: HashMap<(usize, usize), String> = HashMap::new();
 
-        // Build set of relations being adorned
-        let adorned_relations: HashSet<&String> = bindings.keys().collect();
+        for binding in bindings {
+            let uses = adornments.entry(binding.relation.as_str()).or_default();
+            if !uses.iter().any(|b| b.adornment == binding.adornment) {
+                uses.push(binding);
+            }
+            let seeds = magic_seeds
+                .entry(magic_relation_name(&binding.relation, &binding.adornment))
+                .or_default();
+            let seed = build_seed_tuple(&binding.bound_constants);
+            if !seeds.contains(&seed) {
+                seeds.push(seed);
+            }
+            renamed.insert(
+                (binding.rule, binding.body),
+                adorned_relation_name(&binding.relation, &binding.adornment),
+            );
+        }
 
-        for rule in &program.rules {
-            if adorned_relations.contains(&rule.head.relation) {
-                // This rule defines a relation that needs adorning
-                let binding = &bindings[&rule.head.relation];
-                let adorned_name = adorned_relation_name(&rule.head.relation, &binding.adornment);
-                let magic_name = magic_relation_name(&rule.head.relation, &binding.adornment);
+        // Relations still read unadorned somewhere (self-references inside a
+        // relation's own rules follow whichever copy they belong to).
+        let mut needs_original: HashSet<&str> = HashSet::new();
+        for (rule_idx, rule) in program.rules.iter().enumerate() {
+            for (body_idx, pred) in rule.body.iter().enumerate() {
+                if let Some(atom) = pred.atom() {
+                    if atom.relation != rule.head.relation
+                        && !renamed.contains_key(&(rule_idx, body_idx))
+                    {
+                        needs_original.insert(atom.relation.as_str());
+                    }
+                }
+            }
+        }
 
-                // Build the adorned rule with magic guard
-                let adorned_rule = adorn_rule(
-                    rule,
-                    &adorned_name,
-                    &magic_name,
-                    binding,
-                    &adorned_relations,
-                );
-                new_rules.push(adorned_rule);
-
-                // Check if we need a magic propagation rule
-                if let Some(prop_rule) =
-                    generate_magic_propagation_rule(rule, &magic_name, binding, &adorned_relations)
+        let mut new_rules: Vec<Rule> = Vec::new();
+        for (rule_idx, rule) in program.rules.iter().enumerate() {
+            let relation = rule.head.relation.as_str();
+            let Some(uses) = adornments.get(relation) else {
+                new_rules.push(rename_atoms(rule, rule_idx, &renamed));
+                continue;
+            };
+            for binding in uses {
+                let adorned_name = adorned_relation_name(relation, &binding.adornment);
+                let magic_name = magic_relation_name(relation, &binding.adornment);
+                new_rules.push(adorn_rule(rule, &adorned_name, &magic_name, binding));
+                if let Some(prop_rule) = generate_magic_propagation_rule(rule, &magic_name, binding)
                 {
                     new_rules.push(prop_rule);
                 }
-
-                // Generate magic seed tuples (only add once per magic relation)
-                magic_seeds
-                    .entry(magic_name)
-                    .or_insert_with(|| vec![build_seed_tuple(&binding.bound_constants)]);
-            } else if rule.head.relation == "__query__" {
-                // Rewrite __query__ to reference adorned relations
-                let rewritten = rewrite_query_rule(rule, bindings);
-                new_rules.push(rewritten);
-            } else {
-                // Non-adorned, non-query rule - check if its body references adorned relations
-                // and rename those references too
-                let rewritten = rewrite_body_references(rule, bindings);
-                new_rules.push(rewritten);
+            }
+            if needs_original.contains(relation) {
+                new_rules.push(rule.clone());
             }
         }
 
@@ -339,13 +362,7 @@ fn magic_relation_name(relation: &str, adornment: &Adornment) -> String {
 /// For recursive body atoms, rename to adorned version:
 /// Original: `reach(X, Z) <- reach(X, Y), edge(Y, Z)`
 /// Adorned:  `reach_bf(X, Z) <- magic_reach_bf(X), reach_bf(X, Y), edge(Y, Z)`
-fn adorn_rule(
-    rule: &Rule,
-    adorned_name: &str,
-    magic_name: &str,
-    binding: &QueryBinding,
-    adorned_relations: &HashSet<&String>,
-) -> Rule {
+fn adorn_rule(rule: &Rule, adorned_name: &str, magic_name: &str, binding: &QueryBinding) -> Rule {
     // Build magic guard atom: magic_reach_bf(X) using bound argument variables
     let magic_args: Vec<Term> = binding
         .adornment
@@ -363,11 +380,9 @@ fn adorn_rule(
 
     for pred in &rule.body {
         match pred {
-            BodyPredicate::Positive(atom) if adorned_relations.contains(&atom.relation) => {
-                let rel_binding = &binding;
-                let new_name = adorned_relation_name(&atom.relation, &rel_binding.adornment);
+            BodyPredicate::Positive(atom) if atom.relation == rule.head.relation => {
                 adorned_body.push(BodyPredicate::Positive(Atom::new(
-                    new_name,
+                    adorned_name.to_string(),
                     atom.args.clone(),
                 )));
             }
@@ -391,7 +406,6 @@ fn generate_magic_propagation_rule(
     rule: &Rule,
     magic_name: &str,
     binding: &QueryBinding,
-    adorned_relations: &HashSet<&String>,
 ) -> Option<Rule> {
     // Only check recursive rules (body references head relation)
     let recursive_atoms: Vec<&Atom> = rule
@@ -399,8 +413,7 @@ fn generate_magic_propagation_rule(
         .iter()
         .filter_map(|pred| {
             if let BodyPredicate::Positive(atom) = pred {
-                if adorned_relations.contains(&atom.relation) && atom.relation == rule.head.relation
-                {
+                if atom.relation == rule.head.relation {
                     return Some(atom);
                 }
             }
@@ -452,9 +465,7 @@ fn generate_magic_propagation_rule(
             // Include non-recursive body atoms that help bind the propagated variables
             for pred in &rule.body {
                 match pred {
-                    BodyPredicate::Positive(atom)
-                        if !adorned_relations.contains(&atom.relation) =>
-                    {
+                    BodyPredicate::Positive(atom) if atom.relation != rule.head.relation => {
                         prop_body.push(pred.clone());
                     }
                     BodyPredicate::Comparison(_, _, _) => {
@@ -491,54 +502,17 @@ fn build_seed_tuple(bound_constants: &[(usize, Term)]) -> Tuple {
     Tuple::new(values)
 }
 
-/// Rewrite __query__ rule to reference adorned relations
-fn rewrite_query_rule(rule: &Rule, bindings: &HashMap<String, QueryBinding>) -> Rule {
-    let new_body: Vec<BodyPredicate> = rule
-        .body
-        .iter()
-        .map(|pred| match pred {
-            BodyPredicate::Positive(atom) if bindings.contains_key(&atom.relation) => {
-                let binding = &bindings[&atom.relation];
-                let adorned = adorned_relation_name(&atom.relation, &binding.adornment);
-                BodyPredicate::Positive(Atom::new(adorned, atom.args.clone()))
-            }
-            _ => pred.clone(),
-        })
-        .collect();
-
-    Rule::new(rule.head.clone(), new_body)
-}
-
-/// Rewrite body references in non-adorned rules (if they reference adorned relations)
-fn rewrite_body_references(rule: &Rule, bindings: &HashMap<String, QueryBinding>) -> Rule {
-    let has_ref = rule.body.iter().any(|pred| {
-        pred.atom()
-            .is_some_and(|a| bindings.contains_key(&a.relation))
-    });
-
-    if !has_ref {
-        return rule.clone();
+/// Point the bound atoms of rule `rule_idx` at their adorned relations.
+fn rename_atoms(rule: &Rule, rule_idx: usize, renamed: &HashMap<(usize, usize), String>) -> Rule {
+    let mut rule = rule.clone();
+    for (body_idx, pred) in rule.body.iter_mut().enumerate() {
+        if let (Some(name), BodyPredicate::Positive(atom)) =
+            (renamed.get(&(rule_idx, body_idx)), pred)
+        {
+            atom.relation.clone_from(name);
+        }
     }
-
-    let new_body: Vec<BodyPredicate> = rule
-        .body
-        .iter()
-        .map(|pred| match pred {
-            BodyPredicate::Positive(atom) if bindings.contains_key(&atom.relation) => {
-                let binding = &bindings[&atom.relation];
-                let adorned = adorned_relation_name(&atom.relation, &binding.adornment);
-                BodyPredicate::Positive(Atom::new(adorned, atom.args.clone()))
-            }
-            BodyPredicate::Negated(atom) if bindings.contains_key(&atom.relation) => {
-                let binding = &bindings[&atom.relation];
-                let adorned = adorned_relation_name(&atom.relation, &binding.adornment);
-                BodyPredicate::Negated(Atom::new(adorned, atom.args.clone()))
-            }
-            _ => pred.clone(),
-        })
-        .collect();
-
-    Rule::new(rule.head.clone(), new_body)
+    rule
 }
 
 /// Relations Magic Sets may adorn: recursive relations outside any
@@ -584,8 +558,8 @@ mod tests {
         assert!(recursive.contains("reach"));
 
         let bindings = MagicSetRewriter::detect_query_bindings(&program, &recursive);
-        assert!(bindings.contains_key("reach"));
-        let binding = &bindings["reach"];
+        assert!(bindings.iter().any(|b| b.relation == "reach"));
+        let binding = &bindings[0];
         assert_eq!(binding.adornment.suffix(), "bf");
         assert_eq!(binding.bound_constants.len(), 1);
         assert_eq!(binding.bound_constants[0].0, 0); // position 0
@@ -616,9 +590,9 @@ mod tests {
         );
         let recursive = find_recursive_relations(&program);
         let bindings = MagicSetRewriter::detect_query_bindings(&program, &recursive);
-        assert!(bindings.contains_key("reach"));
+        assert!(bindings.iter().any(|b| b.relation == "reach"));
         // Only position 0 (X) is invariant, position 1 (Z→Y) is NOT
-        assert_eq!(bindings["reach"].adornment.suffix(), "bf");
+        assert_eq!(bindings[0].adornment.suffix(), "bf");
     }
 
     #[test]
@@ -631,10 +605,10 @@ mod tests {
         );
         let recursive = find_recursive_relations(&program);
         let bindings = MagicSetRewriter::detect_query_bindings(&program, &recursive);
-        assert!(bindings.contains_key("user"));
-        assert_eq!(bindings["user"].adornment.suffix(), "bf");
+        assert!(bindings.iter().any(|b| b.relation == "user"));
+        assert_eq!(bindings[0].adornment.suffix(), "bf");
         assert!(matches!(
-            &bindings["user"].bound_constants[0].1,
+            &bindings[0].bound_constants[0].1,
             Term::StringConstant(s) if s == "admin"
         ));
     }
@@ -845,7 +819,7 @@ mod tests {
         );
         let recursive = find_recursive_relations(&program);
         let bindings = MagicSetRewriter::detect_query_bindings(&program, &recursive);
-        assert_eq!(bindings["reach"].adornment.suffix(), "bf");
+        assert_eq!(bindings[0].adornment.suffix(), "bf");
 
         let (rewritten, seeds) = MagicSetRewriter::rewrite_program(&program, &bindings);
 
@@ -874,7 +848,7 @@ mod tests {
         );
         let recursive = find_recursive_relations(&program);
         let bindings = MagicSetRewriter::detect_query_bindings(&program, &recursive);
-        assert_eq!(bindings["friends"].adornment.suffix(), "bb");
+        assert_eq!(bindings[0].adornment.suffix(), "bb");
 
         let (_, seeds) = MagicSetRewriter::rewrite_program(&program, &bindings);
         let seed = &seeds["magic_friends_bb"][0];
@@ -910,5 +884,52 @@ mod tests {
         assert!(!recursive.contains("ev") && !recursive.contains("od"));
         let bindings = MagicSetRewriter::detect_query_bindings(&program, &recursive);
         assert!(bindings.is_empty());
+    }
+
+    #[test]
+    fn test_unbound_use_keeps_original_rules() {
+        let program = parse(
+            "reach(X, Y) <- edge(X, Y)\n\
+             reach(X, Z) <- reach(X, Y), edge(Y, Z)\n\
+             __query__(_c0, Y, Z) <- reach(_c0, Y), reach(Y, Z), _c0 = 1",
+        );
+        let recursive = find_recursive_relations(&program);
+        let bindings = MagicSetRewriter::detect_query_bindings(&program, &recursive);
+        assert_eq!(bindings.len(), 1);
+        let (rewritten, _) = MagicSetRewriter::rewrite_program(&program, &bindings);
+
+        let heads: Vec<&str> = rewritten
+            .rules
+            .iter()
+            .map(|r| r.head.relation.as_str())
+            .collect();
+        assert_eq!(heads.iter().filter(|h| **h == "reach").count(), 2);
+        assert_eq!(heads.iter().filter(|h| **h == "reach_bf").count(), 2);
+
+        let query = rewritten.rules.last().unwrap();
+        let body: Vec<&str> = query
+            .body
+            .iter()
+            .filter_map(|p| p.atom().map(|a| a.relation.as_str()))
+            .collect();
+        assert_eq!(body, vec!["reach_bf", "reach"]);
+    }
+
+    #[test]
+    fn test_two_constants_seed_one_adornment() {
+        let program = parse(
+            "reach(X, Y) <- edge(X, Y)\n\
+             reach(X, Z) <- reach(X, Y), edge(Y, Z)\n\
+             __query__(_c0, Y, _c2, Z) <- reach(_c0, Y), reach(_c2, Z), _c0 = 1, _c2 = 5",
+        );
+        let recursive = find_recursive_relations(&program);
+        let bindings = MagicSetRewriter::detect_query_bindings(&program, &recursive);
+        assert_eq!(bindings.len(), 2);
+        let (rewritten, seeds) = MagicSetRewriter::rewrite_program(&program, &bindings);
+
+        assert!(rewritten.rules.iter().all(|r| r.head.relation != "reach"));
+        let mut seed: Vec<_> = seeds["magic_reach_bf"].iter().map(|t| t.get(0)).collect();
+        seed.sort();
+        assert_eq!(seed, vec![Some(&Value::Int64(1)), Some(&Value::Int64(5))]);
     }
 }
