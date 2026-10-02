@@ -5,11 +5,11 @@ Server status: healthy
 Authenticated as: admin
 Current knowledge graph: default
 
-> .kg create _n41t02
-Knowledge graph '_n41t02' created.
-Switched to knowledge graph: _n41t02
-> .kg use _n41t02
-Switched to knowledge graph: _n41t02
+> .kg create n41t02
+Knowledge graph 'n41t02' created.
+Switched to knowledge graph: n41t02
+> .kg use n41t02
+Switched to knowledge graph: n41t02
 > +edge[(1, 2), (2, 3), (3, 4), (4, 5)]
 Inserted 4 fact(s) into 'edge'.
 > +tc(X, Y) <- edge(X, Y)
@@ -34,5 +34,5 @@ Rule 'tc' registered.
 10 rows
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop _n41t02
-Knowledge graph '_n41t02' dropped.
+> .kg drop n41t02
+Knowledge graph 'n41t02' dropped.

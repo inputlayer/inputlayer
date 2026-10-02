@@ -50,6 +50,10 @@ pub enum StorageError {
     #[error("Invalid relation name: {0}")]
     InvalidRelationName(String),
 
+    /// KG or relation name outside the canonical grammar (see [`crate::naming`])
+    #[error("{0}")]
+    InvalidName(String),
+
     /// Metadata error
     #[error("Metadata error: {0}")]
     MetadataError(String),

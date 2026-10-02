@@ -162,10 +162,7 @@ pub fn validate_relation_name(name: &str) -> Result<(), String> {
              (Uppercase names are for type declarations.)"
         ));
     }
-    if !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
-        return Err(format!("Invalid relation name: '{name}'"));
-    }
-    Ok(())
+    crate::naming::validate_relation_name(name)
 }
 
 // Term Parsing

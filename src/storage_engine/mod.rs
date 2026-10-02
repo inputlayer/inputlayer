@@ -40,6 +40,7 @@ use crate::config::Config;
 use crate::derived_relations::CompiledRule;
 use crate::incremental::IncrementalEngine;
 use crate::index_manager::IndexManager;
+use crate::naming;
 use crate::rule_catalog::RuleCatalog;
 use crate::schema::{RelationSchema, SchemaCatalog, ValidationEngine};
 use crate::statement::{RuleDef, SerializableBodyPred};
@@ -74,6 +75,42 @@ pub struct KgDropCleanup {
     data_dir: PathBuf,
     /// Reference to the persist backend for shard cleanup
     persist: Arc<FilePersist>,
+}
+
+fn validate_names(kg: &str, relation: &str) -> StorageResult<()> {
+    naming::validate_kg_name(kg)
+        .and_then(|()| naming::validate_relation_name(relation))
+        .map_err(StorageError::InvalidName)
+}
+
+/// Warn about names loaded from disk that the grammar now rejects. Writes to
+/// them fail; drop them with `.kg drop <kg>` or `.kg use <kg>` + `.rel drop <rel>`.
+fn report_invalid_names(
+    kg_names: &HashSet<String>,
+    kg_shards: &std::collections::HashMap<String, Vec<(String, String)>>,
+) {
+    let mut kgs: Vec<&String> = kg_names
+        .iter()
+        .filter(|kg| naming::validate_kg_name(kg).is_err())
+        .collect();
+    kgs.sort();
+    for kg in kgs {
+        tracing::warn!(kg = %kg, "invalid_kg_name: writes are rejected; drop with `.kg drop {kg}`");
+    }
+    let mut relations: Vec<(&String, &String)> = kg_shards
+        .iter()
+        .filter(|(kg, _)| naming::validate_kg_name(kg).is_ok())
+        .flat_map(|(kg, shards)| shards.iter().map(move |(_, rel)| (kg, rel)))
+        .filter(|(_, rel)| naming::validate_relation_name(rel).is_err())
+        .collect();
+    relations.sort();
+    for (kg, rel) in relations {
+        tracing::warn!(
+            kg = %kg,
+            relation = %rel,
+            "invalid_relation_name: writes are rejected; drop with `.kg use {kg}` then `.rel drop {rel}`"
+        );
+    }
 }
 
 /// Storage Engine - manages multiple knowledge graphs
@@ -172,30 +209,12 @@ impl StorageEngine {
     }
 
     /// Maximum allowed byte length for a knowledge graph name.
-    pub const MAX_KG_NAME_BYTES: usize = 128;
+    pub const MAX_KG_NAME_BYTES: usize = naming::MAX_KG_NAME_BYTES;
 
     /// Create a new knowledge graph
     pub fn create_knowledge_graph(&self, name: &str) -> StorageResult<()> {
         let start = Instant::now();
-        // Validate knowledge graph name
-        if name.is_empty()
-            || name.contains('/')
-            || name.contains('\\')
-            || name.contains('\0')
-            || name.contains("..")
-            || name == "."
-        {
-            return Err(StorageError::InvalidRelationName(name.to_string()));
-        }
-
-        // Validate name length to prevent filesystem PATH_MAX failures
-        if name.len() > Self::MAX_KG_NAME_BYTES {
-            return Err(StorageError::InvalidRelationName(format!(
-                "Knowledge graph name too long: {} bytes (max {})",
-                name.len(),
-                Self::MAX_KG_NAME_BYTES
-            )));
-        }
+        naming::validate_kg_name(name).map_err(StorageError::InvalidName)?;
 
         // Check max knowledge graph limit
         let max_kgs = self.config.storage.max_knowledge_graphs;
@@ -294,10 +313,14 @@ impl StorageEngine {
     /// Deletes persist shards and data directory, then removes tombstone.
     pub fn finish_drop_knowledge_graph(&self, cleanup: KgDropCleanup) {
         let start = Instant::now();
-        let prefix = format!("{}:", cleanup.name);
         if let Ok(shards) = cleanup.persist.list_shards() {
-            for shard in shards.iter().filter(|s| s.starts_with(&prefix)) {
-                let _ = cleanup.persist.delete_shard(shard);
+            let mut kgs = self.list_knowledge_graphs();
+            kgs.extend(self.dropping_kgs.read().iter().cloned());
+            for shard in &shards {
+                let owner = naming::shard_owner(shard, kgs.iter().map(String::as_str));
+                if owner.is_some_and(|(kg, _)| kg == cleanup.name) {
+                    let _ = cleanup.persist.delete_shard(shard);
+                }
             }
         }
         if cleanup.data_dir.exists() {
@@ -438,6 +461,7 @@ impl StorageEngine {
         relation: &str,
         tuples: Vec<Tuple>,
     ) -> StorageResult<(usize, usize)> {
+        validate_names(kg, relation)?;
         if tuples.is_empty() {
             return Ok((0, 0));
         }
@@ -582,6 +606,7 @@ impl StorageEngine {
         relation: &str,
         tuples: Vec<Tuple>,
     ) -> StorageResult<usize> {
+        validate_names(kg, relation)?;
         if tuples.is_empty() {
             return Ok(0);
         }
@@ -1165,6 +1190,7 @@ impl StorageEngine {
 
     /// Register a schema for a relation in a specific knowledge graph
     pub fn register_schema_in(&self, kg: &str, schema: RelationSchema) -> StorageResult<()> {
+        validate_names(kg, &schema.name)?;
         let db = self
             .knowledge_graphs
             .get(kg)
@@ -1629,22 +1655,13 @@ impl StorageEngine {
     /// Load all knowledge graphs from persist layer
     ///
     /// Recovery process:
-    /// 1. Discover knowledge graphs from persist shards
-    /// 2. For each knowledge graph, read all shards
-    /// 3. Consolidate updates to get current state
+    /// 1. Discover knowledge graphs from metadata
+    /// 2. Assign each shard to the longest KG name prefixing it
+    /// 3. Consolidate each shard's updates to get current state
     /// 4. Populate in-memory `IQLEngine`
     fn load_all_knowledge_graphs(&mut self) -> StorageResult<()> {
-        // Discover knowledge graphs from persist shards
         let shard_names = self.persist.list_shards()?;
-        let mut kg_names: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-        for shard in &shard_names {
-            if let Some(kg_name) = shard.split(':').next() {
-                kg_names.insert(kg_name.to_string());
-            }
-        }
-
-        // Also check metadata file for knowledge graphs without data yet
+        let mut kg_names: HashSet<String> = HashSet::new();
         let metadata_path = self
             .config
             .storage
@@ -1652,11 +1669,34 @@ impl StorageEngine {
             .join("metadata/knowledge_graphs.json");
         if metadata_path.exists() {
             if let Ok(metadata) = KnowledgeGraphsMetadata::load(&metadata_path) {
-                for kg_info in metadata.knowledge_graphs {
-                    kg_names.insert(kg_info.name);
-                }
+                kg_names.extend(metadata.knowledge_graphs.into_iter().map(|kg| kg.name));
             }
         }
+
+        // Shards no listed KG claims (metadata missing or stale) keep their data
+        // under the name before the first ':'.
+        let unclaimed: Vec<String> = shard_names
+            .iter()
+            .filter(|shard| {
+                naming::shard_owner(shard, kg_names.iter().map(String::as_str)).is_none()
+            })
+            .filter_map(|shard| shard.split_once(':').map(|(kg, _)| kg.to_string()))
+            .collect();
+        kg_names.extend(unclaimed);
+
+        let mut kg_shards: std::collections::HashMap<String, Vec<(String, String)>> =
+            std::collections::HashMap::new();
+        for shard in &shard_names {
+            if let Some((kg, relation)) =
+                naming::shard_owner(shard, kg_names.iter().map(String::as_str))
+            {
+                kg_shards
+                    .entry(kg.to_string())
+                    .or_default()
+                    .push((shard.clone(), relation.to_string()));
+            }
+        }
+        report_invalid_names(&kg_names, &kg_shards);
 
         // Load each knowledge graph
         let total_kgs = kg_names.len();
@@ -1666,7 +1706,13 @@ impl StorageEngine {
             let kg_dir = self.config.storage.data_dir.join(&kg_name);
             fs::create_dir_all(&kg_dir)?;
 
-            let kg = self.load_knowledge_graph_from_persist(&kg_name, kg_dir, &mut corrections)?;
+            let shards = kg_shards.remove(&kg_name).unwrap_or_default();
+            let kg = self.load_knowledge_graph_from_persist(
+                &kg_name,
+                kg_dir,
+                &shards,
+                &mut corrections,
+            )?;
             self.knowledge_graphs
                 .insert(kg_name, Arc::new(RwLock::new(kg)));
 
@@ -1694,21 +1740,6 @@ impl StorageEngine {
             }
         }
 
-        // Clean up orphaned shards from incomplete drops (RC-6)
-        let loaded_kgs: HashSet<String> = self
-            .knowledge_graphs
-            .iter()
-            .map(|e| e.key().clone())
-            .collect();
-        let all_shards = self.persist.list_shards()?;
-        for shard in &all_shards {
-            if let Some(kg_name) = shard.split(':').next() {
-                if !loaded_kgs.contains(kg_name) {
-                    let _ = self.persist.delete_shard(shard);
-                }
-            }
-        }
-
         Ok(())
     }
 
@@ -1717,45 +1748,37 @@ impl StorageEngine {
         &self,
         name: &str,
         data_dir: PathBuf,
+        shards: &[(String, String)],
         corrections: &mut Vec<(String, Vec<Update>)>,
     ) -> StorageResult<KnowledgeGraph> {
-        let prefix = format!("{name}:");
         let mut store = RelationStore::new();
         let mut metadata = KnowledgeGraphMetadata::new(name.to_string());
 
-        // Find all shards for this knowledge graph
-        for shard_name in self.persist.list_shards()? {
-            if shard_name.starts_with(&prefix) {
-                let relation = match shard_name.strip_prefix(&prefix) {
-                    Some(r) => r,
-                    None => continue, // Skip malformed shard names
-                };
+        for (shard_name, relation) in shards {
+            // Get shard info to determine since frontier
+            let info = self.persist.shard_info(shard_name)?;
 
-                // Get shard info to determine since frontier
-                let info = self.persist.shard_info(&shard_name)?;
+            // Read and consolidate updates
+            let mut updates = self.persist.read(shard_name, info.since)?;
+            consolidate_to_current(&mut updates);
 
-                // Read and consolidate updates
-                let mut updates = self.persist.read(&shard_name, info.since)?;
-                consolidate_to_current(&mut updates);
+            // Extract current tuples (positive multiplicities only)
+            let tuples = to_tuples(&updates);
+            let fixes = set_semantics_corrections(&updates, 0);
+            if !fixes.is_empty() {
+                corrections.push((shard_name.clone(), fixes));
+            }
 
-                // Extract current tuples (positive multiplicities only)
-                let tuples = to_tuples(&updates);
-                let fixes = set_semantics_corrections(&updates, 0);
-                if !fixes.is_empty() {
-                    corrections.push((shard_name.clone(), fixes));
-                }
+            if !tuples.is_empty() {
+                // Infer schema from first tuple
+                let arity = tuples.first().map_or(2, super::value::Tuple::arity);
+                let schema: Vec<String> = (0..arity).map(|i| format!("col{i}")).collect();
+                let tuple_count = tuples.len();
 
-                if !tuples.is_empty() {
-                    // Infer schema from first tuple
-                    let arity = tuples.first().map_or(2, super::value::Tuple::arity);
-                    let schema: Vec<String> = (0..arity).map(|i| format!("col{i}")).collect();
-                    let tuple_count = tuples.len();
+                // Update metadata with relation info
+                metadata.add_relation(relation.clone(), schema, tuple_count);
 
-                    // Update metadata with relation info
-                    metadata.add_relation(relation.to_string(), schema, tuple_count);
-
-                    store.set(relation, tuples);
-                }
+                store.set(relation, tuples);
             }
         }
 
