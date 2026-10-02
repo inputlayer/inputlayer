@@ -289,6 +289,7 @@ impl IRBuilder {
     /// column names for constants. This prevents naming collisions when the same
     /// relation appears multiple times with different constants (e.g., self-joins).
     fn build_scan(&self, atom: &Atom, atom_idx: usize) -> Result<IRNode, String> {
+        check_body_atom_args(atom)?;
         // Schema comes from the atom's arguments (variable bindings)
         // Each occurrence of the same relation can have different variable names
         let schema: Vec<String> = atom
@@ -301,16 +302,9 @@ impl IRBuilder {
                 Term::Placeholder => format!("_ph_{}_{}", atom.relation, i),
                 // Aggregates in body atoms refer to the variable they aggregate
                 Term::Aggregate(_, v) => v.clone(),
-                // Arithmetic expressions - use the variables they reference
-                Term::Arithmetic(expr) => {
-                    // Use the first variable referenced, or generate a name
-                    let vars = expr.variables();
-                    vars.into_iter()
-                        .next()
-                        .unwrap_or_else(|| format!("expr{i}"))
+                Term::Arithmetic(_) | Term::FunctionCall(_, _) => {
+                    unreachable!("rejected by check_body_atom_args")
                 }
-                // Function calls - generate a name
-                Term::FunctionCall(_, _) => format!("func{i}"),
                 // Vector literals - generate a name
                 Term::VectorLiteral(_) => format!("vec{i}"),
                 // Float constants - generate a name
@@ -1736,6 +1730,23 @@ fn swap_comparison(op: &ComparisonOp) -> ComparisonOp {
     }
 }
 
+/// Reject arithmetic and function-call arguments in a body atom; bind them
+/// to a variable with a comparison instead.
+pub fn check_body_atom_args(atom: &Atom) -> Result<(), String> {
+    for (i, term) in atom.args.iter().enumerate() {
+        if matches!(term, Term::Arithmetic(_) | Term::FunctionCall(_, _)) {
+            return Err(format!(
+                "Expression argument {} in body atom '{}' is not supported. \
+                 Bind it to a variable instead, e.g. {}(.., V), V = <expr>",
+                i + 1,
+                atom.relation,
+                atom.relation
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Helper function to convert aggregate function to string
 fn func_to_str(func: &crate::ast::AggregateFunc) -> &'static str {
     use crate::ast::AggregateFunc;
@@ -2765,6 +2776,23 @@ mod tests {
             IRBuilder::try_eval_const_arith(&overflow),
             Some(Value::Null)
         );
+    }
+
+    #[test]
+    fn test_body_atom_expression_args_rejected() {
+        use crate::ast::{ArithExpr, ArithOp};
+        let atom = Atom::new(
+            "e".to_string(),
+            vec![
+                Term::Variable("X".to_string()),
+                Term::Arithmetic(ArithExpr::Binary {
+                    op: ArithOp::Add,
+                    left: Box::new(ArithExpr::Variable("Y".to_string())),
+                    right: Box::new(ArithExpr::Constant(1)),
+                }),
+            ],
+        );
+        assert!(check_body_atom_args(&atom).is_err());
     }
 
     #[test]

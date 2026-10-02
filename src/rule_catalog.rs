@@ -50,6 +50,12 @@ use std::path::PathBuf;
 /// * `Ok(())` if the rule is valid
 /// * `Err(String)` with a descriptive error message if validation fails
 pub fn validate_rule(rule: &Rule, name: &str) -> Result<(), String> {
+    for pred in &rule.body {
+        if let BodyPredicate::Positive(atom) | BodyPredicate::Negated(atom) = pred {
+            crate::ir_builder::check_body_atom_args(atom)?;
+        }
+    }
+
     // Check 1: Direct self-negation
     for pred in &rule.body {
         if let BodyPredicate::Negated(atom) = pred {

@@ -1,4 +1,5 @@
-//! Typed arithmetic in comparisons and assignments.
+//! Typed arithmetic in comparisons and assignments, and expression
+//! arguments in body atoms.
 
 use inputlayer::protocol::{Handler, WireValue};
 use inputlayer::Config;
@@ -116,4 +117,22 @@ async fn int_overflow_in_assignment_gives_null() {
         run(&program, "?v(X), Y = X + 1").await,
         vec![vec![int(i64::MAX), WireValue::Null]]
     );
+}
+
+#[tokio::test]
+async fn expression_argument_in_body_atom_is_rejected() {
+    let program = ["+e[(1, 2)]", "+v[(2,)]"];
+    for query in ["?v(Y), e(X, Y + 1)", "?v(Y), e(1, X), !e(X, Y + 1)"] {
+        let err = exec(&program, query).await.expect_err(query);
+        assert!(err.contains("not supported"), "{query}: {err}");
+    }
+    exec(&program, "?v(Y), e(X, abs_int64(Y))")
+        .await
+        .expect_err("function call argument");
+    let (h, _t) = handler();
+    let err = h
+        .query_program(None, "+r(X) <- v(Y), e(X, Y + 1)".to_string())
+        .await
+        .expect_err("persistent rule");
+    assert!(err.contains("not supported"), "{err}");
 }
