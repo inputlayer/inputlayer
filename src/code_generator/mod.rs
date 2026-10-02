@@ -39,6 +39,7 @@ use timely::order::Product;
 use tracing::info;
 
 use crate::temporal_ops;
+use crate::value::arith::{self, FLOAT_EQ_TOLERANCE};
 use crate::value::{aggregate, Relation, RelationMap, Tuple, Value};
 use crate::vector_ops;
 
@@ -151,13 +152,6 @@ fn format_panic_payload(payload: Box<dyn std::any::Any + Send>) -> String {
         "Unknown error in dataflow computation".to_string()
     }
 }
-
-/// Tolerance for float equality comparisons in filters and joins.
-/// `FLOAT_EQ_TOLERANCE` (~2.2e-16) is far too tight for practical use - values that
-/// differ by normal floating-point rounding (e.g. `0.1 + 0.2`) would compare
-/// as unequal. 1e-10 is tight enough for 64-bit precision while tolerating
-/// accumulated rounding in typical IQL arithmetic.
-const FLOAT_EQ_TOLERANCE: f64 = 1e-10;
 
 /// Iteration counter type for recursive scopes
 pub type Iter = u32;
@@ -1690,67 +1684,23 @@ impl CodeGenerator {
                 let f2 = Self::predicate_to_tuple_fn(&p2);
                 Box::new(move |tuple| f1(tuple) || f2(tuple))
             }
-            // Runtime arithmetic comparison
+            // Runtime arithmetic comparisons
             Predicate::ColumnCompareArith(col, cmp_op, arith_expr, var_map) => {
                 Box::new(move |tuple: &Tuple| {
-                    // Evaluate the arithmetic expression with runtime values
-                    let arith_val = Self::eval_arith_runtime(&arith_expr, tuple, &var_map);
-                    let Some(arith_val) = arith_val else {
-                        return false; // Could not evaluate
-                    };
-
-                    // Get the column value to compare against
-                    let Some(col_val) = tuple.get(col) else {
-                        return false;
-                    };
-
-                    // Try integer comparison
-                    if let Some(col_i) = col_val.as_i64() {
-                        return match cmp_op {
-                            crate::ast::ComparisonOp::Equal => col_i == arith_val,
-                            crate::ast::ComparisonOp::NotEqual => col_i != arith_val,
-                            crate::ast::ComparisonOp::LessThan => col_i < arith_val,
-                            crate::ast::ComparisonOp::LessOrEqual => col_i <= arith_val,
-                            crate::ast::ComparisonOp::GreaterThan => col_i > arith_val,
-                            crate::ast::ComparisonOp::GreaterOrEqual => col_i >= arith_val,
-                        };
+                    match (
+                        tuple.get(col),
+                        Self::eval_arith_runtime(&arith_expr, tuple, &var_map),
+                    ) {
+                        (Some(col_val), Some(v)) => arith::compare(col_val, &cmp_op, &v),
+                        _ => false,
                     }
-
-                    // Fall back to float comparison
-                    if let Some(col_f) = col_val.as_f64() {
-                        let arith_f = arith_val as f64;
-                        return match cmp_op {
-                            crate::ast::ComparisonOp::Equal => {
-                                (col_f - arith_f).abs() < FLOAT_EQ_TOLERANCE
-                            }
-                            crate::ast::ComparisonOp::NotEqual => {
-                                (col_f - arith_f).abs() >= FLOAT_EQ_TOLERANCE
-                            }
-                            crate::ast::ComparisonOp::LessThan => col_f < arith_f,
-                            crate::ast::ComparisonOp::LessOrEqual => col_f <= arith_f,
-                            crate::ast::ComparisonOp::GreaterThan => col_f > arith_f,
-                            crate::ast::ComparisonOp::GreaterOrEqual => col_f >= arith_f,
-                        };
-                    }
-
-                    false
                 })
             }
-            // Runtime arithmetic compared to constant
             Predicate::ArithCompareConst(arith_expr, cmp_op, const_val, var_map) => {
+                let const_val = Value::Int64(const_val);
                 Box::new(move |tuple: &Tuple| {
-                    let Some(arith_val) = Self::eval_arith_runtime(&arith_expr, tuple, &var_map)
-                    else {
-                        return false;
-                    };
-                    match cmp_op {
-                        crate::ast::ComparisonOp::Equal => arith_val == const_val,
-                        crate::ast::ComparisonOp::NotEqual => arith_val != const_val,
-                        crate::ast::ComparisonOp::LessThan => arith_val < const_val,
-                        crate::ast::ComparisonOp::LessOrEqual => arith_val <= const_val,
-                        crate::ast::ComparisonOp::GreaterThan => arith_val > const_val,
-                        crate::ast::ComparisonOp::GreaterOrEqual => arith_val >= const_val,
-                    }
+                    Self::eval_arith_runtime(&arith_expr, tuple, &var_map)
+                        .is_some_and(|v| arith::compare(&v, &cmp_op, &const_val))
                 })
             }
             Predicate::True => Box::new(|_| true),
@@ -1792,28 +1742,8 @@ impl CodeGenerator {
         expr: &crate::ast::ArithExpr,
         tuple: &Tuple,
         var_map: &std::collections::HashMap<String, usize>,
-    ) -> Option<i64> {
-        use crate::ast::{ArithExpr, ArithOp};
-        match expr {
-            ArithExpr::Constant(val) => Some(*val),
-            ArithExpr::FloatConstant(bits) => Some(f64::from_bits(*bits) as i64),
-            ArithExpr::Variable(name) => {
-                let col_idx = var_map.get(name)?;
-                tuple.get(*col_idx)?.as_i64()
-            }
-            ArithExpr::Binary { op, left, right } => {
-                let left_val = Self::eval_arith_runtime(left, tuple, var_map)?;
-                let right_val = Self::eval_arith_runtime(right, tuple, var_map)?;
-                match op {
-                    ArithOp::Add => Some(left_val + right_val),
-                    ArithOp::Sub => Some(left_val - right_val),
-                    ArithOp::Mul => Some(left_val * right_val),
-                    ArithOp::Div if right_val != 0 => Some(left_val / right_val),
-                    ArithOp::Mod if right_val != 0 => Some(left_val % right_val),
-                    _ => None, // Division by zero
-                }
-            }
-        }
+    ) -> Option<Value> {
+        arith::eval_expr(expr, &|name| tuple.get(*var_map.get(name)?).cloned())
     }
 
     /// Generate join node (production: multi-column keys)
@@ -3306,43 +3236,7 @@ impl CodeGenerator {
 
     /// Evaluate arithmetic operation
     fn evaluate_arithmetic(op: ArithOp, left: &Value, right: &Value) -> Value {
-        let l = left.to_f64();
-        let r = right.to_f64();
-
-        let result = match op {
-            ArithOp::Add => l + r,
-            ArithOp::Sub => l - r,
-            ArithOp::Mul => l * r,
-            ArithOp::Div => {
-                if r == 0.0 {
-                    return Value::Null;
-                }
-                l / r
-            }
-            ArithOp::Mod => {
-                if r == 0.0 {
-                    return Value::Null;
-                }
-                l % r
-            }
-        };
-
-        // Return Int64 if both inputs were integers and result is finite
-        if matches!(left, Value::Int32(_) | Value::Int64(_))
-            && matches!(right, Value::Int32(_) | Value::Int64(_))
-            && matches!(
-                op,
-                ArithOp::Add | ArithOp::Sub | ArithOp::Mul | ArithOp::Mod
-            )
-        {
-            // Check for NaN/Infinity before casting to avoid undefined behavior
-            if !result.is_finite() {
-                return Value::Null;
-            }
-            Value::Int64(result as i64)
-        } else {
-            Value::Float64(result)
-        }
+        arith::eval(op, left, right)
     }
 
     // Recursive Query Execution

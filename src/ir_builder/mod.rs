@@ -24,6 +24,7 @@ use crate::ir::{BuiltinFunction, IRExpression, IRNode, Predicate};
 use std::collections::HashSet;
 
 use crate::catalog::Catalog;
+use crate::value::Value;
 
 /// IR Builder converts AST to IR
 pub struct IRBuilder {
@@ -1058,171 +1059,97 @@ impl IRBuilder {
                     Predicate::False
                 })
             }
-            // Variable vs Arithmetic: try to evaluate if arithmetic is constant, otherwise generate runtime predicate
+            // Variable vs Arithmetic: fold constant arithmetic, otherwise compare at runtime
             (Term::Variable(var), Term::Arithmetic(arith)) => {
-                if let Some(val) = Self::try_eval_const_arith(arith) {
-                    let col = get_col(var)?;
-                    match op {
-                        ComparisonOp::Equal => Ok(Predicate::ColumnEqConst(col, val)),
-                        ComparisonOp::NotEqual => Ok(Predicate::ColumnNeConst(col, val)),
-                        ComparisonOp::LessThan => Ok(Predicate::ColumnLtConst(col, val)),
-                        ComparisonOp::LessOrEqual => Ok(Predicate::ColumnLeConst(col, val)),
-                        ComparisonOp::GreaterThan => Ok(Predicate::ColumnGtConst(col, val)),
-                        ComparisonOp::GreaterOrEqual => Ok(Predicate::ColumnGeConst(col, val)),
-                    }
-                } else {
-                    // Build var_to_col map for runtime evaluation
-                    let var_names = arith.variables();
-                    let mut var_map = std::collections::HashMap::new();
-                    for var_name in var_names {
-                        let col_idx = get_col(&var_name)?;
-                        var_map.insert(var_name, col_idx);
-                    }
-                    let col = get_col(var)?;
-                    Ok(Predicate::ColumnCompareArith(
-                        col,
-                        op.clone(),
-                        arith.clone(),
-                        var_map,
-                    ))
-                }
+                Self::column_vs_arith(get_col(var)?, op.clone(), arith, &get_col)
             }
-            // Arithmetic vs Variable: try to evaluate if arithmetic is constant, otherwise generate runtime predicate
             (Term::Arithmetic(arith), Term::Variable(var)) => {
-                if let Some(val) = Self::try_eval_const_arith(arith) {
-                    let col = get_col(var)?;
-                    // Swap comparison: val < X becomes X > val
-                    match op {
-                        ComparisonOp::Equal => Ok(Predicate::ColumnEqConst(col, val)),
-                        ComparisonOp::NotEqual => Ok(Predicate::ColumnNeConst(col, val)),
-                        ComparisonOp::LessThan => Ok(Predicate::ColumnGtConst(col, val)),
-                        ComparisonOp::LessOrEqual => Ok(Predicate::ColumnGeConst(col, val)),
-                        ComparisonOp::GreaterThan => Ok(Predicate::ColumnLtConst(col, val)),
-                        ComparisonOp::GreaterOrEqual => Ok(Predicate::ColumnLeConst(col, val)),
-                    }
-                } else {
-                    // Build var_to_col map for runtime evaluation
-                    // For arith < var, we swap to var > arith
-                    let var_names = arith.variables();
-                    let mut var_map = std::collections::HashMap::new();
-                    for var_name in var_names {
-                        let col_idx = get_col(&var_name)?;
-                        var_map.insert(var_name, col_idx);
-                    }
-                    let col = get_col(var)?;
-                    // Swap comparison: arith < X becomes X > arith
-                    let swapped_op = match op {
-                        ComparisonOp::Equal => ComparisonOp::Equal,
-                        ComparisonOp::NotEqual => ComparisonOp::NotEqual,
-                        ComparisonOp::LessThan => ComparisonOp::GreaterThan,
-                        ComparisonOp::LessOrEqual => ComparisonOp::GreaterOrEqual,
-                        ComparisonOp::GreaterThan => ComparisonOp::LessThan,
-                        ComparisonOp::GreaterOrEqual => ComparisonOp::LessOrEqual,
-                    };
-                    Ok(Predicate::ColumnCompareArith(
-                        col,
-                        swapped_op,
-                        arith.clone(),
-                        var_map,
-                    ))
-                }
+                Self::column_vs_arith(get_col(var)?, swap_comparison(op), arith, &get_col)
             }
-            // Arithmetic vs Constant: runtime evaluation of arithmetic
+            // Arithmetic vs Constant
             (Term::Arithmetic(arith), Term::Constant(val)) => {
-                if let Some(arith_val) = Self::try_eval_const_arith(arith) {
-                    // Both sides are constant, evaluate at compile time
-                    let result = match op {
-                        ComparisonOp::Equal => arith_val == *val,
-                        ComparisonOp::NotEqual => arith_val != *val,
-                        ComparisonOp::LessThan => arith_val < *val,
-                        ComparisonOp::LessOrEqual => arith_val <= *val,
-                        ComparisonOp::GreaterThan => arith_val > *val,
-                        ComparisonOp::GreaterOrEqual => arith_val >= *val,
-                    };
-                    Ok(if result {
-                        Predicate::True
-                    } else {
-                        Predicate::False
-                    })
-                } else {
-                    let var_names = arith.variables();
-                    let mut var_map = std::collections::HashMap::new();
-                    for var_name in var_names {
-                        let col_idx = get_col(&var_name)?;
-                        var_map.insert(var_name, col_idx);
-                    }
-                    Ok(Predicate::ArithCompareConst(
-                        arith.clone(),
-                        op.clone(),
-                        *val,
-                        var_map,
-                    ))
-                }
+                Self::arith_vs_const(arith, op.clone(), *val, &get_col)
             }
-            // Constant vs Arithmetic: swap and evaluate
             (Term::Constant(val), Term::Arithmetic(arith)) => {
-                if let Some(arith_val) = Self::try_eval_const_arith(arith) {
-                    let result = match op {
-                        ComparisonOp::Equal => *val == arith_val,
-                        ComparisonOp::NotEqual => *val != arith_val,
-                        ComparisonOp::LessThan => *val < arith_val,
-                        ComparisonOp::LessOrEqual => *val <= arith_val,
-                        ComparisonOp::GreaterThan => *val > arith_val,
-                        ComparisonOp::GreaterOrEqual => *val >= arith_val,
-                    };
-                    Ok(if result {
-                        Predicate::True
-                    } else {
-                        Predicate::False
-                    })
-                } else {
-                    let var_names = arith.variables();
-                    let mut var_map = std::collections::HashMap::new();
-                    for var_name in var_names {
-                        let col_idx = get_col(&var_name)?;
-                        var_map.insert(var_name, col_idx);
-                    }
-                    // Swap: val < arith becomes arith > val
-                    let swapped_op = match op {
-                        ComparisonOp::Equal => ComparisonOp::Equal,
-                        ComparisonOp::NotEqual => ComparisonOp::NotEqual,
-                        ComparisonOp::LessThan => ComparisonOp::GreaterThan,
-                        ComparisonOp::LessOrEqual => ComparisonOp::GreaterOrEqual,
-                        ComparisonOp::GreaterThan => ComparisonOp::LessThan,
-                        ComparisonOp::GreaterOrEqual => ComparisonOp::LessOrEqual,
-                    };
-                    Ok(Predicate::ArithCompareConst(
-                        arith.clone(),
-                        swapped_op,
-                        *val,
-                        var_map,
-                    ))
-                }
+                Self::arith_vs_const(arith, swap_comparison(op), *val, &get_col)
             }
             _ => Err(format!("Unsupported comparison: {left:?} {op:?} {right:?}")),
         }
     }
 
-    /// Try to evaluate a constant arithmetic expression at compile time
-    fn try_eval_const_arith(arith: &crate::ast::ArithExpr) -> Option<i64> {
-        use crate::ast::{ArithExpr, ArithOp};
-        match arith {
-            ArithExpr::Constant(val) => Some(*val),
-            ArithExpr::FloatConstant(bits) => Some(f64::from_bits(*bits) as i64),
-            ArithExpr::Variable(_) => None, // Contains a variable, can't evaluate
-            ArithExpr::Binary { op, left, right } => {
-                let left_val = Self::try_eval_const_arith(left)?;
-                let right_val = Self::try_eval_const_arith(right)?;
-                match op {
-                    ArithOp::Add => Some(left_val + right_val),
-                    ArithOp::Sub => Some(left_val - right_val),
-                    ArithOp::Mul => Some(left_val * right_val),
-                    ArithOp::Div if right_val != 0 => Some(left_val / right_val),
-                    ArithOp::Mod if right_val != 0 => Some(left_val % right_val),
-                    _ => None, // Division by zero
-                }
-            }
+    /// `col op arith`: a constant predicate when `arith` folds, otherwise a
+    /// runtime comparison.
+    fn column_vs_arith(
+        col: usize,
+        op: ComparisonOp,
+        arith: &crate::ast::ArithExpr,
+        get_col: &dyn Fn(&str) -> Result<usize, String>,
+    ) -> Result<Predicate, String> {
+        Ok(match Self::try_eval_const_arith(arith) {
+            Some(Value::Int64(v)) => match op {
+                ComparisonOp::Equal => Predicate::ColumnEqConst(col, v),
+                ComparisonOp::NotEqual => Predicate::ColumnNeConst(col, v),
+                ComparisonOp::LessThan => Predicate::ColumnLtConst(col, v),
+                ComparisonOp::LessOrEqual => Predicate::ColumnLeConst(col, v),
+                ComparisonOp::GreaterThan => Predicate::ColumnGtConst(col, v),
+                ComparisonOp::GreaterOrEqual => Predicate::ColumnGeConst(col, v),
+            },
+            Some(Value::Float64(f)) => match op {
+                ComparisonOp::Equal => Predicate::ColumnEqFloat(col, f),
+                ComparisonOp::NotEqual => Predicate::ColumnNeFloat(col, f),
+                ComparisonOp::LessThan => Predicate::ColumnLtFloat(col, f),
+                ComparisonOp::LessOrEqual => Predicate::ColumnLeFloat(col, f),
+                ComparisonOp::GreaterThan => Predicate::ColumnGtFloat(col, f),
+                ComparisonOp::GreaterOrEqual => Predicate::ColumnGeFloat(col, f),
+            },
+            Some(_) => Predicate::False,
+            None => Predicate::ColumnCompareArith(
+                col,
+                op,
+                arith.clone(),
+                Self::arith_var_map(arith, get_col)?,
+            ),
+        })
+    }
+
+    /// `arith op val`: folded to `True`/`False` when `arith` is constant.
+    fn arith_vs_const(
+        arith: &crate::ast::ArithExpr,
+        op: ComparisonOp,
+        val: i64,
+        get_col: &dyn Fn(&str) -> Result<usize, String>,
+    ) -> Result<Predicate, String> {
+        if let Some(v) = Self::try_eval_const_arith(arith) {
+            return Ok(
+                if crate::value::arith::compare(&v, &op, &Value::Int64(val)) {
+                    Predicate::True
+                } else {
+                    Predicate::False
+                },
+            );
         }
+        Ok(Predicate::ArithCompareConst(
+            arith.clone(),
+            op,
+            val,
+            Self::arith_var_map(arith, get_col)?,
+        ))
+    }
+
+    fn arith_var_map(
+        arith: &crate::ast::ArithExpr,
+        get_col: &dyn Fn(&str) -> Result<usize, String>,
+    ) -> Result<std::collections::HashMap<String, usize>, String> {
+        arith
+            .variables()
+            .into_iter()
+            .map(|v| Ok((v.clone(), get_col(&v)?)))
+            .collect()
+    }
+
+    /// Evaluate a variable-free arithmetic expression at compile time.
+    fn try_eval_const_arith(arith: &crate::ast::ArithExpr) -> Option<Value> {
+        crate::value::arith::eval_expr(arith, &|_| None)
     }
 
     /// Convert an AST `ArithExpr` to an IR `IRExpression`
@@ -1794,6 +1721,18 @@ impl IRBuilder {
             projection,
             output_schema: head_schema,
         })
+    }
+}
+
+/// Mirror a comparison so `a op b` becomes `b op' a`.
+fn swap_comparison(op: &ComparisonOp) -> ComparisonOp {
+    match op {
+        ComparisonOp::Equal => ComparisonOp::Equal,
+        ComparisonOp::NotEqual => ComparisonOp::NotEqual,
+        ComparisonOp::LessThan => ComparisonOp::GreaterThan,
+        ComparisonOp::LessOrEqual => ComparisonOp::GreaterOrEqual,
+        ComparisonOp::GreaterThan => ComparisonOp::LessThan,
+        ComparisonOp::GreaterOrEqual => ComparisonOp::LessOrEqual,
     }
 }
 
@@ -2719,7 +2658,7 @@ mod tests {
     fn test_try_eval_const_arith_constant() {
         use crate::ast::ArithExpr;
         let result = IRBuilder::try_eval_const_arith(&ArithExpr::Constant(42));
-        assert_eq!(result, Some(42));
+        assert_eq!(result, Some(Value::Int64(42)));
     }
 
     #[test]
@@ -2737,7 +2676,10 @@ mod tests {
             left: Box::new(ArithExpr::Constant(10)),
             right: Box::new(ArithExpr::Constant(20)),
         };
-        assert_eq!(IRBuilder::try_eval_const_arith(&expr), Some(30));
+        assert_eq!(
+            IRBuilder::try_eval_const_arith(&expr),
+            Some(Value::Int64(30))
+        );
     }
 
     #[test]
@@ -2748,7 +2690,10 @@ mod tests {
             left: Box::new(ArithExpr::Constant(50)),
             right: Box::new(ArithExpr::Constant(8)),
         };
-        assert_eq!(IRBuilder::try_eval_const_arith(&expr), Some(42));
+        assert_eq!(
+            IRBuilder::try_eval_const_arith(&expr),
+            Some(Value::Int64(42))
+        );
     }
 
     #[test]
@@ -2759,7 +2704,7 @@ mod tests {
             left: Box::new(ArithExpr::Constant(10)),
             right: Box::new(ArithExpr::Constant(0)),
         };
-        assert_eq!(IRBuilder::try_eval_const_arith(&expr), None);
+        assert_eq!(IRBuilder::try_eval_const_arith(&expr), Some(Value::Null));
     }
 
     #[test]
@@ -2770,7 +2715,7 @@ mod tests {
             left: Box::new(ArithExpr::Constant(10)),
             right: Box::new(ArithExpr::Constant(0)),
         };
-        assert_eq!(IRBuilder::try_eval_const_arith(&expr), None);
+        assert_eq!(IRBuilder::try_eval_const_arith(&expr), Some(Value::Null));
     }
 
     #[test]
@@ -2783,6 +2728,43 @@ mod tests {
             right: Box::new(ArithExpr::Variable("X".to_string())),
         };
         assert_eq!(IRBuilder::try_eval_const_arith(&expr), None);
+    }
+
+    #[test]
+    fn test_try_eval_const_arith_typed() {
+        use crate::ast::{ArithExpr, ArithOp};
+        let bin = |op, l, r| ArithExpr::Binary {
+            op,
+            left: Box::new(l),
+            right: Box::new(r),
+        };
+        let half_times_three = bin(
+            ArithOp::Mul,
+            ArithExpr::from_float(0.5),
+            ArithExpr::Constant(3),
+        );
+        assert_eq!(
+            IRBuilder::try_eval_const_arith(&half_times_three),
+            Some(Value::Float64(1.5))
+        );
+        let min_div = bin(
+            ArithOp::Div,
+            ArithExpr::Constant(i64::MIN),
+            ArithExpr::Constant(-1),
+        );
+        assert_eq!(
+            IRBuilder::try_eval_const_arith(&min_div),
+            Some(Value::Float64(-(i64::MIN as f64)))
+        );
+        let overflow = bin(
+            ArithOp::Add,
+            ArithExpr::Constant(i64::MAX),
+            ArithExpr::Constant(1),
+        );
+        assert_eq!(
+            IRBuilder::try_eval_const_arith(&overflow),
+            Some(Value::Null)
+        );
     }
 
     #[test]
