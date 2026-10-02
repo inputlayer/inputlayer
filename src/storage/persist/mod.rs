@@ -603,16 +603,28 @@ impl PersistBackend for FilePersist {
     }
 
     fn delete_shard(&self, shard: &str) -> StorageResult<()> {
-        // Hold the WAL lock throughout so a concurrent append cannot ack an
-        // entry that this delete then drops.
+        // Lock order everywhere: WAL, then shards. Holding both until the
+        // metadata is gone keeps a concurrent append from acking an entry
+        // this delete then drops.
         let mut wal = self.wal.lock();
+        let mut shards = self.shards.write();
 
-        // Step 1: Remove from in-memory shard map
-        let removed_state = self.shards.write().remove(shard);
+        // Step 1: Drop this shard's WAL entries. A failure here changes nothing.
+        wal.remove_shard_entries(shard)?;
+        let removed_state = shards.remove(shard);
 
-        // Step 2: Delete batch files FIRST (crash-safe ordering)
-        // If we crash here, metadata still references them but they're gone.
-        // On next startup, load_shards will see missing files and handle gracefully.
+        // Step 2: Delete metadata so restart no longer sees the shard.
+        let meta_path = shard_meta_path(&self.config.path.join("shards"), shard);
+        match fs::remove_file(&meta_path) {
+            Ok(()) => sync_directory(&self.config.path.join("shards")),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+        drop(shards);
+        drop(wal);
+
+        // Step 3: Delete batch files. Leftovers are unreferenced orphans,
+        // removed on the next startup.
         if let Some(ref state) = removed_state {
             let mut deleted_any = false;
             for batch_ref in &state.meta.batches {
@@ -624,16 +636,6 @@ impl PersistBackend for FilePersist {
             if deleted_any {
                 sync_directory(&self.config.path.join("batches"));
             }
-        }
-
-        // Step 3: Selective WAL filter - remove only this shard's entries
-        wal.remove_shard_entries(shard)?;
-
-        // Step 4: Delete metadata file LAST (crash-safe ordering)
-        let meta_path = shard_meta_path(&self.config.path.join("shards"), shard);
-        if meta_path.exists() {
-            let _ = fs::remove_file(&meta_path);
-            sync_directory(&self.config.path.join("shards"));
         }
 
         Ok(())
@@ -1470,6 +1472,33 @@ mod tests {
         // Shard should no longer be listed
         let shards = persist.list_shards().unwrap();
         assert!(!shards.contains(&"db:edge".to_string()));
+    }
+
+    #[test]
+    fn test_delete_shard_wal_failure_leaves_shard_intact() {
+        let temp = TempDir::new().unwrap();
+        let config = PersistConfig {
+            path: temp.path().to_path_buf(),
+            ..PersistConfig::default()
+        };
+        let persist = FilePersist::new(config.clone()).unwrap();
+        persist.ensure_shard("db:a").unwrap();
+        persist.ensure_shard("db:b").unwrap();
+        persist
+            .append("db:a", &[Update::insert(Tuple::from_pair(1, 2), 1)])
+            .unwrap();
+        persist
+            .append("db:b", &[Update::insert(Tuple::from_pair(3, 4), 2)])
+            .unwrap();
+        // The WAL rewrite fails: its temp path is a directory.
+        fs::create_dir_all(temp.path().join("wal/current.wal.new")).unwrap();
+
+        assert!(persist.delete_shard("db:a").is_err());
+        assert_eq!(persist.read("db:a", 0).unwrap().len(), 1);
+        drop(persist);
+        fs::remove_dir(temp.path().join("wal/current.wal.new")).unwrap();
+        let persist = FilePersist::new(config).unwrap();
+        assert_eq!(persist.read("db:a", 0).unwrap().len(), 1);
     }
 
     #[test]
