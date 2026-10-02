@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "name": "fx:emb",
+  "batches": [
+    {
+      "id": "4",
+      "path": "/v1-fixture/batches/4.parquet",
+      "lower": 6,
+      "upper": 8,
+      "len": 2
+    }
+  ],
+  "since": 0,
+  "upper": 8,
+  "total_updates": 2
+}

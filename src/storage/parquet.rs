@@ -288,8 +288,8 @@ mod tests {
         ];
 
         let schema = TupleSchema::new(vec![
-            ("x".to_string(), ValueDataType::Int32),
-            ("y".to_string(), ValueDataType::Int32),
+            ("x".to_string(), ValueDataType::Int64),
+            ("y".to_string(), ValueDataType::Int64),
         ]);
 
         save_tuples_to_parquet(&path, &tuples, &schema).unwrap();
@@ -396,8 +396,8 @@ mod tests {
 
         let tuples = vec![Tuple::from_pair(1, 2), Tuple::from_pair(3, 4)];
         let schema = TupleSchema::new(vec![
-            ("x".to_string(), ValueDataType::Int32),
-            ("y".to_string(), ValueDataType::Int32),
+            ("x".to_string(), ValueDataType::Int64),
+            ("y".to_string(), ValueDataType::Int64),
         ]);
 
         save_tuples_to_parquet(&path, &tuples, &schema).unwrap();

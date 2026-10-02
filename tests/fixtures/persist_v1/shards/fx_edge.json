@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "name": "fx:edge",
+  "batches": [
+    {
+      "id": "1",
+      "path": "/v1-fixture/batches/1.parquet",
+      "lower": 1,
+      "upper": 3,
+      "len": 2
+    },
+    {
+      "id": "2",
+      "path": "/v1-fixture/batches/2.parquet",
+      "lower": 3,
+      "upper": 4,
+      "len": 2
+    }
+  ],
+  "since": 0,
+  "upper": 4,
+  "total_updates": 4
+}

@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "name": "fx:person",
+  "batches": [
+    {
+      "id": "3",
+      "path": "/v1-fixture/batches/3.parquet",
+      "lower": 4,
+      "upper": 6,
+      "len": 2
+    }
+  ],
+  "since": 0,
+  "upper": 6,
+  "total_updates": 2
+}
