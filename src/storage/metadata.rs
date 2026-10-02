@@ -2,7 +2,7 @@
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File};
 use std::path::Path;
 
@@ -13,6 +13,85 @@ use super::error::{StorageError, StorageResult};
 pub struct KnowledgeGraphsMetadata {
     pub version: String,
     pub knowledge_graphs: Vec<KnowledgeGraphInfo>,
+}
+
+/// Drops that are committed but whose disk cleanup may not have finished.
+///
+/// Saved before a drop touches anything. Startup finishes every listed drop,
+/// so a crash mid-drop never brings the data back.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DropTombstones {
+    #[serde(default)]
+    pub knowledge_graphs: BTreeSet<String>,
+    #[serde(default)]
+    pub relations: BTreeSet<RelationTombstone>,
+}
+
+/// A dropped relation, identified by its KG and name.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct RelationTombstone {
+    pub kg: String,
+    pub relation: String,
+}
+
+impl RelationTombstone {
+    pub fn new(kg: &str, relation: &str) -> Self {
+        RelationTombstone {
+            kg: kg.to_string(),
+            relation: relation.to_string(),
+        }
+    }
+}
+
+impl DropTombstones {
+    /// Load from file; a missing file means no pending drops.
+    pub fn load(path: &Path) -> StorageResult<Self> {
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+        let file = File::open(path)?;
+        Ok(serde_json::from_reader(file)?)
+    }
+
+    /// Save to file using atomic write-to-temp-then-rename.
+    pub fn save(&self, path: &Path) -> StorageResult<()> {
+        save_json_atomic(self, path)
+    }
+}
+
+/// Write `value` as JSON to `path` durably: unique temp file, `sync_all()`,
+/// atomic rename, then sync the parent directory.
+fn save_json_atomic<T: Serialize>(value: &T, path: &Path) -> StorageResult<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    // Thread ID + timestamp keeps concurrent saves off each other's temp file.
+    let unique = format!(
+        "{:?}.{}",
+        std::thread::current().id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let tmp_name = format!(
+        "{}.{unique}.tmp",
+        path.file_name().unwrap_or_default().to_string_lossy()
+    );
+    let tmp_path = path.with_file_name(tmp_name);
+
+    let file = File::create(&tmp_path)?;
+    serde_json::to_writer_pretty(&file, value)?;
+    file.sync_all()?;
+    fs::rename(&tmp_path, path)?;
+
+    if let Some(parent) = path.parent() {
+        if let Ok(dir) = File::open(parent) {
+            let _ = dir.sync_all();
+        }
+    }
+    Ok(())
 }
 
 /// Information about a single knowledge graph
@@ -71,44 +150,7 @@ impl KnowledgeGraphsMetadata {
     /// or new version - never a corrupt half-written state.
     /// Uses a unique temp file name per call to avoid races under concurrent saves.
     pub fn save(&self, path: &Path) -> StorageResult<()> {
-        // Ensure parent directory exists
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        // Use thread ID + timestamp to create a unique temp file name,
-        // preventing ENOENT races when concurrent threads save simultaneously.
-        let unique = format!(
-            "{:?}.{}",
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        );
-        let tmp_name = format!(
-            "{}.{unique}.tmp",
-            path.file_name().unwrap_or_default().to_string_lossy()
-        );
-        let tmp_path = path.with_file_name(tmp_name);
-
-        // Write to temp file
-        let file = File::create(&tmp_path)?;
-        serde_json::to_writer_pretty(&file, self)?;
-        // Ensure metadata is durably written to disk
-        file.sync_all()?;
-
-        // Atomic rename (POSIX guarantees atomicity)
-        fs::rename(&tmp_path, path)?;
-
-        // Sync parent directory to ensure rename is durable
-        if let Some(parent) = path.parent() {
-            if let Ok(dir) = File::open(parent) {
-                let _ = dir.sync_all();
-            }
-        }
-
-        Ok(())
+        save_json_atomic(self, path)
     }
 }
 
@@ -147,42 +189,7 @@ impl KnowledgeGraphMetadata {
     /// Uses atomic write-to-temp-then-rename to prevent corruption on crash.
     /// Uses a unique temp file name per call to avoid races under concurrent saves.
     pub fn save(&self, path: &Path) -> StorageResult<()> {
-        // Ensure parent directory exists
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let unique = format!(
-            "{:?}.{}",
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        );
-        let tmp_name = format!(
-            "{}.{unique}.tmp",
-            path.file_name().unwrap_or_default().to_string_lossy()
-        );
-        let tmp_path = path.with_file_name(tmp_name);
-
-        // Write to temp file
-        let file = File::create(&tmp_path)?;
-        serde_json::to_writer_pretty(&file, self)?;
-        // Ensure data is durably written to disk before rename
-        file.sync_all()?;
-
-        // Atomic rename (POSIX guarantees atomicity)
-        fs::rename(&tmp_path, path)?;
-
-        // Sync parent directory to ensure rename is durable
-        if let Some(parent) = path.parent() {
-            if let Ok(dir) = File::open(parent) {
-                let _ = dir.sync_all();
-            }
-        }
-
-        Ok(())
+        save_json_atomic(self, path)
     }
 
     /// Add or update relation metadata
@@ -260,6 +267,24 @@ mod tests {
         assert_eq!(loaded.relations.len(), 1);
         assert!(loaded.relations.contains_key("edge"));
         assert_eq!(loaded.relations["edge"].tuple_count, 50);
+    }
+
+    #[test]
+    fn test_drop_tombstones_roundtrip() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("dropping.json");
+        assert_eq!(
+            DropTombstones::load(&path).unwrap(),
+            DropTombstones::default()
+        );
+
+        let mut tombstones = DropTombstones::default();
+        tombstones.knowledge_graphs.insert("gone".to_string());
+        tombstones
+            .relations
+            .insert(RelationTombstone::new("default", "edge"));
+        tombstones.save(&path).unwrap();
+        assert_eq!(DropTombstones::load(&path).unwrap(), tombstones);
     }
 
     #[test]

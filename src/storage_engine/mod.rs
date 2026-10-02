@@ -51,7 +51,8 @@ use crate::storage::persist::{
     PersistConfig, Update,
 };
 use crate::storage::{
-    KnowledgeGraphMetadata, KnowledgeGraphsMetadata, StorageError, StorageResult,
+    DropTombstones, KnowledgeGraphMetadata, KnowledgeGraphsMetadata, RelationTombstone,
+    StorageError, StorageResult,
 };
 use crate::value::relation::to_vec_map;
 use crate::value::{Relation, Tuple};
@@ -62,7 +63,7 @@ use parking_lot::RwLock;
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -115,6 +116,43 @@ fn report_invalid_names(
     }
 }
 
+/// Delete the persist shards and data directory of dropped KG `name`.
+/// `kgs` are the other names that may own shards. Returns whether every
+/// step succeeded.
+fn delete_kg_files(persist: &FilePersist, name: &str, data_dir: &Path, kgs: &[String]) -> bool {
+    let mut clean = true;
+    match persist.list_shards() {
+        Ok(shards) => {
+            for shard in &shards {
+                let owner = naming::shard_owner(shard, kgs.iter().map(String::as_str));
+                if owner.is_some_and(|(kg, _)| kg == name) {
+                    if let Err(e) = persist.delete_shard(shard) {
+                        warn!(kg = %name, shard = %shard, error = %e, "kg_drop_shard_delete_failed");
+                        clean = false;
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            warn!(kg = %name, error = %e, "kg_drop_list_shards_failed");
+            clean = false;
+        }
+    }
+    if data_dir.exists() {
+        if let Err(e) = fs::remove_dir_all(data_dir) {
+            warn!(kg = %name, error = %e, "kg_drop_dir_delete_failed");
+            clean = false;
+        }
+        // Sync parent directory to ensure directory deletion is durable
+        if let Some(parent) = data_dir.parent() {
+            if let Ok(dir) = fs::File::open(parent) {
+                let _ = dir.sync_all();
+            }
+        }
+    }
+    clean
+}
+
 /// Storage Engine - manages multiple knowledge graphs
 ///
 /// Uses `DashMap` for concurrent access to knowledge graphs without global locks.
@@ -127,8 +165,9 @@ pub struct StorageEngine {
     persist: Arc<FilePersist>,
     /// Logical timestamp for DD updates (monotonically increasing)
     logical_time: AtomicU64,
-    /// KG names pending async cleanup - prevents same-name recreation
-    dropping_kgs: parking_lot::RwLock<HashSet<String>>,
+    /// Committed drops whose cleanup is pending, mirrored on disk. A listed
+    /// KG name cannot be recreated until its cleanup finishes.
+    tombstones: parking_lot::Mutex<DropTombstones>,
 }
 
 /// Single knowledge graph instance
@@ -194,7 +233,7 @@ impl StorageEngine {
             current_kg: None,
             persist,
             logical_time: AtomicU64::new(1),
-            dropping_kgs: parking_lot::RwLock::new(HashSet::new()),
+            tombstones: parking_lot::Mutex::new(DropTombstones::default()),
         };
 
         // Load existing knowledge graphs from persist layer
@@ -229,7 +268,7 @@ impl StorageEngine {
         }
 
         // Block creation if a same-name KG is being dropped (prevents RC-2)
-        if self.dropping_kgs.read().contains(name) {
+        if self.tombstones.lock().knowledge_graphs.contains(name) {
             return Err(StorageError::Other(format!(
                 "Knowledge graph '{name}' is being dropped, cannot create"
             )));
@@ -293,8 +332,11 @@ impl StorageEngine {
             return Err(StorageError::KnowledgeGraphNotFound(name.to_string()));
         }
 
-        // Add to tombstone BEFORE removing from DashMap (ordering matters for RC-2)
-        self.dropping_kgs.write().insert(name.to_string());
+        // The durable tombstone commits the drop: startup finishes it, and
+        // it blocks same-name recreation until cleanup is done (RC-2).
+        self.update_tombstones(|t| {
+            t.knowledge_graphs.insert(name.to_string());
+        })?;
 
         // Remove from the DashMap, then mark dropped under the KG lock: this
         // waits for in-flight writes, and writers still holding a handle bail.
@@ -302,8 +344,10 @@ impl StorageEngine {
             db.write().dropped = true;
         }
 
-        // Save metadata JSON (small file write, fast)
-        self.save_knowledge_graphs_metadata()?;
+        // The tombstone outranks a stale listing, so a failure here is benign.
+        if let Err(e) = self.save_knowledge_graphs_metadata() {
+            warn!(kg = %name, error = %e, "kg_drop_metadata_save_failed");
+        }
 
         let elapsed_ms = start.elapsed().as_millis() as u64;
         info!(kg = %name, elapsed_ms, "kg_drop_prepare_complete");
@@ -316,30 +360,23 @@ impl StorageEngine {
     }
 
     /// Phase 2 of KG drop: Slow file I/O cleanup (NO storage write lock needed).
-    /// Deletes persist shards and data directory, then removes tombstone.
+    /// Deletes persist shards and data directory, then removes the tombstone.
+    /// If any cleanup step fails the tombstone stays, and startup retries.
     pub fn finish_drop_knowledge_graph(&self, cleanup: KgDropCleanup) {
         let start = Instant::now();
-        if let Ok(shards) = cleanup.persist.list_shards() {
-            let mut kgs = self.list_knowledge_graphs();
-            kgs.extend(self.dropping_kgs.read().iter().cloned());
-            for shard in &shards {
-                let owner = naming::shard_owner(shard, kgs.iter().map(String::as_str));
-                if owner.is_some_and(|(kg, _)| kg == cleanup.name) {
-                    let _ = cleanup.persist.delete_shard(shard);
-                }
+        let mut kgs = self.list_knowledge_graphs();
+        kgs.extend(self.tombstones.lock().knowledge_graphs.iter().cloned());
+        if delete_kg_files(&cleanup.persist, &cleanup.name, &cleanup.data_dir, &kgs) {
+            let result = self.update_tombstones(|t| {
+                t.knowledge_graphs.remove(&cleanup.name);
+                t.relations.retain(|r| r.kg != cleanup.name);
+            });
+            if let Err(e) = result {
+                warn!(kg = %cleanup.name, error = %e, "kg_drop_tombstone_clear_failed");
             }
+        } else {
+            warn!(kg = %cleanup.name, "kg_drop_cleanup_incomplete: retried on restart");
         }
-        if cleanup.data_dir.exists() {
-            let _ = fs::remove_dir_all(&cleanup.data_dir);
-            // Sync parent directory to ensure directory deletion is durable
-            if let Some(parent) = cleanup.data_dir.parent() {
-                if let Ok(dir) = fs::File::open(parent) {
-                    let _ = dir.sync_all();
-                }
-            }
-        }
-        // Remove tombstone - name is now safe to reuse
-        self.dropping_kgs.write().remove(&cleanup.name);
         let elapsed_ms = start.elapsed().as_millis() as u64;
         info!(kg = %cleanup.name, elapsed_ms, "kg_drop_finish_complete");
     }
@@ -523,6 +560,7 @@ impl StorageEngine {
             return Ok((0, total));
         }
 
+        self.settle_relation_drop(&mut db, kg, relation)?;
         let shard = format!("{kg}:{relation}");
         let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
         let updates: Vec<Update> = new_tuples
@@ -624,6 +662,7 @@ impl StorageEngine {
             return Ok(0);
         }
 
+        self.settle_relation_drop(&mut db, kg, relation)?;
         let shard = format!("{kg}:{relation}");
         let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
         let updates: Vec<Update> = present
@@ -655,6 +694,49 @@ impl StorageEngine {
             return Err(StorageError::KnowledgeGraphNotFound(kg.to_string()));
         }
         Ok(db)
+    }
+
+    fn tombstones_path(&self) -> PathBuf {
+        self.config.storage.data_dir.join("metadata/dropping.json")
+    }
+
+    /// Apply `f` to the drop tombstones and persist them. Memory only
+    /// changes once the save succeeds.
+    fn update_tombstones(&self, f: impl FnOnce(&mut DropTombstones)) -> StorageResult<()> {
+        let mut current = self.tombstones.lock();
+        let mut next = current.clone();
+        f(&mut next);
+        if next != *current {
+            next.save(&self.tombstones_path())?;
+            *current = next;
+        }
+        Ok(())
+    }
+
+    /// Finish a committed drop of `relation` whose cleanup failed, before
+    /// anything writes to that name again.
+    fn settle_relation_drop(
+        &self,
+        db: &mut KnowledgeGraph,
+        kg: &str,
+        relation: &str,
+    ) -> StorageResult<()> {
+        let pending = {
+            let tombstones = self.tombstones.lock();
+            tombstones
+                .relations
+                .iter()
+                .any(|t| t.kg == kg && t.relation == relation)
+        };
+        if !pending {
+            return Ok(());
+        }
+        self.persist.delete_shard(&format!("{kg}:{relation}"))?;
+        db.save_schema_catalog().map_err(StorageError::Other)?;
+        let tombstone = RelationTombstone::new(kg, relation);
+        self.update_tombstones(|t| {
+            t.relations.remove(&tombstone);
+        })
     }
 
     /// Execute an IQL query on the current knowledge graph
@@ -968,22 +1050,57 @@ impl StorageEngine {
 
     /// Drop a relation entirely from a specific knowledge graph.
     ///
-    /// Removes all data, metadata, schema, and any associated rules.
-    /// Also cleans up the persist shard for the relation.
+    /// Removes all data, metadata, schema, and any associated rules, and
+    /// deletes the persist shard. A durable tombstone is written first and the
+    /// KG write lock is held throughout, so neither a crash nor a concurrent
+    /// write brings the relation back. If the shard cannot be deleted and
+    /// nothing changed, returns the error and the relation stays.
     pub fn drop_relation_in(&self, kg: &str, name: &str) -> StorageResult<()> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
+        let mut db = Self::lock_live(&db, kg)?;
+        if !db.has_relation(name) {
+            return Err(StorageError::Other(format!(
+                "Failed to drop relation: Relation '{name}' not found."
+            )));
+        }
 
-        let mut db = db.write();
-        db.drop_relation(name)
-            .map_err(|e| StorageError::Other(format!("Failed to drop relation: {e}")))?;
+        let tombstone = RelationTombstone::new(kg, name);
+        self.update_tombstones(|t| {
+            t.relations.insert(tombstone.clone());
+        })?;
 
-        // Clean up persist shard (fire-and-forget - WAL + batch files)
         let shard = format!("{kg}:{name}");
-        let _ = self.persist.delete_shard(&shard);
+        let had_shard = self.persist.shard_info(&shard).is_ok();
+        let mut settled = true;
+        if let Err(e) = self.persist.delete_shard(&shard) {
+            let intact = self.persist.shard_info(&shard).is_ok() == had_shard;
+            let rolled_back = intact
+                && self
+                    .update_tombstones(|t| {
+                        t.relations.remove(&tombstone);
+                    })
+                    .is_ok();
+            if rolled_back {
+                return Err(e);
+            }
+            // Committed: pending cleanup runs before the next write or on restart.
+            warn!(kg = %kg, relation = %name, error = %e, "relation_drop_cleanup_deferred");
+            settled = false;
+        }
 
+        let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
+        if let Err(e) = db.drop_relation(name, time) {
+            warn!(kg = %kg, relation = %name, error = %e, "relation_drop_cleanup_deferred");
+            settled = false;
+        }
+
+        if settled {
+            if let Err(e) = self.update_tombstones(|t| {
+                t.relations.remove(&tombstone);
+            }) {
+                warn!(kg = %kg, relation = %name, error = %e, "relation_drop_tombstone_clear_failed");
+            }
+        }
         Ok(())
     }
 
@@ -1203,6 +1320,7 @@ impl StorageEngine {
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let mut db = db.write();
+        self.settle_relation_drop(&mut db, kg, &schema.name)?;
         db.register_schema(schema).map_err(StorageError::Other)
     }
 
@@ -1360,6 +1478,7 @@ impl StorageEngine {
             .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
 
         let mut db = db.write();
+        self.settle_relation_drop(&mut db, kg, &schema.name)?;
         db.register_or_update_schema(schema)
             .map_err(StorageError::Other)
     }
@@ -1664,11 +1783,11 @@ impl StorageEngine {
     ///
     /// Recovery process:
     /// 1. Discover knowledge graphs from metadata
-    /// 2. Assign each shard to the longest KG name prefixing it
-    /// 3. Consolidate each shard's updates to get current state
-    /// 4. Populate in-memory `IQLEngine`
+    /// 2. Finish tombstoned drops; their KGs and relations are never loaded
+    /// 3. Assign each shard to the longest KG name prefixing it
+    /// 4. Consolidate each shard's updates to get current state
+    /// 5. Populate in-memory `IQLEngine`
     fn load_all_knowledge_graphs(&mut self) -> StorageResult<()> {
-        let shard_names = self.persist.list_shards()?;
         let mut kg_names: HashSet<String> = HashSet::new();
         let metadata_path = self
             .config
@@ -1681,6 +1800,39 @@ impl StorageEngine {
             }
         }
 
+        let tombstones = DropTombstones::load(&self.tombstones_path())?;
+        let mut pending = tombstones.clone();
+        let listed_dropped = tombstones
+            .knowledge_graphs
+            .iter()
+            .any(|kg| kg_names.contains(kg));
+        let known: Vec<String> = kg_names
+            .iter()
+            .chain(&tombstones.knowledge_graphs)
+            .cloned()
+            .collect();
+        for kg in &tombstones.knowledge_graphs {
+            kg_names.remove(kg);
+            let data_dir = self.config.storage.data_dir.join(kg);
+            if delete_kg_files(&self.persist, kg, &data_dir, &known) {
+                pending.knowledge_graphs.remove(kg);
+                pending.relations.retain(|r| &r.kg != kg);
+            }
+        }
+        let mut deleted = Vec::new();
+        for t in &tombstones.relations {
+            match self
+                .persist
+                .delete_shard(&format!("{}:{}", t.kg, t.relation))
+            {
+                Ok(()) => deleted.push(t.clone()),
+                Err(e) => {
+                    warn!(kg = %t.kg, relation = %t.relation, error = %e, "relation_drop_recovery_failed");
+                }
+            }
+        }
+        let shard_names = self.persist.list_shards()?;
+
         // Metadata is missing or stale when no listed KG claims a shard, or the
         // claimed relation contains ':' (a legacy colon KG). Infer the KG as
         // everything before the last ':'.
@@ -1691,7 +1843,7 @@ impl StorageEngine {
                     .is_none_or(|(_, rel)| rel.contains(':'))
             })
             .filter_map(|shard| shard.rsplit_once(':').map(|(kg, _)| kg.to_string()))
-            .filter(|kg| !kg_names.contains(kg))
+            .filter(|kg| !kg_names.contains(kg) && !tombstones.knowledge_graphs.contains(kg))
             .collect();
         for kg in &inferred {
             tracing::warn!(kg = %kg, "kg_missing_from_metadata: inferred from persist shards");
@@ -1704,6 +1856,12 @@ impl StorageEngine {
             if let Some((kg, relation)) =
                 naming::shard_owner(shard, kg_names.iter().map(String::as_str))
             {
+                if tombstones
+                    .relations
+                    .contains(&RelationTombstone::new(kg, relation))
+                {
+                    continue;
+                }
                 kg_shards
                     .entry(kg.to_string())
                     .or_default()
@@ -1752,6 +1910,34 @@ impl StorageEngine {
                 tracing::warn!(shard = %shard, tuples = fixes.len(), "persist_multiplicity_clamped");
                 self.persist.append(&shard, &fixes)?;
             }
+        }
+
+        // A drop may have crashed before its schema removal was saved.
+        for t in deleted {
+            let scrubbed = match self.knowledge_graphs.get(&t.kg) {
+                Some(db) => db.write().remove_schema(&t.relation).map(|_| ()),
+                None => Ok(()),
+            };
+            match scrubbed {
+                Ok(()) => {
+                    pending.relations.remove(&t);
+                }
+                Err(e) => {
+                    warn!(kg = %t.kg, relation = %t.relation, error = %e, "relation_drop_recovery_failed");
+                }
+            }
+        }
+        if listed_dropped {
+            if let Err(e) = self.save_knowledge_graphs_metadata() {
+                warn!(error = %e, "kg_drop_recovery_metadata_save_failed");
+                pending
+                    .knowledge_graphs
+                    .clone_from(&tombstones.knowledge_graphs);
+            }
+        }
+        *self.tombstones.get_mut() = tombstones;
+        if let Err(e) = self.update_tombstones(|t| *t = pending) {
+            warn!(error = %e, "drop_tombstones_save_failed");
         }
 
         Ok(())
@@ -2531,40 +2717,57 @@ impl KnowledgeGraph {
         Ok(())
     }
 
-    /// Drop a relation entirely: data, metadata, schema, and any associated rules.
-    pub fn drop_relation(&mut self, name: &str) -> Result<(), String> {
-        // Check the relation exists (in metadata or as data)
-        let has_metadata = self.metadata.relations.contains_key(name);
-        let has_data = self.store.contains_relation(name);
-        let has_rule = self.rule_catalog.exists(name);
-        let has_schema = self.schema_catalog.get(name).is_some();
+    /// Whether `name` exists as data, metadata, a rule, or a schema.
+    fn has_relation(&self, name: &str) -> bool {
+        self.metadata.relations.contains_key(name)
+            || self.store.contains_relation(name)
+            || self.rule_catalog.exists(name)
+            || self.schema_catalog.get(name).is_some()
+    }
 
-        if !has_metadata && !has_data && !has_rule && !has_schema {
+    /// Drop a relation entirely: data, metadata, schema, any associated rules
+    /// and indexes, and its DD base data; invalidates dependents.
+    ///
+    /// # Errors
+    /// Returns an error if the relation is missing, or if persisting the
+    /// schema or rule removal fails (memory is dropped regardless).
+    pub fn drop_relation(&mut self, name: &str, time: u64) -> Result<(), String> {
+        if !self.has_relation(name) {
             return Err(format!("Relation '{name}' not found."));
         }
 
-        // 1. Remove data from engine
+        let tuples = self
+            .store
+            .get(name)
+            .map(Relation::to_vec)
+            .unwrap_or_default();
         self.store.remove(name);
-
-        // 2. Remove from metadata
         self.metadata.relations.remove(name);
+        self.schema_catalog.remove_session(name);
+        let schema = self.remove_schema(name).map(|_| ());
+        let rule = if self.rule_catalog.exists(name) {
+            self.rule_catalog.drop(name)
+        } else {
+            Ok(())
+        };
 
-        // 3. Remove schema
-        self.schema_catalog.remove(name);
-
-        // 4. Drop any associated rules (ignore error if no rules)
-        let _ = self.rule_catalog.drop(name);
-
-        // 5. Remove from IncrementalEngine (both base data and rule)
         if let Some(ref dd) = self.incremental {
-            let _ = dd.remove_rule(name);
+            let retracted = if tuples.is_empty() {
+                Ok(())
+            } else {
+                dd.delete(name, tuples, time)
+            };
+            let result = retracted
+                .and_then(|()| dd.remove_rule(name))
+                .and_then(|()| dd.notify_base_update(name).map(|_| ()));
+            if let Err(e) = result {
+                warn!(relation = %name, error = %e, "incremental_drop_relation_failed");
+            }
         }
 
-        // 6. Drop vector indexes on the relation
         self.drop_indexes_for(name);
-
         self.publish_snapshot();
-        Ok(())
+        schema.and(rule)
     }
 
     /// Drop all rules matching a prefix.
@@ -2906,6 +3109,184 @@ mod tests {
         assert!(StorageEngine::lock_live(&stale, "x").is_err());
         let live = storage.kg_handle("x").unwrap();
         assert!(StorageEngine::lock_live(&live, "x").is_ok());
+    }
+
+    fn relation_tuples(storage: &StorageEngine, kg: &str, rel: &str) -> Option<HashSet<Tuple>> {
+        let db = storage.kg_handle(kg).unwrap();
+        let db = db.read();
+        db.store
+            .get(rel)
+            .filter(|t| !t.is_empty())
+            .map(|t| t.iter().cloned().collect())
+    }
+
+    #[test]
+    fn test_prepare_drop_without_finish_stays_dropped_after_restart() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config.clone()).unwrap();
+        storage.create_knowledge_graph("gone").unwrap();
+        storage
+            .insert_into("gone", "edge", vec![(1, 2), (3, 4)])
+            .unwrap();
+        let _cleanup = storage.prepare_drop_knowledge_graph("gone").unwrap();
+        drop(storage);
+
+        let storage = StorageEngine::new(config.clone()).unwrap();
+        assert_eq!(storage.list_knowledge_graphs(), vec!["default".to_string()]);
+        let shards = storage.persist.list_shards().unwrap();
+        assert!(!shards.iter().any(|s| s.starts_with("gone:")), "{shards:?}");
+        assert!(storage.tombstones.lock().knowledge_graphs.is_empty());
+
+        storage.create_knowledge_graph("gone").unwrap();
+        assert_eq!(relation_tuples(&storage, "gone", "edge"), None);
+        drop(storage);
+        let storage = StorageEngine::new(config).unwrap();
+        assert!(storage
+            .list_knowledge_graphs()
+            .contains(&"gone".to_string()));
+    }
+
+    #[test]
+    fn test_rel_drop_wal_failure_keeps_relation() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config.clone()).unwrap();
+        storage
+            .insert_into("default", "doomed", vec![(1, 2)])
+            .unwrap();
+        storage
+            .insert_into("default", "other", vec![(5, 6)])
+            .unwrap();
+        // The WAL rewrite fails: its temp path is a directory.
+        let blocker = temp.path().join("persist/wal/current.wal.new");
+        fs::create_dir_all(&blocker).unwrap();
+
+        assert!(storage.drop_relation_in("default", "doomed").is_err());
+        assert!(storage
+            .list_relations_in("default")
+            .unwrap()
+            .contains(&"doomed".to_string()));
+        assert!(storage.tombstones.lock().relations.is_empty());
+
+        fs::remove_dir(&blocker).unwrap();
+        drop(storage);
+        let storage = StorageEngine::new(config).unwrap();
+        let expected: HashSet<Tuple> = [Tuple::from_pair(1, 2)].into_iter().collect();
+        assert_eq!(
+            relation_tuples(&storage, "default", "doomed"),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn test_rel_drop_persists_schema_removal_and_allows_new_arity() {
+        use crate::schema::{ColumnSchema, SchemaType};
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config.clone()).unwrap();
+        let schema = RelationSchema::new("r")
+            .with_column(ColumnSchema::new("a", SchemaType::Int))
+            .with_column(ColumnSchema::new("b", SchemaType::Int));
+        storage.register_schema_in("default", schema).unwrap();
+        storage.insert_into("default", "r", vec![(1, 2)]).unwrap();
+        storage.drop_relation_in("default", "r").unwrap();
+        assert!(storage.tombstones.lock().relations.is_empty());
+        drop(storage);
+
+        let storage = StorageEngine::new(config.clone()).unwrap();
+        assert!(!storage.has_schema_in("default", "r").unwrap());
+        assert!(!storage
+            .list_relations_in("default")
+            .unwrap()
+            .contains(&"r".to_string()));
+        let wide = Tuple::new(vec![Value::Int64(1), Value::Int64(2), Value::Int64(3)]);
+        storage
+            .insert_tuples_into("default", "r", vec![wide.clone()])
+            .unwrap();
+        drop(storage);
+
+        let storage = StorageEngine::new(config).unwrap();
+        let expected: HashSet<Tuple> = [wide].into_iter().collect();
+        assert_eq!(relation_tuples(&storage, "default", "r"), Some(expected));
+    }
+
+    #[test]
+    fn test_rel_drop_tombstone_finished_on_restart() {
+        use crate::schema::{ColumnSchema, SchemaType};
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config.clone()).unwrap();
+        let schema = RelationSchema::new("r").with_column(ColumnSchema::new("a", SchemaType::Int));
+        storage.register_schema_in("default", schema).unwrap();
+        storage
+            .insert_tuples_into("default", "r", vec![Tuple::new(vec![Value::Int64(1)])])
+            .unwrap();
+        // Crash right after the tombstone was saved.
+        storage
+            .update_tombstones(|t| {
+                t.relations.insert(RelationTombstone::new("default", "r"));
+            })
+            .unwrap();
+        drop(storage);
+
+        let storage = StorageEngine::new(config).unwrap();
+        assert!(!storage
+            .list_relations_in("default")
+            .unwrap()
+            .contains(&"r".to_string()));
+        assert!(!storage.has_schema_in("default", "r").unwrap());
+        assert!(storage.tombstones.lock().relations.is_empty());
+        assert!(storage.persist.shard_info("default:r").is_err());
+    }
+
+    #[test]
+    fn test_rel_drop_racing_inserts_match_after_restart() {
+        let temp = TempDir::new().unwrap();
+        let config = create_test_config(temp.path().to_path_buf());
+        let storage = StorageEngine::new(config.clone()).unwrap();
+        storage.insert_into("default", "r", vec![(0, 0)]).unwrap();
+        std::thread::scope(|scope| {
+            let storage = &storage;
+            scope.spawn(move || {
+                for i in 1..200 {
+                    storage.insert_into("default", "r", vec![(i, i)]).unwrap();
+                }
+            });
+            scope.spawn(move || {
+                for _ in 0..20 {
+                    let _ = storage.drop_relation_in("default", "r");
+                    std::thread::yield_now();
+                }
+            });
+        });
+        let before = relation_tuples(&storage, "default", "r");
+        drop(storage);
+
+        let storage = StorageEngine::new(config).unwrap();
+        assert_eq!(relation_tuples(&storage, "default", "r"), before);
+    }
+
+    #[test]
+    fn test_rel_drop_retracts_incremental_base_data() {
+        let temp = TempDir::new().unwrap();
+        let storage = StorageEngine::new(create_test_config(temp.path().to_path_buf())).unwrap();
+        storage.insert_into("default", "r", vec![(1, 2)]).unwrap();
+        storage
+            .with_kg_mut("default", |kg| {
+                kg.enable_incremental().map_err(|e| e.to_string())
+            })
+            .unwrap();
+        storage.drop_relation_in("default", "r").unwrap();
+        storage.insert_into("default", "r", vec![(3, 4)]).unwrap();
+
+        let db = storage.kg_handle("default").unwrap();
+        let db = db.read();
+        let dd = db.incremental().unwrap();
+        assert_eq!(
+            dd.read_relation_consistent("r").unwrap(),
+            vec![Tuple::from_pair(3, 4)]
+        );
     }
 
     fn create_test_config(data_dir: PathBuf) -> Config {

@@ -32,7 +32,8 @@ pub use csv::{
 };
 pub use error::{StorageError, StorageResult};
 pub use metadata::{
-    KnowledgeGraphInfo, KnowledgeGraphMetadata, KnowledgeGraphsMetadata, RelationMetadata,
+    DropTombstones, KnowledgeGraphInfo, KnowledgeGraphMetadata, KnowledgeGraphsMetadata,
+    RelationMetadata, RelationTombstone,
 };
 pub use parquet::{load_from_parquet, save_to_parquet};
 pub use wal::{replay_wal, Wal, WalEntry, WalOp};
