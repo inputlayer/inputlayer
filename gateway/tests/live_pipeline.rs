@@ -500,17 +500,20 @@ async fn unstorable_text_drops_only_its_row() {
     };
     let mut newline_value = claim("c_m0_3", "2026-08-14", 0, "on August 14th");
     newline_value["value"] = json!("2026-08-14\n+evil");
-    let extractor = Scripted::new(vec![extraction(
-        vec![
-            claim("c_m0_1", "2026-08-14", 0, "Option 1) Paris"),
-            claim("c_m0_2", "2026-08-14", 0, "leave on\nAugust 14th"),
-            newline_value,
-        ],
-        vec![],
-    )]);
+    let extractor = Scripted::new(vec![
+        extraction(
+            vec![
+                claim("c_m0_1", "2026-08-14", 0, "Option 1) Paris"),
+                claim("c_m0_2", "2026-08-14", 0, "leave on\nAugust 14th"),
+                newline_value,
+            ],
+            vec![],
+        ),
+        extraction(vec![], vec![]),
+    ]);
     let pool = EnginePool::new(server, api_key);
-    let content =
-        "Option 1) Paris, option 2) Rome {{prior_messages}}.\nWe leave on\n  August 14th.";
+    let content = "Option 1) Paris, option 2) Rome {{new_messages_with_indices}}.\n\
+                   We leave on\n  August 14th.";
     let turn = run_turn(
         &pool,
         &extractor,
@@ -537,15 +540,29 @@ async fn unstorable_text_drops_only_its_row() {
         .collect();
     assert_eq!(stored.len(), 1, "{stored:?}");
     assert_eq!(stored[0][2], "leave on August 14th");
-    let (_, user) = extractor.last_prompt();
-    assert!(user.contains("{{prior_messages}}."), "{user}");
-
     let prior = inputlayer_gateway::pipeline::read_prior(&pool, &loaded, kg, conv)
         .await
         .expect("prior");
     assert_eq!(prior.next_index, 1);
     assert_eq!(prior.context[0].2, content, "message round-trips");
     assert_eq!(prior.rows.len(), 1);
+
+    // On the next turn the marker sits in CONTEXT and stays literal.
+    run_turn(
+        &pool,
+        &extractor,
+        &loaded,
+        kg,
+        conv,
+        &[msg("user", "second turn")],
+        "2026-10-01",
+        false,
+    )
+    .await
+    .expect("second turn");
+    let (_, user) = extractor.last_prompt();
+    assert!(user.contains("{{new_messages_with_indices}}."), "{user}");
+    assert_eq!(user.matches("second turn").count(), 1, "{user}");
 
     teardown(engine, kg).await;
 }
