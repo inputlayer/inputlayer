@@ -2048,6 +2048,16 @@ impl Handler {
         knowledge_graph: Option<String>,
         program: String,
     ) -> Result<QueryResult, String> {
+        self.run_program(knowledge_graph, program, None).await
+    }
+
+    /// `query_program` with `statements` already parsed by `parse_program`.
+    async fn run_program(
+        &self,
+        knowledge_graph: Option<String>,
+        program: String,
+        statements: Option<Vec<statement::Statement>>,
+    ) -> Result<QueryResult, String> {
         // Intercept .agent commands - these need async context for Claude API calls
         let trimmed = program.trim();
         if trimmed.starts_with(".agent ") || trimmed == ".agent" {
@@ -2189,7 +2199,7 @@ impl Handler {
         // The permit is moved into the blocking task so it's released when DD finishes.
         let blocking_task = tokio::task::spawn_blocking(move || {
             crate::code_generator::set_query_cancel_flag(Some(cancel_flag_clone));
-            let result = job.execute(knowledge_graph, program);
+            let result = job.execute(knowledge_graph, program, statements);
             crate::code_generator::set_query_cancel_flag(None);
             drop(permit); // Explicit drop; semaphore slot returned here
             result
@@ -2254,10 +2264,12 @@ impl QueryJob {
     /// Execute an IQL program synchronously on the current thread.
     /// Called from `Handler::query_program` via `tokio::task::spawn_blocking`
     /// so that Tokio worker threads are never blocked by DD computation.
+    /// `statements`, when given, must be `parse_program(&program)`'s output.
     fn execute(
         self,
         knowledge_graph: Option<String>,
         program: String,
+        statements: Option<Vec<statement::Statement>>,
     ) -> Result<QueryResult, String> {
         self.inc_query_count();
         let start = Instant::now();
@@ -2297,7 +2309,7 @@ impl QueryJob {
         // If ANY statement fails to parse, reject the ENTIRE program with
         // structured error info, so nothing executes partially.
         let parse_start = Instant::now();
-        let statements = match parse_program(&program) {
+        let statements = match statements.map_or_else(|| parse_program(&program), Ok) {
             Ok(statements) => statements,
             Err(parse_errors) => {
                 let errors_json = serde_json::to_string(&parse_errors).unwrap_or_default();
@@ -3463,7 +3475,7 @@ impl QueryJob {
                             }
                         }
                     } else {
-                        query_to_execute = Some(stmt_text.to_string());
+                        return Err("Internal error: statement count mismatch".to_string());
                     }
                 }
                 current_stmt.clear();
@@ -3707,6 +3719,19 @@ impl Handler {
         session_id: &SessionId,
         program: String,
     ) -> Result<QueryResult, String> {
+        self.run_program_with_session(session_id, None, program, None)
+            .await
+    }
+
+    /// `query_program_with_session` on `kg` instead of the session's binding,
+    /// including when the session is gone.
+    async fn run_program_with_session(
+        &self,
+        session_id: &SessionId,
+        kg: Option<String>,
+        program: String,
+        statements: Option<Vec<statement::Statement>>,
+    ) -> Result<QueryResult, String> {
         // Input size validation (same as query_program)
         let perf = &self.config.storage.performance;
         if perf.max_query_size_bytes > 0 && program.len() > perf.max_query_size_bytes {
@@ -3721,16 +3746,19 @@ impl Handler {
         // If session was reaped (e.g., WS reconnect), fall back to non-session query.
         if self.sessions.touch_session(session_id).is_err() {
             tracing::debug!(session_id = %session_id, "session_gone_fallback_to_query_program");
-            return self.query_program(None, program).await;
+            return self.run_program(kg, program, statements).await;
         }
 
         // Check if session is clean → fast path
         let is_clean = self.sessions.is_session_clean(session_id)?;
-        let kg = self.sessions.session_kg(session_id)?;
+        let kg = match kg {
+            Some(kg) => kg,
+            None => self.sessions.session_kg(session_id)?,
+        };
 
         if is_clean {
             // Fast path: no ephemeral state, use global snapshot directly
-            return self.query_program(Some(kg), program).await;
+            return self.run_program(Some(kg), program, statements).await;
         }
 
         // Slow path: combine ephemeral + persistent data
@@ -4111,7 +4139,14 @@ impl Handler {
         } else {
             None
         };
-        let current_kg = knowledge_graph.as_deref().or(session_kg_owned.as_deref());
+        // The KG the program runs on: authorization and execution both use it.
+        let exec_kg: Option<String> = knowledge_graph.clone().or(session_kg_owned).or_else(|| {
+            self.storage
+                .read()
+                .current_knowledge_graph()
+                .map(str::to_string)
+        });
+        let current_kg = exec_kg.as_deref();
 
         if let Some(identity) = effective_auth {
             if identity.role != crate::auth::Role::Admin
@@ -4121,20 +4156,27 @@ impl Handler {
             }
         }
 
-        // `parsed` is the single-statement form the intercepts below use;
-        // `query_program` runs `parse_program`'s statements. Authorize both.
-        let parsed = statement::parse_statement(trimmed);
-        let mut to_authorize: Vec<&statement::Statement> = Vec::new();
-        let program_stmts = parse_program(&program);
-        if let Ok(stmts) = &program_stmts {
-            to_authorize.extend(stmts);
+        // Parsed once: these exact statements are authorized and executed.
+        let statements = parse_program(&program).ok();
+        let stmts = statements.as_deref().unwrap_or_default();
+        self.authorize_program(effective_auth, current_kg, stmts)?;
+        if stmts.len() > 1
+            && stmts.iter().any(|stmt| {
+                matches!(
+                    stmt,
+                    statement::Statement::Meta(MetaCommand::KgCreate(_) | MetaCommand::KgDrop(_))
+                )
+            })
+        {
+            return Err(
+                "'.kg create' and '.kg drop' must be sent as a single statement".to_string(),
+            );
         }
-        if let Ok(stmt) = &parsed {
-            if !matches!(&program_stmts, Ok(stmts) if stmts.len() == 1) {
-                to_authorize.push(stmt);
-            }
-        }
-        self.authorize_program(effective_auth, current_kg, &to_authorize)?;
+        // The single statement the intercepts below handle.
+        let parsed = match stmts {
+            [stmt] => Some(stmt),
+            _ => None,
+        };
 
         // Any session-bound activity should keep the session alive.
         // If the session was reaped (e.g., after WS reconnect), log and continue
@@ -4148,7 +4190,7 @@ impl Handler {
 
         // Fast path: intercept session meta commands that need SessionManager
         if trimmed.starts_with('.') {
-            if let Ok(statement::Statement::Meta(meta)) = &parsed {
+            if let Some(statement::Statement::Meta(meta)) = parsed {
                 match meta {
                     MetaCommand::SessionList => {
                         let sid = session_id.ok_or_else(|| "No active session".to_string())?;
@@ -4284,7 +4326,7 @@ impl Handler {
         // In the WS protocol each statement is a separate request, so we must
         // persist them in the SessionManager (not in a request-local vector).
         if let Some(sid) = session_id {
-            if let Ok(stmt) = &parsed {
+            if let Some(stmt) = parsed {
                 match stmt {
                     statement::Statement::SessionRule(rule) => {
                         // Reject reserved '__' prefix to prevent shadowing internal relations.
@@ -4346,15 +4388,6 @@ impl Handler {
             }
         }
 
-        // Determine effective KG: use provided, or session's KG, or default
-        let effective_kg = if knowledge_graph.is_some() {
-            knowledge_graph
-        } else if let Some(sid) = session_id {
-            Some(self.sessions.session_kg(sid)?)
-        } else {
-            None
-        };
-
         // Only queries need session-aware execution (to prepend ephemeral rules).
         // All other statements (meta commands, inserts, deletes, persistent rules)
         // must go through query_program() directly because query_program_with_session()
@@ -4367,24 +4400,27 @@ impl Handler {
         // Detect KG create/drop before program is moved into query_program.
         // Extracting these from the parsed statement avoids fragile string matching
         // on the result messages.
-        let (kg_create_name, kg_drop_name) = match &parsed {
-            Ok(statement::Statement::Meta(statement::MetaCommand::KgCreate(name))) => {
+        let (kg_create_name, kg_drop_name) = match parsed {
+            Some(statement::Statement::Meta(statement::MetaCommand::KgCreate(name))) => {
                 (Some(name.clone()), None)
             }
-            Ok(statement::Statement::Meta(statement::MetaCommand::KgDrop(name))) => {
+            Some(statement::Statement::Meta(statement::MetaCommand::KgDrop(name))) => {
                 (None, Some(name.clone()))
             }
             _ => (None, None),
         };
 
-        let result = if is_query {
-            if let Some(sid) = session_id {
-                self.query_program_with_session(sid, program).await?
-            } else {
-                self.query_program(effective_kg, program).await?
+        // A non-query on a reaped session errors instead of running on the
+        // storage default.
+        if let (Some(sid), None, false) = (session_id, &knowledge_graph, is_query) {
+            self.sessions.session_kg(sid)?;
+        }
+        let result = match session_id {
+            Some(sid) if is_query => {
+                self.run_program_with_session(sid, exec_kg, program, statements)
+                    .await?
             }
-        } else {
-            self.query_program(effective_kg, program).await?
+            _ => self.run_program(exec_kg, program, statements).await?,
         };
 
         // If KG was switched, update session binding
@@ -4444,21 +4480,12 @@ impl Handler {
         &self,
         auth: Option<&crate::auth::AuthIdentity>,
         current_kg: Option<&str>,
-        statements: &[&statement::Statement],
+        statements: &[statement::Statement],
     ) -> Result<(), String> {
         use crate::auth::{self, Role, INTERNAL_KG};
         use statement::Statement;
 
-        let mut kgs: Vec<String> = current_kg
-            .map(str::to_string)
-            .or_else(|| {
-                self.storage
-                    .read()
-                    .current_knowledge_graph()
-                    .map(str::to_string)
-            })
-            .into_iter()
-            .collect();
+        let mut kgs: Vec<String> = current_kg.map(str::to_string).into_iter().collect();
         let non_admin = auth.filter(|identity| identity.role != Role::Admin);
         let kg_role = |kg: &str, identity: &auth::AuthIdentity| {
             if kg == INTERNAL_KG {
@@ -4476,7 +4503,7 @@ impl Handler {
             }
         }
 
-        for &stmt in statements {
+        for stmt in statements {
             if let Some(identity) = non_admin {
                 auth::authorize_statement(&identity.role, stmt)?;
             }

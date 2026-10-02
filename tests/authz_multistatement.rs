@@ -261,3 +261,82 @@ async fn unparseable_program_without_acl_is_denied() {
     let m = user("mallory", Role::Viewer);
     assert_denied(run(&h, "secret", "?creds(U, P)\n?creds(U,", &m).await);
 }
+
+async fn run_in_session(
+    handler: &Handler,
+    sid: &String,
+    program: &str,
+    who: &AuthIdentity,
+) -> Result<QueryResult, String> {
+    handler
+        .execute_program(Some(sid), None, program.to_string(), Some(who))
+        .await
+}
+
+#[tokio::test]
+async fn session_bound_switch_is_denied_and_binding_kept() {
+    let (h, _t) = setup().await;
+    let m = user("mallory", Role::Viewer);
+    let sid = h.create_session_with_auth("public", &m).unwrap();
+    for program in [
+        "?pub_data(X)\n.kg use secret\n?creds(U, P)",
+        "?pub_data(X)\n.kg use _internal\n?users(U, H, R)",
+        ".kg use _internal",
+    ] {
+        assert_denied(run_in_session(&h, &sid, program, &m).await);
+        assert_eq!(h.session_manager().session_kg(&sid).unwrap(), "public");
+    }
+    let r = run_in_session(&h, &sid, "?pub_data(X)\n?pub_data(X)", &m)
+        .await
+        .unwrap();
+    assert_eq!(r.rows.len(), 1);
+}
+
+#[tokio::test]
+async fn storage_default_kg_is_checked() {
+    let (h, _t) = setup().await;
+    let m = user("mallory", Role::Viewer);
+    let a = admin();
+    let no_kg = |program: &str, who| h.execute_program(None, None, program.to_string(), who);
+    assert_denied(no_kg("?pub_data(X)\n?pub_data(X)", Some(&m)).await);
+    assert_denied(no_kg(".kg use public\n?pub_data(X)", Some(&m)).await);
+    no_kg("+d[(1,)]\n?d(X)", Some(&a)).await.unwrap();
+}
+
+#[tokio::test]
+async fn reaped_session_runs_on_checked_kg() {
+    let (h, _t) = setup().await;
+    let m = user("mallory", Role::Viewer);
+    let sid = h.create_session_with_auth("public", &m).unwrap();
+    h.close_session(&sid).unwrap();
+    // The session's KG is gone; the storage default is checked instead.
+    assert_denied(run_in_session(&h, &sid, "?pub_data(X)", &m).await);
+    h.handle_kg_acl_grant("default", "mallory", "viewer")
+        .unwrap();
+    let r = run_in_session(&h, &sid, "?pub_data(X)", &m).await.unwrap();
+    assert!(r.rows.is_empty(), "must run on default, not public");
+    assert!(run_in_session(&h, &sid, "+d[(1,)]", &admin())
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn kg_create_and_drop_must_be_single_statement() {
+    let (h, _t) = setup().await;
+    let a = admin();
+    let e = user("eve", Role::Editor);
+    assert!(run(&h, "public", ".kg create fresh\n.kg use public", &e)
+        .await
+        .is_err());
+    assert!(run(&h, "public", ".kg drop secret\n.kg list", &a)
+        .await
+        .is_err());
+    let kgs = h.get_storage().list_knowledge_graphs();
+    assert!(!kgs.contains(&"fresh".to_string()));
+    assert!(kgs.contains(&"secret".to_string()));
+
+    run(&h, "public", ".kg create fresh", &e).await.unwrap();
+    assert!(h.get_kg_role_for_user("fresh", "eve", &e.role).is_some());
+    run(&h, "public", ".kg drop fresh", &e).await.unwrap();
+    assert!(h.get_kg_role_for_user("fresh", "eve", &e.role).is_none());
+}
