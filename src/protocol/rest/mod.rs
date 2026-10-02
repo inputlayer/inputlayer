@@ -27,6 +27,7 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use tracing::{info, warn};
 
+use crate::auth::ip_bucket;
 use crate::config::{HttpConfig, IpNet};
 use crate::protocol::Handler;
 
@@ -109,7 +110,10 @@ async fn api_version_middleware(req: Request<Body>, next: Next) -> Response {
 pub struct ClientIp(pub IpAddr);
 
 /// Resolve the client IP. Forwarded headers count only when `peer` is a
-/// trusted proxy; then the rightmost untrusted `X-Forwarded-For` hop wins.
+/// trusted proxy. Then `X-Forwarded-For` is walked from the right, skipping
+/// trusted hops, and stops at the first untrusted hop. An unparseable hop
+/// ends the walk at the last hop that parsed. `X-Real-IP` is used only when
+/// `X-Forwarded-For` is absent.
 fn client_ip(peer: Option<IpAddr>, headers: &HeaderMap, trusted: &[IpNet]) -> IpAddr {
     let Some(peer) = peer.map(|ip| ip.to_canonical()) else {
         return IpAddr::V4(Ipv4Addr::UNSPECIFIED);
@@ -118,26 +122,36 @@ fn client_ip(peer: Option<IpAddr>, headers: &HeaderMap, trusted: &[IpNet]) -> Ip
     if !is_trusted(peer) {
         return peer;
     }
-    let hops: Vec<IpAddr> = headers
+    let forwarded: Vec<&str> = headers
         .get_all("x-forwarded-for")
         .iter()
-        .filter_map(|v| v.to_str().ok())
-        .flat_map(|v| v.split(','))
-        .map_while(|hop| hop.trim().parse::<IpAddr>().ok())
+        .flat_map(|v| v.to_str().unwrap_or("").split(','))
         .collect();
-    if let Some(first) = hops.first() {
-        return hops
-            .iter()
-            .rev()
-            .copied()
-            .find(|ip| !is_trusted(*ip))
-            .unwrap_or(*first);
+    if forwarded.is_empty() {
+        return headers
+            .get("x-real-ip")
+            .and_then(|v| v.to_str().ok())
+            .and_then(parse_hop)
+            .unwrap_or(peer);
     }
-    headers
-        .get("x-real-ip")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.trim().parse::<IpAddr>().ok())
-        .unwrap_or(peer)
+    let mut client = peer;
+    for ip in forwarded.into_iter().rev().map_while(parse_hop) {
+        client = ip;
+        if !is_trusted(ip) {
+            break;
+        }
+    }
+    client
+}
+
+/// Parse a forwarded hop: `ip`, `ip:port`, `[v6]` or `[v6]:port`.
+fn parse_hop(hop: &str) -> Option<IpAddr> {
+    let hop = hop.trim();
+    hop.parse::<IpAddr>()
+        .ok()
+        .or_else(|| hop.parse::<SocketAddr>().ok().map(|addr| addr.ip()))
+        .or_else(|| hop.strip_prefix('[')?.strip_suffix(']')?.parse().ok())
+        .map(|ip| ip.to_canonical())
 }
 
 /// Interval between sweeps of idle [`IpRateLimiter`] entries.
@@ -170,7 +184,7 @@ impl IpRateLimiter {
         }
         let now = Instant::now();
         self.prune(now);
-        let mut entry = self.map.entry(ip).or_insert((now, 0));
+        let mut entry = self.map.entry(ip_bucket(ip)).or_insert((now, 0));
         let (window_start, count) = entry.value_mut();
         if now.duration_since(*window_start).as_secs() >= 1 {
             // Reset window
@@ -234,6 +248,7 @@ impl PreAuthSlots {
 
     /// Take a slot for `ip`, or `None` if it already holds the maximum.
     pub fn try_acquire(&self, ip: IpAddr) -> Option<PreAuthSlot> {
+        let ip = ip_bucket(ip);
         if self.max_per_ip > 0 {
             let mut count = self.counts.entry(ip).or_insert(0);
             if *count >= self.max_per_ip {
@@ -846,6 +861,36 @@ mod tests {
         assert_eq!(client_ip(peer, &HeaderMap::new(), &trusted), ip("10.0.0.1"));
     }
 
+    #[test]
+    fn test_client_ip_unparseable_hop_does_not_hide_later_hops() {
+        let trusted: Vec<IpNet> = vec!["10.0.0.0/8".parse().unwrap()];
+        let peer = Some(ip("10.0.0.1"));
+        let h = headers(&[
+            ("x-forwarded-for", "garbage, 1.2.3.4"),
+            ("x-real-ip", "6.6.6.6"),
+        ]);
+        assert_eq!(client_ip(peer, &h, &trusted), ip("1.2.3.4"));
+        // The walk stops at the first unparseable hop from the right.
+        let h = headers(&[("x-forwarded-for", "1.2.3.4, garbage, 10.0.0.2")]);
+        assert_eq!(client_ip(peer, &h, &trusted), ip("10.0.0.2"));
+        let h = headers(&[("x-forwarded-for", ""), ("x-real-ip", "6.6.6.6")]);
+        assert_eq!(client_ip(peer, &h, &trusted), ip("10.0.0.1"));
+        for hop in [
+            "1.2.3.4:5678",
+            "[2001:db8::1]",
+            "[2001:db8::1]:443",
+            "2001:db8::1",
+        ] {
+            let h = headers(&[("x-forwarded-for", hop)]);
+            let expected = if hop.contains("2001") {
+                ip("2001:db8::1")
+            } else {
+                ip("1.2.3.4")
+            };
+            assert_eq!(client_ip(peer, &h, &trusted), expected, "{hop}");
+        }
+    }
+
     async fn status_with_xff(app: Router, xff: &str) -> StatusCode {
         let req = Request::builder()
             .uri("/health")
@@ -855,7 +900,7 @@ mod tests {
         app.oneshot(req).await.unwrap().status()
     }
 
-    /// Regression: rotating `X-Forwarded-For` bypassed the per-IP limit.
+    /// Rotating `X-Forwarded-For` from an untrusted peer shares the peer's bucket.
     #[tokio::test]
     async fn test_rotating_forwarded_for_does_not_bypass_rate_limit() {
         use axum::extract::connect_info::MockConnectInfo;
@@ -914,6 +959,20 @@ mod tests {
         *limiter.last_prune.lock() -= RATE_LIMIT_PRUNE_INTERVAL;
         assert!(limiter.check(ip("203.0.113.1")));
         assert_eq!(limiter.map.len(), 1);
+    }
+
+    #[test]
+    fn test_ipv6_limits_share_a_64() {
+        let limiter = IpRateLimiter::new(2, &[]);
+        assert!(limiter.check(ip("2001:db8::1")));
+        assert!(limiter.check(ip("2001:db8::2")));
+        assert!(!limiter.check(ip("2001:db8::3")));
+        assert!(limiter.check(ip("2001:db8:0:1::1")));
+
+        let slots = PreAuthSlots::new(1);
+        let _held = slots.try_acquire(ip("2001:db8::1")).unwrap();
+        assert!(slots.try_acquire(ip("2001:db8::2")).is_none());
+        assert!(slots.try_acquire(ip("2001:db8:0:1::1")).is_some());
     }
 
     #[test]

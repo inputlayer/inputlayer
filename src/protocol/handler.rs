@@ -84,6 +84,9 @@ fn term_to_value(term: &Term) -> Result<Value, String> {
 const SUBSCRIPTION_WS_ONLY: &str =
     ".subscribe and .unsubscribe are only available as standalone commands on the global /ws endpoint.";
 
+/// Password logins allowed in flight; more are refused as busy.
+const MAX_QUEUED_LOGINS: usize = 64;
+
 /// Prefix used to encode structured validation errors in error strings.
 /// WebSocket handlers can detect this prefix to extract per-line error info.
 pub const VALIDATION_ERROR_PREFIX: &str = "VALIDATION_ERRORS:";
@@ -213,6 +216,8 @@ pub struct Handler {
     login_throttle: Arc<crate::auth::LoginThrottle>,
     /// Caps concurrent argon2 verifications.
     password_permits: Arc<tokio::sync::Semaphore>,
+    /// Caps logins in flight, including those waiting for `password_permits`.
+    login_queue: Arc<tokio::sync::Semaphore>,
 }
 
 /// `.index` command implementations shared by `Handler` and `QueryJob`.
@@ -762,6 +767,7 @@ impl Handler {
             subscription_metrics: super::subscription::SubscriptionMetrics::default(),
             login_throttle: Arc::default(),
             password_permits: Arc::new(tokio::sync::Semaphore::new((ncpu / 4).clamp(1, 4))),
+            login_queue: Arc::new(tokio::sync::Semaphore::new(MAX_QUEUED_LOGINS)),
         }
     }
 
@@ -802,6 +808,7 @@ impl Handler {
             subscription_metrics: super::subscription::SubscriptionMetrics::default(),
             login_throttle: Arc::default(),
             password_permits: Arc::new(tokio::sync::Semaphore::new((ncpu / 4).clamp(1, 4))),
+            login_queue: Arc::new(tokio::sync::Semaphore::new(MAX_QUEUED_LOGINS)),
         }
     }
 
@@ -1053,63 +1060,70 @@ impl Handler {
             .ok()
             .filter(|k| !k.is_empty());
         let mut to_persist = auth::PersistedCredentials::default();
-        let mut generated = false;
-        let mut resolve =
+        let resolve =
             |supplied: Option<String>, persisted: Option<String>, slot: &mut Option<String>| {
                 if let Some(value) = supplied {
-                    return value;
+                    return (value, false);
                 }
-                let value = persisted.unwrap_or_else(|| {
-                    generated = true;
-                    auth::generate_api_key()
-                });
+                let generated = persisted.is_none();
+                let value = persisted.unwrap_or_else(auth::generate_api_key);
                 *slot = Some(value.clone());
-                value
+                (value, generated)
             };
-        let password = resolve(
+        let (password, password_generated) = resolve(
             supplied_password,
             persisted.admin_password,
             &mut to_persist.admin_password,
         );
-        let api_key = resolve(supplied_api_key, persisted.api_key, &mut to_persist.api_key);
+        let (api_key, key_generated) =
+            resolve(supplied_api_key, persisted.api_key, &mut to_persist.api_key);
+        let mut create_api_key = true;
 
-        if generated {
-            if let Err(e) = to_persist.save(&credentials_path) {
-                warn!(
-                    error = %e,
-                    path = %credentials_path.display(),
-                    "Failed to save credentials file"
-                );
-                eprintln!(
-                    "ERROR: cannot save generated credentials to {}: {e}. Admin user not created.",
-                    credentials_path.display()
-                );
-                return;
+        if password_generated || key_generated {
+            match to_persist.save(&credentials_path) {
+                Ok(()) => {
+                    info!(
+                        "Auth bootstrap: credentials saved to {}",
+                        credentials_path.display()
+                    );
+                    eprintln!();
+                    eprintln!("=== INITIAL ADMIN CREDENTIALS CREATED ===");
+                    // Masked to keep the key out of logs.
+                    let masked = match api_key.len() {
+                        n if n > 4 => api_key.get(n - 4..).unwrap_or(""),
+                        _ => "",
+                    };
+                    eprintln!("Admin API key: ****{masked}");
+                    eprintln!("==========================================");
+                    eprintln!();
+                    eprintln!(
+                        "Generated credentials saved to: {}",
+                        credentials_path.display()
+                    );
+                    eprintln!("Retrieve them with:  cat {}", credentials_path.display());
+                    eprintln!("Delete this file to generate new credentials on next boot.");
+                    eprintln!();
+                }
+                Err(e) => {
+                    warn!(
+                        error = %e,
+                        path = %credentials_path.display(),
+                        "Failed to save credentials file"
+                    );
+                    if password_generated {
+                        eprintln!(
+                            "ERROR: cannot save generated credentials to {}: {e}. Admin user not created.",
+                            credentials_path.display()
+                        );
+                        return;
+                    }
+                    eprintln!(
+                        "WARNING: cannot save generated API key to {}: {e}. Bootstrap API key not created.",
+                        credentials_path.display()
+                    );
+                    create_api_key = false;
+                }
             }
-            info!(
-                "Auth bootstrap: credentials saved to {}",
-                credentials_path.display()
-            );
-
-            // Print masked API key to stderr to avoid leaking credentials into logs.
-            // Full credentials are available in the credentials file.
-            let masked_key = if api_key.len() > 4 {
-                format!("****{}", &api_key[api_key.len() - 4..])
-            } else {
-                "****".to_string()
-            };
-            eprintln!();
-            eprintln!("=== INITIAL ADMIN CREDENTIALS CREATED ===");
-            eprintln!("Admin API key: {masked_key}");
-            eprintln!("==========================================");
-            eprintln!();
-            eprintln!(
-                "Generated credentials saved to: {}",
-                credentials_path.display()
-            );
-            eprintln!("Retrieve them with:  cat {}", credentials_path.display());
-            eprintln!("Delete this file to generate new credentials on next boot.");
-            eprintln!();
         } else if to_persist != auth::PersistedCredentials::default() {
             info!(
                 "Auth bootstrap: reusing credentials from {}",
@@ -1138,7 +1152,9 @@ impl Handler {
         }
         info!("Auth bootstrap: admin user created");
 
-        // Insert bootstrap API key
+        if !create_api_key {
+            return;
+        }
         let key_hash = auth::hash_api_key(&api_key);
         let key_tuple = crate::value::Tuple::new(vec![
             Value::string("bootstrap"), // label
@@ -1185,44 +1201,56 @@ impl Handler {
     }
 
     /// Password login from `peer`: throttled per IP and username, with
-    /// argon2 on the blocking pool behind a small semaphore.
+    /// argon2 on the blocking pool behind a small semaphore. The outcome is
+    /// recorded even if the caller stops waiting.
     pub async fn login(
         self: &Arc<Self>,
         username: &str,
         password: &str,
         peer: std::net::IpAddr,
     ) -> Result<crate::auth::AuthIdentity, String> {
-        if let Err(wait) = self.login_throttle.begin(peer, username) {
+        let attempt = self.login_throttle.begin(peer, username).map_err(|wait| {
             let retry_secs = wait.as_secs().max(1);
             warn!(username, %peer, retry_secs, "audit_auth_login_throttled");
-            return Err(format!(
-                "Too many failed login attempts; retry in {retry_secs}s"
-            ));
-        }
+            format!("Too many failed login attempts; retry in {retry_secs}s")
+        })?;
+        let Ok(queued) = Arc::clone(&self.login_queue).try_acquire_owned() else {
+            self.login_throttle.abort(&attempt);
+            warn!(username, %peer, "audit_auth_login_busy");
+            return Err("Authentication service busy; retry later".to_string());
+        };
         let unavailable = || "Authentication service unavailable".to_string();
-        let permit = Arc::clone(&self.password_permits)
-            .acquire_owned()
-            .await
-            .map_err(|_| unavailable())?;
         let handler = Arc::clone(self);
         let (user, pass) = (username.to_string(), password.to_string());
-        let result = tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            handler.authenticate_user(&user, &pass)
+        tokio::spawn(async move {
+            let _queued = queued;
+            let result = match Arc::clone(&handler.password_permits).acquire_owned().await {
+                Ok(permit) => {
+                    let verifier = Arc::clone(&handler);
+                    let user = user.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let _permit = permit;
+                        verifier.authenticate_user(&user, &pass)
+                    })
+                    .await
+                    .unwrap_or_else(|_| Err(unavailable()))
+                }
+                Err(_) => Err(unavailable()),
+            };
+            match &result {
+                Ok(identity) => {
+                    handler.login_throttle.succeed(&attempt);
+                    info!(username = %user, role = %identity.role, %peer, "audit_auth_login_success");
+                }
+                Err(_) => {
+                    handler.login_throttle.fail(&attempt);
+                    warn!(username = %user, %peer, "audit_auth_login_failed");
+                }
+            }
+            result
         })
         .await
-        .unwrap_or_else(|_| Err(unavailable()));
-        match &result {
-            Ok(identity) => {
-                self.login_throttle.succeed(peer, username);
-                info!(username, role = %identity.role, %peer, "audit_auth_login_success");
-            }
-            Err(_) => {
-                self.login_throttle.fail(peer, username);
-                warn!(username, %peer, "audit_auth_login_failed");
-            }
-        }
-        result
+        .unwrap_or_else(|_| Err(unavailable()))
     }
 
     /// Authenticate an API key.
@@ -5968,6 +5996,31 @@ mod tests {
             StorageEngine::new(config).expect("storage creation failed"),
             tmp,
         )
+    }
+
+    #[tokio::test]
+    async fn test_login_outcome_recorded_after_caller_gives_up() {
+        let (mut config, _tmp) = make_test_config();
+        config.http.auth.bootstrap_admin_password = Some("pw".to_string());
+        let handler = Arc::new(Handler::from_config(config).expect("handler creation failed"));
+        handler.bootstrap_auth();
+        let peer = std::net::IpAddr::from([192, 0, 2, 1]);
+        for _ in 0..4 {
+            let attempt = handler.login_throttle.begin(peer, "admin").unwrap();
+            handler.login_throttle.fail(&attempt);
+        }
+        let login = handler.login("admin", "pw", peer);
+        assert!(tokio::time::timeout(Duration::ZERO, login).await.is_err());
+        // Wait for the abandoned login to settle.
+        let _all = handler
+            .login_queue
+            .acquire_many(MAX_QUEUED_LOGINS as u32)
+            .await
+            .unwrap();
+        assert!(
+            handler.login_throttle.begin(peer, "admin").is_ok(),
+            "the abandoned correct login counts as a success"
+        );
     }
 
     // --- term_to_value tests ---

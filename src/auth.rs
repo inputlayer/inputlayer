@@ -6,7 +6,7 @@
 use crate::statement::{MetaCommand, Statement};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::LazyLock;
@@ -95,12 +95,23 @@ pub fn verify_password_or_dummy(password: &str, hash: Option<&str>) -> bool {
 
 // ── Login Throttling ────────────────────────────────────────────────────────
 
+/// Throttling key for `ip`. IPv6 addresses share their /64, which a single
+/// host usually controls.
+pub fn ip_bucket(ip: IpAddr) -> IpAddr {
+    match ip.to_canonical() {
+        IpAddr::V6(v6) => IpAddr::V6(Ipv6Addr::from(u128::from(v6) & !u128::from(u64::MAX))),
+        v4 => v4,
+    }
+}
+
 /// Failed logins allowed per IP or username before backoff starts.
 const LOGIN_FREE_FAILURES: u32 = 5;
 /// Longest login backoff.
 const LOGIN_MAX_BACKOFF: Duration = Duration::from_secs(15 * 60);
 /// Failures older than this are forgotten.
 const LOGIN_FAILURE_TTL: Duration = Duration::from_secs(15 * 60);
+/// How long a successful login exempts its IP from that user's backoff.
+const LOGIN_KNOWN_IP_TTL: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 /// Usernames are tracked by at most this many characters.
 const LOGIN_USERNAME_KEY_CHARS: usize = 128;
 /// Interval between sweeps of expired entries.
@@ -146,10 +157,17 @@ impl Failures {
 /// Per-IP and per-username login failure counters with exponential backoff.
 ///
 /// Every attempt counts as a failure until [`LoginThrottle::succeed`] is
-/// called, so parallel attempts cannot slip past the limit.
+/// called, so parallel attempts cannot slip past the limit. IPs are keyed
+/// by [`ip_bucket`].
+///
+/// Lockout policy: a username's backoff applies from every IP except those
+/// it logged in from successfully within the last 30 days, so failures
+/// elsewhere cannot lock a user out of their usual address. API-key auth is
+/// not throttled here and is the recovery path for a locked-out account.
 #[derive(Debug)]
 pub struct LoginThrottle {
     failures: dashmap::DashMap<ThrottleKey, Failures>,
+    known_ips: dashmap::DashMap<(String, IpAddr), Instant>,
     last_prune: parking_lot::Mutex<Instant>,
 }
 
@@ -157,41 +175,93 @@ impl Default for LoginThrottle {
     fn default() -> Self {
         Self {
             failures: dashmap::DashMap::new(),
+            known_ips: dashmap::DashMap::new(),
             last_prune: parking_lot::Mutex::new(Instant::now()),
         }
     }
 }
 
+/// A begun login attempt. Settle it with [`LoginThrottle::fail`],
+/// [`LoginThrottle::succeed`] or [`LoginThrottle::abort`].
+#[derive(Debug)]
+pub struct LoginAttempt {
+    ip: IpAddr,
+    username: String,
+    at: Instant,
+    prev_ip: Failures,
+    /// `None` when the IP is known for this user and skips its backoff.
+    prev_user: Option<Failures>,
+}
+
 impl LoginThrottle {
     /// Record a login attempt, or return how long `ip` / `username` must wait.
-    pub fn begin(&self, ip: IpAddr, username: &str) -> Result<(), Duration> {
-        let now = Instant::now();
-        self.prune(now);
-        self.try_record(ThrottleKey::Ip(ip), now)?;
-        if let Err(wait) = self.try_record(Self::user_key(username), now) {
-            self.refund(ip);
-            return Err(wait);
-        }
-        Ok(())
+    pub fn begin(&self, ip: IpAddr, username: &str) -> Result<LoginAttempt, Duration> {
+        let at = Instant::now();
+        self.prune(at);
+        let ip = ip_bucket(ip);
+        let username: String = username.chars().take(LOGIN_USERNAME_KEY_CHARS).collect();
+        let known = self
+            .known_ips
+            .get(&(username.clone(), ip))
+            .is_some_and(|t| at.duration_since(*t) < LOGIN_KNOWN_IP_TTL);
+        let prev_ip = self.try_record(ThrottleKey::Ip(ip), at)?;
+        let prev_user = if known {
+            None
+        } else {
+            match self.try_record(ThrottleKey::User(username.clone()), at) {
+                Ok(prev) => Some(prev),
+                Err(wait) => {
+                    self.restore(&ThrottleKey::Ip(ip), prev_ip, at);
+                    return Err(wait);
+                }
+            }
+        };
+        Ok(LoginAttempt {
+            ip,
+            username,
+            at,
+            prev_ip,
+            prev_user,
+        })
     }
 
-    /// Mark a begun attempt as failed: its backoff runs from now.
-    pub fn fail(&self, ip: IpAddr, username: &str) {
+    /// The attempt failed: its backoff runs from now.
+    pub fn fail(&self, attempt: &LoginAttempt) {
         let now = Instant::now();
-        for key in [ThrottleKey::Ip(ip), Self::user_key(username)] {
+        for (key, _) in Self::keys(attempt) {
             if let Some(mut f) = self.failures.get_mut(&key) {
                 f.last = now;
             }
         }
     }
 
-    /// Clear the username's failures and refund the attempt's IP failure.
-    pub fn succeed(&self, ip: IpAddr, username: &str) {
-        self.failures.remove(&Self::user_key(username));
-        self.refund(ip);
+    /// The attempt succeeded: clear the username's failures, refund the IP
+    /// failure and exempt the IP from this user's future backoff.
+    pub fn succeed(&self, attempt: &LoginAttempt) {
+        self.failures
+            .remove(&ThrottleKey::User(attempt.username.clone()));
+        self.restore(&ThrottleKey::Ip(attempt.ip), attempt.prev_ip, attempt.at);
+        self.known_ips
+            .insert((attempt.username.clone(), attempt.ip), Instant::now());
     }
 
-    fn try_record(&self, key: ThrottleKey, now: Instant) -> Result<(), Duration> {
+    /// The attempt never checked a password: undo it.
+    pub fn abort(&self, attempt: &LoginAttempt) {
+        for (key, prev) in Self::keys(attempt) {
+            self.restore(&key, prev, attempt.at);
+        }
+    }
+
+    fn keys(attempt: &LoginAttempt) -> impl Iterator<Item = (ThrottleKey, Failures)> + '_ {
+        std::iter::once((ThrottleKey::Ip(attempt.ip), attempt.prev_ip)).chain(
+            attempt
+                .prev_user
+                .map(|prev| (ThrottleKey::User(attempt.username.clone()), prev)),
+        )
+    }
+
+    /// Record a failure under `key`, returning the previous state.
+    fn try_record(&self, key: ThrottleKey, now: Instant) -> Result<Failures, Duration> {
         let mut entry = self.failures.entry(key).or_insert(Failures {
             count: 0,
             last: now,
@@ -199,18 +269,19 @@ impl LoginThrottle {
         if let Some(wait) = entry.retry_after(now) {
             return Err(wait);
         }
+        let prev = *entry;
         entry.record(now);
-        Ok(())
+        Ok(prev)
     }
 
-    fn refund(&self, ip: IpAddr) {
-        if let Some(mut f) = self.failures.get_mut(&ThrottleKey::Ip(ip)) {
+    /// Undo a failure recorded at `at`.
+    fn restore(&self, key: &ThrottleKey, prev: Failures, at: Instant) {
+        if let Some(mut f) = self.failures.get_mut(key) {
             f.count = f.count.saturating_sub(1);
+            if f.last == at {
+                f.last = prev.last;
+            }
         }
-    }
-
-    fn user_key(username: &str) -> ThrottleKey {
-        ThrottleKey::User(username.chars().take(LOGIN_USERNAME_KEY_CHARS).collect())
     }
 
     fn prune(&self, now: Instant) {
@@ -221,6 +292,8 @@ impl LoginThrottle {
             *last = now;
             drop(last);
             self.failures.retain(|_, f| f.live(now) && f.count > 0);
+            self.known_ips
+                .retain(|_, t| now.duration_since(*t) < LOGIN_KNOWN_IP_TTL);
         }
     }
 
@@ -1009,10 +1082,81 @@ mod tests {
     fn test_login_throttle_success_resets_username_and_refunds_ip() {
         let throttle = LoginThrottle::default();
         for _ in 0..10 {
-            throttle.begin(ip(1), "admin").unwrap();
-            throttle.succeed(ip(1), "admin");
+            let attempt = throttle.begin(ip(1), "admin").unwrap();
+            throttle.succeed(&attempt);
         }
         throttle.begin(ip(1), "admin").unwrap();
+    }
+
+    #[test]
+    fn test_login_throttle_known_ip_skips_username_backoff() {
+        let throttle = LoginThrottle::default();
+        let attempt = throttle.begin(ip(1), "admin").unwrap();
+        throttle.succeed(&attempt);
+        for i in 0..LOGIN_FREE_FAILURES {
+            let attempt = throttle.begin(ip(10 + i as u8), "admin").unwrap();
+            throttle.fail(&attempt);
+        }
+        assert!(throttle.begin(ip(100), "admin").is_err());
+        let attempt = throttle.begin(ip(1), "admin").unwrap();
+        throttle.fail(&attempt);
+        assert!(
+            throttle.begin(ip(100), "admin").is_err(),
+            "known-IP failures do not extend the username backoff"
+        );
+        throttle.begin(ip(1), "admin").unwrap();
+    }
+
+    #[test]
+    fn test_login_throttle_username_rejection_keeps_ip_backoff() {
+        let throttle = LoginThrottle::default();
+        let failures = |count| Failures {
+            count,
+            last: Instant::now(),
+        };
+        throttle
+            .failures
+            .insert(ThrottleKey::Ip(ip(1)), failures(LOGIN_FREE_FAILURES));
+        throttle.backdate(Duration::from_secs(2));
+        throttle
+            .failures
+            .insert(ThrottleKey::User("admin".into()), failures(10));
+        assert!(throttle.begin(ip(1), "admin").is_err());
+        throttle.begin(ip(1), "other").unwrap();
+    }
+
+    #[test]
+    fn test_login_throttle_abort_undoes_attempt() {
+        let throttle = LoginThrottle::default();
+        for _ in 0..LOGIN_FREE_FAILURES * 2 {
+            let attempt = throttle.begin(ip(1), "admin").unwrap();
+            throttle.abort(&attempt);
+        }
+        throttle.begin(ip(1), "admin").unwrap();
+    }
+
+    #[test]
+    fn test_ip_bucket_groups_ipv6_by_64() {
+        let v6 = |s: &str| s.parse::<IpAddr>().unwrap();
+        assert_eq!(ip_bucket(v6("2001:db8::1")), v6("2001:db8::"));
+        assert_eq!(
+            ip_bucket(v6("2001:db8::ffff:1")),
+            ip_bucket(v6("2001:db8::abcd"))
+        );
+        assert_ne!(
+            ip_bucket(v6("2001:db8::1")),
+            ip_bucket(v6("2001:db8:0:1::1"))
+        );
+        assert_eq!(ip_bucket(v6("::ffff:192.0.2.7")), ip(7));
+        assert_eq!(ip_bucket(ip(7)), ip(7));
+
+        let throttle = LoginThrottle::default();
+        for i in 0..LOGIN_FREE_FAILURES {
+            throttle
+                .begin(v6(&format!("2001:db8::{i}")), &format!("u{i}"))
+                .unwrap();
+        }
+        assert!(throttle.begin(v6("2001:db8::99"), "other").is_err());
     }
 
     #[test]

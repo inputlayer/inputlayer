@@ -150,6 +150,7 @@ ws_auth_timeout_ms = 5000
 
 # Proxies (IPs or CIDR blocks) whose X-Forwarded-For / X-Real-IP headers are
 # trusted for the client IP. Empty = always use the TCP peer address.
+# Per-IP limits key IPv6 clients by their /64.
 # trusted_proxies = ["127.0.0.1", "10.0.0.0/8"]
 
 [http.gui]

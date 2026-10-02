@@ -25,7 +25,9 @@ info:
     On success the server responds with `authenticated`; on failure with `auth_error`.
     The server closes the socket after 3 failed attempts, or if the client has not
     authenticated within `http.ws_auth_timeout_ms` (default 5 s). Repeated failed logins
-    per IP or username are throttled with exponential backoff.
+    per IP (IPv6: per /64) or username are throttled with exponential backoff. A username's
+    backoff does not apply from IPs it logged in from in the last 30 days; API-key
+    authentication skips login backoff and is the recovery path for a locked-out account.
 
     ## Message Flow
 
