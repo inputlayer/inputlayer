@@ -17,6 +17,7 @@
 //! cargo run --bin inputlayer-client -- --script examples/iql/basic/same_component.iql
 //! ```
 
+use inputlayer::parser::lexer::escape;
 use inputlayer::statement::{parse_statement, MetaCommand, Statement};
 
 use futures_util::{SinkExt, StreamExt};
@@ -1207,7 +1208,7 @@ fn format_cell_value(value: &serde_json::Value) -> String {
             let s = n.to_string();
             s.replace("e+", "e")
         }
-        serde_json::Value::String(s) => format!("\"{s}\""),
+        serde_json::Value::String(s) => format!("\"{}\"", escape(s)),
         serde_json::Value::Bool(b) => b.to_string(),
         serde_json::Value::Array(arr) => {
             let items: Vec<String> = arr.iter().map(format_cell_value).collect();
@@ -1706,6 +1707,12 @@ mod tests {
             http_to_ws_url("http://10.0.0.5:8080/"),
             "ws://10.0.0.5:8080/ws"
         );
+    }
+
+    #[test]
+    fn test_format_cell_value_escapes_strings() {
+        let v = serde_json::Value::String("say \"hi\"\n\\".to_string());
+        assert_eq!(format_cell_value(&v), r#""say \"hi\"\n\\""#);
     }
 
     // strip_block_comments tests
