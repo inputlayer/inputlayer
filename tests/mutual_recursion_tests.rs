@@ -155,14 +155,18 @@ async fn test_stratified_negation_above_mutual_recursion() {
 async fn test_negation_inside_cycle_is_rejected() {
     let (handler, _t) = create_test_handler();
     run_all(&handler, "+base[(1), (2)]").await;
-    let err = handler
-        .query_program(
-            None,
-            "a(X) <- base(X), !b(X)\nb(X) <- base(X), !a(X)\n?a(X)".to_string(),
-        )
-        .await
-        .expect_err("negation through recursion must be rejected");
-    assert!(err.contains("Unstratified negation"), "{err}");
+    let result = exec(
+        &handler,
+        "a(X) <- base(X), !b(X)\nb(X) <- base(X), !a(X)\n?a(X)",
+    )
+    .await;
+    assert_eq!(result.errors.len(), 1, "{result:?}");
+    assert_eq!(result.errors[0].index, 1);
+    assert!(
+        result.errors[0].message.contains("Unstratified negation"),
+        "{:?}",
+        result.errors
+    );
 }
 
 #[tokio::test]

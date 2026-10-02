@@ -84,6 +84,9 @@ async fn missing_rule_and_relation_are_not_found() {
         ".rule def missing",
         ".rel drop missing",
         ".rel missing",
+        ".index drop missing",
+        ".index stats missing",
+        ".index rebuild missing",
     ] {
         let err = run(&handler, program).await.expect_err(program);
         assert_eq!(err.code, Some(ErrorCode::NotFound), "{program}: {err:?}");
@@ -121,6 +124,80 @@ async fn successful_statements_report_no_errors() {
     assert!(result.errors.is_empty(), "{:?}", result.errors);
     let result = run(&handler, "+a(3)").await.expect("insert");
     assert!(result.errors.is_empty());
+}
+
+#[tokio::test]
+async fn invalid_rule_mid_program_is_listed_and_later_statements_run() {
+    let (handler, _tmp) = handler();
+    let result = run(&handler, "+a(1)\n+p(X) <- q(Y)\n+c(3)")
+        .await
+        .expect("program result");
+    let errors: Vec<(usize, ErrorCode)> = result.errors.iter().map(|e| (e.index, e.code)).collect();
+    assert_eq!(errors, vec![(1, ErrorCode::Validation)]);
+    assert_eq!(count(&handler, "?a(X)").await, 1);
+    assert_eq!(count(&handler, "?c(X)").await, 1);
+}
+
+#[tokio::test]
+async fn invalid_rules_alone_are_validation_errors() {
+    let (handler, _tmp) = handler();
+    run(&handler, "+a(1)").await.expect("insert");
+    for program in ["+p(X) <- q(Y)", "__s(X) <- a(X)", "s(X) <- a(Y)"] {
+        let err = run(&handler, program).await.expect_err(program);
+        assert_eq!(err.code, Some(ErrorCode::Validation), "{program}: {err:?}");
+    }
+}
+
+#[tokio::test]
+async fn failed_query_after_writes_is_listed() {
+    let (handler, _tmp) = handler();
+    let result = run(&handler, "+a(1)\n?a(X), X > Y")
+        .await
+        .expect("program result");
+    let errors: Vec<(usize, ErrorCode)> = result.errors.iter().map(|e| (e.index, e.code)).collect();
+    assert_eq!(errors, vec![(1, ErrorCode::Validation)], "{result:?}");
+    assert_eq!(count(&handler, "?a(X)").await, 1);
+}
+
+#[tokio::test]
+async fn ontology_remove_tolerates_an_already_dropped_rule() {
+    let (handler, _tmp) = handler();
+    run(
+        &handler,
+        "+pack_meta(name: string, version: string, digest: string)\n\
+         +pack_item(pack: string, kind: string, item: string)\n\
+         +pack_meta[(\"p\", \"1.0.0\", \"d\")]\n\
+         +pack_item[(\"p\", \"rule\", \"gone\")]",
+    )
+    .await
+    .expect("record pack");
+    run(&handler, ".ontology remove p").await.expect("remove");
+    assert_eq!(count(&handler, "?pack_item(P, K, I)").await, 0);
+    assert_eq!(count(&handler, "?pack_meta(N, V, D)").await, 0);
+}
+
+#[tokio::test]
+async fn ontology_upgrade_tolerates_an_already_dropped_rule() {
+    let (handler, tmp) = handler();
+    // No registry: the upgrade must get past dropping old rules and fail
+    // only at install.
+    std::env::set_var("INPUTLAYER_REGISTRY", tmp.path().join("no-registry"));
+    run(
+        &handler,
+        "+pack_meta(name: string, version: string, digest: string)\n\
+         +pack_item(pack: string, kind: string, item: string)\n\
+         +a(1)\n\
+         +live(X) <- a(X)\n\
+         +pack_meta[(\"p\", \"1.0.0\", \"d\")]\n\
+         +pack_item[(\"p\", \"rule\", \"gone\"), (\"p\", \"rule\", \"live\")]",
+    )
+    .await
+    .expect("record pack");
+    let err = run(&handler, ".ontology upgrade p")
+        .await
+        .expect_err("install has no registry");
+    assert!(err.message.contains("WITHOUT rules"), "{err:?}");
+    assert_eq!(count(&handler, "?pack_meta(N, V, D)").await, 0);
 }
 
 mod ws {
@@ -199,6 +276,7 @@ mod ws {
             format!("+a(1)\n+b(\"{}\")", too_long()),
             ".rule drop missing".to_string(),
             "+a(2)".to_string(),
+            "__s(X) <- a(X)".to_string(),
         ])
         .await;
 
@@ -216,5 +294,8 @@ mod ws {
 
         assert_eq!(frames[3]["type"], "result", "{}", frames[3]);
         assert_eq!(frames[3]["errors"], json!([]), "{}", frames[3]);
+
+        assert_eq!(frames[4]["type"], "error", "{}", frames[4]);
+        assert_eq!(frames[4]["code"], "validation", "{}", frames[4]);
     }
 }
