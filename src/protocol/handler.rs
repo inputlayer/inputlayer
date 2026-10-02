@@ -26,7 +26,9 @@ use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
-use super::wire::{ColumnDef, QueryResult, WireDataType, WireTuple, WireValue};
+use super::wire::{
+    ColumnDef, ErrorCode, QueryResult, StatementError, WireDataType, WireTuple, WireValue,
+};
 
 /// Result of transforming a `?shorthand` query, including sort and pagination annotations.
 pub(crate) struct QueryTransform {
@@ -95,6 +97,23 @@ pub struct ValidationError {
     pub statement_index: usize,
     /// The parse error message
     pub error: String,
+}
+
+/// A program that failed as a whole.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProgramError {
+    pub message: String,
+    /// Set when the program's only statement failed.
+    pub code: Option<ErrorCode>,
+}
+
+impl From<String> for ProgramError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            code: None,
+        }
+    }
 }
 
 /// Notification sent to WebSocket subscribers when persistent data changes.
@@ -581,6 +600,7 @@ impl QueryJob {
             switched_kg: None,
             proof_trees: Some(graphs),
             timing_breakdown,
+            errors: Vec::new(),
         })
     }
 
@@ -674,6 +694,7 @@ impl QueryJob {
             switched_kg: None,
             proof_trees: Some(vec![graph]),
             timing_breakdown,
+            errors: Vec::new(),
         })
     }
 }
@@ -1259,6 +1280,7 @@ impl Handler {
             switched_kg: None,
             proof_trees: None,
             timing_breakdown: None,
+            errors: Vec::new(),
         })
     }
 
@@ -1548,6 +1570,7 @@ impl Handler {
             switched_kg: None,
             proof_trees: None,
             timing_breakdown: None,
+            errors: Vec::new(),
         })
     }
 
@@ -1598,6 +1621,7 @@ impl Handler {
             switched_kg: None,
             proof_trees: None,
             timing_breakdown: None,
+            errors: Vec::new(),
         })
     }
 
@@ -2086,6 +2110,7 @@ impl Handler {
                     switched_kg: None,
                     proof_trees: None,
                     timing_breakdown: None,
+                    errors: Vec::new(),
                 });
             }
 
@@ -2149,6 +2174,7 @@ impl Handler {
                 switched_kg: None,
                 proof_trees: None,
                 timing_breakdown: None,
+                errors: Vec::new(),
             });
         }
 
@@ -2326,7 +2352,7 @@ impl QueryJob {
         if kg_name == crate::auth::INTERNAL_KG || statements.iter().any(targets_internal_kg) {
             return Err(internal_kg_denied());
         }
-        let mut statements = statements.into_iter();
+        let mut statements = statements.into_iter().enumerate();
 
         // Phase 2: Execute statements (all guaranteed to parse successfully)
         let mut messages = Vec::new();
@@ -2341,6 +2367,21 @@ impl QueryJob {
         let mut session_rules: Vec<String> = Vec::new();
         // Parsed session rules for validation (arity/aggregation compatibility)
         let mut session_rules_parsed: Vec<crate::ast::Rule> = Vec::new();
+        let mut errors: Vec<StatementError> = Vec::new();
+        let mut stmt_index: usize;
+        // Records a failure of the current statement and reports it as a
+        // message row too.
+        macro_rules! fail {
+            ($code:expr, $message:expr) => {{
+                let message: String = $message;
+                errors.push(StatementError {
+                    index: stmt_index,
+                    code: $code,
+                    message: message.clone(),
+                });
+                messages.push(message);
+            }};
+        }
 
         let stmt_exec_start = Instant::now();
         for line in program_text.lines() {
@@ -2354,7 +2395,8 @@ impl QueryJob {
             {
                 let stmt_text = current_stmt.trim();
                 if !stmt_text.is_empty() {
-                    if let Some(stmt) = statements.next() {
+                    if let Some((index, stmt)) = statements.next() {
+                        stmt_index = index;
                         match stmt {
                             statement::Statement::SchemaDecl(decl) => {
                                 // Build RelationSchema from SchemaDecl
@@ -2391,10 +2433,13 @@ impl QueryJob {
                                         ));
                                     }
                                     Err(e) => {
-                                        messages.push(format!(
-                                            "Failed to register schema for '{}': {}",
-                                            decl.name, e
-                                        ));
+                                        fail!(
+                                            storage_error_code(&e, ErrorCode::Validation),
+                                            format!(
+                                                "Failed to register schema for '{}': {}",
+                                                decl.name, e
+                                            )
+                                        );
                                     }
                                 }
                             }
@@ -2436,7 +2481,7 @@ impl QueryJob {
                                 }
 
                                 if let Some(err) = conversion_error {
-                                    messages.push(err);
+                                    fail!(ErrorCode::Validation, err);
                                     current_stmt.clear();
                                     continue;
                                 }
@@ -2444,12 +2489,15 @@ impl QueryJob {
                                 // Validate tuple count limit (WI-07)
                                 let max_tuples = self.config.storage.performance.max_insert_tuples;
                                 if max_tuples > 0 && tuples.len() > max_tuples {
-                                    messages.push(format!(
-                                        "Insert rejected for '{}': {} tuples exceeds max {}",
-                                        op.relation,
-                                        tuples.len(),
-                                        max_tuples
-                                    ));
+                                    fail!(
+                                        ErrorCode::Validation,
+                                        format!(
+                                            "Insert rejected for '{}': {} tuples exceeds max {}",
+                                            op.relation,
+                                            tuples.len(),
+                                            max_tuples
+                                        )
+                                    );
                                     current_stmt.clear();
                                     continue;
                                 }
@@ -2458,10 +2506,10 @@ impl QueryJob {
                                 if let Err(e) =
                                     storage.validate_tuples_in(&kg_name, &op.relation, &tuples)
                                 {
-                                    messages.push(format!(
-                                        "Insert rejected for '{}': {}",
-                                        op.relation, e
-                                    ));
+                                    fail!(
+                                        ErrorCode::Validation,
+                                        format!("Insert rejected for '{}': {}", op.relation, e)
+                                    );
                                     current_stmt.clear();
                                     continue;
                                 }
@@ -2489,8 +2537,10 @@ impl QueryJob {
                                 // Session facts are NOT persisted - they are only available for
                                 // queries during this request. Use +relation(args). to persist.
                                 if rule.head.args.is_empty() {
-                                    messages
-                                        .push("Fact must have at least one argument".to_string());
+                                    fail!(
+                                        ErrorCode::Validation,
+                                        "Fact must have at least one argument".to_string()
+                                    );
                                     current_stmt.clear();
                                     continue;
                                 }
@@ -2508,7 +2558,7 @@ impl QueryJob {
                                     }
                                 }
                                 if let Some(err) = conversion_error {
-                                    messages.push(err);
+                                    fail!(ErrorCode::Validation, err);
                                     current_stmt.clear();
                                     continue;
                                 }
@@ -2531,7 +2581,10 @@ impl QueryJob {
                                             let values = match values {
                                                 Ok(v) => v,
                                                 Err(e) => {
-                                                    messages.push(format!("Delete error: {e}"));
+                                                    fail!(
+                                                        ErrorCode::Validation,
+                                                        format!("Delete error: {e}")
+                                                    );
                                                     current_stmt.clear();
                                                     continue;
                                                 }
@@ -2775,7 +2828,10 @@ impl QueryJob {
                                         messages.push(format!("Rule '{name}' dropped."));
                                     }
                                     Err(_) => {
-                                        messages.push(format!("'{name}' not found as rule."));
+                                        fail!(
+                                            ErrorCode::NotFound,
+                                            format!("'{name}' not found as rule.")
+                                        );
                                     }
                                 }
                             }
@@ -2938,7 +2994,10 @@ impl QueryJob {
                                             }
                                             Err(e) => {
                                                 info!(kg = %name, error = %e, "meta_kg_create_err");
-                                                messages.push(format!("Create failed: {e}"));
+                                                fail!(
+                                                    storage_error_code(&e, ErrorCode::Internal),
+                                                    format!("Create failed: {e}")
+                                                );
                                             }
                                         }
                                     }
@@ -2955,15 +3014,21 @@ impl QueryJob {
                                             }
                                             Err(e) => {
                                                 info!(kg = %name, error = %e, "meta_kg_use_err");
-                                                messages.push(format!(
-                                                    "Knowledge graph '{name}' not found: {e}"
-                                                ));
+                                                fail!(
+                                                    ErrorCode::NotFound,
+                                                    format!(
+                                                        "Knowledge graph '{name}' not found: {e}"
+                                                    )
+                                                );
                                             }
                                         }
                                     }
                                     MetaCommand::KgDrop(name) => {
                                         if name == kg {
-                                            messages.push("Cannot drop current knowledge graph. Switch to another first.".to_string());
+                                            fail!(
+                                                ErrorCode::Conflict,
+                                                "Cannot drop current knowledge graph. Switch to another first.".to_string()
+                                            );
                                         } else {
                                             info!(kg = %name, "meta_kg_drop_start");
                                             // Phase 1: Fast in-memory removal (~microseconds).
@@ -2983,7 +3048,10 @@ impl QueryJob {
                                                 }
                                                 Err(e) => {
                                                     info!(kg = %name, error = %e, "meta_kg_drop_err");
-                                                    messages.push(format!("Drop failed: {e}"));
+                                                    fail!(
+                                                        storage_error_code(&e, ErrorCode::Internal),
+                                                        format!("Drop failed: {e}")
+                                                    );
                                                 }
                                             }
                                         }
@@ -3015,7 +3083,10 @@ impl QueryJob {
                                                     }
                                                 }
                                             }
-                                            Err(e) => messages.push(format!("Error: {e}")),
+                                            Err(e) => fail!(
+                                                storage_error_code(&e, ErrorCode::Internal),
+                                                format!("Error: {e}")
+                                            ),
                                         }
                                     }
                                     MetaCommand::RelDescribe(name) => {
@@ -3047,9 +3118,14 @@ impl QueryJob {
                                                     messages.push(format!("Relation '{name}': {arity} columns, {total_count} total tuples"));
                                                 }
                                             }
-                                            Ok(None) => messages
-                                                .push(format!("Relation '{name}' not found.")),
-                                            Err(e) => messages.push(format!("Error: {e}")),
+                                            Ok(None) => fail!(
+                                                ErrorCode::NotFound,
+                                                format!("Relation '{name}' not found.")
+                                            ),
+                                            Err(e) => fail!(
+                                                storage_error_code(&e, ErrorCode::Internal),
+                                                format!("Error: {e}")
+                                            ),
                                         }
                                     }
 
@@ -3060,7 +3136,10 @@ impl QueryJob {
                                                 messages
                                                     .push(format!("Relation '{name}' dropped."));
                                             }
-                                            Err(e) => messages.push(format!("Error: {e}")),
+                                            Err(e) => fail!(
+                                                storage_error_code(&e, ErrorCode::NotFound),
+                                                format!("Error: {e}")
+                                            ),
                                         }
                                     }
 
@@ -3083,7 +3162,10 @@ impl QueryJob {
                                                 }
                                             }
                                         }
-                                        Err(e) => messages.push(format!("Error: {e}")),
+                                        Err(e) => fail!(
+                                            storage_error_code(&e, ErrorCode::Internal),
+                                            format!("Error: {e}")
+                                        ),
                                     },
                                     MetaCommand::RuleDrop(name) => {
                                         match storage.drop_rule_in(kg, &name) {
@@ -3091,8 +3173,10 @@ impl QueryJob {
                                                 self.notify_rule_change(kg, &name, "dropped");
                                                 messages.push(format!("Rule '{name}' dropped."));
                                             }
-                                            Err(e) => messages
-                                                .push(format!("Rule '{name}' not found: {e}")),
+                                            Err(e) => fail!(
+                                                storage_error_code(&e, ErrorCode::NotFound),
+                                                format!("Rule '{name}' not found: {e}")
+                                            ),
                                         }
                                     }
                                     MetaCommand::RuleDropPrefix(prefix) => {
@@ -3115,7 +3199,10 @@ impl QueryJob {
                                                     ));
                                                 }
                                             }
-                                            Err(e) => messages.push(format!("Error: {e}")),
+                                            Err(e) => fail!(
+                                                storage_error_code(&e, ErrorCode::Internal),
+                                                format!("Error: {e}")
+                                            ),
                                         }
                                     }
                                     MetaCommand::RuleQuery(name) => {
@@ -3127,9 +3214,15 @@ impl QueryJob {
                                         match storage.describe_rule_in(kg, &name) {
                                             Ok(Some(desc)) => messages.push(desc),
                                             Ok(None) => {
-                                                messages.push(format!("Rule '{name}' not found."));
+                                                fail!(
+                                                    ErrorCode::NotFound,
+                                                    format!("Rule '{name}' not found.")
+                                                );
                                             }
-                                            Err(e) => messages.push(format!("Error: {e}")),
+                                            Err(e) => fail!(
+                                                storage_error_code(&e, ErrorCode::Internal),
+                                                format!("Error: {e}")
+                                            ),
                                         }
                                     }
                                     MetaCommand::RuleRemove { name, index } => {
@@ -3145,7 +3238,10 @@ impl QueryJob {
                                                     ));
                                                 }
                                             }
-                                            Err(e) => messages.push(format!("Error: {e}")),
+                                            Err(e) => fail!(
+                                                storage_error_code(&e, ErrorCode::NotFound),
+                                                format!("Error: {e}")
+                                            ),
                                         }
                                     }
                                     MetaCommand::RuleClear(name) => {
@@ -3154,13 +3250,17 @@ impl QueryJob {
                                                 self.notify_rule_change(kg, &name, "removed");
                                                 messages.push(format!("Rule '{name}' cleared."));
                                             }
-                                            Err(e) => messages.push(format!("Error: {e}")),
+                                            Err(e) => fail!(
+                                                storage_error_code(&e, ErrorCode::NotFound),
+                                                format!("Error: {e}")
+                                            ),
                                         }
                                     }
                                     MetaCommand::RuleEdit { .. } => {
-                                        messages.push(
+                                        fail!(
+                                            ErrorCode::Unsupported,
                                             "Rule editing is not supported in server mode."
-                                                .to_string(),
+                                                .to_string()
                                         );
                                     }
 
@@ -3192,7 +3292,10 @@ impl QueryJob {
                                                     ));
                                                 }
                                             }
-                                            Err(e) => messages.push(format!("Error: {e}")),
+                                            Err(e) => fail!(
+                                                storage_error_code(&e, ErrorCode::Internal),
+                                                format!("Error: {e}")
+                                            ),
                                         }
                                     }
 
@@ -3229,7 +3332,10 @@ impl QueryJob {
                                                 messages.push("Compaction complete.".to_string());
                                             }
                                             Err(e) => {
-                                                messages.push(format!("Compaction error: {e}"));
+                                                fail!(
+                                                    storage_error_code(&e, ErrorCode::Internal),
+                                                    format!("Compaction error: {e}")
+                                                );
                                             }
                                         }
                                     }
@@ -3254,7 +3360,10 @@ impl QueryJob {
                                                 }
                                             }
                                             Err(e) => {
-                                                messages.push(format!("Debug error: {e}"));
+                                                fail!(
+                                                    ErrorCode::Validation,
+                                                    format!("Debug error: {e}")
+                                                );
                                             }
                                         }
                                     }
@@ -3268,9 +3377,12 @@ impl QueryJob {
                                         match self.why_query(Some(kg.to_string()), why_q, false) {
                                             Ok(qr) => {
                                                 drop(storage);
-                                                return Ok(qr);
+                                                return Ok(QueryResult { errors, ..qr });
                                             }
-                                            Err(e) => messages.push(format!("Why error: {e}")),
+                                            Err(e) => fail!(
+                                                ErrorCode::Validation,
+                                                format!("Why error: {e}")
+                                            ),
                                         }
                                     }
                                     MetaCommand::WhyFull(query) => {
@@ -3281,9 +3393,12 @@ impl QueryJob {
                                         match self.why_query(Some(kg.to_string()), why_q, true) {
                                             Ok(qr) => {
                                                 drop(storage);
-                                                return Ok(qr);
+                                                return Ok(QueryResult { errors, ..qr });
                                             }
-                                            Err(e) => messages.push(format!("Why error: {e}")),
+                                            Err(e) => fail!(
+                                                ErrorCode::Validation,
+                                                format!("Why error: {e}")
+                                            ),
                                         }
                                     }
 
@@ -3292,9 +3407,12 @@ impl QueryJob {
                                         match self.why_not_query(Some(kg.to_string()), input) {
                                             Ok(qr) => {
                                                 drop(storage);
-                                                return Ok(qr);
+                                                return Ok(QueryResult { errors, ..qr });
                                             }
-                                            Err(e) => messages.push(format!("Why-not error: {e}")),
+                                            Err(e) => fail!(
+                                                ErrorCode::Validation,
+                                                format!("Why-not error: {e}")
+                                            ),
                                         }
                                     }
 
@@ -3331,13 +3449,17 @@ impl QueryJob {
                                             switched_kg: None,
                                             proof_trees: None,
                                             timing_breakdown: None,
+                                            errors,
                                         });
                                     }
                                     MetaCommand::AgentStart(_)
                                     | MetaCommand::AgentMessage(_)
                                     | MetaCommand::AgentSetup(_) => {
                                         // Agent commands are handled async via query_program
-                                        messages.push("Agent commands require async context. Use the GUI chat panel.".to_string());
+                                        fail!(
+                                            ErrorCode::Unsupported,
+                                            "Agent commands require async context. Use the GUI chat panel.".to_string()
+                                        );
                                     }
 
                                     // === Index commands ===
@@ -3350,7 +3472,10 @@ impl QueryJob {
                                             }
                                             Err(e) => {
                                                 info!(index = %opts.name, error = %e, "meta_index_create_err");
-                                                messages.push(format!("Index error: {e}"));
+                                                fail!(
+                                                    ErrorCode::Validation,
+                                                    format!("Index error: {e}")
+                                                );
                                             }
                                         }
                                     }
@@ -3363,7 +3488,10 @@ impl QueryJob {
                                             }
                                             Err(e) => {
                                                 info!(index = %name, error = %e, "meta_index_drop_err");
-                                                messages.push(format!("Index error: {e}"));
+                                                fail!(
+                                                    ErrorCode::NotFound,
+                                                    format!("Index error: {e}")
+                                                );
                                             }
                                         }
                                     }
@@ -3385,7 +3513,7 @@ impl QueryJob {
                                         }
                                         Err(e) => {
                                             info!(error = %e, "meta_index_list_err");
-                                            messages.push(format!("Index error: {e}"));
+                                            fail!(ErrorCode::Internal, format!("Index error: {e}"));
                                         }
                                     },
                                     MetaCommand::IndexStats(name) => {
@@ -3403,13 +3531,19 @@ impl QueryJob {
                                                     ));
                                                 }
                                             }
-                                            Err(e) => messages.push(format!("Index error: {e}")),
+                                            Err(e) => fail!(
+                                                ErrorCode::NotFound,
+                                                format!("Index error: {e}")
+                                            ),
                                         }
                                     }
                                     MetaCommand::IndexRebuild(name) => {
                                         match self.rebuild_index(kg, &name) {
                                             Ok(msg) => messages.push(msg),
-                                            Err(e) => messages.push(format!("Index error: {e}")),
+                                            Err(e) => fail!(
+                                                ErrorCode::NotFound,
+                                                format!("Index error: {e}")
+                                            ),
                                         }
                                     }
 
@@ -3418,9 +3552,10 @@ impl QueryJob {
                                     | MetaCommand::SessionClear
                                     | MetaCommand::SessionDrop(_)
                                     | MetaCommand::SessionDropName(_) => {
-                                        messages.push(
+                                        fail!(
+                                            ErrorCode::Unsupported,
                                             "Session commands require a WebSocket connection."
-                                                .to_string(),
+                                                .to_string()
                                         );
                                     }
 
@@ -3433,9 +3568,10 @@ impl QueryJob {
                                     | MetaCommand::ApiKeyCreate(_)
                                     | MetaCommand::ApiKeyList
                                     | MetaCommand::ApiKeyRevoke(_) => {
-                                        messages.push(
+                                        fail!(
+                                            ErrorCode::Unsupported,
                                             "User/API key commands require a WebSocket connection with admin privileges."
-                                                .to_string(),
+                                                .to_string()
                                         );
                                     }
 
@@ -3443,9 +3579,10 @@ impl QueryJob {
                                     MetaCommand::KgAclList(_)
                                     | MetaCommand::KgAclGrant { .. }
                                     | MetaCommand::KgAclRevoke { .. } => {
-                                        messages.push(
+                                        fail!(
+                                            ErrorCode::Unsupported,
                                             "KG ACL commands require a WebSocket connection with admin or owner privileges."
-                                                .to_string(),
+                                                .to_string()
                                         );
                                     }
 
@@ -3457,23 +3594,30 @@ impl QueryJob {
                                     MetaCommand::OntologyInstall(_)
                                     | MetaCommand::OntologyRemove(_)
                                     | MetaCommand::OntologyUpgrade(_) => {
-                                        messages.push(
+                                        fail!(
+                                            ErrorCode::Unsupported,
                                             ".ontology commands must be run as a standalone statement."
-                                                .to_string(),
+                                                .to_string()
                                         );
                                     }
 
                                     // Owned by the /ws connection, which
                                     // intercepts them before execution.
                                     MetaCommand::Subscribe { .. } | MetaCommand::Unsubscribe(_) => {
-                                        messages.push(SUBSCRIPTION_WS_ONLY.to_string());
+                                        fail!(
+                                            ErrorCode::Unsupported,
+                                            SUBSCRIPTION_WS_ONLY.to_string()
+                                        );
                                     }
 
                                     // === Client-only commands ===
                                     MetaCommand::Help
                                     | MetaCommand::Quit
                                     | MetaCommand::Load { .. } => {
-                                        messages.push("This command is client-only and not available via server API.".to_string());
+                                        fail!(
+                                            ErrorCode::Unsupported,
+                                            "This command is client-only and not available via server API.".to_string()
+                                        );
                                     }
                                 }
                             }
@@ -3525,6 +3669,7 @@ impl QueryJob {
                 switched_kg: switched_kg_result,
                 proof_trees: None,
                 timing_breakdown: None,
+                errors,
             });
         }
 
@@ -3700,6 +3845,7 @@ impl QueryJob {
             switched_kg: None,
             proof_trees: None,
             timing_breakdown,
+            errors,
         })
     }
 }
@@ -4021,6 +4167,7 @@ impl Handler {
             switched_kg: None,
             proof_trees: None,
             timing_breakdown,
+            errors: Vec::new(),
         })
     }
 
@@ -4096,7 +4243,43 @@ impl Handler {
     /// - Session commands (when `session_id` is `Some`)
     /// - KG switching with session binding updates
     /// - All other statements via `query_program()` or `query_program_with_session()`
+    ///
+    /// A one-statement program whose statement failed is an `Err`; a longer
+    /// program reports failed statements in `QueryResult::errors`.
     pub async fn execute_program(
+        &self,
+        session_id: Option<&SessionId>,
+        knowledge_graph: Option<String>,
+        program: String,
+        auth: Option<&crate::auth::AuthIdentity>,
+    ) -> Result<QueryResult, String> {
+        self.execute_program_status(session_id, knowledge_graph, program, auth)
+            .await
+            .map_err(|e| e.message)
+    }
+
+    /// `execute_program`, keeping the failed statement's `ErrorCode`.
+    pub async fn execute_program_status(
+        &self,
+        session_id: Option<&SessionId>,
+        knowledge_graph: Option<String>,
+        program: String,
+        auth: Option<&crate::auth::AuthIdentity>,
+    ) -> Result<QueryResult, ProgramError> {
+        let single_statement = program_statement_count(&program) == 1;
+        let result = self
+            .run_execute_program(session_id, knowledge_graph, program, auth)
+            .await?;
+        match result.errors.as_slice() {
+            [error] if single_statement => Err(ProgramError {
+                message: error.message.clone(),
+                code: Some(error.code),
+            }),
+            _ => Ok(result),
+        }
+    }
+
+    async fn run_execute_program(
         &self,
         session_id: Option<&SessionId>,
         knowledge_graph: Option<String>,
@@ -4458,29 +4641,10 @@ impl Handler {
         }
 
         // If a KG was dropped, clean up sessions and ACLs.
-        // Verified by checking the result message (drop sets a message, not switched_kg).
         if let Some(ref name) = kg_drop_name {
-            let drop_succeeded = result.rows.iter().any(|row| {
-                matches!(
-                    row.values.first(),
-                    Some(WireValue::String(s)) if s.contains("dropped")
-                )
-            });
-            if drop_succeeded {
+            if result.errors.is_empty() {
                 self.sessions.close_sessions_for_kg(name);
                 self.cleanup_kg_acls(name);
-            }
-        }
-
-        // Convert error-like messages to Err for the WS protocol.
-        // query_program() accumulates errors as Ok(message) for multi-statement compat,
-        // but the WS protocol sends one statement at a time, so errors should abort.
-        if result.schema.len() == 1 && result.schema[0].name == "message" && result.rows.len() == 1
-        {
-            if let Some(WireValue::String(ref msg)) = result.rows[0].values.first() {
-                if is_error_message(msg) {
-                    return Err(msg.clone());
-                }
             }
         }
 
@@ -4581,6 +4745,7 @@ impl Handler {
             switched_kg: None,
             proof_trees: None,
             timing_breakdown: None,
+            errors: Vec::new(),
         }
     }
 
@@ -4623,44 +4788,9 @@ impl Handler {
             .ok_or_else(|| "No knowledge graph selected".to_string())
     }
 
-    /// The engine reports many per-statement failures as message rows
-    /// inside an Ok result. Deny by default, exactly like the WS client's
-    /// classifier: an allowlist of failure phrases means any unfamiliar
-    /// phrasing reads as success, and reporting success for a statement
-    /// that did not execute is the failure this must never have.
+    /// Messages of the statements that failed in `result`.
     fn result_problem_rows(result: &QueryResult) -> Vec<String> {
-        const SUCCESS_MARKERS: [&str; 12] = [
-            "Inserted ",
-            "Deleted ",
-            "Updated ",
-            "Conditional delete:",
-            "Relation ",
-            "Rule ",
-            "Schema ",
-            "Knowledge graph ",
-            "Switched to knowledge graph",
-            "Registered ",
-            "Type ",
-            "No facts",
-        ];
-        if result.schema.len() != 1 || result.schema[0].name != "message" {
-            return Vec::new();
-        }
-        result
-            .rows
-            .iter()
-            .filter_map(|row| match row.values.first() {
-                Some(WireValue::String(s)) => Some(s.clone()),
-                _ => None,
-            })
-            .filter(|message| {
-                let trimmed = message.trim();
-                !trimmed.is_empty()
-                    && !SUCCESS_MARKERS
-                        .iter()
-                        .any(|marker| trimmed.starts_with(marker))
-            })
-            .collect()
+        result.errors.iter().map(|e| e.message.clone()).collect()
     }
 
     fn messages_result(messages: Vec<String>) -> QueryResult {
@@ -4685,6 +4815,7 @@ impl Handler {
             switched_kg: None,
             proof_trees: None,
             timing_breakdown: None,
+            errors: Vec::new(),
         }
     }
 
@@ -5263,6 +5394,7 @@ impl Handler {
             switched_kg: None,
             proof_trees: None,
             timing_breakdown: None,
+            errors: Vec::new(),
         })
     }
 
@@ -5507,6 +5639,21 @@ fn targets_internal_kg(stmt: &statement::Statement) -> bool {
     )
 }
 
+/// `code` for a storage error, `default` when its variant does not say.
+fn storage_error_code(error: &crate::storage::StorageError, default: ErrorCode) -> ErrorCode {
+    use crate::storage::StorageError;
+    match error {
+        StorageError::KnowledgeGraphNotFound(_) | StorageError::RelationNotFound(..) => {
+            ErrorCode::NotFound
+        }
+        StorageError::KnowledgeGraphExists(_)
+        | StorageError::CannotDropDefault
+        | StorageError::CannotDropCurrentKnowledgeGraph => ErrorCode::Conflict,
+        StorageError::InvalidRelationName(_) | StorageError::ParseError(_) => ErrorCode::Validation,
+        _ => default,
+    }
+}
+
 fn internal_kg_denied() -> String {
     format!(
         "Access denied: '{}' is a system knowledge graph",
@@ -5529,19 +5676,12 @@ fn format_term(term: &Term) -> String {
     term.to_string()
 }
 
-/// Check if a message from query_program() represents an error that should abort execution.
-/// Used by execute_program() to convert soft errors (Ok with message) to hard errors (Err)
-/// for the WebSocket protocol where each statement is a separate request.
-///
-/// Only matches errors that previously mapped to HTTP 4xx/5xx responses.
-/// Other errors (delete, insert validation) stay as messages (soft errors).
-fn is_error_message(msg: &str) -> bool {
-    // KG management errors (historically mapped to HTTP 400/404 responses)
-    msg == SUBSCRIPTION_WS_ONLY
-        || msg.starts_with("Cannot drop current knowledge graph")
-        || msg.starts_with("Create failed:")
-        || msg.starts_with("Drop failed:")
-        || (msg.starts_with("Knowledge graph") && msg.contains("not found"))
+/// Statements in `program`, counted the way `parse_program` splits them.
+fn program_statement_count(program: &str) -> usize {
+    join_continuation_lines(&strip_comments(program))
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count()
 }
 
 /// Extract meaningful column names from a query's head variables.

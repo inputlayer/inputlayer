@@ -293,6 +293,31 @@ impl ColumnDef {
     }
 }
 
+/// Why a statement failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorCode {
+    /// The input was rejected (schema, size limits, bad values or rules).
+    Validation,
+    /// The named KG, relation, rule or index does not exist.
+    NotFound,
+    /// The statement conflicts with current state (already exists, in use).
+    Conflict,
+    /// The statement cannot run on this path (client-only, WS-only).
+    Unsupported,
+    /// The engine failed to apply a valid statement.
+    Internal,
+}
+
+/// A failed statement of a program.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatementError {
+    /// 0-based statement index in the program.
+    pub index: usize,
+    pub code: ErrorCode,
+    pub message: String,
+}
+
 // Query Result
 /// Result of a query execution.
 ///
@@ -327,6 +352,9 @@ pub struct QueryResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub timing_breakdown: Option<crate::execution::TimingBreakdown>,
+    /// Statements that failed. A statement not listed here succeeded.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<StatementError>,
 }
 
 /// Provenance and audit metadata for a query result
@@ -375,6 +403,7 @@ impl QueryResult {
             switched_kg: None,
             proof_trees: None,
             timing_breakdown: None,
+            errors: Vec::new(),
         }
     }
 
@@ -390,6 +419,7 @@ impl QueryResult {
             switched_kg: None,
             proof_trees: None,
             timing_breakdown: None,
+            errors: Vec::new(),
         }
     }
 
@@ -411,6 +441,7 @@ impl QueryResult {
             switched_kg: None,
             proof_trees: None,
             timing_breakdown: None,
+            errors: Vec::new(),
         }
     }
 }
@@ -691,6 +722,7 @@ mod tests {
             switched_kg: None,
             proof_trees: None,
             timing_breakdown: None,
+            errors: Vec::new(),
         };
         assert_eq!(result.rows.len(), 0);
         assert_eq!(result.schema.len(), 1);

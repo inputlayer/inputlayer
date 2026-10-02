@@ -93,7 +93,8 @@ The `program` field accepts any valid InputLayer statement: queries, inserts, ru
   "row_count": 3,
   "total_count": 3,
   "truncated": false,
-  "execution_time_ms": 2
+  "execution_time_ms": 2,
+  "errors": []
 }
 ```
 
@@ -102,9 +103,27 @@ The `program` field accepts any valid InputLayer statement: queries, inserts, ru
 ```json
 {
   "type": "error",
-  "message": "Unknown relation 'edge'"
+  "message": "String value too long: 70000 bytes (max 65536)",
+  "code": "validation"
 }
 ```
+
+A program of one statement that fails gets an `error`. `code` says why: `validation`, `not_found`, `conflict`, `unsupported` or `internal`; it is absent for connection, auth and engine failures.
+
+### Statement Failures
+
+A multi-statement program keeps running past a failed statement and replies with a `result` (or `result_start`) whose `errors` lists each failure by 0-based statement index:
+
+```json
+{
+  "type": "result",
+  "columns": ["message"],
+  "rows": [["Inserted 1 fact(s) into 'a'."], ["Rule 'x' not found."]],
+  "errors": [{"index": 1, "code": "not_found", "message": "Rule 'x' not found."}]
+}
+```
+
+An empty `errors` means every statement succeeded. Do not match message text to detect failures.
 
 ## Knowledge Graph Operations
 

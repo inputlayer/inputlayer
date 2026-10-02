@@ -36,10 +36,12 @@ pub mod wire;
 pub use error::{InputLayerError, InputLayerResult};
 
 // Re-export wire types
-pub use wire::{ColumnDef, QueryResult, WireDataType, WireTuple, WireValue};
+pub use wire::{
+    ColumnDef, ErrorCode, QueryResult, StatementError, WireDataType, WireTuple, WireValue,
+};
 
 // Re-export handler
-pub use handler::Handler;
+pub use handler::{Handler, ProgramError};
 
 // Protocol Constants
 /// Default HTTP server port
