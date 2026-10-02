@@ -209,6 +209,10 @@ pub struct Handler {
     agent: Arc<crate::agent::AgentManager>,
     /// Standing-query counters (evaluations, active subscriptions).
     subscription_metrics: super::subscription::SubscriptionMetrics,
+    /// Login failure counters.
+    login_throttle: Arc<crate::auth::LoginThrottle>,
+    /// Caps concurrent argon2 verifications.
+    password_permits: Arc<tokio::sync::Semaphore>,
 }
 
 /// `.index` command implementations shared by `Handler` and `QueryJob`.
@@ -756,6 +760,8 @@ impl Handler {
                 crate::agent::AgentConfig::default(),
             )),
             subscription_metrics: super::subscription::SubscriptionMetrics::default(),
+            login_throttle: Arc::default(),
+            password_permits: Arc::new(tokio::sync::Semaphore::new((ncpu / 4).clamp(1, 4))),
         }
     }
 
@@ -794,6 +800,8 @@ impl Handler {
                 crate::agent::AgentConfig::default(),
             )),
             subscription_metrics: super::subscription::SubscriptionMetrics::default(),
+            login_throttle: Arc::default(),
+            password_permits: Arc::new(tokio::sync::Semaphore::new((ncpu / 4).clamp(1, 4))),
         }
     }
 
@@ -1027,76 +1035,61 @@ impl Handler {
             return;
         }
 
-        // Resolve credentials file path
         let credentials_path = self
             .config
             .http
             .auth
             .credentials_file
             .clone()
-            .unwrap_or_else(|| std::path::PathBuf::from(".inputlayer-credentials.toml"));
+            .unwrap_or_else(|| self.config.storage.data_dir.join("credentials.toml"));
+        let persisted = auth::PersistedCredentials::load(&credentials_path).unwrap_or_default();
 
-        // Try to load persisted credentials
-        let persisted = auth::PersistedCredentials::load(&credentials_path);
-
-        // Determine admin password: env var > config > persisted file > generate new
-        let env_password = std::env::var("INPUTLAYER_ADMIN_PASSWORD").ok();
-        let env_api_key = std::env::var("INPUTLAYER_BOOTSTRAP_API_KEY")
+        // Precedence: env var / config > persisted file > generated. Supplied
+        // secrets are never written to disk.
+        let supplied_password = std::env::var("INPUTLAYER_ADMIN_PASSWORD")
+            .ok()
+            .or_else(|| self.config.http.auth.bootstrap_admin_password.clone());
+        let supplied_api_key = std::env::var("INPUTLAYER_BOOTSTRAP_API_KEY")
             .ok()
             .filter(|k| !k.is_empty());
+        let mut to_persist = auth::PersistedCredentials::default();
+        let mut generated = false;
+        let mut resolve =
+            |supplied: Option<String>, persisted: Option<String>, slot: &mut Option<String>| {
+                if let Some(value) = supplied {
+                    return value;
+                }
+                let value = persisted.unwrap_or_else(|| {
+                    generated = true;
+                    auth::generate_api_key()
+                });
+                *slot = Some(value.clone());
+                value
+            };
+        let password = resolve(
+            supplied_password,
+            persisted.admin_password,
+            &mut to_persist.admin_password,
+        );
+        let api_key = resolve(supplied_api_key, persisted.api_key, &mut to_persist.api_key);
 
-        let (password, api_key, is_new_credentials) =
-            if env_password.is_some() || env_api_key.is_some() {
-                // Env vars take priority - use them (with fallback to persisted/generated for the other)
-                let pw = env_password
-                    .or_else(|| persisted.as_ref().map(|p| p.admin_password.clone()))
-                    .or_else(|| self.config.http.auth.bootstrap_admin_password.clone())
-                    .unwrap_or_else(auth::generate_api_key);
-                let key = env_api_key
-                    .or_else(|| persisted.as_ref().map(|p| p.api_key.clone()))
-                    .unwrap_or_else(auth::generate_api_key);
-                (pw, key, persisted.is_none())
-            } else if let Some(creds) = persisted {
-                // Reuse persisted credentials
-                info!(
-                    "Auth bootstrap: reusing credentials from {}",
+        if generated {
+            if let Err(e) = to_persist.save(&credentials_path) {
+                warn!(
+                    error = %e,
+                    path = %credentials_path.display(),
+                    "Failed to save credentials file"
+                );
+                eprintln!(
+                    "ERROR: cannot save generated credentials to {}: {e}. Admin user not created.",
                     credentials_path.display()
                 );
-                (creds.admin_password, creds.api_key, false)
-            } else {
-                // First boot: generate new credentials
-                let pw = self
-                    .config
-                    .http
-                    .auth
-                    .bootstrap_admin_password
-                    .clone()
-                    .unwrap_or_else(auth::generate_api_key);
-                let key = auth::generate_api_key();
-                (pw, key, true)
-            };
-
-        // Persist credentials to file (if newly generated)
-        if is_new_credentials {
-            let to_persist = auth::PersistedCredentials {
-                admin_password: password.clone(),
-                api_key: api_key.clone(),
-            };
-            match to_persist.save(&credentials_path) {
-                Ok(()) => {
-                    info!(
-                        "Auth bootstrap: credentials saved to {}",
-                        credentials_path.display()
-                    );
-                }
-                Err(e) => {
-                    warn!(
-                        error = %e,
-                        path = %credentials_path.display(),
-                        "Failed to save credentials file"
-                    );
-                }
+                return;
             }
+            info!(
+                "Auth bootstrap: credentials saved to {}",
+                credentials_path.display()
+            );
 
             // Print masked API key to stderr to avoid leaking credentials into logs.
             // Full credentials are available in the credentials file.
@@ -1111,12 +1104,17 @@ impl Handler {
             eprintln!("==========================================");
             eprintln!();
             eprintln!(
-                "Full credentials (API key and password) saved to: {}",
+                "Generated credentials saved to: {}",
                 credentials_path.display()
             );
             eprintln!("Retrieve them with:  cat {}", credentials_path.display());
             eprintln!("Delete this file to generate new credentials on next boot.");
             eprintln!();
+        } else if to_persist != auth::PersistedCredentials::default() {
+            info!(
+                "Auth bootstrap: reusing credentials from {}",
+                credentials_path.display()
+            );
         }
 
         let hash = match auth::hash_password(&password) {
@@ -1154,8 +1152,8 @@ impl Handler {
         }
     }
 
-    /// Authenticate a user by username and password.
-    /// Returns `AuthIdentity` on success, error message on failure.
+    /// Authenticate a user by username and password. Synchronous and
+    /// CPU-heavy (argon2); servers should call [`Handler::login`].
     pub fn authenticate_user(
         &self,
         username: &str,
@@ -1170,37 +1168,61 @@ impl Handler {
             .map_err(|_| "Authentication service unavailable".to_string())?;
         drop(storage);
 
-        let empty_vec = crate::value::Relation::new();
-        let users = snapshot.input_tuples.get("users").unwrap_or(&empty_vec);
+        let user = snapshot.input_tuples.get("users").and_then(|users| {
+            users.iter().find_map(|tuple| match tuple.values() {
+                [u, h, r, ..] if u.as_str() == Some(username) => Some((h.as_str()?, r.as_str()?)),
+                _ => None,
+            })
+        });
+        let verified = auth::verify_password_or_dummy(password, user.map(|(hash, _)| hash));
+        match user {
+            Some((_, role)) if verified => Ok(auth::AuthIdentity {
+                username: username.to_string(),
+                role: auth::Role::from_str(role)?,
+            }),
+            _ => Err("Invalid credentials".to_string()),
+        }
+    }
 
-        for tuple in users {
-            let vals = tuple.values();
-            if vals.len() >= 3 {
-                if let (Some(u), Some(h), Some(r)) =
-                    (vals[0].as_str(), vals[1].as_str(), vals[2].as_str())
-                {
-                    if u == username {
-                        if auth::verify_password(password, h) {
-                            let role = auth::Role::from_str(r)?;
-                            tracing::info!(
-                                username,
-                                role = %role,
-                                "audit_auth_login_success"
-                            );
-                            return Ok(auth::AuthIdentity {
-                                username: username.to_string(),
-                                role,
-                            });
-                        }
-                        tracing::warn!(username, "audit_auth_login_failed");
-                        return Err("Invalid credentials".to_string());
-                    }
-                }
+    /// Password login from `peer`: throttled per IP and username, with
+    /// argon2 on the blocking pool behind a small semaphore.
+    pub async fn login(
+        self: &Arc<Self>,
+        username: &str,
+        password: &str,
+        peer: std::net::IpAddr,
+    ) -> Result<crate::auth::AuthIdentity, String> {
+        if let Err(wait) = self.login_throttle.begin(peer, username) {
+            let retry_secs = wait.as_secs().max(1);
+            warn!(username, %peer, retry_secs, "audit_auth_login_throttled");
+            return Err(format!(
+                "Too many failed login attempts; retry in {retry_secs}s"
+            ));
+        }
+        let unavailable = || "Authentication service unavailable".to_string();
+        let permit = Arc::clone(&self.password_permits)
+            .acquire_owned()
+            .await
+            .map_err(|_| unavailable())?;
+        let handler = Arc::clone(self);
+        let (user, pass) = (username.to_string(), password.to_string());
+        let result = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            handler.authenticate_user(&user, &pass)
+        })
+        .await
+        .unwrap_or_else(|_| Err(unavailable()));
+        match &result {
+            Ok(identity) => {
+                self.login_throttle.succeed(peer, username);
+                info!(username, role = %identity.role, %peer, "audit_auth_login_success");
+            }
+            Err(_) => {
+                self.login_throttle.fail(peer, username);
+                warn!(username, %peer, "audit_auth_login_failed");
             }
         }
-
-        tracing::warn!(username, "audit_auth_login_unknown_user");
-        Err("Invalid credentials".to_string())
+        result
     }
 
     /// Authenticate an API key.

@@ -8,12 +8,14 @@ pub mod dto;
 pub mod error;
 pub mod handlers;
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use axum::{
     body::Body,
-    http::{Request, StatusCode},
+    extract::ConnectInfo,
+    http::{HeaderMap, Request, StatusCode},
     middleware::{self, Next},
     response::{Html, IntoResponse, Response},
     routing::get,
@@ -25,7 +27,7 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use tracing::{info, warn};
 
-use crate::config::HttpConfig;
+use crate::config::{HttpConfig, IpNet};
 use crate::protocol::Handler;
 
 use self::handlers::{admin, ws};
@@ -101,28 +103,73 @@ async fn api_version_middleware(req: Request<Body>, next: Next) -> Response {
     response
 }
 
+/// The client's IP: the TCP peer, or the forwarded client when the peer is a
+/// trusted proxy. Set on every request by [`ip_rate_limit_middleware`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClientIp(pub IpAddr);
+
+/// Resolve the client IP. Forwarded headers count only when `peer` is a
+/// trusted proxy; then the rightmost untrusted `X-Forwarded-For` hop wins.
+fn client_ip(peer: Option<IpAddr>, headers: &HeaderMap, trusted: &[IpNet]) -> IpAddr {
+    let Some(peer) = peer.map(|ip| ip.to_canonical()) else {
+        return IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+    };
+    let is_trusted = |ip: IpAddr| trusted.iter().any(|net| net.contains(ip));
+    if !is_trusted(peer) {
+        return peer;
+    }
+    let hops: Vec<IpAddr> = headers
+        .get_all("x-forwarded-for")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(','))
+        .map_while(|hop| hop.trim().parse::<IpAddr>().ok())
+        .collect();
+    if let Some(first) = hops.first() {
+        return hops
+            .iter()
+            .rev()
+            .copied()
+            .find(|ip| !is_trusted(*ip))
+            .unwrap_or(*first);
+    }
+    headers
+        .get("x-real-ip")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.trim().parse::<IpAddr>().ok())
+        .unwrap_or(peer)
+}
+
+/// Interval between sweeps of idle [`IpRateLimiter`] entries.
+const RATE_LIMIT_PRUNE_INTERVAL: Duration = Duration::from_secs(10);
+
 /// Per-IP rate limiter state (#27).
 /// Uses a simple sliding window: (window_start, request_count).
 #[derive(Clone)]
 pub struct IpRateLimiter {
-    map: Arc<dashmap::DashMap<std::net::IpAddr, (std::time::Instant, u32)>>,
+    map: Arc<dashmap::DashMap<IpAddr, (Instant, u32)>>,
     max_rps: u32,
+    trusted_proxies: Arc<[IpNet]>,
+    last_prune: Arc<parking_lot::Mutex<Instant>>,
 }
 
 impl IpRateLimiter {
-    fn new(max_rps: u32) -> Self {
+    fn new(max_rps: u32, trusted_proxies: &[IpNet]) -> Self {
         Self {
             map: Arc::new(dashmap::DashMap::new()),
             max_rps,
+            trusted_proxies: trusted_proxies.into(),
+            last_prune: Arc::new(parking_lot::Mutex::new(Instant::now())),
         }
     }
 
     /// Returns true if the request should be allowed.
-    fn check(&self, ip: std::net::IpAddr) -> bool {
+    fn check(&self, ip: IpAddr) -> bool {
         if self.max_rps == 0 {
             return true;
         }
-        let now = std::time::Instant::now();
+        let now = Instant::now();
+        self.prune(now);
         let mut entry = self.map.entry(ip).or_insert((now, 0));
         let (window_start, count) = entry.value_mut();
         if now.duration_since(*window_start).as_secs() >= 1 {
@@ -137,37 +184,84 @@ impl IpRateLimiter {
             false
         }
     }
+
+    /// Drop entries whose window has expired.
+    fn prune(&self, now: Instant) {
+        let Some(mut last) = self.last_prune.try_lock() else {
+            return;
+        };
+        if now.duration_since(*last) >= RATE_LIMIT_PRUNE_INTERVAL {
+            *last = now;
+            drop(last);
+            self.map
+                .retain(|_, (start, _)| now.duration_since(*start) < Duration::from_secs(1));
+        }
+    }
 }
 
-/// Middleware: Per-IP rate limiting (#27).
+/// Middleware: Resolve [`ClientIp`] and apply per-IP rate limiting (#27).
 async fn ip_rate_limit_middleware(
     Extension(limiter): Extension<IpRateLimiter>,
-    req: Request<Body>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+    mut req: Request<Body>,
     next: Next,
 ) -> Response {
-    if limiter.max_rps == 0 {
-        return next.run(req).await;
-    }
-
-    // Extract client IP from X-Forwarded-For, X-Real-IP, or ConnectInfo
-    let ip = req
-        .headers()
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.split(',').next())
-        .and_then(|s| s.trim().parse::<std::net::IpAddr>().ok())
-        .or_else(|| {
-            req.headers()
-                .get("x-real-ip")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.trim().parse::<std::net::IpAddr>().ok())
-        })
-        .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
+    let peer = connect_info.map(|ConnectInfo(addr)| addr.ip());
+    let ip = client_ip(peer, req.headers(), &limiter.trusted_proxies);
+    req.extensions_mut().insert(ClientIp(ip));
 
     if limiter.check(ip) {
         next.run(req).await
     } else {
         (StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded").into_response()
+    }
+}
+
+/// Per-IP cap on unauthenticated WebSocket connections.
+#[derive(Clone)]
+pub struct PreAuthSlots {
+    counts: Arc<dashmap::DashMap<IpAddr, usize>>,
+    max_per_ip: usize,
+}
+
+impl PreAuthSlots {
+    fn new(max_per_ip: usize) -> Self {
+        Self {
+            counts: Arc::new(dashmap::DashMap::new()),
+            max_per_ip,
+        }
+    }
+
+    /// Take a slot for `ip`, or `None` if it already holds the maximum.
+    pub fn try_acquire(&self, ip: IpAddr) -> Option<PreAuthSlot> {
+        if self.max_per_ip > 0 {
+            let mut count = self.counts.entry(ip).or_insert(0);
+            if *count >= self.max_per_ip {
+                return None;
+            }
+            *count += 1;
+        }
+        Some(PreAuthSlot {
+            slots: self.clone(),
+            ip,
+        })
+    }
+}
+
+/// A held pre-auth slot, released on drop.
+pub struct PreAuthSlot {
+    slots: PreAuthSlots,
+    ip: IpAddr,
+}
+
+impl Drop for PreAuthSlot {
+    fn drop(&mut self) {
+        if self.slots.max_per_ip > 0 {
+            self.slots.counts.remove_if_mut(&self.ip, |_, count| {
+                *count -= 1;
+                *count == 0
+            });
+        }
     }
 }
 
@@ -278,7 +372,11 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
         } else {
             None
         };
-    api_app = api_app.layer(Extension(WsSemaphore(ws_semaphore)));
+    api_app = api_app
+        .layer(Extension(WsSemaphore(ws_semaphore)))
+        .layer(Extension(PreAuthSlots::new(
+            config.rate_limit.ws_max_preauth_per_ip,
+        )));
 
     // Outer router: API routes + GUI static files.
     // GUI static files are served as a fallback (no auth required).
@@ -296,7 +394,7 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
     app = app.layer(middleware::from_fn(api_version_middleware));
 
     // Per-IP rate limiting (#27)
-    let ip_limiter = IpRateLimiter::new(config.rate_limit.per_ip_max_rps);
+    let ip_limiter = IpRateLimiter::new(config.rate_limit.per_ip_max_rps, &config.trusted_proxies);
     app = app
         .layer(middleware::from_fn(ip_rate_limit_middleware))
         .layer(Extension(ip_limiter));
@@ -402,9 +500,12 @@ pub async fn start_http_server(
     socket.set_reuseaddr(true)?;
     socket.bind(addr)?;
     let listener = socket.listen(1024)?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
 
     // Signal reaper to stop
     let _ = shutdown_tx.send(true);
@@ -701,5 +802,133 @@ mod tests {
             StatusCode::UNAUTHORIZED,
             "Unauthenticated request to /metrics must get 401"
         );
+    }
+
+    fn headers(pairs: &[(&'static str, &str)]) -> HeaderMap {
+        let mut map = HeaderMap::new();
+        for (name, value) in pairs {
+            map.append(*name, value.parse().unwrap());
+        }
+        map
+    }
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn test_client_ip_ignores_headers_from_untrusted_peer() {
+        let h = headers(&[("x-forwarded-for", "1.2.3.4"), ("x-real-ip", "5.6.7.8")]);
+        assert_eq!(client_ip(Some(ip("9.9.9.9")), &h, &[]), ip("9.9.9.9"));
+        let trusted: Vec<IpNet> = vec!["10.0.0.0/8".parse().unwrap()];
+        assert_eq!(client_ip(Some(ip("9.9.9.9")), &h, &trusted), ip("9.9.9.9"));
+        assert_eq!(client_ip(None, &h, &trusted), ip("0.0.0.0"));
+    }
+
+    #[test]
+    fn test_client_ip_from_trusted_proxy() {
+        let trusted: Vec<IpNet> = vec!["10.0.0.0/8".parse().unwrap()];
+        let peer = Some(ip("10.0.0.1"));
+        // Rightmost untrusted hop: a client-supplied left entry is ignored.
+        let h = headers(&[("x-forwarded-for", "6.6.6.6, 1.2.3.4, 10.0.0.2")]);
+        assert_eq!(client_ip(peer, &h, &trusted), ip("1.2.3.4"));
+        let h = headers(&[
+            ("x-forwarded-for", "6.6.6.6"),
+            ("x-forwarded-for", "1.2.3.4"),
+        ]);
+        assert_eq!(client_ip(peer, &h, &trusted), ip("1.2.3.4"));
+        let h = headers(&[("x-forwarded-for", "10.0.0.3, 10.0.0.2")]);
+        assert_eq!(client_ip(peer, &h, &trusted), ip("10.0.0.3"));
+        let h = headers(&[("x-real-ip", "1.2.3.4")]);
+        assert_eq!(client_ip(peer, &h, &trusted), ip("1.2.3.4"));
+        let h = headers(&[("x-forwarded-for", "garbage")]);
+        assert_eq!(client_ip(peer, &h, &trusted), ip("10.0.0.1"));
+        assert_eq!(client_ip(peer, &HeaderMap::new(), &trusted), ip("10.0.0.1"));
+    }
+
+    async fn status_with_xff(app: Router, xff: &str) -> StatusCode {
+        let req = Request::builder()
+            .uri("/health")
+            .header("x-forwarded-for", xff)
+            .body(Body::empty())
+            .unwrap();
+        app.oneshot(req).await.unwrap().status()
+    }
+
+    /// Regression: rotating `X-Forwarded-For` bypassed the per-IP limit.
+    #[tokio::test]
+    async fn test_rotating_forwarded_for_does_not_bypass_rate_limit() {
+        use axum::extract::connect_info::MockConnectInfo;
+        let (handler, _tmp) = make_handler();
+        let mut config = make_default_config();
+        config.rate_limit.per_ip_max_rps = 2;
+        let peer = SocketAddr::from(([192, 0, 2, 1], 4000));
+        let app = create_router(handler, &config).layer(MockConnectInfo(peer));
+        assert_eq!(
+            status_with_xff(app.clone(), "1.1.1.1").await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status_with_xff(app.clone(), "2.2.2.2").await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status_with_xff(app, "3.3.3.3").await,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+    }
+
+    #[tokio::test]
+    async fn test_trusted_proxy_forwarded_for_gets_own_bucket() {
+        use axum::extract::connect_info::MockConnectInfo;
+        let (handler, _tmp) = make_handler();
+        let mut config = make_default_config();
+        config.rate_limit.per_ip_max_rps = 1;
+        config.trusted_proxies = vec!["192.0.2.0/24".parse().unwrap()];
+        let peer = SocketAddr::from(([192, 0, 2, 1], 4000));
+        let app = create_router(handler, &config).layer(MockConnectInfo(peer));
+        assert_eq!(
+            status_with_xff(app.clone(), "1.1.1.1").await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status_with_xff(app.clone(), "2.2.2.2").await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status_with_xff(app, "1.1.1.1").await,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+    }
+
+    #[test]
+    fn test_rate_limiter_prunes_idle_entries() {
+        let limiter = IpRateLimiter::new(10, &[]);
+        for i in 0..100u8 {
+            assert!(limiter.check(IpAddr::from([198, 51, 100, i])));
+        }
+        assert_eq!(limiter.map.len(), 100);
+        for mut entry in limiter.map.iter_mut() {
+            entry.value_mut().0 -= Duration::from_secs(2);
+        }
+        *limiter.last_prune.lock() -= RATE_LIMIT_PRUNE_INTERVAL;
+        assert!(limiter.check(ip("203.0.113.1")));
+        assert_eq!(limiter.map.len(), 1);
+    }
+
+    #[test]
+    fn test_preauth_slots_cap_and_release() {
+        let slots = PreAuthSlots::new(2);
+        let a = ip("192.0.2.1");
+        let first = slots.try_acquire(a).unwrap();
+        let second = slots.try_acquire(a).unwrap();
+        assert!(slots.try_acquire(a).is_none());
+        assert!(slots.try_acquire(ip("192.0.2.2")).is_some());
+        drop(first);
+        let third = slots.try_acquire(a).unwrap();
+        drop(third);
+        drop(second);
+        assert!(slots.counts.is_empty(), "released IPs leave no entry");
+        assert!(PreAuthSlots::new(0).try_acquire(a).is_some());
     }
 }

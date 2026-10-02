@@ -107,7 +107,7 @@ volumes:
 ## Security Recommendations
 
 1. **Bind to localhost**: Set `host = "127.0.0.1"` in config to prevent direct access
-2. **Trust proxy headers**: InputLayer reads `X-Forwarded-For` and `X-Real-IP` for rate limiting
+2. **Trust proxy headers**: Set `trusted_proxies = ["127.0.0.1"]` (IPs or CIDRs) under `[http]` so InputLayer reads `X-Forwarded-For` / `X-Real-IP` from your proxy. Otherwise the TCP peer is the client IP
 3. **Disable CORS in production**: Only enable `cors_allow_all` for development
 4. **Use strong TLS**: Minimum TLS 1.2, prefer TLS 1.3
 5. **Rate limit at proxy level too**: Defense-in-depth with both proxy and InputLayer rate limits

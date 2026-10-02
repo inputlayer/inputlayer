@@ -159,7 +159,7 @@ components:
     apiKey:
       type: http
       scheme: bearer
-      description: API key from .inputlayer-credentials.toml
+      description: API key from credentials.toml in the data directory
 
   schemas:
     HealthResponse:

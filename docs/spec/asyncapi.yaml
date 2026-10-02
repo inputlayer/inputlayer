@@ -23,6 +23,9 @@ info:
     After WebSocket upgrade, the client must authenticate before any other operation.
     Send a `login` message (username/password) or an `authenticate` message (API key).
     On success the server responds with `authenticated`; on failure with `auth_error`.
+    The server closes the socket after 3 failed attempts, or if the client has not
+    authenticated within `http.ws_auth_timeout_ms` (default 5 s). Repeated failed logins
+    per IP or username are throttled with exponential backoff.
 
     ## Message Flow
 
