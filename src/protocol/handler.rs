@@ -2260,6 +2260,17 @@ impl Handler {
     }
 }
 
+/// Fails a conditional mutation whose match query hit `max_result_rows`,
+/// rather than applying it to an arbitrary subset of the matches.
+fn reject_row_capped_mutation(kind: &str) -> Result<(), String> {
+    if crate::last_result_truncated() {
+        return Err(format!(
+            "Conditional {kind} matches more rows than max_result_rows; narrow the condition or raise the limit"
+        ));
+    }
+    Ok(())
+}
+
 impl QueryJob {
     /// Execute an IQL program synchronously on the current thread.
     /// Called from `Handler::query_program` via `tokio::task::spawn_blocking`
@@ -2632,6 +2643,7 @@ impl QueryJob {
                                                 &query_rule,
                                             )
                                             .map_err(|e| e.to_string())?;
+                                        reject_row_capped_mutation("delete")?;
 
                                         let mut deleted = 0;
 
@@ -2815,6 +2827,7 @@ impl QueryJob {
                                 let results = storage
                                     .execute_query_with_rules_tuples_on(&kg_name, &query_rule)
                                     .map_err(|e| e.to_string())?;
+                                reject_row_capped_mutation("update")?;
 
                                 let mut deleted = 0;
                                 let mut inserted = 0;
@@ -3584,6 +3597,7 @@ impl QueryJob {
                 )
                 .map_err(|e| format!("Query execution failed: {e}"))?
         };
+        let row_capped = crate::last_result_truncated();
         let query_exec_ms = query_exec_start.elapsed().as_millis() as u64;
         info!(
             program_len,
@@ -3663,7 +3677,7 @@ impl QueryJob {
         // Apply pagination (offset then limit)
         let total_count = rows.len();
         let rows = apply_pagination(rows, query_limit, query_offset);
-        let truncated = rows.len() < total_count;
+        let truncated = row_capped || rows.len() < total_count;
 
         info!(
             program_len,
@@ -3828,6 +3842,7 @@ impl Handler {
                     timing_mode,
                 )
                 .map_err(|e| format!("Query execution failed: {e}"))?;
+            let row_capped = crate::last_result_truncated();
 
             // Record timing in Prometheus histograms
             if let Some(ref tb) = timing_breakdown {
@@ -3850,11 +3865,11 @@ impl Handler {
             crate::code_generator::set_query_cancel_flag(None);
             drop(permit); // Release semaphore slot
 
-            Ok::<_, String>((results, baseline, timing_breakdown))
+            Ok::<_, String>((results, row_capped, baseline, timing_breakdown))
         });
 
         // Apply timeout if configured
-        let (results, baseline, timing_breakdown) = if timeout_ms > 0 {
+        let (results, row_capped, baseline, timing_breakdown) = if timeout_ms > 0 {
             match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), blocking_task)
                 .await
             {
@@ -3976,7 +3991,7 @@ impl Handler {
         // Apply pagination (offset then limit)
         let total_count = rows.len();
         let rows = apply_pagination(rows, query_limit, query_offset);
-        let truncated = rows.len() < total_count;
+        let truncated = row_capped || rows.len() < total_count;
 
         Ok(QueryResult {
             rows,

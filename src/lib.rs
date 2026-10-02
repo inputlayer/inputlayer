@@ -287,6 +287,7 @@ pub use recursion::{
     StratificationResult,
 };
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::time::Instant;
 use tracing::info;
@@ -294,6 +295,16 @@ use tracing::info;
 /// Query result, all derived relations, and optional timing breakdown.
 pub type ExecutionOutput =
     Result<(Vec<Tuple>, RelationMap, Option<execution::TimingBreakdown>), String>;
+
+thread_local! {
+    static RESULT_TRUNCATED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether the last [`IQLEngine::execute_tuples_profiled`] run on this thread
+/// cut its result at `max_result_rows`.
+pub fn last_result_truncated() -> bool {
+    RESULT_TRUNCATED.get()
+}
 
 /// Main IQL engine that orchestrates the entire pipeline
 pub struct IQLEngine {
@@ -331,7 +342,8 @@ pub struct IQLEngine {
     /// Number of worker threads for parallel execution (1 = single-worker)
     num_workers: usize,
 
-    /// Maximum result rows returned per query (0 = unlimited)
+    /// Maximum rows in the final query result (0 = unlimited). Intermediate
+    /// relations are never cut.
     max_result_rows: usize,
 
     /// Maximum query cost score (0 = unlimited). Queries exceeding this
@@ -420,7 +432,7 @@ impl IQLEngine {
         self.optimization_config = config;
     }
 
-    /// Set maximum result rows (0 = unlimited)
+    /// Set the final result row cap (0 = unlimited)
     pub fn set_max_result_rows(&mut self, max: usize) {
         self.max_result_rows = max;
     }
@@ -1080,7 +1092,6 @@ impl IQLEngine {
         };
 
         let mut codegen = CodeGenerator::new();
-        codegen.set_max_result_rows(self.max_result_rows);
         codegen.set_semiring_type(semiring);
         self.load_inputs_into_codegen(&mut codegen, accumulated);
         codegen
@@ -1343,6 +1354,7 @@ impl IQLEngine {
         parse_us: u64,
         source_len: usize,
     ) -> ExecutionOutput {
+        RESULT_TRUNCATED.set(false);
         let debug = std::env::var("INPUTLAYER_DEBUG").is_ok();
         let exec_start = Instant::now();
         let parse_ms = parse_us / 1000;
@@ -1443,6 +1455,21 @@ impl IQLEngine {
         let execution_groups = Self::execution_groups(&unoptimized_ir_nodes, &rule_heads);
         let query_idx = self.ir_nodes.len() - 1;
         let mut last_result: Vec<Tuple> = Vec::new();
+        // The final rule may stop early (one row past the cap, to detect
+        // truncation) only when it is non-recursive and no other rule reads it.
+        let query_stops_early = self.max_result_rows > 0
+            && recursive_info.get(query_idx).is_some_and(Option::is_none)
+            && rule_heads.get(query_idx).is_some_and(|head| {
+                unoptimized_ir_nodes
+                    .iter()
+                    .enumerate()
+                    .filter(|&(j, _)| j != query_idx)
+                    .all(|(_, ir)| {
+                        let mut scans = Vec::new();
+                        Self::collect_scan_relations(ir, &mut scans);
+                        !scans.contains(head)
+                    })
+            });
 
         for group in &execution_groups {
             if let [i] = group.as_slice() {
@@ -1474,7 +1501,10 @@ impl IQLEngine {
                 accumulated_results.extend(hnsw_inputs);
 
                 // Create fresh CodeGenerator for each rule (avoids timely state issues)
-                let codegen = self.rule_codegen(&[i], &accumulated_results);
+                let mut codegen = self.rule_codegen(&[i], &accumulated_results);
+                if i == query_idx && query_stops_early {
+                    codegen.set_max_result_rows(self.max_result_rows.saturating_add(1));
+                }
                 for name in &hnsw_names {
                     accumulated_results.remove(name);
                 }
@@ -1571,6 +1601,16 @@ impl IQLEngine {
             }
         }
 
+        if self.max_result_rows > 0 && last_result.len() > self.max_result_rows {
+            last_result.truncate(self.max_result_rows);
+            RESULT_TRUNCATED.set(true);
+            info!(
+                source_len,
+                max_result_rows = self.max_result_rows,
+                "engine_result_truncated"
+            );
+        }
+
         info!(
             source_len,
             total_ms = exec_start.elapsed().as_millis() as u64,
@@ -1608,7 +1648,6 @@ impl IQLEngine {
             let head_name = rule_heads.get(i).cloned().unwrap_or_default();
 
             let mut codegen = CodeGenerator::new();
-            codegen.set_max_result_rows(self.max_result_rows);
             // Set per-rule semiring type from boolean specialization
             let semiring = self
                 .semiring_annotations
@@ -3137,5 +3176,76 @@ mod tests {
             .parse("a(X) <- base(X), !b(X)\nb(X) <- base(X), !a(X)")
             .unwrap_err();
         assert!(err.contains("Unstratified negation"), "{err}");
+    }
+
+    fn limited_engine(limit: usize) -> IQLEngine {
+        let mut engine = IQLEngine::new();
+        engine.set_max_result_rows(limit);
+        engine.add_tuples(
+            "e",
+            (0..10)
+                .map(|i| Tuple::new(vec![Value::Int64(i), Value::Int64(100 + i)]))
+                .collect(),
+        );
+        engine
+    }
+
+    /// Regression: the row cap applies only to the final result. An
+    /// intermediate relation over the cap stays whole, and hitting the cap
+    /// never trips the request's cancel flag.
+    #[test]
+    fn test_result_limit_spares_intermediates() {
+        let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        code_generator::set_query_cancel_flag(Some(Arc::clone(&flag)));
+        let filtered = limited_engine(3)
+            .execute_tuples("big(X, Y) <- e(X, Y)\n__query__(Y) <- big(X, Y), X = 7");
+        let filtered_truncated = last_result_truncated();
+        let counted = limited_engine(3)
+            .execute_tuples("big(X, Y) <- e(X, Y)\n__query__(count<X>) <- big(X, Y)");
+        let cancelled = flag.load(std::sync::atomic::Ordering::Relaxed);
+        code_generator::set_query_cancel_flag(None);
+
+        assert_eq!(filtered.unwrap(), vec![Tuple::new(vec![Value::Int64(107)])]);
+        assert!(!filtered_truncated);
+        assert_eq!(counted.unwrap(), vec![Tuple::new(vec![Value::Int64(10)])]);
+        assert!(!cancelled, "row cap must not signal cancel");
+    }
+
+    /// A final result over the cap is cut to the cap and flagged.
+    #[test]
+    fn test_result_limit_truncates_final_result() {
+        let rows = limited_engine(3).execute_tuples("__query__(X, Y) <- e(X, Y)");
+        assert_eq!(rows.unwrap().len(), 3);
+        assert!(last_result_truncated());
+
+        let rows = limited_engine(10).execute_tuples("__query__(X, Y) <- e(X, Y)");
+        assert_eq!(rows.unwrap().len(), 10);
+        assert!(!last_result_truncated(), "exactly at the cap is complete");
+
+        let rows = limited_engine(3).execute_tuples("__query__(X, Y) <- e(X, Y), X = 1");
+        assert_eq!(rows.unwrap().len(), 1);
+        assert!(!last_result_truncated());
+    }
+
+    /// The last rule is cut only in the returned result when another rule
+    /// reads it.
+    #[test]
+    fn test_result_limit_keeps_last_rule_readers_whole() {
+        let (rows, derived) = limited_engine(3)
+            .execute_tuples_with_derived("a(X) <- b(X)\nb(X) <- e(X, _Y)")
+            .unwrap();
+        assert_eq!(rows.len(), 3);
+        assert!(last_result_truncated());
+        assert_eq!(derived["a"].len(), 10);
+    }
+
+    /// A recursive final rule is computed to its fixpoint, then cut.
+    #[test]
+    fn test_result_limit_recursive_final_rule() {
+        let rows = limited_engine(3)
+            .execute_tuples("p(X, Y) <- e(X, Y)\np(X, Z) <- p(X, Y), e(Y, Z)")
+            .unwrap();
+        assert_eq!(rows.len(), 3);
+        assert!(last_result_truncated());
     }
 }
