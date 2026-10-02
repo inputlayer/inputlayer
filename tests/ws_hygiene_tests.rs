@@ -42,6 +42,7 @@ async fn start_server() -> Server {
     config.http.auth.credentials_file = Some(tmp.path().join("credentials.toml"));
     config.http.rate_limit.ws_max_messages_per_sec = 0;
     config.http.gui.enabled = false;
+    config.storage.performance.slow_query_log_ms = 1;
     let handler = Arc::new(Handler::from_config(config).unwrap());
     handler.bootstrap_auth();
     handler.get_storage().create_knowledge_graph(KG).unwrap();
@@ -159,6 +160,8 @@ async fn info_logs_carry_no_credentials_or_session_ids() {
     for program in [
         ".user create bob bobs-pw-123 viewer",
         ".user password bob bobs-new-pw-456",
+        ".USER create carol carols-pw-789 viewer",
+        ".User Password carol carols-new-pw-012",
     ] {
         let exec = json!({"type": "execute", "program": program});
         ws.send(Message::Text(exec.to_string())).await.unwrap();
@@ -177,7 +180,13 @@ async fn info_logs_carry_no_credentials_or_session_ids() {
     assert!(out.contains("ws_execute_start"), "{out}");
     assert!(out.contains(".user create <redacted>"), "{out}");
     assert!(out.contains(".user password <redacted>"), "{out}");
-    for secret in ["bobs-pw-123", "bobs-new-pw-456", PASSWORD] {
+    for secret in [
+        "bobs-pw-123",
+        "bobs-new-pw-456",
+        "carols-pw-789",
+        "carols-new-pw-012",
+        PASSWORD,
+    ] {
         assert!(!out.contains(secret), "logged {secret}: {out}");
     }
     assert!(!out.contains("session_id"), "{out}");

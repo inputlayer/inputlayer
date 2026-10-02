@@ -381,7 +381,7 @@ async fn handle_global_ws_connection(
     if let Ok(json) = serde_json::to_string(&authenticated) {
         if sender.send(Message::Text(json)).await.is_err() {
             if let Err(e) = handler.close_session(&session_id) {
-                tracing::warn!(session_id = %session_id, error = %e, "session_cleanup_failed");
+                tracing::warn!(error = %e, "session_cleanup_failed");
             }
             let _ = sender.send(Message::Close(None)).await;
             return;
@@ -423,7 +423,7 @@ async fn handle_global_ws_connection(
                     if let Ok(json) = serde_json::to_string(notif) {
                         if sender.send(Message::Text(json)).await.is_err() {
                             if let Err(e) = handler.close_session(&session_id) {
-                                tracing::warn!(session_id = %session_id, error = %e, "session_cleanup_failed");
+                                tracing::warn!(error = %e, "session_cleanup_failed");
                             }
                             return;
                         }
@@ -560,7 +560,7 @@ async fn handle_global_ws_connection(
                         break;
                     }
                     Some(Err(e)) => {
-                        warn!(session_id = %session_id, error = %e, "ws_protocol_error");
+                        warn!(error = %e, "ws_protocol_error");
                         break;
                     }
                     _ => {}
@@ -575,7 +575,7 @@ async fn handle_global_ws_connection(
             // Standing-query evaluation finished
             completion = subscriptions.next_completion() => {
                 if let Some(push) = subscriptions.on_completion(completion) {
-                    if !send_subscription_push(&mut sender, &push, &session_id).await {
+                    if !send_subscription_push(&mut sender, &push).await {
                         break;
                     }
                 }
@@ -611,7 +611,7 @@ async fn handle_global_ws_connection(
                         subscriptions.on_missed_notifications();
                         total_lagged += count;
                         if total_lagged > max_lag {
-                            warn!(session_id = %session_id, total_lagged, max_lag, "ws_slow_subscriber_disconnected");
+                            warn!(total_lagged, max_lag, "ws_slow_subscriber_disconnected");
                             let err = GlobalWsResponse::Error {
                                 message: format!("Disconnected: missed {total_lagged} total notification(s)"),
                                 validation_errors: None,
@@ -657,7 +657,7 @@ async fn handle_global_ws_connection(
         "ws_session_disconnecting"
     );
     if let Err(e) = handler.close_session(&session_id) {
-        tracing::warn!(session_id = %session_id, error = %e, "session_cleanup_failed");
+        tracing::warn!(error = %e, "session_cleanup_failed");
     }
 }
 
@@ -666,7 +666,6 @@ async fn handle_global_ws_connection(
 async fn send_global_response(
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     response: &GlobalWsResponse,
-    session_id: &str,
 ) -> bool {
     let json = match serde_json::to_string(response) {
         Ok(j) => j,
@@ -684,7 +683,11 @@ async fn send_global_response(
     // Guard against oversized WS frames (shouldn't happen for streamed chunks,
     // but protects against non-streamed single messages)
     let json = if json.len() > MAX_MESSAGE_SIZE {
-        warn!(session_id = %session_id, size = json.len(), max = MAX_MESSAGE_SIZE, "ws_result_too_large");
+        warn!(
+            size = json.len(),
+            max = MAX_MESSAGE_SIZE,
+            "ws_result_too_large"
+        );
         let err = GlobalWsResponse::Error {
             message: format!(
                 "Result too large ({} bytes, max {})",
@@ -725,7 +728,6 @@ async fn process_and_send_global_ws_message(
                     message: "Invalid message format".to_string(),
                     validation_errors: None,
                 },
-                session_id,
             )
             .await;
         }
@@ -759,9 +761,7 @@ async fn process_and_send_global_ws_message(
             }
             alive
         }
-        GlobalWsRequest::Ping => {
-            send_global_response(sender, &GlobalWsResponse::Pong, session_id).await
-        }
+        GlobalWsRequest::Ping => send_global_response(sender, &GlobalWsResponse::Pong).await,
         // Login/Authenticate after already authenticated is a no-op
         GlobalWsRequest::Login { .. } | GlobalWsRequest::Authenticate { .. } => {
             send_global_response(
@@ -770,7 +770,6 @@ async fn process_and_send_global_ws_message(
                     message: "Already authenticated".to_string(),
                     validation_errors: None,
                 },
-                session_id,
             )
             .await
         }
@@ -841,7 +840,7 @@ async fn send_subscription_command(
             validation_errors: None,
         },
     };
-    send_global_response(sender, &response, session_id).await
+    send_global_response(sender, &response).await
 }
 
 /// Send a subscription push; an oversized delta becomes a `subscription_error`.
@@ -849,7 +848,6 @@ async fn send_subscription_command(
 async fn send_subscription_push(
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     push: &Push,
-    session_id: &str,
 ) -> bool {
     let json = match serde_json::to_string(push) {
         Ok(json) if json.len() <= MAX_MESSAGE_SIZE => json,
@@ -861,7 +859,7 @@ async fn send_subscription_push(
                 ),
                 Err(e) => format!("Failed to serialize delta: {e}"),
             };
-            warn!(session_id = %session_id, %reason, "ws_subscription_push_failed");
+            warn!(%reason, "ws_subscription_push_failed");
             let subscription = match push {
                 Push::SubscriptionDelta { subscription, .. }
                 | Push::SubscriptionError { subscription, .. } => subscription.clone(),
@@ -893,10 +891,13 @@ fn log_preview(program: &str) -> String {
             continue;
         };
         let mut words = meta.trim_start_matches('.').split_whitespace();
-        let Some(cmd) = words.next().filter(|c| SECRET_COMMANDS.contains(c)) else {
+        let find = |word: Option<&str>, names: &[&'static str]| {
+            word.and_then(|w| names.iter().copied().find(|n| w.eq_ignore_ascii_case(n)))
+        };
+        let Some(cmd) = find(words.next(), &SECRET_COMMANDS) else {
             continue;
         };
-        return match words.next().filter(|sub| SUBCOMMANDS.contains(sub)) {
+        return match find(words.next(), &SUBCOMMANDS) {
             Some(sub) => format!(".{cmd} {sub} <redacted>"),
             None => format!(".{cmd} <redacted>"),
         };
@@ -943,7 +944,6 @@ async fn send_global_execute(
     let slow_query_ms = handler.config().storage.performance.slow_query_log_ms;
     if slow_query_ms > 0 && elapsed.as_millis() as u64 >= slow_query_ms {
         warn!(
-            session_id,
             elapsed_ms = elapsed.as_millis() as u64,
             threshold_ms = slow_query_ms,
             program_preview = %program_preview,
@@ -1010,7 +1010,6 @@ async fn send_global_execute(
                             message: "Internal server error".to_string(),
                             validation_errors: None,
                         },
-                        session_id,
                     )
                     .await;
                 }
@@ -1019,7 +1018,11 @@ async fn send_global_execute(
             if single_json.len() <= STREAMING_THRESHOLD {
                 // Small result: send as single message (backward compatible)
                 if single_json.len() > MAX_MESSAGE_SIZE {
-                    warn!(session_id = %session_id, size = single_json.len(), max = MAX_MESSAGE_SIZE, "ws_result_too_large");
+                    warn!(
+                        size = single_json.len(),
+                        max = MAX_MESSAGE_SIZE,
+                        "ws_result_too_large"
+                    );
                     return send_global_response(
                         sender,
                         &GlobalWsResponse::Error {
@@ -1030,7 +1033,6 @@ async fn send_global_execute(
                             ),
                             validation_errors: None,
                         },
-                        session_id,
                     )
                     .await;
                 }
@@ -1038,7 +1040,6 @@ async fn send_global_execute(
             } else {
                 // Large result: stream as chunks
                 info!(
-                    session_id,
                     row_count,
                     json_size = single_json.len(),
                     "ws_streaming_result"
@@ -1056,7 +1057,7 @@ async fn send_global_execute(
                     proof_trees: response.proof_trees,
                     timing_breakdown: response.timing_breakdown,
                 };
-                if !send_global_response(sender, &start_msg, session_id).await {
+                if !send_global_response(sender, &start_msg).await {
                     return false;
                 }
 
@@ -1077,7 +1078,7 @@ async fn send_global_execute(
                         row_provenance: chunk_prov,
                         chunk_index,
                     };
-                    if !send_global_response(sender, &chunk_msg, session_id).await {
+                    if !send_global_response(sender, &chunk_msg).await {
                         return false;
                     }
                     chunk_index += 1;
@@ -1088,7 +1089,7 @@ async fn send_global_execute(
                     row_count,
                     chunk_count: chunk_index,
                 };
-                send_global_response(sender, &end_msg, session_id).await
+                send_global_response(sender, &end_msg).await
             }
         }
         Err(e) => {
@@ -1112,7 +1113,7 @@ async fn send_global_execute(
                     validation_errors: None,
                 }
             };
-            send_global_response(sender, &response, session_id).await
+            send_global_response(sender, &response).await
         }
     }
 }
@@ -1135,6 +1136,18 @@ mod tests {
         assert_eq!(log_preview("..user bob s3cret"), ".user <redacted>");
         assert_eq!(
             log_preview("?edge(X, Y)\n.apikey create ci"),
+            ".apikey create <redacted>"
+        );
+        assert_eq!(
+            log_preview(".USER create bob s3cret admin"),
+            ".user create <redacted>"
+        );
+        assert_eq!(
+            log_preview(".User Password bob n3w"),
+            ".user password <redacted>"
+        );
+        assert_eq!(
+            log_preview(".ApiKey CREATE ci"),
             ".apikey create <redacted>"
         );
     }
