@@ -8493,9 +8493,7 @@ mod tests {
         let (_, base_idx, rec_idx) =
             CodeGenerator::detect_recursive_union_for_relation(inputs, Some(rel)).unwrap();
         let mut codegen = CodeGenerator::new();
-        for (name, tuples) in engine.input_tuples() {
-            codegen.add_input_tuples(name.clone(), tuples.clone());
-        }
+        codegen.set_inputs(engine.input_tuples().clone());
         let pick = |idx: &[usize]| idx.iter().map(|&i| inputs[i].clone()).collect();
         (codegen, pick(&base_idx), pick(&rec_idx))
     }
