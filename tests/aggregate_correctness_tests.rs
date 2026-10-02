@@ -151,3 +151,22 @@ async fn interleaved_group_keys_and_aggregates_keep_head_order() {
         ]
     );
 }
+
+#[tokio::test]
+async fn ranking_aggregate_before_group_key_keeps_head_order() {
+    let rows = run(
+        &[
+            "+scores[(\"math\", \"ann\", 95), (\"math\", \"bob\", 87), (\"sci\", \"eve\", 91)]",
+            "+best(top_k<1, Name, Score:desc>, Subj) <- scores(Subj, Name, Score)",
+        ],
+        "?best(Name, Score, Subj)",
+    )
+    .await;
+    assert_eq!(
+        rows,
+        vec![
+            vec![s("ann"), WireValue::Int64(95), s("math")],
+            vec![s("eve"), WireValue::Int64(91), s("sci")],
+        ]
+    );
+}

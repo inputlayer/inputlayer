@@ -12,33 +12,22 @@ pub fn agg_cmp(a: &Value, b: &Value) -> Ordering {
     a.query_cmp(b).unwrap_or_else(|| a.cmp(b))
 }
 
-/// Sum as `Int64` while every input is an integer and the total fits;
+/// Sum as `Int64` when every input is an integer and the total fits;
 /// otherwise as `Float64`.
 pub fn sum<'a>(values: impl IntoIterator<Item = &'a Value>) -> Value {
-    let mut int = Some(0i64);
-    let mut float = 0.0f64;
+    let (mut int, mut float, mut any_float) = (0i128, 0.0f64, false);
     for v in values {
-        match (v.as_i64(), v) {
-            (Some(i), _) => match int {
-                Some(acc) => match acc.checked_add(i) {
-                    Some(next) => int = Some(next),
-                    None => {
-                        float = acc as f64 + i as f64;
-                        int = None;
-                    }
-                },
-                None => float += i as f64,
-            },
-            (None, Value::Float64(f)) => {
-                if let Some(acc) = int.take() {
-                    float = acc as f64;
-                }
-                float += f;
-            }
-            _ => {}
+        if let Some(i) = v.as_i64() {
+            int += i128::from(i);
+        } else if let Value::Float64(f) = v {
+            float += f;
+            any_float = true;
         }
     }
-    int.map_or(Value::Float64(float), Value::Int64)
+    match i64::try_from(int) {
+        Ok(i) if !any_float => Value::Int64(i),
+        _ => Value::Float64(int as f64 + float),
+    }
 }
 
 /// Mean of the numeric values, or `Null` when there are none.
@@ -108,6 +97,12 @@ mod tests {
     fn test_sum_overflow_promotes_to_float() {
         let vals = [Value::Int64(i64::MAX), Value::Int64(1)];
         assert_eq!(sum(&vals), Value::Float64(i64::MAX as f64 + 1.0));
+    }
+
+    #[test]
+    fn test_sum_intermediate_overflow_stays_exact() {
+        let vals = [Value::Int64(i64::MIN), Value::Int64(-1), Value::Int64(5)];
+        assert_eq!(sum(&vals), Value::Int64(i64::MIN + 4));
     }
 
     #[test]
