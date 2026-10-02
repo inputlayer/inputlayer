@@ -21,7 +21,7 @@
 use crate::ast::{Atom, BodyPredicate, BuiltinFunc, ComparisonOp, Rule, Term};
 use crate::execution::timing::IrBuilderTiming;
 use crate::ir::{BuiltinFunction, IRExpression, IRNode, Predicate};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::catalog::Catalog;
 use crate::value::Value;
@@ -1071,39 +1071,21 @@ impl IRBuilder {
         }
     }
 
-    /// `col op arith`: a constant predicate when `arith` folds, otherwise a
-    /// runtime comparison.
+    /// `col op arith`, compared with [`crate::value::arith::compare`]. A
+    /// variable-free `arith` is folded to a literal first.
     fn column_vs_arith(
         col: usize,
         op: ComparisonOp,
         arith: &crate::ast::ArithExpr,
         get_col: &dyn Fn(&str) -> Result<usize, String>,
     ) -> Result<Predicate, String> {
-        Ok(match Self::try_eval_const_arith(arith) {
-            Some(Value::Int64(v)) => match op {
-                ComparisonOp::Equal => Predicate::ColumnEqConst(col, v),
-                ComparisonOp::NotEqual => Predicate::ColumnNeConst(col, v),
-                ComparisonOp::LessThan => Predicate::ColumnLtConst(col, v),
-                ComparisonOp::LessOrEqual => Predicate::ColumnLeConst(col, v),
-                ComparisonOp::GreaterThan => Predicate::ColumnGtConst(col, v),
-                ComparisonOp::GreaterOrEqual => Predicate::ColumnGeConst(col, v),
-            },
-            Some(Value::Float64(f)) => match op {
-                ComparisonOp::Equal => Predicate::ColumnEqFloat(col, f),
-                ComparisonOp::NotEqual => Predicate::ColumnNeFloat(col, f),
-                ComparisonOp::LessThan => Predicate::ColumnLtFloat(col, f),
-                ComparisonOp::LessOrEqual => Predicate::ColumnLeFloat(col, f),
-                ComparisonOp::GreaterThan => Predicate::ColumnGtFloat(col, f),
-                ComparisonOp::GreaterOrEqual => Predicate::ColumnGeFloat(col, f),
-            },
-            Some(_) => Predicate::False,
-            None => Predicate::ColumnCompareArith(
-                col,
-                op,
-                arith.clone(),
-                Self::arith_var_map(arith, get_col)?,
-            ),
-        })
+        let (expr, var_map) = match Self::try_eval_const_arith(arith) {
+            Some(Value::Int64(v)) => (crate::ast::ArithExpr::Constant(v), HashMap::new()),
+            Some(Value::Float64(f)) => (crate::ast::ArithExpr::from_float(f), HashMap::new()),
+            Some(_) => return Ok(Predicate::False),
+            None => (arith.clone(), Self::arith_var_map(arith, get_col)?),
+        };
+        Ok(Predicate::ColumnCompareArith(col, op, expr, var_map))
     }
 
     /// `arith op val`: folded to `True`/`False` when `arith` is constant.
@@ -1133,7 +1115,7 @@ impl IRBuilder {
     fn arith_var_map(
         arith: &crate::ast::ArithExpr,
         get_col: &dyn Fn(&str) -> Result<usize, String>,
-    ) -> Result<std::collections::HashMap<String, usize>, String> {
+    ) -> Result<HashMap<String, usize>, String> {
         arith
             .variables()
             .into_iter()

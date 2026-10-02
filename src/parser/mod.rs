@@ -1085,7 +1085,10 @@ mod tests {
         let term = parse_term("2+3*4").unwrap();
         if let Term::Arithmetic(expr) = term {
             // 2 + 3*4 = 2 + 12 = 14
-            assert_eq!(expr.try_eval_constant(), Some(14));
+            assert_eq!(
+                crate::value::arith::eval_expr(&expr, &|_| None),
+                Some(crate::value::Value::Int64(14))
+            );
         } else {
             panic!("Expected arithmetic term");
         }

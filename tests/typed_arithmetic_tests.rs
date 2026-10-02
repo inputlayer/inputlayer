@@ -136,3 +136,34 @@ async fn expression_argument_in_body_atom_is_rejected() {
         .expect_err("persistent rule");
     assert!(err.contains("not supported"), "{err}");
 }
+
+#[tokio::test]
+async fn timestamp_column_against_float_arithmetic() {
+    let program = ["+raw[(1, 1000, 990, 30), (2, 2000, 900, 20)]"];
+    let ts = "?raw(I, X, S, D), T = time_add(X, 0)";
+    assert_eq!(
+        first_col(&program, &format!("{ts}, T < S + D / 2")).await,
+        vec![int(1)]
+    );
+    assert_eq!(
+        first_col(&program, &format!("{ts}, T > 1000 * 1.5")).await,
+        vec![int(2)]
+    );
+    assert_eq!(
+        first_col(&program, &format!("{ts}, T > S + 0.5")).await,
+        vec![int(1), int(2)]
+    );
+}
+
+#[tokio::test]
+async fn null_fails_ne_folded_or_not() {
+    let program = ["+v[(1, 1), (2, \"abc\")]", "+m(I, N) <- v(I, X), N = X + 1"];
+    assert_eq!(
+        first_col(&program, "?m(I, N), N != 1 + 2").await,
+        vec![int(1)]
+    );
+    assert_eq!(
+        first_col(&program, "?m(I, N), N != I + 2").await,
+        vec![int(1)]
+    );
+}

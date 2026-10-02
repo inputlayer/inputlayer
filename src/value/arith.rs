@@ -95,14 +95,23 @@ pub fn eval_expr(expr: &ArithExpr, lookup: &dyn Fn(&str) -> Option<Value>) -> Op
 }
 
 /// Comparison filter over arithmetic results. Orders like
-/// [`Value::query_cmp`]; float equality uses [`FLOAT_EQ_TOLERANCE`].
+/// [`Value::query_cmp`], except a `Float64` against any numeric (including a
+/// timestamp) compares as `f64`; float equality uses [`FLOAT_EQ_TOLERANCE`].
 /// Incomparable values (including `Null`) fail every operator.
 pub fn compare(left: &Value, op: &ComparisonOp, right: &Value) -> bool {
-    let Some(ord) = left.query_cmp(right) else {
+    let float = matches!(left, Value::Float64(_)) || matches!(right, Value::Float64(_));
+    let ord = if float {
+        match (left.as_f64_numeric(), right.as_f64_numeric()) {
+            (Some(l), Some(r)) => l.partial_cmp(&r),
+            _ => None,
+        }
+    } else {
+        left.query_cmp(right)
+    };
+    let Some(ord) = ord else {
         return false;
     };
-    let float = matches!(left, Value::Float64(_)) || matches!(right, Value::Float64(_));
-    let close = || match (left.as_f64(), right.as_f64()) {
+    let close = || match (left.as_f64_numeric(), right.as_f64_numeric()) {
         (Some(l), Some(r)) => (l - r).abs() < FLOAT_EQ_TOLERANCE,
         _ => false,
     };
@@ -120,7 +129,7 @@ pub fn compare(left: &Value, op: &ComparisonOp, right: &Value) -> bool {
 
 impl Value {
     /// Numeric value as `f64`, including timestamps.
-    fn as_f64_numeric(&self) -> Option<f64> {
+    pub(crate) fn as_f64_numeric(&self) -> Option<f64> {
         match self {
             Value::Timestamp(t) => Some(*t as f64),
             v => v.as_f64(),
@@ -262,8 +271,13 @@ mod tests {
             &GreaterThan,
             &Value::Int64(i64::MAX - 1)
         ));
+        let t = Value::Timestamp(1000);
+        assert!(compare(&t, &LessThan, &Value::Float64(1000.5)));
+        assert!(compare(&t, &Equal, &Value::Float64(1000.0)));
+        assert!(compare(&Value::Float64(999.5), &NotEqual, &t));
         for op in [Equal, NotEqual, LessThan, GreaterOrEqual] {
             assert!(!compare(&Value::Int64(1), &op, &Value::Null));
+            assert!(!compare(&Value::Float64(1.0), &op, &Value::Null));
             assert!(!compare(&s("1"), &op, &Value::Int64(1)));
         }
     }
