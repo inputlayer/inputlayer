@@ -63,6 +63,7 @@ describe('compileValue', () => {
     expect(compileValue('hello')).toBe('"hello"');
     expect(compileValue('say "hi"')).toBe('"say \\"hi\\""');
     expect(compileValue('back\\slash')).toBe('"back\\\\slash"');
+    expect(compileValue('a\nb\r\tc')).toBe('"a\\nb\\r\\tc"');
   });
 
   it('compiles vectors', () => {

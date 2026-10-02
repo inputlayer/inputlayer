@@ -31,7 +31,18 @@ enum FillError {
 
 /// Escape a string for interpolation into an IQL string literal.
 pub fn esc(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// Integer mirror for ordered comparisons: ISO dates become YYYYMMDD, bare
@@ -371,6 +382,11 @@ insert = ['+constraint[("{id}", "{type}", "{attr}", "{value}")]']
                 "+constraint[(\"k2\", \"forbid\", \"pricing\", \"\")]",
             ]
         );
+    }
+
+    #[test]
+    fn esc_encodes_control_characters() {
+        assert_eq!(esc("a\nb\r\tc \"q\" \\"), r#"a\nb\r\tc \"q\" \\"#);
     }
 
     #[test]

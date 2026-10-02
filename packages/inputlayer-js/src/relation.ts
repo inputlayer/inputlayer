@@ -117,7 +117,12 @@ export function compileValue(value: unknown): string {
     return String(value);
   }
   if (typeof value === 'string') {
-    const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const escaped = value
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t');
     return `"${escaped}"`;
   }
   if (Array.isArray(value)) {
