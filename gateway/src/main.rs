@@ -888,7 +888,7 @@ async fn evaluate_all(
                     ontology: format!("{}@{}", ontology.name, ontology.version),
                     digest: ontology.digest.clone(),
                     status: "incomplete",
-                    reason: Some(err.to_string()),
+                    reason: Some(format!("{err:#}")),
                     findings: Vec::new(),
                     dropped: Vec::new(),
                     notes: Vec::new(),
