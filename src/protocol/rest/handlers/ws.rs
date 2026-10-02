@@ -1,30 +1,9 @@
 //! WebSocket Handler
 //!
-//! Provides session-scoped WebSocket connections for real-time bidirectional
-//! communication. Supports queries, ephemeral data operations, and push
-//! notifications when persistent data changes.
-//!
-//! ## Protocol
-//!
-//! Messages are JSON objects with a `type` field:
-//!
-//! **Client → Server:**
-//! - `{"type": "query", "query": "?edge(X,Y)"}`
-//! - `{"type": "insert_facts", "relation": "r", "tuples": [[1,2]]}`
-//! - `{"type": "retract_facts", "relation": "r", "tuples": [[1,2]]}`
-//! - `{"type": "add_rule", "rule": "path(X,Y) <- edge(X,Y)"}`
-//! - `{"type": "ping"}`
-//!
-//! **Server → Client:**
-//! - `{"type": "result", "rows": [...], "columns": [...], "metadata": {...}}`
-//! - `{"type": "error", "message": "..."}`
-//! - `{"type": "ack", "message": "..."}`
-//! - `{"type": "pong"}`
-//! - `{"type": "persistent_update", "knowledge_graph": "...", "relation": "...", ...}`
-//!   (also `rule_change`, `schema_change`, `kg_change`)
-//!
-//! The global `/ws` endpoint additionally supports standing queries
-//! (`.subscribe` / `.unsubscribe`), pushing `subscription_delta` and
+//! The global `/ws` endpoint: authenticate, then send `execute` messages
+//! carrying IQL. Each connection owns an auto-managed session and receives
+//! push notifications for its knowledge graph. Standing queries
+//! (`.subscribe` / `.unsubscribe`) push `subscription_delta` and
 //! `subscription_error`; see [`crate::protocol::subscription`].
 
 use std::sync::Arc;
@@ -32,7 +11,7 @@ use std::sync::Arc;
 use axum::{
     extract::{
         ws::{Message, WebSocket},
-        Path, Query, WebSocketUpgrade,
+        Query, WebSocketUpgrade,
     },
     response::IntoResponse,
     Extension,
@@ -58,577 +37,6 @@ const STREAMING_THRESHOLD: usize = 1024 * 1024; // 1 MB
 
 /// Maximum number of rows per `result_chunk` message.
 const STREAMING_CHUNK_ROWS: usize = 500;
-
-/// Incoming WebSocket message from client
-#[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum WsRequest {
-    Query {
-        query: String,
-    },
-    InsertFacts {
-        relation: String,
-        tuples: Vec<Vec<serde_json::Value>>,
-    },
-    RetractFacts {
-        relation: String,
-        tuples: Vec<Vec<serde_json::Value>>,
-    },
-    AddRule {
-        rule: String,
-    },
-    Ping,
-}
-
-/// Outgoing WebSocket message to client
-#[derive(Debug, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum WsResponse {
-    Result {
-        columns: Vec<String>,
-        rows: Vec<Vec<serde_json::Value>>,
-        row_count: usize,
-        execution_time_ms: u64,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
-        row_provenance: Vec<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        metadata: Option<SessionQueryMetadataDto>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        proof_trees: Option<Vec<crate::provenance::proof_tree::ProofTree>>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        timing_breakdown: Option<crate::execution::TimingBreakdown>,
-    },
-    Error {
-        message: String,
-    },
-    Ack {
-        message: String,
-    },
-    Pong,
-}
-
-/// Upgrade to a session-scoped WebSocket connection for real-time bidirectional communication.
-///
-/// ## WebSocket Protocol
-///
-/// All messages are JSON objects with a `type` field. The connection is scoped to a single
-/// session and inherits its knowledge graph binding and ephemeral data.
-///
-/// ### Client → Server Messages
-///
-/// **Query** - Execute an IQL query in the session context:
-/// ```json
-/// {"type": "query", "query": "?edge(X, Y)"}
-/// ```
-///
-/// **Insert Ephemeral Facts** - Add session-scoped facts:
-/// ```json
-/// {"type": "insert_facts", "relation": "edge", "tuples": [[1, 2], [3, 4]]}
-/// ```
-///
-/// **Retract Ephemeral Facts** - Remove session-scoped facts:
-/// ```json
-/// {"type": "retract_facts", "relation": "edge", "tuples": [[1, 2]]}
-/// ```
-///
-/// **Add Ephemeral Rule** - Add a session-scoped rule (exactly one rule per message):
-/// ```json
-/// {"type": "add_rule", "rule": "path(X, Y) <- edge(X, Y)"}
-/// ```
-///
-/// **Ping** - Keep-alive:
-/// ```json
-/// {"type": "ping"}
-/// ```
-///
-/// ### Server → Client Messages
-///
-/// **Result** - Query results with per-row provenance tracking:
-/// ```json
-/// {"type": "result", "columns": ["x", "y"], "rows": [[1, 2]], "row_count": 1,
-///  "execution_time_ms": 5, "row_provenance": ["persistent"],
-///  "metadata": {"has_ephemeral": false, "ephemeral_sources": [], "warnings": []}}
-/// ```
-///
-/// **Ack** - Acknowledgement for insert/retract/add_rule operations:
-/// ```json
-/// {"type": "ack", "message": "Inserted 2 fact(s) into 'edge'"}
-/// ```
-///
-/// **Error** - Error response:
-/// ```json
-/// {"type": "error", "message": "Invalid query syntax"}
-/// ```
-///
-/// **Pong** - Response to ping:
-/// ```json
-/// {"type": "pong"}
-/// ```
-///
-/// **Notification** - Push notification when persistent data changes in the session's KG:
-/// ```json
-/// {"type": "persistent_update", "knowledge_graph": "default", "relation": "edge",
-///  "operation": "insert", "count": 5, "timestamp_ms": 1700000000000, "seq": 42}
-/// ```
-///
-/// ### Backpressure
-///
-/// If the client falls behind on reading notifications, missed notifications are reported
-/// via an error message: `{"type": "error", "message": "Missed N notification(s) due to backpressure"}`.
-///
-/// ### Connection Lifecycle
-///
-/// The WebSocket connection closes when:
-/// - The client sends a close frame
-/// - The underlying session is closed (server sends an error message before closing)
-/// - The notification broadcast channel is shut down
-/// Deprecated: Use the global `/ws` endpoint instead, which auto-manages session lifecycle.
-pub async fn session_websocket(
-    Extension(handler): Extension<Arc<Handler>>,
-    Extension(ws_sem): Extension<WsSemaphore>,
-    Path(id): Path<String>,
-    ws: WebSocketUpgrade,
-) -> Result<impl IntoResponse, RestError> {
-    // Verify session exists before upgrading
-    if !handler.session_manager().has_session(&id) {
-        return Err(RestError::not_found(format!("Session {id} not found")));
-    }
-
-    // Enforce WebSocket connection limit
-    let ws_permit = if let Some(ref sem) = ws_sem.0 {
-        match sem.clone().try_acquire_owned() {
-            Ok(permit) => Some(permit),
-            Err(_) => {
-                return Err(RestError::service_unavailable(
-                    "Too many WebSocket connections".to_string(),
-                ));
-            }
-        }
-    } else {
-        None
-    };
-
-    Ok(ws
-        .max_message_size(MAX_MESSAGE_SIZE)
-        .max_frame_size(MAX_MESSAGE_SIZE)
-        .on_upgrade(move |socket| {
-            // Move permit into the async block so it's held for connection lifetime
-            let permit = ws_permit;
-            async move {
-                handle_ws_connection(socket, handler, id).await;
-                drop(permit);
-            }
-        }))
-}
-
-/// Handle a WebSocket connection for a specific session.
-/// Uses `tokio::select!` to concurrently process client messages and push notifications.
-async fn handle_ws_connection(socket: WebSocket, handler: Arc<Handler>, session_id: String) {
-    let (mut sender, mut receiver) = socket.split();
-
-    // Re-validate session exists after upgrade (it may have closed during the
-    // HTTP→WebSocket upgrade handshake)
-    if !handler.session_manager().has_session(&session_id) {
-        let err_msg = WsResponse::Error {
-            message: format!("Session {session_id} closed during upgrade"),
-        };
-        if let Ok(json) = serde_json::to_string(&err_msg) {
-            let _ = sender.send(Message::Text(json)).await;
-        }
-        let _ = sender.close().await;
-        return;
-    }
-
-    let mut notify_rx = handler.subscribe_notifications();
-
-    // Idle timeout (matches global WS handler behavior)
-    let idle_ms = handler.config().http.ws_idle_timeout_ms;
-    let idle_duration = if idle_ms > 0 {
-        Some(std::time::Duration::from_millis(idle_ms))
-    } else {
-        None
-    };
-    let mut last_activity = std::time::Instant::now();
-
-    // Cumulative notification lag - disconnect if subscriber falls too far behind
-    let max_lag = handler.config().http.rate_limit.notification_buffer_size as u64;
-    let mut total_lagged: u64 = 0;
-
-    // Per-connection message rate limiting
-    let max_msgs_per_sec = handler.config().http.rate_limit.ws_max_messages_per_sec;
-    let mut rate_window_start = std::time::Instant::now();
-    let mut rate_window_count: u32 = 0;
-
-    // Connection lifetime limit
-    let connection_start = std::time::Instant::now();
-    let max_lifetime_secs = handler.config().http.rate_limit.ws_max_lifetime_secs;
-    let max_lifetime = if max_lifetime_secs > 0 {
-        Some(std::time::Duration::from_secs(max_lifetime_secs))
-    } else {
-        None
-    };
-
-    // Server-initiated heartbeat: send ping every 30s to detect dead connections
-    let mut heartbeat_interval = tokio::time::interval(std::time::Duration::from_secs(30));
-    heartbeat_interval.tick().await; // consume the immediate first tick
-
-    loop {
-        // Check connection lifetime
-        if let Some(max_lt) = max_lifetime {
-            if connection_start.elapsed() >= max_lt {
-                info!(session_id = %session_id, max_lifetime_secs, "ws_max_lifetime_exceeded");
-                let err_msg = WsResponse::Error {
-                    message: format!("Connection lifetime exceeded ({max_lifetime_secs}s)"),
-                };
-                if let Ok(json) = serde_json::to_string(&err_msg) {
-                    let _ = sender.send(Message::Text(json)).await;
-                }
-                break;
-            }
-        }
-
-        // Compute remaining idle time for this iteration
-        let idle_sleep: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> =
-            match idle_duration {
-                Some(dur) => {
-                    let elapsed = last_activity.elapsed();
-                    if elapsed >= dur {
-                        Box::pin(std::future::ready(()))
-                    } else {
-                        Box::pin(tokio::time::sleep(dur.saturating_sub(elapsed)))
-                    }
-                }
-                None => Box::pin(std::future::pending()),
-            };
-
-        tokio::select! {
-            // Idle timeout
-            () = idle_sleep => {
-                if idle_duration.is_some() {
-                    info!(session_id = %session_id, idle_ms, "ws_idle_timeout");
-                    let err_msg = WsResponse::Error {
-                        message: "Idle timeout".to_string(),
-                    };
-                    if let Ok(json) = serde_json::to_string(&err_msg) {
-                        let _ = sender.send(Message::Text(json)).await;
-                    }
-                    break;
-                }
-            }
-            // Client message
-            msg = receiver.next() => {
-                match msg {
-                    Some(Ok(Message::Text(text))) => {
-                        last_activity = std::time::Instant::now();
-
-                        // Per-connection message rate limiting
-                        if max_msgs_per_sec > 0 {
-                            let now = std::time::Instant::now();
-                            if now.duration_since(rate_window_start) >= std::time::Duration::from_secs(1) {
-                                rate_window_start = now;
-                                rate_window_count = 0;
-                            }
-                            rate_window_count += 1;
-                            if rate_window_count > max_msgs_per_sec {
-                                let err_msg = WsResponse::Error {
-                                    message: format!("Rate limit exceeded ({max_msgs_per_sec} msgs/sec)"),
-                                };
-                                if let Ok(json) = serde_json::to_string(&err_msg) {
-                                    let _ = sender.send(Message::Text(json)).await;
-                                }
-                                continue;
-                            }
-                        }
-
-                        let response = process_ws_message(&handler, &session_id, &text).await;
-                        let json = match serde_json::to_string(&response) {
-                            Ok(j) => j,
-                            Err(e) => {
-                                tracing::error!(error = %e, "Failed to serialize WsResponse");
-                                let err = WsResponse::Error {
-                                    message: "Internal server error".to_string(),
-                                };
-                                serde_json::to_string(&err).unwrap_or_else(|_| {
-                                    r#"{"type":"error","message":"Internal serialization error"}"#.to_string()
-                                })
-                            }
-                        };
-                        // Guard against oversized WS frames
-                        let json = if json.len() > MAX_MESSAGE_SIZE {
-                            warn!(session_id = %session_id, size = json.len(), max = MAX_MESSAGE_SIZE, "ws_result_too_large");
-                            let err = WsResponse::Error {
-                                message: format!("Result too large ({} bytes, max {})", json.len(), MAX_MESSAGE_SIZE),
-                            };
-                            serde_json::to_string(&err).unwrap_or_else(|_| {
-                                r#"{"type":"error","message":"Result too large"}"#.to_string()
-                            })
-                        } else {
-                            json
-                        };
-                        if sender.send(Message::Text(json)).await.is_err() {
-                            break;
-                        }
-                    }
-                    Some(Ok(Message::Close(_))) | None => break,
-                    Some(Err(_)) => break, // Protocol error, close connection
-                    _ => {} // Ignore binary, ping/pong handled by axum
-                }
-            }
-            // Server-initiated heartbeat ping
-            _ = heartbeat_interval.tick() => {
-                if sender.send(Message::Ping(Vec::new())).await.is_err() {
-                    break; // Connection dead
-                }
-            }
-            // Push notification from persistent data changes
-            notification = notify_rx.recv() => {
-                match notification {
-                    Ok(ref notif) => {
-                        // Get current session KG (may have changed via switch_kg)
-                        let session_kg = match handler
-                            .session_manager()
-                            .with_session(&session_id, |s| s.knowledge_graph.clone())
-                        {
-                            Ok(kg) => kg,
-                            Err(_) => {
-                                // Session was closed - notify client before disconnecting
-                                let err_msg = WsResponse::Error {
-                                    message: "Session closed".to_string(),
-                                };
-                                if let Ok(json) = serde_json::to_string(&err_msg) {
-                                    let _ = sender.send(Message::Text(json)).await;
-                                }
-
-                                break;
-                            }
-                        };
-                        // Extract the KG name from any notification variant
-                        let notif_kg = match notif {
-                            PersistentNotification::PersistentUpdate { knowledge_graph, .. } => knowledge_graph,
-                            PersistentNotification::RuleChange { knowledge_graph, .. } => knowledge_graph,
-                            PersistentNotification::KgChange { knowledge_graph, .. } => knowledge_graph,
-                            PersistentNotification::SchemaChange { knowledge_graph, .. } => knowledge_graph,
-                        };
-                        // Only forward notifications for this session's knowledge graph
-                        // (KgChange notifications are always forwarded - they affect the KG list)
-                        let is_kg_change = matches!(notif, PersistentNotification::KgChange { .. });
-                        if *notif_kg == session_kg || is_kg_change {
-                            if let Ok(json) = serde_json::to_string(&notif) {
-                                if sender.send(Message::Text(json)).await.is_err() {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
-                        total_lagged += count;
-                        if total_lagged > max_lag {
-                            warn!(session_id = %session_id, total_lagged, max_lag, "ws_slow_subscriber_disconnected");
-                            let err = WsResponse::Error {
-                                message: format!("Disconnected: missed {total_lagged} total notification(s)"),
-                            };
-                            if let Ok(json) = serde_json::to_string(&err) {
-                                let _ = sender.send(Message::Text(json)).await;
-                            }
-                            break;
-                        }
-                        let warn = WsResponse::Error {
-                            message: format!("Missed {count} notification(s) due to backpressure"),
-                        };
-                        if let Ok(json) = serde_json::to_string(&warn) {
-                            if sender.send(Message::Text(json)).await.is_err() {
-                                break;
-                            }
-                        }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        // Notification channel closed - server shutting down
-                        let shutdown_msg = WsResponse::Error {
-                            message: "Server shutting down".to_string(),
-                        };
-                        if let Ok(json) = serde_json::to_string(&shutdown_msg) {
-                            let _ = sender.send(Message::Text(json)).await;
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    // Send close frame before cleanup (prevents "connection reset without handshake" warnings)
-    let _ = sender.send(Message::Close(None)).await;
-
-    // Guarantee session cleanup on WS disconnect (WI-03)
-    let stats = handler.session_stats();
-    info!(session_id = %session_id, active_sessions = stats.total_sessions, "ws_legacy_session_disconnecting");
-    if let Err(e) = handler.close_session(&session_id) {
-        tracing::warn!(session_id = %session_id, error = %e, "session_cleanup_failed");
-    }
-}
-
-/// Process a single WebSocket message and return a response
-async fn process_ws_message(handler: &Arc<Handler>, session_id: &str, text: &str) -> WsResponse {
-    let request: WsRequest = match serde_json::from_str(text) {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::debug!(error = %e, "Invalid WsRequest message");
-            return WsResponse::Error {
-                message: "Invalid message format".to_string(),
-            };
-        }
-    };
-
-    match request {
-        WsRequest::Query { query } => handle_ws_query(handler, session_id, query).await,
-        WsRequest::InsertFacts { relation, tuples } => {
-            handle_ws_insert_facts(handler, session_id, &relation, tuples)
-        }
-        WsRequest::RetractFacts { relation, tuples } => {
-            handle_ws_retract_facts(handler, session_id, &relation, tuples)
-        }
-        WsRequest::AddRule { rule } => handle_ws_add_rule(handler, session_id, &rule),
-        WsRequest::Ping => WsResponse::Pong,
-    }
-}
-
-async fn handle_ws_query(handler: &Arc<Handler>, session_id: &str, query: String) -> WsResponse {
-    let start = std::time::Instant::now();
-    match handler
-        .query_program_with_session(&session_id.to_string(), query)
-        .await
-    {
-        Ok(response) => {
-            let row_provenance: Vec<String> = response
-                .rows
-                .iter()
-                .map(|row| {
-                    row.provenance
-                        .as_ref()
-                        .map_or_else(|| "unknown".to_string(), std::string::ToString::to_string)
-                })
-                .collect();
-
-            let rows: Vec<Vec<serde_json::Value>> = response
-                .rows
-                .into_iter()
-                .map(|row| row.values.into_iter().map(wire_value_to_json).collect())
-                .collect();
-
-            let columns: Vec<String> = response.schema.iter().map(|c| c.name.clone()).collect();
-            let row_count = rows.len();
-
-            let metadata = response.metadata.map(|m| SessionQueryMetadataDto {
-                has_ephemeral: m.has_ephemeral,
-                ephemeral_sources: m.ephemeral_sources,
-                warnings: m.warnings,
-            });
-
-            WsResponse::Result {
-                columns,
-                rows,
-                row_count,
-                execution_time_ms: start.elapsed().as_millis() as u64,
-                row_provenance,
-                metadata,
-                proof_trees: response.proof_trees,
-                timing_breakdown: response.timing_breakdown,
-            }
-        }
-        Err(e) => WsResponse::Error { message: e },
-    }
-}
-
-fn handle_ws_insert_facts(
-    handler: &Arc<Handler>,
-    session_id: &str,
-    relation: &str,
-    tuples: Vec<Vec<serde_json::Value>>,
-) -> WsResponse {
-    let max_str = handler.config().storage.performance.max_string_value_bytes;
-    let parsed = match super::json_tuples_to_tuples_with_limits(&tuples, max_str, 65_536) {
-        Ok(t) => t,
-        Err(e) => return WsResponse::Error { message: e },
-    };
-    match handler.session_insert_ephemeral(&session_id.to_string(), relation, parsed) {
-        Ok(inserted) => WsResponse::Ack {
-            message: format!("Inserted {inserted} fact(s) into '{relation}'"),
-        },
-        Err(e) => WsResponse::Error { message: e },
-    }
-}
-
-fn handle_ws_retract_facts(
-    handler: &Arc<Handler>,
-    session_id: &str,
-    relation: &str,
-    tuples: Vec<Vec<serde_json::Value>>,
-) -> WsResponse {
-    let max_str = handler.config().storage.performance.max_string_value_bytes;
-    let parsed = match super::json_tuples_to_tuples_with_limits(&tuples, max_str, 65_536) {
-        Ok(t) => t,
-        Err(e) => return WsResponse::Error { message: e },
-    };
-    match handler.session_retract_ephemeral(&session_id.to_string(), relation, parsed) {
-        Ok(retracted) => WsResponse::Ack {
-            message: format!("Retracted {retracted} fact(s) from '{relation}'"),
-        },
-        Err(e) => WsResponse::Error { message: e },
-    }
-}
-
-fn handle_ws_add_rule(handler: &Arc<Handler>, session_id: &str, rule_text: &str) -> WsResponse {
-    // Enforce max_query_size_bytes on rule text to prevent DoS via huge rules
-    let max_bytes = handler.config().storage.performance.max_query_size_bytes;
-    if max_bytes > 0 && rule_text.len() > max_bytes {
-        return WsResponse::Error {
-            message: format!(
-                "Rule text too large: {} bytes (max {})",
-                rule_text.len(),
-                max_bytes
-            ),
-        };
-    }
-
-    let program = match crate::parser::parse_program(rule_text) {
-        Ok(p) => p,
-        Err(e) => {
-            return WsResponse::Error {
-                message: format!("Invalid rule syntax: {e}"),
-            };
-        }
-    };
-
-    if program.rules.is_empty() {
-        return WsResponse::Error {
-            message: "No rule found in input".to_string(),
-        };
-    }
-    if program.rules.len() > 1 {
-        return WsResponse::Error {
-            message: format!(
-                "Expected exactly one rule, got {}. Add rules one at a time.",
-                program.rules.len()
-            ),
-        };
-    }
-    let rule = match program.rules.into_iter().next() {
-        Some(r) => r,
-        None => {
-            return WsResponse::Error {
-                message: "Internal error: parsed rule not found".to_string(),
-            };
-        }
-    };
-
-    let head = rule.head.relation.clone();
-    match handler.session_add_rule(&session_id.to_string(), rule, rule_text.to_string()) {
-        Ok(()) => WsResponse::Ack {
-            message: format!("Rule added for '{head}'"),
-        },
-        Err(e) => WsResponse::Error { message: e },
-    }
-}
 
 // =============================================================================
 // Global WebSocket Endpoint (/ws)
@@ -945,7 +353,8 @@ async fn handle_global_ws_connection(
     let session_id = match handler.create_session_with_auth(&kg, &auth_identity) {
         Ok(id) => {
             let stats = handler.session_stats();
-            info!(session_id = %id, kg = %kg, active_sessions = stats.total_sessions, "ws_session_created");
+            info!(kg = %kg, active_sessions = stats.total_sessions, "ws_session_created");
+            debug!(session_id = %id, "ws_session_id");
             id
         }
         Err(e) => {
@@ -1074,7 +483,7 @@ async fn handle_global_ws_connection(
         // Check connection lifetime
         if let Some(max_lt) = max_lifetime {
             if connection_start.elapsed() >= max_lt {
-                info!(session_id = %session_id, max_lifetime_secs, "ws_max_lifetime_exceeded");
+                info!(max_lifetime_secs, "ws_max_lifetime_exceeded");
                 let err_msg = GlobalWsResponse::Error {
                     message: format!("Connection lifetime exceeded ({max_lifetime_secs}s)"),
                     validation_errors: None,
@@ -1090,7 +499,7 @@ async fn handle_global_ws_connection(
             // Idle timeout
             () = idle_sleep => {
                 if idle_duration.is_some() {
-                    info!(session_id = %session_id, idle_ms, "ws_idle_timeout");
+                    info!(idle_ms, "ws_idle_timeout");
                     let err_msg = GlobalWsResponse::Error {
                         message: "Idle timeout".to_string(),
                         validation_errors: None,
@@ -1129,7 +538,6 @@ async fn handle_global_ws_connection(
                         }
                         let span = tracing::info_span!(
                             "ws_request",
-                            session_id = %session_id,
                             request_id = request_seq,
                             msg_bytes = text.len()
                         );
@@ -1244,7 +652,10 @@ async fn handle_global_ws_connection(
 
     // Auto-close session on disconnect
     let stats = handler.session_stats();
-    info!(session_id = %session_id, active_sessions = stats.total_sessions, "ws_session_disconnecting");
+    info!(
+        active_sessions = stats.total_sessions,
+        "ws_session_disconnecting"
+    );
     if let Err(e) = handler.close_session(&session_id) {
         tracing::warn!(session_id = %session_id, error = %e, "session_cleanup_failed");
     }
@@ -1468,6 +879,38 @@ async fn send_subscription_push(
     sender.send(Message::Text(json)).await.is_ok()
 }
 
+/// Maximum characters of a program logged as a preview.
+const LOG_PREVIEW_CHARS: usize = 80;
+
+/// Credential-free log preview of a program: the first line, truncated to
+/// [`LOG_PREVIEW_CHARS`] characters. `.user` and `.apikey` commands carry
+/// secrets, so only their kind is kept.
+fn log_preview(program: &str) -> String {
+    const SECRET_COMMANDS: [&str; 2] = ["user", "apikey"];
+    const SUBCOMMANDS: [&str; 6] = ["list", "create", "drop", "password", "role", "revoke"];
+    for line in program.lines() {
+        let Some(meta) = line.trim_start().strip_prefix('.') else {
+            continue;
+        };
+        let mut words = meta.trim_start_matches('.').split_whitespace();
+        let Some(cmd) = words.next().filter(|c| SECRET_COMMANDS.contains(c)) else {
+            continue;
+        };
+        return match words.next().filter(|sub| SUBCOMMANDS.contains(sub)) {
+            Some(sub) => format!(".{cmd} {sub} <redacted>"),
+            None => format!(".{cmd} <redacted>"),
+        };
+    }
+    program
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .chars()
+        .take(LOG_PREVIEW_CHARS)
+        .collect()
+}
+
 /// Handle an Execute message on the global WebSocket.
 ///
 /// For small results (< STREAMING_THRESHOLD bytes when serialized), sends a
@@ -1486,9 +929,8 @@ async fn send_global_execute(
 ) -> bool {
     let start = std::time::Instant::now();
     let program_len = program.len();
-    let program_preview = program.lines().next().unwrap_or("").trim();
+    let program_preview = log_preview(&program);
     info!(
-        session_id,
         program_len,
         program_preview = %program_preview,
         "ws_execute_start"
@@ -1504,12 +946,11 @@ async fn send_global_execute(
             session_id,
             elapsed_ms = elapsed.as_millis() as u64,
             threshold_ms = slow_query_ms,
-            program_preview = %&program[..program.len().min(80)],
+            program_preview = %program_preview,
             "ws_slow_execute"
         );
     }
     info!(
-        session_id,
         program_len,
         elapsed_ms = elapsed.as_millis() as u64,
         ok = result.is_ok(),
@@ -1682,82 +1123,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_ws_request_query_deserialize() {
-        let json = r#"{"type": "query", "query": "?edge(X,Y)"}"#;
-        let req: WsRequest = serde_json::from_str(json).unwrap();
-        assert!(matches!(req, WsRequest::Query { query } if query == "?edge(X,Y)"));
+    fn test_log_preview_redacts_credentials() {
+        assert_eq!(
+            log_preview(".user create bob s3cret admin"),
+            ".user create <redacted>"
+        );
+        assert_eq!(
+            log_preview("  .user password bob n3w"),
+            ".user password <redacted>"
+        );
+        assert_eq!(log_preview("..user bob s3cret"), ".user <redacted>");
+        assert_eq!(
+            log_preview("?edge(X, Y)\n.apikey create ci"),
+            ".apikey create <redacted>"
+        );
     }
 
     #[test]
-    fn test_ws_request_insert_facts_deserialize() {
-        let json = r#"{"type": "insert_facts", "relation": "edge", "tuples": [[1,2],[3,4]]}"#;
-        let req: WsRequest = serde_json::from_str(json).unwrap();
-        assert!(matches!(req, WsRequest::InsertFacts { relation, tuples }
-            if relation == "edge" && tuples.len() == 2));
+    fn test_log_preview_first_line() {
+        assert_eq!(log_preview("  ?edge(X, Y)  \n+edge(1, 2)"), "?edge(X, Y)");
+        assert_eq!(log_preview(".users"), ".users");
+        assert_eq!(log_preview(""), "");
     }
 
     #[test]
-    fn test_ws_request_ping_deserialize() {
-        let json = r#"{"type": "ping"}"#;
-        let req: WsRequest = serde_json::from_str(json).unwrap();
-        assert!(matches!(req, WsRequest::Ping));
-    }
-
-    #[test]
-    fn test_ws_response_result_serialize() {
-        let resp = WsResponse::Result {
-            columns: vec!["x".to_string()],
-            rows: vec![vec![serde_json::json!(1)]],
-            row_count: 1,
-            execution_time_ms: 5,
-            row_provenance: vec!["persistent".to_string()],
-            metadata: None,
-            proof_trees: None,
-            timing_breakdown: None,
-        };
-        let json = serde_json::to_string(&resp).unwrap();
-        assert!(json.contains("\"type\":\"result\""));
-        assert!(json.contains("\"row_count\":1"));
-    }
-
-    #[test]
-    fn test_ws_response_error_serialize() {
-        let resp = WsResponse::Error {
-            message: "bad query".to_string(),
-        };
-        let json = serde_json::to_string(&resp).unwrap();
-        assert!(json.contains("\"type\":\"error\""));
-        assert!(json.contains("bad query"));
-    }
-
-    #[test]
-    fn test_ws_response_pong_serialize() {
-        let resp = WsResponse::Pong;
-        let json = serde_json::to_string(&resp).unwrap();
-        assert_eq!(json, r#"{"type":"pong"}"#);
-    }
-
-    #[test]
-    fn test_ws_response_ack_serialize() {
-        let resp = WsResponse::Ack {
-            message: "done".to_string(),
-        };
-        let json = serde_json::to_string(&resp).unwrap();
-        assert!(json.contains("\"type\":\"ack\""));
-    }
-
-    #[test]
-    fn test_ws_request_add_rule_deserialize() {
-        let json = r#"{"type": "add_rule", "rule": "path(X,Y) <- edge(X,Y)"}"#;
-        let req: WsRequest = serde_json::from_str(json).unwrap();
-        assert!(matches!(req, WsRequest::AddRule { rule } if rule.contains("path")));
-    }
-
-    #[test]
-    fn test_ws_request_retract_facts_deserialize() {
-        let json = r#"{"type": "retract_facts", "relation": "edge", "tuples": [[1,2]]}"#;
-        let req: WsRequest = serde_json::from_str(json).unwrap();
-        assert!(matches!(req, WsRequest::RetractFacts { relation, .. } if relation == "edge"));
+    fn test_log_preview_truncates_on_char_boundary() {
+        let program = format!("{}é{}", "a".repeat(79), "b".repeat(19));
+        assert_eq!(program.len(), 100);
+        assert!(!program.is_char_boundary(80));
+        let preview = log_preview(&program);
+        assert_eq!(preview.chars().count(), LOG_PREVIEW_CHARS);
+        assert!(preview.ends_with('é'));
     }
 
     #[test]
