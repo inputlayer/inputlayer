@@ -298,12 +298,27 @@ pub type ExecutionOutput =
 
 thread_local! {
     static RESULT_TRUNCATED: Cell<bool> = const { Cell::new(false) };
+    static RESULT_CAP_OFF: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Whether the last [`IQLEngine::execute_tuples_profiled`] run on this thread
 /// cut its result at `max_result_rows`.
 pub fn last_result_truncated() -> bool {
     RESULT_TRUNCATED.get()
+}
+
+/// Runs `f` with `max_result_rows` ignored on this thread, for internal
+/// queries whose full result is needed (mutation matches, sorting,
+/// provenance baselines).
+pub fn without_result_cap<R>(f: impl FnOnce() -> R) -> R {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            RESULT_CAP_OFF.set(self.0);
+        }
+    }
+    let _restore = Restore(RESULT_CAP_OFF.replace(true));
+    f()
 }
 
 /// Main IQL engine that orchestrates the entire pipeline
@@ -435,6 +450,15 @@ impl IQLEngine {
     /// Set the final result row cap (0 = unlimited)
     pub fn set_max_result_rows(&mut self, max: usize) {
         self.max_result_rows = max;
+    }
+
+    /// The cap in effect on this thread (0 inside [`without_result_cap`]).
+    fn result_cap(&self) -> usize {
+        if RESULT_CAP_OFF.get() {
+            0
+        } else {
+            self.max_result_rows
+        }
     }
 
     /// Set maximum query cost score (0 = unlimited)
@@ -993,7 +1017,6 @@ impl IQLEngine {
     pub fn execute_ir_tuples(&self, ir: &IRNode) -> Result<Vec<Tuple>, String> {
         // Create code generator
         let mut codegen = CodeGenerator::new();
-        codegen.set_max_result_rows(self.max_result_rows);
 
         // Set semiring type from boolean specialization analysis
         let semiring = boolean_specialization::compute_global_semiring(&self.semiring_annotations);
@@ -1457,7 +1480,8 @@ impl IQLEngine {
         let mut last_result: Vec<Tuple> = Vec::new();
         // The final rule may stop early (one row past the cap, to detect
         // truncation) only when it is non-recursive and no other rule reads it.
-        let query_stops_early = self.max_result_rows > 0
+        let result_cap = self.result_cap();
+        let query_stops_early = result_cap > 0
             && recursive_info.get(query_idx).is_some_and(Option::is_none)
             && rule_heads.get(query_idx).is_some_and(|head| {
                 unoptimized_ir_nodes
@@ -1503,7 +1527,7 @@ impl IQLEngine {
                 // Create fresh CodeGenerator for each rule (avoids timely state issues)
                 let mut codegen = self.rule_codegen(&[i], &accumulated_results);
                 if i == query_idx && query_stops_early {
-                    codegen.set_max_result_rows(self.max_result_rows.saturating_add(1));
+                    codegen.set_max_result_rows(result_cap.saturating_add(1));
                 }
                 for name in &hnsw_names {
                     accumulated_results.remove(name);
@@ -1601,12 +1625,17 @@ impl IQLEngine {
             }
         }
 
-        if self.max_result_rows > 0 && last_result.len() > self.max_result_rows {
-            last_result.truncate(self.max_result_rows);
+        if result_cap > 0 && last_result.len() > result_cap {
+            last_result.truncate(result_cap);
             RESULT_TRUNCATED.set(true);
+            if query_stops_early {
+                if let Some(head) = accumulated_results.get_mut(&rule_heads[query_idx]) {
+                    head.truncate(result_cap);
+                }
+            }
             info!(
                 source_len,
-                max_result_rows = self.max_result_rows,
+                max_result_rows = result_cap,
                 "engine_result_truncated"
             );
         }
@@ -3237,6 +3266,39 @@ mod tests {
         assert_eq!(rows.len(), 3);
         assert!(last_result_truncated());
         assert_eq!(derived["a"].len(), 10);
+    }
+
+    /// The derived entry for an early-stopped query head matches the
+    /// returned rows.
+    #[test]
+    fn test_result_limit_derived_head_matches_result() {
+        let (rows, derived) = limited_engine(3)
+            .execute_tuples_with_derived("__query__(X, Y) <- e(X, Y)")
+            .unwrap();
+        assert!(last_result_truncated());
+        assert_eq!(derived["__query__"], rows);
+    }
+
+    /// `without_result_cap` returns every row, unflagged, and restores the cap.
+    #[test]
+    fn test_without_result_cap() {
+        let rows =
+            without_result_cap(|| limited_engine(3).execute_tuples("__query__(X, Y) <- e(X, Y)"));
+        assert_eq!(rows.unwrap().len(), 10);
+        assert!(!last_result_truncated());
+
+        let rows = limited_engine(3).execute_tuples("__query__(X, Y) <- e(X, Y)");
+        assert_eq!(rows.unwrap().len(), 3);
+    }
+
+    /// Raw IR execution is never capped.
+    #[test]
+    fn test_execute_ir_tuples_ignores_result_limit() {
+        let ir = IRNode::Scan {
+            relation: "e".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        assert_eq!(limited_engine(3).execute_ir_tuples(&ir).unwrap().len(), 10);
     }
 
     /// A recursive final rule is computed to its fixpoint, then cut.
