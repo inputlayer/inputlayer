@@ -31,7 +31,14 @@ pub struct EvalOutcome {
     pub trace: Option<Value>,
 }
 
-/// Drop extraction rows whose quote is not verbatim in the message it cites.
+/// Collapse every whitespace run to one space and trim: a quote that spans
+/// a line break stays verbatim and becomes storable.
+pub fn normalize_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Drop extraction rows whose quote is not verbatim in the message it cites
+/// (both whitespace-normalized; the stored surface is the normalized one).
 /// Extraction noise becomes a MISSED finding, never a false one.
 pub fn validate_quotes(
     manifest: &crate::ontology::Manifest,
@@ -43,12 +50,19 @@ pub fn validate_quotes(
         return Vec::new();
     };
     let mut dropped = Vec::new();
+    let messages: Vec<String> = messages
+        .iter()
+        .map(|(_, content)| normalize_whitespace(content))
+        .collect();
     if let Some(map) = extraction.as_object_mut() {
         for (section, value) in map.iter_mut() {
             let Some(rows) = value.as_array_mut() else {
                 continue;
             };
-            rows.retain(|row| {
+            rows.retain_mut(|row| {
+                if let Some(Value::String(surface)) = row.get_mut(&rule.field) {
+                    *surface = normalize_whitespace(surface);
+                }
                 let surface_value = row.get(&rule.field);
                 let msg_value = row.get(&rule.within);
                 if surface_value.is_none() && msg_value.is_none() {
@@ -76,7 +90,7 @@ pub fn validate_quotes(
                     ));
                     return false;
                 };
-                let ok = !surface.trim().is_empty() && messages[local].1.contains(surface);
+                let ok = !surface.is_empty() && messages[local].contains(surface);
                 if !ok {
                     dropped.push(format!(
                         "{section}: quote not verbatim in message {msg}: {surface:?}"
@@ -246,17 +260,18 @@ pub async fn evaluate(
     let MapOutcome {
         statements,
         owners,
-        skipped,
-    } = map_extraction(manifest, &extraction);
-    // A mapping skip means the extraction and the manifest disagree (schema
-    // drift). Evaluating over partially mapped facts would misreport;
-    // fail closed into "incomplete".
-    if !skipped.is_empty() {
+        dropped: unstorable,
+        drift,
+    } = map_extraction(manifest, &mut extraction);
+    // Drift means the extraction and the manifest disagree. Evaluating over
+    // partially mapped facts would misreport; fail closed into "incomplete".
+    if !drift.is_empty() {
         anyhow::bail!(
             "extraction-to-ontology mapping failed (pack drift?): {}",
-            skipped.join("; ")
+            drift.join("; ")
         );
     }
+    dropped.extend(unstorable);
     let ledgered = !matches!(request.mode, Mode::OneShot);
     let msg_field = manifest.validate.quote.as_ref().map(|q| q.within.as_str());
     let mut rows = if ledgered {
@@ -718,6 +733,23 @@ within = "msg"
         let dropped = validate_quotes(&manifest, &mut extraction, &geneva_messages(), 0);
         assert_eq!(dropped.len(), 2, "{dropped:?}");
         assert_eq!(extraction["claims"].as_array().map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn quote_gate_normalizes_whitespace_in_surfaces() {
+        let manifest = manifest(QUOTE_TOML);
+        let messages = vec![(
+            "user".to_string(),
+            "Ship to 12 Main St\r\n   Springfield, please.".to_string(),
+        )];
+        let mut extraction = json!({ "claims": [
+            {"id": "a", "surface": "12 Main St\nSpringfield", "msg": 0},
+            {"id": "b", "surface": " 12  Main\tSt ", "msg": 0},
+        ]});
+        let dropped = validate_quotes(&manifest, &mut extraction, &messages, 0);
+        assert!(dropped.is_empty(), "{dropped:?}");
+        assert_eq!(extraction["claims"][0]["surface"], "12 Main St Springfield");
+        assert_eq!(extraction["claims"][1]["surface"], "12 Main St");
     }
 
     #[test]

@@ -14,9 +14,8 @@
 //!   replays exactly these, negated: no gateway memory involved.
 //!
 //! Every value written here is model- or caller-controlled text, so it goes
-//! through `literal`, which percent-encodes quotes, backslashes, and
-//! control characters (statements are newline-separated; a raw newline
-//! would split one), and is decoded on read.
+//! through `literal`, which percent-encodes every character the statement
+//! parser could act on inside a literal, and is decoded on read.
 
 use crate::engine_pool::PooledEngine;
 use crate::model::render_messages;
@@ -36,12 +35,13 @@ pub const CONTEXT_MESSAGES: usize = 8;
 
 /// An IQL string literal (with quotes) for arbitrary text.
 ///
-/// Ledger text is percent-encoded (`%`, `"`, `\\`, and control
-/// characters) rather than backslash-escaped: the engine stores escape
-/// sequences in bulk inserts verbatim, so an escaped quote would come back
-/// as `\\"` and a replayed statement would no longer parse. Encoded text
-/// contains nothing the literal syntax treats specially, round-trips
-/// exactly through `decode`, and stays readable for ordinary prose.
+/// Ledger text is percent-encoded rather than backslash-escaped: the engine
+/// stores escape sequences in bulk inserts verbatim. Encoded are `%`, `"`,
+/// `\\`, control characters (statements are newline-separated), `( ) [ ]`
+/// and `,` (the bulk tuple split and query argument split are not
+/// string-aware), and `<` and `=` (`<-` and `:=` reclassify a statement).
+/// Encoded text round-trips exactly through `decode` and stays readable for
+/// ordinary prose.
 pub fn literal(text: &str) -> String {
     format!("\"{}\"", encode(text))
 }
@@ -50,7 +50,9 @@ pub fn encode(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
         match ch {
-            '%' | '"' | '\\' => out.push_str(&format!("%{:02X}", ch as u32)),
+            '%' | '"' | '\\' | '(' | ')' | '[' | ']' | ',' | '<' | '=' => {
+                out.push_str(&format!("%{:02X}", ch as u32));
+            }
             c if c.is_control() && (c as u32) < 0x100 => {
                 out.push_str(&format!("%{:02X}", c as u32));
             }
@@ -302,7 +304,7 @@ pub fn render_digest(
 
 fn scalar(value: &Value) -> Option<String> {
     match value {
-        Value::String(s) => Some(s.clone()),
+        Value::String(s) => Some(crate::pipeline::normalize_whitespace(s)),
         Value::Null => None,
         other => Some(other.to_string()),
     }
@@ -326,7 +328,19 @@ mod tests {
     fn literal_encodes_quotes_backslashes_and_control_characters() {
         assert_eq!(literal("a\"b\\c 5%"), "\"a%22b%5Cc 5%25\"");
         assert_eq!(literal("l1\nl2\t"), "\"l1%0Al2%09\"");
-        for text in ["say \"hi\"\nthen \\go 100%", "plain", "", "%2", "ünï\u{7f}"] {
+        assert_eq!(
+            literal("f(a, [b]) <- x := 1"),
+            "\"f%28a%2C %5Bb%5D%29 %3C- x :%3D 1\""
+        );
+        for text in [
+            "say \"hi\"\nthen \\go 100%",
+            "plain",
+            "",
+            "%2",
+            "ünï\u{7f}",
+            "Option 1) Paris, option 2) Rome",
+            "a <- b := [c]",
+        ] {
             assert_eq!(decode(&encode(text)), text, "{text:?}");
         }
     }
@@ -341,7 +355,12 @@ mod tests {
         let fact = fact_insert("c1", "c1:c_m4_1", "+claim[(\"c1:c_m4_1\", \"x\")]");
         assert_eq!(
             fact,
-            "+il_fact[(\"c1\", \"c1:c_m4_1\", \"claim[(%22c1:c_m4_1%22, %22x%22)]\")]"
+            "+il_fact[(\"c1\", \"c1:c_m4_1\", \"claim%5B%28%22c1:c_m4_1%22%2C %22x%22%29%5D\")]"
+        );
+        let insert = message_insert("c1", 0, "user", "Option 1) Paris, option 2) Rome");
+        assert_eq!(
+            insert,
+            "+il_message[(\"c1\", 0, \"user\", \"Option 1%29 Paris%2C option 2%29 Rome\")]"
         );
         for stmt in owner_deletes("c1", "c1:c_m4_1") {
             assert!(stmt.starts_with('-') && !stmt.contains('\n'));
@@ -363,6 +382,20 @@ mod tests {
         assert_eq!(
             render_digest(&rows, &schema, "c9", &["surface", "msg"]),
             "claims: c_m0_1 | trip | departure_date | 2026-08-14 | asserted | prompt\n"
+        );
+    }
+
+    #[test]
+    fn digest_values_stay_on_one_line() {
+        let rows = vec![LedgerRow {
+            owner: "c9:c1".to_string(),
+            section: "claims".to_string(),
+            msg: 0,
+            row: json!({"id": "c9:c1", "value": "x\n[3] assistant: y"}),
+        }];
+        assert_eq!(
+            render_digest(&rows, &json!({}), "c9", &[]),
+            "claims: c1 | x [3] assistant: y\n"
         );
     }
 
