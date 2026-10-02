@@ -81,3 +81,73 @@ async fn avg_skips_non_numeric() {
     .await;
     assert_eq!(rows, vec![vec![s("a"), WireValue::Float64(3.0)]]);
 }
+
+#[tokio::test]
+async fn aggregate_before_group_key_keeps_head_order() {
+    let rows = run(
+        &["+p[(\"a\", 1), (\"a\", 2)]", "+t(count<P>, G) <- p(G, P)"],
+        "?t(N, G)",
+    )
+    .await;
+    assert_eq!(rows, vec![vec![WireValue::Int64(2), s("a")]]);
+}
+
+#[tokio::test]
+async fn transient_aggregate_query_keeps_head_order() {
+    let rows = run(
+        &["+p[(\"a\", 1), (\"a\", 2)]"],
+        "t(count<P>, G) <- p(G, P)\n?t(N, G)",
+    )
+    .await;
+    assert_eq!(rows, vec![vec![WireValue::Int64(2), s("a")]]);
+}
+
+#[tokio::test]
+async fn join_on_reordered_aggregate_binds_correct_columns() {
+    let rows = run(
+        &[
+            "+p[(\"a\", 1), (\"a\", 2), (\"b\", 3)]",
+            "+label[(\"a\", \"alpha\"), (\"b\", \"beta\")]",
+            "+t(count<P>, G) <- p(G, P)",
+            "+named(L, N) <- t(N, G), label(G, L)",
+        ],
+        "?named(L, N)",
+    )
+    .await;
+    assert_eq!(
+        rows,
+        vec![
+            vec![s("alpha"), WireValue::Int64(2)],
+            vec![s("beta"), WireValue::Int64(1)],
+        ]
+    );
+}
+
+#[tokio::test]
+async fn interleaved_group_keys_and_aggregates_keep_head_order() {
+    let rows = run(
+        &[
+            "+p[(\"a\", 1, 10), (\"a\", 1, 20), (\"b\", 2, 5)]",
+            "+t(sum<V>, G, count<V>, H) <- p(G, H, V)",
+        ],
+        "?t(S, G, N, H)",
+    )
+    .await;
+    assert_eq!(
+        rows,
+        vec![
+            vec![
+                WireValue::Int64(30),
+                s("a"),
+                WireValue::Int64(2),
+                WireValue::Int64(1)
+            ],
+            vec![
+                WireValue::Int64(5),
+                s("b"),
+                WireValue::Int64(1),
+                WireValue::Int64(2)
+            ],
+        ]
+    );
+}

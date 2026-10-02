@@ -1571,9 +1571,13 @@ impl IRBuilder {
         // Separate group-by variables from aggregate terms
         // For ranking aggregates: Term::Variable = group-by key (PARTITION BY)
         // For simple aggregates: Term::Variable = group-by key (same behavior, always correct)
+        // The Aggregate node emits group keys then aggregate outputs;
+        // `head_order` maps each head column to (is_agg, index in its class).
         let mut group_by = Vec::new();
         let mut aggregations = Vec::new();
-        let mut output_schema = Vec::new();
+        let mut group_names = Vec::new();
+        let mut agg_names = Vec::new();
+        let mut head_order = Vec::new();
 
         for term in &head.args {
             match term {
@@ -1586,7 +1590,8 @@ impl IRBuilder {
 
                     // All non-aggregate head variables are group-by keys
                     group_by.push(pos);
-                    output_schema.push(v.clone());
+                    head_order.push((false, group_names.len()));
+                    group_names.push(v.clone());
                 }
                 Term::Aggregate(func, var_name) => {
                     if func.is_ranking() {
@@ -1702,7 +1707,8 @@ impl IRBuilder {
                             _ => unreachable!(),
                         };
                         for v in output_vars {
-                            output_schema.push(v.clone());
+                            head_order.push((true, agg_names.len()));
+                            agg_names.push(v.clone());
                         }
                     } else {
                         // Simple (scalar) aggregates use var_name
@@ -1725,7 +1731,8 @@ impl IRBuilder {
                             _ => unreachable!(),
                         };
                         aggregations.push((ir_func, col_pos));
-                        output_schema.push(format!("{}_{}", func_to_str(func), var_name));
+                        head_order.push((true, agg_names.len()));
+                        agg_names.push(format!("{}_{}", func_to_str(func), var_name));
                     }
                 }
                 Term::Constant(_) => {
@@ -1763,11 +1770,29 @@ impl IRBuilder {
             }
         }
 
-        Ok(IRNode::Aggregate {
+        let projection: Vec<usize> = head_order
+            .iter()
+            .map(|&(is_agg, i)| if is_agg { group_names.len() + i } else { i })
+            .collect();
+        let mut output_schema = group_names;
+        output_schema.extend(agg_names);
+        let head_schema = projection
+            .iter()
+            .map(|&i| output_schema[i].clone())
+            .collect();
+        let aggregate = IRNode::Aggregate {
             input: Box::new(input),
             group_by,
             aggregations,
             output_schema,
+        };
+        if projection.iter().enumerate().all(|(i, &p)| i == p) {
+            return Ok(aggregate);
+        }
+        Ok(IRNode::Map {
+            input: Box::new(aggregate),
+            projection,
+            output_schema: head_schema,
         })
     }
 }
