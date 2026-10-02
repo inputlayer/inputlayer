@@ -58,6 +58,11 @@ pub fn set_query_cancel_flag(flag: Option<Arc<AtomicBool>>) {
     });
 }
 
+/// The current thread's query cancellation flag.
+fn current_query_cancel_flag() -> Option<Arc<AtomicBool>> {
+    QUERY_CANCEL.with(|cell| cell.borrow().clone())
+}
+
 /// Check if the current query has been cancelled.
 fn is_query_cancelled() -> bool {
     QUERY_CANCEL.with(|cell| {
@@ -67,6 +72,9 @@ fn is_query_cancelled() -> bool {
     })
 }
 
+/// Error returned when a query stops on its cancel flag.
+const QUERY_CANCELLED: &str = "Query cancelled due to timeout";
+
 /// Signal cancellation on the current thread's cancel flag.
 /// Used by max_result_rows enforcement to stop DD computation early (#2).
 fn signal_query_cancel() {
@@ -75,6 +83,30 @@ fn signal_query_cancel() {
             flag.store(true, Ordering::Relaxed);
         }
     });
+}
+
+/// Relation name of a bare two-column `Scan`.
+fn binary_scan(ir: &IRNode) -> Option<&str> {
+    match ir {
+        IRNode::Scan { relation, schema } if schema.len() == 2 => Some(relation),
+        _ => None,
+    }
+}
+
+/// Unwraps a `Map` whose projection is the identity over its input.
+fn strip_identity_map(ir: &IRNode) -> &IRNode {
+    match ir {
+        IRNode::Map {
+            input, projection, ..
+        } if projection
+            .iter()
+            .copied()
+            .eq(0..input.output_schema().len()) =>
+        {
+            input
+        }
+        _ => ir,
+    }
 }
 
 /// Extract a human-readable message from a panic payload.
@@ -306,7 +338,7 @@ impl CodeGenerator {
             // If we hit the result limit, the cancel was self-triggered - return results
             let collected = results.lock().len();
             if result_limit == 0 || collected < result_limit {
-                return Err("Query cancelled due to timeout".to_string());
+                return Err(QUERY_CANCELLED.to_string());
             }
         }
 
@@ -418,134 +450,51 @@ impl CodeGenerator {
         }
     }
 
-    /// Detect if the recursive pattern is a simple BINARY transitive closure
-    ///
-    /// Pattern must be EXACTLY:
+    /// Detect a plain binary transitive closure:
     ///   base: tc(X, Y) <- edge(X, Y)
     ///   recursive: tc(X, Z) <- edge(X, Y), tc(Y, Z)
     ///
-    /// This matches standard transitive closure where:
-    /// - edge is on the LEFT side of the join, keyed by column 1
-    /// - tc (recursive) is on the RIGHT side of the join, keyed by column 0
-    ///
-    /// Other patterns like `subordinate(Mgr, Emp) <- reports_to(Emp, Mid), subordinate(Mgr, Mid)`
-    /// have different join key columns and must use the general recursive handler.
+    /// Only identity projections and bare scans match; any filter, computed
+    /// column, reordering or extra atom falls back to the general evaluator.
     fn detect_transitive_closure_pattern(
         base_inputs: &[IRNode],
         recursive_inputs: &[IRNode],
         recursive_rel: &str,
     ) -> Option<String> {
-        // Check base case: should be a simple scan of some relation with exactly 2 columns
-        if base_inputs.len() != 1 {
+        let ([base], [recursive]) = (base_inputs, recursive_inputs) else {
             return None;
-        }
-
-        let (edge_relation, schema_len) = match &base_inputs[0] {
-            IRNode::Scan { relation, schema } => (relation.clone(), schema.len()),
-            IRNode::Map {
-                input, projection, ..
-            } => {
-                // For Map, check if output is binary
-                if projection.len() != 2 {
-                    return None;
-                }
-                match input.as_ref() {
-                    IRNode::Scan { relation, .. } => (relation.clone(), 2),
-                    _ => return None,
-                }
-            }
-            _ => return None,
         };
-
-        // CRITICAL: Only optimize binary relations (exactly 2 columns)
-        if schema_len != 2 {
+        let edge = binary_scan(strip_identity_map(base))?;
+        let IRNode::Map {
+            input, projection, ..
+        } = recursive
+        else {
             return None;
-        }
-
-        // Check recursive case: must be a single rule
-        if recursive_inputs.len() != 1 {
+        };
+        let IRNode::Join {
+            left,
+            right,
+            left_keys,
+            right_keys,
+            ..
+        } = input.as_ref()
+        else {
             return None;
-        }
-
-        // The recursive case must be a Join with specific structure:
-        // - Left side scans edge relation, keyed by column 1
-        // - Right side scans recursive relation, keyed by column 0
-        match &recursive_inputs[0] {
-            IRNode::Join {
-                left,
-                right,
-                left_keys,
-                right_keys,
-                ..
-            } => {
-                // Check left side scans edge relation
-                let left_scans_edge = match left.as_ref() {
-                    IRNode::Scan { relation, .. } => relation == &edge_relation,
-                    IRNode::Map { input, .. } => match input.as_ref() {
-                        IRNode::Scan { relation, .. } => relation == &edge_relation,
-                        _ => false,
-                    },
-                    _ => false,
-                };
-
-                // Check right side scans recursive relation
-                let right_scans_recursive = match right.as_ref() {
-                    IRNode::Scan { relation, .. } => relation == recursive_rel,
-                    IRNode::Map { input, .. } => match input.as_ref() {
-                        IRNode::Scan { relation, .. } => relation == recursive_rel,
-                        _ => false,
-                    },
-                    _ => false,
-                };
-
-                // Check join keys: edge.col1 = recursive.col0
-                let correct_keys = left_keys == &[1] && right_keys == &[0];
-
-                if left_scans_edge && right_scans_recursive && correct_keys {
-                    Some(edge_relation)
-                } else {
-                    None
-                }
-            }
-            // Also handle Map over Join (for projections)
-            IRNode::Map { input, .. } => match input.as_ref() {
-                IRNode::Join {
-                    left,
-                    right,
-                    left_keys,
-                    right_keys,
-                    ..
-                } => {
-                    let left_scans_edge = match left.as_ref() {
-                        IRNode::Scan { relation, .. } => relation == &edge_relation,
-                        _ => false,
-                    };
-                    let right_scans_recursive = match right.as_ref() {
-                        IRNode::Scan { relation, .. } => relation == recursive_rel,
-                        _ => false,
-                    };
-                    let correct_keys = left_keys == &[1] && right_keys == &[0];
-
-                    if left_scans_edge && right_scans_recursive && correct_keys {
-                        Some(edge_relation)
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            },
-            _ => None,
-        }
+        };
+        let exact = projection == &[0, 2]
+            && left_keys == &[1]
+            && right_keys == &[0]
+            && binary_scan(left) == Some(edge)
+            && binary_scan(right) == Some(recursive_rel);
+        exact.then(|| edge.to_string())
     }
 
-    /// Detect a **bound** transitive closure pattern produced by Magic Sets.
-    ///
-    /// Only matches the standard TC form with `_bf` adornment (first arg bound):
+    /// Detect the Magic Sets `_bf` transitive closure:
     ///   base: reach_bf(X, Y) <- magic_reach_bf(X), edge(X, Y)
     ///   recursive: reach_bf(X, Z) <- magic_reach_bf(X), reach_bf(X, Y), edge(Y, Z)
     ///
-    /// The recursive IR must have the exact join structure:
-    ///   edge.col1 = recursive.col0 (standard TC join keys)
+    /// Only bare scans joined with identity projections match; anything else
+    /// (filters, computed columns, reordered heads) uses the general evaluator.
     ///
     /// Returns `(edge_relation, seed_values, bound_col=0)` if the pattern matches.
     fn detect_bound_tc_pattern(
@@ -554,132 +503,74 @@ impl CodeGenerator {
         recursive_inputs: &[IRNode],
         recursive_rel: &str,
     ) -> Option<(String, Vec<Tuple>, usize)> {
-        if base_inputs.len() != 1 || recursive_inputs.len() != 1 {
+        let ([base], [recursive]) = (base_inputs, recursive_inputs) else {
             return None;
-        }
-
-        // Only support _bf adornment (first arg bound, standard TC structure)
+        };
         if !recursive_rel.ends_with("_bf") {
             return None;
         }
+        let magic_name = format!("magic_{recursive_rel}");
 
-        // Helper: extract the relation name from a Scan or Map(Scan) node
-        fn scan_relation(ir: &IRNode) -> Option<&str> {
-            match ir {
-                IRNode::Scan { relation, .. } => Some(relation),
-                IRNode::Map { input, .. } => scan_relation(input),
-                _ => None,
+        // Join(magic, rel) on column 0 in either order (or `rel` alone when
+        // `allow_bare`); yields (X, Y).
+        let guarded = |ir: &IRNode, rel: &str, allow_bare: bool| -> bool {
+            if allow_bare && binary_scan(ir) == Some(rel) {
+                return true;
             }
+            let IRNode::Join {
+                left,
+                right,
+                left_keys,
+                right_keys,
+                ..
+            } = strip_identity_map(ir)
+            else {
+                return false;
+            };
+            let is_magic = |n: &IRNode| matches!(n, IRNode::Scan { relation, schema } if *relation == magic_name && schema.len() == 1);
+            left_keys == &[0]
+                && right_keys == &[0]
+                && ((is_magic(left) && binary_scan(right) == Some(rel))
+                    || (binary_scan(left) == Some(rel) && is_magic(right)))
+        };
+
+        let IRNode::Map {
+            input, projection, ..
+        } = recursive
+        else {
+            return None;
+        };
+        let IRNode::Join {
+            left,
+            right,
+            left_keys,
+            right_keys,
+            ..
+        } = input.as_ref()
+        else {
+            return None;
+        };
+        // rec(X, Y) ⋈ edge(Y, Z) -> (X, Y, Z), or edge(Y, Z) ⋈ rec(X, Y) -> (Y, Z, X).
+        let edge_rel = if left_keys == &[1] && right_keys == &[0] && projection == &[0, 2] {
+            guarded(left, recursive_rel, true).then(|| binary_scan(right))??
+        } else if left_keys == &[0] && right_keys == &[1] && projection == &[2, 1] {
+            guarded(right, recursive_rel, true).then(|| binary_scan(left))??
+        } else {
+            return None;
+        };
+        if edge_rel == recursive_rel
+            || edge_rel.starts_with("magic_")
+            || !guarded(base, edge_rel, false)
+        {
+            return None;
         }
 
-        // Helper: check if an IR tree transitively contains a Scan of a relation
-        fn contains_scan(ir: &IRNode, rel: &str) -> bool {
-            match ir {
-                IRNode::Scan { relation, .. } => relation == rel,
-                IRNode::Map { input, .. }
-                | IRNode::Filter { input, .. }
-                | IRNode::Distinct { input }
-                | IRNode::Compute { input, .. } => contains_scan(input, rel),
-                IRNode::Join { left, right, .. } => {
-                    contains_scan(left, rel) || contains_scan(right, rel)
-                }
-                _ => false,
-            }
-        }
-
-        // Helper: find the edge relation and verify the join structure in the
-        // recursive input. We need a Join where:
-        //   - One side is keyed by [1] and contains the recursive relation
-        //   - Other side is keyed by [0] and is a direct scan of the edge relation
-        // This handles the adorned pattern where the recursive side is
-        // Join(magic_guard, reach_bf), not just Scan(reach_bf).
-        fn find_tc_join<'a>(ir: &'a IRNode, recursive_rel: &str) -> Option<&'a str> {
-            match ir {
-                IRNode::Join {
-                    left,
-                    right,
-                    left_keys,
-                    right_keys,
-                    ..
-                } => {
-                    // Pattern: left[key=1] JOIN right[key=0]
-                    // Left contains recursive rel, right is edge scan
-                    if left_keys == &[1] && right_keys == &[0] && contains_scan(left, recursive_rel)
-                    {
-                        if let Some(r) = scan_relation(right) {
-                            if !r.starts_with("magic_") && r != recursive_rel {
-                                return Some(r);
-                            }
-                        }
-                    }
-                    // Swapped: left[key=0] JOIN right[key=1]
-                    if left_keys == &[0]
-                        && right_keys == &[1]
-                        && contains_scan(right, recursive_rel)
-                    {
-                        if let Some(l) = scan_relation(left) {
-                            if !l.starts_with("magic_") && l != recursive_rel {
-                                return Some(l);
-                            }
-                        }
-                    }
-                    // Recurse into children (the TC join may be wrapped)
-                    find_tc_join(left, recursive_rel).or_else(|| find_tc_join(right, recursive_rel))
-                }
-                IRNode::Map { input, .. } | IRNode::Filter { input, .. } => {
-                    find_tc_join(input, recursive_rel)
-                }
-                _ => None,
-            }
-        }
-
-        // Find the edge relation from the recursive input's join structure
-        let edge_rel = find_tc_join(&recursive_inputs[0], recursive_rel)?;
-
-        // Verify edge relation has 2-column tuples in input_tuples
         let edge_tuples = self.input_tuples.get(edge_rel)?;
         if edge_tuples.get(0).is_none_or(|t| t.values().len() != 2) {
             return None;
         }
-
-        // Find the magic relation name and verify it has seed tuples
-        let magic_name = format!("magic_{recursive_rel}");
         let magic_tuples = self.input_tuples.get(&magic_name)?;
         if magic_tuples.is_empty() {
-            return None;
-        }
-
-        // Verify the base case only has scans of the magic relation and the edge
-        // relation (no negation, no extra joins that would change semantics)
-        fn collect_scans_local(ir: &IRNode, scans: &mut Vec<String>) {
-            match ir {
-                IRNode::Scan { relation, .. } => scans.push(relation.clone()),
-                IRNode::Map { input, .. }
-                | IRNode::Filter { input, .. }
-                | IRNode::Distinct { input }
-                | IRNode::Compute { input, .. } => collect_scans_local(input, scans),
-                IRNode::Join { left, right, .. } => {
-                    collect_scans_local(left, scans);
-                    collect_scans_local(right, scans);
-                }
-                // Antijoin/negation means this isn't a simple TC - bail out
-                _ => scans.push("__unsupported__".to_string()),
-            }
-        }
-
-        let mut base_scans = Vec::new();
-        collect_scans_local(&base_inputs[0], &mut base_scans);
-
-        // Base case must scan exactly: the magic relation + the edge relation
-        // No unsupported nodes, no extra relations
-        if base_scans.iter().any(|s| s == "__unsupported__") {
-            return None;
-        }
-        let base_set: HashSet<&str> = base_scans.iter().map(String::as_str).collect();
-        if base_set.len() != 2
-            || !base_set.contains(magic_name.as_str())
-            || !base_set.contains(edge_rel)
-        {
             return None;
         }
 
@@ -822,7 +713,7 @@ impl CodeGenerator {
             // If we hit the result limit, the cancel was self-triggered - return results
             let collected = results.lock().len();
             if result_limit == 0 || collected < result_limit {
-                return Err("Query cancelled due to timeout".to_string());
+                return Err(QUERY_CANCELLED.to_string());
             }
         }
 
@@ -989,7 +880,7 @@ impl CodeGenerator {
         if is_query_cancelled() {
             let collected = results.lock().len();
             if result_limit == 0 || collected < result_limit {
-                return Err("Query cancelled due to timeout".to_string());
+                return Err(QUERY_CANCELLED.to_string());
             }
         }
 
@@ -1236,7 +1127,7 @@ impl CodeGenerator {
             // If we hit the result limit, the cancel was self-triggered - return results
             let collected = results.lock().len();
             if result_limit == 0 || collected < result_limit {
-                return Err("Query cancelled due to timeout".to_string());
+                return Err(QUERY_CANCELLED.to_string());
             }
         }
 
@@ -1259,78 +1150,94 @@ impl CodeGenerator {
         self.execute_recursive_fixpoint_tuples(ir, recursive_rel)
     }
 
-    /// Execute with Rayon-based parallelism. Falls back to single-worker for joins
-    /// (data must be co-located). Scan/filter/map queries partition data across workers.
+    /// Execute with Rayon-based parallelism. Only per-tuple IR (scan, filter,
+    /// map, compute, union) is hash-partitioned across workers; everything
+    /// else runs on a single worker.
     pub fn execute_with_config(
         &self,
         ir: &IRNode,
         config: ExecutionConfig,
     ) -> Result<Vec<Tuple>, String> {
         use rayon::prelude::*;
-        use std::collections::HashSet;
 
-        if config.num_workers == 1 {
-            // Fall back to direct execution for single worker
+        if config.num_workers == 1 || !Self::is_partitionable(ir) {
             return self.generate_and_execute_tuples(ir);
         }
 
-        // Check if the IR contains joins - if so, use single-worker for correctness
-        // Joins require coordinated data exchange which our simple partitioning doesn't handle
-        if Self::contains_join(ir) {
-            return self.generate_and_execute_tuples(ir);
-        }
-
-        // For queries without joins, we can partition and process in parallel
         let num_workers = config.num_workers;
-
-        // Partition input data across workers
         let partitioned_inputs: Vec<RelationMap> = (0..num_workers)
             .map(|worker_idx| {
                 Self::partition_data_for_worker(&self.input_tuples, worker_idx, num_workers)
             })
             .collect();
 
-        let ir_clone = ir.clone();
+        let cancel = current_query_cancel_flag();
+        let limit = self.max_result_rows;
         let semiring_type = self.semiring_type;
 
-        // Execute in parallel using Rayon
-        let all_results: Vec<Vec<Tuple>> = partitioned_inputs
+        let all_results: Vec<Result<Vec<Tuple>, String>> = partitioned_inputs
             .into_par_iter()
             .map(|partition| {
-                // Create a temporary code generator with this partition
+                let prev = current_query_cancel_flag();
+                set_query_cancel_flag(cancel.clone());
                 let mut temp_codegen = CodeGenerator::new();
                 temp_codegen.set_semiring_type(semiring_type);
+                temp_codegen.set_max_result_rows(limit);
                 temp_codegen.set_inputs(partition);
-                temp_codegen
-                    .generate_and_execute_tuples(&ir_clone)
-                    .unwrap_or_default()
+                let result = temp_codegen.generate_and_execute_tuples(ir);
+                set_query_cancel_flag(prev);
+                result
             })
             .collect();
 
-        // Merge and deduplicate results
-        let mut combined: HashSet<Tuple> = HashSet::new();
-        for results in all_results {
-            combined.extend(results);
-        }
-
-        Ok(combined.into_iter().collect())
+        Self::merge_worker_results(all_results, limit)
     }
 
-    /// Check if IR tree contains any join operations
-    fn contains_join(ir: &IRNode) -> bool {
+    /// Union worker outputs, truncated to `limit` (0 = unlimited). A worker
+    /// reaching the limit cancels its siblings, so their cancellation errors
+    /// are dropped once the limit is met; any other error is returned.
+    fn merge_worker_results(
+        results: Vec<Result<Vec<Tuple>, String>>,
+        limit: usize,
+    ) -> Result<Vec<Tuple>, String> {
+        let mut combined: HashSet<Tuple> = HashSet::new();
+        let mut cancelled = None;
+        for result in results {
+            match result {
+                Ok(tuples) => combined.extend(tuples),
+                Err(e) if e == QUERY_CANCELLED => cancelled = Some(e),
+                Err(e) => return Err(e),
+            }
+        }
+        if let Some(e) = cancelled {
+            if limit == 0 || combined.len() < limit {
+                return Err(e);
+            }
+        }
+
+        let mut rows: Vec<Tuple> = combined.into_iter().collect();
+        if limit > 0 {
+            rows.truncate(limit);
+        }
+        Ok(rows)
+    }
+
+    /// True when the IR is per-tuple, so evaluating hash partitions
+    /// independently and unioning the results equals evaluating the whole.
+    fn is_partitionable(ir: &IRNode) -> bool {
         match ir {
-            IRNode::Scan { .. } => false,
-            IRNode::HnswScan { .. } => false,
-            IRNode::Map { input, .. } => Self::contains_join(input),
-            IRNode::Filter { input, .. } => Self::contains_join(input),
-            IRNode::Join { .. } => true,
-            IRNode::Distinct { input } => Self::contains_join(input),
-            IRNode::Union { inputs } => inputs.iter().any(Self::contains_join),
-            IRNode::Aggregate { input, .. } => Self::contains_join(input),
-            IRNode::Antijoin { .. } => true, // Antijoin is also a join-like operation
-            IRNode::Compute { input, .. } => Self::contains_join(input),
-            IRNode::FlatMap { input, .. } => Self::contains_join(input),
-            IRNode::JoinFlatMap { .. } => true,
+            IRNode::Scan { .. } => true,
+            IRNode::Map { input, .. }
+            | IRNode::Filter { input, .. }
+            | IRNode::Compute { input, .. }
+            | IRNode::FlatMap { input, .. } => Self::is_partitionable(input),
+            IRNode::Union { inputs } => inputs.iter().all(Self::is_partitionable),
+            IRNode::Join { .. }
+            | IRNode::JoinFlatMap { .. }
+            | IRNode::Antijoin { .. }
+            | IRNode::Aggregate { .. }
+            | IRNode::Distinct { .. }
+            | IRNode::HnswScan { .. } => false,
         }
     }
 
@@ -3802,7 +3709,7 @@ impl CodeGenerator {
             // If we hit the result limit, the cancel was self-triggered - return results
             let collected = results.lock().len();
             if result_limit == 0 || collected < result_limit {
-                return Err("Query cancelled due to timeout".to_string());
+                return Err(QUERY_CANCELLED.to_string());
             }
         }
 
@@ -3941,7 +3848,7 @@ impl CodeGenerator {
             // If we hit the result limit, the cancel was self-triggered - return results
             let collected = results.lock().len();
             if result_limit == 0 || collected < result_limit {
-                return Err("Query cancelled due to timeout".to_string());
+                return Err(QUERY_CANCELLED.to_string());
             }
         }
 
@@ -8331,32 +8238,291 @@ mod tests {
 
     // === detect_transitive_closure_pattern tests ===
 
+    fn scan(relation: &str, arity: usize) -> IRNode {
+        IRNode::Scan {
+            relation: relation.to_string(),
+            schema: (0..arity).map(|i| format!("c{i}")).collect(),
+        }
+    }
+
+    fn join(left: IRNode, right: IRNode, lk: usize, rk: usize) -> IRNode {
+        let arity = left.output_schema().len() + right.output_schema().len() - 1;
+        IRNode::Join {
+            left: Box::new(left),
+            right: Box::new(right),
+            left_keys: vec![lk],
+            right_keys: vec![rk],
+            output_schema: (0..arity).map(|i| format!("j{i}")).collect(),
+        }
+    }
+
+    fn project(input: IRNode, projection: Vec<usize>) -> IRNode {
+        IRNode::Map {
+            input: Box::new(input),
+            output_schema: projection.iter().map(|i| format!("p{i}")).collect(),
+            projection,
+        }
+    }
+
+    fn filter_ne(input: IRNode, column: usize, value: i64) -> IRNode {
+        IRNode::Filter {
+            input: Box::new(input),
+            predicate: Predicate::ColumnNeConst(column, value),
+        }
+    }
+
+    /// tc(X, Z) <- edge(X, Y), tc(Y, Z)
+    fn tc_recursive() -> IRNode {
+        project(join(scan("edge", 2), scan("tc", 2), 1, 0), vec![0, 2])
+    }
+
     #[test]
     fn test_detect_tc_simple_pattern() {
-        let base = vec![IRNode::Scan {
-            relation: "edge".to_string(),
-            schema: vec!["x".to_string(), "y".to_string()],
-        }];
-        let recursive = vec![IRNode::Join {
-            left: Box::new(IRNode::Scan {
-                relation: "edge".to_string(),
-                schema: vec!["x".to_string(), "y".to_string()],
-            }),
-            right: Box::new(IRNode::Scan {
-                relation: "tc".to_string(),
-                schema: vec!["x".to_string(), "y".to_string()],
-            }),
-            left_keys: vec![1],
-            right_keys: vec![0],
-            output_schema: vec![
-                "x".to_string(),
-                "y".to_string(),
-                "x2".to_string(),
-                "y2".to_string(),
-            ],
-        }];
-        let result = CodeGenerator::detect_transitive_closure_pattern(&base, &recursive, "tc");
+        let result = CodeGenerator::detect_transitive_closure_pattern(
+            &[scan("edge", 2)],
+            &[tc_recursive()],
+            "tc",
+        );
         assert_eq!(result, Some("edge".to_string()));
+    }
+
+    #[test]
+    fn test_detect_tc_rejects_non_exact_clauses() {
+        let detect = |base: IRNode, rec: IRNode| {
+            CodeGenerator::detect_transitive_closure_pattern(&[base], &[rec], "tc")
+        };
+        // tc(Y, X) <- edge(X, Y)
+        assert_eq!(
+            detect(project(scan("edge", 2), vec![1, 0]), tc_recursive()),
+            None
+        );
+        // tc(Z, X) <- edge(X, Y), tc(Y, Z)
+        let swapped = project(join(scan("edge", 2), scan("tc", 2), 1, 0), vec![2, 0]);
+        assert_eq!(detect(scan("edge", 2), swapped), None);
+        // Filters in either clause
+        assert_eq!(
+            detect(filter_ne(scan("edge", 2), 1, 2), tc_recursive()),
+            None
+        );
+        assert_eq!(
+            detect(scan("edge", 2), filter_ne(tc_recursive(), 1, 3)),
+            None
+        );
+        // Bare join yields three columns, not a binary head
+        assert_eq!(
+            detect(scan("edge", 2), join(scan("edge", 2), scan("tc", 2), 1, 0)),
+            None
+        );
+        // Identity map over the base is still exact
+        assert_eq!(
+            detect(project(scan("edge", 2), vec![0, 1]), tc_recursive()),
+            Some("edge".to_string())
+        );
+    }
+
+    fn bound_codegen() -> CodeGenerator {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "edge".to_string(),
+            vec![Tuple::new(vec![Value::Int64(1), Value::Int64(2)])],
+        );
+        codegen.add_input_tuples(
+            "magic_tc_bf".to_string(),
+            vec![Tuple::new(vec![Value::Int64(1)])],
+        );
+        codegen
+    }
+
+    /// tc_bf(X, Y) <- magic_tc_bf(X), edge(X, Y)
+    fn bound_base() -> IRNode {
+        join(scan("magic_tc_bf", 1), scan("edge", 2), 0, 0)
+    }
+
+    /// tc_bf(X, Z) <- magic_tc_bf(X), tc_bf(X, Y), edge(Y, Z)
+    fn bound_recursive() -> IRNode {
+        let guarded = join(scan("magic_tc_bf", 1), scan("tc_bf", 2), 0, 0);
+        project(join(guarded, scan("edge", 2), 1, 0), vec![0, 2])
+    }
+
+    #[test]
+    fn test_detect_bound_tc_pattern_exact() {
+        let codegen = bound_codegen();
+        let result =
+            codegen.detect_bound_tc_pattern(&[bound_base()], &[bound_recursive()], "tc_bf");
+        assert_eq!(
+            result.map(|(edge, _, col)| (edge, col)),
+            Some(("edge".to_string(), 0))
+        );
+    }
+
+    #[test]
+    fn test_detect_bound_tc_rejects_filters_and_projections() {
+        let codegen = bound_codegen();
+        let detect = |base: IRNode, rec: IRNode| {
+            codegen
+                .detect_bound_tc_pattern(&[base], &[rec], "tc_bf")
+                .is_some()
+        };
+        assert!(!detect(filter_ne(bound_base(), 1, 2), bound_recursive()));
+        assert!(!detect(bound_base(), filter_ne(bound_recursive(), 1, 3)));
+        let guarded = join(scan("magic_tc_bf", 1), scan("tc_bf", 2), 0, 0);
+        let filtered_edge = join(guarded, filter_ne(scan("edge", 2), 1, 3), 1, 0);
+        assert!(!detect(bound_base(), project(filtered_edge, vec![0, 2])));
+        let guarded = join(scan("magic_tc_bf", 1), scan("tc_bf", 2), 0, 0);
+        let swapped = project(join(guarded, scan("edge", 2), 1, 0), vec![2, 0]);
+        assert!(!detect(bound_base(), swapped));
+        // An unguarded base would seed from every edge
+        assert!(!detect(scan("edge", 2), bound_recursive()));
+    }
+
+    #[test]
+    fn test_is_partitionable() {
+        let per_tuple = filter_ne(project(scan("r", 2), vec![1]), 0, 1);
+        assert!(CodeGenerator::is_partitionable(&per_tuple));
+        let aggregate = IRNode::Aggregate {
+            input: Box::new(scan("r", 2)),
+            group_by: vec![],
+            aggregations: vec![(AggregateFunction::Count, 1)],
+            output_schema: vec!["n".to_string()],
+        };
+        assert!(!CodeGenerator::is_partitionable(&aggregate));
+        let distinct = IRNode::Distinct {
+            input: Box::new(scan("r", 2)),
+        };
+        assert!(!CodeGenerator::is_partitionable(&distinct));
+        assert!(!CodeGenerator::is_partitionable(&join(
+            scan("r", 2),
+            scan("s", 2),
+            1,
+            0
+        )));
+    }
+
+    #[test]
+    fn test_execute_with_config_aggregate_is_global() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "r".to_string(),
+            (0..20)
+                .map(|i| Tuple::new(vec![Value::Int64(1), Value::Int64(i)]))
+                .collect(),
+        );
+        let ir = IRNode::Aggregate {
+            input: Box::new(scan("r", 2)),
+            group_by: vec![],
+            aggregations: vec![(AggregateFunction::Sum, 1)],
+            output_schema: vec!["s".to_string()],
+        };
+        let rows = codegen
+            .execute_with_config(&ir, ExecutionConfig::with_workers(4))
+            .unwrap();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+    }
+
+    #[test]
+    fn test_execute_with_config_honors_cancel_and_row_limit() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "r".to_string(),
+            (0..200)
+                .map(|i| Tuple::new(vec![Value::Int64(i)]))
+                .collect(),
+        );
+        let config = ExecutionConfig::with_workers(4);
+
+        let flag = Arc::new(AtomicBool::new(true));
+        set_query_cancel_flag(Some(Arc::clone(&flag)));
+        let cancelled = codegen.execute_with_config(&scan("r", 1), config.clone());
+        set_query_cancel_flag(None);
+        assert!(cancelled.is_err(), "cancel flag must reach workers");
+
+        codegen.set_max_result_rows(10);
+        set_query_cancel_flag(Some(Arc::new(AtomicBool::new(false))));
+        let limited = codegen.execute_with_config(&scan("r", 1), config);
+        set_query_cancel_flag(None);
+        assert_eq!(limited.unwrap().len(), 10);
+    }
+
+    #[test]
+    fn test_merge_worker_results_keeps_real_errors_at_limit() {
+        let rows =
+            |n: i64| -> Vec<Tuple> { (0..n).map(|i| Tuple::new(vec![Value::Int64(i)])).collect() };
+        let cancelled = || Err(QUERY_CANCELLED.to_string());
+
+        let merged = CodeGenerator::merge_worker_results(vec![Ok(rows(10)), cancelled()], 10);
+        assert_eq!(merged.unwrap().len(), 10);
+
+        let merged = CodeGenerator::merge_worker_results(vec![Ok(rows(5)), cancelled()], 10);
+        assert_eq!(merged.unwrap_err(), QUERY_CANCELLED);
+
+        let failed = Err("Internal error in query execution: boom".to_string());
+        let merged =
+            CodeGenerator::merge_worker_results(vec![Ok(rows(10)), cancelled(), failed], 10);
+        assert!(merged.unwrap_err().starts_with("Internal error"));
+    }
+
+    /// Recursive clauses for `rel` as the engine compiles `program`.
+    fn compiled_clauses(
+        program: &str,
+        rel: &str,
+        magic: bool,
+    ) -> (CodeGenerator, Vec<IRNode>, Vec<IRNode>) {
+        let mut engine = crate::IQLEngine::with_config(crate::OptimizationConfig {
+            enable_magic_sets: magic,
+            ..crate::OptimizationConfig::default()
+        });
+        engine.add_tuples(
+            "e",
+            vec![
+                Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
+                Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
+            ],
+        );
+        engine.parse(program).unwrap();
+        engine.apply_sip_rewriting();
+        engine.apply_magic_sets();
+        engine.build_ir(false).unwrap();
+        let idx = engine
+            .get_rule_heads()
+            .iter()
+            .position(|h| h == rel)
+            .unwrap_or_else(|| panic!("no rule for {rel}"));
+        let IRNode::Union { inputs } = &engine.ir_nodes[idx] else {
+            panic!("{rel} is not a union");
+        };
+        let (_, base_idx, rec_idx) =
+            CodeGenerator::detect_recursive_union_for_relation(inputs, Some(rel)).unwrap();
+        let mut codegen = CodeGenerator::new();
+        codegen.set_inputs(engine.input_tuples().clone());
+        let pick = |idx: &[usize]| idx.iter().map(|&i| inputs[i].clone()).collect();
+        (codegen, pick(&base_idx), pick(&rec_idx))
+    }
+
+    #[test]
+    fn test_tc_fast_path_matches_compiled_ir() {
+        let program = "\
+            tc(X, Y) <- e(X, Y)\n\
+            tc(X, Z) <- e(X, Y), tc(Y, Z)\n\
+            __query__(X, Y) <- tc(X, Y)";
+        let (_, base, rec) = compiled_clauses(program, "tc", false);
+        assert_eq!(
+            CodeGenerator::detect_transitive_closure_pattern(&base, &rec, "tc"),
+            Some("e".to_string())
+        );
+    }
+
+    #[test]
+    fn test_bound_tc_fast_path_matches_compiled_ir() {
+        let program = "\
+            reach(X, Y) <- e(X, Y)\n\
+            reach(X, Z) <- reach(X, Y), e(Y, Z)\n\
+            __query__(_c0, Y) <- reach(_c0, Y), _c0 = 1";
+        let (codegen, base, rec) = compiled_clauses(program, "reach_bf", true);
+        let detected = codegen.detect_bound_tc_pattern(&base, &rec, "reach_bf");
+        assert_eq!(
+            detected.map(|(edge, seeds, col)| (edge, seeds.len(), col)),
+            Some(("e".to_string(), 1, 0))
+        );
     }
 
     #[test]
