@@ -285,6 +285,11 @@ pub struct OptimizationConfig {
     /// arguments, e.g. `?reach(1, Y)` only computes reachability from node 1.
     #[serde(default = "default_true")]
     pub enable_magic_sets: bool,
+
+    /// Specialize non-recursive derived relations read with constant
+    /// arguments, e.g. `?two_hop(1, Z)` evaluates `two_hop` only for `X = 1`.
+    #[serde(default = "default_true")]
+    pub enable_constant_specialization: bool,
 }
 
 impl Default for OptimizationConfig {
@@ -295,6 +300,7 @@ impl Default for OptimizationConfig {
             enable_subplan_sharing: true,
             enable_boolean_specialization: true,
             enable_magic_sets: true,
+            enable_constant_specialization: true,
         }
     }
 }
@@ -323,6 +329,10 @@ impl OptimizationConfig {
             (
                 self.enable_magic_sets,
                 "Magic Sets (demand-driven recursion)",
+            ),
+            (
+                self.enable_constant_specialization,
+                "Constant Specialization (demand-driven non-recursive rules)",
             ),
             (
                 true,

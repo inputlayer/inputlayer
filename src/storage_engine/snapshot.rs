@@ -5,14 +5,19 @@
 //!
 //! ## Design
 //!
-//! - `KnowledgeGraphSnapshot`: Immutable snapshot with Arc-wrapped data
-//! - Data is shared via Arc, so cloning a snapshot is O(1)
+//! - `KnowledgeGraphSnapshot`: immutable; relations share tuples with the
+//!   writer and with other snapshots (see [`Relation`]), so publishing after a
+//!   write costs O(changed chunks), not O(KG)
+//! - Persistent rules are parsed once per snapshot; a query is evaluated with
+//!   only the rules and relations in its dependency closure
 //! - Writers publish new snapshots atomically via `ArcSwap`
 //! - Readers get consistent snapshots without holding locks
 
-use crate::ast::Rule;
+use crate::ast::dependencies::DependencyClosure;
+use crate::ast::{Program, Rule};
+use crate::execution::{TimingBreakdown, TimingMode};
 use crate::index_manager::HnswSearchFn;
-use crate::value::Tuple;
+use crate::value::{Relation, RelationMap, Tuple};
 use crate::{IQLEngine, OptimizationConfig};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -25,7 +30,6 @@ static SNAPSHOT_VERSION: AtomicU64 = AtomicU64::new(0);
 
 /// Immutable point-in-time snapshot of knowledge graph data
 ///
-/// All data is wrapped in Arc for efficient sharing between readers.
 /// Cloning a snapshot is O(1) - just incrementing reference counts.
 #[derive(Clone)]
 pub struct KnowledgeGraphSnapshot {
@@ -35,12 +39,10 @@ pub struct KnowledgeGraphSnapshot {
     /// Timestamp when snapshot was created (microseconds since epoch)
     pub timestamp: u64,
 
-    /// Base relation data (arbitrary arity)
-    /// Wrapped in Arc for lock-free sharing
-    pub input_tuples: Arc<HashMap<String, Vec<Tuple>>>,
+    /// Base relation data, including valid materializations of derived relations.
+    pub input_tuples: Arc<RelationMap>,
 
     /// Persistent rules (AST format)
-    /// Wrapped in Arc for lock-free sharing
     pub rules: Arc<Vec<Rule>>,
 
     /// Number of worker threads for parallel query execution
@@ -50,14 +52,13 @@ pub struct KnowledgeGraphSnapshot {
     ///
     /// Rules for these relations are skipped during execution since
     /// their data is already present in `input_tuples` as base facts.
-    /// This enables efficient incremental materialization.
     pub materialized_relations: Arc<HashSet<String>>,
 
-    /// Cached formatted rule prefix (computed once at snapshot creation).
-    ///
-    /// Contains all non-materialized rules formatted as text with trailing newline.
-    /// Reused across all query executions to avoid redundant formatting.
+    /// Non-materialized rules formatted as text, one per line.
     rule_prefix: Arc<String>,
+
+    /// `rule_prefix` parsed once, as every query would parse it.
+    prefix_rules: Arc<Result<Vec<Rule>, String>>,
 
     /// Maximum result rows returned per query (0 = unlimited)
     pub max_result_rows: usize,
@@ -73,15 +74,32 @@ pub struct KnowledgeGraphSnapshot {
     pub hnsw_search_fn: Option<HnswSearchFn>,
 }
 
+/// Whether the caller reads derived relations by their original names
+/// (provenance). Constant specialization renames them, so it is off then.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Output {
+    Result,
+    WithDerived,
+}
+
+/// Rules a query is evaluated with.
+#[derive(Clone, Copy)]
+enum RuleSet {
+    /// Only the rules in the query text.
+    QueryOnly,
+    /// The query plus the persistent rules in its dependency closure.
+    WithPersistent,
+}
+
 impl KnowledgeGraphSnapshot {
     /// Create a new snapshot from knowledge graph data
-    pub fn new(input_tuples: HashMap<String, Vec<Tuple>>, rules: Vec<Rule>) -> Self {
+    pub fn new<R: Into<Relation>>(input_tuples: HashMap<String, R>, rules: Vec<Rule>) -> Self {
         Self::new_with_workers(input_tuples, rules, 1)
     }
 
     /// Create a new snapshot with configurable worker count
-    pub fn new_with_workers(
-        input_tuples: HashMap<String, Vec<Tuple>>,
+    pub fn new_with_workers<R: Into<Relation>>(
+        input_tuples: HashMap<String, R>,
         rules: Vec<Rule>,
         num_workers: usize,
     ) -> Self {
@@ -90,14 +108,10 @@ impl KnowledgeGraphSnapshot {
 
     /// Create a new snapshot with materialized relations
     ///
-    /// `materialized_tuples` contains tuples from derived relations that have
-    /// valid materializations. These are merged into `input_tuples` so they
-    /// appear as base facts. The corresponding rule execution is skipped.
-    ///
-    /// `materialized_names` identifies which relations are materialized.
-    /// Rules with head relation in this set are not prepended to queries.
-    pub fn new_with_materializations(
-        input_tuples: HashMap<String, Vec<Tuple>>,
+    /// Materialized tuples must already be merged into `input_tuples` by the
+    /// caller. `materialized_names` identifies them; their rules are skipped.
+    pub fn new_with_materializations<R: Into<Relation>>(
+        input_tuples: HashMap<String, R>,
         rules: Vec<Rule>,
         num_workers: usize,
         materialized_names: HashSet<String>,
@@ -107,14 +121,12 @@ impl KnowledgeGraphSnapshot {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_micros() as u64);
 
-        // Note: materialized tuples should be merged into input_tuples by the caller
-        // (KnowledgeGraph::publish_snapshot) before calling this constructor.
-        // This keeps the snapshot constructor simple and allows the caller to
-        // decide how to handle conflicts (though typically there shouldn't be any).
-
-        // Pre-compute the rule prefix once (lazy rule compilation).
-        // This avoids re-formatting rules on every query execution.
         let prefix = Self::build_rule_prefix(&rules, &materialized_names);
+        let prefix_rules = crate::parser::parse_program(&prefix).map(|p| p.rules);
+        let input_tuples: RelationMap = input_tuples
+            .into_iter()
+            .map(|(name, tuples)| (name, tuples.into()))
+            .collect();
 
         Self {
             version,
@@ -124,6 +136,7 @@ impl KnowledgeGraphSnapshot {
             num_workers,
             materialized_relations: Arc::new(materialized_names),
             rule_prefix: Arc::new(prefix),
+            prefix_rules: Arc::new(prefix_rules),
             max_result_rows: 0,
             max_query_cost: 0,
             optimization: OptimizationConfig::default(),
@@ -133,7 +146,7 @@ impl KnowledgeGraphSnapshot {
 
     /// Create an empty snapshot
     pub fn empty() -> Self {
-        Self::new(HashMap::new(), Vec::new())
+        Self::new(RelationMap::new(), Vec::new())
     }
 
     /// Build the formatted rule prefix text from rules, excluding materialized ones.
@@ -154,57 +167,139 @@ impl KnowledgeGraphSnapshot {
         &self.rule_prefix
     }
 
-    /// Execute a query against this snapshot
-    ///
-    /// Creates a fresh `IQLEngine` with the snapshot's data.
-    /// The snapshot is immutable so this is thread-safe without locks.
-    pub fn execute(&self, program: &str) -> Result<Vec<(i32, i32)>, String> {
+    /// Build an engine and program for `program`: the query's rules, plus the
+    /// persistent rules it depends on, over only the relations it can read.
+    /// Session facts are layered on copies of the affected relations; the
+    /// snapshot itself is never modified.
+    fn prepare(
+        &self,
+        program: &str,
+        rule_set: RuleSet,
+        output: Output,
+        session_facts: Vec<(String, Tuple)>,
+        timing_mode: TimingMode,
+    ) -> Result<(IQLEngine, Program), String> {
+        let query = crate::parser::parse_program(program)?;
+        let persistent: &[Rule] = match rule_set {
+            RuleSet::QueryOnly => &[],
+            RuleSet::WithPersistent => self.prefix_rules.as_ref().as_ref().map_err(Clone::clone)?,
+        };
+
+        let mut closure = DependencyClosure::default();
+        for rule in &query.rules {
+            closure.add_rule(rule);
+        }
+        closure.close_over(persistent);
+
+        let mut combined = Program::new();
+        combined.rules = persistent
+            .iter()
+            .filter(|rule| closure.contains(&rule.head.relation))
+            .cloned()
+            .chain(query.rules)
+            .collect();
+
+        let mut inputs: RelationMap = closure
+            .relations()
+            .filter_map(|name| {
+                self.input_tuples
+                    .get(name)
+                    .map(|tuples| (name.to_string(), tuples.clone()))
+            })
+            .collect();
+        for (relation, tuple) in session_facts {
+            inputs.entry(relation).or_default().push(tuple);
+        }
+
         let mut engine = self.new_engine();
-        engine.input_tuples.clone_from(&self.input_tuples);
-        engine.set_shared_input(Arc::clone(&self.input_tuples));
-        engine.execute(program)
+        engine.set_timing_mode(timing_mode);
+        if output == Output::WithDerived {
+            let mut config = engine.config().clone();
+            config.enable_constant_specialization = false;
+            engine.set_config(config);
+        }
+        engine.set_inputs(inputs);
+        Ok((engine, combined))
     }
 
-    /// Execute a query with rules prepended against this snapshot
+    /// Build an engine with this snapshot's optimizer passes, limits, worker
+    /// count and HNSW search. Callers load the input data.
+    pub fn new_engine(&self) -> IQLEngine {
+        let mut engine = IQLEngine::with_config(self.optimization.clone());
+        engine.set_num_workers(self.num_workers);
+        engine.set_max_result_rows(self.max_result_rows);
+        engine.set_max_query_cost(self.max_query_cost);
+        if let Some(ref search_fn) = self.hnsw_search_fn {
+            engine.set_hnsw_search_fn(Arc::clone(search_fn));
+        }
+        engine
+    }
+
+    /// Evaluate `program`, returning the query result, all derived relations
+    /// and the optional timing breakdown.
+    fn run(
+        &self,
+        program: &str,
+        rule_set: RuleSet,
+        output: Output,
+        session_facts: Vec<(String, Tuple)>,
+        timing_mode: TimingMode,
+    ) -> Result<(Vec<Tuple>, RelationMap, Option<TimingBreakdown>), String> {
+        let start = Instant::now();
+        let session_fact_count = session_facts.len();
+        let (mut engine, combined) =
+            self.prepare(program, rule_set, output, session_facts, timing_mode)?;
+        let rules = combined.rules.len();
+        let result = engine.execute_program_profiled(combined);
+        info!(
+            program_len = program.len(),
+            rules,
+            session_facts = session_fact_count,
+            elapsed_ms = start.elapsed().as_millis() as u64,
+            "snapshot_execute"
+        );
+        result
+    }
+
+    /// Execute a query (without persistent rules) returning binary tuples
+    pub fn execute(&self, program: &str) -> Result<Vec<(i32, i32)>, String> {
+        Ok(Self::to_pairs(&self.execute_tuples(program)?))
+    }
+
+    /// Execute a query with persistent rules, returning binary tuples
     ///
     /// Rules for materialized relations are skipped - their data is already
     /// present in `input_tuples` as base facts (injected at snapshot creation).
     pub fn execute_with_rules(&self, program: &str) -> Result<Vec<(i32, i32)>, String> {
-        if self.rule_prefix.is_empty() {
-            return self.execute(program);
-        }
-
-        let combined = format!("{}{}", self.rule_prefix, program);
-        self.execute(&combined)
+        Ok(Self::to_pairs(&self.execute_with_rules_tuples(program)?))
     }
 
-    /// Execute a query returning arbitrary-arity tuples
+    fn to_pairs(tuples: &[Tuple]) -> Vec<(i32, i32)> {
+        tuples.iter().filter_map(Tuple::to_pair).collect()
+    }
+
+    /// Execute a query (without persistent rules) returning arbitrary-arity tuples
     pub fn execute_tuples(&self, program: &str) -> Result<Vec<Tuple>, String> {
-        let mut engine = self.new_engine();
-        engine.input_tuples.clone_from(&self.input_tuples);
-        engine.set_shared_input(Arc::clone(&self.input_tuples));
-        engine.execute_tuples(program)
+        self.run(
+            program,
+            RuleSet::QueryOnly,
+            Output::Result,
+            Vec::new(),
+            TimingMode::Off,
+        )
+        .map(|(tuples, _, _)| tuples)
     }
 
-    /// Execute a query with rules, returning arbitrary-arity tuples
-    ///
-    /// Rules for materialized relations are skipped - their data is already
-    /// present in `input_tuples` as base facts (injected at snapshot creation).
+    /// Execute a query with persistent rules, returning arbitrary-arity tuples
     pub fn execute_with_rules_tuples(&self, program: &str) -> Result<Vec<Tuple>, String> {
-        if self.rule_prefix.is_empty() {
-            return self.execute_tuples(program);
-        }
-
-        let start = Instant::now();
-        let combined = format!("{}{}", self.rule_prefix, program);
-        let result = self.execute_tuples(&combined);
-        info!(
-            program_len = program.len(),
-            combined_len = combined.len(),
-            elapsed_ms = start.elapsed().as_millis() as u64,
-            "snapshot_execute_with_rules"
-        );
-        result
+        self.run(
+            program,
+            RuleSet::WithPersistent,
+            Output::Result,
+            Vec::new(),
+            TimingMode::Off,
+        )
+        .map(|(tuples, _, _)| tuples)
     }
 
     /// Execute a query with rules, returning tuples AND all derived relation data.
@@ -214,72 +309,54 @@ impl KnowledgeGraphSnapshot {
     pub fn execute_with_rules_tuples_and_derived(
         &self,
         program: &str,
-    ) -> Result<(Vec<Tuple>, HashMap<String, Vec<Tuple>>), String> {
-        use crate::execution::TimingMode;
-        self.execute_with_rules_tuples_profiled_full(program, TimingMode::Off)
-            .map(|(tuples, derived, _timing)| (tuples, derived))
+    ) -> Result<(Vec<Tuple>, RelationMap), String> {
+        self.run(
+            program,
+            RuleSet::WithPersistent,
+            Output::WithDerived,
+            Vec::new(),
+            TimingMode::Off,
+        )
+        .map(|(tuples, derived, _)| (tuples, derived))
     }
 
     /// Execute a query with rules, returning tuples and optional timing breakdown.
     pub fn execute_with_rules_tuples_profiled(
         &self,
         program: &str,
-        timing_mode: crate::execution::TimingMode,
-    ) -> Result<(Vec<Tuple>, Option<crate::execution::TimingBreakdown>), String> {
-        self.execute_with_rules_tuples_profiled_full(program, timing_mode)
-            .map(|(tuples, _derived, timing)| (tuples, timing))
+        timing_mode: TimingMode,
+    ) -> Result<(Vec<Tuple>, Option<TimingBreakdown>), String> {
+        self.run(
+            program,
+            RuleSet::WithPersistent,
+            Output::Result,
+            Vec::new(),
+            timing_mode,
+        )
+        .map(|(tuples, _, timing)| (tuples, timing))
     }
 
     /// Execute a query with rules, returning tuples, all derived relation data,
     /// and optional timing breakdown.
-    ///
-    /// The derived data contains all intermediate relation results computed during
-    /// evaluation, used by the provenance system for backward chaining.
     pub fn execute_with_rules_tuples_profiled_full(
         &self,
         program: &str,
-        timing_mode: crate::execution::TimingMode,
-    ) -> Result<
-        (
-            Vec<Tuple>,
-            HashMap<String, Vec<Tuple>>,
-            Option<crate::execution::TimingBreakdown>,
-        ),
-        String,
-    > {
-        let start = Instant::now();
-        let combined = if self.rule_prefix.is_empty() {
-            program.to_string()
-        } else {
-            format!("{}{}", self.rule_prefix, program)
-        };
-
-        let mut engine = self.new_engine();
-        engine.set_timing_mode(timing_mode);
-
-        // Use shared input for zero-copy
-        engine.input_tuples.clone_from(&self.input_tuples);
-        engine.set_shared_input(Arc::clone(&self.input_tuples));
-
-        let result = engine.execute_tuples_profiled(&combined);
-        info!(
-            program_len = program.len(),
-            combined_len = combined.len(),
-            elapsed_ms = start.elapsed().as_millis() as u64,
-            "snapshot_execute_with_rules_profiled"
-        );
-        result
+        timing_mode: TimingMode,
+    ) -> Result<(Vec<Tuple>, RelationMap, Option<TimingBreakdown>), String> {
+        self.run(
+            program,
+            RuleSet::WithPersistent,
+            Output::WithDerived,
+            Vec::new(),
+            timing_mode,
+        )
     }
 
     /// Execute a query with temporary session facts that don't affect the shared store
     ///
-    /// This provides request-scoped isolation: session facts are added to a CLONE
-    /// of the snapshot's data, not the shared store. This prevents race conditions
-    /// where concurrent queries could see each other's session facts.
-    ///
-    /// # Arguments
-    /// * `program` - The query/rules to execute
-    /// * `session_facts` - Vec of (relation_name, tuple) pairs to add temporarily
+    /// Session facts are appended to request-local copies of the affected
+    /// relations (copy-on-write per chunk), so concurrent queries never see
+    /// each other's session facts.
     ///
     /// # Example
     /// ```text
@@ -295,57 +372,14 @@ impl KnowledgeGraphSnapshot {
         program: &str,
         session_facts: Vec<(String, Tuple)>,
     ) -> Result<Vec<Tuple>, String> {
-        let start = Instant::now();
-        let session_fact_count = session_facts.len();
-        // Create a fresh engine with cloned data
-        let mut engine = self.new_engine();
-
-        // Copy-on-write: only clone relation vectors that receive session facts.
-        // Relations without session facts share the same underlying data via Arc.
-        // For a 1M-tuple KG with a few session facts, this avoids an O(n) deep clone.
-        let mut needs_mutation: HashMap<String, Vec<Tuple>> = HashMap::new();
-        for (relation, tuple) in session_facts {
-            needs_mutation.entry(relation).or_default().push(tuple);
-        }
-
-        // Build isolated tuples: clone only what we need to modify
-        let mut isolated_tuples: HashMap<String, Vec<Tuple>> =
-            HashMap::with_capacity(self.input_tuples.len() + needs_mutation.len());
-        for (rel, tuples) in self.input_tuples.as_ref() {
-            if let Some(extra) = needs_mutation.remove(rel) {
-                // This relation needs session facts: clone and extend
-                let mut cloned = tuples.clone();
-                cloned.extend(extra);
-                isolated_tuples.insert(rel.clone(), cloned);
-            } else {
-                // No session facts for this relation: share the existing vec
-                isolated_tuples.insert(rel.clone(), tuples.clone());
-            }
-        }
-        // Add relations that only exist in session facts (not in base data)
-        for (rel, tuples) in needs_mutation {
-            isolated_tuples.insert(rel, tuples);
-        }
-
-        // Set the isolated tuples on the engine (needed for pipeline)
-        // Also wrap in Arc for CodeGenerator (avoids deep clone into DD closures)
-        let shared = Arc::new(isolated_tuples);
-        engine.input_tuples.clone_from(&shared);
-        engine.set_shared_input(shared);
-
-        // Build combined program using cached rule prefix
-        let combined = format!("{}{}", self.rule_prefix, program);
-
-        // Execute against isolated state
-        let result = engine.execute_tuples(&combined);
-        info!(
-            program_len = program.len(),
-            combined_len = combined.len(),
-            session_facts = session_fact_count,
-            elapsed_ms = start.elapsed().as_millis() as u64,
-            "snapshot_execute_with_session_facts"
-        );
-        result
+        self.run(
+            program,
+            RuleSet::WithPersistent,
+            Output::Result,
+            session_facts,
+            TimingMode::Off,
+        )
+        .map(|(tuples, _, _)| tuples)
     }
 
     /// Execute a query with session facts, returning tuples and optional timing breakdown.
@@ -353,68 +387,16 @@ impl KnowledgeGraphSnapshot {
         &self,
         program: &str,
         session_facts: Vec<(String, Tuple)>,
-        timing_mode: crate::execution::TimingMode,
-    ) -> Result<(Vec<Tuple>, Option<crate::execution::TimingBreakdown>), String> {
-        let start = Instant::now();
-        let session_fact_count = session_facts.len();
-        let mut engine = self.new_engine();
-        engine.set_timing_mode(timing_mode);
-
-        // Copy-on-write: only clone relation vectors that receive session facts.
-        let mut needs_mutation: HashMap<String, Vec<Tuple>> = HashMap::new();
-        for (relation, tuple) in session_facts {
-            needs_mutation.entry(relation).or_default().push(tuple);
-        }
-
-        let mut isolated_tuples: HashMap<String, Vec<Tuple>> =
-            HashMap::with_capacity(self.input_tuples.len() + needs_mutation.len());
-        for (rel, tuples) in self.input_tuples.as_ref() {
-            if let Some(extra) = needs_mutation.remove(rel) {
-                let mut cloned = tuples.clone();
-                cloned.extend(extra);
-                isolated_tuples.insert(rel.clone(), cloned);
-            } else {
-                isolated_tuples.insert(rel.clone(), tuples.clone());
-            }
-        }
-        for (rel, tuples) in needs_mutation {
-            isolated_tuples.insert(rel, tuples);
-        }
-
-        let shared = Arc::new(isolated_tuples);
-        engine.input_tuples.clone_from(&shared);
-        engine.set_shared_input(shared);
-
-        let combined = format!("{}{}", self.rule_prefix, program);
-        let result = engine
-            .execute_tuples_profiled(&combined)
-            .map(|(tuples, _derived, timing)| (tuples, timing));
-        info!(
-            program_len = program.len(),
-            combined_len = combined.len(),
-            session_facts = session_fact_count,
-            elapsed_ms = start.elapsed().as_millis() as u64,
-            "snapshot_execute_with_session_facts_profiled"
-        );
-        result
-    }
-
-    /// Build an engine with this snapshot's optimizer passes, limits, worker
-    /// count and HNSW search. Callers load the input data.
-    pub fn new_engine(&self) -> IQLEngine {
-        let mut engine = IQLEngine::with_config(self.optimization.clone());
-        engine.set_num_workers(self.num_workers);
-        engine.set_max_result_rows(self.max_result_rows);
-        engine.set_max_query_cost(self.max_query_cost);
-        self.configure_hnsw(&mut engine);
-        engine
-    }
-
-    /// Configure HNSW search on a IQLEngine if available.
-    fn configure_hnsw(&self, engine: &mut IQLEngine) {
-        if let Some(ref search_fn) = self.hnsw_search_fn {
-            engine.set_hnsw_search_fn(Arc::clone(search_fn));
-        }
+        timing_mode: TimingMode,
+    ) -> Result<(Vec<Tuple>, Option<TimingBreakdown>), String> {
+        self.run(
+            program,
+            RuleSet::WithPersistent,
+            Output::Result,
+            session_facts,
+            timing_mode,
+        )
+        .map(|(tuples, _, timing)| (tuples, timing))
     }
 
     /// Get the number of relations in this snapshot
@@ -424,7 +406,7 @@ impl KnowledgeGraphSnapshot {
 
     /// Get the total number of tuples across all relations
     pub fn tuple_count(&self) -> usize {
-        self.input_tuples.values().map(std::vec::Vec::len).sum()
+        self.input_tuples.values().map(Relation::len).sum()
     }
 
     /// Check if this snapshot is empty (no data)
@@ -719,7 +701,7 @@ mod tests {
         mat_names.insert("reachable".to_string());
 
         let snapshot = KnowledgeGraphSnapshot::new_with_materializations(
-            HashMap::new(),
+            RelationMap::new(),
             Vec::new(),
             1,
             mat_names,
@@ -750,7 +732,7 @@ mod tests {
             })],
         };
 
-        let snapshot = KnowledgeGraphSnapshot::new(HashMap::new(), vec![rule]);
+        let snapshot = KnowledgeGraphSnapshot::new(RelationMap::new(), vec![rule]);
 
         // Rule prefix should be cached at creation
         let prefix = snapshot.rule_prefix();
@@ -792,7 +774,7 @@ mod tests {
         mat.insert("derived1".to_string());
 
         let snapshot = KnowledgeGraphSnapshot::new_with_materializations(
-            HashMap::new(),
+            RelationMap::new(),
             vec![rule1, rule2],
             1,
             mat,
@@ -809,7 +791,7 @@ mod tests {
 
     #[test]
     fn test_snapshot_with_workers() {
-        let snapshot = KnowledgeGraphSnapshot::new_with_workers(HashMap::new(), Vec::new(), 4);
+        let snapshot = KnowledgeGraphSnapshot::new_with_workers(RelationMap::new(), Vec::new(), 4);
         assert_eq!(snapshot.num_workers, 4);
         assert!(snapshot.is_empty());
     }

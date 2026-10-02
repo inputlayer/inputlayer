@@ -194,6 +194,27 @@ Zero measurable persistence overhead - the WAL is efficiently batched. Crash rec
 
 ---
 
+## Writes and Standing Queries vs KG Size
+
+Snapshots share relation data (copy-on-write chunks), inserts dedup through a hash index, and bound queries evaluate only their dependency closure, specialized on constants. Same-machine before/after (Apple M1, 16 GB, Rust 1.99, bench profile with LTO):
+
+| Benchmark | Before | After |
+|-----------|--------|-------|
+| Standing-query refresh, 1K edges | 20.9 ms | **9.0 ms** |
+| Standing-query refresh, 10K edges | 136.6 ms | **9.2 ms** |
+| Batch insert 100 | 34.0 ms | **5.6 ms** |
+| Batch insert 1K | 509 ms | **10.2 ms** |
+| Batch insert 10K | 22.4 s | **33.5 ms** |
+| Insert 10K tuples (persist ON) | 261 ms | **65.5 ms** |
+| Insert 10K tuples (persist OFF) | 163 ms | **57.3 ms** |
+| Bound re-query after +100 edges | 7.38 ms | **6.11 ms** |
+| Single insert (fsync-bound) | 4.20 ms | 4.17 ms |
+| Recovery from WAL, 10K | 2.72 ms | 3.16 ms |
+
+Refresh cost no longer grows with KG size. Recovery pays for building the dedup index.
+
+---
+
 ## Running the Benchmarks
 
 ```bash
@@ -215,5 +236,6 @@ cargo bench --bench production_benchmarks -- persistence
 # Microbenchmarks
 cargo bench --bench query_benchmarks
 cargo bench --bench insert_benchmarks
+cargo bench --bench subscription_benchmarks
 cargo bench --bench aggregation_benchmarks
 ```

@@ -1120,7 +1120,7 @@ impl Handler {
             .map_err(|_| "Authentication service unavailable".to_string())?;
         drop(storage);
 
-        let empty_vec = Vec::new();
+        let empty_vec = crate::value::Relation::new();
         let users = snapshot.input_tuples.get("users").unwrap_or(&empty_vec);
 
         for tuple in users {
@@ -1167,7 +1167,7 @@ impl Handler {
             .map_err(|_| "Authentication service unavailable".to_string())?;
         drop(storage);
 
-        let empty_vec = Vec::new();
+        let empty_vec = crate::value::Relation::new();
         let api_keys = snapshot.input_tuples.get("api_keys").unwrap_or(&empty_vec);
 
         for tuple in api_keys {
@@ -1177,7 +1177,7 @@ impl Handler {
                 if let (Some(hash), Some(uname)) = (vals[1].as_str(), vals[2].as_str()) {
                     if hash == key_hash {
                         // Look up user's role
-                        let empty_users = Vec::new();
+                        let empty_users = crate::value::Relation::new();
                         let users = snapshot.input_tuples.get("users").unwrap_or(&empty_users);
                         for user_tuple in users {
                             let uvals = user_tuple.values();
@@ -1221,7 +1221,7 @@ impl Handler {
             .map_err(|e| format!("Auth storage error: {e}"))?;
         drop(storage);
 
-        let empty_vec = Vec::new();
+        let empty_vec = crate::value::Relation::new();
         let users = snapshot.input_tuples.get("users").unwrap_or(&empty_vec);
 
         let mut rows = Vec::new();
@@ -1323,7 +1323,7 @@ impl Handler {
             .map_err(|e| format!("Auth storage error: {e}"))?;
 
         // Find user tuple to delete
-        let empty_vec = Vec::new();
+        let empty_vec = crate::value::Relation::new();
         let users = snapshot.input_tuples.get("users").unwrap_or(&empty_vec);
         let mut found = None;
         for tuple in users {
@@ -1394,7 +1394,7 @@ impl Handler {
             .map_err(|e| format!("Auth storage error: {e}"))?;
 
         // Find existing user
-        let empty_vec = Vec::new();
+        let empty_vec = crate::value::Relation::new();
         let users = snapshot.input_tuples.get("users").unwrap_or(&empty_vec);
         let mut old_tuple = None;
         let mut role_str = String::new();
@@ -1449,7 +1449,7 @@ impl Handler {
             .map_err(|e| format!("Auth storage error: {e}"))?;
 
         // Find existing user
-        let empty_vec = Vec::new();
+        let empty_vec = crate::value::Relation::new();
         let users = snapshot.input_tuples.get("users").unwrap_or(&empty_vec);
         let mut old_tuple = None;
         let mut hash_str = String::new();
@@ -1560,7 +1560,7 @@ impl Handler {
             .map_err(|e| format!("Auth storage error: {e}"))?;
         drop(storage);
 
-        let empty_vec = Vec::new();
+        let empty_vec = crate::value::Relation::new();
         let api_keys = snapshot.input_tuples.get("api_keys").unwrap_or(&empty_vec);
 
         let mut rows = Vec::new();
@@ -1609,7 +1609,7 @@ impl Handler {
             .get_snapshot_for(auth::INTERNAL_KG)
             .map_err(|e| format!("Auth storage error: {e}"))?;
 
-        let empty_vec = Vec::new();
+        let empty_vec = crate::value::Relation::new();
         let api_keys = snapshot.input_tuples.get("api_keys").unwrap_or(&empty_vec);
 
         let mut found = None;
@@ -1656,7 +1656,7 @@ impl Handler {
             Err(_) => return None,
         };
 
-        let empty_vec = Vec::new();
+        let empty_vec = crate::value::Relation::new();
         let acls = snapshot.input_tuples.get("kg_acls").unwrap_or(&empty_vec);
 
         // Find matching ACL: kg_acls(kg_name, username, role)
@@ -1685,7 +1685,7 @@ impl Handler {
             .get_snapshot_for(auth::INTERNAL_KG)
             .map_err(|e| format!("Auth storage error: {e}"))?;
 
-        let empty_vec = Vec::new();
+        let empty_vec = crate::value::Relation::new();
         let acls = snapshot.input_tuples.get("kg_acls").unwrap_or(&empty_vec);
 
         let mut entries = Vec::new();
@@ -1742,7 +1742,7 @@ impl Handler {
             .get_snapshot_for(auth::INTERNAL_KG)
             .map_err(|e| format!("Auth storage error: {e}"))?;
 
-        let empty_vec = Vec::new();
+        let empty_vec = crate::value::Relation::new();
         let acls = snapshot.input_tuples.get("kg_acls").unwrap_or(&empty_vec);
 
         let mut to_remove = Vec::new();
@@ -1788,7 +1788,7 @@ impl Handler {
             .get_snapshot_for(auth::INTERNAL_KG)
             .map_err(|e| format!("Auth storage error: {e}"))?;
 
-        let empty_vec = Vec::new();
+        let empty_vec = crate::value::Relation::new();
         let acls = snapshot.input_tuples.get("kg_acls").unwrap_or(&empty_vec);
 
         let mut to_remove = Vec::new();
@@ -1826,7 +1826,7 @@ impl Handler {
         let snapshot = storage.get_snapshot_for(auth::INTERNAL_KG).ok()?;
         drop(storage);
 
-        let empty_vec = Vec::new();
+        let empty_vec = crate::value::Relation::new();
         let users = snapshot.input_tuples.get("users").unwrap_or(&empty_vec);
 
         for tuple in users {
@@ -1853,7 +1853,7 @@ impl Handler {
             Err(_) => return,
         };
 
-        let empty_vec = Vec::new();
+        let empty_vec = crate::value::Relation::new();
         let acls = snapshot.input_tuples.get("kg_acls").unwrap_or(&empty_vec);
 
         let to_remove: Vec<_> = acls

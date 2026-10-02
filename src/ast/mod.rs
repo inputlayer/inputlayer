@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 pub mod builders;
+pub mod dependencies;
 
 // Core AST Types
 /// Aggregation function types for IQL
