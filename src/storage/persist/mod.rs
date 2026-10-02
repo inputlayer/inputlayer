@@ -386,26 +386,18 @@ impl PersistBackend for FilePersist {
             return Ok(());
         }
 
-        // Handle WAL based on durability mode
-        match self.config.durability_mode {
-            DurabilityMode::Immediate => {
-                // Write to WAL with immediate sync (safest)
-                let mut wal = self.wal.lock();
-                wal.append_batch(shard, updates)?;
-            }
-            DurabilityMode::Batched => {
-                // Write to WAL without sync (faster, batched durability)
-                let mut wal = self.wal.lock();
-                wal.append_batch_buffered(shard, updates)?;
-            }
-            DurabilityMode::Async => {
-                // Skip WAL entirely for maximum speed (in-memory only until flush).
-                // Data WILL be lost on crash. Only use for ephemeral/reproducible data.
-            }
-        }
-
-        // Add to buffer
+        // WAL write and buffer push share one critical section, so a concurrent flush
+        // never drops a WAL entry whose update is not yet in its batch.
+        // Lock order everywhere: WAL, then shards.
         let should_flush = {
+            let mut wal = self.wal.lock();
+            match self.config.durability_mode {
+                DurabilityMode::Immediate => wal.append_batch(shard, updates)?,
+                DurabilityMode::Batched => wal.append_batch_buffered(shard, updates)?,
+                // No WAL: data is lost on crash. Only for ephemeral/reproducible data.
+                DurabilityMode::Async => {}
+            }
+
             let mut shards = self.shards.write();
             let state = shards
                 .entry(shard.to_string())
@@ -563,6 +555,7 @@ impl PersistBackend for FilePersist {
     }
 
     fn flush(&self, shard: &str) -> StorageResult<()> {
+        let mut wal = self.wal.lock();
         let mut shards = self.shards.write();
         let state = shards
             .get_mut(shard)
@@ -595,10 +588,7 @@ impl PersistBackend for FilePersist {
         }
 
         // Step 3: Remove WAL entries LAST (safe - metadata already points to batch)
-        {
-            let mut wal = self.wal.lock();
-            wal.remove_shard_entries(shard)?;
-        }
+        wal.remove_shard_entries(shard)?;
 
         Ok(())
     }
@@ -726,6 +716,7 @@ fn write_shard_meta(shards_dir: &Path, meta: &ShardMeta) -> StorageResult<()> {
         let _ = fs::remove_file(&tmp_path);
         return Err(e.into());
     }
+    sync_directory(shards_dir);
 
     Ok(())
 }
@@ -817,6 +808,9 @@ fn write_updates_parquet(path: &Path, updates: &[Update]) -> StorageResult<()> {
 
     // Atomic rename (POSIX guarantees atomicity)
     fs::rename(&tmp_path, path)?;
+    if let Some(dir) = path.parent() {
+        sync_directory(dir);
+    }
 
     Ok(())
 }

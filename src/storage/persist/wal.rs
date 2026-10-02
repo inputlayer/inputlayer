@@ -4,10 +4,11 @@
 //! Each entry contains the shard name and the update data.
 
 use super::batch::Update;
+use super::sync_directory;
 use crate::storage::{StorageError, StorageResult};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 
 /// A WAL entry containing shard and update information
@@ -32,23 +33,54 @@ pub struct PersistWal {
 }
 
 impl PersistWal {
-    /// Create a new WAL
+    /// Open the WAL, truncating any bytes after the last valid record.
     pub fn new(wal_dir: PathBuf) -> StorageResult<Self> {
         fs::create_dir_all(&wal_dir)?;
 
-        let current_file = wal_dir.join("current.wal");
-
-        Ok(PersistWal {
+        let wal = PersistWal {
+            current_file: wal_dir.join("current.wal"),
             wal_dir,
             writer: None,
-            current_file,
             entries_written: 0,
-        })
+        };
+        wal.truncate_torn_tail()?;
+        Ok(wal)
+    }
+
+    /// Cut the file after its last valid record, so new appends never follow a torn line.
+    fn truncate_torn_tail(&self) -> StorageResult<()> {
+        let bytes = match fs::read(&self.current_file) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e.into()),
+        };
+        let valid_end = records(&bytes)
+            .filter(|(_, rec)| parse_record(rec).is_ok())
+            .map(|(end, _)| end)
+            .last()
+            .unwrap_or(0);
+        if valid_end < bytes.len() {
+            tracing::warn!(
+                file = %self.current_file.display(),
+                kept = valid_end,
+                dropped = bytes.len() - valid_end,
+                "Truncating torn WAL tail"
+            );
+            let file = OpenOptions::new().write(true).open(&self.current_file)?;
+            file.set_len(valid_end as u64)?;
+            file.sync_all()?;
+        } else if bytes.last().is_some_and(|&b| b != b'\n') {
+            let mut file = OpenOptions::new().append(true).open(&self.current_file)?;
+            file.write_all(b"\n")?;
+            file.sync_all()?;
+        }
+        Ok(())
     }
 
     /// Ensure writer is open
     fn ensure_writer(&mut self) -> StorageResult<&mut BufWriter<File>> {
         if self.writer.is_none() {
+            let created = !self.current_file.exists();
             let file = OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -64,6 +96,9 @@ impl PersistWal {
                     );
                     e
                 })?;
+            if created {
+                sync_directory(&self.wal_dir);
+            }
             self.writer = Some(BufWriter::new(file));
         }
         Ok(self
@@ -154,59 +189,17 @@ impl PersistWal {
             return Ok(Vec::new());
         }
 
-        let file = File::open(&self.current_file)?;
-        let reader = BufReader::new(file);
+        let bytes = fs::read(&self.current_file)?;
         let mut entries = Vec::new();
-        let mut lines: Vec<String> = Vec::new();
-
-        for line in reader.lines() {
-            let line = line?;
-            if line.trim().is_empty() {
-                continue;
-            }
-            lines.push(line);
-        }
-
         let mut skipped = 0usize;
-        for (i, line) in lines.iter().enumerate() {
-            // Parse line format: "<crc32hex>:<json>" (new) or plain "<json>" (legacy)
-            let (json_str, expected_crc) = if line.len() > 9 && line.as_bytes()[8] == b':' {
-                let (hex_part, rest) = line.split_at(8);
-                let json_part = &rest[1..]; // skip the ':'
-                                            // Validate hex characters
-                if hex_part.chars().all(|c| c.is_ascii_hexdigit()) {
-                    (json_part, Some(hex_part))
-                } else {
-                    // Not a checksum prefix - treat whole line as legacy JSON
-                    (line.as_str(), None)
-                }
-            } else {
-                (line.as_str(), None)
-            };
-
-            // Verify CRC32 if present
-            if let Some(expected) = expected_crc {
-                let actual = Self::crc32_hex(json_str.as_bytes());
-                if actual != expected {
-                    tracing::warn!(
-                        line = i + 1,
-                        file = %self.current_file.display(),
-                        expected_crc = expected,
-                        actual_crc = %actual,
-                        "Skipping WAL entry with CRC32 mismatch (bit-rot or corruption)"
-                    );
-                    skipped += 1;
-                    continue;
-                }
-            }
-
-            match serde_json::from_str::<WalEntry>(json_str) {
+        for (i, (_, rec)) in records(&bytes).enumerate() {
+            match parse_record(rec) {
                 Ok(entry) => entries.push(entry),
-                Err(e) => {
+                Err(reason) => {
                     tracing::warn!(
                         line = i + 1,
                         file = %self.current_file.display(),
-                        error = %e,
+                        %reason,
                         "Skipping corrupt WAL entry"
                     );
                     skipped += 1;
@@ -245,6 +238,7 @@ impl PersistWal {
         // all data to batch files, so the WAL entries are redundant.
         if self.current_file.exists() {
             fs::remove_file(&self.current_file)?;
+            sync_directory(&self.wal_dir);
         }
 
         self.entries_written = 0;
@@ -273,10 +267,11 @@ impl PersistWal {
     /// This guarantees that either the old or new WAL exists at all times -
     /// a crash at any point cannot lose other shards' data.
     pub fn remove_shard_entries(&mut self, shard_name: &str) -> StorageResult<()> {
+        // Buffered appends must reach the file before it is read and replaced.
+        if let Some(mut writer) = self.writer.take() {
+            writer.flush()?;
+        }
         let entries = self.read_all()?;
-
-        // Close writer before manipulating the file
-        self.writer = None;
 
         let surviving: Vec<&WalEntry> = entries.iter().filter(|e| e.shard != shard_name).collect();
 
@@ -284,6 +279,7 @@ impl PersistWal {
             // No surviving entries: just remove the WAL file
             if self.current_file.exists() {
                 fs::remove_file(&self.current_file)?;
+                sync_directory(&self.wal_dir);
             }
             self.entries_written = 0;
             return Ok(());
@@ -311,6 +307,7 @@ impl PersistWal {
         // Atomic rename: replaces old WAL with the new one.
         // On POSIX, rename is atomic - either the old or new file is visible.
         fs::rename(&new_file, &self.current_file)?;
+        sync_directory(&self.wal_dir);
 
         self.entries_written = surviving.len();
         Ok(())
@@ -345,6 +342,48 @@ impl PersistWal {
     pub fn file_size(&self) -> u64 {
         fs::metadata(&self.current_file).map_or(0, |m| m.len())
     }
+}
+
+/// Split WAL bytes into non-blank records, yielding each with the offset just past it.
+/// The offset counts the trailing newline, so a final unterminated record ends at `bytes.len()`.
+fn records(bytes: &[u8]) -> impl Iterator<Item = (usize, &[u8])> {
+    let mut start = 0;
+    std::iter::from_fn(move || {
+        while start < bytes.len() {
+            let (rec, end) = match bytes[start..].iter().position(|&b| b == b'\n') {
+                Some(n) => (&bytes[start..start + n], start + n + 1),
+                None => (&bytes[start..], bytes.len()),
+            };
+            start = end;
+            let rec = rec.strip_suffix(b"\r").unwrap_or(rec);
+            if !rec.trim_ascii().is_empty() {
+                return Some((end, rec));
+            }
+        }
+        None
+    })
+}
+
+/// Parse one record: `<crc32hex>:<json>`, or legacy plain `<json>`.
+fn parse_record(rec: &[u8]) -> Result<WalEntry, String> {
+    let line = std::str::from_utf8(rec).map_err(|e| format!("invalid UTF-8: {e}"))?;
+    let (json, expected_crc) = match line.split_at_checked(8) {
+        Some((hex, rest))
+            if rest.len() > 1
+                && rest.as_bytes()[0] == b':'
+                && hex.chars().all(|c| c.is_ascii_hexdigit()) =>
+        {
+            (&rest[1..], Some(hex))
+        }
+        _ => (line, None),
+    };
+    if let Some(expected) = expected_crc {
+        let actual = PersistWal::crc32_hex(json.as_bytes());
+        if actual != expected {
+            return Err(format!("CRC32 mismatch: expected {expected}, got {actual}"));
+        }
+    }
+    serde_json::from_str(json).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -883,5 +922,45 @@ mod tests {
             let entries = wal.read_all().unwrap();
             assert_eq!(entries.len(), 1, "sync() should ensure data is durable");
         }
+    }
+
+    #[test]
+    fn test_wal_open_truncates_invalid_tail() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
+        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
+            .unwrap();
+        let valid_len = wal.file_size();
+        drop(wal);
+
+        let path = temp.path().join("current.wal");
+        let mut f = OpenOptions::new().append(true).open(&path).unwrap();
+        f.write_all(b"00000000:{\"bad\":1}\n\xE2\x82").unwrap();
+        drop(f);
+
+        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
+        assert_eq!(wal.file_size(), valid_len);
+        wal.append("db:edge", &Update::insert(Tuple::from_pair(3, 4), 20))
+            .unwrap();
+        assert_eq!(wal.read_all().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_wal_open_terminates_valid_unterminated_tail() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
+        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
+            .unwrap();
+        drop(wal);
+
+        let path = temp.path().join("current.wal");
+        let mut bytes = fs::read(&path).unwrap();
+        assert_eq!(bytes.pop(), Some(b'\n'));
+        fs::write(&path, &bytes).unwrap();
+
+        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
+        wal.append("db:edge", &Update::insert(Tuple::from_pair(3, 4), 20))
+            .unwrap();
+        assert_eq!(wal.read_all().unwrap().len(), 2);
     }
 }
