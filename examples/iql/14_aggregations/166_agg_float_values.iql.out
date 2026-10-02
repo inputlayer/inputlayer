@@ -21,11 +21,11 @@ Rule 'smallest' registered.
 > +top2(top_k<2, Id, Val:desc>) <- measurement(Id, Val)
 Rule 'top2' registered.
 > ?total(X)
-┌───┐
-│ X │
-├───┤
-│ 5 │
-└───┘
+┌──────┐
+│ X    │
+├──────┤
+│ 5.76 │
+└──────┘
 1 rows
 > ?biggest(X)
 ┌──────┐
