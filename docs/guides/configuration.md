@@ -92,7 +92,8 @@ async_io = true
 # Number of worker threads (0 = use all CPU cores)
 num_threads = 0
 
-# Maximum rows returned per query result (0 = unlimited)
+# Maximum rows in a query's final result; larger results are cut and
+# flagged `truncated` (0 = unlimited)
 max_result_rows = 100000
 
 # Maximum query cost budget (0 = unlimited)

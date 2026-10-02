@@ -3817,10 +3817,18 @@ impl Handler {
         }; // storage read lock released here
 
         // Acquire semaphore permit to bound concurrent DD computations (same as query_program)
-        let permit = Arc::clone(&self.query_semaphore)
-            .acquire_owned()
-            .await
-            .map_err(|_| "Query semaphore closed (server shutting down)")?;
+        let permit = match tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            Arc::clone(&self.query_semaphore).acquire_owned(),
+        )
+        .await
+        {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(_)) => return Err("Query semaphore closed (server shutting down)".to_string()),
+            Err(_) => {
+                return Err("Server overloaded: query queue full (timed out after 30s)".to_string())
+            }
+        };
 
         let timeout_ms = self.config.storage.performance.query_timeout_ms;
         let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
