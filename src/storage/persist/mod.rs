@@ -33,7 +33,8 @@ pub mod wal;
 
 pub use batch::{Batch, BatchRef, ShardInfo, ShardMeta, Update};
 pub use consolidate::{
-    consolidate, consolidate_to_current, filter_since, to_tuples, to_tuples_with_multiplicity,
+    consolidate, consolidate_to_current, filter_since, set_semantics_corrections, to_tuples,
+    to_tuples_with_multiplicity,
 };
 pub use wal::PersistWal;
 
