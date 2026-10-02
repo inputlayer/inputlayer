@@ -104,6 +104,18 @@ fn writes_reject_non_canonical_relation_names() {
             is_invalid_name(storage.register_schema_in("default", RelationSchema::new(rel))),
             "schema {rel}"
         );
+        assert!(
+            is_invalid_name(
+                storage.register_or_update_schema_in("default", RelationSchema::new(rel))
+            ),
+            "upsert schema {rel}"
+        );
+        assert!(
+            is_invalid_name(
+                storage.register_or_update_session_schema_in("default", RelationSchema::new(rel))
+            ),
+            "session schema {rel}"
+        );
     }
     assert!(storage.list_relations_in("default").unwrap().is_empty());
 }
@@ -210,4 +222,50 @@ fn shards_without_metadata_still_load() {
     let storage = StorageEngine::new(config(temp.path())).unwrap();
     assert_eq!(storage.list_knowledge_graphs(), ["default", "kg1"]);
     assert_eq!(relations(&storage, "kg1"), [("edge".to_string(), 2)]);
+}
+
+#[test]
+fn legacy_colon_kg_without_metadata_creates_no_phantom_kg() {
+    let temp = TempDir::new().unwrap();
+    seed_legacy(temp.path(), None, &[("user:42:fact", &[1, 2])]);
+    let storage = StorageEngine::new(config(temp.path())).unwrap();
+    assert_eq!(storage.list_knowledge_graphs(), ["default", "user:42"]);
+    assert_eq!(relations(&storage, "user:42"), [("fact".to_string(), 2)]);
+}
+
+#[test]
+fn stale_metadata_keeps_legacy_colon_kg_separate() {
+    let temp = TempDir::new().unwrap();
+    seed_legacy(
+        temp.path(),
+        Some(&["default", "user"]),
+        &[("user:fact", &[1]), ("user:42:fact", &[1, 2, 3])],
+    );
+    {
+        let storage = StorageEngine::new(config(temp.path())).unwrap();
+        assert_eq!(
+            storage.list_knowledge_graphs(),
+            ["default", "user", "user:42"]
+        );
+        assert_eq!(relations(&storage, "user"), [("fact".to_string(), 1)]);
+        storage.drop_knowledge_graph("user").unwrap();
+    }
+    let storage = StorageEngine::new(config(temp.path())).unwrap();
+    assert_eq!(storage.list_knowledge_graphs(), ["default", "user:42"]);
+    assert_eq!(relations(&storage, "user:42"), [("fact".to_string(), 3)]);
+}
+
+#[test]
+fn create_rolls_back_when_metadata_save_fails() {
+    let temp = TempDir::new().unwrap();
+    let storage = StorageEngine::new(config(temp.path())).unwrap();
+    let metadata = temp.path().join("metadata");
+    if metadata.exists() {
+        std::fs::remove_dir_all(&metadata).unwrap();
+    }
+    std::fs::write(&metadata, b"").unwrap();
+    assert!(storage.create_knowledge_graph("orphan").is_err());
+    assert!(!storage
+        .list_knowledge_graphs()
+        .contains(&"orphan".to_string()));
 }

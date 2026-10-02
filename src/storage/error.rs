@@ -47,9 +47,6 @@ pub enum StorageError {
     RelationNotFound(String, String),
 
     /// Invalid relation name
-    #[error("Invalid relation name: {0}")]
-    InvalidRelationName(String),
-
     /// KG or relation name outside the canonical grammar (see [`crate::naming`])
     #[error("{0}")]
     InvalidName(String),
@@ -143,8 +140,8 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_relation_name_display() {
-        let err = StorageError::InvalidRelationName("bad-name".to_string());
+    fn test_invalid_name_display() {
+        let err = StorageError::InvalidName("bad-name".to_string());
         assert!(err.to_string().contains("bad-name"));
     }
 

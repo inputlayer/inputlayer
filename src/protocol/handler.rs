@@ -3993,9 +3993,6 @@ impl Handler {
 
     /// Validate a relation name for use in inserts/retracts.
     fn validate_relation_name(name: &str) -> Result<(), String> {
-        if name.starts_with("__") {
-            return Err(format!("Relation name '{name}' uses reserved '__' prefix"));
-        }
         crate::naming::validate_relation_name(name)
     }
 
@@ -7184,10 +7181,7 @@ mod tests {
         let result = Handler::validate_relation_name("__internal");
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(
-            err.contains("reserved"),
-            "Error should mention reserved: {err}"
-        );
+        assert!(err.contains("must start with a lowercase letter"), "{err}");
     }
 
     // === Regression tests for max_insert_tuples in session_insert/retract_ephemeral ===
@@ -7274,7 +7268,9 @@ mod tests {
         let tuples = vec![Tuple::new(vec![Value::Int64(1)])];
         let result = handler.session_insert_ephemeral(&sid, "__internal", tuples);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("reserved"));
+        assert!(result
+            .unwrap_err()
+            .contains("must start with a lowercase letter"));
     }
 
     #[test]

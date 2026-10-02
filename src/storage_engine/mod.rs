@@ -256,8 +256,10 @@ impl StorageEngine {
             }
         }
 
-        // Update system metadata
-        self.save_knowledge_graphs_metadata()?;
+        if let Err(e) = self.save_knowledge_graphs_metadata() {
+            self.knowledge_graphs.remove(name);
+            return Err(e);
+        }
 
         let elapsed_ms = start.elapsed().as_millis() as u64;
         info!(kg = %name, elapsed_ms, "kg_create_complete");
@@ -1347,6 +1349,7 @@ impl StorageEngine {
         kg: &str,
         schema: RelationSchema,
     ) -> StorageResult<()> {
+        validate_names(kg, &schema.name)?;
         let db = self
             .knowledge_graphs
             .get(kg)
@@ -1363,6 +1366,7 @@ impl StorageEngine {
         kg: &str,
         schema: RelationSchema,
     ) -> StorageResult<()> {
+        validate_names(kg, &schema.name)?;
         let db = self
             .knowledge_graphs
             .get(kg)
@@ -1673,16 +1677,22 @@ impl StorageEngine {
             }
         }
 
-        // Shards no listed KG claims (metadata missing or stale) keep their data
-        // under the name before the first ':'.
-        let unclaimed: Vec<String> = shard_names
+        // Metadata is missing or stale when no listed KG claims a shard, or the
+        // claimed relation contains ':' (a legacy colon KG). Infer the KG as
+        // everything before the last ':'.
+        let inferred: HashSet<String> = shard_names
             .iter()
             .filter(|shard| {
-                naming::shard_owner(shard, kg_names.iter().map(String::as_str)).is_none()
+                naming::shard_owner(shard, kg_names.iter().map(String::as_str))
+                    .is_none_or(|(_, rel)| rel.contains(':'))
             })
-            .filter_map(|shard| shard.split_once(':').map(|(kg, _)| kg.to_string()))
+            .filter_map(|shard| shard.rsplit_once(':').map(|(kg, _)| kg.to_string()))
+            .filter(|kg| !kg_names.contains(kg))
             .collect();
-        kg_names.extend(unclaimed);
+        for kg in &inferred {
+            tracing::warn!(kg = %kg, "kg_missing_from_metadata: inferred from persist shards");
+        }
+        kg_names.extend(inferred);
 
         let mut kg_shards: std::collections::HashMap<String, Vec<(String, String)>> =
             std::collections::HashMap::new();
