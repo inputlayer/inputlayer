@@ -34,7 +34,19 @@ fn s(v: &str) -> WireValue {
 
 /// Same escaping as the JS and Python SDKs' `compileValue`.
 fn sdk_literal(v: &str) -> String {
-    format!("\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\""))
+    let mut out = String::from('"');
+    for ch in v.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 const TEXTS: &[&str] = &[
@@ -49,6 +61,8 @@ const TEXTS: &[&str] = &[
     "Smith, John",
     "1 != 2 = 3 >= 4",
     "// not a comment",
+    "line one\nline two",
+    "tab\there\r\n",
 ];
 
 #[tokio::test]
@@ -160,4 +174,23 @@ async fn reserved_query_name_gives_name_error() {
         .await
         .unwrap_err();
     assert!(err.contains("reserved"), "got: {err}");
+}
+
+#[tokio::test]
+async fn query_shorthand_accepts_underscore_and_space() {
+    let (handler, _t) = create_test_handler();
+    exec(&handler, "+n[(1), (2)]").await;
+    let sid = handler.create_session("default").expect("session");
+    let run = |q: &str| handler.execute_program(Some(&sid), None, q.to_string(), None);
+    run("_tmp(X) <- n(X)").await.expect("session rule");
+    for q in ["?_tmp(X)", "? n(X)"] {
+        let res = run(q).await.unwrap_or_else(|e| panic!("{q}: {e}"));
+        let mut got: Vec<_> = res.rows.into_iter().map(|r| r.values).collect();
+        got.sort_by_key(|r| format!("{r:?}"));
+        assert_eq!(
+            got,
+            vec![vec![WireValue::Int64(1)], vec![WireValue::Int64(2)]],
+            "{q}"
+        );
+    }
 }

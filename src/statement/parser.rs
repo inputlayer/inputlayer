@@ -471,6 +471,9 @@ fn strip_sort_annotations(input: &str) -> (String, Vec<(String, SortDirection)>)
     let prefix = &input[..=open_paren]; // "rel("
     let args_str = &input[open_paren + 1..close_paren]; // "X, Score:desc, Name:asc"
     let suffix = &input[close_paren..]; // "), cond(X)"
+    if args_str.trim_end().ends_with(',') {
+        return (input.to_string(), vec![]);
+    }
 
     let mut order_by = Vec::new();
     let mut cleaned_args = Vec::new();

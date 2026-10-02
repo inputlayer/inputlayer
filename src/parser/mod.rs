@@ -254,6 +254,8 @@ fn parse_atom(s: &str) -> Result<Atom, String> {
 
     let args = if args_str.is_empty() {
         vec![]
+    } else if args_str.ends_with(',') {
+        return Err(format!("Empty argument in atom: {s}"));
     } else {
         split_top_level(args_str, ',', Angles::All)
             .into_iter()

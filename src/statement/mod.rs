@@ -665,6 +665,12 @@ mod tests {
     }
 
     #[test]
+    fn test_empty_argument_is_rejected() {
+        assert!(parse_statement("?r(X, )").is_err());
+        assert!(parse_statement("+r(X, ) <- n(X)").is_err());
+    }
+
+    #[test]
     fn test_operators_inside_strings_do_not_route() {
         assert!(matches!(
             parse_statement(r#"+note(1, "a := b")"#),
@@ -749,8 +755,8 @@ mod tests {
 
             /// Strings escaped like the SDKs' `compileValue` round-trip through insert.
             #[test]
-            fn sdk_escaped_strings_roundtrip(v in "\\PC{0,40}|[a-z ,()<>=!:\\\\\"%/-]{0,20}") {
-                let lit = format!("\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\""));
+            fn sdk_escaped_strings_roundtrip(v in "\\PC{0,40}|[a-z ,()<>=!:\\\\\"%/\n\r\t-]{0,20}") {
+                let lit = format!("\"{}\"", crate::parser::lexer::escape(&v));
                 let input = format!("+note[(1, {lit}), (2, {lit})]");
                 match parse_statement(&input) {
                     Ok(Statement::Insert(op)) => {
