@@ -72,6 +72,9 @@ fn is_query_cancelled() -> bool {
     })
 }
 
+/// Error returned when a query stops on its cancel flag.
+const QUERY_CANCELLED: &str = "Query cancelled due to timeout";
+
 /// Signal cancellation on the current thread's cancel flag.
 /// Used by max_result_rows enforcement to stop DD computation early (#2).
 fn signal_query_cancel() {
@@ -335,7 +338,7 @@ impl CodeGenerator {
             // If we hit the result limit, the cancel was self-triggered - return results
             let collected = results.lock().len();
             if result_limit == 0 || collected < result_limit {
-                return Err("Query cancelled due to timeout".to_string());
+                return Err(QUERY_CANCELLED.to_string());
             }
         }
 
@@ -710,7 +713,7 @@ impl CodeGenerator {
             // If we hit the result limit, the cancel was self-triggered - return results
             let collected = results.lock().len();
             if result_limit == 0 || collected < result_limit {
-                return Err("Query cancelled due to timeout".to_string());
+                return Err(QUERY_CANCELLED.to_string());
             }
         }
 
@@ -877,7 +880,7 @@ impl CodeGenerator {
         if is_query_cancelled() {
             let collected = results.lock().len();
             if result_limit == 0 || collected < result_limit {
-                return Err("Query cancelled due to timeout".to_string());
+                return Err(QUERY_CANCELLED.to_string());
             }
         }
 
@@ -1124,7 +1127,7 @@ impl CodeGenerator {
             // If we hit the result limit, the cancel was self-triggered - return results
             let collected = results.lock().len();
             if result_limit == 0 || collected < result_limit {
-                return Err("Query cancelled due to timeout".to_string());
+                return Err(QUERY_CANCELLED.to_string());
             }
         }
 
@@ -1187,21 +1190,27 @@ impl CodeGenerator {
             })
             .collect();
 
+        Self::merge_worker_results(all_results, limit)
+    }
+
+    /// Union worker outputs, truncated to `limit` (0 = unlimited). A worker
+    /// reaching the limit cancels its siblings, so their cancellation errors
+    /// are dropped once the limit is met; any other error is returned.
+    fn merge_worker_results(
+        results: Vec<Result<Vec<Tuple>, String>>,
+        limit: usize,
+    ) -> Result<Vec<Tuple>, String> {
         let mut combined: HashSet<Tuple> = HashSet::new();
-        let mut first_err = None;
-        for result in all_results {
+        let mut cancelled = None;
+        for result in results {
             match result {
                 Ok(tuples) => combined.extend(tuples),
-                Err(e) => {
-                    first_err.get_or_insert(e);
-                }
+                Err(e) if e == QUERY_CANCELLED => cancelled = Some(e),
+                Err(e) => return Err(e),
             }
         }
-
-        // A worker reaching the row limit cancels its siblings; that is not an error.
-        let hit_limit = limit > 0 && combined.len() >= limit;
-        if let Some(e) = first_err {
-            if !(hit_limit && is_query_cancelled()) {
+        if let Some(e) = cancelled {
+            if limit == 0 || combined.len() < limit {
                 return Err(e);
             }
         }
@@ -3700,7 +3709,7 @@ impl CodeGenerator {
             // If we hit the result limit, the cancel was self-triggered - return results
             let collected = results.lock().len();
             if result_limit == 0 || collected < result_limit {
-                return Err("Query cancelled due to timeout".to_string());
+                return Err(QUERY_CANCELLED.to_string());
             }
         }
 
@@ -3839,7 +3848,7 @@ impl CodeGenerator {
             // If we hit the result limit, the cancel was self-triggered - return results
             let collected = results.lock().len();
             if result_limit == 0 || collected < result_limit {
-                return Err("Query cancelled due to timeout".to_string());
+                return Err(QUERY_CANCELLED.to_string());
             }
         }
 
@@ -8432,6 +8441,90 @@ mod tests {
         let limited = codegen.execute_with_config(&scan("r", 1), config);
         set_query_cancel_flag(None);
         assert_eq!(limited.unwrap().len(), 10);
+    }
+
+    #[test]
+    fn test_merge_worker_results_keeps_real_errors_at_limit() {
+        let rows =
+            |n: i64| -> Vec<Tuple> { (0..n).map(|i| Tuple::new(vec![Value::Int64(i)])).collect() };
+        let cancelled = || Err(QUERY_CANCELLED.to_string());
+
+        let merged = CodeGenerator::merge_worker_results(vec![Ok(rows(10)), cancelled()], 10);
+        assert_eq!(merged.unwrap().len(), 10);
+
+        let merged = CodeGenerator::merge_worker_results(vec![Ok(rows(5)), cancelled()], 10);
+        assert_eq!(merged.unwrap_err(), QUERY_CANCELLED);
+
+        let failed = Err("Internal error in query execution: boom".to_string());
+        let merged =
+            CodeGenerator::merge_worker_results(vec![Ok(rows(10)), cancelled(), failed], 10);
+        assert!(merged.unwrap_err().starts_with("Internal error"));
+    }
+
+    /// Recursive clauses for `rel` as the engine compiles `program`.
+    fn compiled_clauses(
+        program: &str,
+        rel: &str,
+        magic: bool,
+    ) -> (CodeGenerator, Vec<IRNode>, Vec<IRNode>) {
+        let mut engine = crate::IQLEngine::with_config(crate::OptimizationConfig {
+            enable_magic_sets: magic,
+            ..crate::OptimizationConfig::default()
+        });
+        engine.add_tuples(
+            "e",
+            vec![
+                Tuple::new(vec![Value::Int64(1), Value::Int64(2)]),
+                Tuple::new(vec![Value::Int64(2), Value::Int64(3)]),
+            ],
+        );
+        engine.parse(program).unwrap();
+        engine.apply_sip_rewriting();
+        engine.apply_magic_sets();
+        engine.build_ir(false).unwrap();
+        let idx = engine
+            .get_rule_heads()
+            .iter()
+            .position(|h| h == rel)
+            .unwrap_or_else(|| panic!("no rule for {rel}"));
+        let IRNode::Union { inputs } = &engine.ir_nodes[idx] else {
+            panic!("{rel} is not a union");
+        };
+        let (_, base_idx, rec_idx) =
+            CodeGenerator::detect_recursive_union_for_relation(inputs, Some(rel)).unwrap();
+        let mut codegen = CodeGenerator::new();
+        for (name, tuples) in engine.input_tuples() {
+            codegen.add_input_tuples(name.clone(), tuples.clone());
+        }
+        let pick = |idx: &[usize]| idx.iter().map(|&i| inputs[i].clone()).collect();
+        (codegen, pick(&base_idx), pick(&rec_idx))
+    }
+
+    #[test]
+    fn test_tc_fast_path_matches_compiled_ir() {
+        let program = "\
+            tc(X, Y) <- e(X, Y)\n\
+            tc(X, Z) <- e(X, Y), tc(Y, Z)\n\
+            __query__(X, Y) <- tc(X, Y)";
+        let (_, base, rec) = compiled_clauses(program, "tc", false);
+        assert_eq!(
+            CodeGenerator::detect_transitive_closure_pattern(&base, &rec, "tc"),
+            Some("e".to_string())
+        );
+    }
+
+    #[test]
+    fn test_bound_tc_fast_path_matches_compiled_ir() {
+        let program = "\
+            reach(X, Y) <- e(X, Y)\n\
+            reach(X, Z) <- reach(X, Y), e(Y, Z)\n\
+            __query__(_c0, Y) <- reach(_c0, Y), _c0 = 1";
+        let (codegen, base, rec) = compiled_clauses(program, "reach_bf", true);
+        let detected = codegen.detect_bound_tc_pattern(&base, &rec, "reach_bf");
+        assert_eq!(
+            detected.map(|(edge, seeds, col)| (edge, seeds.len(), col)),
+            Some(("e".to_string(), 1, 0))
+        );
     }
 
     #[test]
