@@ -23,6 +23,7 @@ pub use serialize::{
 pub use types::{BaseType, RecordField, Refinement, RefinementArg, TypeDecl, TypeExpr};
 
 use crate::ast::Rule;
+use crate::parser::lexer::contains_outside_strings;
 
 // Statement Types
 /// Top-level statement parsed from user input
@@ -75,7 +76,7 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
     }
 
     // The := operator is not valid syntax
-    if input.contains(":=") {
+    if contains_outside_strings(input, ":=") {
         return Err("Invalid syntax: ':=' is not a valid operator".to_string());
     }
 
@@ -96,7 +97,7 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
     // Handle + prefix: schema declaration, persistent rule, or fact insert
     if let Some(rest) = input.strip_prefix('+') {
         // Check for persistent rule: +name(...) <- body.
-        if rest.contains("<-") {
+        if contains_outside_strings(rest, "<-") {
             return parse_persistent_rule(rest).map(Statement::PersistentRule);
         }
 
@@ -126,12 +127,16 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
     }
 
     // Query: ?goal
-    if input.starts_with('?') && input.chars().nth(1).is_some_and(char::is_alphabetic) {
-        return parse_query(&input[1..]).map(Statement::Query);
+    if let Some(rest) = input.strip_prefix('?') {
+        let query = parse_query(rest)?;
+        if let Some(goal) = &query.goal {
+            validate_query_relation(&goal.relation)?;
+        }
+        return Ok(Statement::Query(query));
     }
 
     // Session rule: head <- body (query-only, not materialized)
-    if input.contains("<-") {
+    if contains_outside_strings(input, "<-") {
         return parse_transient_rule(input).map(Statement::SessionRule);
     }
 
@@ -150,6 +155,19 @@ pub fn parse_statement(input: &str) -> Result<Statement, String> {
     }
 
     Err(format!("Unrecognized statement: {input}"))
+}
+
+/// Query goals name a relation (lowercase first) or a session rule (single leading `_`).
+fn validate_query_relation(name: &str) -> Result<(), String> {
+    if name.starts_with("__") {
+        return Err(format!(
+            "Relation name '{name}' is reserved: names starting with '__' are internal"
+        ));
+    }
+    match name.strip_prefix('_') {
+        Some(rest) if rest.chars().all(|c| c.is_alphanumeric() || c == '_') => Ok(()),
+        _ => validate_relation_name(name),
+    }
 }
 
 // Re-export parse_rule_definition for convenience
@@ -635,6 +653,49 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_query_any_question_prefix_validates_name() {
+        let err = parse_statement("?__x(N)").unwrap_err();
+        assert!(err.contains("reserved"), "got: {err}");
+        assert!(parse_statement("?Foo(N)").is_err());
+        assert!(matches!(
+            parse_statement("?_helper(N)"),
+            Ok(Statement::Query(_))
+        ));
+    }
+
+    #[test]
+    fn test_operators_inside_strings_do_not_route() {
+        assert!(matches!(
+            parse_statement(r#"+note(1, "a := b")"#),
+            Ok(Statement::Insert(_))
+        ));
+        assert!(matches!(
+            parse_statement(r#"+note(1, "x<-y")"#),
+            Ok(Statement::Insert(_))
+        ));
+        assert!(matches!(
+            parse_statement(r#"note(1, "x<-y")"#),
+            Ok(Statement::Fact(_))
+        ));
+        assert!(matches!(
+            parse_statement(r#"?note(I, "x<-y")"#),
+            Ok(Statement::Query(_))
+        ));
+    }
+
+    #[test]
+    fn test_query_sort_annotation_keeps_string_args_intact() {
+        let Ok(Statement::Query(q)) = parse_statement(r#"?said(U:desc, "hi,there  :)")"#) else {
+            panic!("expected query");
+        };
+        assert_eq!(
+            q.goal.unwrap().args[1],
+            Term::StringConstant("hi,there  :)".into())
+        );
+        assert_eq!(q.order_by.len(), 1);
+    }
+
     // === Property-based parser tests (#54) ===
 
     mod proptest_parser {
@@ -683,6 +744,21 @@ mod tests {
                     Err(e) => {
                         prop_assert!(!e.is_empty());
                     }
+                }
+            }
+
+            /// Strings escaped like the SDKs' `compileValue` round-trip through insert.
+            #[test]
+            fn sdk_escaped_strings_roundtrip(v in "\\PC{0,40}|[a-z ,()<>=!:\\\\\"%/-]{0,20}") {
+                let lit = format!("\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\""));
+                let input = format!("+note[(1, {lit}), (2, {lit})]");
+                match parse_statement(&input) {
+                    Ok(Statement::Insert(op)) => {
+                        let want = vec![Term::Constant(1), Term::StringConstant(v.clone())];
+                        prop_assert_eq!(op.tuples.len(), 2);
+                        prop_assert_eq!(&op.tuples[0], &want);
+                    }
+                    other => prop_assert!(false, "{input}: {other:?}"),
                 }
             }
 

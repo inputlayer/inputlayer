@@ -1,6 +1,10 @@
 //! Shared parsing utilities for statement modules.
 
 use crate::ast::{AggregateFunc, Atom, BodyPredicate, Rule, Term};
+use crate::parser::lexer::{
+    code_chars, contains_outside_strings, find_outside_strings, is_string_literal, split_top_level,
+    unescape, Angles,
+};
 use crate::parser::{parse_rule, parse_term};
 
 /// Sort direction for query result ordering.
@@ -28,20 +32,10 @@ pub struct QueryGoal {
 // String Utilities
 /// Strip `//` comments, respecting string literals.
 pub fn strip_inline_comment(input: &str) -> &str {
-    let mut in_string = false;
-    let bytes = input.as_bytes();
-
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'"' {
-            in_string = !in_string;
-        } else if !in_string && bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
-            return input[..i].trim_end();
-        }
-        i += 1;
+    match find_outside_strings(input, "//") {
+        Some(i) => input[..i].trim_end(),
+        None => input,
     }
-
-    input
 }
 
 /// Strip block comments (/* ... */) from input.
@@ -92,12 +86,8 @@ pub fn has_typed_arguments(args_content: &str) -> bool {
         }
 
         // Look for `:` that indicates typing (but not inside a string)
-        let mut in_string = false;
-        for (i, (byte_pos, ch)) in part.char_indices().enumerate() {
-            let _ = i; // enumerate used for readability
-            if ch == '"' {
-                in_string = !in_string;
-            } else if ch == ':' && !in_string {
+        for (byte_pos, ch) in code_chars(part) {
+            if ch == ':' {
                 // Found a colon - check that what's before it looks like an identifier
                 // and what's after looks like a type
                 let before = part[..byte_pos].trim();
@@ -148,7 +138,7 @@ pub fn extract_args_content(input: &str) -> Option<&str> {
 pub fn is_simple_name_deletion(input: &str) -> bool {
     let input = input.trim();
     // Must not contain parentheses or `<-`
-    !input.contains('(') && !input.contains("<-")
+    !input.contains('(') && !contains_outside_strings(input, "<-")
 }
 
 /// Validate a relation name (must be lowercase identifier)
@@ -197,10 +187,8 @@ pub fn parse_single_term(input: &str) -> Result<Term, String> {
     }
 
     // String constant
-    if input.starts_with('"') && input.ends_with('"') && input.len() >= 2 {
-        let inner = &input[1..input.len() - 1];
-        let processed = process_string_escapes(inner);
-        return Ok(Term::StringConstant(processed));
+    if is_string_literal(input) {
+        return Ok(Term::StringConstant(unescape(&input[1..input.len() - 1])));
     }
 
     // Integer constant
@@ -337,98 +325,22 @@ fn parse_aggregate(input: &str) -> Option<Term> {
     None
 }
 
-/// Split by comma, respecting parentheses, square brackets, and angle brackets
+/// Split by comma outside string literals, parentheses, square brackets, and angle brackets
 pub fn split_by_comma(input: &str) -> Vec<String> {
-    let mut result = Vec::new();
-    let mut current = String::new();
-    let mut paren_depth: i32 = 0;
-    let mut bracket_depth: i32 = 0; // Track square brackets for vectors
-    let mut angle_depth: i32 = 0; // Track angle brackets for aggregates like top_k<3, Points, desc>
-    let mut in_string = false;
-
-    for ch in input.chars() {
-        match ch {
-            '"' => {
-                in_string = !in_string;
-                current.push(ch);
-            }
-            '(' if !in_string => {
-                paren_depth += 1;
-                current.push(ch);
-            }
-            ')' if !in_string => {
-                // Clamp to 0 to handle malformed input
-                paren_depth = (paren_depth - 1).max(0);
-                current.push(ch);
-            }
-            '[' if !in_string => {
-                bracket_depth += 1;
-                current.push(ch);
-            }
-            ']' if !in_string => {
-                // Clamp to 0 to handle malformed input
-                bracket_depth = (bracket_depth - 1).max(0);
-                current.push(ch);
-            }
-            '<' if !in_string => {
-                angle_depth += 1;
-                current.push(ch);
-            }
-            '>' if !in_string => {
-                // Clamp to 0 to handle malformed input
-                angle_depth = (angle_depth - 1).max(0);
-                current.push(ch);
-            }
-            ',' if paren_depth == 0 && bracket_depth == 0 && angle_depth == 0 && !in_string => {
-                result.push(current.clone());
-                current.clear();
-            }
-            _ => current.push(ch),
-        }
-    }
-
-    if !current.is_empty() {
-        result.push(current);
-    }
-
-    result
-}
-
-/// Process escape sequences in a string literal.
-///
-/// Supports: `\n` (newline), `\t` (tab), `\\` (backslash), `\"` (quote).
-/// Unknown escape sequences are passed through literally (e.g., `\x` → `\x`).
-fn process_string_escapes(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(ch) = chars.next() {
-        if ch == '\\' {
-            match chars.next() {
-                Some('n') => result.push('\n'),
-                Some('t') => result.push('\t'),
-                Some('\\') => result.push('\\'),
-                Some('"') => result.push('"'),
-                Some(other) => {
-                    result.push('\\');
-                    result.push(other);
-                }
-                None => result.push('\\'),
-            }
-        } else {
-            result.push(ch);
-        }
-    }
-    result
+    split_top_level(input, ',', Angles::All)
+        .into_iter()
+        .map(str::to_string)
+        .collect()
 }
 
 /// Convert term to string for rule reconstruction
 pub fn term_to_string(term: &Term) -> String {
     match term {
-        Term::Variable(name) => name.clone(),
-        Term::Constant(val) => val.to_string(),
-        Term::StringConstant(s) => format!("\"{s}\""),
-        Term::FloatConstant(f) => f.to_string(),
-        Term::Placeholder => "_".to_string(),
+        Term::Variable(_)
+        | Term::Constant(_)
+        | Term::StringConstant(_)
+        | Term::FloatConstant(_)
+        | Term::Placeholder => term.to_string(),
         _ => "_".to_string(),
     }
 }
@@ -446,7 +358,7 @@ pub fn parse_query(input: &str) -> Result<QueryGoal, String> {
     // A query like `?result(X, Y) <- edge(X, Y)` is a mistake - the user
     // should register the rule first (`+result(X, Y) <- edge(X, Y)`) then
     // query it (`?result(X, Y)`).
-    if input.contains("<-") {
+    if contains_outside_strings(input, "<-") {
         return Err("Query cannot contain a rule definition (<-). \
              Register the rule first with + then query it with ?"
             .to_string());
@@ -538,7 +450,7 @@ fn strip_sort_annotations(input: &str) -> (String, Vec<(String, SortDirection)>)
     // Find the matching ')' for this opening paren (respecting nesting)
     let mut depth = 0;
     let mut close_paren = None;
-    for (i, ch) in input[open_paren..].char_indices() {
+    for (i, ch) in code_chars(&input[open_paren..]) {
         match ch {
             '(' => depth += 1,
             ')' => {
@@ -563,7 +475,7 @@ fn strip_sort_annotations(input: &str) -> (String, Vec<(String, SortDirection)>)
     let mut order_by = Vec::new();
     let mut cleaned_args = Vec::new();
 
-    for arg in split_top_level(args_str, ',') {
+    for arg in split_top_level(args_str, ',', Angles::Ignore) {
         let arg = arg.trim();
         if let Some(base) = arg.strip_suffix(":desc") {
             let var = base.trim().to_string();
@@ -580,27 +492,6 @@ fn strip_sort_annotations(input: &str) -> (String, Vec<(String, SortDirection)>)
 
     let result = format!("{prefix}{}{suffix}", cleaned_args.join(", "));
     (result, order_by)
-}
-
-/// Split a string by a delimiter at the top level (respecting parentheses).
-fn split_top_level(s: &str, delim: char) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut depth = 0;
-    let mut start = 0;
-
-    for (i, ch) in s.char_indices() {
-        match ch {
-            '(' | '[' => depth += 1,
-            ')' | ']' => depth -= 1,
-            c if c == delim && depth == 0 => {
-                parts.push(&s[start..i]);
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    parts.push(&s[start..]);
-    parts
 }
 
 /// Parse a transient rule: head <- body.

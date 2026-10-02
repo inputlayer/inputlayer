@@ -4,43 +4,14 @@
 //! Handles rules, atoms, terms, negation, comparisons, aggregates,
 //! arithmetic, function calls, and comments (% and /* */).
 
+pub mod lexer;
+
 use crate::ast::{
     AggregateFunc, ArithExpr, ArithOp, Atom, BodyPredicate, BuiltinFunc, ComparisonOp, Program,
     Rule, Term,
 };
-
-/// Strip block comments (/* ... */) from source text
-/// Handles nested block comments properly and respects string literals
-pub fn strip_block_comments(source: &str) -> String {
-    let mut result = String::with_capacity(source.len());
-    let mut chars = source.chars().peekable();
-    let mut depth = 0;
-    let mut in_string = false;
-
-    while let Some(c) = chars.next() {
-        // Track string literals - don't strip comments inside strings
-        if c == '"' && depth == 0 {
-            in_string = !in_string;
-            result.push(c);
-        } else if in_string {
-            // Inside a string, copy everything as-is
-            result.push(c);
-        } else if c == '/' && chars.peek() == Some(&'*') {
-            chars.next(); // consume '*'
-            depth += 1;
-        } else if c == '*' && chars.peek() == Some(&'/') && depth > 0 {
-            chars.next(); // consume '/'
-            depth -= 1;
-            if depth == 0 {
-                result.push(' '); // Replace comment with space to preserve spacing
-            }
-        } else if depth == 0 {
-            result.push(c);
-        }
-    }
-
-    result
-}
+pub use lexer::strip_block_comments;
+use lexer::{find_outside_strings, find_top_level, is_string_literal, split_top_level, Angles};
 
 /// Parse an IQL program (supports // and /* */ comments).
 pub fn parse_program(source: &str) -> Result<Program, String> {
@@ -79,42 +50,23 @@ pub fn parse_program(source: &str) -> Result<Program, String> {
 
 /// Find the start position of a // comment, respecting string literals.
 fn find_double_slash_comment(line: &str) -> Option<usize> {
-    let mut in_string = false;
-    let bytes = line.as_bytes();
-
-    for i in 0..bytes.len() {
-        if bytes[i] == b'"' {
-            in_string = !in_string;
-        } else if !in_string && bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
-            return Some(i);
-        }
-    }
-
-    None
+    find_outside_strings(line, "//")
 }
 
 /// Parse a single rule
 pub fn parse_rule(line: &str) -> Result<Rule, String> {
     let line = line.trim();
 
-    // Split by "<-"
-    let parts: Vec<&str> = line.split("<-").collect();
-
-    if parts.len() == 1 {
+    let Some(arrow) = find_outside_strings(line, "<-") else {
         // Fact: just a head atom
-        let head = parse_atom(parts[0].trim())?;
-        return Ok(Rule::new(head, vec![]));
-    }
-
-    if parts.len() != 2 {
+        return Ok(Rule::new(parse_atom(line)?, vec![]));
+    };
+    let body_str = line[arrow + 2..].trim();
+    if find_outside_strings(body_str, "<-").is_some() {
         return Err(format!("Invalid rule: {line}"));
     }
 
-    // Parse head
-    let head = parse_atom(parts[0].trim())?;
-
-    // Parse body (comma-separated atoms)
-    let body_str = parts[1].trim();
+    let head = parse_atom(line[..arrow].trim())?;
     let body = parse_body(body_str)?;
 
     // Check: if body is empty but head has variables, this is an invalid rule
@@ -136,8 +88,7 @@ pub fn parse_rule(line: &str) -> Result<Rule, String> {
 fn parse_body(body_str: &str) -> Result<Vec<BodyPredicate>, String> {
     let mut body = Vec::new();
 
-    // Split by commas, but respect parentheses
-    let parts = split_by_comma_outside_parens(body_str);
+    let parts = split_top_level(body_str, ',', Angles::AfterWord);
 
     for part in parts {
         let part = part.trim();
@@ -167,7 +118,7 @@ fn parse_body(body_str: &str) -> Result<Vec<BodyPredicate>, String> {
 /// Returns None if this is not a comparison, Ok(Some(...)) if it is
 fn try_parse_comparison(s: &str) -> Result<Option<BodyPredicate>, String> {
     // Check for == and give a helpful error
-    if s.contains("==") {
+    if find_outside_strings(s, "==").is_some() {
         return Err("Use '=' for equality, not '=='".to_string());
     }
 
@@ -183,7 +134,7 @@ fn try_parse_comparison(s: &str) -> Result<Option<BodyPredicate>, String> {
 
     for (op_str, op) in operators {
         // Find the operator, but not inside parentheses
-        if let Some(pos) = find_operator_outside_parens(s, op_str) {
+        if let Some(pos) = find_top_level(s, op_str) {
             let left_str = s[..pos].trim();
             let right_str = s[pos + op_str.len()..].trim();
 
@@ -216,7 +167,7 @@ fn try_parse_hnsw_nearest(s: &str) -> Result<Option<BodyPredicate>, String> {
     }
 
     let inner = &s["hnsw_nearest(".len()..s.len() - 1];
-    let args = split_args_respecting_angles(inner);
+    let args = split_top_level(inner, ',', Angles::All);
 
     if args.len() < 5 || args.len() > 6 {
         return Err(format!(
@@ -227,10 +178,10 @@ fn try_parse_hnsw_nearest(s: &str) -> Result<Option<BodyPredicate>, String> {
 
     // Arg 0: index name (string literal)
     let index_str = args[0].trim();
-    if !index_str.starts_with('"') || !index_str.ends_with('"') || index_str.len() < 2 {
+    if !is_string_literal(index_str) {
         return Err("hnsw_nearest: first argument must be a string literal (index name)".into());
     }
-    let index_name = index_str[1..index_str.len() - 1].to_string();
+    let index_name = lexer::unescape(&index_str[1..index_str.len() - 1]);
 
     // Arg 1: query vector (variable or vector literal)
     let query = parse_term(args[1].trim())?;
@@ -280,104 +231,11 @@ fn try_parse_hnsw_nearest(s: &str) -> Result<Option<BodyPredicate>, String> {
     }))
 }
 
-/// Find an operator outside parentheses
-fn find_operator_outside_parens(s: &str, op: &str) -> Option<usize> {
-    let mut paren_depth: i32 = 0;
-    // Use char_indices to get byte offsets for safe string slicing
-    let char_indices: Vec<(usize, char)> = s.char_indices().collect();
-    let op_chars: Vec<char> = op.chars().collect();
-
-    for i in 0..char_indices.len() {
-        match char_indices[i].1 {
-            '(' => paren_depth += 1,
-            // Clamp to 0 to handle malformed input with extra closing parens
-            ')' => paren_depth = (paren_depth - 1).max(0),
-            _ => {}
-        }
-
-        if paren_depth == 0 {
-            // Check if operator matches at this position
-            let mut matches = true;
-            for (j, &op_char) in op_chars.iter().enumerate() {
-                if i + j >= char_indices.len() || char_indices[i + j].1 != op_char {
-                    matches = false;
-                    break;
-                }
-            }
-            if matches {
-                // Return the byte offset (not char index)
-                return Some(char_indices[i].0);
-            }
-        }
-    }
-
-    None
-}
-
 /// Parse a term for comparison - uses full `parse_term` for complete support
 /// This allows function calls, arithmetic, vectors, etc. on either side
 fn parse_comparison_term(s: &str) -> Result<Term, String> {
     // Delegate to the full term parser which handles all term types
     parse_term(s)
-}
-
-/// Split a string by commas, but only those outside parentheses and angle brackets
-///
-/// Note: Angle brackets in aggregates (count<x>) are tracked specially.
-/// We only track angle depth for potential aggregates: when < immediately follows
-/// a word character (no space).
-fn split_by_comma_outside_parens(s: &str) -> Vec<String> {
-    let mut result = Vec::new();
-    let mut current = String::new();
-    let mut paren_depth: i32 = 0;
-    let mut angle_depth: i32 = 0;
-    let chars = s.chars().peekable();
-
-    for ch in chars {
-        match ch {
-            '(' => {
-                paren_depth += 1;
-                current.push(ch);
-            }
-            ')' => {
-                // Clamp to 0 to handle malformed input with extra closing parens
-                paren_depth = (paren_depth - 1).max(0);
-                current.push(ch);
-            }
-            '<' => {
-                // Only track angle depth if this looks like aggregate syntax:
-                // previous char was alphanumeric (word char), no space before <
-                let prev_is_word = current
-                    .chars()
-                    .last()
-                    .is_some_and(|c| c.is_alphanumeric() || c == '_');
-                if prev_is_word {
-                    angle_depth += 1;
-                }
-                current.push(ch);
-            }
-            '>' => {
-                current.push(ch);
-                // Only decrement angle depth if we're in an aggregate
-                if angle_depth > 0 {
-                    angle_depth -= 1;
-                }
-            }
-            ',' if paren_depth == 0 && angle_depth == 0 => {
-                result.push(current.clone());
-                current.clear();
-            }
-            _ => {
-                current.push(ch);
-            }
-        }
-    }
-
-    if !current.is_empty() {
-        result.push(current);
-    }
-
-    result
 }
 
 /// Parse an atom like "edge(x, y)" or "result(x, count<y>)"
@@ -389,74 +247,21 @@ fn parse_atom(s: &str) -> Result<Atom, String> {
 
     let relation = s[..paren_pos].trim().to_string();
 
-    // Extract arguments - find matching closing parenthesis
-    let args_str = s[paren_pos + 1..].trim_end_matches(')').trim();
+    let args_str = s[paren_pos + 1..]
+        .strip_suffix(')')
+        .ok_or_else(|| format!("Invalid atom: {s}"))?
+        .trim();
 
     let args = if args_str.is_empty() {
         vec![]
     } else {
-        // Use smart split to handle aggregates like count<x>
-        split_args_respecting_angles(args_str)
+        split_top_level(args_str, ',', Angles::All)
             .into_iter()
             .map(|arg| parse_term(arg.trim()))
             .collect::<Result<Vec<_>, _>>()?
     };
 
     Ok(Atom::new(relation, args))
-}
-
-/// Split atom arguments, respecting angle brackets, parentheses, and square brackets
-fn split_args_respecting_angles(s: &str) -> Vec<String> {
-    let mut result = Vec::new();
-    let mut current = String::new();
-    let mut angle_depth: i32 = 0;
-    let mut paren_depth: i32 = 0;
-    let mut bracket_depth: i32 = 0;
-
-    for ch in s.chars() {
-        match ch {
-            '<' => {
-                angle_depth += 1;
-                current.push(ch);
-            }
-            '>' => {
-                // Clamp to 0 to handle malformed input
-                angle_depth = (angle_depth - 1).max(0);
-                current.push(ch);
-            }
-            '(' => {
-                paren_depth += 1;
-                current.push(ch);
-            }
-            ')' => {
-                // Clamp to 0 to handle malformed input
-                paren_depth = (paren_depth - 1).max(0);
-                current.push(ch);
-            }
-            '[' => {
-                bracket_depth += 1;
-                current.push(ch);
-            }
-            ']' => {
-                // Clamp to 0 to handle malformed input
-                bracket_depth = (bracket_depth - 1).max(0);
-                current.push(ch);
-            }
-            ',' if angle_depth == 0 && paren_depth == 0 && bracket_depth == 0 => {
-                result.push(current.clone());
-                current.clear();
-            }
-            _ => {
-                current.push(ch);
-            }
-        }
-    }
-
-    if !current.is_empty() {
-        result.push(current);
-    }
-
-    result
 }
 
 /// Parse a term (variable, constant, aggregate, function call, vector literal, or arithmetic expression)
@@ -489,9 +294,8 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
     }
 
     // Check for string literal: "hello"
-    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
-        let inner = &s[1..s.len() - 1];
-        return Ok(Term::StringConstant(inner.to_string()));
+    if is_string_literal(s) {
+        return Ok(Term::StringConstant(lexer::unescape(&s[1..s.len() - 1])));
     }
 
     // Check for aggregate syntax: func<params> or <func:var>
@@ -633,8 +437,7 @@ fn parse_function_args(s: &str) -> Result<Vec<Term>, String> {
         return Ok(vec![]);
     }
 
-    // Split by commas, respecting nested structures
-    split_args_respecting_angles(s)
+    split_top_level(s, ',', Angles::All)
         .into_iter()
         .map(|arg| parse_term(arg.trim()))
         .collect()
@@ -652,10 +455,7 @@ fn contains_arithmetic_operator(s: &str) -> bool {
             '>' => angle_depth -= 1,
             '+' if angle_depth == 0 => {
                 // Check for scientific notation: digit/dot followed by e/E then +
-                if i >= 2
-                    && (chars[i - 1] == 'e' || chars[i - 1] == 'E')
-                    && (chars[i - 2].is_ascii_digit() || chars[i - 2] == '.')
-                {
+                if is_exponent_sign(&chars[..i]) {
                     continue;
                 }
                 return true;
@@ -665,10 +465,7 @@ fn contains_arithmetic_operator(s: &str) -> bool {
                 // Distinguish unary minus at start vs binary minus.
                 // Binary minus has an alphanumeric/paren/underscore before it (possibly with spaces).
                 // Check for scientific notation: digit/dot followed by e/E then -
-                if i >= 2
-                    && (chars[i - 1] == 'e' || chars[i - 1] == 'E')
-                    && (chars[i - 2].is_ascii_digit() || chars[i - 2] == '.')
-                {
+                if is_exponent_sign(&chars[..i]) {
                     continue;
                 }
                 // Look backwards skipping whitespace to find the previous significant char
@@ -685,6 +482,25 @@ fn contains_arithmetic_operator(s: &str) -> bool {
         }
     }
     false
+}
+
+/// True when a `+`/`-` following `before` is an exponent sign, as in `1.5e-3`:
+/// `before` ends in `e`/`E` preceded by a numeric literal, not an identifier like `A0e`.
+fn is_exponent_sign(before: &[char]) -> bool {
+    let Some((&e, rest)) = before.split_last() else {
+        return false;
+    };
+    if e != 'e' && e != 'E' {
+        return false;
+    }
+    let num_start = rest
+        .iter()
+        .rposition(|c| !(c.is_ascii_digit() || *c == '.'))
+        .map_or(0, |p| p + 1);
+    num_start < rest.len()
+        && !rest[..num_start]
+            .last()
+            .is_some_and(|c| c.is_alphanumeric() || *c == '_')
 }
 
 /// Parse an arithmetic expression with proper precedence
@@ -707,6 +523,7 @@ fn parse_add_sub(s: &str) -> Result<ArithExpr, String> {
     // Use char_indices for correct byte offsets with multi-byte Unicode
     let mut paren_depth: i32 = 0;
     let char_indices: Vec<(usize, char)> = s.char_indices().collect();
+    let chars: Vec<char> = char_indices.iter().map(|&(_, c)| c).collect();
 
     for ci in (0..char_indices.len()).rev() {
         let (byte_pos, ch) = char_indices[ci];
@@ -716,10 +533,7 @@ fn parse_add_sub(s: &str) -> Result<ArithExpr, String> {
             '(' => paren_depth = (paren_depth - 1).max(0),
             '+' if paren_depth == 0 => {
                 // Skip scientific notation: e+ or E+
-                if ci >= 2
-                    && (char_indices[ci - 1].1 == 'e' || char_indices[ci - 1].1 == 'E')
-                    && (char_indices[ci - 2].1.is_ascii_digit() || char_indices[ci - 2].1 == '.')
-                {
+                if is_exponent_sign(&chars[..ci]) {
                     continue;
                 }
                 let left = &s[..byte_pos];
@@ -734,10 +548,7 @@ fn parse_add_sub(s: &str) -> Result<ArithExpr, String> {
             }
             '-' if paren_depth == 0 && ci > 0 => {
                 // Skip scientific notation: e- or E-
-                if ci >= 2
-                    && (char_indices[ci - 1].1 == 'e' || char_indices[ci - 1].1 == 'E')
-                    && (char_indices[ci - 2].1.is_ascii_digit() || char_indices[ci - 2].1 == '.')
-                {
+                if is_exponent_sign(&chars[..ci]) {
                     continue;
                 }
                 // Check it's binary minus (not unary) by looking for alphanumeric before it
@@ -1839,5 +1650,203 @@ mod tests {
 
         // Non-variable distance_var
         assert!(parse_rule(r#"r(X, D) <- hnsw_nearest("idx", [1.0], 5, X, 3.14)"#).is_err());
+    }
+
+    fn str_arg(rule: &Rule, i: usize) -> String {
+        match &rule.head.args[i] {
+            Term::StringConstant(s) => s.clone(),
+            other => panic!("expected string, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_string_literals_hide_syntax() {
+        for (src, want) in [
+            (r#"said(U, "hi, there")"#, "hi, there"),
+            (r#"said(U, "a<b")"#, "a<b"),
+            (r#"said(U, "x<-y")"#, "x<-y"),
+            (r#"said(U, "say \"hi\"")"#, "say \"hi\""),
+            (
+                r#"said(U, "Option 1) Paris, option 2) Rome")"#,
+                "Option 1) Paris, option 2) Rome",
+            ),
+            (r#"said(U, "smile :), ok")"#, "smile :), ok"),
+            (r#"said(U, "C:\\temp")"#, r"C:\temp"),
+            (r#"said(U, "a\nb")"#, "a\nb"),
+        ] {
+            let rule = parse_rule(src).unwrap_or_else(|e| panic!("{src}: {e}"));
+            assert_eq!(rule.head.args.len(), 2, "{src}");
+            assert_eq!(str_arg(&rule, 1), want, "{src}");
+        }
+    }
+
+    #[test]
+    fn test_comparisons_with_string_operands() {
+        for (src, op, want) in [
+            (r#"q(M) <- m(M), M = "a<b""#, ComparisonOp::Equal, "a<b"),
+            (
+                r#"q(M) <- m(M), M != "x<-y""#,
+                ComparisonOp::NotEqual,
+                "x<-y",
+            ),
+            (
+                r#"q(M) <- m(M), M = "x == y""#,
+                ComparisonOp::Equal,
+                "x == y",
+            ),
+            (
+                r#"q(M) <- m(M), M = "say \"hi\"""#,
+                ComparisonOp::Equal,
+                "say \"hi\"",
+            ),
+        ] {
+            let rule = parse_rule(src).unwrap_or_else(|e| panic!("{src}: {e}"));
+            assert_eq!(rule.body.len(), 2, "{src}");
+            assert_eq!(
+                rule.body[1],
+                BodyPredicate::Comparison(
+                    Term::Variable("M".into()),
+                    op,
+                    Term::StringConstant(want.into())
+                ),
+                "{src}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_comments_inside_strings_kept() {
+        let program = parse_program(r#"r("a \" // b") // trailing"#).unwrap();
+        assert_eq!(str_arg(&program.rules[0], 0), "a \" // b");
+    }
+
+    #[test]
+    fn test_atom_with_nested_call_keeps_closing_paren() {
+        let rule = parse_rule("r(X, abs(Y)) <- n(X, Y)").unwrap();
+        assert!(matches!(rule.head.args[1], Term::FunctionCall(..)));
+    }
+
+    #[test]
+    fn test_display_roundtrip_keeps_float_and_escapes() {
+        let rule = parse_rule(r#"r(X, 2.0, "a \"b\"\\c") <- n(X), Y = X * 2.0, Z = -0.5"#).unwrap();
+        let printed = rule.to_string();
+        assert_eq!(
+            printed,
+            r#"r(X, 2.0, "a \"b\"\\c") <- n(X), Y = X*2.0, Z = -0.5"#
+        );
+        assert_eq!(parse_rule(&printed).unwrap(), rule);
+        assert!(matches!(rule.head.args[1], Term::FloatConstant(v) if v == 2.0));
+    }
+
+    #[test]
+    fn test_identifier_ending_in_e_is_not_exponent() {
+        let rule = parse_rule("r(A) <- n(A0e), A = A0e+A+A, B = A1E-2").unwrap();
+        assert_eq!(rule.to_string(), "r(A) <- n(A0e), A = A0e+A+A, B = A1E-2");
+        let rule = parse_rule("r(A) <- n(A), B = A*1.5e-3+2e+1").unwrap();
+        assert_eq!(rule.to_string(), "r(A) <- n(A), B = A*0.0015+20.0");
+    }
+
+    mod roundtrip {
+        use super::*;
+        use proptest::prelude::*;
+
+        fn var() -> impl Strategy<Value = String> {
+            "[A-Z][a-z0-9]{0,3}"
+        }
+
+        fn float() -> impl Strategy<Value = f64> {
+            prop_oneof![
+                (-1000i32..1000).prop_map(f64::from),
+                -1e6f64..1e6,
+                prop::num::f64::NORMAL,
+            ]
+        }
+
+        fn text() -> impl Strategy<Value = String> {
+            r#"[a-z ,()<>=!:\\"\n\t%/*+-]{0,12}|\PC{0,8}"#
+        }
+
+        fn constant() -> impl Strategy<Value = Term> {
+            prop_oneof![
+                any::<i64>().prop_map(Term::Constant),
+                float().prop_map(Term::FloatConstant),
+                text().prop_map(Term::StringConstant),
+                any::<bool>().prop_map(Term::BoolConstant),
+            ]
+        }
+
+        fn arith() -> impl Strategy<Value = ArithExpr> {
+            let leaf = prop_oneof![
+                var().prop_map(ArithExpr::Variable),
+                (0i64..1000).prop_map(ArithExpr::Constant),
+                float().prop_map(ArithExpr::from_float),
+            ];
+            leaf.prop_recursive(3, 8, 2, |inner| {
+                (
+                    prop_oneof![
+                        Just(ArithOp::Add),
+                        Just(ArithOp::Sub),
+                        Just(ArithOp::Mul),
+                        Just(ArithOp::Div),
+                    ],
+                    inner.clone(),
+                    inner,
+                )
+                    .prop_map(|(op, l, r)| ArithExpr::Binary {
+                        op,
+                        left: Box::new(l),
+                        right: Box::new(r),
+                    })
+            })
+        }
+
+        fn atom(rel: &'static str) -> impl Strategy<Value = Atom> {
+            prop::collection::vec(
+                prop_oneof![var().prop_map(Term::Variable), constant()],
+                1..4,
+            )
+            .prop_map(move |args| Atom::new(rel.to_string(), args))
+        }
+
+        fn comparison() -> impl Strategy<Value = BodyPredicate> {
+            let op = prop_oneof![
+                Just(ComparisonOp::Equal),
+                Just(ComparisonOp::NotEqual),
+                Just(ComparisonOp::LessThan),
+                Just(ComparisonOp::LessOrEqual),
+                Just(ComparisonOp::GreaterThan),
+                Just(ComparisonOp::GreaterOrEqual),
+            ];
+            let rhs = prop_oneof![
+                constant(),
+                arith().prop_filter_map("binary only", |e| {
+                    matches!(e, ArithExpr::Binary { .. }).then_some(Term::Arithmetic(e))
+                }),
+            ];
+            (var(), op, rhs)
+                .prop_map(|(v, op, r)| BodyPredicate::Comparison(Term::Variable(v), op, r))
+        }
+
+        fn rule() -> impl Strategy<Value = Rule> {
+            let body = prop::collection::vec(
+                prop_oneof![
+                    atom("p").prop_map(BodyPredicate::Positive),
+                    atom("q").prop_map(BodyPredicate::Negated),
+                    comparison(),
+                ],
+                1..4,
+            );
+            (atom("r"), body).prop_map(|(head, body)| Rule::new(head, body))
+        }
+
+        proptest! {
+            #[test]
+            fn parse_print_roundtrip(rule in rule()) {
+                let printed = rule.to_string();
+                let parsed = parse_rule(&printed)
+                    .map_err(|e| TestCaseError::fail(format!("{printed}: {e}")))?;
+                prop_assert_eq!(parsed, rule, "{}", printed);
+            }
+        }
     }
 }
