@@ -20,7 +20,7 @@
 //! ## Recovery
 //!
 //! On startup:
-//! 1. Migrate v1 data (see [`migrate`]) and load shard metadata
+//! 1. Migrate v1 data (see `migrate`) and load shard metadata
 //! 2. Read batch files
 //! 3. Replay WAL (uncommitted updates)
 //! 4. Consolidate to get current state
