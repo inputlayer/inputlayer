@@ -30,6 +30,10 @@ pub struct PersistWal {
     current_file: PathBuf,
     /// Number of entries written
     entries_written: usize,
+    /// Bytes in the file plus bytes buffered in `writer`
+    len: u64,
+    /// A failed write left bytes that could not be cut off; repair before the next write
+    needs_repair: bool,
 }
 
 impl PersistWal {
@@ -42,6 +46,8 @@ impl PersistWal {
             wal_dir,
             writer: None,
             entries_written: 0,
+            len: 0,
+            needs_repair: false,
         };
         wal.truncate_torn_tail()?;
         Ok(wal)
@@ -80,6 +86,10 @@ impl PersistWal {
     /// Ensure writer is open
     fn ensure_writer(&mut self) -> StorageResult<&mut BufWriter<File>> {
         if self.writer.is_none() {
+            if self.needs_repair {
+                self.truncate_torn_tail()?;
+                self.needs_repair = false;
+            }
             let created = !self.current_file.exists();
             let file = OpenOptions::new()
                 .create(true)
@@ -99,6 +109,7 @@ impl PersistWal {
             if created {
                 sync_directory(&self.wal_dir);
             }
+            self.len = file.metadata()?.len();
             self.writer = Some(BufWriter::new(file));
         }
         Ok(self
@@ -109,12 +120,22 @@ impl PersistWal {
 
     /// Append an entry to the WAL with immediate flush (durable)
     pub fn append(&mut self, shard: &str, update: &Update) -> StorageResult<()> {
-        self.append_inner(shard, update, true)
+        self.append_records(shard, std::slice::from_ref(update), true)
     }
 
     /// Append an entry to the WAL without immediate flush (buffered)
     pub fn append_buffered(&mut self, shard: &str, update: &Update) -> StorageResult<()> {
-        self.append_inner(shard, update, false)
+        self.append_records(shard, std::slice::from_ref(update), false)
+    }
+
+    /// Append multiple entries for a shard with immediate flush (durable)
+    pub fn append_batch(&mut self, shard: &str, updates: &[Update]) -> StorageResult<()> {
+        self.append_records(shard, updates, true)
+    }
+
+    /// Append multiple entries for a shard without immediate flush (buffered)
+    pub fn append_batch_buffered(&mut self, shard: &str, updates: &[Update]) -> StorageResult<()> {
+        self.append_records(shard, updates, false)
     }
 
     /// Compute CRC32 checksum of a byte slice and return as 8-char hex string.
@@ -122,60 +143,100 @@ impl PersistWal {
         format!("{:08x}", crc32fast::hash(data))
     }
 
-    /// Internal append implementation
-    fn append_inner(&mut self, shard: &str, update: &Update, flush: bool) -> StorageResult<()> {
-        let entry = WalEntry {
-            shard: shard.to_string(),
-            update: update.clone(),
-        };
-
-        let writer = self.ensure_writer()?;
-        let json = serde_json::to_string(&entry)
-            .map_err(|e| StorageError::Other(format!("WAL serialization failed: {e}")))?;
-
-        // Write format: "<crc32hex>:<json>"
-        let checksum = Self::crc32_hex(json.as_bytes());
-        writeln!(writer, "{checksum}:{json}")?;
-        if flush {
-            writer.flush()?;
-            // sync_all() forces data to disk (not just OS page cache).
-            // Without this, a power failure after flush() could still lose data
-            // because the OS may not have written the page cache to the physical disk yet.
-            writer.get_ref().sync_all()?;
-        }
-        self.entries_written += 1;
-
-        Ok(())
-    }
-
-    /// Append multiple entries for a shard with immediate flush (durable)
-    pub fn append_batch(&mut self, shard: &str, updates: &[Update]) -> StorageResult<()> {
-        self.append_batch_inner(shard, updates, true)
-    }
-
-    /// Append multiple entries for a shard without immediate flush (buffered)
-    pub fn append_batch_buffered(&mut self, shard: &str, updates: &[Update]) -> StorageResult<()> {
-        self.append_batch_inner(shard, updates, false)
-    }
-
-    /// Internal batch append implementation
-    fn append_batch_inner(
+    /// Append records all-or-nothing: on error the WAL is cut back to its prior length,
+    /// so a failed record is never recovered and the next one never follows a torn line.
+    fn append_records(
         &mut self,
         shard: &str,
         updates: &[Update],
-        flush: bool,
+        durable: bool,
     ) -> StorageResult<()> {
+        self.ensure_writer()?;
+        let (len, entries_written) = (self.len, self.entries_written);
+        let result = self.write_records(shard, updates, durable);
+        if result.is_err() {
+            self.discard_writer(Some(len));
+            self.entries_written = entries_written;
+        }
+        result
+    }
+
+    fn write_records(
+        &mut self,
+        shard: &str,
+        updates: &[Update],
+        durable: bool,
+    ) -> StorageResult<()> {
+        let writer = self.ensure_writer()?;
+        let mut written = 0u64;
         for update in updates {
-            self.append_inner(shard, update, false)?; // Don't flush individual entries
+            let entry = WalEntry {
+                shard: shard.to_string(),
+                update: update.clone(),
+            };
+            let json = serde_json::to_string(&entry)
+                .map_err(|e| StorageError::Other(format!("WAL serialization failed: {e}")))?;
+            // Write format: "<crc32hex>:<json>"
+            let line = format!("{}:{json}\n", Self::crc32_hex(json.as_bytes()));
+            writer.write_all(line.as_bytes())?;
+            written += line.len() as u64;
         }
-        if flush {
-            // Flush once at the end for the whole batch and sync to disk
-            if let Some(ref mut writer) = self.writer {
-                writer.flush()?;
-                writer.get_ref().sync_all()?;
-            }
+        if durable {
+            writer.flush()?;
+            // sync_all() forces data to disk, not just the OS page cache.
+            writer.get_ref().sync_all()?;
         }
+        self.len += written;
+        self.entries_written += updates.len();
         Ok(())
+    }
+
+    /// Drop the writer and restore the file to exactly `len` bytes: cut off what a failed
+    /// write left, and keep earlier buffered records. With no `len`, or if the restore
+    /// fails, the next write repairs the torn tail first.
+    fn discard_writer(&mut self, len: Option<u64>) {
+        let Some(writer) = self.writer.take() else {
+            return;
+        };
+        let (mut file, unflushed) = writer.into_parts();
+        let unflushed = unflushed.unwrap_or_default();
+        let restored = len.is_some_and(|len| {
+            let restore = |file: &mut File| -> std::io::Result<()> {
+                let on_disk = file.metadata()?.len();
+                if on_disk >= len {
+                    file.set_len(len)?;
+                } else {
+                    let missing = usize::try_from(len - on_disk).unwrap_or(usize::MAX);
+                    file.write_all(
+                        unflushed
+                            .get(..missing)
+                            .ok_or(std::io::ErrorKind::UnexpectedEof)?,
+                    )?;
+                }
+                file.sync_all()
+            };
+            restore(&mut file).is_ok()
+        });
+        self.needs_repair = !restored;
+    }
+
+    /// Flush buffered bytes to the file, optionally fsyncing. On error the writer is
+    /// discarded so a retry on drop cannot write a partial record later.
+    fn flush_writer(&mut self, sync: bool) -> StorageResult<()> {
+        let Some(writer) = self.writer.as_mut() else {
+            return Ok(());
+        };
+        let result = writer.flush().and_then(|()| {
+            if sync {
+                writer.get_ref().sync_all()
+            } else {
+                Ok(())
+            }
+        });
+        if result.is_err() {
+            self.discard_writer(None);
+        }
+        Ok(result?)
     }
 
     /// Read all entries from the WAL.
@@ -247,11 +308,7 @@ impl PersistWal {
 
     /// Sync WAL to disk (flushes buffer and calls fsync)
     pub fn sync(&mut self) -> StorageResult<()> {
-        if let Some(ref mut writer) = self.writer {
-            writer.flush()?;
-            writer.get_ref().sync_all()?;
-        }
-        Ok(())
+        self.flush_writer(true)
     }
 
     /// Get number of entries written since last clear
@@ -268,9 +325,8 @@ impl PersistWal {
     /// a crash at any point cannot lose other shards' data.
     pub fn remove_shard_entries(&mut self, shard_name: &str) -> StorageResult<()> {
         // Buffered appends must reach the file before it is read and replaced.
-        if let Some(mut writer) = self.writer.take() {
-            writer.flush()?;
-        }
+        self.flush_writer(false)?;
+        self.writer = None;
         let entries = self.read_all()?;
 
         let surviving: Vec<&WalEntry> = entries.iter().filter(|e| e.shard != shard_name).collect();
@@ -962,5 +1018,75 @@ mod tests {
         wal.append("db:edge", &Update::insert(Tuple::from_pair(3, 4), 20))
             .unwrap();
         assert_eq!(wal.read_all().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_wal_failed_append_is_cut_back() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
+        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
+            .unwrap();
+        let valid_len = wal.file_size();
+
+        // Simulate a write that failed partway: some bytes reached the file, more are buffered.
+        let writer = wal.writer.as_mut().unwrap();
+        writer.write_all(b"deadbeef:{\"sha").unwrap();
+        writer.flush().unwrap();
+        writer.write_all(b"rd\":\"db").unwrap();
+        wal.discard_writer(Some(valid_len));
+        assert_eq!(wal.file_size(), valid_len);
+
+        wal.append("db:edge", &Update::insert(Tuple::from_pair(3, 4), 20))
+            .unwrap();
+        assert_eq!(wal.read_all().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_wal_failed_append_keeps_earlier_buffered_records() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
+        wal.append_buffered("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
+            .unwrap();
+        let len = wal.len;
+
+        // A failed write appended partial bytes to the still-unflushed buffer.
+        wal.writer
+            .as_mut()
+            .unwrap()
+            .write_all(b"deadbeef:{")
+            .unwrap();
+        wal.discard_writer(Some(len));
+        assert!(!wal.needs_repair);
+        assert_eq!(wal.file_size(), len);
+        assert_eq!(wal.read_all().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_wal_failed_flush_repairs_before_next_write() {
+        let temp = TempDir::new().unwrap();
+        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
+        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
+            .unwrap();
+        let valid_len = wal.file_size();
+
+        let writer = wal.writer.as_mut().unwrap();
+        writer.write_all(b"deadbeef:{\"sha").unwrap();
+        writer.flush().unwrap();
+        wal.discard_writer(None);
+        assert!(wal.file_size() > valid_len);
+
+        wal.append("db:edge", &Update::insert(Tuple::from_pair(3, 4), 20))
+            .unwrap();
+        let entries = wal.read_all().unwrap();
+        assert_eq!(entries.len(), 2);
+        drop(wal);
+        assert_eq!(
+            PersistWal::new(temp.path().to_path_buf())
+                .unwrap()
+                .read_all()
+                .unwrap()
+                .len(),
+            2
+        );
     }
 }

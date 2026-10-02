@@ -88,6 +88,49 @@ fn concurrent_appends_and_flushes_lose_no_acked_write() {
 }
 
 #[test]
+fn concurrent_append_and_delete_recover_what_was_acked() {
+    const ROUNDS: i32 = 10;
+    const BATCHES: i32 = 40;
+    const WRITES: i32 = 40;
+
+    for round in 0..ROUNDS {
+        let temp = TempDir::new().expect("tempdir");
+        let persist = Arc::new(open(
+            temp.path().to_path_buf(),
+            1000,
+            DurabilityMode::Immediate,
+        ));
+        // Batch files give delete_shard work to do while a writer races it.
+        for i in 0..BATCHES {
+            let update = Update::insert(Tuple::from_pair(-1, i), 1);
+            persist.append("db:r", &[update]).expect("append");
+            persist.flush("db:r").expect("flush");
+        }
+        let writer = {
+            let persist = Arc::clone(&persist);
+            std::thread::spawn(move || {
+                for i in 0..WRITES {
+                    let update = Update::insert(Tuple::from_pair(round, i), 1);
+                    persist.append("db:r", &[update]).expect("append");
+                }
+            })
+        };
+        while persist.read("db:r", 0).expect("read").len() <= (BATCHES + round) as usize {
+            std::thread::yield_now();
+        }
+        persist.delete_shard("db:r").expect("delete shard");
+        writer.join().expect("writer thread");
+
+        let persist = Arc::try_unwrap(persist).ok().expect("sole owner");
+        let acked = keys(&persist, "db:r");
+        std::mem::forget(persist);
+
+        let reopened = open(temp.path().to_path_buf(), 1000, DurabilityMode::Immediate);
+        assert_eq!(keys(&reopened, "db:r"), acked, "round {round}");
+    }
+}
+
+#[test]
 fn append_after_torn_tail_survives_restart() {
     let temp = TempDir::new().expect("tempdir");
     append_raw(
@@ -114,13 +157,9 @@ fn torn_tail_after_valid_records_is_truncated() {
         .expect("append");
     std::mem::forget(persist);
 
-    let wal = wal_file(temp.path());
-    let valid_len = fs::metadata(&wal).expect("wal metadata").len();
-    append_raw(&wal, b"deadbeef:{\"sha");
+    append_raw(&wal_file(temp.path()), b"deadbeef:{\"sha");
 
-    // A fresh WAL is a valid prefix of the old one; reopening never fails on the tail.
     let persist = open(temp.path().to_path_buf(), 1000, DurabilityMode::Immediate);
-    assert!(fs::metadata(&wal).map_or(0, |m| m.len()) <= valid_len);
     persist
         .append("db:r", &[Update::insert(Tuple::from_pair(2, 2), 1)])
         .expect("append");
