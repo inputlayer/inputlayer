@@ -2141,9 +2141,15 @@ impl KnowledgeGraph {
 
     /// Serve rules from materializations recomputed on every publish.
     ///
-    /// Takes effect only with the incremental engine enabled.
+    /// Takes effect only with the incremental engine enabled. Turning it off
+    /// drops every materialization, since nothing keeps them fresh.
     pub fn set_auto_materialize(&mut self, enabled: bool) {
         self.auto_materialize = enabled;
+        if !enabled {
+            if let Some(dd) = &self.incremental {
+                dd.derived_relations().lock().clear_all_materialized();
+            }
+        }
         self.publish_snapshot();
     }
 
@@ -2318,9 +2324,7 @@ impl KnowledgeGraph {
         self.metadata
             .add_relation(relation.to_string(), schema, tuple_count);
 
-        // Shadow write new tuples to IncrementalEngine (if enabled).
-        // Uses the logical timestamp from StorageEngine for proper time tracking.
-        // Time advancement is lazy  -  only happens when a consistent read is requested.
+        // Shadow write to IncrementalEngine (if enabled).
         if new_count > 0 {
             self.index_inserted(relation, &added);
             if let Some(dd) = &self.incremental {

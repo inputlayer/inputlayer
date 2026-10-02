@@ -19,7 +19,8 @@
 //!
 //! InputSessions and TraceAgents are NOT Send/Sync (Rc-based internally).
 //! All DD state lives on the worker thread and is reached only through the
-//! command channel. Writes are fire-and-forget sends.
+//! command channel. Writes are queued sends; the channel holds 1024 commands,
+//! so a worker that falls behind blocks writers.
 
 use crate::derived_relations::{CompiledRule, DerivedRelationsManager};
 use crate::value::Tuple;
@@ -421,11 +422,6 @@ impl IncrementalEngine {
             .map_err(|_| "Worker disconnected".to_string())?;
         rx.recv()
             .map_err(|_| "Worker disconnected while reading trace".to_string())
-    }
-
-    /// Commands queued for the worker.
-    pub fn pending_commands(&self) -> usize {
-        self.command_tx.len()
     }
 
     // === Derived Relations API ===
@@ -1229,15 +1225,10 @@ mod tests {
         }
         engine.insert("data", rows(0..10), time).unwrap();
 
-        // A read round trip is answered only after the queue is drained and stepped.
         assert_eq!(engine.read_relation("data").unwrap().len(), 10);
-        assert_eq!(engine.pending_commands(), 0);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        let mut held = engine.trace_updates("data").unwrap();
-        while held > 1_000 && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            held = engine.trace_updates("data").unwrap();
-        }
+        // No commands arrive while idle merging compacts the trace.
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let held = engine.trace_updates("data").unwrap();
         assert!(
             held <= 1_000,
             "trace holds {held} of 200010 written updates"

@@ -149,3 +149,27 @@ fn test_auto_materialize_is_off_by_default() {
     assert!(materialized(&storage).is_empty());
     assert_eq!(results(&storage, "q(X, Y) <- path(X, Y)").len(), 1);
 }
+
+#[test]
+fn test_auto_materialize_off_drops_materializations() {
+    let temp = TempDir::new().unwrap();
+    let storage = storage(&temp, false);
+    storage.insert_tuples("edge", vec![edge(1, 2)]).unwrap();
+    // Registered before the incremental engine, so it has no invalidation edges.
+    register(&storage, "path(X, Y) <- edge(X, Y)");
+    {
+        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let mut kg = kg.write();
+        kg.enable_incremental().unwrap();
+        kg.set_auto_materialize(true);
+    }
+    assert_eq!(materialized(&storage), HashSet::from(["path".to_string()]));
+    {
+        let kg = storage.knowledge_graphs.get("default").unwrap();
+        kg.write().set_auto_materialize(false);
+    }
+    assert!(materialized(&storage).is_empty());
+
+    storage.insert_tuples("edge", vec![edge(2, 3)]).unwrap();
+    assert_eq!(results(&storage, "q(X, Y) <- path(X, Y)").len(), 2);
+}

@@ -276,6 +276,11 @@ impl DerivedRelationsManager {
         self.materialized.remove(name);
     }
 
+    /// Drop every materialization, keeping the rules
+    pub fn clear_all_materialized(&mut self) {
+        self.materialized.clear();
+    }
+
     /// Notify that a base relation has been updated
     ///
     /// This invalidates all derived relations that depend on it.
