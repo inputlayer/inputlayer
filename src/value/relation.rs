@@ -94,6 +94,28 @@ impl Relation {
         self.extend(tail);
     }
 
+    /// Keep the first `len` tuples. Whole chunks before the cut stay shared;
+    /// only the chunk the cut falls in is copied, and only if it is shared.
+    pub fn truncate(&mut self, len: usize) {
+        if len >= self.len {
+            return;
+        }
+        let mut remaining = len;
+        let mut kept = 0;
+        for chunk in &mut self.chunks {
+            if remaining == 0 {
+                break;
+            }
+            if chunk.len() > remaining {
+                Arc::make_mut(chunk).truncate(remaining);
+            }
+            remaining -= chunk.len();
+            kept += 1;
+        }
+        self.chunks.truncate(kept);
+        self.len = len;
+    }
+
     /// Copy the tuples into a plain vector.
     pub fn to_vec(&self) -> Vec<Tuple> {
         self.iter().cloned().collect()
@@ -251,6 +273,26 @@ mod tests {
         assert_eq!(reader.len(), CHUNK_SIZE + 3);
         assert_eq!(writer.len(), CHUNK_SIZE + 4);
         assert!(!reader.contains(&t(-1)));
+    }
+
+    #[test]
+    fn test_relation_truncate_keeps_prefix_shared() {
+        let n = CHUNK_SIZE as i64 * 3;
+        let mut writer: Relation = (0..n).map(t).collect();
+        let reader = writer.clone();
+        let cut = CHUNK_SIZE + 5;
+        writer.truncate(cut);
+        assert_eq!(writer.len(), cut);
+        assert_eq!(writer.chunks.len(), 2);
+        assert!(Arc::ptr_eq(&writer.chunks[0], &reader.chunks[0]));
+        assert_eq!(ints(&writer), (0..cut as i64).collect::<Vec<_>>());
+        assert_eq!(reader.len(), n as usize);
+        writer.truncate(CHUNK_SIZE);
+        assert_eq!(writer.chunks.len(), 1);
+        writer.truncate(usize::MAX);
+        assert_eq!(writer.len(), CHUNK_SIZE);
+        writer.truncate(0);
+        assert!(writer.is_empty() && writer.chunks.is_empty());
     }
 
     #[test]

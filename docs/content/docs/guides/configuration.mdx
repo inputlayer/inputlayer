@@ -112,7 +112,8 @@ max_insert_tuples = 10000
 # Maximum string value size in bytes
 max_string_value_bytes = 65536
 
-# Maximum rows returned per query result (0 = unlimited)
+# Maximum rows in a query's final result; larger results are cut and
+# flagged `truncated` (0 = unlimited)
 max_result_rows = 100000
 
 # Log queries slower than this (ms, 0 = disabled)

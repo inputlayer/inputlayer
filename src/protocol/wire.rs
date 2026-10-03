@@ -307,7 +307,7 @@ pub struct QueryResult {
     /// Total number of rows before limit/offset (equals rows.len() when no pagination)
     #[serde(default)]
     pub total_count: usize,
-    /// Whether pagination truncated the result set
+    /// Whether pagination or `max_result_rows` cut the result set
     #[serde(default)]
     pub truncated: bool,
     /// Execution time in milliseconds

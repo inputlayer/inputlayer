@@ -456,6 +456,7 @@ impl QueryJob {
         let (mut result_tuples, rules, base_data, derived_data, index_metrics) = storage
             .execute_and_get_context(&kg_name, &query)
             .map_err(|e| format!("{e}"))?;
+        let row_capped = crate::last_result_truncated();
         let query_us = query_start.elapsed().as_micros() as u64;
 
         if result_tuples.is_empty() {
@@ -574,7 +575,7 @@ impl QueryJob {
             rows,
             schema,
             total_count,
-            truncated: false,
+            truncated: row_capped,
             execution_time_ms: start.elapsed().as_millis() as u64,
             metadata: None,
             switched_kg: None,
@@ -2626,12 +2627,13 @@ impl QueryJob {
                                         );
 
                                         // Execute query to find matching variable bindings
-                                        let results = storage
-                                            .execute_query_with_rules_tuples_on(
+                                        let results = crate::without_result_cap(|| {
+                                            storage.execute_query_with_rules_tuples_on(
                                                 &kg_name,
                                                 &query_rule,
                                             )
-                                            .map_err(|e| e.to_string())?;
+                                        })
+                                        .map_err(|e| e.to_string())?;
 
                                         let mut deleted = 0;
 
@@ -2812,9 +2814,11 @@ impl QueryJob {
                                     body_str
                                 );
 
-                                let results = storage
-                                    .execute_query_with_rules_tuples_on(&kg_name, &query_rule)
-                                    .map_err(|e| e.to_string())?;
+                                let results = crate::without_result_cap(|| {
+                                    storage
+                                        .execute_query_with_rules_tuples_on(&kg_name, &query_rule)
+                                })
+                                .map_err(|e| e.to_string())?;
 
                                 let mut deleted = 0;
                                 let mut inserted = 0;
@@ -3571,19 +3575,25 @@ impl QueryJob {
         let query_exec_start = Instant::now();
         let has_session_facts = !session_fact_tuples.is_empty();
         let timing_mode = self.config.storage.performance.timing_mode;
-        let (results, timing_breakdown) = if !has_session_facts {
-            snapshot
-                .execute_with_rules_tuples_profiled(&query_program, timing_mode)
-                .map_err(|e| format!("Query execution failed: {e}"))?
-        } else {
-            snapshot
-                .execute_with_session_facts_profiled(
+        let run = || {
+            if has_session_facts {
+                snapshot.execute_with_session_facts_profiled(
                     &query_program,
                     session_fact_tuples,
                     timing_mode,
                 )
-                .map_err(|e| format!("Query execution failed: {e}"))?
+            } else {
+                snapshot.execute_with_rules_tuples_profiled(&query_program, timing_mode)
+            }
         };
+        let needs_full = needs_full_result(&order_by, query_offset);
+        let (results, timing_breakdown) = if needs_full {
+            crate::without_result_cap(run)
+        } else {
+            run()
+        }
+        .map_err(|e| format!("Query execution failed: {e}"))?;
+        let row_capped = crate::last_result_truncated();
         let query_exec_ms = query_exec_start.elapsed().as_millis() as u64;
         info!(
             program_len,
@@ -3663,7 +3673,8 @@ impl QueryJob {
         // Apply pagination (offset then limit)
         let total_count = rows.len();
         let rows = apply_pagination(rows, query_limit, query_offset);
-        let truncated = rows.len() < total_count;
+        let (rows, cut) = cap_rows(rows, self.config.storage.performance.max_result_rows);
+        let truncated = row_capped || cut || rows.len() < total_count;
 
         info!(
             program_len,
@@ -3803,10 +3814,18 @@ impl Handler {
         }; // storage read lock released here
 
         // Acquire semaphore permit to bound concurrent DD computations (same as query_program)
-        let permit = Arc::clone(&self.query_semaphore)
-            .acquire_owned()
-            .await
-            .map_err(|_| "Query semaphore closed (server shutting down)")?;
+        let permit = match tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            Arc::clone(&self.query_semaphore).acquire_owned(),
+        )
+        .await
+        {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(_)) => return Err("Query semaphore closed (server shutting down)".to_string()),
+            Err(_) => {
+                return Err("Server overloaded: query queue full (timed out after 30s)".to_string())
+            }
+        };
 
         let timeout_ms = self.config.storage.performance.query_timeout_ms;
         let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -3817,17 +3836,25 @@ impl Handler {
         let preprocessed_clone = preprocessed.clone();
         let timing_mode = self.config.storage.performance.timing_mode;
         let timing_histograms = Arc::clone(&self.timing_histograms);
+        let needs_full = needs_full_result(&order_by, query_offset);
         let blocking_task = tokio::task::spawn_blocking(move || {
             crate::code_generator::set_query_cancel_flag(Some(cancel_flag_clone));
 
             // Run session query on snapshot (lock-free) with profiling
-            let (results, timing_breakdown) = snapshot
-                .execute_with_session_facts_profiled(
+            let run = || {
+                snapshot.execute_with_session_facts_profiled(
                     &combined_program_clone,
                     session_facts,
                     timing_mode,
                 )
-                .map_err(|e| format!("Query execution failed: {e}"))?;
+            };
+            let (results, timing_breakdown) = if needs_full {
+                crate::without_result_cap(run)
+            } else {
+                run()
+            }
+            .map_err(|e| format!("Query execution failed: {e}"))?;
+            let row_capped = crate::last_result_truncated();
 
             // Record timing in Prometheus histograms
             if let Some(ref tb) = timing_breakdown {
@@ -3836,25 +3863,30 @@ impl Handler {
 
             // Per-tuple provenance: run the original query (without ephemeral rules)
             // against persistent-only data to identify ephemeral contributions.
+            // Uncapped, so a capped result is never compared to a different subset.
             use std::collections::HashSet;
-            let baseline: HashSet<Tuple> = match snapshot
-                .execute_with_rules_tuples(&preprocessed_clone)
-            {
-                Ok(tuples) => tuples.into_iter().collect(),
-                Err(e) => {
-                    warn!(error = %e, "Provenance baseline query failed - all tuples tagged as ephemeral");
-                    HashSet::new()
+            let baseline: HashSet<Tuple> = if results.is_empty() {
+                HashSet::new()
+            } else {
+                match crate::without_result_cap(|| {
+                    snapshot.execute_with_rules_tuples(&preprocessed_clone)
+                }) {
+                    Ok(tuples) => tuples.into_iter().collect(),
+                    Err(e) => {
+                        warn!(error = %e, "Provenance baseline query failed - all tuples tagged as ephemeral");
+                        HashSet::new()
+                    }
                 }
             };
 
             crate::code_generator::set_query_cancel_flag(None);
             drop(permit); // Release semaphore slot
 
-            Ok::<_, String>((results, baseline, timing_breakdown))
+            Ok::<_, String>((results, row_capped, baseline, timing_breakdown))
         });
 
         // Apply timeout if configured
-        let (results, baseline, timing_breakdown) = if timeout_ms > 0 {
+        let (results, row_capped, baseline, timing_breakdown) = if timeout_ms > 0 {
             match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), blocking_task)
                 .await
             {
@@ -3976,7 +4008,8 @@ impl Handler {
         // Apply pagination (offset then limit)
         let total_count = rows.len();
         let rows = apply_pagination(rows, query_limit, query_offset);
-        let truncated = rows.len() < total_count;
+        let (rows, cut) = cap_rows(rows, self.config.storage.performance.max_result_rows);
+        let truncated = row_capped || cut || rows.len() < total_count;
 
         Ok(QueryResult {
             rows,
@@ -8515,6 +8548,21 @@ fn extract_arith_vars(expr: &crate::ast::ArithExpr, vars: &mut Vec<String>) {
 
 /// Extract variables from a body predicate and add to `head_vars`
 /// Used for Cartesian product queries like ?- foo(X), bar(Y).
+/// Sorting and offsets must see every row, so such queries run uncapped and
+/// are cut by [`cap_rows`] afterwards.
+fn needs_full_result(order_by: &[(usize, SortDirection)], offset: Option<usize>) -> bool {
+    !order_by.is_empty() || offset.is_some_and(|n| n > 0)
+}
+
+/// Cuts `rows` to `max_rows` (0 = no limit), reporting whether any were dropped.
+fn cap_rows(mut rows: Vec<WireTuple>, max_rows: usize) -> (Vec<WireTuple>, bool) {
+    let cut = max_rows > 0 && rows.len() > max_rows;
+    if cut {
+        rows.truncate(max_rows);
+    }
+    (rows, cut)
+}
+
 /// Apply offset and limit pagination to result rows.
 fn apply_pagination(
     rows: Vec<WireTuple>,

@@ -75,14 +75,46 @@ fn is_query_cancelled() -> bool {
 /// Error returned when a query stops on its cancel flag.
 const QUERY_CANCELLED: &str = "Query cancelled due to timeout";
 
-/// Signal cancellation on the current thread's cancel flag.
-/// Used by max_result_rows enforcement to stop DD computation early (#2).
-fn signal_query_cancel() {
-    QUERY_CANCEL.with(|cell| {
-        if let Some(flag) = cell.borrow().as_ref() {
-            flag.store(true, Ordering::Relaxed);
+/// Collects a dataflow's output rows. Full at `limit` rows (0 = unlimited),
+/// which stops only this dataflow and leaves the query cancel flag alone.
+#[derive(Clone)]
+struct RowSink {
+    rows: Arc<Mutex<Vec<Tuple>>>,
+    full: Arc<AtomicBool>,
+    limit: usize,
+}
+
+impl RowSink {
+    fn new(limit: usize) -> Self {
+        RowSink {
+            rows: Arc::new(Mutex::new(Vec::new())),
+            full: Arc::new(AtomicBool::new(false)),
+            limit,
         }
-    });
+    }
+
+    fn push(&self, row: &Tuple) {
+        let mut rows = self.rows.lock();
+        if self.limit == 0 || rows.len() < self.limit {
+            rows.push(row.clone());
+            if rows.len() == self.limit {
+                self.full.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// True once the sink is full or the query was cancelled.
+    fn should_stop(&self) -> bool {
+        self.full.load(Ordering::Relaxed) || is_query_cancelled()
+    }
+
+    /// The collected rows, or the cancellation error.
+    fn finish(self) -> Result<Vec<Tuple>, String> {
+        if is_query_cancelled() {
+            return Err(QUERY_CANCELLED.to_string());
+        }
+        Ok(std::mem::take(&mut *self.rows.lock()))
+    }
 }
 
 /// Relation name of a bare two-column `Scan`.
@@ -266,13 +298,12 @@ impl CodeGenerator {
     /// Execute a single-pass (non-recursive) query, generic over the diff type.
     fn execute_single_pass_typed<R: DiffType>(&self, ir: &IRNode) -> Result<Vec<Tuple>, String> {
         // Shared results vector
-        let results = Arc::new(Mutex::new(Vec::new()));
-        let results_clone = Arc::clone(&results);
+        let sink = RowSink::new(self.max_result_rows);
+        let sink_clone = sink.clone();
 
         // Clone data for move into closure
         let input_data = self.input_tuples.clone();
         let ir_clone = ir.clone();
-        let result_limit = self.max_result_rows;
 
         // Execute DD computation with panic safety - DD bugs (e.g. merge_batcher
         // out-of-bounds) should produce an error, not crash the server.
@@ -296,21 +327,16 @@ impl CodeGenerator {
                     collection
                         .distinct_core::<R>()
                         .inner
-                        .inspect(move |(data, _time, _diff)| {
-                            let mut guard = results_clone.lock();
-                            if result_limit == 0 || guard.len() < result_limit {
-                                guard.push(data.clone());
-                                if result_limit > 0 && guard.len() >= result_limit {
-                                    signal_query_cancel();
-                                }
-                            }
+                        .inspect({
+                            let out = sink_clone.clone();
+                            move |(data, _time, _diff)| out.push(data)
                         })
                         .probe_with(&probe);
                 });
 
                 // Wait for computation to complete
                 while !probe.done() {
-                    if is_query_cancelled() {
+                    if sink_clone.should_stop() {
                         break;
                     }
                     worker.step();
@@ -334,21 +360,7 @@ impl CodeGenerator {
             )
         })?;
 
-        if is_query_cancelled() {
-            // If we hit the result limit, the cancel was self-triggered - return results
-            let collected = results.lock().len();
-            if result_limit == 0 || collected < result_limit {
-                return Err(QUERY_CANCELLED.to_string());
-            }
-        }
-
-        // Extract results from Arc<Mutex<>>
-        // parking_lot::Mutex never poisons, so into_inner() returns the value directly
-        let final_results = Arc::try_unwrap(results)
-            .map_err(|_| "Failed to extract results")?
-            .into_inner();
-
-        Ok(final_results)
+        sink.finish()
     }
 
     /// Recursive query via DD's `.iterative()` scope (semi-naive fixpoint).
@@ -599,9 +611,8 @@ impl CodeGenerator {
         edge_relation: &str,
         _recursive_rel: &str,
     ) -> Result<Vec<Tuple>, String> {
-        let results = Arc::new(Mutex::new(Vec::new()));
-        let results_clone = Arc::clone(&results);
-        let result_limit = self.max_result_rows;
+        let sink = RowSink::new(self.max_result_rows);
+        let sink_clone = sink.clone();
 
         // Get edge data
         let edges: Vec<Tuple> = self
@@ -680,21 +691,16 @@ impl CodeGenerator {
                     // Capture results
                     tc_result
                         .inner
-                        .inspect(move |(data, _time, _diff)| {
-                            let mut guard = results_clone.lock();
-                            if result_limit == 0 || guard.len() < result_limit {
-                                guard.push(data.clone());
-                                if result_limit > 0 && guard.len() >= result_limit {
-                                    signal_query_cancel();
-                                }
-                            }
+                        .inspect({
+                            let out = sink_clone.clone();
+                            move |(data, _time, _diff)| out.push(data)
                         })
                         .probe_with(&probe);
                 });
 
                 // Wait for computation to complete
                 while !probe.done() {
-                    if is_query_cancelled() {
+                    if sink_clone.should_stop() {
                         break;
                     }
                     worker.step();
@@ -709,21 +715,7 @@ impl CodeGenerator {
             )
         })?;
 
-        if is_query_cancelled() {
-            // If we hit the result limit, the cancel was self-triggered - return results
-            let collected = results.lock().len();
-            if result_limit == 0 || collected < result_limit {
-                return Err(QUERY_CANCELLED.to_string());
-            }
-        }
-
-        // Extract results
-        // parking_lot::Mutex never poisons, so into_inner() returns the value directly
-        let final_results = Arc::try_unwrap(results)
-            .map_err(|_| "Failed to extract results")?
-            .into_inner();
-
-        Ok(final_results)
+        sink.finish()
     }
 
     /// Optimized bound transitive closure using DD's native `.iterative()` scope.
@@ -761,9 +753,8 @@ impl CodeGenerator {
         seed_values: &[Tuple],
         bound_col: usize,
     ) -> Result<Vec<Tuple>, String> {
-        let results = Arc::new(Mutex::new(Vec::new()));
-        let results_clone = Arc::clone(&results);
-        let result_limit = self.max_result_rows;
+        let sink = RowSink::new(self.max_result_rows);
+        let sink_clone = sink.clone();
 
         // Get all edges
         let all_edges: Vec<Tuple> = self
@@ -849,20 +840,15 @@ impl CodeGenerator {
 
                     tc_result
                         .inner
-                        .inspect(move |(data, _time, _diff)| {
-                            let mut guard = results_clone.lock();
-                            if result_limit == 0 || guard.len() < result_limit {
-                                guard.push(data.clone());
-                                if result_limit > 0 && guard.len() >= result_limit {
-                                    signal_query_cancel();
-                                }
-                            }
+                        .inspect({
+                            let out = sink_clone.clone();
+                            move |(data, _time, _diff)| out.push(data)
                         })
                         .probe_with(&probe);
                 });
 
                 while !probe.done() {
-                    if is_query_cancelled() {
+                    if sink_clone.should_stop() {
                         break;
                     }
                     worker.step();
@@ -877,18 +863,7 @@ impl CodeGenerator {
             )
         })?;
 
-        if is_query_cancelled() {
-            let collected = results.lock().len();
-            if result_limit == 0 || collected < result_limit {
-                return Err(QUERY_CANCELLED.to_string());
-            }
-        }
-
-        let final_results = Arc::try_unwrap(results)
-            .map_err(|_| "Failed to extract results")?
-            .into_inner();
-
-        Ok(final_results)
+        sink.finish()
     }
 
     /// General recursive execution using DD's `.iterative()` scope
@@ -1016,11 +991,10 @@ impl CodeGenerator {
             }
         };
 
-        let results = Arc::new(Mutex::new(Vec::new()));
-        let results_clone = Arc::clone(&results);
+        let sink = RowSink::new(self.max_result_rows);
+        let sink_clone = sink.clone();
         let input_data = self.input_tuples.clone();
         let rec_rel = recursive_rel.to_string();
-        let result_limit = self.max_result_rows;
 
         if std::env::var("INPUTLAYER_DEBUG").is_ok() {
             if let Some(ref agg) = agg_in_loop {
@@ -1094,21 +1068,16 @@ impl CodeGenerator {
                     // Capture results
                     result
                         .inner
-                        .inspect(move |(data, _time, _diff)| {
-                            let mut guard = results_clone.lock();
-                            if result_limit == 0 || guard.len() < result_limit {
-                                guard.push(data.clone());
-                                if result_limit > 0 && guard.len() >= result_limit {
-                                    signal_query_cancel();
-                                }
-                            }
+                        .inspect({
+                            let out = sink_clone.clone();
+                            move |(data, _time, _diff)| out.push(data)
                         })
                         .probe_with(&probe);
                 });
 
                 // Wait for computation to complete
                 while !probe.done() {
-                    if is_query_cancelled() {
+                    if sink_clone.should_stop() {
                         break;
                     }
                     worker.step();
@@ -1123,19 +1092,7 @@ impl CodeGenerator {
             )
         })?;
 
-        if is_query_cancelled() {
-            // If we hit the result limit, the cancel was self-triggered - return results
-            let collected = results.lock().len();
-            if result_limit == 0 || collected < result_limit {
-                return Err(QUERY_CANCELLED.to_string());
-            }
-        }
-
-        let final_results = Arc::try_unwrap(results)
-            .map_err(|_| "Failed to extract results")?
-            .into_inner();
-
-        Ok(final_results)
+        sink.finish()
     }
 
     /// Execute a recursive query using fixpoint iteration
@@ -1193,26 +1150,15 @@ impl CodeGenerator {
         Self::merge_worker_results(all_results, limit)
     }
 
-    /// Union worker outputs, truncated to `limit` (0 = unlimited). A worker
-    /// reaching the limit cancels its siblings, so their cancellation errors
-    /// are dropped once the limit is met; any other error is returned.
+    /// Union worker outputs, truncated to `limit` (0 = unlimited). Any worker
+    /// error fails the whole query.
     fn merge_worker_results(
         results: Vec<Result<Vec<Tuple>, String>>,
         limit: usize,
     ) -> Result<Vec<Tuple>, String> {
         let mut combined: HashSet<Tuple> = HashSet::new();
-        let mut cancelled = None;
         for result in results {
-            match result {
-                Ok(tuples) => combined.extend(tuples),
-                Err(e) if e == QUERY_CANCELLED => cancelled = Some(e),
-                Err(e) => return Err(e),
-            }
-        }
-        if let Some(e) = cancelled {
-            if limit == 0 || combined.len() < limit {
-                return Err(e);
-            }
+            combined.extend(result?);
         }
 
         let mut rows: Vec<Tuple> = combined.into_iter().collect();
@@ -3605,9 +3551,8 @@ impl CodeGenerator {
     /// - Properly handles timestamps and convergence
     /// - Is the same pattern used in production `InputLayer`
     pub fn execute_transitive_closure_dd(&self, edge_relation: &str) -> Result<Vec<Tuple>, String> {
-        let results = Arc::new(Mutex::new(Vec::new()));
-        let results_clone = Arc::clone(&results);
-        let result_limit = self.max_result_rows;
+        let sink = RowSink::new(self.max_result_rows);
+        let sink_clone = sink.clone();
 
         // Get edge data
         let edges: Vec<Tuple> = self
@@ -3676,21 +3621,16 @@ impl CodeGenerator {
                     // Capture results
                     tc_result
                         .inner
-                        .inspect(move |(data, _time, _diff)| {
-                            let mut guard = results_clone.lock();
-                            if result_limit == 0 || guard.len() < result_limit {
-                                guard.push(data.clone());
-                                if result_limit > 0 && guard.len() >= result_limit {
-                                    signal_query_cancel();
-                                }
-                            }
+                        .inspect({
+                            let out = sink_clone.clone();
+                            move |(data, _time, _diff)| out.push(data)
                         })
                         .probe_with(&probe);
                 });
 
                 // Wait for computation to complete
                 while !probe.done() {
-                    if is_query_cancelled() {
+                    if sink_clone.should_stop() {
                         break;
                     }
                     worker.step();
@@ -3705,21 +3645,7 @@ impl CodeGenerator {
             )
         })?;
 
-        if is_query_cancelled() {
-            // If we hit the result limit, the cancel was self-triggered - return results
-            let collected = results.lock().len();
-            if result_limit == 0 || collected < result_limit {
-                return Err(QUERY_CANCELLED.to_string());
-            }
-        }
-
-        // Extract results
-        // parking_lot::Mutex never poisons, so into_inner() returns the value directly
-        let final_results = Arc::try_unwrap(results)
-            .map_err(|_| "Failed to extract results")?
-            .into_inner();
-
-        Ok(final_results)
+        sink.finish()
     }
 
     /// Execute reachability using TRUE Differential Dataflow recursion
@@ -3734,8 +3660,8 @@ impl CodeGenerator {
         source_relation: &str,
         edge_relation: &str,
     ) -> Result<Vec<Tuple>, String> {
-        let results = Arc::new(Mutex::new(Vec::new()));
-        let results_clone = Arc::clone(&results);
+        let sink = RowSink::new(self.max_result_rows);
+        let sink_clone = sink.clone();
 
         // Get source nodes
         let sources: Vec<Tuple> = self
@@ -3757,7 +3683,6 @@ impl CodeGenerator {
 
         let source_data = sources.clone();
         let edge_data = edges.clone();
-        let result_limit = self.max_result_rows;
 
         // Execute DD computation with TRUE recursion
         catch_unwind(AssertUnwindSafe(|| {
@@ -3815,21 +3740,16 @@ impl CodeGenerator {
                     // Capture results
                     reach_result
                         .inner
-                        .inspect(move |(data, _time, _diff)| {
-                            let mut guard = results_clone.lock();
-                            if result_limit == 0 || guard.len() < result_limit {
-                                guard.push(data.clone());
-                                if result_limit > 0 && guard.len() >= result_limit {
-                                    signal_query_cancel();
-                                }
-                            }
+                        .inspect({
+                            let out = sink_clone.clone();
+                            move |(data, _time, _diff)| out.push(data)
                         })
                         .probe_with(&probe);
                 });
 
                 // Wait for computation to complete
                 while !probe.done() {
-                    if is_query_cancelled() {
+                    if sink_clone.should_stop() {
                         break;
                     }
                     worker.step();
@@ -3844,21 +3764,7 @@ impl CodeGenerator {
             )
         })?;
 
-        if is_query_cancelled() {
-            // If we hit the result limit, the cancel was self-triggered - return results
-            let collected = results.lock().len();
-            if result_limit == 0 || collected < result_limit {
-                return Err(QUERY_CANCELLED.to_string());
-            }
-        }
-
-        // Extract results
-        // parking_lot::Mutex never poisons, so into_inner() returns the value directly
-        let final_results = Arc::try_unwrap(results)
-            .map_err(|_| "Failed to extract results")?
-            .into_inner();
-
-        Ok(final_results)
+        sink.finish()
     }
 }
 
@@ -8444,21 +8350,16 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_worker_results_keeps_real_errors_at_limit() {
+    fn test_merge_worker_results_fails_on_any_worker_error() {
         let rows =
             |n: i64| -> Vec<Tuple> { (0..n).map(|i| Tuple::new(vec![Value::Int64(i)])).collect() };
-        let cancelled = || Err(QUERY_CANCELLED.to_string());
 
-        let merged = CodeGenerator::merge_worker_results(vec![Ok(rows(10)), cancelled()], 10);
+        let merged = CodeGenerator::merge_worker_results(vec![Ok(rows(10)), Ok(rows(20))], 10);
         assert_eq!(merged.unwrap().len(), 10);
 
-        let merged = CodeGenerator::merge_worker_results(vec![Ok(rows(5)), cancelled()], 10);
+        let cancelled = Err(QUERY_CANCELLED.to_string());
+        let merged = CodeGenerator::merge_worker_results(vec![Ok(rows(10)), cancelled], 10);
         assert_eq!(merged.unwrap_err(), QUERY_CANCELLED);
-
-        let failed = Err("Internal error in query execution: boom".to_string());
-        let merged =
-            CodeGenerator::merge_worker_results(vec![Ok(rows(10)), cancelled(), failed], 10);
-        assert!(merged.unwrap_err().starts_with("Internal error"));
     }
 
     /// Recursive clauses for `rel` as the engine compiles `program`.
@@ -8667,13 +8568,10 @@ mod tests {
         assert_eq!(results.len(), 5, "Should return all 5 when limit is 1000");
     }
 
-    /// Verify that hitting max_result_rows signals cancel but returns results (not error).
-    /// This tests the early-termination path: DD computation stops when limit is reached.
+    /// Regression: a full row sink stops its dataflow without touching the
+    /// shared cancel flag, so later rules of the same request still run.
     #[test]
-    fn test_result_limit_signals_cancel_returns_ok() {
-        use std::sync::atomic::AtomicBool;
-        use std::sync::Arc;
-
+    fn test_result_limit_leaves_cancel_flag_clear() {
         let flag = Arc::new(AtomicBool::new(false));
         set_query_cancel_flag(Some(Arc::clone(&flag)));
 
@@ -8689,17 +8587,12 @@ mod tests {
             relation: "data".to_string(),
             schema: vec!["x".to_string()],
         };
-        // Must succeed (not Err) even though cancel flag gets set by limit enforcement
         let results = codegen.execute(&ir).unwrap();
-        assert_eq!(results.len(), 5, "Should return exactly max_result_rows");
-        // Cancel flag should have been set by the inspect callback
-        assert!(
-            flag.load(Ordering::Relaxed),
-            "Cancel flag should be set when result limit is reached"
-        );
-
-        // Clean up thread-local
+        let cancelled = flag.load(Ordering::Relaxed);
         set_query_cancel_flag(None);
+
+        assert_eq!(results.len(), 5);
+        assert!(!cancelled, "row limit must not signal query cancel");
     }
 
     /// Verify that timeout cancellation (external) still returns an error even when
