@@ -502,36 +502,6 @@ impl ArithExpr {
             ArithExpr::Variable(_) | ArithExpr::Constant(_) | ArithExpr::FloatConstant(_)
         )
     }
-
-    /// Try to evaluate as a constant if all values are known
-    pub fn try_eval_constant(&self) -> Option<i64> {
-        match self {
-            ArithExpr::Constant(v) => Some(*v),
-            ArithExpr::FloatConstant(_) => None, // Can't evaluate floats as integer
-            ArithExpr::Variable(_) => None,
-            ArithExpr::Binary { op, left, right } => {
-                let l = left.try_eval_constant()?;
-                let r = right.try_eval_constant()?;
-                Some(match op {
-                    ArithOp::Add => l + r,
-                    ArithOp::Sub => l - r,
-                    ArithOp::Mul => l * r,
-                    ArithOp::Div => {
-                        if r == 0 {
-                            return None;
-                        }
-                        l / r
-                    }
-                    ArithOp::Mod => {
-                        if r == 0 {
-                            return None;
-                        }
-                        l % r
-                    }
-                })
-            }
-        }
-    }
 }
 
 impl AggregateFunc {
@@ -1810,49 +1780,6 @@ mod tests {
             right: Box::new(ArithExpr::Constant(2)),
         }
         .is_simple());
-    }
-
-    #[test]
-    fn test_arith_expr_try_eval_constant() {
-        // Simple constant
-        assert_eq!(ArithExpr::Constant(10).try_eval_constant(), Some(10));
-        // Variable → None
-        assert_eq!(
-            ArithExpr::Variable("x".to_string()).try_eval_constant(),
-            None
-        );
-        // Float → None
-        assert_eq!(ArithExpr::from_float(1.0).try_eval_constant(), None);
-        // Binary: 3 + 4 = 7
-        assert_eq!(
-            ArithExpr::Binary {
-                op: ArithOp::Add,
-                left: Box::new(ArithExpr::Constant(3)),
-                right: Box::new(ArithExpr::Constant(4)),
-            }
-            .try_eval_constant(),
-            Some(7)
-        );
-        // Division by zero → None
-        assert_eq!(
-            ArithExpr::Binary {
-                op: ArithOp::Div,
-                left: Box::new(ArithExpr::Constant(10)),
-                right: Box::new(ArithExpr::Constant(0)),
-            }
-            .try_eval_constant(),
-            None
-        );
-        // Modulo by zero → None
-        assert_eq!(
-            ArithExpr::Binary {
-                op: ArithOp::Mod,
-                left: Box::new(ArithExpr::Constant(10)),
-                right: Box::new(ArithExpr::Constant(0)),
-            }
-            .try_eval_constant(),
-            None
-        );
     }
 
     // --- Term ---

@@ -24,6 +24,7 @@
 //! ```
 
 pub mod aggregate;
+pub mod arith;
 pub mod arrow_convert;
 mod compare;
 pub mod relation;
