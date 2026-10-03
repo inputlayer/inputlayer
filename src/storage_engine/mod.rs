@@ -30,27 +30,38 @@
 //! storage.save_knowledge_graph("analytics").unwrap();
 //! ```
 
+mod catalog_change;
+#[cfg(test)]
+mod catalog_commit_tests;
 #[cfg(test)]
 mod commit_tests;
 #[cfg(test)]
 mod materialize_tests;
+mod program_commit;
+#[cfg(test)]
+mod program_commit_tests;
 mod relation_store;
 mod snapshot;
 mod vector_index;
+mod write_program;
+pub use catalog_change::{CatalogChange, CatalogOutcome};
 pub use relation_store::RelationStore;
 pub use snapshot::KnowledgeGraphSnapshot;
+pub use write_program::{
+    CommitError, FactChange, FactCount, ProgramCommit, RelationChange, StagedChanges,
+    StagedStatement, StatementEffect, StatementOutcome, WriteProgram,
+};
 
 use crate::config::Config;
-use crate::derived_relations::CompiledRule;
 use crate::incremental::IncrementalEngine;
 use crate::index_manager::IndexManager;
 use crate::naming;
 use crate::rule_catalog::RuleCatalog;
 use crate::schema::{RelationSchema, SchemaCatalog, ValidationEngine};
-use crate::statement::{RuleDef, SerializableBodyPred};
+use crate::statement::RuleDef;
 use crate::storage::persist::{
-    consolidate_to_current, set_semantics_corrections, to_tuples, FilePersist, PersistBackend,
-    PersistConfig, Transaction, Update,
+    consolidate_to_current, set_semantics_corrections, to_tuples, CatalogRecord, FilePersist,
+    PersistBackend, PersistConfig, Transaction, Update,
 };
 use crate::storage::{
     DataDirLock, DropTombstones, KnowledgeGraphMetadata, KnowledgeGraphsMetadata,
@@ -135,6 +146,11 @@ fn delete_kg_files(persist: &FilePersist, name: &str, data_dir: &Path, kgs: &[St
             warn!(kg = %name, error = %e, "kg_drop_list_shards_failed");
             clean = false;
         }
+    }
+    // A later KG of the same name must not replay this one's rule changes.
+    if let Err(e) = persist.forget_catalog(name) {
+        warn!(kg = %name, error = %e, "kg_drop_catalog_wal_cleanup_failed");
+        clean = false;
     }
     if data_dir.exists() {
         if let Err(e) = fs::remove_dir_all(data_dir) {
@@ -550,81 +566,15 @@ impl StorageEngine {
         relation: &str,
         tuples: Vec<Tuple>,
     ) -> StorageResult<(usize, usize)> {
-        validate_names(kg, relation)?;
-        if tuples.is_empty() {
-            return Ok((0, 0));
-        }
-
-        // Check if relation is a view (derived relation) - cannot insert into views
-        {
-            let db = self
-                .knowledge_graphs
-                .get(kg)
-                .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
-            let db = db.read();
-            if db.rule_exists(relation) {
-                return Err(StorageError::Other(format!(
-                    "Cannot insert into '{relation}': it is a derived relation (view). \
-                     Use a base relation or drop the rule first with '.rule drop {relation}'."
-                )));
-            }
-            db.validate_index_rows(relation, &tuples)
-                .map_err(StorageError::Other)?;
-        }
-
-        // Check arity consistency
-        let new_arity = tuples.first().map_or(0, super::value::Tuple::arity);
-
-        // Verify all tuples in this batch have the same arity
-        for tuple in &tuples {
-            if tuple.arity() != new_arity {
-                return Err(StorageError::Other(format!(
-                    "Arity mismatch in insert batch: expected {}, got {}",
-                    new_arity,
-                    tuple.arity()
-                )));
-            }
-        }
-
-        // Check if relation already exists with a different arity
-        if let Some((existing_schema, _)) = self.get_relation_metadata_in(kg, relation)? {
-            let existing_arity = existing_schema.len();
-            if existing_arity != new_arity {
-                return Err(StorageError::Other(format!(
-                    "Arity mismatch for relation '{relation}': existing arity is {existing_arity}, but trying to insert tuples with arity {new_arity}"
-                )));
-            }
-        }
-
-        // Under the KG write lock: compute the effective delta, assign time,
-        // persist, apply. Disk and memory see writes in the same order.
-        let db = self.kg_handle(kg)?;
-        let mut db = Self::lock_live(&db, kg)?;
         let total = tuples.len();
-        let new_tuples = db.absent_tuples(relation, tuples);
-        if new_tuples.is_empty() {
-            return Ok((0, total));
-        }
-
-        self.settle_relation_drop(&mut db, kg, relation)?;
-        let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
-        let mut txn = Transaction::new(time);
-        txn.insert(format!("{kg}:{relation}"), new_tuples.iter().cloned());
-
-        let persist_start = Instant::now();
-        self.persist.commit(txn)?;
-        let persist_ms = persist_start.elapsed().as_millis() as u64;
-        let new_count = new_tuples.len();
-        info!(
-            kg = %kg,
-            relation = %relation,
-            tuples = new_count,
-            persist_ms,
-            "persist_append_complete"
-        );
-
-        db.insert_in_memory(relation, new_tuples, time)?;
-        Ok((new_count, total - new_count))
+        let inserted = self.commit_facts(
+            kg,
+            FactChange::Insert {
+                relation: relation.to_string(),
+                tuples,
+            },
+        )?;
+        Ok((inserted.inserted, total - inserted.inserted))
     }
 
     /// Delete binary tuples from a relation in the current knowledge graph
@@ -692,25 +642,49 @@ impl StorageEngine {
         relation: &str,
         tuples: Vec<Tuple>,
     ) -> StorageResult<usize> {
-        validate_names(kg, relation)?;
-        if tuples.is_empty() {
-            return Ok(0);
-        }
+        let deleted = self.commit_facts(
+            kg,
+            FactChange::Delete {
+                relation: relation.to_string(),
+                tuples,
+            },
+        )?;
+        Ok(deleted.deleted)
+    }
 
+    /// Commit one fact change as a one-statement [`WriteProgram`].
+    fn commit_facts(&self, kg: &str, change: FactChange) -> StorageResult<FactCount> {
+        match self.commit_single(kg, StagedChanges::Facts(vec![change]))? {
+            StatementEffect::Facts(count) => Ok(count),
+            StatementEffect::Catalog(_) => unreachable!("a fact change has a fact effect"),
+        }
+    }
+
+    /// Commit one catalog change as a one-statement [`WriteProgram`].
+    fn commit_catalog(&self, kg: &str, change: CatalogChange) -> StorageResult<CatalogOutcome> {
+        match self.commit_single(kg, StagedChanges::Catalog(change))? {
+            StatementEffect::Catalog(outcome) => Ok(outcome),
+            StatementEffect::Facts(_) => unreachable!("a catalog change has a catalog effect"),
+        }
+    }
+
+    fn commit_single(&self, kg: &str, changes: StagedChanges) -> StorageResult<StatementEffect> {
+        let mut commit = self
+            .commit_program(kg, WriteProgram::single(changes), None)
+            .map_err(CommitError::into_storage_error)?;
+        Ok(commit.statements.remove(0).effect)
+    }
+
+    /// The KG's published snapshot and a copy of its rules as of that
+    /// snapshot, read together: the base for staging a program that reads
+    /// the KG after changing its rules (see [`CatalogChange::apply_to_rules`]).
+    pub fn staging_base(
+        &self,
+        kg: &str,
+    ) -> StorageResult<(Arc<KnowledgeGraphSnapshot>, RuleCatalog)> {
         let db = self.kg_handle(kg)?;
-        let mut db = Self::lock_live(&db, kg)?;
-        let present = db.present_tuples(relation, &tuples);
-        if present.is_empty() {
-            return Ok(0);
-        }
-
-        self.settle_relation_drop(&mut db, kg, relation)?;
-        let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
-        let mut txn = Transaction::new(time);
-        txn.delete(format!("{kg}:{relation}"), present.iter().cloned());
-        self.persist.commit(txn)?;
-
-        db.delete_in_memory(relation, present, time)
+        let db = db.read();
+        Ok((db.snapshot(), db.rule_catalog.detached()))
     }
 
     /// Clone a KG handle without holding the `DashMap` shard lock.
@@ -1036,15 +1010,10 @@ impl StorageEngine {
         kg: &str,
         rule_def: &RuleDef,
     ) -> StorageResult<crate::rule_catalog::RuleRegisterResult> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
-
-        let mut db = db.write();
-        self.settle_relation_drop(&mut db, kg, &rule_def.name)?;
-        db.register_rule(rule_def)
-            .map_err(|e| StorageError::Other(format!("Failed to register rule: {e}")))
+        match self.commit_catalog(kg, CatalogChange::RegisterRule(rule_def.clone()))? {
+            CatalogOutcome::RuleRegistered(result) => Ok(result),
+            other => unreachable!("rule registration reported {other:?}"),
+        }
     }
 
     /// Drop a rule from the current knowledge graph
@@ -1062,14 +1031,8 @@ impl StorageEngine {
     ///
     /// Uses `&self` instead of `&mut self` to enable concurrent writes to different KGs.
     pub fn drop_rule_in(&self, kg: &str, name: &str) -> StorageResult<()> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
-
-        let mut db = db.write();
-        db.drop_rule(name)
-            .map_err(|e| StorageError::Other(format!("Failed to drop rule: {e}")))
+        self.commit_catalog(kg, CatalogChange::DropRule(name.to_string()))
+            .map(drop)
     }
 
     /// Drop a relation entirely from a specific knowledge graph.
@@ -1139,14 +1102,10 @@ impl StorageEngine {
     /// Drop all rules matching a prefix from a specific knowledge graph.
     /// Returns the list of dropped rule names.
     pub fn drop_rules_by_prefix_in(&self, kg: &str, prefix: &str) -> StorageResult<Vec<String>> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
-
-        let mut db = db.write();
-        db.drop_rules_by_prefix(prefix)
-            .map_err(|e| StorageError::Other(format!("Failed to drop rules by prefix: {e}")))
+        match self.commit_catalog(kg, CatalogChange::DropRulesByPrefix(prefix.to_string()))? {
+            CatalogOutcome::RulesDropped(names) => Ok(names),
+            other => unreachable!("prefix drop reported {other:?}"),
+        }
     }
 
     /// Clear all facts from relations matching a prefix in a knowledge graph.
@@ -1221,48 +1180,8 @@ impl StorageEngine {
 
     /// Clear all clauses from a rule for editing/redefining (specific knowledge graph)
     pub fn clear_rule_in(&self, kg: &str, name: &str) -> StorageResult<()> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
-
-        let mut db = db.write();
-        db.clear_rule(name)
-            .map_err(|e| StorageError::Other(format!("Failed to clear rule: {e}")))
-    }
-
-    /// Replace a specific clause in a rule (current knowledge graph)
-    pub fn replace_rule(
-        &mut self,
-        name: &str,
-        index: usize,
-        new_rule: crate::statement::SerializableRule,
-    ) -> StorageResult<()> {
-        let db_name = self
-            .current_kg
-            .as_ref()
-            .ok_or(StorageError::NoCurrentKnowledgeGraph)?
-            .clone();
-
-        self.replace_rule_in(&db_name, name, index, new_rule)
-    }
-
-    /// Replace a specific clause in a rule (specific knowledge graph)
-    pub fn replace_rule_in(
-        &mut self,
-        kg: &str,
-        name: &str,
-        index: usize,
-        new_rule: crate::statement::SerializableRule,
-    ) -> StorageResult<()> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
-
-        let mut db = db.write();
-        db.replace_rule(name, index, new_rule)
-            .map_err(|e| StorageError::Other(format!("Failed to replace rule clause: {e}")))
+        self.commit_catalog(kg, CatalogChange::ClearRule(name.to_string()))
+            .map(drop)
     }
 
     /// Remove a specific clause from a rule (current knowledge graph)
@@ -1280,14 +1199,14 @@ impl StorageEngine {
     /// Remove a specific clause from a rule (specific knowledge graph)
     /// Returns true if the entire rule was deleted (last clause removed)
     pub fn remove_rule_clause_in(&self, kg: &str, name: &str, index: usize) -> StorageResult<bool> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
-
-        let mut db = db.write();
-        db.remove_rule_clause(name, index)
-            .map_err(|e| StorageError::Other(format!("Failed to remove rule clause: {e}")))
+        let change = CatalogChange::RemoveRuleClause {
+            name: name.to_string(),
+            index,
+        };
+        match self.commit_catalog(kg, change)? {
+            CatalogOutcome::ClauseRemoved { rule_deleted } => Ok(rule_deleted),
+            other => unreachable!("clause removal reported {other:?}"),
+        }
     }
 
     /// Get the number of clauses in a rule (current knowledge graph)
@@ -1346,15 +1265,8 @@ impl StorageEngine {
 
     /// Register a schema for a relation in a specific knowledge graph
     pub fn register_schema_in(&self, kg: &str, schema: RelationSchema) -> StorageResult<()> {
-        validate_names(kg, &schema.name)?;
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
-
-        let mut db = db.write();
-        self.settle_relation_drop(&mut db, kg, &schema.name)?;
-        db.register_schema(schema).map_err(StorageError::Other)
+        self.commit_catalog(kg, CatalogChange::CreateSchema(schema))
+            .map(drop)
     }
 
     /// Get schema for a relation in the current knowledge graph
@@ -1415,13 +1327,10 @@ impl StorageEngine {
         kg: &str,
         relation: &str,
     ) -> StorageResult<Option<RelationSchema>> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
-
-        let mut db = db.write();
-        db.remove_schema(relation).map_err(StorageError::Other)
+        match self.commit_catalog(kg, CatalogChange::RemoveSchema(relation.to_string()))? {
+            CatalogOutcome::SchemaRemoved(removed) => Ok(removed),
+            other => unreachable!("schema removal reported {other:?}"),
+        }
     }
 
     /// Execute a closure with read access to a specific KnowledgeGraph.
@@ -1504,16 +1413,8 @@ impl StorageEngine {
         kg: &str,
         schema: RelationSchema,
     ) -> StorageResult<()> {
-        validate_names(kg, &schema.name)?;
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
-
-        let mut db = db.write();
-        self.settle_relation_drop(&mut db, kg, &schema.name)?;
-        db.register_or_update_schema(schema)
-            .map_err(StorageError::Other)
+        self.commit_catalog(kg, CatalogChange::DefineSchema(schema))
+            .map(drop)
     }
 
     /// Register or update a session schema in a specific knowledge graph (not persisted)
@@ -1522,15 +1423,8 @@ impl StorageEngine {
         kg: &str,
         schema: RelationSchema,
     ) -> StorageResult<()> {
-        validate_names(kg, &schema.name)?;
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
-
-        let mut db = db.write();
-        db.register_or_update_session_schema(schema)
-            .map_err(StorageError::Other)
+        self.commit_catalog(kg, CatalogChange::DefineSessionSchema(schema))
+            .map(drop)
     }
 
     /// Execute a query with rules prepended (current knowledge graph)
@@ -1933,8 +1827,10 @@ impl StorageEngine {
             "kg_load_complete"
         );
 
-        // Update logical time to be after all loaded data
-        let max_time = self.find_max_logical_time()?;
+        let replayed = self.replay_catalog(&self.persist.take_recovered_catalog())?;
+
+        // Update logical time to be after all loaded data and catalog changes
+        let max_time = self.find_max_logical_time()?.max(replayed);
         self.logical_time.store(max_time + 1, Ordering::SeqCst);
 
         // Clamp shards whose multiplicities drifted from set membership
@@ -2072,6 +1968,44 @@ impl StorageEngine {
             kg.publish_snapshot();
         }
         Ok(kg)
+    }
+
+    /// Apply the rule and schema changes recovered from the WAL over each
+    /// KG's catalog files, and save the files. Changes of KGs that no longer
+    /// exist are discarded. Returns the newest catalog revision of any KG.
+    ///
+    /// # Errors
+    /// Discarding the changes of a missing KG from the WAL failed.
+    fn replay_catalog(&self, records: &[CatalogRecord]) -> StorageResult<u64> {
+        let kgs: std::collections::BTreeSet<&str> = records.iter().map(|r| r.kg.as_str()).collect();
+        for kg in kgs {
+            let Some(db) = self.knowledge_graphs.get(kg) else {
+                warn!(kg = %kg, "catalog_replay_discarded_unknown_kg");
+                self.persist.forget_catalog(kg)?;
+                continue;
+            };
+            let mut db = db.write();
+            match db.replay_catalog(records.iter().filter(|r| r.kg == kg)) {
+                Ok(Some(revision)) => {
+                    if let Err(e) = self.persist.catalog_saved(kg, revision) {
+                        warn!(kg = %kg, error = %e, "catalog_wal_prune_failed");
+                    }
+                }
+                Ok(None) => {}
+                // Memory has the changes and the WAL keeps them.
+                Err(e) => warn!(kg = %kg, error = %e, "catalog_replay_save_failed"),
+            }
+            db.publish_snapshot();
+        }
+        Ok(self
+            .knowledge_graphs
+            .iter()
+            .map(|db| {
+                let db = db.read();
+                db.rule_catalog.revision().max(db.schema_catalog.revision())
+            })
+            .max()
+            .unwrap_or(0))
     }
 
     /// Find the maximum logical time across all shards
@@ -2510,115 +2444,6 @@ impl KnowledgeGraph {
         }
     }
 
-    /// Distinct tuples from `tuples` not yet in `relation`, in input order.
-    fn absent_tuples(&self, relation: &str, tuples: Vec<Tuple>) -> Vec<Tuple> {
-        self.store.absent(relation, tuples)
-    }
-
-    /// Distinct tuples from `tuples` currently in `relation`.
-    fn present_tuples(&self, relation: &str, tuples: &[Tuple]) -> Vec<Tuple> {
-        self.store.present(relation, tuples)
-    }
-
-    /// Insert tuples into in-memory state only
-    ///
-    /// `tuples` should be the effective delta (see `absent_tuples`); the store
-    /// still dedups. Persistence is handled by `StorageEngine`.
-    ///
-    /// # Errors
-    /// Returns error if DD shadow write fails.
-    fn insert_in_memory(
-        &mut self,
-        relation: &str,
-        tuples: Vec<Tuple>,
-        time: u64,
-    ) -> StorageResult<()> {
-        // Infer schema from first tuple if available
-        let schema = if let Some(first) = tuples.first() {
-            (0..first.arity())
-                .map(|i| format!("col{i}"))
-                .collect::<Vec<_>>()
-        } else {
-            vec!["col0".to_string(), "col1".to_string()]
-        };
-
-        let (added, _) = self.store.insert(relation, tuples);
-        let new_count = added.len();
-        let tuple_count = self.store.get(relation).map_or(0, Relation::len);
-
-        // Update metadata
-        self.metadata
-            .add_relation(relation.to_string(), schema, tuple_count);
-
-        // Shadow write to IncrementalEngine (if enabled).
-        if new_count > 0 {
-            self.index_inserted(relation, &added);
-            if let Some(dd) = &self.incremental {
-                dd.insert(relation, added, time)
-                    .map_err(StorageError::IncrementalEngineError)?;
-                // Invalidate derived relations that depend on this base
-                dd.notify_base_update(relation)
-                    .map_err(StorageError::IncrementalEngineError)?;
-            }
-            // Publish new snapshot for lock-free reads
-            self.publish_snapshot();
-        }
-
-        info!(
-            relation = %relation,
-            new_count,
-            time,
-            "insert_in_memory_complete"
-        );
-
-        Ok(())
-    }
-
-    /// Delete tuples from in-memory state only
-    ///
-    /// `tuples` should be the effective delta (see `present_tuples`).
-    /// Persistence is handled by `StorageEngine`. Returns the count of
-    /// deleted tuples.
-    ///
-    /// # Errors
-    /// Returns error if DD shadow write fails.
-    fn delete_in_memory(
-        &mut self,
-        relation: &str,
-        tuples: Vec<Tuple>,
-        time: u64,
-    ) -> StorageResult<usize> {
-        let removed = self.store.delete(relation, &tuples);
-        if removed.is_empty() {
-            return Ok(0);
-        }
-        let final_count = self.store.get(relation).map_or(0, Relation::len);
-
-        // Get schema from metadata (which has the correct arity from insert time)
-        // Avoid using catalog which may not have the schema for base facts
-        let schema = self.metadata.relations.get(relation).map_or_else(
-            || vec!["col0".to_string(), "col1".to_string()],
-            |r| r.schema.clone(),
-        );
-        self.metadata
-            .add_relation(relation.to_string(), schema, final_count);
-
-        let deleted_count = removed.len();
-        self.index_deleted(relation, &removed);
-        if let Some(dd) = &self.incremental {
-            dd.delete(relation, removed, time)
-                .map_err(StorageError::IncrementalEngineError)?;
-            // Invalidate derived relations that depend on this base
-            dd.notify_base_update(relation)
-                .map_err(StorageError::IncrementalEngineError)?;
-        }
-
-        // Publish new snapshot for lock-free reads
-        self.publish_snapshot();
-
-        Ok(deleted_count)
-    }
-
     /// Get knowledge graph name
     pub fn name(&self) -> &str {
         &self.name
@@ -2627,30 +2452,6 @@ impl KnowledgeGraph {
     /// Get knowledge graph metadata
     pub fn metadata(&self) -> &KnowledgeGraphMetadata {
         &self.metadata
-    }
-
-    // View Management
-    /// Register a persistent view
-    /// Returns whether view was created or rule was added
-    ///
-    /// With the incremental engine on, the rule is also registered there for
-    /// dependency tracking.
-    pub fn register_rule(
-        &mut self,
-        rule_def: &RuleDef,
-    ) -> Result<crate::rule_catalog::RuleRegisterResult, String> {
-        let result = self.rule_catalog.register_rule(rule_def)?;
-
-        // Register with IncrementalEngine for materialization
-        if let Some(ref dd) = self.incremental {
-            let compiled_rule = self.compile_rule_for_dd(rule_def);
-            if let Err(e) = dd.register_rule(compiled_rule) {
-                warn!(rule = %rule_def.name, error = %e, "incremental_register_rule_failed");
-            }
-        }
-
-        self.publish_snapshot();
-        Ok(result)
     }
 
     /// Recompute every rule from base data into the incremental engine.
@@ -2696,66 +2497,6 @@ impl KnowledgeGraph {
         temp_engine.set_inputs(self.store.relations().clone());
         temp_engine.set_num_workers(self.num_workers);
         temp_engine.execute_tuples(&program)
-    }
-
-    /// Compile a RuleDef into a CompiledRule for IncrementalEngine
-    fn compile_rule_for_dd(&self, rule_def: &RuleDef) -> CompiledRule {
-        use std::collections::HashSet;
-
-        let name = rule_def.name.clone();
-
-        // Extract dependencies from rule body
-        let mut dependencies: HashSet<String> = HashSet::new();
-        for body_pred in &rule_def.rule.body {
-            if let SerializableBodyPred::Atom { relation, .. } = body_pred {
-                // Don't count the rule's own head as a dependency (for recursive rules)
-                if relation != &name {
-                    dependencies.insert(relation.clone());
-                }
-            }
-        }
-
-        // Check if rule is recursive (references itself in body)
-        let is_recursive = rule_def.rule.body.iter().any(|p| {
-            if let SerializableBodyPred::Atom { relation, .. } = p {
-                relation == &name
-            } else {
-                false
-            }
-        });
-
-        // Extract output schema from head args
-        let output_schema: Vec<String> = rule_def
-            .rule
-            .head_args
-            .iter()
-            .enumerate()
-            .map(|(i, _)| format!("col{i}"))
-            .collect();
-
-        CompiledRule {
-            name,
-            clauses: vec![], // IR compilation deferred to execution time
-            dependencies,
-            is_recursive,
-            output_schema,
-            stratum: 0, // Stratum computed by RuleCatalog
-        }
-    }
-
-    /// Drop a view
-    pub fn drop_rule(&mut self, name: &str) -> Result<(), String> {
-        self.rule_catalog.drop(name)?;
-
-        // Remove from IncrementalEngine
-        if let Some(ref dd) = self.incremental {
-            if let Err(e) = dd.remove_rule(name) {
-                warn!(rule = %name, error = %e, "incremental_remove_rule_failed");
-            }
-        }
-
-        self.publish_snapshot();
-        Ok(())
     }
 
     /// Whether `name` exists as data, metadata, a rule, or a schema.
@@ -2826,26 +2567,6 @@ impl KnowledgeGraph {
         self.drop_indexes_for(name);
         self.publish_snapshot();
         schema.and(rule)
-    }
-
-    /// Drop all rules matching a prefix.
-    /// Returns the list of dropped rule names.
-    pub fn drop_rules_by_prefix(&mut self, prefix: &str) -> Result<Vec<String>, String> {
-        let dropped = self.rule_catalog.drop_by_prefix(prefix)?;
-
-        // Remove each from IncrementalEngine
-        if let Some(ref dd) = self.incremental {
-            for name in &dropped {
-                if let Err(e) = dd.remove_rule(name) {
-                    warn!(rule = %name, error = %e, "incremental_remove_rule_failed");
-                }
-            }
-        }
-
-        if !dropped.is_empty() {
-            self.publish_snapshot();
-        }
-        Ok(dropped)
     }
 
     /// Clear all facts from relations whose name starts with the given prefix.
@@ -2931,34 +2652,6 @@ impl KnowledgeGraph {
         self.rule_catalog.exists(name)
     }
 
-    /// Clear all rules from a view for editing/redefining
-    /// The view remains registered but with no rules, ready for new rule registration
-    pub fn clear_rule(&mut self, name: &str) -> Result<(), String> {
-        self.rule_catalog.clear_rules(name)?;
-        self.publish_snapshot();
-        Ok(())
-    }
-
-    /// Replace a specific rule in a view by index (0-based)
-    pub fn replace_rule(
-        &mut self,
-        name: &str,
-        index: usize,
-        new_rule: crate::statement::SerializableRule,
-    ) -> Result<(), String> {
-        self.rule_catalog.replace_rule(name, index, new_rule)?;
-        self.publish_snapshot();
-        Ok(())
-    }
-
-    /// Remove a specific clause from a rule by index (0-based)
-    /// Returns true if the entire rule was deleted (last clause removed)
-    pub fn remove_rule_clause(&mut self, name: &str, index: usize) -> Result<bool, String> {
-        let result = self.rule_catalog.remove_rule_clause(name, index)?;
-        self.publish_snapshot();
-        Ok(result)
-    }
-
     /// Get the number of rules in a view
     pub fn rule_count(&self, name: &str) -> Option<usize> {
         self.rule_catalog.rule_count(name)
@@ -3004,48 +2697,6 @@ impl KnowledgeGraph {
         &mut self.schema_catalog
     }
 
-    /// Register a persistent schema for a relation
-    ///
-    /// Returns error if schema already exists or is invalid.
-    /// Saves the catalog to disk on success.
-    pub fn register_schema(&mut self, schema: RelationSchema) -> Result<(), String> {
-        self.schema_catalog
-            .register(schema)
-            .map_err(|e| format!("{e}"))?;
-        self.save_schema_catalog()?;
-        Ok(())
-    }
-
-    /// Register or update a persistent schema for a relation
-    ///
-    /// Overwrites any existing schema. Saves to disk on success.
-    pub fn register_or_update_schema(&mut self, schema: RelationSchema) -> Result<(), String> {
-        self.schema_catalog
-            .register_or_update(schema)
-            .map_err(|e| format!("{e}"))?;
-        self.save_schema_catalog()?;
-        Ok(())
-    }
-
-    /// Register a session schema for a relation (not persisted)
-    ///
-    /// Session schemas are cleared when the knowledge graph is reloaded.
-    pub fn register_session_schema(&mut self, schema: RelationSchema) -> Result<(), String> {
-        self.schema_catalog
-            .register_session(schema)
-            .map_err(|e| format!("{e}"))
-    }
-
-    /// Register or update a session schema for a relation (not persisted)
-    pub fn register_or_update_session_schema(
-        &mut self,
-        schema: RelationSchema,
-    ) -> Result<(), String> {
-        self.schema_catalog
-            .register_or_update_session(schema)
-            .map_err(|e| format!("{e}"))
-    }
-
     /// Clear all session schemas (called on disconnect/session end)
     pub fn clear_session_schemas(&mut self) {
         self.schema_catalog.clear_session();
@@ -3082,13 +2733,7 @@ impl KnowledgeGraph {
     /// Returns Ok(()) if no schema exists or validation passes.
     /// Returns Err with message if validation fails.
     pub fn validate_tuples(&self, relation: &str, tuples: &[Tuple]) -> Result<(), String> {
-        if let Some(schema) = self.schema_catalog.get(relation) {
-            let mut engine = ValidationEngine::new();
-            engine
-                .validate_batch(schema, tuples)
-                .map_err(|e| format!("{e}"))?;
-        }
-        Ok(())
+        validate_tuples(&self.schema_catalog, relation, tuples)
     }
 
     /// Save schema catalog to disk
@@ -3098,6 +2743,20 @@ impl KnowledgeGraph {
             .save(&schema_path)
             .map_err(|e| format!("Failed to save schema catalog: {e}"))
     }
+}
+
+/// Validate `tuples` against `relation`'s schema in `schemas`, if it has one.
+fn validate_tuples(
+    schemas: &SchemaCatalog,
+    relation: &str,
+    tuples: &[Tuple],
+) -> Result<(), String> {
+    if let Some(schema) = schemas.get(relation) {
+        ValidationEngine::new()
+            .validate_batch(schema, tuples)
+            .map_err(|e| format!("{e}"))?;
+    }
+    Ok(())
 }
 
 /// Format a Rule as an IQL string (uses Rule's Display impl)
@@ -3122,9 +2781,12 @@ mod tests {
         .unwrap();
         let mut kg = KnowledgeGraph::new_with_workers("kg".into(), temp.path().join("kg"), 1);
         for rel in ["p_a", "p_b"] {
-            kg.insert_in_memory(rel, vec![Tuple::from_pair(1, 2), Tuple::from_pair(3, 4)], 1)
-                .unwrap();
+            kg.store
+                .insert(rel, vec![Tuple::from_pair(1, 2), Tuple::from_pair(3, 4)]);
+            kg.metadata
+                .add_relation(rel.to_string(), vec!["col0".into(), "col1".into()], 2);
         }
+        kg.publish_snapshot();
         // p_a's shard exists; creating p_b's fails because shards/ is a file.
         persist.ensure_shard("kg:p_a").unwrap();
         let shards = temp.path().join("persist").join("shards");
@@ -4485,11 +4147,7 @@ mod tests {
 
         // Register a rule
         let rule_def = make_path_rule_def();
-        {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
-            let mut kg = kg.write();
-            kg.register_rule(&rule_def).unwrap();
-        }
+        storage.register_rule(&rule_def).unwrap();
 
         // Materialize the derived relation (uses the new method that also publishes snapshot)
         {
@@ -4551,11 +4209,7 @@ mod tests {
             .unwrap();
 
         let rule_def = make_path_rule_def();
-        {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
-            let mut kg = kg.write();
-            kg.register_rule(&rule_def).unwrap();
-        }
+        storage.register_rule(&rule_def).unwrap();
 
         // Materialize (uses the new method that also publishes snapshot)
         {
@@ -4624,11 +4278,7 @@ mod tests {
 
         // Register rule
         let rule_def = make_path_rule_def();
-        {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
-            let mut kg = kg.write();
-            kg.register_rule(&rule_def).unwrap();
-        }
+        storage.register_rule(&rule_def).unwrap();
 
         // Materialize with DIFFERENT data than what the rule would produce
         // This proves the query uses cached data, not the rule
@@ -4675,12 +4325,8 @@ mod tests {
         let rule1 = make_simple_rule_def("derived1", "base");
         let rule2 = make_simple_rule_def("derived2", "base");
 
-        {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
-            let mut kg = kg.write();
-            kg.register_rule(&rule1).unwrap();
-            kg.register_rule(&rule2).unwrap();
-        }
+        storage.register_rule(&rule1).unwrap();
+        storage.register_rule(&rule2).unwrap();
 
         // Check stats - 2 rules, 0 materialized, 2 invalid
         {

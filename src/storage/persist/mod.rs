@@ -28,8 +28,13 @@
 //! 2. Read batch files
 //! 3. Replay the WAL's intact prefix of committed transactions
 //! 4. Consolidate to get current state
+//!
+//! Rule and schema changes in the WAL are handed to the engine
+//! ([`FilePersist::take_recovered_catalog`]), which applies them over the catalog
+//! files; see the `catalog_log` module for how long the WAL keeps them.
 
 pub mod batch;
+mod catalog_log;
 pub mod codec;
 pub mod consolidate;
 mod migrate;
@@ -42,11 +47,12 @@ pub use consolidate::{
     consolidate, consolidate_to_current, filter_since, set_semantics_corrections, to_tuples,
     to_tuples_with_multiplicity,
 };
-pub use transaction::{Transaction, TxnOp};
+pub use transaction::{CatalogEntry, CatalogRecord, Transaction, TxnOp};
 pub use wal::PersistWal;
 
 use crate::storage::{StorageError, StorageResult};
 use crate::value::record_batch_to_tuples;
+use catalog_log::CatalogLog;
 use parking_lot::{Mutex, RwLock};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -128,10 +134,16 @@ struct ShardState {
 }
 
 /// File-based persist implementation
+///
+/// Lock order everywhere: `wal`, then `shards`, then `catalog`.
 pub struct FilePersist {
     config: PersistConfig,
     shards: RwLock<HashMap<String, ShardState>>,
     wal: Mutex<PersistWal>,
+    /// Which catalog changes in the WAL are still needed.
+    catalog: Mutex<CatalogLog>,
+    /// Catalog changes replayed from the WAL at startup, until the engine takes them.
+    recovered_catalog: Mutex<Vec<CatalogRecord>>,
     next_batch_id: AtomicU64,
 }
 
@@ -150,6 +162,8 @@ impl FilePersist {
             config,
             shards: RwLock::new(HashMap::new()),
             wal: Mutex::new(wal),
+            catalog: Mutex::new(CatalogLog::default()),
+            recovered_catalog: Mutex::new(Vec::new()),
             next_batch_id: AtomicU64::new(1),
         };
 
@@ -316,16 +330,54 @@ impl FilePersist {
         }
     }
 
-    /// Replay recovered transactions into shard buffers. Returns how many there were.
+    /// Replay recovered transactions: fact changes into shard buffers, catalog
+    /// changes kept for [`Self::take_recovered_catalog`]. Returns how many
+    /// transactions there were.
     fn replay(&self, txns: Vec<Transaction>) -> usize {
         let count = txns.len();
         let mut shards = self.shards.write();
+        let mut log = self.catalog.lock();
+        let mut recovered = self.recovered_catalog.lock();
         for txn in txns {
-            for (shard, updates) in txn.into_updates() {
+            log.logged(&txn);
+            let (updates, catalog) = txn.split();
+            for (shard, updates) in updates {
                 buffer_updates(&mut shards, shard, updates);
             }
+            recovered.extend(catalog);
         }
         count
+    }
+
+    /// The rule and schema changes the WAL held at startup, in commit order.
+    /// The WAL keeps them until [`Self::catalog_saved`] reports them saved.
+    /// Returns them once; later calls return nothing.
+    pub fn take_recovered_catalog(&self) -> Vec<CatalogRecord> {
+        std::mem::take(&mut *self.recovered_catalog.lock())
+    }
+
+    /// `kg`'s catalog files now reflect every change up to `revision`, so the
+    /// WAL no longer needs them. They are dropped at the next WAL rewrite, or
+    /// now when the WAL holds no fact changes (it is small then).
+    pub fn catalog_saved(&self, kg: &str, revision: u64) -> StorageResult<()> {
+        let mut wal = self.wal.lock();
+        let shards = self.shards.read();
+        let mut log = self.catalog.lock();
+        log.saved(kg, revision);
+        if log.has_redundant() && shards.values().all(|state| state.buffer.is_empty()) {
+            wal.retain_ops(|revision, op| log.keeps(revision, op))?;
+            log.pruned();
+        }
+        Ok(())
+    }
+
+    /// Remove every catalog change of `kg` from the WAL, for a dropped KG: a
+    /// later KG of the same name must not replay them.
+    pub fn forget_catalog(&self, kg: &str) -> StorageResult<()> {
+        let mut wal = self.wal.lock();
+        wal.retain_ops(|_, op| !matches!(op, TxnOp::Catalog { kg: k, .. } if k == kg))?;
+        self.catalog.lock().forget(kg);
+        Ok(())
     }
 
     /// Save shard metadata to disk; see [`write_shard_meta`].
@@ -393,8 +445,14 @@ impl FilePersist {
             return Err(e);
         }
 
-        // Step 3: Remove WAL entries LAST (safe - metadata already points to batch)
-        wal.remove_shard_entries(shard)?;
+        // Step 3: Remove WAL entries LAST (safe - metadata already points to batch),
+        // with any catalog changes the catalog files already reflect.
+        let mut log = self.catalog.lock();
+        wal.retain_ops(|revision, op| match op {
+            TxnOp::Facts { shard: s, .. } => s != shard,
+            TxnOp::Catalog { .. } => log.keeps(revision, op),
+        })?;
+        log.pruned();
 
         Ok(true)
     }
@@ -447,7 +505,16 @@ impl PersistBackend for FilePersist {
             }
 
             let mut shards = self.shards.write();
-            txn.into_updates()
+            // Only rule and schema changes are tracked: plain fact commits
+            // never take the catalog lock.
+            if self.config.durability_mode != DurabilityMode::Async
+                && txn.catalog_kgs().next().is_some()
+            {
+                self.catalog.lock().logged(&txn);
+            }
+            let (updates, _) = txn.split();
+            updates
+                .into_iter()
                 .filter_map(|(shard, updates)| {
                     let len = buffer_updates(&mut shards, shard.clone(), updates);
                     (len >= self.config.buffer_size).then_some(shard)

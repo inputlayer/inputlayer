@@ -12,8 +12,11 @@
 //!
 //! The JSON is `{"rev":7,"ops":[{"facts":{"shard":"kg:edge","changes":[[t,1]]}}]}`,
 //! where each tuple `t` is its [`codec`] encoding in base64: lossless for every
-//! value, including non-finite floats, which JSON numbers cannot hold. Unknown fields
-//! and operations are rejected, never ignored.
+//! value, including non-finite floats, which JSON numbers cannot hold. Catalog
+//! changes are `{"rule":{"kg":..,"name":..,"definition":d}}` and
+//! `{"schema":{"kg":..,"relation":..,"schema":s}}`, where `d` and `s` are a rule
+//! definition and a relation schema in their catalog-file JSON, or `null` when the
+//! commit removes them. Unknown fields and operations are rejected, never ignored.
 //!
 //! Recovery replays the longest prefix of intact records, which is the state after
 //! some exact number of commits. It never skips a damaged record to replay later
@@ -21,7 +24,9 @@
 
 use super::batch::Update;
 use super::codec;
-use super::transaction::{Transaction, TxnOp};
+use super::transaction::{CatalogEntry, Transaction, TxnOp};
+use crate::rule_catalog::RuleDefinition;
+use crate::schema::RelationSchema;
 use crate::storage::{StorageError, StorageResult};
 use crate::value::Tuple;
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -187,6 +192,28 @@ impl Serialize for OpsOut<'_> {
                         changes: ChangesOut(changes),
                     },
                 ))?,
+                TxnOp::Catalog {
+                    kg,
+                    entry: CatalogEntry::Rule { name, definition },
+                } => seq.serialize_element(&Tagged(
+                    "rule",
+                    RuleOut {
+                        kg,
+                        name,
+                        definition: definition.as_ref(),
+                    },
+                ))?,
+                TxnOp::Catalog {
+                    kg,
+                    entry: CatalogEntry::Schema { relation, schema },
+                } => seq.serialize_element(&Tagged(
+                    "schema",
+                    SchemaOut {
+                        kg,
+                        relation,
+                        schema: schema.as_ref(),
+                    },
+                ))?,
             }
         }
         seq.end()
@@ -208,6 +235,20 @@ impl<T: Serialize> Serialize for Tagged<T> {
 struct FactsOut<'a> {
     shard: &'a str,
     changes: ChangesOut<'a>,
+}
+
+#[derive(Serialize)]
+struct RuleOut<'a> {
+    kg: &'a str,
+    name: &'a str,
+    definition: Option<&'a RuleDefinition>,
+}
+
+#[derive(Serialize)]
+struct SchemaOut<'a> {
+    kg: &'a str,
+    relation: &'a str,
+    schema: Option<&'a RelationSchema>,
 }
 
 struct ChangesOut<'a>(&'a [(Tuple, i64)]);
@@ -236,6 +277,16 @@ enum OpIn {
     Facts {
         shard: String,
         changes: Vec<(String, i64)>,
+    },
+    Rule {
+        kg: String,
+        name: String,
+        definition: Option<RuleDefinition>,
+    },
+    Schema {
+        kg: String,
+        relation: String,
+        schema: Option<RelationSchema>,
     },
 }
 
@@ -268,6 +319,20 @@ fn decode_payload(json: &[u8]) -> Result<Transaction, String> {
                     .collect::<Result<Vec<_>, String>>()?;
                 txn.facts(shard, changes);
             }
+            OpIn::Rule {
+                kg,
+                name,
+                definition,
+            } => {
+                txn.catalog(kg, CatalogEntry::Rule { name, definition });
+            }
+            OpIn::Schema {
+                kg,
+                relation,
+                schema,
+            } => {
+                txn.catalog(kg, CatalogEntry::Schema { relation, schema });
+            }
         }
     }
     Ok(txn)
@@ -293,6 +358,50 @@ mod tests {
         txn
     }
 
+    fn catalog_txn(rev: u64) -> Transaction {
+        let rule = crate::statement::parse_rule_definition("p(X) <- a(X, Y), Y > 1.5").unwrap();
+        let schema = RelationSchema::new("a")
+            .with_column(crate::schema::ColumnSchema::new(
+                "x",
+                crate::schema::SchemaType::Int,
+            ))
+            .with_column(crate::schema::ColumnSchema::new(
+                "y",
+                crate::schema::SchemaType::Float,
+            ));
+        let mut txn = Transaction::new(rev);
+        txn.catalog(
+            "kg",
+            CatalogEntry::Schema {
+                relation: "a".into(),
+                schema: Some(schema),
+            },
+        )
+        .insert("kg:a", [Tuple::from_pair(1, 2)])
+        .catalog(
+            "kg",
+            CatalogEntry::Rule {
+                name: "p".into(),
+                definition: Some(RuleDefinition::new("p".into(), rule.rule)),
+            },
+        )
+        .catalog(
+            "kg",
+            CatalogEntry::Rule {
+                name: "q".into(),
+                definition: None,
+            },
+        )
+        .catalog(
+            "kg",
+            CatalogEntry::Schema {
+                relation: "b".into(),
+                schema: None,
+            },
+        );
+        txn
+    }
+
     fn file(records: &[Transaction]) -> Vec<u8> {
         records.iter().flat_map(|t| encode(t).unwrap()).collect()
     }
@@ -308,6 +417,14 @@ mod tests {
         assert!(scan.damage.is_none());
         assert_eq!(scan.txns, vec![txn(1), txn(2)]);
         assert_eq!(scan.valid_end, bytes.len());
+    }
+
+    #[test]
+    fn catalog_changes_round_trip_in_commit_order() {
+        let expected = vec![catalog_txn(4), txn(5)];
+        let scan = scan_ok(&file(&expected));
+        assert!(scan.damage.is_none());
+        assert_eq!(scan.txns, expected);
     }
 
     #[test]
@@ -355,7 +472,9 @@ mod tests {
     #[test]
     fn intact_record_in_foreign_format_is_an_error() {
         for json in [
-            &br#"{"rev":1,"ops":[{"rule":{"name":"r"}}]}"#[..],
+            &br#"{"rev":1,"ops":[{"index":{"name":"r"}}]}"#[..],
+            br#"{"rev":1,"ops":[{"rule":{"name":"r"}}]}"#,
+            br#"{"rev":1,"ops":[{"schema":{"kg":"k","relation":"r","schema":null,"x":1}}]}"#,
             br#"{"rev":1,"ops":[],"epoch":2}"#,
             br#"{"rev":1,"ops":[{"facts":{"shard":"kg:a","changes":[["!!",1]]}}]}"#,
         ] {
@@ -388,7 +507,9 @@ mod tests {
         let mut txn = Transaction::new(1);
         txn.insert("kg:a", [Tuple::new(values.clone())]);
         let scan = scan_ok(&file(&[txn]));
-        let TxnOp::Facts { changes, .. } = &scan.txns[0].ops()[0];
+        let TxnOp::Facts { changes, .. } = &scan.txns[0].ops()[0] else {
+            panic!("expected facts");
+        };
         let got = changes[0].0.values();
         assert_eq!(got.len(), values.len());
         for (got, want) in got.iter().zip(&values) {

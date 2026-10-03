@@ -105,7 +105,7 @@ async fn api_version_middleware(req: Request<Body>, next: Next) -> Response {
 }
 
 /// The client's IP: the TCP peer, or the forwarded client when the peer is a
-/// trusted proxy. Set on every request by [`ip_rate_limit_middleware`].
+/// trusted proxy. Set on every request by the per-IP rate-limit middleware.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClientIp(pub IpAddr);
 

@@ -15,7 +15,7 @@ Edit files in `docs/content/`. Navigation is controlled by `_meta.json` files in
 | Method | URL |
 |--------|-----|
 | **GUI (InputLayer Studio)** | Navigate to `/docs` in the GUI - works without a server connection |
-| **GitHub Pages** | Deployed automatically on push to `main` |
+| **GitHub Pages** | See the [CI deployment policy](../CONTRIBUTING#continuous-integration) |
 | **Local dev** | `cd front && npm install && npm run dev`, then open `/docs` |
 
 ### Content Map

@@ -5,7 +5,12 @@
 //!
 //! ## Storage
 //!
-//! Rules are stored in JSON format at `{db_dir}/rules/catalog.json`
+//! Rules are stored in JSON format at `{db_dir}/rules/catalog.json`, written
+//! atomically. The file records the revision of the newest committed rule change
+//! it reflects; startup replays newer changes from the WAL over it.
+//!
+//! A [`RuleCatalog::detached`] copy applies the same validated edits in memory
+//! and never saves: a program stages its rule changes on one before committing.
 //!
 //! ## Example
 //!
@@ -31,6 +36,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
+
+/// Rule catalog file format version.
+const CATALOG_VERSION: u32 = 1;
 
 /// Validate a single rule for safety constraints
 ///
@@ -440,7 +448,7 @@ pub enum RuleRegisterResult {
 }
 
 /// Rule definition stored in the catalog
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuleDefinition {
     /// Rule name (relation name)
     pub name: String,
@@ -506,16 +514,11 @@ impl RuleDefinition {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CatalogFile {
     version: u32,
+    /// Revision of the newest committed rule change the file reflects (0 in
+    /// files written before revisions were recorded).
+    #[serde(default)]
+    revision: u64,
     rules: BTreeMap<String, RuleDefinition>,
-}
-
-impl Default for CatalogFile {
-    fn default() -> Self {
-        CatalogFile {
-            version: 1,
-            rules: BTreeMap::new(),
-        }
-    }
 }
 
 /// Rule catalog - manages persistent rules per database
@@ -523,39 +526,78 @@ impl Default for CatalogFile {
 pub struct RuleCatalog {
     /// Rules indexed by name
     rules: BTreeMap<String, RuleDefinition>,
-    /// Path to the catalog file
-    catalog_path: PathBuf,
+    /// Path to the catalog file; `None` for a catalog that never saves
+    catalog_path: Option<PathBuf>,
+    /// Revision of the newest committed rule change applied to `rules`
+    revision: u64,
     /// Whether the catalog has been modified since last save
     dirty: bool,
 }
 
 impl RuleCatalog {
-    /// Create an empty rule catalog (for error recovery when loading fails)
+    /// Create an empty rule catalog that never saves (for error recovery when
+    /// loading fails)
     pub fn empty() -> Self {
         RuleCatalog {
             rules: BTreeMap::new(),
-            catalog_path: PathBuf::new(),
+            catalog_path: None,
+            revision: 0,
             dirty: false,
         }
     }
 
     /// Create a new rule catalog for a database directory
     pub fn new(db_dir: PathBuf) -> Result<Self, String> {
-        let rules_dir = db_dir.join("rules");
-        let catalog_path = rules_dir.join("catalog.json");
+        let catalog_path = db_dir.join("rules").join("catalog.json");
+        let exists = catalog_path.exists();
 
         let mut catalog = RuleCatalog {
             rules: BTreeMap::new(),
-            catalog_path,
+            catalog_path: Some(catalog_path),
+            revision: 0,
             dirty: false,
         };
 
         // Load existing catalog if present
-        if catalog.catalog_path.exists() {
+        if exists {
             catalog.load()?;
         }
 
         Ok(catalog)
+    }
+
+    /// A copy of these rules that never saves. Edits to it are validated as
+    /// on this catalog; [`Self::set`] installs the results here.
+    pub fn detached(&self) -> Self {
+        RuleCatalog {
+            rules: self.rules.clone(),
+            catalog_path: None,
+            revision: self.revision,
+            dirty: false,
+        }
+    }
+
+    /// Revision of the newest committed rule change these rules reflect.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Make rule `name` exactly `definition` (remove it when `None`), without
+    /// validating or saving. For installing committed changes.
+    pub fn set(&mut self, name: &str, definition: Option<RuleDefinition>) {
+        match definition {
+            Some(definition) => self.rules.insert(name.to_string(), definition),
+            None => self.rules.remove(name),
+        };
+        self.dirty = true;
+    }
+
+    /// Record that the rules reflect every committed change up to `revision`,
+    /// and save them.
+    pub fn save_at(&mut self, revision: u64) -> Result<(), String> {
+        self.revision = self.revision.max(revision);
+        self.dirty = true;
+        self.save()
     }
 
     /// Register a rule from a `RuleDef`
@@ -897,13 +939,17 @@ impl RuleCatalog {
 
     /// Load the catalog from disk
     fn load(&mut self) -> Result<(), String> {
-        let content = fs::read_to_string(&self.catalog_path)
-            .map_err(|e| format!("Failed to read catalog: {e}"))?;
+        let Some(path) = &self.catalog_path else {
+            return Ok(());
+        };
+        let content =
+            fs::read_to_string(path).map_err(|e| format!("Failed to read catalog: {e}"))?;
 
         let catalog_file: CatalogFile =
             serde_json::from_str(&content).map_err(|e| format!("Failed to parse catalog: {e}"))?;
 
         self.rules = catalog_file.rules;
+        self.revision = catalog_file.revision;
         self.dirty = false;
 
         // Deliberately no validation on load: a KG must never be bricked by
@@ -925,36 +971,28 @@ impl RuleCatalog {
         Ok(())
     }
 
-    /// Save the catalog to disk
+    /// Save the catalog to disk (atomically). A catalog without a file only
+    /// forgets that it changed.
     pub fn save(&mut self) -> Result<(), String> {
         if !self.dirty {
             return Ok(());
         }
-
-        // Ensure the rules directory exists
-        if let Some(parent) = self.catalog_path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create rules directory: {e}"))?;
+        if let Some(path) = &self.catalog_path {
+            let catalog_file = CatalogFile {
+                version: CATALOG_VERSION,
+                revision: self.revision,
+                rules: self.rules.clone(),
+            };
+            crate::storage::metadata::save_json_atomic(&catalog_file, path)
+                .map_err(|e| format!("Failed to write catalog: {e}"))?;
         }
-
-        let catalog_file = CatalogFile {
-            version: 1,
-            rules: self.rules.clone(),
-        };
-
-        let content = serde_json::to_string_pretty(&catalog_file)
-            .map_err(|e| format!("Failed to serialize catalog: {e}"))?;
-
-        fs::write(&self.catalog_path, content)
-            .map_err(|e| format!("Failed to write catalog: {e}"))?;
-
         self.dirty = false;
         Ok(())
     }
 
     /// Force a reload from disk
     pub fn reload(&mut self) -> Result<(), String> {
-        if self.catalog_path.exists() {
+        if self.catalog_path.as_ref().is_some_and(|path| path.exists()) {
             self.load()
         } else {
             self.rules.clear();
@@ -2686,10 +2724,50 @@ mod tests {
     }
 
     #[test]
-    fn test_catalog_file_default() {
-        let cf = CatalogFile::default();
-        assert_eq!(cf.version, 1);
-        assert!(cf.rules.is_empty());
+    fn saved_revision_survives_reload_and_legacy_files_read_as_zero() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        catalog
+            .register("path", &make_test_rule("path", "edge"))
+            .unwrap();
+        assert_eq!(catalog.revision(), 0);
+        catalog.save_at(7).unwrap();
+        catalog.save_at(5).unwrap();
+        let reloaded = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        assert_eq!(reloaded.revision(), 7);
+        assert!(reloaded.exists("path"));
+
+        let legacy = tmp_dir.path().join("rules/catalog.json");
+        fs::write(&legacy, r#"{"version":1,"rules":{}}"#).unwrap();
+        let reloaded = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        assert_eq!(reloaded.revision(), 0);
+        assert!(reloaded.is_empty());
+    }
+
+    #[test]
+    fn detached_copy_validates_edits_and_never_saves() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        catalog
+            .register("path", &make_test_rule("path", "edge"))
+            .unwrap();
+        let file = tmp_dir.path().join("rules/catalog.json");
+        let saved = fs::read_to_string(&file).unwrap();
+
+        let mut staged = catalog.detached();
+        staged.drop("path").unwrap();
+        assert!(staged.drop("path").is_err());
+        staged
+            .register("other", &make_test_rule("other", "edge"))
+            .unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), saved);
+        assert!(catalog.exists("path"));
+
+        catalog.set("path", None);
+        catalog.set("other", staged.get("other").cloned());
+        catalog.save_at(3).unwrap();
+        let reloaded = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        assert_eq!(reloaded.list(), ["other"]);
     }
 
     #[test]
