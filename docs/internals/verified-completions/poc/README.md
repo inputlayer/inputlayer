@@ -24,9 +24,11 @@ passes):
     spans_ok   1,628/1,628   ground-truth spans verbatim in conversation
     clean_ok   1,628/1,628   clean twin genuinely differs
     labels_ok  1,628/1,628   categories/placement/tier/sub well-formed
-    engine_ok  1,526/1,526   EXACT finding-kind match - the engine fires
+    engine_ok  1,628/1,628   EXACT finding-kind match - the engine fires
                              precisely the expected kinds, nothing extra,
-                             on every corrupted scenario (controls: n/a)
+                             on every corrupted scenario; every control
+                             raises no hard finding and each correction
+                             retracts the superseded fact (2026-10-03)
 
 The v2.1 LLM behavior re-baseline (regimes A and B, double-graded with an
 Opus arbiter) is complete for 100/1,628 scenarios and in progress for the
@@ -104,6 +106,35 @@ Raw per-scenario replies and grades: results/archive_v1_full_bench_390.json
 (the current results/full_bench.json holds the in-progress v2.1
 re-baseline, #95).
 
+## The CI gate: false alarms, revision fidelity, detection (#88)
+
+    scripts/run_vc_gate.sh            # builds + starts a throwaway engine
+    make vc-gate                      # same
+
+gate.py replays, with no model calls, every corpus.json scenario's
+extractor-truth facts (controls included: a correction asserts both
+values and then retracts the superseded one) and every benchmark.json
+recorded reference extraction through the real rule pack, then scores
+both with ONE contract (evaluator.py) and prints three numbers:
+
+    detection per family    flagged rows firing exactly the expected kinds
+    false-alarm rate        control rows raising any hard finding/violation
+    revision fidelity       correction rows whose retracted fact is gone,
+                            whose replacement survives, with no conflict
+
+It fails on any row problem - a control finding, a stale correction, an
+over-retraction, a missed or extra finding kind, a soft-tension change -
+and on any contract failure: a scenario not evaluated, a control with no
+facts (nothing evaluated proves nothing), a required family missing or
+under n=30, an empty metric, a finding spanning two scenarios, or
+corpus.json out of sync with corpus.py. Declared gaps are listed, never
+scored. test_evaluator.py plants each of these defects against the
+contract and runs first. Because the replay is deterministic, a
+detection drop is a contract break too; the warn-only tier #88 sketched
+for detection belongs to live model extraction, which stays out of
+per-PR CI. The path-filtered workflow is
+.github/workflows/verified-completions.yml.
+
 ## Sample labels
 
 Every sample in corpus.json and benchmark.json carries a labels block:
@@ -144,7 +175,11 @@ and measured.
                      reference extraction (what a correct extractor emits),
                      and exactly what must - or must NOT - be found
     poc_verify.py    the pipeline: extract -> validate -> load -> judge,
-                     plus scoring
+                     scored by evaluator.py
+    evaluator.py     the gate contract: per-row verdicts and the three
+                     metrics (pure; self-tested by test_evaluator.py)
+    engine_replay.py corpus.json facts -> one KG -> per-scenario findings
+    gate.py          the CI gate over both (see above)
     README.md        this file
 
 ## The two modes

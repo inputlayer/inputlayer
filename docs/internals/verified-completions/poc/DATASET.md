@@ -93,7 +93,13 @@ they cannot drift from content.
   this at build time, and the ledger re-verifies it per scenario.
 - **Controls are first-class.** A checker that cries wolf gets turned
   off; the correction/restatement/modality controls measure exactly that
-  risk, and legitimate corrections must produce zero findings.
+  risk, and legitimate corrections must produce zero findings. Controls
+  carry extractor-truth facts like every other scenario: a correction
+  asserts both values and lists the superseded fact in `retractions`, a
+  restatement repeats the canonical value, a hedge/question/conditional
+  keeps its modality, and `expect_soft` names any advisory tension (a
+  hedge against an assertion). The CI gate (gate.py) replays them for
+  real; a control without facts fails the gate as vacuous.
 - **Determinism end to end.** Fixed pools, no randomness: the corpus
   regenerates byte-identically, so results join against scenario ids
   across runs and machines.

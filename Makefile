@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint perf-gate perf-gate-check bench-genbi test test-fast test-release unit-test integration-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test python-test-live python-test-examples js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint perf-gate perf-gate-check bench-genbi test test-fast test-release unit-test integration-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test python-test-live python-test-examples vc-gate js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -412,6 +412,12 @@ python-test-examples:
 	wait $$SERVER_PID 2>/dev/null || true; \
 	rm -rf $$DATA_DIR; \
 	exit $$TEST_EXIT
+
+# Verified Completions false-alarm/revision gate (#88): corpus controls and
+# recorded extractions through the rule pack on a throwaway engine, no model
+# calls. Path-filtered in CI (.github/workflows/verified-completions.yml).
+vc-gate:
+	./scripts/run_vc_gate.sh
 
 # Tier 5: JS/TS SDK tests (inputlayer-js package)
 js-test:
