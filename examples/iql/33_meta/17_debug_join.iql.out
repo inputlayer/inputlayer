@@ -37,19 +37,19 @@ Query Plan:
 
   Rule 1 IR:
     Map[[0, 1]] -> [OrderId, UserId]
-      Join[L:[1], R:[0]] -> [OrderId, UserId, _ph_user_1]
+      Join[L:[1], R:[0]] -> [OrderId, UserId, _ph_a1_c1]
       |- Left:
           Scan(order)[OrderId, UserId]
       `- Right:
-          Scan(user)[UserId, _ph_user_1]
+          Scan(user)[UserId, _ph_a1_c1]
 
   Rule 2 IR:
     Map[[0, 1]] -> [UserId, Name]
-      Join[L:[0], R:[1]] -> [UserId, Name, _ph_order_sip0f1_0]
+      Join[L:[0], R:[1]] -> [UserId, Name, _ph_a1_c0]
       |- Left:
           Scan(user)[UserId, Name]
       `- Right:
-          Scan(order_sip0f1)[_ph_order_sip0f1_0, UserId]
+          Scan(order_sip0f1)[_ph_a1_c0, UserId]
 
   Rule 3 IR:
     Join[L:[0], R:[1]] -> [UserId, Name, OrderId]
@@ -66,18 +66,18 @@ Query Plan:
   Rule 1 Optimized IR:
     Map[[2, 0]] -> [OrderId, UserId]
       Distinct
-        Join[L:[0], R:[1]] -> [UserId, _ph_user_1, OrderId]
+        Join[L:[0], R:[1]] -> [UserId, _ph_a1_c1, OrderId]
         |- Left:
-            Scan(user)[UserId, _ph_user_1]
+            Scan(user)[UserId, _ph_a1_c1]
         `- Right:
             Scan(order)[OrderId, UserId]
 
   Rule 2 Optimized IR:
     Map[[1, 2]] -> [UserId, Name]
       Distinct
-        Join[L:[1], R:[0]] -> [_ph_order_sip0f1_0, UserId, Name]
+        Join[L:[1], R:[0]] -> [_ph_a1_c0, UserId, Name]
         |- Left:
-            Scan(order_sip0f1)[_ph_order_sip0f1_0, UserId]
+            Scan(order_sip0f1)[_ph_a1_c0, UserId]
         `- Right:
             Scan(user)[UserId, Name]
 

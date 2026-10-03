@@ -41,35 +41,35 @@ Query Plan:
 
   Rule 1 IR:
     Map[[0, 1, 2]] -> [SId, PId, Price]
-      Join[L:[1], R:[0]] -> [SId, PId, Price, _ph_product_1]
+      Join[L:[1], R:[0]] -> [SId, PId, Price, _ph_a1_c1]
       |- Left:
           Scan(sale)[SId, PId, Price]
       `- Right:
-          Scan(product)[PId, _ph_product_1]
+          Scan(product)[PId, _ph_a1_c1]
 
   Rule 2 IR:
     Map[[0, 1]] -> [SId, CId]
-      Join[L:[0], R:[0]] -> [SId, CId, _ph_sale_sip0f1_1, _ph_sale_sip0f1_2]
+      Join[L:[0], R:[0]] -> [SId, CId, _ph_a1_c1, _ph_a1_c2]
       |- Left:
           Scan(order_item)[SId, CId]
       `- Right:
-          Scan(sale_sip0f1)[SId, _ph_sale_sip0f1_1, _ph_sale_sip0f1_2]
+          Scan(sale_sip0f1)[SId, _ph_a1_c1, _ph_a1_c2]
 
   Rule 3 IR:
     Map[[0, 1, 2]] -> [SId, PId, Price]
-      Join[L:[0], R:[0]] -> [SId, PId, Price, _ph_order_item_sip0f2_1]
+      Join[L:[0], R:[0]] -> [SId, PId, Price, _ph_a1_c1]
       |- Left:
           Scan(sale_sip0f1)[SId, PId, Price]
       `- Right:
-          Scan(order_item_sip0f2)[SId, _ph_order_item_sip0f2_1]
+          Scan(order_item_sip0f2)[SId, _ph_a1_c1]
 
   Rule 4 IR:
     Map[[0, 1]] -> [PId, Name]
-      Join[L:[0], R:[1]] -> [PId, Name, _ph_sale_sip0f1_sip0b1_0, _ph_sale_sip0f1_sip0b1_2]
+      Join[L:[0], R:[1]] -> [PId, Name, _ph_a1_c0, _ph_a1_c2]
       |- Left:
           Scan(product)[PId, Name]
       `- Right:
-          Scan(sale_sip0f1_sip0b1)[_ph_sale_sip0f1_sip0b1_0, PId, _ph_sale_sip0f1_sip0b1_2]
+          Scan(sale_sip0f1_sip0b1)[_ph_a1_c0, PId, _ph_a1_c2]
 
   Rule 5 IR:
     Join[L:[2], R:[0]] -> [PId, Name, SId, Price, CId]
@@ -90,36 +90,36 @@ Query Plan:
   Rule 1 Optimized IR:
     Map[[2, 0, 3]] -> [SId, PId, Price]
       Distinct
-        Join[L:[0], R:[1]] -> [PId, _ph_product_1, SId, Price]
+        Join[L:[0], R:[1]] -> [PId, _ph_a1_c1, SId, Price]
         |- Left:
-            Scan(product)[PId, _ph_product_1]
+            Scan(product)[PId, _ph_a1_c1]
         `- Right:
             Scan(sale)[SId, PId, Price]
 
   Rule 2 Optimized IR:
     Map[[0, 3]] -> [SId, CId]
       Distinct
-        Join[L:[0], R:[0]] -> [SId, _ph_sale_sip0f1_1, _ph_sale_sip0f1_2, CId]
+        Join[L:[0], R:[0]] -> [SId, _ph_a1_c1, _ph_a1_c2, CId]
         |- Left:
-            Scan(sale_sip0f1)[SId, _ph_sale_sip0f1_1, _ph_sale_sip0f1_2]
+            Scan(sale_sip0f1)[SId, _ph_a1_c1, _ph_a1_c2]
         `- Right:
             Scan(order_item)[SId, CId]
 
   Rule 3 Optimized IR:
     Map[[0, 2, 3]] -> [SId, PId, Price]
       Distinct
-        Join[L:[0], R:[0]] -> [SId, _ph_order_item_sip0f2_1, PId, Price]
+        Join[L:[0], R:[0]] -> [SId, _ph_a1_c1, PId, Price]
         |- Left:
-            Scan(order_item_sip0f2)[SId, _ph_order_item_sip0f2_1]
+            Scan(order_item_sip0f2)[SId, _ph_a1_c1]
         `- Right:
             Scan(sale_sip0f1)[SId, PId, Price]
 
   Rule 4 Optimized IR:
     Map[[1, 3]] -> [PId, Name]
       Distinct
-        Join[L:[1], R:[0]] -> [_ph_sale_sip0f1_sip0b1_0, PId, _ph_sale_sip0f1_sip0b1_2, Name]
+        Join[L:[1], R:[0]] -> [_ph_a1_c0, PId, _ph_a1_c2, Name]
         |- Left:
-            Scan(sale_sip0f1_sip0b1)[_ph_sale_sip0f1_sip0b1_0, PId, _ph_sale_sip0f1_sip0b1_2]
+            Scan(sale_sip0f1_sip0b1)[_ph_a1_c0, PId, _ph_a1_c2]
         `- Right:
             Scan(product)[PId, Name]
 
