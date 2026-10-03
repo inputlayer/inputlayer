@@ -28,9 +28,9 @@ Inserted 1 fact(s) into 'edge'.
 └───┴───┘
 3 rows
 > +path(X, Y) <- edge(X, Y).
-Parse error: Invalid term: 'Y).'
+Parse error: Invalid atom: edge(X, Y).
 > +path(X, Z) <- path(X, Y), edge(Y, Z).
-Parse error: Invalid term: 'Z).'
+Parse error: Invalid atom: edge(Y, Z).
 > ?path(1, X)
 No results.
 > +data(100, 200).

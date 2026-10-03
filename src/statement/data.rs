@@ -8,6 +8,7 @@
 //! - `-old, +new <- condition.` - atomic update
 
 use crate::ast::{Atom, BodyPredicate, Rule, Term};
+use crate::parser::lexer::{find_outside_strings, split_top_level, Angles};
 use crate::parser::parse_rule;
 
 /// Insert operation: +relation(args).
@@ -109,37 +110,11 @@ fn parse_bulk_tuples(input: &str) -> Result<Vec<Vec<Term>>, String> {
         return Err("Bulk insert must be in format: relation[(t1), (t2), ...]".to_string());
     }
 
-    let inner = &input[1..input.len() - 1];
-    let mut tuples = Vec::new();
-    let mut current = String::new();
-    let mut paren_depth: i32 = 0;
-
-    for ch in inner.chars() {
-        match ch {
-            '(' => {
-                paren_depth += 1;
-                current.push(ch);
-            }
-            ')' => {
-                // Clamp to 0 to handle malformed input
-                paren_depth = (paren_depth - 1).max(0);
-                current.push(ch);
-            }
-            ',' if paren_depth == 0 => {
-                let tuple = parse_tuple(current.trim())?;
-                tuples.push(tuple);
-                current.clear();
-            }
-            _ => current.push(ch),
-        }
-    }
-
-    if !current.trim().is_empty() {
-        let tuple = parse_tuple(current.trim())?;
-        tuples.push(tuple);
-    }
-
-    Ok(tuples)
+    split_top_level(&input[1..input.len() - 1], ',', Angles::Ignore)
+        .into_iter()
+        .filter(|t| !t.trim().is_empty())
+        .map(|t| parse_tuple(t.trim()))
+        .collect()
 }
 
 /// Parse a single tuple: (1, 2) or (1, "hello")
@@ -159,14 +134,9 @@ pub fn parse_delete(input: &str) -> Result<DeleteOp, String> {
     let input = input.trim();
 
     // Check for conditional delete: relation(X, Y) <- condition.
-    if input.contains("<-") {
-        let parts: Vec<&str> = input.splitn(2, "<-").collect();
-        if parts.len() != 2 {
-            return Err("Invalid conditional delete syntax".to_string());
-        }
-
-        let head_str = parts[0].trim();
-        let body_str = parts[1].trim();
+    if let Some(arrow) = find_outside_strings(input, "<-") {
+        let head_str = input[..arrow].trim();
+        let body_str = input[arrow + 2..].trim();
 
         // Parse the head
         let (relation, head_args) = parse_head_atom(head_str)?;
@@ -220,17 +190,11 @@ pub fn try_parse_update(input: &str) -> Result<Option<UpdateOp>, String> {
     // An update has the pattern: -rel1(...), +rel2(...) <- body.
     // It must have both - and + before <-
 
-    if !input.contains("<-") {
+    let Some(arrow) = find_outside_strings(input, "<-") else {
         return Ok(None);
-    }
-
-    let parts: Vec<&str> = input.splitn(2, "<-").collect();
-    if parts.len() != 2 {
-        return Ok(None);
-    }
-
-    let head_part = parts[0].trim();
-    let body_part = parts[1].trim();
+    };
+    let head_part = input[..arrow].trim();
+    let body_part = input[arrow + 2..].trim();
 
     // Split head by comma (outside parentheses)
     let head_items = split_by_comma(head_part);
@@ -507,5 +471,64 @@ mod tests {
         assert_eq!(op.tuples.len(), 2);
         assert_eq!(op.tuples[0].len(), 2);
         assert_eq!(op.tuples[1].len(), 2);
+    }
+
+    fn strs(tuple: &[Term]) -> Vec<String> {
+        tuple
+            .iter()
+            .map(|t| match t {
+                Term::StringConstant(s) => s.clone(),
+                other => other.to_string(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_bulk_insert_text_with_parens_and_commas() {
+        let op = parse_insert(
+            r#"il_message[("c1", 4, "user", "Option 1) Paris, option 2) Rome"), ("c1", 5, "user", "smile :), ok"), ("c1", 6, "user", "a \"b, c")]"#,
+        )
+        .unwrap();
+        assert_eq!(op.tuples.len(), 3);
+        assert_eq!(strs(&op.tuples[0])[3], "Option 1) Paris, option 2) Rome");
+        assert_eq!(strs(&op.tuples[1])[3], "smile :), ok");
+        assert_eq!(strs(&op.tuples[2])[3], "a \"b, c");
+    }
+
+    #[test]
+    fn test_bulk_insert_injection_is_one_tuple() {
+        let op = parse_insert(r#"claim[("c1:k", "c1:e\"), (\", 7, true, \"", "budget")]"#).unwrap();
+        assert_eq!(op.tuples.len(), 1);
+        assert_eq!(
+            strs(&op.tuples[0]),
+            vec!["c1:k", r#"c1:e"), (", 7, true, ""#, "budget"]
+        );
+    }
+
+    #[test]
+    fn test_insert_unescapes_strings() {
+        let op = parse_insert(r#"note(7, "say \"hi\" now", "C:\\temp")"#).unwrap();
+        assert_eq!(strs(&op.tuples[0]), vec!["7", "say \"hi\" now", r"C:\temp"]);
+    }
+
+    #[test]
+    fn test_delete_with_arrow_in_string_is_not_conditional() {
+        let op = parse_delete(r#"note(1, "x<-y")"#).unwrap();
+        match op.pattern {
+            DeletePattern::SingleTuple(args) => assert_eq!(strs(&args), vec!["1", "x<-y"]),
+            other => panic!("expected single tuple, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_conditional_delete_with_string_head_arg() {
+        let op = parse_delete(r#"note(X, "a, \"b\"") <- note(X, "a, \"b\"")"#).unwrap();
+        match op.pattern {
+            DeletePattern::Conditional { head_args, body } => {
+                assert_eq!(strs(&head_args), vec!["X", "a, \"b\""]);
+                assert_eq!(body.len(), 1);
+            }
+            other => panic!("expected conditional, got {other:?}"),
+        }
     }
 }

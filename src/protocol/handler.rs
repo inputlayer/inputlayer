@@ -5286,7 +5286,8 @@ impl Handler {
 pub(crate) fn transform_query_shorthand(program_text: &str) -> Result<QueryTransform, String> {
     let trimmed = program_text.trim();
     if let Some(after_q) = trimmed.strip_prefix('?') {
-        if !after_q.starts_with(char::is_alphabetic) {
+        let after_q = after_q.trim_start();
+        if !after_q.starts_with(|c: char| c.is_alphabetic() || c == '_') {
             return Ok(QueryTransform {
                 query: program_text.to_string(),
                 order_by: vec![],
@@ -5311,30 +5312,13 @@ pub(crate) fn transform_query_shorthand(program_text: &str) -> Result<QueryTrans
                     head_vars.push(v.clone());
                     v.clone()
                 }
-                Term::Constant(val) => {
+                Term::Constant(_)
+                | Term::FloatConstant(_)
+                | Term::BoolConstant(_)
+                | Term::StringConstant(_) => {
                     let t = format!("_c{i}");
                     head_vars.push(t.clone());
-                    extra_constraints.push(format!("{t} = {val}"));
-                    t
-                }
-                Term::FloatConstant(val) => {
-                    let t = format!("_c{i}");
-                    head_vars.push(t.clone());
-                    extra_constraints.push(format!("{t} = {val}"));
-                    t
-                }
-                Term::BoolConstant(val) => {
-                    let t = format!("_c{i}");
-                    head_vars.push(t.clone());
-                    extra_constraints.push(format!("{t} = {val}"));
-                    t
-                }
-                Term::StringConstant(s) => {
-                    let t = format!("_c{i}");
-                    head_vars.push(t.clone());
-                    // Escape internal double quotes
-                    let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
-                    extra_constraints.push(format!("{t} = \"{escaped}\""));
+                    extra_constraints.push(format!("{t} = {term}"));
                     t
                 }
                 Term::VectorLiteral(_) => {
@@ -8716,39 +8700,9 @@ fn parse_why_not_target(input: &str) -> Result<(String, crate::value::Tuple), St
     Ok((relation, crate::value::Tuple::new(values)))
 }
 
-/// Split a string by commas, respecting brackets, quotes, and escaped quotes.
-///
-/// Handles `\"` (escaped quote) and `\\` (escaped backslash) inside quoted strings.
+/// Split a string by commas outside brackets and string literals.
 fn split_respecting_brackets(s: &str) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut depth = 0;
-    let mut in_quotes = false;
-    let mut escaped = false;
-    let mut start = 0;
-
-    for (i, ch) in s.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        match ch {
-            '\\' if in_quotes => {
-                escaped = true;
-            }
-            '"' if depth == 0 => in_quotes = !in_quotes,
-            '[' | '(' if !in_quotes => depth += 1,
-            ']' | ')' if !in_quotes => depth -= 1,
-            ',' if depth == 0 && !in_quotes => {
-                parts.push(&s[start..i]);
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    if start < s.len() {
-        parts.push(&s[start..]);
-    }
-    parts
+    crate::parser::lexer::split_top_level(s, ',', crate::parser::lexer::Angles::Ignore)
 }
 
 /// Parse a literal value string into a Value.
@@ -8758,27 +8712,9 @@ fn parse_literal_value(s: &str) -> Result<crate::value::Value, String> {
 
     let s = s.trim();
 
-    // String literal (unescape \" and \\)
-    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
-        let inner = &s[1..s.len() - 1];
-        let mut unescaped = String::with_capacity(inner.len());
-        let mut chars = inner.chars();
-        while let Some(ch) = chars.next() {
-            if ch == '\\' {
-                match chars.next() {
-                    Some('"') => unescaped.push('"'),
-                    Some('\\') => unescaped.push('\\'),
-                    Some(other) => {
-                        unescaped.push('\\');
-                        unescaped.push(other);
-                    }
-                    None => unescaped.push('\\'),
-                }
-            } else {
-                unescaped.push(ch);
-            }
-        }
-        return Ok(Value::String(Arc::from(unescaped.as_str())));
+    if crate::parser::lexer::is_string_literal(s) {
+        let inner = crate::parser::lexer::unescape(&s[1..s.len() - 1]);
+        return Ok(Value::String(Arc::from(inner.as_str())));
     }
 
     // Boolean
@@ -8938,6 +8874,12 @@ mod parsing_tests {
             }
             other => panic!("Expected empty Vector, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_parse_literal_value_unescapes_control_chars() {
+        let val = parse_literal_value(r#""a\nb\t\"c\"""#).unwrap();
+        assert!(matches!(val, crate::value::Value::String(ref s) if &**s == "a\nb\t\"c\""));
     }
 
     #[test]

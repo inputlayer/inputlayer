@@ -69,6 +69,7 @@ op          ::= '=' | '!=' | '<' | '<=' | '>' | '>='
 |----------|---------|
 | `\n` | Newline |
 | `\t` | Tab |
+| `\r` | Carriage return |
 | `\\` | Backslash |
 | `\"` | Quote |
 
