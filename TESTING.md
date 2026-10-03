@@ -9,6 +9,7 @@ make test-all       # Full verification: build + unit + snapshot (~70s, all CPUs
 make test-fast      # Unit tests only (~30s)
 make test           # Unit + snapshot tests
 make e2e-test       # Snapshot tests only (parallel)
+make e2e-reactive   # Reactive agent path against real engine processes
 make test-affected  # Run only snapshots affected by uncommitted changes
 make perf-gate      # Performance gate: this tree vs the approved baseline (same host)
 make bench-genbi    # Reactive agent benchmark on genbi-trust (needs GENBI_TRUST_DIR)
@@ -73,6 +74,36 @@ the budgets in `perf-gate/policy.toml`. Only a PASS is acceptable. Attach
 requirements are in [`perf-gate/README.md`](perf-gate/README.md). The
 Criterion benches in `benches/` are diagnostic only.
 
+## Reactive Agent Path (E2E)
+
+`make e2e-reactive` drives the supported agent path end to end: each test
+starts a real `inputlayer-server` process with its own data directory, agents
+subscribe to standing queries over `/ws`, and independent writer connections
+insert and retract facts and change rules. Agents must receive the exact
+added/retracted rows as `subscription_delta` pushes, with contiguous `seq`, and
+end equal to a fresh full query on another connection, without re-querying.
+Scenarios cover one subscriber, 64 subscribers, reconnect/resubscribe and
+crash-restart, unrelated writes, and write bursts.
+
+```bash
+make e2e-reactive                                   # release build, writes latency samples
+cargo test --test e2e_reactive                      # same scenarios, debug build
+```
+
+Defects tracked by the reactive plan run as **expected failures**
+(`tests/e2e_reactive/known_defects.rs`): capped results adopted as complete
+(S05), out-of-order and restart-cursor notification delivery (W04), and an
+oversized delta that advances the subscription without delivery (W05). Each
+asserts the correct contract; its own violation passes as `XFAIL`, any other
+violation fails, and a holding contract fails as `XPASS` so the marker is
+removed and the scenario becomes required when the plan item lands.
+
+Every writer->agent delivery is recorded as a raw sample (write sent, write
+acknowledged, delta arrived) in `target/e2e-reactive/<scenario>.jsonl`, schema
+`inputlayer.reactive.delta_latency.v1` (see `testkit/src/metrics.rs`). The
+harness lives in the test-only `testkit` crate (engine process, `/ws` agent
+client, fixtures, samples), shared with the benches.
+
 ## Server Tracing (Debug Logs to File)
 
 Enable structured server tracing logs (useful for diagnosing hangs/timeouts):
@@ -116,6 +147,7 @@ Source-to-category mapping:
 | `make test-affected` | Snapshot tests for changed files only | Fast E2E feedback |
 | `make perf-gate` | Paired latency/throughput gate over `/ws` vs the approved baseline | Every implementation PR (see `perf-gate/README.md`) |
 | `make perf-gate-check` | Clippy + unit tests of the gate tool | After changing `perf-gate/` |
+| `make e2e-reactive` | Reactive agent path against real engines, latency samples | Subscription or wire changes |
 
 ### Code Quality
 
