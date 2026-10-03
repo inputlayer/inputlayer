@@ -169,6 +169,24 @@ pub enum PersistentNotification {
 }
 
 impl PersistentNotification {
+    /// The knowledge graph the change happened in.
+    pub fn knowledge_graph(&self) -> &str {
+        match self {
+            Self::PersistentUpdate {
+                knowledge_graph, ..
+            }
+            | Self::RuleChange {
+                knowledge_graph, ..
+            }
+            | Self::KgChange {
+                knowledge_graph, ..
+            }
+            | Self::SchemaChange {
+                knowledge_graph, ..
+            } => knowledge_graph,
+        }
+    }
+
     /// Get the sequence number of this notification.
     pub fn seq(&self) -> u64 {
         match self {
@@ -218,6 +236,8 @@ pub struct Handler {
     password_permits: Arc<tokio::sync::Semaphore>,
     /// Caps logins in flight, including those waiting for `password_permits`.
     login_queue: Arc<tokio::sync::Semaphore>,
+    /// Live users and API keys; sessions hold principals issued from it.
+    credentials: crate::auth::CredentialRegistry,
 }
 
 /// `.index` command implementations shared by `Handler` and `QueryJob`.
@@ -754,6 +774,7 @@ impl Handler {
             login_throttle: Arc::default(),
             password_permits: Arc::new(tokio::sync::Semaphore::new((ncpu / 4).clamp(1, 4))),
             login_queue: Arc::new(tokio::sync::Semaphore::new(MAX_QUEUED_LOGINS)),
+            credentials: crate::auth::CredentialRegistry::default(),
         }
     }
 
@@ -795,6 +816,7 @@ impl Handler {
             login_throttle: Arc::default(),
             password_permits: Arc::new(tokio::sync::Semaphore::new((ncpu / 4).clamp(1, 4))),
             login_queue: Arc::new(tokio::sync::Semaphore::new(MAX_QUEUED_LOGINS)),
+            credentials: crate::auth::CredentialRegistry::default(),
         }
     }
 
@@ -939,8 +961,9 @@ impl Handler {
     pub fn create_session_with_auth(
         &self,
         knowledge_graph: &str,
-        auth: &crate::auth::AuthIdentity,
+        principal: &crate::auth::Principal,
     ) -> Result<SessionId, String> {
+        let auth = principal.identity()?;
         // Admins skip per-KG checks
         if auth.role != crate::auth::Role::Admin
             && self
@@ -988,10 +1011,61 @@ impl Handler {
 
     // ── Auth / RBAC ─────────────────────────────────────────────────────────
 
-    /// Bootstrap the `_internal` knowledge graph with an admin user if it doesn't exist.
-    /// Called once on server startup. Creates the `_internal` KG and inserts an admin
-    /// user if the `users` relation is empty.
+    /// Bootstrap auth: create the `_internal` knowledge graph and an admin
+    /// user if there is none, then load the credential registry from it.
+    /// Called once on server startup; until then no credential authenticates.
     pub fn bootstrap_auth(&self) {
+        self.seed_admin_credentials();
+        self.load_credentials();
+    }
+
+    /// Load every user and API key from `_internal` into the registry.
+    fn load_credentials(&self) {
+        use crate::auth::{self, ApiKeyRecord, UserRecord};
+
+        let snapshot = match self.storage.read().get_snapshot_for(auth::INTERNAL_KG) {
+            Ok(snapshot) => snapshot,
+            Err(e) => {
+                warn!(error = %e, "auth_credentials_load_failed");
+                return;
+            }
+        };
+        let rows = |relation: &str| {
+            snapshot
+                .input_tuples
+                .get(relation)
+                .into_iter()
+                .flatten()
+                .filter_map(|tuple| match tuple.values() {
+                    [a, b, c, ..] => Some((a.as_str()?, b.as_str()?, c.as_str()?)),
+                    _ => None,
+                })
+        };
+        let users = rows("users")
+            .filter_map(|(username, hash, role)| match role.parse() {
+                Ok(role) => Some(UserRecord {
+                    username: username.to_string(),
+                    password_hash: hash.to_string(),
+                    role,
+                }),
+                Err(e) => {
+                    warn!(username, error = %e, "auth_user_skipped");
+                    None
+                }
+            })
+            .collect();
+        let keys = rows("api_keys")
+            .map(|(label, key_hash, username)| ApiKeyRecord {
+                label: label.to_string(),
+                key_hash: key_hash.to_string(),
+                username: username.to_string(),
+            })
+            .collect();
+        self.credentials.load(users, keys);
+    }
+
+    /// Insert the bootstrap admin user and API key when `_internal` has no users.
+    fn seed_admin_credentials(&self) {
         use crate::auth;
         use crate::value::Value;
 
@@ -1160,30 +1234,17 @@ impl Handler {
         &self,
         username: &str,
         password: &str,
-    ) -> Result<crate::auth::AuthIdentity, String> {
-        use crate::auth;
-        use std::str::FromStr;
-
-        let storage = self.storage.read();
-        let snapshot = storage
-            .get_snapshot_for(auth::INTERNAL_KG)
-            .map_err(|_| "Authentication service unavailable".to_string())?;
-        drop(storage);
-
-        let user = snapshot.input_tuples.get("users").and_then(|users| {
-            users.iter().find_map(|tuple| match tuple.values() {
-                [u, h, r, ..] if u.as_str() == Some(username) => Some((h.as_str()?, r.as_str()?)),
-                _ => None,
-            })
-        });
-        let verified = auth::verify_password_or_dummy(password, user.map(|(hash, _)| hash));
-        match user {
-            Some((_, role)) if verified => Ok(auth::AuthIdentity {
-                username: username.to_string(),
-                role: auth::Role::from_str(role)?,
-            }),
-            _ => Err("Invalid credentials".to_string()),
+    ) -> Result<crate::auth::Principal, String> {
+        let candidate = self.credentials.password_candidate(username);
+        let hash = candidate.as_ref().map(|c| c.password_hash.as_str());
+        if !crate::auth::verify_password_or_dummy(password, hash) {
+            return Err("Invalid credentials".to_string());
         }
+        // Verified but replaced meanwhile: the old password is no longer valid.
+        candidate
+            .ok_or_else(|| "Invalid credentials".to_string())?
+            .accept()
+            .map_err(|_| "Invalid credentials".to_string())
     }
 
     /// Password login from `peer`: throttled per IP and username, with
@@ -1194,7 +1255,7 @@ impl Handler {
         username: &str,
         password: &str,
         peer: std::net::IpAddr,
-    ) -> Result<crate::auth::AuthIdentity, String> {
+    ) -> Result<crate::auth::Principal, String> {
         let attempt = self.login_throttle.begin(peer, username).map_err(|wait| {
             let retry_secs = wait.as_secs().max(1);
             warn!(username, %peer, retry_secs, "audit_auth_login_throttled");
@@ -1224,9 +1285,9 @@ impl Handler {
                 Err(_) => Err(unavailable()),
             };
             match &result {
-                Ok(identity) => {
+                Ok(principal) => {
                     handler.login_throttle.succeed(&attempt);
-                    info!(username = %user, role = %identity.role, %peer, "audit_auth_login_success");
+                    info!(username = %user, credential = %principal.credential(), %peer, "audit_auth_login_success");
                 }
                 Err(_) => {
                     handler.login_throttle.fail(&attempt);
@@ -1239,60 +1300,25 @@ impl Handler {
         .unwrap_or_else(|_| Err(unavailable()))
     }
 
-    /// Authenticate an API key.
-    /// Returns `AuthIdentity` on success, error message on failure.
-    pub fn authenticate_api_key(&self, key: &str) -> Result<crate::auth::AuthIdentity, String> {
-        use crate::auth;
-        use std::str::FromStr;
-
-        let key_hash = auth::hash_api_key(key);
-
-        let storage = self.storage.read();
-        let snapshot = storage
-            .get_snapshot_for(auth::INTERNAL_KG)
-            .map_err(|_| "Authentication service unavailable".to_string())?;
-        drop(storage);
-
-        let empty_vec = crate::value::Relation::new();
-        let api_keys = snapshot.input_tuples.get("api_keys").unwrap_or(&empty_vec);
-
-        for tuple in api_keys {
-            let vals = tuple.values();
-            // api_keys: (label, key_hash, username)
-            if vals.len() >= 3 {
-                if let (Some(hash), Some(uname)) = (vals[1].as_str(), vals[2].as_str()) {
-                    if hash == key_hash {
-                        // Look up user's role
-                        let empty_users = crate::value::Relation::new();
-                        let users = snapshot.input_tuples.get("users").unwrap_or(&empty_users);
-                        for user_tuple in users {
-                            let uvals = user_tuple.values();
-                            if uvals.len() >= 3 {
-                                if let (Some(u), Some(r)) = (uvals[0].as_str(), uvals[2].as_str()) {
-                                    if u == uname {
-                                        let role = auth::Role::from_str(r)?;
-                                        tracing::info!(
-                                            username = uname,
-                                            role = %role,
-                                            "audit_auth_apikey_success"
-                                        );
-                                        return Ok(auth::AuthIdentity {
-                                            username: uname.to_string(),
-                                            role,
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                        tracing::warn!(username = uname, "audit_auth_apikey_owner_not_found");
-                        return Err("API key owner not found".to_string());
-                    }
-                }
+    /// Authenticate an API key: one hash and one registry lookup.
+    pub fn authenticate_api_key(&self, key: &str) -> Result<crate::auth::Principal, String> {
+        match self
+            .credentials
+            .authenticate_key(&crate::auth::hash_api_key(key))
+        {
+            Ok(principal) => {
+                tracing::info!(
+                    username = principal.username(),
+                    credential = %principal.credential(),
+                    "audit_auth_apikey_success"
+                );
+                Ok(principal)
+            }
+            Err(rejected) => {
+                tracing::warn!(reason = %rejected, "audit_auth_apikey_rejected");
+                Err(rejected.to_string())
             }
         }
-
-        tracing::warn!("audit_auth_apikey_invalid");
-        Err("Invalid API key".to_string())
     }
 
     // ── User CRUD ───────────────────────────────────────────────────────────
@@ -1359,8 +1385,7 @@ impl Handler {
         use crate::value::Value;
         use std::str::FromStr;
 
-        // Validate role
-        let _role = auth::Role::from_str(role_str)?;
+        let role = auth::Role::from_str(role_str)?;
 
         // Check user doesn't already exist
         let storage = self.storage.read();
@@ -1389,6 +1414,11 @@ impl Handler {
         storage
             .insert_tuples_into(auth::INTERNAL_KG, "users", vec![tuple])
             .map_err(|e| format!("Failed to create user: {e}"))?;
+        self.credentials.put_user(auth::UserRecord {
+            username: username.to_string(),
+            password_hash: hash,
+            role,
+        });
 
         tracing::info!(username, role = role_str, "audit_user_created");
         Ok(self.message_result(&format!(
@@ -1427,6 +1457,7 @@ impl Handler {
         storage
             .delete_tuples_from(auth::INTERNAL_KG, "users", vec![tuple])
             .map_err(|e| format!("Failed to drop user: {e}"))?;
+        self.credentials.remove_user(username);
 
         // Also revoke all API keys owned by this user
         if let Some(api_keys) = snapshot.input_tuples.get("api_keys") {
@@ -1512,6 +1543,7 @@ impl Handler {
         storage
             .insert_tuples_into(auth::INTERNAL_KG, "users", vec![new_tuple])
             .map_err(|e| format!("Failed to update password: {e}"))?;
+        self.credentials.set_password(username, new_hash);
 
         tracing::info!(username, "audit_user_password_changed");
         Ok(self.message_result(&format!("Password updated for '{username}'.")))
@@ -1523,8 +1555,7 @@ impl Handler {
         use crate::value::Value;
         use std::str::FromStr;
 
-        // Validate role
-        let _role = auth::Role::from_str(new_role)?;
+        let role = auth::Role::from_str(new_role)?;
 
         if username == "admin" && new_role != "admin" {
             return Err("Cannot change the 'admin' user's role".to_string());
@@ -1566,14 +1597,48 @@ impl Handler {
         storage
             .insert_tuples_into(auth::INTERNAL_KG, "users", vec![new_tuple])
             .map_err(|e| format!("Failed to update role: {e}"))?;
+        self.credentials.set_role(username, role);
 
         Ok(self.message_result(&format!("Role updated to '{new_role}' for '{username}'.")))
     }
 
     // ── API Key CRUD ────────────────────────────────────────────────────────
 
-    /// Create a new API key. Returns the plaintext key (shown only once).
+    /// `.apikey create`: the plaintext key as a result row (shown only once).
     pub fn handle_apikey_create(&self, label: &str, owner: &str) -> Result<QueryResult, String> {
+        let plaintext_key = self.create_api_key(label, owner)?;
+        Ok(QueryResult {
+            rows: vec![WireTuple {
+                values: vec![
+                    WireValue::String(label.to_string()),
+                    WireValue::String(plaintext_key),
+                ],
+                provenance: None,
+            }],
+            schema: vec![
+                ColumnDef {
+                    name: "label".to_string(),
+                    data_type: WireDataType::String,
+                },
+                ColumnDef {
+                    name: "api_key".to_string(),
+                    data_type: WireDataType::String,
+                },
+            ],
+            total_count: 1,
+            truncated: false,
+            execution_time_ms: 0,
+            metadata: None,
+            switched_kg: None,
+            proof_trees: None,
+            timing_breakdown: None,
+            errors: Vec::new(),
+        })
+    }
+
+    /// Create an API key for `owner`; returns the plaintext key, which is
+    /// not stored and cannot be recovered.
+    pub fn create_api_key(&self, label: &str, owner: &str) -> Result<String, String> {
         use crate::auth;
         use crate::value::Value;
 
@@ -1606,36 +1671,14 @@ impl Handler {
         storage
             .insert_tuples_into(auth::INTERNAL_KG, "api_keys", vec![tuple])
             .map_err(|e| format!("Failed to create API key: {e}"))?;
+        self.credentials.put_key(auth::ApiKeyRecord {
+            label: label.to_string(),
+            key_hash,
+            username: owner.to_string(),
+        });
 
         tracing::info!(label, owner, "audit_apikey_created");
-        // Return the plaintext key (shown only once)
-        Ok(QueryResult {
-            rows: vec![WireTuple {
-                values: vec![
-                    WireValue::String(label.to_string()),
-                    WireValue::String(plaintext_key),
-                ],
-                provenance: None,
-            }],
-            schema: vec![
-                ColumnDef {
-                    name: "label".to_string(),
-                    data_type: WireDataType::String,
-                },
-                ColumnDef {
-                    name: "api_key".to_string(),
-                    data_type: WireDataType::String,
-                },
-            ],
-            total_count: 1,
-            truncated: false,
-            execution_time_ms: 0,
-            metadata: None,
-            switched_kg: None,
-            proof_trees: None,
-            timing_breakdown: None,
-            errors: Vec::new(),
-        })
+        Ok(plaintext_key)
     }
 
     /// List all API keys (label and owner, never the hash).
@@ -1716,6 +1759,7 @@ impl Handler {
         storage
             .delete_tuples_from(auth::INTERNAL_KG, "api_keys", vec![tuple])
             .map_err(|e| format!("Failed to revoke API key: {e}"))?;
+        self.credentials.revoke_key(label);
 
         tracing::info!(label, "audit_apikey_revoked");
         Ok(self.message_result(&format!("API key '{label}' revoked.")))
@@ -1904,32 +1948,6 @@ impl Handler {
 
         tracing::info!(kg = kg_name, user = username, "audit_kg_acl_revoked");
         Ok(format!("Revoked access on '{kg_name}' from '{username}'."))
-    }
-
-    /// Look up the current global role for a user from storage.
-    /// Returns None if the user no longer exists (e.g., was dropped).
-    fn refresh_user_role(&self, identity: &crate::auth::AuthIdentity) -> Option<crate::auth::Role> {
-        use crate::auth;
-
-        let storage = self.storage.read();
-        let snapshot = storage.get_snapshot_for(auth::INTERNAL_KG).ok()?;
-        drop(storage);
-
-        let empty_vec = crate::value::Relation::new();
-        let users = snapshot.input_tuples.get("users").unwrap_or(&empty_vec);
-
-        for tuple in users {
-            let vals = tuple.values();
-            if vals.len() >= 3 {
-                if let (Some(u), Some(r)) = (vals[0].as_str(), vals[2].as_str()) {
-                    if u == identity.username {
-                        return r.parse::<auth::Role>().ok();
-                    }
-                }
-            }
-        }
-
-        None // user was dropped
     }
 
     /// Remove all ACL entries for a dropped knowledge graph.
@@ -4413,12 +4431,17 @@ impl Handler {
     ///
     /// A one-statement program whose statement failed is an `Err`; a longer
     /// program reports failed statements in `QueryResult::errors`.
+    ///
+    /// `auth` is checked twice: at admission, where it yields the permission
+    /// snapshot the whole program is authorized with, and at release, so a
+    /// credential revoked while the program ran receives none of its output.
+    /// Writes admitted before the revocation stay committed.
     pub async fn execute_program(
         &self,
         session_id: Option<&SessionId>,
         knowledge_graph: Option<String>,
         program: String,
-        auth: Option<&crate::auth::AuthIdentity>,
+        auth: Option<&crate::auth::Principal>,
     ) -> Result<QueryResult, String> {
         self.execute_program_status(session_id, knowledge_graph, program, auth)
             .await
@@ -4431,12 +4454,17 @@ impl Handler {
         session_id: Option<&SessionId>,
         knowledge_graph: Option<String>,
         program: String,
-        auth: Option<&crate::auth::AuthIdentity>,
+        auth: Option<&crate::auth::Principal>,
     ) -> Result<QueryResult, ProgramError> {
         let single_statement = program_statement_count(&program) == 1;
         let result = self
             .run_execute_program(session_id, knowledge_graph, program, auth)
             .await?;
+        if let Some(principal) = auth {
+            principal
+                .identity()
+                .map_err(|revoked| ProgramError::from(String::from(revoked)))?;
+        }
         match result.errors.as_slice() {
             [error] if single_statement => Err(ProgramError {
                 message: error.message.clone(),
@@ -4451,7 +4479,7 @@ impl Handler {
         session_id: Option<&SessionId>,
         knowledge_graph: Option<String>,
         program: String,
-        auth: Option<&crate::auth::AuthIdentity>,
+        auth: Option<&crate::auth::Principal>,
     ) -> Result<QueryResult, String> {
         // Input size validation (protects parsing and downstream handlers)
         let max_bytes = self.config.storage.performance.max_query_size_bytes;
@@ -4465,24 +4493,12 @@ impl Handler {
 
         let trimmed = program.trim();
 
-        // Refresh the user's global role from storage on every call.
-        // The AuthIdentity passed in was captured at login time and may be stale
-        // if an admin changed the user's role since then.
-        let refreshed_identity = if let Some(identity) = auth {
-            match self.refresh_user_role(identity) {
-                Some(role) => Some(crate::auth::AuthIdentity {
-                    username: identity.username.clone(),
-                    role,
-                }),
-                None => {
-                    // User was dropped while session was active
-                    return Err("Access denied: user no longer exists".to_string());
-                }
-            }
-        } else {
-            None
-        };
-        let effective_auth = refreshed_identity.as_ref().or(auth);
+        // Admission: one immutable permission snapshot for the whole program.
+        let identity = auth
+            .map(crate::auth::Principal::identity)
+            .transpose()
+            .map_err(String::from)?;
+        let effective_auth = identity.as_ref();
 
         // Protect _internal KG from direct access.
         // Block both explicit commands AND sessions already bound to _internal.
@@ -4593,34 +4609,19 @@ impl Handler {
                     MetaCommand::OntologyInstall(spec) => {
                         let spec = spec.clone();
                         return self
-                            .handle_ontology_install(
-                                session_id,
-                                knowledge_graph,
-                                &spec,
-                                effective_auth,
-                            )
+                            .handle_ontology_install(session_id, knowledge_graph, &spec, auth)
                             .await;
                     }
                     MetaCommand::OntologyRemove(name) => {
                         let name = name.clone();
                         return self
-                            .handle_ontology_remove(
-                                session_id,
-                                knowledge_graph,
-                                &name,
-                                effective_auth,
-                            )
+                            .handle_ontology_remove(session_id, knowledge_graph, &name, auth)
                             .await;
                     }
                     MetaCommand::OntologyUpgrade(spec) => {
                         let spec = spec.clone();
                         return self
-                            .handle_ontology_upgrade(
-                                session_id,
-                                knowledge_graph,
-                                &spec,
-                                effective_auth,
-                            )
+                            .handle_ontology_upgrade(session_id, knowledge_graph, &spec, auth)
                             .await;
                     }
 
@@ -4645,8 +4646,8 @@ impl Handler {
                         return self.handle_user_role(username, role);
                     }
                     MetaCommand::ApiKeyCreate(label) => {
-                        let owner =
-                            auth.map_or_else(|| "admin".to_string(), |a| a.username.clone());
+                        let owner = effective_auth
+                            .map_or_else(|| "admin".to_string(), |a| a.username.clone());
                         return self.handle_apikey_create(label, &owner);
                     }
                     MetaCommand::ApiKeyList => {
@@ -4985,7 +4986,7 @@ impl Handler {
         session_id: Option<&SessionId>,
         kg: &str,
         name: &str,
-        auth: Option<&crate::auth::AuthIdentity>,
+        auth: Option<&crate::auth::Principal>,
     ) -> Vec<(String, String)> {
         let query = "?pack_item(P, K, I)".to_string();
         let result =
@@ -5015,7 +5016,7 @@ impl Handler {
         session_id: Option<&SessionId>,
         kg: &str,
         name: &str,
-        auth: Option<&crate::auth::AuthIdentity>,
+        auth: Option<&crate::auth::Principal>,
     ) -> std::collections::BTreeSet<(String, String)> {
         let result = Box::pin(self.execute_program(
             session_id,
@@ -5049,7 +5050,7 @@ impl Handler {
         session_id: Option<&SessionId>,
         kg: &str,
         name: &str,
-        auth: Option<&crate::auth::AuthIdentity>,
+        auth: Option<&crate::auth::Principal>,
     ) -> Option<(String, String)> {
         let result = Box::pin(self.execute_program(
             session_id,
@@ -5080,7 +5081,7 @@ impl Handler {
         session_id: Option<&SessionId>,
         knowledge_graph: Option<String>,
         spec: &str,
-        auth: Option<&crate::auth::AuthIdentity>,
+        auth: Option<&crate::auth::Principal>,
     ) -> Result<QueryResult, String> {
         use inputlayer_ontology_client::registry;
         let kg = self.resolve_ontology_kg(session_id, knowledge_graph.as_ref())?;
@@ -5314,7 +5315,7 @@ impl Handler {
         session_id: Option<&SessionId>,
         knowledge_graph: Option<String>,
         name: &str,
-        auth: Option<&crate::auth::AuthIdentity>,
+        auth: Option<&crate::auth::Principal>,
     ) -> Result<QueryResult, String> {
         inputlayer_ontology_client::registry::validate_component("ontology name", name)
             .map_err(|e| e.to_string())?;
@@ -5422,7 +5423,7 @@ impl Handler {
         session_id: Option<&SessionId>,
         knowledge_graph: Option<String>,
         spec: &str,
-        auth: Option<&crate::auth::AuthIdentity>,
+        auth: Option<&crate::auth::Principal>,
     ) -> Result<QueryResult, String> {
         let name = spec.split('@').next().unwrap_or(spec).to_string();
         inputlayer_ontology_client::registry::validate_component("ontology name", &name)

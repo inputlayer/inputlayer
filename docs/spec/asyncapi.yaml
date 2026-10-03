@@ -663,7 +663,11 @@ components:
           const: error
         message:
           type: string
-          description: Human-readable error message
+          description: |
+            Human-readable error message. Also sent unsolicited before the
+            server closes the connection, e.g. "Idle timeout" or, once the
+            connection's credential is revoked, "Credential revoked; reconnect
+            with valid credentials" (no other message follows it).
         validation_errors:
           type: array
           items:
@@ -674,6 +678,8 @@ components:
           message: "Invalid query syntax"
         - type: error
           message: "Knowledge graph 'missing' not found"
+        - type: error
+          message: "Credential revoked; reconnect with valid credentials"
 
     ResultStartResponse:
       type: object
@@ -786,6 +792,9 @@ components:
         Push notification for data/schema/rule/KG changes. The `type` field
         discriminates the event kind. All notifications carry a monotonically
         increasing `seq` number for replay on reconnect (see `last_seq` query param).
+        A session receives changes to its own knowledge graph; `kg_change` for
+        other knowledge graphs is sent to admin sessions only. Changes to
+        `_internal` are never sent. Replay applies the same rules.
       properties:
         type:
           type: string

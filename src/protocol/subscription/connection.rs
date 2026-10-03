@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio::task::JoinSet;
 use tracing::{debug, warn};
 
-use crate::auth::AuthIdentity;
+use crate::auth::Principal;
 use crate::protocol::handler::PersistentNotification;
 use crate::protocol::Handler;
 
@@ -21,14 +21,14 @@ use super::{
 /// Subscriptions owned by one WebSocket connection.
 pub struct ConnectionSubscriptions {
     handler: Arc<Handler>,
-    auth: Option<AuthIdentity>,
+    auth: Option<Principal>,
     registry: SubscriptionRegistry,
     in_flight: JoinSet<Completion>,
 }
 
 impl ConnectionSubscriptions {
     /// Empty set, limited by `http.rate_limit.ws_max_subscriptions`.
-    pub fn new(handler: Arc<Handler>, auth: Option<AuthIdentity>) -> Self {
+    pub fn new(handler: Arc<Handler>, auth: Option<Principal>) -> Self {
         let limit = handler.config().http.rate_limit.ws_max_subscriptions;
         Self {
             handler,
