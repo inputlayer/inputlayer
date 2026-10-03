@@ -5,11 +5,11 @@ Server status: healthy
 Authenticated as: admin
 Current knowledge graph: default
 
-> .kg create _n41t01
-Knowledge graph '_n41t01' created.
-Switched to knowledge graph: _n41t01
-> .kg use _n41t01
-Switched to knowledge graph: _n41t01
+> .kg create n41t01
+Knowledge graph 'n41t01' created.
+Switched to knowledge graph: n41t01
+> .kg use n41t01
+Switched to knowledge graph: n41t01
 > +edge[(1, 2), (2, 3), (3, 4)]
 Inserted 3 fact(s) into 'edge'.
 > +result(X, Y) <- edge(X, Y)
@@ -25,5 +25,5 @@ Rule 'result' registered.
 3 rows
 > .kg use default
 Switched to knowledge graph: default
-> .kg drop _n41t01
-Knowledge graph '_n41t01' dropped.
+> .kg drop n41t01
+Knowledge graph 'n41t01' dropped.

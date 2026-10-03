@@ -11,7 +11,7 @@ Switched to knowledge graph: test_invalid_id_n12t37
 > .kg use test_invalid_id_n12t37
 Switched to knowledge graph: test_invalid_id_n12t37
 > +123invalid(1, 2)
-Inserted 1 fact(s) into '123invalid'.
+Relation name '123invalid' must start with a lowercase letter (a-z)
 > .kg use default
 Switched to knowledge graph: default
 > .kg drop test_invalid_id_n12t37

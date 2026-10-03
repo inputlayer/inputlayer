@@ -18,7 +18,7 @@ This guide covers common errors and how to resolve them.
 
 ### "Invalid relation name"
 
-**Cause**: Relation names must start with lowercase.
+**Cause**: Relation and knowledge graph names must start with `a-z` and contain only `a-z`, `0-9` and `_`.
 
 ```iql
 // Wrong
@@ -185,6 +185,19 @@ This guide covers common errors and how to resolve them.
 **Cause**: Operating without selecting a knowledge graph.
 
 **Solution**: Use `.kg use <name>` first.
+
+### "invalid_kg_name" / "invalid_relation_name" at startup
+
+**Cause**: Data written by an older build uses a name the current grammar rejects (for example `user:42`). The data still loads, but writes to it fail.
+
+**Solution**: Export what you need, then drop the offending names.
+
+```iql
+.kg drop user:42
+
+.kg use mykg
+.rel drop __old_relation
+```
 
 ## Rule Errors
 

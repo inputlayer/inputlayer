@@ -41,6 +41,8 @@ Create a new knowledge graph.
 .kg create analytics
 ```
 
+Knowledge graph and relation names start with `a-z` and contain only `a-z`, `0-9` and `_`. Knowledge graph names are at most 128 bytes, relation names at most 256.
+
 ### `.kg use <name>`
 
 Switch to a knowledge graph.

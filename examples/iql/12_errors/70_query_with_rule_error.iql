@@ -2,8 +2,8 @@
 // Description: A query cannot contain a rule definition (<-).
 // Rules must be registered first with +, then queried with ?.
 
-.kg create _n12t70
-.kg use _n12t70
+.kg create n12t70
+.kg use n12t70
 
 +edge[(1, 2), (2, 3)]
 
@@ -12,4 +12,4 @@
 
 // Cleanup
 .kg use default
-.kg drop _n12t70
+.kg drop n12t70
