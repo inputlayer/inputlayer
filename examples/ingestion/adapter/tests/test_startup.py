@@ -8,7 +8,6 @@ import stat
 import subprocess
 from pathlib import Path
 
-
 EXAMPLE = Path(__file__).resolve().parents[2]
 NAMES = (
     "INGEST_ENGINE_API_KEY",
@@ -45,7 +44,10 @@ def test_startup_generates_private_credentials_and_loopback_ports(tmp_path: Path
             else:
                 assert len(bytes.fromhex(value)) == 32
         normalized = subprocess.check_output(
-            [docker, "compose", "--profile", "demo", "config", "--format", "json"], cwd=tmp_path, env=env, text=True
+            [docker, "compose", "--profile", "demo", "config", "--format", "json"],
+            cwd=tmp_path,
+            env=env,
+            text=True,
         )
         services = json.loads(normalized)["services"]
         ports = [port for service in services.values() for port in service.get("ports", [])]

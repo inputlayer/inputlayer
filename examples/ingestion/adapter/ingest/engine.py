@@ -67,7 +67,9 @@ class EngineSession:
     """
 
     def __init__(
-        self, ws: aiohttp.ClientWebSocketResponse, keep_pushes: frozenset[str],
+        self,
+        ws: aiohttp.ClientWebSocketResponse,
+        keep_pushes: frozenset[str],
         request_timeout: float,
     ) -> None:
         self._ws = ws

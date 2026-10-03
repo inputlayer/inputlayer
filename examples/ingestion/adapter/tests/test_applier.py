@@ -33,19 +33,24 @@ async def real_engine(tmp_path: Path) -> AsyncIterator[EngineSettings]:
     config = tmp_path / "engine.toml"
     config.write_text(
         '[storage]\ndata_dir = "data"\n'
-        '[storage.performance]\nnum_threads = 2\n'
+        "[storage.performance]\nnum_threads = 2\n"
         f'[http]\nenabled = true\nhost = "127.0.0.1"\nport = {port}\n'
         '[http.auth]\nbootstrap_admin_password = "regression-only"\n'
         'credentials_file = "credentials.toml"\n'
-        '[http.rate_limit]\nws_max_messages_per_sec = 0\nper_ip_max_rps = 0\n'
+        "[http.rate_limit]\nws_max_messages_per_sec = 0\nper_ip_max_rps = 0\n"
         '[logging]\nlevel = "warn"\n'
     )
     env = {k: v for k, v in os.environ.items() if not k.startswith("INPUTLAYER_")}
     env.update(INPUTLAYER_BOOTSTRAP_API_KEY=key, TOKIO_WORKER_THREADS="2")
     with (tmp_path / "engine.log").open("w") as log:
         process = await asyncio.create_subprocess_exec(
-            str(binary), "--config", str(config), cwd=tmp_path, env=env,
-            stdout=log, stderr=log,
+            str(binary),
+            "--config",
+            str(config),
+            cwd=tmp_path,
+            env=env,
+            stdout=log,
+            stderr=log,
         )
         try:
             async with aiohttp.ClientSession() as http:
@@ -79,15 +84,23 @@ async def real_engine(tmp_path: Path) -> AsyncIterator[EngineSettings]:
 @pytest.mark.parametrize("seeded", [False, True])
 @pytest.mark.parametrize("disconnected_revision", [10, 12])
 async def test_disconnected_write_preserves_revision_order_and_committed_counts(
-    real_engine: EngineSettings, relation: Relation, key: tuple,
-    old_row: tuple, new_row: tuple, old_delete: bool, new_delete: bool, seeded: bool,
-    disconnected_revision: int, caplog: pytest.LogCaptureFixture,
+    real_engine: EngineSettings,
+    relation: Relation,
+    key: tuple,
+    old_row: tuple,
+    new_row: tuple,
+    old_delete: bool,
+    new_delete: bool,
+    seeded: bool,
+    disconnected_revision: int,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     release = asyncio.Event()
     completed: asyncio.Future[dict] = asyncio.get_running_loop().create_future()
     pause_write = False
     resume_on_next_write = False
     async with aiohttp.ClientSession() as http:
+
         async def proxy(request: web.Request) -> web.WebSocketResponse:
             nonlocal pause_write, resume_on_next_write
             downstream = web.WebSocketResponse()
@@ -98,7 +111,8 @@ async def test_disconnected_write_preserves_revision_order_and_committed_counts(
                 async for msg in downstream:
                     frame = json.loads(msg.data)
                     paused = (
-                        pause_write and frame["type"] == "execute"
+                        pause_write
+                        and frame["type"] == "execute"
                         and not frame["program"].startswith("?")
                     )
                     if paused:
@@ -107,7 +121,8 @@ async def test_disconnected_write_preserves_revision_order_and_committed_counts(
                         await downstream.close()
                         await release.wait()
                     elif (
-                        resume_on_next_write and frame["type"] == "execute"
+                        resume_on_next_write
+                        and frame["type"] == "execute"
                         and not frame["program"].startswith("?")
                     ):
                         resume_on_next_write = False

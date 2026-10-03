@@ -232,7 +232,10 @@ def adapter_settings(
 
 @pytest.mark.parametrize("phase", ["authentication", "declaration"])
 async def test_startup_retries_after_timeout(
-    engine: Engine, sockets: list[web.WebSocketResponse], monkeypatch: pytest.MonkeyPatch, phase: str
+    engine: Engine,
+    sockets: list[web.WebSocketResponse],
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
 ) -> None:
     stalled = False
     authentications = 0
@@ -262,8 +265,11 @@ async def test_startup_retries_after_timeout(
 @pytest.mark.parametrize("feed", ["cdc", "billing"])
 @pytest.mark.parametrize("phase", ["revision", "write"])
 async def test_http_timeout_releases_lock_and_reconnects(
-    engine: Engine, sockets: list[web.WebSocketResponse], monkeypatch: pytest.MonkeyPatch,
-    feed: str, phase: str,
+    engine: Engine,
+    sockets: list[web.WebSocketResponse],
+    monkeypatch: pytest.MonkeyPatch,
+    feed: str,
+    phase: str,
 ) -> None:
     stall_next = False
     accepted = asyncio.Event()
@@ -287,14 +293,16 @@ async def test_http_timeout_releases_lock_and_reconnects(
     if feed == "cdc":
         path = "/cdc"
         event = {
-            "op": "c", "after": {"id": 1, "name": "Acme", "tier": "enterprise"},
+            "op": "c",
+            "after": {"id": 1, "name": "Acme", "tier": "enterprise"},
             "source": {"schema": "public", "table": "customers", "lsn": 10},
         }
         signer = settings.cdc_signer
     else:
         path = "/webhooks/billing"
         event = {
-            "type": "payment.failed", "sequence": 10,
+            "type": "payment.failed",
+            "sequence": 10,
             "data": {"invoice": "inv_1", "customer_id": 1, "amount_cents": 42},
         }
         signer = settings.webhook_sources["billing"].signer
@@ -340,13 +348,20 @@ async def test_idle_subscription_wait_is_not_a_request_timeout(engine: Engine) -
             yield authenticated(request)[0]
             return
         yield {
-            "type": "result", "id": request["id"], "rows": [],
+            "type": "result",
+            "id": request["id"],
+            "rows": [],
             "subscribed": {"subscription": "s", "generation": 1, "revision": 0},
         }
         await asyncio.sleep(0.15)
         yield {
-            "type": "subscription_delta", "subscription": "s", "generation": 1,
-            "seq": 1, "revision": 1, "inserted": [[1]], "retracted": [],
+            "type": "subscription_delta",
+            "subscription": "s",
+            "generation": 1,
+            "seq": 1,
+            "revision": 1,
+            "inserted": [[1]],
+            "retracted": [],
         }
 
     settings = replace(await engine(script), request_timeout=0.05)
