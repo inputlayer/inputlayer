@@ -23,9 +23,13 @@ fn open(path: PathBuf, buffer_size: usize, durability_mode: DurabilityMode) -> F
 }
 
 fn keys(persist: &FilePersist, shard: &str) -> BTreeSet<(i64, i64)> {
-    persist
-        .read(shard, 0)
-        .expect("read shard")
+    let updates = match persist.read(shard, 0) {
+        Ok(updates) => updates,
+        // A delete that lands after the writer's last append leaves no shard.
+        Err(e) if e.to_string().contains("Shard not found") => Vec::new(),
+        Err(e) => panic!("read shard: {e:?}"),
+    };
+    updates
         .into_iter()
         .map(|u| {
             let v = u.data.values();
