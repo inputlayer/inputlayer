@@ -62,16 +62,6 @@ pub struct SessionStatsDto {
     pub total_ephemeral_rules: usize,
 }
 
-/// Provenance metadata in session query response (used by WS handler)
-#[derive(Debug, Clone, Serialize)]
-pub struct SessionQueryMetadataDto {
-    pub has_ephemeral: bool,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub ephemeral_sources: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub warnings: Vec<String>,
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {

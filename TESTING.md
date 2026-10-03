@@ -107,6 +107,12 @@ end equal to a fresh full query on another connection, without re-querying.
 Scenarios cover one subscriber, 64 subscribers, reconnect/resubscribe and
 crash-restart, unrelated writes, and write bursts.
 
+Every request the harness sends carries an `id`, and a reply that does not
+echo it fails the scenario (`Violation::Uncorrelated`); a `notice` is never
+taken for a reply. `tests/e2e_reactive/wire.rs` pipelines requests (malformed
+ones included) while the engine interleaves pushes, a streamed result and a
+`notifications_missed` notice, and requires every reply to correlate in order.
+
 ```bash
 make e2e-reactive                                   # release build, writes latency samples
 cargo test --test e2e_reactive                      # same scenarios, debug build

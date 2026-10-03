@@ -4,8 +4,7 @@ use futures_util::future::BoxFuture;
 
 use super::Dependencies;
 
-/// One result row, in wire JSON form.
-pub type Row = Vec<serde_json::Value>;
+pub use inputlayer_ws_protocol::Row;
 
 /// Change in a standing query's result since its previous refresh.
 #[derive(Debug, Clone, Default, PartialEq)]

@@ -32,7 +32,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub use connection::{change_of, ConnectionSubscriptions};
 pub use dependencies::Dependencies;
 pub use reevaluate::ReevaluatingQuery;
-pub use registry::{ChangeSet, Completion, Dispatch, Push, SubscriptionRegistry};
+pub use registry::{ChangeSet, Completion, Dispatch, SubscriptionRegistry};
 pub use standing_query::{Refresh, Row, StandingQuery};
 
 /// Server-wide subscription counters.

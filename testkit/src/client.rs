@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
+use inputlayer_ws_protocol::{FrameClass, NoticeCode, RequestId, ServerFrame};
 use serde_json::{json, Value};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -29,33 +30,37 @@ type Sink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
 pub struct Frame {
     pub at: Instant,
     pub value: Value,
+    /// How the frame routes, or why it is not a protocol frame.
+    class: Result<FrameClass, String>,
+    /// The `id` it echoes, for replies.
+    request_id: Option<RequestId>,
 }
 
 impl Frame {
+    /// Parse `text`, received at `at`, against the shared protocol types.
+    fn parse(at: Instant, text: &str) -> Self {
+        let value = serde_json::from_str(text)
+            .unwrap_or_else(|e| json!({"type": "malformed", "error": e.to_string(), "text": text}));
+        let (class, request_id) = match serde_json::from_str::<ServerFrame>(text) {
+            Ok(frame) => (Ok(frame.class()), frame.request_id().cloned()),
+            // Unknown types are a protocol change the harness must learn.
+            Err(e) => (Err(format!("not a protocol frame ({e}): {text}")), None),
+        };
+        Self {
+            at,
+            value,
+            class,
+            request_id,
+        }
+    }
+
     /// The message's `type` tag.
     pub fn kind(&self) -> &str {
         self.value["type"].as_str().unwrap_or_default()
     }
-}
 
-/// Whether a frame answers a request or is pushed by the server.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Role {
-    Reply,
-    Push,
-}
-
-/// Classify a frame; unknown types are a protocol change the harness must learn.
-fn role(frame: &Frame) -> Checked<Role> {
-    match frame.kind() {
-        "authenticated" | "auth_error" | "result" | "result_start" | "result_chunk"
-        | "result_end" | "error" | "pong" => Ok(Role::Reply),
-        "subscription_delta" | "subscription_error" | "persistent_update" | "rule_change"
-        | "kg_change" | "schema_change" => Ok(Role::Push),
-        _ => Err(Violation::Transport(format!(
-            "unknown message type (update the testkit for the new protocol): {}",
-            frame.value
-        ))),
+    fn class(&self) -> Checked<FrameClass> {
+        self.class.clone().map_err(Violation::Transport)
     }
 }
 
@@ -122,11 +127,18 @@ pub struct Commit {
 }
 
 /// An authenticated `/ws` connection.
+///
+/// Every request carries an id; a reply that does not echo it is a
+/// [`Violation::Uncorrelated`]. Notices are never taken for replies.
 pub struct WsClient {
     sink: Sink,
     inbox: mpsc::UnboundedReceiver<Frame>,
     /// Pushes read while waiting for a reply, in arrival order.
     pushes: VecDeque<Frame>,
+    /// Connection notices that did not close it (`notifications_missed`).
+    notices: Vec<Frame>,
+    /// Id of the last request sent.
+    last_id: u64,
     reader: JoinHandle<()>,
 }
 
@@ -153,10 +165,7 @@ impl WsClient {
             while let Some(Ok(message)) = stream.next().await {
                 let at = Instant::now();
                 if let Message::Text(text) = message {
-                    let value = serde_json::from_str(&text).unwrap_or_else(
-                        |e| json!({"type": "malformed", "error": e.to_string(), "text": text}),
-                    );
-                    if tx.send(Frame { at, value }).is_err() {
+                    if tx.send(Frame::parse(at, &text)).is_err() {
                         break;
                     }
                 }
@@ -166,12 +175,13 @@ impl WsClient {
             sink,
             inbox,
             pushes: VecDeque::new(),
+            notices: Vec::new(),
+            last_id: 0,
             reader,
         };
-        client
-            .send(&json!({"type": "authenticate", "api_key": api_key}))
+        let reply = client
+            .request(json!({"type": "authenticate", "api_key": api_key}))
             .await?;
-        let reply = client.next_reply().await?;
         if reply.kind() != "authenticated" {
             return Err(Violation::Rejected(format!(
                 "authentication: {}",
@@ -181,39 +191,75 @@ impl WsClient {
         Ok(client)
     }
 
-    async fn send(&mut self, value: &Value) -> Checked<()> {
-        self.sink
-            .send(Message::Text(value.to_string()))
-            .await
-            .map_err(|e| Violation::Transport(format!("send: {e}")))
+    /// Connection notices received so far that did not close the connection.
+    pub fn notices(&self) -> &[Frame] {
+        &self.notices
     }
 
+    /// Send `request` tagged with a fresh id; returns its first reply.
+    async fn request(&mut self, mut request: Value) -> Checked<Frame> {
+        self.last_id += 1;
+        request["id"] = json!(self.last_id.to_string());
+        self.sink
+            .send(Message::Text(request.to_string()))
+            .await
+            .map_err(|e| Violation::Transport(format!("send: {e}")))?;
+        self.next_reply().await
+    }
+
+    /// Next reply or push. Notices are kept aside; one that closes the
+    /// connection is a transport failure.
     async fn next_frame(&mut self, timeout: Duration, what: &str) -> Checked<Frame> {
-        match tokio::time::timeout(timeout, self.inbox.recv()).await {
-            Ok(Some(frame)) => Ok(frame),
-            Ok(None) => Err(Violation::Transport(format!(
-                "connection closed while waiting for {what}"
-            ))),
-            Err(_) => Err(Violation::Timeout(what.to_string())),
+        loop {
+            let frame = match tokio::time::timeout(timeout, self.inbox.recv()).await {
+                Ok(Some(frame)) => frame,
+                Ok(None) => {
+                    return Err(Violation::Transport(format!(
+                        "connection closed while waiting for {what}"
+                    )))
+                }
+                Err(_) => return Err(Violation::Timeout(what.to_string())),
+            };
+            if frame.class()? != FrameClass::Notice {
+                return Ok(frame);
+            }
+            let closing = serde_json::from_value::<NoticeCode>(frame.value["code"].clone())
+                .map_or(true, NoticeCode::closes_connection);
+            if closing {
+                return Err(Violation::Transport(format!(
+                    "server closed the connection: {}",
+                    frame.value
+                )));
+            }
+            self.notices.push(frame);
         }
     }
 
-    /// Next reply frame; pushes read meanwhile are kept for [`Self::next_push`].
+    /// Next frame answering the last request; pushes read meanwhile are kept
+    /// for [`Self::next_push`].
     async fn next_reply(&mut self) -> Checked<Frame> {
         loop {
             let frame = self.next_frame(FRAME_TIMEOUT, "a reply").await?;
-            match role(&frame)? {
-                Role::Reply => return Ok(frame),
-                Role::Push => self.pushes.push_back(frame),
+            if frame.class()? == FrameClass::Push {
+                self.pushes.push_back(frame);
+                continue;
             }
+            let expected = self.last_id.to_string();
+            if frame.request_id.as_ref().map(RequestId::as_str) != Some(expected.as_str()) {
+                return Err(Violation::Uncorrelated {
+                    expected,
+                    frame: frame.value.to_string(),
+                });
+            }
+            return Ok(frame);
         }
     }
 
     /// Run `program`; returns its complete result or the engine's error.
     pub async fn execute(&mut self, program: &str) -> Checked<QueryResult> {
-        self.send(&json!({"type": "execute", "program": program}))
+        let header = self
+            .request(json!({"type": "execute", "program": program}))
             .await?;
-        let header = self.next_reply().await?;
         match header.kind() {
             "result" => {
                 let mut result = QueryResult::from_header(&header.value);
@@ -274,9 +320,9 @@ impl WsClient {
             return Ok(frame);
         }
         let frame = self.next_frame(timeout, "a push").await?;
-        match role(&frame)? {
-            Role::Push => Ok(frame),
-            Role::Reply => Err(Violation::Transport(format!(
+        match frame.class()? {
+            FrameClass::Push => Ok(frame),
+            _ => Err(Violation::Transport(format!(
                 "unsolicited reply: {}",
                 frame.value
             ))),

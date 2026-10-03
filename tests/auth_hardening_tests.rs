@@ -135,7 +135,11 @@ async fn unauthenticated_socket_times_out() {
     let server = start_server(|c| c.http.ws_auth_timeout_ms = 300).await;
     let mut ws = connect(&server, None).await.unwrap();
     let started = Instant::now();
-    assert!(auth_error(recv(&mut ws).await).contains("timeout"));
+    // Nothing was asked, so the timeout is a notice, not a reply.
+    let notice = recv(&mut ws).await.expect("socket closed");
+    assert_eq!(notice["type"], "notice", "{notice}");
+    assert_eq!(notice["code"], "auth_timeout", "{notice}");
+    assert!(notice.get("id").is_none(), "{notice}");
     assert_eq!(recv(&mut ws).await, None);
     assert!(started.elapsed() < Duration::from_secs(3));
 }

@@ -2,7 +2,7 @@ asyncapi: 3.0.0
 
 info:
   title: InputLayer WebSocket API
-  version: 1.0.0
+  version: 2.0.0
   description: |
     WebSocket API for InputLayer Knowledge Graph Engine.
 
@@ -29,14 +29,42 @@ info:
     backoff does not apply from IPs it logged in from in the last 30 days; API-key
     authentication skips login backoff and is the recovery path for a locked-out account.
 
+    ## Protocol version and request IDs
+
+    This is protocol version 2, reported as `protocol_version` in `authenticated`.
+    The frame types are defined once in the `inputlayer-ws-protocol` crate
+    (`ws-protocol/`); the Python and JS SDKs mirror them.
+
+    Any request (`login`, `authenticate`, `execute`, `ping`) may carry an `id`: a
+    non-empty string of at most 64 bytes. Every frame answering that request echoes it:
+    `authenticated`, `auth_error`, `result`, `result_start`, `result_chunk`, `result_end`,
+    `error` and `pong`. A request without an `id` gets replies without one. Keep an `id`
+    unique among your requests still awaiting a reply; it may be reused once answered.
+    The server answers requests one at a time, in the order received.
+
+    Frames the client did not ask for never carry an `id` and have their own types, so
+    they can never be mistaken for a reply:
+
+    - pushes: change notifications (`persistent_update`, `rule_change`, `kg_change`,
+      `schema_change`) and standing-query results (`subscription_delta`,
+      `subscription_error`), addressed by subscription name and generation;
+    - `notice`: connection events such as an idle timeout, typed by `code`. Every code
+      except `notifications_missed` is followed by the server closing the connection.
+
+    A request that is not a valid frame (bad JSON, unknown `type`, missing field, or an
+    `id` that is not a 1-64 byte string or is given twice) is answered by exactly one
+    `error` with code `invalid_request`, carrying the `id` when it could be read; a
+    request over the per-connection message rate gets code `rate_limited`. Neither runs,
+    and the connection stays usable.
+
     ## Message Flow
 
     1. Client connects → must authenticate first
     2. Client sends `login` or `authenticate` → Server responds with `authenticated` or `auth_error`
     3. If `last_seq` was provided, server replays missed notifications
-    4. Client sends `execute` messages → Server responds with `result` or `error`
+    4. Client sends `execute` messages → Server responds with `result` or `error`, echoing the request `id`
     5. For large results (>1 MB), the server streams: `result_start` → `result_chunk` (×N) → `result_end`
-    6. Server may push change notifications (`persistent_update`, `rule_change`, ...) and, for `.subscribe`d queries, `subscription_delta` / `subscription_error`
+    6. Server may push change notifications (`persistent_update`, `rule_change`, ...), for `.subscribe`d queries `subscription_delta` / `subscription_error`, and connection `notice`s
     7. Client disconnects → Server auto-closes session
 
     ## Raw Text Protocol
@@ -109,6 +137,8 @@ channels:
         $ref: '#/components/messages/SubscriptionDelta'
       subscription_error:
         $ref: '#/components/messages/SubscriptionError'
+      notice:
+        $ref: '#/components/messages/Notice'
 
 operations:
   login:
@@ -275,6 +305,18 @@ operations:
     messages:
       - $ref: '#/channels/ws/messages/subscription_delta'
 
+  onNotice:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: Connection event
+    description: |
+      Sent unprompted, never as a reply and never with an `id`. All codes but
+      `notifications_missed` are followed by the server closing the connection;
+      `credential_revoked` is the last frame of a revoked connection.
+    messages:
+      - $ref: '#/channels/ws/messages/notice'
+
   onSubscriptionError:
     action: receive
     channel:
@@ -401,6 +443,14 @@ components:
       payload:
         $ref: '#/components/schemas/SubscriptionDeltaResponse'
 
+    Notice:
+      name: notice
+      title: Notice
+      summary: Connection event announced by the server
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/NoticeResponse'
+
     SubscriptionError:
       name: subscription_error
       title: Subscription Error
@@ -410,16 +460,92 @@ components:
         $ref: '#/components/schemas/SubscriptionErrorResponse'
 
   schemas:
+    RequestId:
+      type: string
+      minLength: 1
+      maxLength: 64
+      description: |
+        Client-chosen request identifier, echoed on every reply to the request.
+        At most 64 bytes (UTF-8).
+
+    ErrorCode:
+      type: string
+      enum: [validation, not_found, conflict, unsupported, internal, invalid_request, rate_limited]
+      description: |
+        Why a statement or request failed. `invalid_request` (malformed frame or `id`)
+        and `rate_limited` reject a whole request before anything runs.
+
+    StatementError:
+      type: object
+      required: [index, code, message]
+      properties:
+        index:
+          type: integer
+          description: 0-based statement index in the program
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+        message:
+          type: string
+
+    NoticeResponse:
+      type: object
+      required: [type, code, message]
+      properties:
+        type:
+          type: string
+          const: notice
+        code:
+          type: string
+          enum:
+            - notifications_missed
+            - slow_consumer
+            - idle_timeout
+            - lifetime_exceeded
+            - auth_timeout
+            - credential_revoked
+            - server_shutdown
+          description: |
+            `notifications_missed`: the client read too slowly and change notifications
+            were dropped; standing queries re-evaluate and the connection stays open.
+            Every other code is followed by the server closing the connection.
+        message:
+          type: string
+      examples:
+        - type: notice
+          code: idle_timeout
+          message: Idle timeout
+        - type: notice
+          code: credential_revoked
+          message: "Credential revoked; reconnect with valid credentials"
+
+    Subscribed:
+      type: object
+      required: [subscription, generation]
+      description: |
+        The subscription a `.subscribe` registered. A name can be reused after
+        `.unsubscribe`; the generation is unique per connection, so a push whose
+        generation differs belongs to an earlier registration and is stale.
+      properties:
+        subscription:
+          type: string
+        generation:
+          type: integer
+          format: int64
+
     SubscriptionDeltaResponse:
       type: object
-      required: [type, subscription, knowledge_graph, seq, columns, inserted, retracted]
+      required: [type, subscription, generation, knowledge_graph, seq, columns, inserted, retracted]
       properties:
         type:
           type: string
           const: subscription_delta
         subscription:
           type: string
-          description: Client-chosen id from `.subscribe`
+          description: Client-chosen name from `.subscribe`
+        generation:
+          type: integer
+          format: int64
+          description: The registration this delta belongs to (see `Subscribed`)
         knowledge_graph:
           type: string
         seq:
@@ -443,6 +569,7 @@ components:
       examples:
         - type: subscription_delta
           subscription: late_orders
+          generation: 1
           knowledge_graph: default
           seq: 1
           columns: [Order, Customer]
@@ -451,18 +578,22 @@ components:
 
     SubscriptionErrorResponse:
       type: object
-      required: [type, subscription, message]
+      required: [type, subscription, generation, message]
       properties:
         type:
           type: string
           const: subscription_error
         subscription:
           type: string
+        generation:
+          type: integer
+          format: int64
         message:
           type: string
       examples:
         - type: subscription_error
           subscription: late_orders
+          generation: 1
           message: Access denied
 
     ExecuteRequest:
@@ -475,6 +606,8 @@ components:
           type: string
           const: execute
           description: Message type discriminator
+        id:
+          $ref: '#/components/schemas/RequestId'
         program:
           type: string
           description: |
@@ -482,6 +615,7 @@ components:
             Examples: "+edge[(1,2)]", "?edge(X,Y)", ".kg list", ".rule list"
       examples:
         - type: execute
+          id: "1"
           program: "+edge[(1, 2), (3, 4)]"
         - type: execute
           program: "?edge(X, Y)"
@@ -498,6 +632,8 @@ components:
         type:
           type: string
           const: ping
+        id:
+          $ref: '#/components/schemas/RequestId'
       examples:
         - type: ping
 
@@ -511,6 +647,8 @@ components:
         type:
           type: string
           const: login
+        id:
+          $ref: '#/components/schemas/RequestId'
         username:
           type: string
           description: User's username
@@ -531,6 +669,8 @@ components:
         type:
           type: string
           const: authenticate
+        id:
+          $ref: '#/components/schemas/RequestId'
         api_key:
           type: string
           description: API key for programmatic access
@@ -546,10 +686,13 @@ components:
         - knowledge_graph
         - version
         - role
+        - protocol_version
       properties:
         type:
           type: string
           const: authenticated
+        id:
+          $ref: '#/components/schemas/RequestId'
         session_id:
           type: string
           description: Auto-created session ID
@@ -562,8 +705,13 @@ components:
         role:
           type: string
           description: Authenticated user's role (admin, writer, reader)
+        protocol_version:
+          type: integer
+          description: Version of this protocol the server speaks (2)
       examples:
         - type: authenticated
+          id: "1"
+          protocol_version: 2
           session_id: "42"
           knowledge_graph: default
           version: "0.1.0"
@@ -578,6 +726,8 @@ components:
         type:
           type: string
           const: auth_error
+        id:
+          $ref: '#/components/schemas/RequestId'
         message:
           type: string
           description: Human-readable authentication error
@@ -595,10 +745,13 @@ components:
         - total_count
         - truncated
         - execution_time_ms
+        - errors
       properties:
         type:
           type: string
           const: result
+        id:
+          $ref: '#/components/schemas/RequestId'
         columns:
           type: array
           items:
@@ -638,8 +791,24 @@ components:
             Present when the command switched the session's knowledge graph
             (e.g., after `.kg use <name>` or `.kg create <name>`).
             The client should update its local KG tracking.
+        proof_trees:
+          type: array
+          items: {}
+          description: Derivations of a `.why` result
+        timing_breakdown:
+          type: object
+          description: Per-stage execution timing in microseconds
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatementError'
+          description: Failed statements of the program; empty when every statement succeeded
+        subscribed:
+          $ref: '#/components/schemas/Subscribed'
+          description: Set on the reply to `.subscribe`, whose `rows` are the snapshot
       examples:
         - type: result
+          id: "2"
           columns: ["col0", "col1"]
           rows: [[1, 2], [3, 4]]
           row_count: 2
@@ -664,25 +833,32 @@ components:
         type:
           type: string
           const: error
+        id:
+          $ref: '#/components/schemas/RequestId'
         message:
           type: string
           description: |
-            Human-readable error message. Also sent unsolicited before the
-            server closes the connection, e.g. "Idle timeout" or, once the
-            connection's credential is revoked, "Credential revoked; reconnect
-            with valid credentials" (no other message follows it).
+            Human-readable error message. An `error` always answers a request;
+            connection events are `notice` frames.
         validation_errors:
           type: array
           items:
             $ref: '#/components/schemas/ValidationError'
           description: Detailed validation errors (present for parse/validation errors)
+        code:
+          $ref: '#/components/schemas/ErrorCode'
       examples:
         - type: error
-          message: "Invalid query syntax"
+          id: "3"
+          message: "Program has 1 parse error(s)"
+          code: validation
         - type: error
+          id: "4"
           message: "Knowledge graph 'missing' not found"
+          code: not_found
         - type: error
-          message: "Credential revoked; reconnect with valid credentials"
+          message: "Invalid message format: request id is empty"
+          code: invalid_request
 
     ResultStartResponse:
       type: object
@@ -696,6 +872,8 @@ components:
         type:
           type: string
           const: result_start
+        id:
+          $ref: '#/components/schemas/RequestId'
         columns:
           type: array
           items:
@@ -716,6 +894,15 @@ components:
         switched_kg:
           type: string
           description: Present when the command switched the session's knowledge graph
+        proof_trees:
+          type: array
+          items: {}
+        timing_breakdown:
+          type: object
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatementError'
       examples:
         - type: result_start
           columns: ["id", "name", "score"]
@@ -733,6 +920,8 @@ components:
         type:
           type: string
           const: result_chunk
+        id:
+          $ref: '#/components/schemas/RequestId'
         rows:
           type: array
           items:
@@ -762,6 +951,8 @@ components:
         type:
           type: string
           const: result_end
+        id:
+          $ref: '#/components/schemas/RequestId'
         row_count:
           type: integer
           description: Total number of rows sent across all chunks
@@ -781,6 +972,8 @@ components:
         type:
           type: string
           const: pong
+        id:
+          $ref: '#/components/schemas/RequestId'
       examples:
         - type: pong
 

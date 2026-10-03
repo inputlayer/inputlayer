@@ -18,6 +18,7 @@
 
 mod known_defects;
 mod reactive;
+mod wire;
 
 use inputlayer_testkit::EngineBuilder;
 

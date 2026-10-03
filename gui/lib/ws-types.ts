@@ -1,24 +1,31 @@
-// WebSocket protocol types matching the server's GlobalWsRequest/GlobalWsResponse
+// WebSocket protocol types (/ws protocol version 2), mirroring the
+// `inputlayer-ws-protocol` crate and docs/spec/asyncapi.yaml. Any request may
+// carry an `id`, echoed on every reply to it; `notice` and push frames never
+// carry one.
 
 // ── Client → Server ─────────────────────────────────────────────────────────
 
 export interface WsExecuteRequest {
   type: "execute"
+  id?: string
   program: string
 }
 
 export interface WsPingRequest {
   type: "ping"
+  id?: string
 }
 
 export interface WsLoginRequest {
   type: "login"
+  id?: string
   username: string
   password: string
 }
 
 export interface WsAuthenticateRequest {
   type: "authenticate"
+  id?: string
   api_key: string
 }
 
@@ -34,6 +41,8 @@ export interface WsConnectedMessage {
 
 export interface WsAuthenticatedMessage {
   type: "authenticated"
+  id?: string
+  protocol_version: number
   session_id: string
   knowledge_graph: string
   version: string
@@ -42,6 +51,7 @@ export interface WsAuthenticatedMessage {
 
 export interface WsAuthErrorMessage {
   type: "auth_error"
+  id?: string
   message: string
 }
 
@@ -118,7 +128,14 @@ export interface WsTimingBreakdown {
   }>
 }
 
-export type WsErrorCode = "validation" | "not_found" | "conflict" | "unsupported" | "internal"
+export type WsErrorCode =
+  | "validation"
+  | "not_found"
+  | "conflict"
+  | "unsupported"
+  | "internal"
+  | "invalid_request"
+  | "rate_limited"
 
 /** A failed statement of a multi-statement program (0-based `index`). */
 export interface WsStatementError {
@@ -129,6 +146,7 @@ export interface WsStatementError {
 
 export interface WsResultMessage {
   type: "result"
+  id?: string
   columns: string[]
   rows: (string | number | boolean | null)[][]
   row_count: number
@@ -157,6 +175,7 @@ export interface WsValidationError {
 
 export interface WsErrorMessage {
   type: "error"
+  id?: string
   message: string
   validation_errors?: WsValidationError[]
   code?: WsErrorCode
@@ -164,6 +183,7 @@ export interface WsErrorMessage {
 
 export interface WsPongMessage {
   type: "pong"
+  id?: string
 }
 
 export interface WsNotificationMessage {
@@ -179,6 +199,7 @@ export interface WsNotificationMessage {
 
 export interface WsResultStartMessage {
   type: "result_start"
+  id?: string
   columns: string[]
   total_count: number
   truncated: boolean
@@ -192,6 +213,7 @@ export interface WsResultStartMessage {
 
 export interface WsResultChunkMessage {
   type: "result_chunk"
+  id?: string
   rows: (string | number | boolean | null)[][]
   row_provenance?: string[]
   chunk_index: number
@@ -199,8 +221,41 @@ export interface WsResultChunkMessage {
 
 export interface WsResultEndMessage {
   type: "result_end"
+  id?: string
   row_count: number
   chunk_count: number
+}
+
+/** A connection event; all but `notifications_missed` precede the server closing the connection. */
+export interface WsNoticeMessage {
+  type: "notice"
+  code:
+    | "notifications_missed"
+    | "slow_consumer"
+    | "idle_timeout"
+    | "lifetime_exceeded"
+    | "auth_timeout"
+    | "credential_revoked"
+    | "server_shutdown"
+  message: string
+}
+
+export interface WsSubscriptionDeltaMessage {
+  type: "subscription_delta"
+  subscription: string
+  generation: number
+  knowledge_graph: string
+  seq: number
+  columns: string[]
+  inserted: (string | number | boolean | null)[][]
+  retracted: (string | number | boolean | null)[][]
+}
+
+export interface WsSubscriptionErrorMessage {
+  type: "subscription_error"
+  subscription: string
+  generation: number
+  message: string
 }
 
 export type WsServerMessage =
@@ -214,6 +269,9 @@ export type WsServerMessage =
   | WsResultStartMessage
   | WsResultChunkMessage
   | WsResultEndMessage
+  | WsNoticeMessage
+  | WsSubscriptionDeltaMessage
+  | WsSubscriptionErrorMessage
 
 // ── Connection state ────────────────────────────────────────────────────────
 

@@ -108,6 +108,9 @@ pub struct Client {
     ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
     /// Subscription frames that arrived while waiting for a reply.
     deferred: Vec<Stamped>,
+    /// Requests sent so far; each carries the next number as its `id`, as SDK
+    /// requests do. Engines before protocol v2 ignore it.
+    sent: u64,
 }
 
 impl Client {
@@ -120,9 +123,10 @@ impl Client {
         let mut client = Self {
             ws,
             deferred: Vec::new(),
+            sent: 0,
         };
         client
-            .send(&json!({"type": "login", "username": ADMIN_USER, "password": password}))
+            .send(json!({"type": "login", "username": ADMIN_USER, "password": password}))
             .await?;
         match client.next().await?.frame {
             Frame::Authenticated {} => Ok(client),
@@ -134,7 +138,7 @@ impl Client {
     /// Send one program without waiting; returns the send instant.
     pub async fn send_execute(&mut self, program: &str) -> Result<Instant> {
         let start = Instant::now();
-        self.send(&json!({"type": "execute", "program": program}))
+        self.send(json!({"type": "execute", "program": program}))
             .await?;
         Ok(start)
     }
@@ -248,7 +252,9 @@ impl Client {
         }
     }
 
-    async fn send(&mut self, value: &Value) -> Result<()> {
+    async fn send(&mut self, mut value: Value) -> Result<()> {
+        self.sent += 1;
+        value["id"] = json!(self.sent.to_string());
         self.ws
             .send(Message::Text(value.to_string()))
             .await

@@ -48,6 +48,8 @@ pub enum Violation {
     MissedChanges(String),
     /// Nothing arrived in time.
     Timeout(String),
+    /// A reply did not echo the id of the request it answered.
+    Uncorrelated { expected: String, frame: String },
     /// Connection closed, malformed frame or an unknown protocol message.
     Transport(String),
 }
@@ -97,6 +99,9 @@ impl fmt::Display for Violation {
             }
             Self::MissedChanges(detail) => write!(f, "missed committed changes: {detail}"),
             Self::Timeout(what) => write!(f, "timed out waiting for {what}"),
+            Self::Uncorrelated { expected, frame } => {
+                write!(f, "reply does not answer request {expected}: {frame}")
+            }
             Self::Transport(detail) => write!(f, "transport: {detail}"),
         }
     }

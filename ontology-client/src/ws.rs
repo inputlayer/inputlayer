@@ -1,69 +1,18 @@
 //! Minimal WebSocket client for `il` - connect, authenticate, execute.
 //!
-//! Speaks the same GlobalWs* protocol as `inputlayer-client`, but exposes only
-//! the request/response surface the registry commands need. Streaming results
+//! Speaks the engine's `/ws` protocol ([`inputlayer_ws_protocol`]), but exposes
+//! only the request/response surface the registry commands need. Every request
+//! carries an id and only frames echoing it are accepted as its reply. Streaming results
 //! (result_start / result_chunk / result_end) are reassembled into a single
 //! `Result` before being returned.
 
 use anyhow::{anyhow, bail, Context, Result};
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
+use inputlayer_ws_protocol::{ClientFrame, FrameClass, RequestId, ServerFrame};
 use tokio_tungstenite::tungstenite;
 
-#[derive(Debug, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum WsRequest {
-    Authenticate { api_key: String },
-    Execute { program: String },
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum WsResponse {
-    Connected {},
-    Authenticated {},
-    AuthError {
-        message: String,
-    },
-    Result {
-        columns: Vec<String>,
-        rows: Vec<Vec<serde_json::Value>>,
-        #[serde(default)]
-        proof_trees: Option<serde_json::Value>,
-        #[serde(default)]
-        errors: Option<Vec<StatementError>>,
-    },
-    ResultStart {
-        columns: Vec<String>,
-        #[serde(default)]
-        errors: Option<Vec<StatementError>>,
-    },
-    ResultChunk {
-        rows: Vec<Vec<serde_json::Value>>,
-    },
-    ResultEnd {},
-    Error {
-        message: String,
-        #[serde(default)]
-        validation_errors: Option<serde_json::Value>,
-    },
-    Pong,
-    Notification {},
-    PersistentUpdate {},
-    RuleChange {},
-    KgChange {},
-    SchemaChange {},
-}
-
 /// A failed statement of a multi-statement program.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct StatementError {
-    /// 0-based statement index in the program.
-    pub index: usize,
-    /// `validation`, `not_found`, `conflict`, `unsupported` or `internal`.
-    pub code: String,
-    pub message: String,
-}
+pub use inputlayer_ws_protocol::StatementError;
 
 pub struct QueryResult {
     #[allow(dead_code)]
@@ -72,92 +21,15 @@ pub struct QueryResult {
     /// Engine-produced proof trees (present on `.why` results), passed
     /// through untouched.
     pub proof_trees: Option<serde_json::Value>,
-    /// Failed statements; `None` from engines that do not report them.
-    pub errors: Option<Vec<StatementError>>,
-}
-
-/// Every success message the engine writes as a message row. `*` stands for
-/// a name or number (no `'`); a trailing `*` for the rest of the line.
-const SUCCESS_SHAPES: &[&str] = &[
-    "Inserted * fact(s) into '*'.",
-    "Deleted * facts from '*'.",
-    "Deleted * fact(s) from '*'.",
-    "Conditional delete: * fact(s) deleted from '*'.",
-    "Update: * deleted, * inserted.",
-    "Schema for '*' registered with * columns (persistent)",
-    "Schema for '*' registered with * columns (session)",
-    "Session fact added for '*'. (Use +*(...) to persist)",
-    "Session rule added for '*'.",
-    "Rule '*' registered.",
-    "Rule '*' dropped.",
-    "Rule '*' cleared.",
-    "Rule '*' deleted (last clause removed).",
-    "Clause * removed from rule '*'.",
-    "Dropped * rule(s) with prefix '*': *",
-    "No rules matching prefix '*'.",
-    "Type '*' declared.",
-    "Relation '*' dropped.",
-    "Relation '*' is empty.",
-    "Cleared * fact(s) from * relation(s) with prefix '*': *",
-    "No relations matching prefix '*'.",
-    "Knowledge graph '*' created.",
-    "Knowledge graph '*' dropped.",
-    "Switched to knowledge graph: *",
-    "Compaction complete.",
-    "Index '*' created on * (* vectors).",
-    "Index '*' dropped.",
-    "Index '*' rebuilt (* vectors).",
-    // `.ontology` command results.
-    "installed * into * (* statements)",
-    "digest *",
-    "recorded * rule(s), * relation(s) in pack_item",
-    "removed * from * (* rule(s), * relation(s))",
-    "kept * item(s) shared with another installed pack",
-    "upgraded * in * (dropped * old rule(s), data kept)",
-];
-
-/// Whether `text` has `shape` (see `SUCCESS_SHAPES`).
-fn has_shape(shape: &str, text: &str) -> bool {
-    let Some((literal, rest)) = shape.split_once('*') else {
-        return shape == text;
-    };
-    let Some(text) = text.strip_prefix(literal) else {
-        return false;
-    };
-    if rest.is_empty() {
-        return !text.is_empty();
-    }
-    let span = text.find(['\'', '\n']).unwrap_or(text.len());
-    (1..=span)
-        .filter(|&end| text.is_char_boundary(end))
-        .any(|end| has_shape(rest, &text[end..]))
+    /// Failed statements; empty when every statement succeeded.
+    pub errors: Vec<StatementError>,
 }
 
 impl QueryResult {
     /// Messages of the statements that failed. A failed single statement is
     /// an error frame instead, so `execute` already returned `Err`.
-    ///
-    /// Engines without `errors` report failures as message rows. For those
-    /// this is DENY BY DEFAULT: a message row is a problem unless it has an
-    /// exact `SUCCESS_SHAPES` shape, because reporting success for something
-    /// that did not happen is the one failure this product must never have.
     pub fn soft_errors(&self) -> Vec<String> {
-        if let Some(errors) = &self.errors {
-            return errors.iter().map(|e| e.message.clone()).collect();
-        }
-        // Message rows only: real query results are not problem reports.
-        if self.columns.len() != 1 || self.columns.first().map(String::as_str) != Some("message") {
-            return Vec::new();
-        }
-        self.rows
-            .iter()
-            .filter_map(|row| row.first().and_then(|v| v.as_str()))
-            .filter(|message| {
-                let trimmed = message.trim();
-                !trimmed.is_empty() && !SUCCESS_SHAPES.iter().any(|shape| has_shape(shape, trimmed))
-            })
-            .map(str::to_string)
-            .collect()
+        self.errors.iter().map(|e| e.message.clone()).collect()
     }
 }
 
@@ -166,6 +38,8 @@ type WsStream =
 
 pub struct Engine {
     stream: WsStream,
+    /// Id of the last request sent; its replies must echo it.
+    last_id: u64,
 }
 
 /// Transport-level failure: the socket is gone (closed, reset, or the server
@@ -209,7 +83,7 @@ pub fn ws_url(server: &str) -> String {
 impl Engine {
     pub async fn connect(server: &str, api_key: &str) -> Result<Self> {
         let url = ws_url(server);
-        let (mut stream, _) = tokio::time::timeout(
+        let (stream, _) = tokio::time::timeout(
             std::time::Duration::from_secs(10),
             tokio_tungstenite::connect_async(&url),
         )
@@ -217,86 +91,88 @@ impl Engine {
         .map_err(|_| anyhow!("connection timeout (10s): {url}"))?
         .with_context(|| format!("failed to connect to {url}"))?;
 
-        let auth = serde_json::to_string(&WsRequest::Authenticate {
-            api_key: api_key.to_string(),
-        })?;
-        stream.send(tungstenite::Message::Text(auth)).await?;
-
-        loop {
-            match Self::next_response(&mut stream).await? {
-                WsResponse::Authenticated {} => break,
-                WsResponse::AuthError { message } => bail!("authentication failed: {message}"),
-                _ => {}
-            }
+        let mut engine = Self { stream, last_id: 0 };
+        engine
+            .send(ClientFrame::Authenticate {
+                id: Some(RequestId::from(0)),
+                api_key: api_key.to_string(),
+            })
+            .await?;
+        // Engines before protocol v2 omit `protocol_version`, so their reply
+        // does not parse.
+        let reply = engine
+            .next_reply()
+            .await
+            .context("authenticate (the engine must speak /ws protocol v2)")?;
+        match reply {
+            ServerFrame::Authenticated { .. } => Ok(engine),
+            ServerFrame::AuthError { message, .. } => bail!("authentication failed: {message}"),
+            other => bail!("unexpected reply to authenticate: {other:?}"),
         }
-        Ok(Self { stream })
+    }
+
+    async fn send(&mut self, request: ClientFrame) -> Result<()> {
+        let text = serde_json::to_string(&request)?;
+        self.stream
+            .send(tungstenite::Message::Text(text))
+            .await
+            .map_err(|err| disconnected(format!("send failed: {err}")))
     }
 
     /// Execute a (possibly multi-statement) program and return the final result.
     pub async fn execute(&mut self, program: &str) -> Result<QueryResult> {
-        let req = serde_json::to_string(&WsRequest::Execute {
+        self.last_id += 1;
+        self.send(ClientFrame::Execute {
+            id: Some(RequestId::from(self.last_id)),
             program: program.to_string(),
-        })?;
-        self.stream
-            .send(tungstenite::Message::Text(req))
-            .await
-            .map_err(|err| disconnected(format!("send failed: {err}")))?;
+        })
+        .await?;
 
         let mut streamed: Option<QueryResult> = None;
         loop {
-            match Self::next_response(&mut self.stream).await? {
-                WsResponse::Result {
-                    columns,
-                    rows,
-                    proof_trees,
-                    errors,
-                } => {
+            match self.next_reply().await? {
+                ServerFrame::Result(result) => {
                     return Ok(QueryResult {
-                        columns,
-                        rows,
-                        proof_trees,
-                        errors,
+                        columns: result.columns,
+                        rows: result.rows,
+                        proof_trees: result.proof_trees.map(serde_json::Value::Array),
+                        errors: result.errors,
                     });
                 }
-                WsResponse::ResultStart { columns, errors } => {
+                ServerFrame::ResultStart(start) => {
                     streamed = Some(QueryResult {
-                        columns,
+                        columns: start.columns,
                         rows: Vec::new(),
-                        proof_trees: None,
-                        errors,
+                        proof_trees: start.proof_trees.map(serde_json::Value::Array),
+                        errors: start.errors,
                     });
                 }
-                WsResponse::ResultChunk { rows } => {
+                ServerFrame::ResultChunk { rows, .. } => {
                     if let Some(acc) = streamed.as_mut() {
                         acc.rows.extend(rows);
                     }
                 }
-                WsResponse::ResultEnd {} => {
+                ServerFrame::ResultEnd { .. } => {
                     if let Some(acc) = streamed.take() {
                         return Ok(acc);
                     }
                 }
-                WsResponse::Error {
+                ServerFrame::Error {
                     message,
                     validation_errors,
+                    ..
                 } => {
-                    // The global socket pushes connection-level errors that
-                    // are not responses to the in-flight request; treating
-                    // them as one fails the request spuriously.
-                    if message.starts_with("Missed ")
-                        || message.starts_with("Idle timeout")
-                        || message.starts_with("Connection lifetime")
-                    {
-                        continue;
-                    }
                     // Parse failures name the offending lines; without
                     // them "Program has N parse error(s)" is undebuggable.
                     match validation_errors {
-                        Some(details) if !details.is_null() => bail!("{message}: {details}"),
-                        _ => bail!("{message}"),
+                        Some(details) => {
+                            let details = serde_json::to_string(&details)?;
+                            bail!("{message}: {details}")
+                        }
+                        None => bail!("{message}"),
                     }
                 }
-                _ => {} // notifications, pongs: skip
+                other => bail!("unexpected reply to execute: {other:?}"),
             }
         }
     }
@@ -315,21 +191,39 @@ impl Engine {
         }
     }
 
-    async fn next_response(stream: &mut WsStream) -> Result<WsResponse> {
+    /// Next frame answering the last request. Pushes are skipped; a notice
+    /// is not an answer, and the one closing the connection fails the request
+    /// as a disconnect.
+    async fn next_reply(&mut self) -> Result<ServerFrame> {
         loop {
-            let frame = tokio::time::timeout(std::time::Duration::from_secs(120), stream.next())
-                .await
-                .map_err(|_| anyhow!("server response timeout (120s)"))?
-                .ok_or_else(|| disconnected("connection closed"))?
-                .map_err(|err| disconnected(format!("websocket error: {err}")))?;
-            match frame {
-                tungstenite::Message::Text(text) => {
-                    return serde_json::from_str(&text).context("unexpected server message");
-                }
+            let frame =
+                tokio::time::timeout(std::time::Duration::from_secs(120), self.stream.next())
+                    .await
+                    .map_err(|_| anyhow!("server response timeout (120s)"))?
+                    .ok_or_else(|| disconnected("connection closed"))?
+                    .map_err(|err| disconnected(format!("websocket error: {err}")))?;
+            let text = match frame {
+                tungstenite::Message::Text(text) => text,
                 tungstenite::Message::Close(_) => {
                     return Err(disconnected("connection closed by server"))
                 }
-                _ => {} // binary/ping/pong: skip
+                _ => continue, // binary/ping/pong: skip
+            };
+            let frame: ServerFrame =
+                serde_json::from_str(&text).context("unexpected server message")?;
+            match frame {
+                ServerFrame::Notice { code, message } if code.closes_connection() => {
+                    return Err(disconnected(message));
+                }
+                ServerFrame::Notice { .. } => {}
+                frame if frame.class() == FrameClass::Reply => {
+                    let expected = RequestId::from(self.last_id);
+                    if frame.request_id() != Some(&expected) {
+                        bail!("reply for another request (waiting for {expected}): {frame:?}");
+                    }
+                    return Ok(frame);
+                }
+                _ => {} // notifications and subscription pushes
             }
         }
     }
@@ -340,173 +234,25 @@ impl Engine {
 mod tests {
     use super::*;
 
-    fn messages(rows: &[&str], errors: Option<Vec<StatementError>>) -> QueryResult {
-        QueryResult {
-            columns: vec!["message".to_string()],
-            rows: rows.iter().map(|m| vec![serde_json::json!(m)]).collect(),
-            proof_trees: None,
-            errors,
-        }
-    }
-
-    /// Every message row the engine writes for a statement that succeeded.
-    const ENGINE_SUCCESSES: &[&str] = &[
-        "Inserted 2 fact(s) into 'edge'.",
-        "Deleted 1 facts from 'edge'.",
-        "Deleted 3 fact(s) from 'edge'.",
-        "Conditional delete: 4 fact(s) deleted from 'edge'.",
-        "Update: 1 deleted, 1 inserted.",
-        "Schema for 'person' registered with 2 columns (persistent)",
-        "Schema for 'person' registered with 2 columns (session)",
-        "Session fact added for 'edge'. (Use +edge(...) to persist)",
-        "Session rule added for 'path'.",
-        "Rule 'path' registered.",
-        "Rule 'path' dropped.",
-        "Rule 'path' cleared.",
-        "Rule 'path' deleted (last clause removed).",
-        "Clause 2 removed from rule 'path'.",
-        "Dropped 2 rule(s) with prefix 'tmp_': tmp_a, tmp_b",
-        "No rules matching prefix 'tmp_'.",
-        "Type 'Email' declared.",
-        "Relation 'edge' dropped.",
-        "Relation 'edge' is empty.",
-        "Cleared 5 fact(s) from 2 relation(s) with prefix 'tmp_': tmp_a (2), tmp_b (3)",
-        "No relations matching prefix 'tmp_'.",
-        "Knowledge graph 'kg2' created.",
-        "Knowledge graph 'kg2' dropped.",
-        "Switched to knowledge graph: kg2",
-        "Compaction complete.",
-        "Index 'emb_idx' created on doc.embedding (10 vectors).",
-        "Index 'emb_idx' dropped.",
-        "Index 'emb_idx' rebuilt (10 vectors).",
-        "installed retail@1.2.0 into default (12 statements)",
-        "digest sha256:abc123",
-        "recorded 3 rule(s), 4 relation(s) in pack_item",
-        "removed retail from default (3 rule(s), 4 relation(s))",
-        "  kept 1 item(s) shared with another installed pack",
-        "upgraded retail in default (dropped 3 old rule(s), data kept)",
-        "  Rule 'path' dropped.",
-    ];
-
-    /// Every message row the engine writes for a statement that failed.
-    const ENGINE_FAILURES: &[&str] = &[
-        "Relation 'edge' not found.",
-        "Rule 'path' not found.",
-        "Rule 'path' not found: Failed to drop rule: Rule 'path' not found",
-        "'path' not found as rule.",
-        "Knowledge graph 'kg2' not found: Knowledge graph not found: kg2",
-        "Arity mismatch for relation 'edge': existing arity is 2, but trying to insert tuples with arity 3",
-        "Cannot insert into 'derived': it is a derived relation (view). Use a base relation or drop the rule first with '.rule drop derived'.",
-        "Delete failed: I/O error: disk full",
-        "Update failed: Parse error: unknown relation",
-        "Failed to parse rule: unexpected token",
-        "Session rule '__s' uses reserved '__' prefix. Choose a different relation name.",
-        "Query execution failed: unsafe variable Y",
-        "Create failed: Knowledge graph already exists: kg2",
-        "Drop failed: Cannot drop the default knowledge graph",
-        "Cannot drop current knowledge graph. Switch to another first.",
-        "String value too long: 70000 bytes (max 65536)",
-        "Insert rejected for 'edge': 20000 tuples exceeds max 10000",
-        "Insert rejected for 'edge': arity mismatch",
-        "Failed to register schema for 'person': conflicting column types",
-        "Fact must have at least one argument",
-        "Delete error: unsupported term",
-        "Error: Failed to drop relation: Relation 'edge' not found.",
-        "Compaction error: I/O error: disk full",
-        "Debug error: unknown relation",
-        "Why error: no derivation",
-        "Why-not error: unknown relation",
-        "Index error: Index 'emb_idx' not found",
-        "Rule editing is not supported in server mode.",
-        "Agent commands require async context. Use the GUI chat panel.",
-        "Session commands require a WebSocket connection.",
-        "User/API key commands require a WebSocket connection with admin privileges.",
-        "KG ACL commands require a WebSocket connection with admin or owner privileges.",
-        ".ontology commands must be run as a standalone statement.",
-        ".subscribe and .unsubscribe are only available as standalone commands on the global /ws endpoint.",
-        "This command is client-only and not available via server API.",
-        "  warning: Relation 'pack_item' not found.",
-        "Relation 'edge' dropped. Rule 'path' not found.",
-        "Inserted 2 fact(s) into 'edge'. Insert rejected for 'b': arity mismatch",
-    ];
-
     #[test]
-    fn legacy_fallback_accepts_every_engine_success() {
-        for message in ENGINE_SUCCESSES {
-            let result = messages(&[message], None);
-            assert!(
-                result.soft_errors().is_empty(),
-                "flagged success: {message}"
-            );
-        }
-    }
-
-    #[test]
-    fn legacy_fallback_flags_every_engine_failure() {
-        for message in ENGINE_FAILURES {
-            let result = messages(&[message], None);
-            assert_eq!(
-                result.soft_errors(),
-                vec![message.to_string()],
-                "missed failure: {message}"
-            );
-        }
-    }
-
-    #[test]
-    fn legacy_fallback_flags_unknown_messages() {
-        let result = messages(&["Something new happened", ""], None);
-        assert_eq!(result.soft_errors(), vec!["Something new happened"]);
-    }
-
-    #[test]
-    fn structured_errors_are_authoritative() {
+    fn soft_errors_are_the_failed_statements() {
         let error = StatementError {
             index: 1,
-            code: "not_found".to_string(),
+            code: inputlayer_ws_protocol::ErrorCode::NotFound,
             message: "Rule 'path' not found.".to_string(),
         };
-        let result = messages(
-            &["Inserted 1 fact(s) into 'a'.", &error.message],
-            Some(vec![error.clone()]),
-        );
+        let result = QueryResult {
+            columns: vec!["message".to_string()],
+            rows: vec![vec![serde_json::json!("Inserted 1 fact(s) into 'a'.")]],
+            proof_trees: None,
+            errors: vec![error.clone()],
+        };
         assert_eq!(result.soft_errors(), vec![error.message]);
 
-        let result = messages(&["Something new happened"], Some(Vec::new()));
-        assert!(result.soft_errors().is_empty());
-    }
-
-    #[test]
-    fn query_rows_are_not_problems() {
         let result = QueryResult {
-            columns: vec!["x".to_string()],
-            rows: vec![vec![serde_json::json!("Rule 'p' not found.")]],
-            proof_trees: None,
-            errors: None,
+            errors: Vec::new(),
+            ..result
         };
         assert!(result.soft_errors().is_empty());
-    }
-
-    #[test]
-    fn result_frames_carry_errors() {
-        let frame = r#"{"type":"result","columns":["message"],"rows":[],
-            "errors":[{"index":1,"code":"validation","message":"String value too long"}]}"#;
-        let WsResponse::Result { errors, .. } = serde_json::from_str(frame).unwrap() else {
-            panic!("not a result");
-        };
-        assert_eq!(
-            errors,
-            Some(vec![StatementError {
-                index: 1,
-                code: "validation".to_string(),
-                message: "String value too long".to_string(),
-            }])
-        );
-
-        let frame = r#"{"type":"result","columns":[],"rows":[]}"#;
-        let WsResponse::Result { errors, .. } = serde_json::from_str(frame).unwrap() else {
-            panic!("not a result");
-        };
-        assert_eq!(errors, None);
     }
 }

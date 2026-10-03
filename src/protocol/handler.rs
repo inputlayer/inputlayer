@@ -29,6 +29,7 @@ use tracing::{debug, info, warn};
 use super::wire::{
     ColumnDef, ErrorCode, QueryResult, StatementError, WireDataType, WireTuple, WireValue,
 };
+pub use inputlayer_ws_protocol::{Notification, ValidationError};
 
 /// Result of transforming a `?shorthand` query, including sort and pagination annotations.
 pub(crate) struct QueryTransform {
@@ -91,17 +92,6 @@ const MAX_QUEUED_LOGINS: usize = 64;
 /// WebSocket handlers can detect this prefix to extract per-line error info.
 pub const VALIDATION_ERROR_PREFIX: &str = "VALIDATION_ERRORS:";
 
-/// A parse/validation error for a specific statement in a program.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ValidationError {
-    /// 1-based line number in the original program text
-    pub line: usize,
-    /// 0-based index of the statement (counting only non-empty lines)
-    pub statement_index: usize,
-    /// The parse error message
-    pub error: String,
-}
-
 /// A program that failed as a whole.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProgramError {
@@ -115,85 +105,6 @@ impl From<String> for ProgramError {
         Self {
             message,
             code: None,
-        }
-    }
-}
-
-/// Notification sent to WebSocket subscribers when persistent data changes.
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum PersistentNotification {
-    /// A base relation was updated (insert or delete)
-    PersistentUpdate {
-        knowledge_graph: String,
-        relation: String,
-        operation: String,
-        count: usize,
-        /// Epoch milliseconds when the change occurred (#40)
-        timestamp_ms: u64,
-        /// Session that triggered the change (None for API-key or system operations)
-        #[serde(skip_serializing_if = "Option::is_none")]
-        session_id: Option<String>,
-        /// Monotonic sequence number for dedup on reconnect (#39)
-        seq: u64,
-    },
-    /// A rule was registered or removed (#16)
-    RuleChange {
-        knowledge_graph: String,
-        rule_name: String,
-        /// "registered" or "removed" or "dropped"
-        operation: String,
-        timestamp_ms: u64,
-        /// Monotonic sequence number for dedup on reconnect (#39)
-        seq: u64,
-    },
-    /// A knowledge graph was created or dropped (#16)
-    KgChange {
-        knowledge_graph: String,
-        /// "created" or "dropped"
-        operation: String,
-        timestamp_ms: u64,
-        /// Monotonic sequence number for dedup on reconnect (#39)
-        seq: u64,
-    },
-    /// A schema change occurred (index created/dropped, relation dropped) (#16)
-    SchemaChange {
-        knowledge_graph: String,
-        entity: String,
-        /// "created" or "dropped"
-        operation: String,
-        timestamp_ms: u64,
-        /// Monotonic sequence number for dedup on reconnect (#39)
-        seq: u64,
-    },
-}
-
-impl PersistentNotification {
-    /// The knowledge graph the change happened in.
-    pub fn knowledge_graph(&self) -> &str {
-        match self {
-            Self::PersistentUpdate {
-                knowledge_graph, ..
-            }
-            | Self::RuleChange {
-                knowledge_graph, ..
-            }
-            | Self::KgChange {
-                knowledge_graph, ..
-            }
-            | Self::SchemaChange {
-                knowledge_graph, ..
-            } => knowledge_graph,
-        }
-    }
-
-    /// Get the sequence number of this notification.
-    pub fn seq(&self) -> u64 {
-        match self {
-            Self::PersistentUpdate { seq, .. }
-            | Self::RuleChange { seq, .. }
-            | Self::KgChange { seq, .. }
-            | Self::SchemaChange { seq, .. } => *seq,
         }
     }
 }
@@ -214,7 +125,7 @@ pub struct Handler {
     sessions: SessionManager,
     /// Broadcast channel for persistent data change notifications.
     /// WebSocket connections subscribe to receive push updates.
-    notify_tx: tokio::sync::broadcast::Sender<PersistentNotification>,
+    notify_tx: tokio::sync::broadcast::Sender<Notification>,
     /// Semaphore limiting concurrent DD computations.
     /// Prevents blocking-thread-pool explosion by capping CPU-bound parallelism
     /// at the hardware thread count. Tokio workers queue via async `acquire()`.
@@ -222,8 +133,7 @@ pub struct Handler {
     /// Monotonic sequence counter for notification dedup (#39).
     notification_seq: Arc<AtomicU64>,
     /// Bounded ring buffer of recent notifications for replay on reconnect (#39).
-    notification_buffer:
-        Arc<parking_lot::Mutex<std::collections::VecDeque<PersistentNotification>>>,
+    notification_buffer: Arc<parking_lot::Mutex<std::collections::VecDeque<Notification>>>,
     /// Accumulated timing histogram buckets for Prometheus export.
     timing_histograms: Arc<crate::execution::timing::TimingHistograms>,
     /// Teaching agent for guided onboarding.
@@ -293,12 +203,12 @@ fn now_ms() -> u64 {
 }
 
 /// Set the sequence number on a notification (all variants have a `seq` field).
-fn set_notification_seq(notif: &mut PersistentNotification, seq: u64) {
+fn set_notification_seq(notif: &mut Notification, seq: u64) {
     match notif {
-        PersistentNotification::PersistentUpdate { seq: s, .. }
-        | PersistentNotification::RuleChange { seq: s, .. }
-        | PersistentNotification::KgChange { seq: s, .. }
-        | PersistentNotification::SchemaChange { seq: s, .. } => *s = seq,
+        Notification::PersistentUpdate { seq: s, .. }
+        | Notification::RuleChange { seq: s, .. }
+        | Notification::KgChange { seq: s, .. }
+        | Notification::SchemaChange { seq: s, .. } => *s = seq,
     }
 }
 
@@ -412,13 +322,12 @@ mod guard_reentry_tests;
 struct QueryJob {
     storage: Arc<RwLock<StorageEngine>>,
     config: Arc<crate::Config>,
-    notify_tx: tokio::sync::broadcast::Sender<PersistentNotification>,
+    notify_tx: tokio::sync::broadcast::Sender<Notification>,
     insert_count: Arc<AtomicU64>,
     query_count: Arc<AtomicU64>,
     start_time: Instant,
     notification_seq: Arc<AtomicU64>,
-    notification_buffer:
-        Arc<parking_lot::Mutex<std::collections::VecDeque<PersistentNotification>>>,
+    notification_buffer: Arc<parking_lot::Mutex<std::collections::VecDeque<Notification>>>,
     timing_histograms: Arc<crate::execution::timing::TimingHistograms>,
 }
 
@@ -436,7 +345,7 @@ impl QueryJob {
     }
 
     /// Assign a seq number, buffer, and broadcast a notification.
-    fn send_notification(&self, mut notif: PersistentNotification) {
+    fn send_notification(&self, mut notif: Notification) {
         let seq = self.notification_seq.fetch_add(1, Ordering::Relaxed) + 1;
         set_notification_seq(&mut notif, seq);
         {
@@ -465,7 +374,7 @@ impl QueryJob {
         count: usize,
         session_id: Option<String>,
     ) {
-        self.send_notification(PersistentNotification::PersistentUpdate {
+        self.send_notification(Notification::PersistentUpdate {
             knowledge_graph: kg.to_string(),
             relation: relation.to_string(),
             operation: operation.to_string(),
@@ -477,7 +386,7 @@ impl QueryJob {
     }
 
     fn notify_rule_change(&self, kg: &str, rule_name: &str, operation: &str) {
-        self.send_notification(PersistentNotification::RuleChange {
+        self.send_notification(Notification::RuleChange {
             knowledge_graph: kg.to_string(),
             rule_name: rule_name.to_string(),
             operation: operation.to_string(),
@@ -487,7 +396,7 @@ impl QueryJob {
     }
 
     fn notify_kg_change(&self, kg: &str, operation: &str) {
-        self.send_notification(PersistentNotification::KgChange {
+        self.send_notification(Notification::KgChange {
             knowledge_graph: kg.to_string(),
             operation: operation.to_string(),
             timestamp_ms: now_ms(),
@@ -496,7 +405,7 @@ impl QueryJob {
     }
 
     fn notify_schema_change(&self, kg: &str, entity: &str, operation: &str) {
-        self.send_notification(PersistentNotification::SchemaChange {
+        self.send_notification(Notification::SchemaChange {
             knowledge_graph: kg.to_string(),
             entity: entity.to_string(),
             operation: operation.to_string(),
@@ -847,14 +756,12 @@ impl Handler {
 
     /// Subscribe to persistent data change notifications.
     /// Returns a broadcast receiver for push updates.
-    pub fn subscribe_notifications(
-        &self,
-    ) -> tokio::sync::broadcast::Receiver<PersistentNotification> {
+    pub fn subscribe_notifications(&self) -> tokio::sync::broadcast::Receiver<Notification> {
         self.notify_tx.subscribe()
     }
 
     /// Assign a seq number, buffer, and broadcast a notification.
-    fn send_notification(&self, mut notif: PersistentNotification) {
+    fn send_notification(&self, mut notif: Notification) {
         let seq = self.notification_seq.fetch_add(1, Ordering::Relaxed) + 1;
         set_notification_seq(&mut notif, seq);
         {
@@ -879,7 +786,7 @@ impl Handler {
         operation: &str,
         count: usize,
     ) {
-        self.send_notification(PersistentNotification::PersistentUpdate {
+        self.send_notification(Notification::PersistentUpdate {
             knowledge_graph: kg.to_string(),
             relation: relation.to_string(),
             operation: operation.to_string(),
@@ -892,7 +799,7 @@ impl Handler {
 
     /// Send a rule change notification.
     pub fn notify_rule_change(&self, kg: &str, rule_name: &str, operation: &str) {
-        self.send_notification(PersistentNotification::RuleChange {
+        self.send_notification(Notification::RuleChange {
             knowledge_graph: kg.to_string(),
             rule_name: rule_name.to_string(),
             operation: operation.to_string(),
@@ -903,7 +810,7 @@ impl Handler {
 
     /// Send a knowledge graph change notification.
     pub fn notify_kg_change(&self, kg: &str, operation: &str) {
-        self.send_notification(PersistentNotification::KgChange {
+        self.send_notification(Notification::KgChange {
             knowledge_graph: kg.to_string(),
             operation: operation.to_string(),
             timestamp_ms: now_ms(),
@@ -913,7 +820,7 @@ impl Handler {
 
     /// Send a schema change notification.
     pub fn notify_schema_change(&self, kg: &str, entity: &str, operation: &str) {
-        self.send_notification(PersistentNotification::SchemaChange {
+        self.send_notification(Notification::SchemaChange {
             knowledge_graph: kg.to_string(),
             entity: entity.to_string(),
             operation: operation.to_string(),
@@ -924,7 +831,7 @@ impl Handler {
 
     /// Get buffered notifications with sequence number > `since_seq`.
     /// Returns notifications in order. Used for replay on WS reconnect (#39).
-    pub fn get_notifications_since(&self, since_seq: u64) -> Vec<PersistentNotification> {
+    pub fn get_notifications_since(&self, since_seq: u64) -> Vec<Notification> {
         let buf = self.notification_buffer.lock();
         buf.iter()
             .filter(|n| n.seq() > since_seq)
@@ -6181,7 +6088,7 @@ mod tests {
         handler.notify_persistent_update("test_kg", "edge", "insert", 5);
 
         match rx.try_recv() {
-            Ok(PersistentNotification::PersistentUpdate {
+            Ok(Notification::PersistentUpdate {
                 knowledge_graph,
                 relation,
                 operation,
@@ -7292,7 +7199,7 @@ mod tests {
             .await
             .expect("query execution failed");
         match rx.try_recv() {
-            Ok(PersistentNotification::PersistentUpdate {
+            Ok(Notification::PersistentUpdate {
                 operation, count, ..
             }) => {
                 assert_eq!(operation, "insert");
@@ -7321,7 +7228,7 @@ mod tests {
             .await
             .expect("query execution failed");
         match rx.try_recv() {
-            Ok(PersistentNotification::PersistentUpdate {
+            Ok(Notification::PersistentUpdate {
                 operation, count, ..
             }) => {
                 assert_eq!(operation, "delete");
@@ -7645,7 +7552,7 @@ mod tests {
 
     #[test]
     fn test_persistent_notification_serialize() {
-        let notif = PersistentNotification::PersistentUpdate {
+        let notif = Notification::PersistentUpdate {
             knowledge_graph: "test".to_string(),
             relation: "edge".to_string(),
             operation: "insert".to_string(),

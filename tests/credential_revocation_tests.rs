@@ -199,7 +199,8 @@ impl Client {
 /// The frames a revoked connection receives: only the notice, then close.
 fn assert_revoked(frames: &[Value]) {
     assert_eq!(frames.len(), 1, "{frames:?}");
-    assert_eq!(frames[0]["type"], "error");
+    assert_eq!(frames[0]["type"], "notice");
+    assert_eq!(frames[0]["code"], "credential_revoked");
     assert_eq!(frames[0]["message"], REVOKED);
 }
 

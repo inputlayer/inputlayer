@@ -75,6 +75,7 @@ class ScriptedEngine {
               knowledge_graph: 'other',
               version: 'test',
               role: 'admin',
+              protocol_version: 2,
             }),
           );
           return;
@@ -158,6 +159,34 @@ describe('error frames', () => {
     const err = (await kg.execute('?demo(X)').catch((e: unknown) => e)) as QueryError;
     expect(err).toBeInstanceOf(QueryError);
     expect(err.code).toBeUndefined();
+  });
+
+  it('notices and subscription pushes do not answer a call', async () => {
+    const kg = await kgOn([
+      { type: 'notice', code: 'notifications_missed', message: 'Missed 2 notification(s)' },
+      {
+        type: 'subscription_delta',
+        subscription: 's',
+        generation: 1,
+        knowledge_graph: 'default',
+        seq: 1,
+        columns: ['x'],
+        inserted: [[9]],
+        retracted: [],
+      },
+      { type: 'subscription_error', subscription: 's', generation: 1, message: 'boom' },
+      {
+        type: 'result',
+        columns: ['x'],
+        rows: [[1]],
+        row_count: 1,
+        total_count: 1,
+        truncated: false,
+        execution_time_ms: 0,
+        errors: [],
+      },
+    ]);
+    expect((await kg.execute('?demo(X)')).toTuples()).toEqual([[1]]);
   });
 
   it('a relation named error is data', async () => {

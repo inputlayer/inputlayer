@@ -81,11 +81,14 @@
 <h2 id="lifecycle">Connection Lifecycle</h2>
 <ol class="steps">
   <li>Client connects to <code>/ws?kg=&lt;name&gt;</code></li>
-  <li>Server auto-creates a session and sends a <code>connected</code> message</li>
+  <li>Client sends <code>login</code> or <code>authenticate</code>; the server creates a session and answers <code>authenticated</code> (with <code>protocol_version</code>, currently 2) or <code>auth_error</code></li>
   <li>Client sends <code>execute</code> messages, server responds with <code>result</code> or <code>error</code></li>
-  <li>Server may push change notifications (<code>persistent_update</code>, ...) and <code>subscription_delta</code> messages when persistent data changes in the session's KG</li>
+  <li>Server may push change notifications (<code>persistent_update</code>, ...), <code>subscription_delta</code> messages and connection <code>notice</code>s</li>
   <li>Client disconnects &rarr; server auto-closes the session</li>
 </ol>
+
+<h3 id="request-ids">Request IDs</h3>
+<p>Any request may carry an <code>id</code> (a non-empty string of at most 64 bytes). Every frame answering it &mdash; <code>authenticated</code>, <code>auth_error</code>, <code>result</code>, <code>result_start</code>, <code>result_chunk</code>, <code>result_end</code>, <code>error</code>, <code>pong</code> &mdash; echoes it. Pushes and notices never carry an <code>id</code>, so they cannot be mistaken for a reply. A malformed request (or one whose <code>id</code> is invalid or given twice) gets exactly one <code>error</code> with code <code>invalid_request</code>, carrying the <code>id</code> when it could be read; the connection stays usable.</p>
 
 <h2 id="client-messages">Client &rarr; Server Messages</h2>
 
@@ -98,9 +101,10 @@
     <p>Execute any Datalog statement or meta command as raw text.</p>
     <table class="field-table">
       <tr><td>type</td><td>string</td><td>Always <code>"execute"</code></td></tr>
+      <tr><td>id</td><td>string?</td><td>Request id, echoed on every reply</td></tr>
       <tr><td>program</td><td>string</td><td>The Datalog statement or meta command</td></tr>
     </table>
-    <pre><code>{"type": "execute", "program": "?edge(X, Y)"}</code></pre>
+    <pre><code>{"type": "execute", "id": "7", "program": "?edge(X, Y)"}</code></pre>
   </div>
 </div>
 
@@ -111,7 +115,7 @@
   </div>
   <div class="msg-card-body">
     <p>Keep-alive ping. Server responds with <code>pong</code>.</p>
-    <pre><code>{"type": "ping"}</code></pre>
+    <pre><code>{"type": "ping", "id": "8"}</code></pre>
   </div>
 </div>
 
@@ -120,16 +124,21 @@
 <div class="msg-card">
   <div class="msg-card-header">
     <span class="badge badge-recv">RECV</span>
-    <h4>connected</h4>
+    <h4>authenticated</h4>
   </div>
   <div class="msg-card-body">
-    <p>Sent immediately after connection, confirming session creation.</p>
+    <p>Answers a successful <code>login</code> or <code>authenticate</code>, confirming session creation.</p>
     <table class="field-table">
-      <tr><td>type</td><td>string</td><td>Always <code>"connected"</code></td></tr>
-      <tr><td>session_id</td><td>integer</td><td>Auto-created session ID</td></tr>
+      <tr><td>type</td><td>string</td><td>Always <code>"authenticated"</code></td></tr>
+      <tr><td>id</td><td>string?</td><td>The request's id</td></tr>
+      <tr><td>session_id</td><td>string</td><td>Auto-created session ID</td></tr>
       <tr><td>knowledge_graph</td><td>string</td><td>Initial knowledge graph binding</td></tr>
+      <tr><td>version</td><td>string</td><td>Engine version</td></tr>
+      <tr><td>role</td><td>string</td><td>Role of the credential</td></tr>
+      <tr><td>protocol_version</td><td>integer</td><td>Version of this protocol (2)</td></tr>
     </table>
-    <pre><code>{"type": "connected", "session_id": 42, "knowledge_graph": "default"}</code></pre>
+    <pre><code>{"type": "authenticated", "id": "1", "session_id": "42", "knowledge_graph": "default",
+ "version": "0.1.0", "role": "admin", "protocol_version": 2}</code></pre>
   </div>
 </div>
 
@@ -142,6 +151,7 @@
     <p>Command or query execution result.</p>
     <table class="field-table">
       <tr><td>type</td><td>string</td><td>Always <code>"result"</code></td></tr>
+      <tr><td>id</td><td>string?</td><td>The request's id</td></tr>
       <tr><td>columns</td><td>string[]</td><td>Column names from result schema</td></tr>
       <tr><td>rows</td><td>any[][]</td><td>Result rows</td></tr>
       <tr><td>row_count</td><td>integer</td><td>Number of rows returned</td></tr>
@@ -151,9 +161,11 @@
       <tr><td>row_provenance</td><td>string[]</td><td>Per-row source: <code>"persistent"</code>, <code>"ephemeral"</code>, or <code>"unknown"</code></td></tr>
       <tr><td>metadata</td><td>object?</td><td>Session query metadata (if applicable)</td></tr>
       <tr><td>switched_kg</td><td>string?</td><td>Present when KG was switched (e.g. after <code>.kg use</code>)</td></tr>
+      <tr><td>errors</td><td>array</td><td>Failed statements (<code>{"index", "code", "message"}</code>); empty when all succeeded</td></tr>
+      <tr><td>subscribed</td><td>object?</td><td>On a <code>.subscribe</code> reply: <code>{"subscription", "generation"}</code></td></tr>
     </table>
-    <pre><code>{"type": "result", "columns": ["col0", "col1"], "rows": [[1, 2], [3, 4]],
- "row_count": 2, "total_count": 2, "truncated": false, "execution_time_ms": 5}</code></pre>
+    <pre><code>{"type": "result", "id": "7", "columns": ["col0", "col1"], "rows": [[1, 2], [3, 4]],
+ "row_count": 2, "total_count": 2, "truncated": false, "execution_time_ms": 5, "errors": []}</code></pre>
   </div>
 </div>
 
@@ -163,12 +175,14 @@
     <h4>error</h4>
   </div>
   <div class="msg-card-body">
-    <p>Error response.</p>
+    <p>A request failed as a whole. Always a reply; connection events are <code>notice</code>s.</p>
     <table class="field-table">
       <tr><td>type</td><td>string</td><td>Always <code>"error"</code></td></tr>
+      <tr><td>id</td><td>string?</td><td>The request's id, when it could be read</td></tr>
       <tr><td>message</td><td>string</td><td>Human-readable error message</td></tr>
+      <tr><td>code</td><td>string?</td><td><code>validation</code>, <code>not_found</code>, <code>conflict</code>, <code>unsupported</code>, <code>internal</code>, <code>invalid_request</code> or <code>rate_limited</code></td></tr>
     </table>
-    <pre><code>{"type": "error", "message": "Knowledge graph 'missing' not found"}</code></pre>
+    <pre><code>{"type": "error", "id": "7", "message": "Knowledge graph 'missing' not found", "code": "not_found"}</code></pre>
   </div>
 </div>
 
@@ -179,7 +193,22 @@
   </div>
   <div class="msg-card-body">
     <p>Response to a <code>ping</code> message.</p>
-    <pre><code>{"type": "pong"}</code></pre>
+    <pre><code>{"type": "pong", "id": "8"}</code></pre>
+  </div>
+</div>
+
+<div class="msg-card">
+  <div class="msg-card-header">
+    <span class="badge badge-recv">RECV</span>
+    <h4>notice</h4>
+  </div>
+  <div class="msg-card-body">
+    <p>A connection event, sent unprompted and never with an <code>id</code>. Every code but <code>notifications_missed</code> is followed by the server closing the connection.</p>
+    <table class="field-table">
+      <tr><td>code</td><td>string</td><td><code>notifications_missed</code>, <code>slow_consumer</code>, <code>idle_timeout</code>, <code>lifetime_exceeded</code>, <code>auth_timeout</code>, <code>credential_revoked</code> or <code>server_shutdown</code></td></tr>
+      <tr><td>message</td><td>string</td><td>Human-readable description</td></tr>
+    </table>
+    <pre><code>{"type": "notice", "code": "idle_timeout", "message": "Idle timeout"}</code></pre>
   </div>
 </div>
 
@@ -212,15 +241,16 @@
   <div class="msg-card-body">
     <p>Change to a standing query's result (after <code>.subscribe &lt;id&gt; ?&lt;query&gt;</code>). Set semantics; persistent data only.</p>
     <table class="field-table">
-      <tr><td>subscription</td><td>string</td><td>Client-chosen id</td></tr>
+      <tr><td>subscription</td><td>string</td><td>Client-chosen name</td></tr>
+      <tr><td>generation</td><td>integer</td><td>The registration it belongs to, as in the <code>.subscribe</code> reply's <code>subscribed</code></td></tr>
       <tr><td>knowledge_graph</td><td>string</td><td>KG the subscription is bound to</td></tr>
       <tr><td>seq</td><td>integer</td><td>Per-subscription delta number, starting at 1</td></tr>
       <tr><td>columns</td><td>array</td><td>Column names</td></tr>
       <tr><td>inserted</td><td>array</td><td>Rows now in the result (sorted)</td></tr>
       <tr><td>retracted</td><td>array</td><td>Rows no longer in the result (sorted)</td></tr>
     </table>
-    <pre><code>{"type": "subscription_delta", "subscription": "late", "knowledge_graph": "default",
- "seq": 1, "columns": ["Order"], "inserted": [[1042]], "retracted": []}</code></pre>
+    <pre><code>{"type": "subscription_delta", "subscription": "late", "generation": 1,
+ "knowledge_graph": "default", "seq": 1, "columns": ["Order"], "inserted": [[1042]], "retracted": []}</code></pre>
   </div>
 </div>
 
@@ -231,7 +261,7 @@
   </div>
   <div class="msg-card-body">
     <p>Re-evaluation of a standing query failed. The subscription stays registered.</p>
-    <pre><code>{"type": "subscription_error", "subscription": "late", "message": "Access denied"}</code></pre>
+    <pre><code>{"type": "subscription_error", "subscription": "late", "generation": 1, "message": "Access denied"}</code></pre>
   </div>
 </div>
 
