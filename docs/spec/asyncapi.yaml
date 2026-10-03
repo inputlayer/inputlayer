@@ -1045,7 +1045,8 @@ components:
         reconnect (see the `last_seq` and `epoch` query params).
         A session receives changes to its own knowledge graph; `kg_change` for
         other knowledge graphs is sent to admin sessions only. Changes to
-        `_internal` are never sent. Replay applies the same rules.
+        `_internal` are never sent, nor changes to a knowledge graph the user's
+        access to was revoked (`.kg acl revoke`). Replay applies the same rules.
       properties:
         type:
           type: string

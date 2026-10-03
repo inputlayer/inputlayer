@@ -181,6 +181,23 @@ impl Client {
     }
 
     /// Frames before the persistent update of `relation` in `shared`.
+    /// Frames until the first of type `kind`; returns those before it and it.
+    async fn frames_until(&mut self, kind: &str) -> (Vec<Value>, Value) {
+        let mut frames = Vec::new();
+        loop {
+            let frame = self.recv().await.expect("closed");
+            if frame["type"] == kind {
+                return (frames, frame);
+            }
+            frames.push(frame);
+        }
+    }
+
+    /// The next frame of type `kind`, skipping others.
+    async fn next_push_of(&mut self, kind: &str) -> Value {
+        self.frames_until(kind).await.1
+    }
+
     async fn frames_before_update_of(&mut self, relation: &str) -> Vec<Value> {
         let mut frames = Vec::new();
         loop {
@@ -498,4 +515,45 @@ async fn revocation_during_a_proof_withholds_it() {
     tokio::time::sleep(evaluation / 4).await;
     server.handler.handle_apikey_revoke("bob-why").unwrap();
     assert_revoked(&client.drain().await);
+}
+
+/// Revoking a user's access to a knowledge graph stops its change
+/// notifications and subscription rows at once, although the connection's
+/// credential stays valid; a new grant lets them through again.
+#[tokio::test(flavor = "multi_thread")]
+async fn kg_access_revocation_stops_pushes_on_a_live_connection() {
+    let server = start_server().await;
+    let key = server.key("bob-acl", "bob");
+    let mut bob = Client::connect(&server, Login::Key(&key)).await;
+    let reply = bob.execute(".subscribe d ?d(X)").await;
+    assert_eq!(reply["type"], "result", "{reply}");
+
+    server.write("+d[(1,)]").await;
+    let delta = bob.next_push_of("subscription_delta").await;
+    assert_eq!(delta["inserted"], json!([[1]]), "{delta}");
+
+    // Revoked: the write's notification is withheld, and the re-evaluation
+    // it triggers fails; regranting only after that keeps the order exact.
+    server.handler.handle_kg_acl_revoke(KG, "bob").unwrap();
+    server.write("+d[(2,)]").await;
+    let (withheld, error) = bob.frames_until("subscription_error").await;
+    assert!(
+        error["message"].as_str().unwrap().contains("Access denied"),
+        "{error}"
+    );
+    server
+        .handler
+        .handle_kg_acl_grant(KG, "bob", "viewer")
+        .unwrap();
+    server.write("+marker[(1,)]").await;
+    let mut frames = withheld;
+    frames.extend(bob.frames_before_update_of("marker").await);
+    let leaked: Vec<_> = frames
+        .iter()
+        .filter(|f| f["type"] == "persistent_update" || f["type"] == "subscription_delta")
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "pushed while access was revoked: {leaked:?}"
+    );
 }

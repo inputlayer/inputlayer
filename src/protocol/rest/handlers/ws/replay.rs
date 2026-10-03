@@ -7,8 +7,9 @@
 //! `replay_gap` notice instead and must re-read the state it tracks; nothing
 //! is ever replayed from a different engine run.
 //!
-//! Replayed frames pass the same credential fence as live ones, so a
-//! credential revoked during the replay stops it at the next frame.
+//! Replayed frames pass the same credential fence and knowledge graph access
+//! check as live ones, so access revoked during the replay stops the frames
+//! that follow.
 //!
 //! [`NotificationLog::resume`]: crate::protocol::notification_log::NotificationLog::resume
 
@@ -26,7 +27,7 @@ pub(super) async fn send_replay<S: Sink<axum::extract::ws::Message> + Unpin>(
     sender: &mut Outbound<S>,
     last_seq: u64,
     replay: Result<Vec<Notification>, ReplayGap>,
-    visible: impl Fn(&Notification) -> bool,
+    mut visible: impl FnMut(&Notification) -> bool,
 ) -> bool {
     let notifications = match replay {
         Ok(notifications) => notifications,

@@ -33,11 +33,13 @@ use inputlayer_ws_protocol::{
 use serde::Deserialize;
 use tracing::{debug, info, warn, Instrument};
 
+mod access;
 mod auth;
 mod execute;
 mod outbound;
 mod replay;
 
+use access::KgReadAccess;
 use outbound::Outbound;
 
 use crate::auth::{Principal, Role, INTERNAL_KG};
@@ -314,6 +316,9 @@ async fn handle_global_ws_connection(
     let mut subscriptions =
         ConnectionSubscriptions::new(Arc::clone(&handler), Some(principal.clone()));
 
+    // Read access to the KG of each pushed frame, re-checked when ACLs change.
+    let mut kg_access = KgReadAccess::default();
+
     // Missed notifications on reconnect, then live ones without overlap.
     let Resumed {
         replay,
@@ -324,7 +329,10 @@ async fn handle_global_ws_connection(
             .session_manager()
             .with_session(&session_id, |s| s.knowledge_graph.clone())
             .unwrap_or_default();
-        let visible = |n: &Notification| notification_visible(n, &session_kg, &principal);
+        let visible = |n: &Notification| {
+            notification_visible(n, &session_kg, &principal)
+                && kg_access.allows(&handler, &principal, n.knowledge_graph())
+        };
         if !replay::send_replay(&mut sender, cursor.last_seq, replay, visible).await {
             if let Err(e) = handler.close_session(&session_id) {
                 tracing::warn!(error = %e, "session_cleanup_failed");
@@ -462,6 +470,7 @@ async fn handle_global_ws_connection(
             // Standing-query evaluation finished
             completion = subscriptions.next_completion() => {
                 if let Some(push) = subscriptions.on_completion(completion) {
+                    let push = kg_access.fence(&handler, &principal, push);
                     if !send_subscription_push(&mut sender, push).await {
                         break;
                     }
@@ -480,6 +489,7 @@ async fn handle_global_ws_connection(
                         };
                         subscriptions.on_notification(&notif);
                         if notification_visible(&notif, &session_kg, &principal)
+                            && kg_access.allows(&handler, &principal, notif.knowledge_graph())
                             && !sender.send_frame(&ServerFrame::Notification(notif)).await
                         {
                             break;

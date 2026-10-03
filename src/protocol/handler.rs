@@ -152,6 +152,8 @@ pub struct Handler {
     login_queue: Arc<tokio::sync::Semaphore>,
     /// Live users and API keys; sessions hold principals issued from it.
     credentials: crate::auth::CredentialRegistry,
+    /// Bumped after every change to the KG access lists (`kg_acls`).
+    kg_acl_generation: AtomicU64,
 }
 
 /// `.index` command implementations shared by `Handler` and `QueryJob`.
@@ -662,6 +664,7 @@ impl Handler {
             password_permits: Arc::new(tokio::sync::Semaphore::new((ncpu / 4).clamp(1, 4))),
             login_queue: Arc::new(tokio::sync::Semaphore::new(MAX_QUEUED_LOGINS)),
             credentials: crate::auth::CredentialRegistry::default(),
+            kg_acl_generation: AtomicU64::new(0),
         }
     }
 
@@ -701,6 +704,7 @@ impl Handler {
             password_permits: Arc::new(tokio::sync::Semaphore::new((ncpu / 4).clamp(1, 4))),
             login_queue: Arc::new(tokio::sync::Semaphore::new(MAX_QUEUED_LOGINS)),
             credentials: crate::auth::CredentialRegistry::default(),
+            kg_acl_generation: AtomicU64::new(0),
         }
     }
 
@@ -1352,6 +1356,7 @@ impl Handler {
                 .collect();
             if !to_delete.is_empty() {
                 let _ = storage.delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_delete);
+                self.kg_acls_changed();
             }
         }
 
@@ -1753,9 +1758,9 @@ impl Handler {
         }
 
         if !to_remove.is_empty() {
-            storage
-                .delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove)
-                .map_err(|e| format!("Failed to update ACL: {e}"))?;
+            let removed = storage.delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove);
+            self.kg_acls_changed();
+            removed.map_err(|e| format!("Failed to update ACL: {e}"))?;
         }
 
         // Insert new ACL entry
@@ -1764,14 +1769,25 @@ impl Handler {
             Value::String(username.to_string().into()),
             Value::String(role.to_lowercase().into()),
         ]);
-        storage
-            .insert_tuples_into(auth::INTERNAL_KG, "kg_acls", vec![tuple])
-            .map_err(|e| format!("Failed to grant ACL: {e}"))?;
+        let granted = storage.insert_tuples_into(auth::INTERNAL_KG, "kg_acls", vec![tuple]);
+        self.kg_acls_changed();
+        granted.map_err(|e| format!("Failed to grant ACL: {e}"))?;
 
         tracing::info!(kg = kg_name, user = username, role, "audit_kg_acl_granted");
         Ok(format!(
             "Granted '{role}' access on '{kg_name}' to '{username}'."
         ))
+    }
+
+    /// Count a change to the KG access lists, after it is visible.
+    fn kg_acls_changed(&self) {
+        self.kg_acl_generation.fetch_add(1, Ordering::Release);
+    }
+
+    /// Changes so far to the KG access lists: a reader that saw a value and
+    /// sees it again knows no grant or revocation happened in between.
+    pub fn kg_acl_generation(&self) -> u64 {
+        self.kg_acl_generation.load(Ordering::Acquire)
     }
 
     /// Revoke a user's access to a knowledge graph.
@@ -1804,9 +1820,9 @@ impl Handler {
             ));
         }
 
-        storage
-            .delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove)
-            .map_err(|e| format!("Failed to revoke ACL: {e}"))?;
+        let revoked = storage.delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove);
+        self.kg_acls_changed();
+        revoked.map_err(|e| format!("Failed to revoke ACL: {e}"))?;
 
         tracing::info!(kg = kg_name, user = username, "audit_kg_acl_revoked");
         Ok(format!("Revoked access on '{kg_name}' from '{username}'."))
@@ -1839,6 +1855,7 @@ impl Handler {
         if !to_remove.is_empty() {
             let count = to_remove.len();
             let _ = storage.delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove);
+            self.kg_acls_changed();
             tracing::info!(kg = kg_name, count, "audit_kg_acls_cleaned_up");
         }
     }

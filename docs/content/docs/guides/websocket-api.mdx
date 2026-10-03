@@ -259,7 +259,7 @@ Session rules are automatically included when querying:
 
 ## Notifications
 
-The server pushes notifications when persistent data changes in the session's knowledge graph. `kg_change` notifications for other knowledge graphs go to admin sessions only, and changes to the internal `_internal` knowledge graph are never sent. Replay on reconnect (`last_seq` with `epoch`) applies the same rules.
+The server pushes notifications when persistent data changes in the session's knowledge graph. `kg_change` notifications for other knowledge graphs go to admin sessions only, and changes to the internal `_internal` knowledge graph are never sent. Replay on reconnect (`last_seq` with `epoch`) applies the same rules. Revoking a user's access to the knowledge graph (`.kg acl revoke`) stops its notifications and subscription deltas on live connections at once; a delta withheld this way is replaced by a `subscription_error`, and its `seq` is skipped, so resubscribe once access is restored.
 
 ### Persistent Update
 
