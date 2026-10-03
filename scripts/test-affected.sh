@@ -82,8 +82,9 @@ for cat in $CATEGORIES; do
 done
 echo ""
 
-# Build filter pattern (grep OR of categories)
-FILTER=$(echo "$CATEGORIES" | tr ' ' '\n' | grep -v '^$' | paste -sd'|' -)
+# Build filter pattern: run_snapshot_tests.sh filters with basic grep, where
+# alternation is \|
+FILTER=$(echo "$CATEGORIES" | tr ' ' '\n' | grep -v '^$' | paste -sd'|' - | sed 's/|/\\|/g')
 
 # Run affected tests
 exec "$SCRIPT_DIR/run_snapshot_tests.sh" -f "$FILTER"

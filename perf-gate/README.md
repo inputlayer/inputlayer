@@ -2,8 +2,9 @@
 
 `make perf-gate` measures this tree's `inputlayer-server` against the
 **approved baseline** on the same host, over the real `/ws` protocol, and
-exits zero only when no required metric is worse than its budget. Run it
-for every implementation PR and attach the report to the PR record. Changes
+exits zero only when no required metric is worse than its budget. It runs
+before every push to a PR as the last step of `make pre-pr`, after the fast checks;
+attach the report to the PR record. Changes
 that do not touch the runtime still record the run, as evidence that runtime
 is unchanged. Being test-only or off the hot path is a statement in the
 record, not an exemption.
@@ -50,7 +51,7 @@ The report lands in `target/perf-gate/latest/report.md`. Next to it are
 | `bound_query` | warm `?reach(1, Y)` (transitive closure, Magic Sets), same graph: 150 serial, 8 x 25 | same |
 | `insert_single` | 200 durable `+event(i, i)` serial, then 4 writers x 50 | `ack_us`, `concurrent_ack_us`, `facts_per_sec`, `concurrent_facts_per_sec` |
 | `insert_batch` | 20 durable batches of 1,000 facts | `ack_us`, `facts_per_sec` |
-| `delta_single` | 1 agent subscribed to `?two_hop(1, Z)` on 2.5K nodes / 10K edges; an external writer, open loop, every 20 ms, 150 writes | `delta_us` (writer send to delta at agent), `last_agent_us`, `ack_us`, `subscribe_us` |
+| `delta_single` | 1 agent subscribed to `?two_hop(1, Z)` on 2.5K nodes / 10K edges; an external writer, open loop, every 20 ms, 150 writes | `delta_us` (scheduled write to delta at agent), `last_agent_us`, `ack_us`, `subscribe_us` |
 | `delta_fanout` | 64 agents on the same query, a write every 80 ms, 100 writes | same |
 | `delta_first` | 40 fresh agents, one after another, on the `delta_single` graph: each subscribes and the writer inserts a probe at once, then another after the agent has been quiet for 100 ms | `first_delta_us` (first write after subscribing, send to delta), `warm_delta_us` (the later write), `subscribe_us` |
 | `interference` | 1 probe agent while another connection loops a long join (`?two_hop(X, Z), edge(Z, X)`) and a slow consumer stops reading with large results pending; a write every 30 ms, 120 writes | `delta_us`, `ack_us`, `long_request_us` |
@@ -60,9 +61,11 @@ Each fixture also records `server_peak_rss_kb`.
 In the delta fixtures, each write inserts `edge(1, P_k)`. That adds exactly
 the row `two_hop(1, Q_k)`. The same write retracts the probe inserted 32
 writes earlier, so the result size stays bounded and every retraction is
-measured as well. The writer runs open loop on a fixed schedule, so a slow
-server cannot hide latency by slowing the writer down (no coordinated
-omission).
+measured as well. Delta and interference writers send on a fixed schedule
+independently of acknowledgement collection. Both acknowledgement and delta
+latency start at the scheduled write time, including any delay from socket
+backpressure or task scheduling (no coordinated omission). The run-file schema
+remains `inputlayer-perf-gate/v1`.
 
 `delta_first` instead writes right after each subscription, the moment a
 reactive agent's first change typically follows it. Its first delta must
@@ -198,7 +201,10 @@ Per scenario, on a fresh server with the gate's configuration:
 Memory is `/proc` RSS after load, after subscribing and at the end, plus
 peak RSS. Throughput is `load_statements` (seed statements per second of
 cold load) and `converged_mutations` (mutations per second of send-to-
-converged time, one serial writer).
+converged time, one serial writer). Convergence requires a successful, complete
+re-query for every subscription and a matching maintained answer without a
+subscription error. Missing ground truth (including truncated re-queries) never
+counts as convergence or contributes a convergence latency sample.
 
 The summary lists the reactive-path categories first (multiple supports and
 retraction, change impact, event replay, conversation revisions, change

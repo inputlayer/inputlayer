@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{SinkExt, Stream, StreamExt};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::net::TcpStream;
@@ -153,29 +153,44 @@ impl Client {
 
     /// Wait for the reply to the oldest outstanding `execute`.
     pub async fn reply(&mut self) -> Result<Reply> {
-        loop {
-            let Stamped { at, frame } = self.next().await?;
-            match frame {
-                Frame::Result {
-                    row_count,
-                    truncated,
-                    errors,
-                } => {
-                    check_complete(truncated, &errors)?;
-                    return Ok(Reply { at, row_count });
-                }
-                Frame::ResultStart { truncated, errors } => check_complete(truncated, &errors)?,
-                Frame::ResultEnd { row_count } => return Ok(Reply { at, row_count }),
-                Frame::Error { message } => bail!("server error: {message}"),
-                frame @ (Frame::SubscriptionDelta { .. } | Frame::SubscriptionError { .. }) => {
-                    self.deferred.push(Stamped { at, frame });
-                }
-                Frame::ResultChunk {} | Frame::Other => {}
-                frame @ (Frame::Authenticated {} | Frame::AuthError { .. }) => {
-                    bail!("unexpected frame while waiting for a reply: {frame:?}")
-                }
+        read_reply(&mut self.ws, &mut self.deferred).await
+    }
+
+    pub async fn execute_schedule(
+        &mut self,
+        programs: &[String],
+        interval: Duration,
+    ) -> Result<Vec<(Instant, Reply)>> {
+        let (mut sender, mut receiver) = (&mut self.ws).split();
+        let origin = tokio::time::Instant::now();
+        let sends = async {
+            let mut scheduled = Vec::with_capacity(programs.len());
+            for (index, program) in programs.iter().enumerate() {
+                let due = origin + interval * u32::try_from(index)?;
+                tokio::time::sleep_until(due).await;
+                sender
+                    .send(Message::Text(
+                        json!({"type": "execute", "program": program}).to_string(),
+                    ))
+                    .await
+                    .context("websocket send")?;
+                scheduled.push(due.into_std());
             }
-        }
+            Ok::<_, anyhow::Error>(scheduled)
+        };
+        let replies = async {
+            let mut replies = Vec::with_capacity(programs.len());
+            for program in programs {
+                replies.push(
+                    read_reply(&mut receiver, &mut self.deferred)
+                        .await
+                        .with_context(|| preview(program))?,
+                );
+            }
+            Ok::<_, anyhow::Error>(replies)
+        };
+        let (scheduled, replies) = tokio::try_join!(sends, replies)?;
+        Ok(scheduled.into_iter().zip(replies).collect())
     }
 
     /// Send `program` and collect its complete reply, rows included. A
@@ -271,16 +286,53 @@ impl Client {
 
     /// Next text frame and the instant it was read, before any parsing.
     async fn next_text(&mut self) -> Result<(Instant, String)> {
-        loop {
-            let message = tokio::time::timeout(REPLY_TIMEOUT, self.ws.next())
-                .await
-                .map_err(|_| anyhow!("no frame within {REPLY_TIMEOUT:?}"))?
-                .ok_or_else(|| anyhow!("connection closed"))?
-                .context("websocket receive")?;
-            let at = Instant::now();
-            if let Message::Text(text) = message {
-                return Ok((at, text));
+        next_text(&mut self.ws).await
+    }
+}
+
+async fn read_reply<S>(ws: &mut S, deferred: &mut Vec<Stamped>) -> Result<Reply>
+where
+    S: Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    loop {
+        let (at, text) = next_text(ws).await?;
+        let frame = parse(&text)?;
+        match frame {
+            Frame::Result {
+                row_count,
+                truncated,
+                errors,
+            } => {
+                check_complete(truncated, &errors)?;
+                return Ok(Reply { at, row_count });
             }
+            Frame::ResultStart { truncated, errors } => check_complete(truncated, &errors)?,
+            Frame::ResultEnd { row_count } => return Ok(Reply { at, row_count }),
+            Frame::Error { message } => bail!("server error: {message}"),
+            frame @ (Frame::SubscriptionDelta { .. } | Frame::SubscriptionError { .. }) => {
+                deferred.push(Stamped { at, frame });
+            }
+            Frame::ResultChunk {} | Frame::Other => {}
+            frame @ (Frame::Authenticated {} | Frame::AuthError { .. }) => {
+                bail!("unexpected frame while waiting for a reply: {frame:?}")
+            }
+        }
+    }
+}
+
+async fn next_text<S>(ws: &mut S) -> Result<(Instant, String)>
+where
+    S: Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    loop {
+        let message = tokio::time::timeout(REPLY_TIMEOUT, ws.next())
+            .await
+            .map_err(|_| anyhow!("no frame within {REPLY_TIMEOUT:?}"))?
+            .ok_or_else(|| anyhow!("connection closed"))?
+            .context("websocket receive")?;
+        let at = Instant::now();
+        if let Message::Text(text) = message {
+            return Ok((at, text));
         }
     }
 }

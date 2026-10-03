@@ -1,4 +1,4 @@
-//! External writer to subscribed agents: insert-start to delta-at-agent.
+//! External writer to subscribed agents.
 //!
 //! The KG holds a random graph, the rule `two_hop`, and one "probe" edge pair
 //! `edge(P_k, Q_k)` per write. Every agent subscribes to `?two_hop(1, Z)`.
@@ -8,7 +8,7 @@
 //! an insert and its own retraction from coalescing into one no-op refresh.
 //!
 //! Writes are open-loop on a fixed schedule. Each agent stamps deltas into
-//! its own buffer; samples are joined with the writer's send instants only
+//! its own buffer; samples are joined with the writer's scheduled instants only
 //! after the run, so the harness adds no shared per-delta synchronization.
 
 use std::time::{Duration, Instant};
@@ -184,14 +184,12 @@ async fn collect(agent: &mut Client, probes: Probes) -> Result<Vec<Instant>> {
     Ok(arrivals.into_iter().flatten().collect())
 }
 
-/// Writer timings: send instants and acknowledgement latencies.
 pub struct Writes {
     pub sent: Vec<Instant>,
     pub ack_us: Vec<u64>,
 }
 
 impl Writes {
-    /// Send instant of the write behind each event.
     pub fn event_sent(&self, probes: Probes) -> Vec<Instant> {
         (0..probes.events())
             .map(|event| self.sent[probes.write_of(event)])
@@ -206,16 +204,17 @@ pub async fn write_schedule(
     params: &DeltaParams,
 ) -> Result<Writes> {
     let interval = Duration::from_millis(params.interval_ms);
-    let origin = tokio::time::Instant::now();
+    let programs: Vec<_> = (0..params.writes)
+        .map(|index| probes.program(index))
+        .collect();
+    let replies = writer.execute_schedule(&programs, interval).await?;
     let mut timings = Writes {
         sent: Vec::with_capacity(params.writes),
         ack_us: Vec::with_capacity(params.writes),
     };
-    for index in 0..params.writes {
-        tokio::time::sleep_until(origin + interval * index as u32).await;
-        let (sent, reply) = writer.execute(&probes.program(index)).await?;
-        timings.sent.push(sent);
-        timings.ack_us.push(elapsed_us(sent, reply.at));
+    for (scheduled, reply) in replies {
+        timings.sent.push(scheduled);
+        timings.ack_us.push(elapsed_us(scheduled, reply.at));
     }
     Ok(timings)
 }
@@ -273,6 +272,71 @@ mod tests {
             first: 101,
             writes: WRITES,
         }
+    }
+
+    #[tokio::test]
+    async fn scheduled_writes_do_not_wait_for_acknowledgements() {
+        use futures_util::{SinkExt, StreamExt};
+        use serde_json::json;
+        use tokio_tungstenite::tungstenite::Message;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = async {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(tcp).await.unwrap();
+            ws.next().await.unwrap().unwrap();
+            ws.send(Message::Text(json!({"type": "authenticated"}).to_string()))
+                .await
+                .unwrap();
+            for index in 0..3 {
+                let frame = ws.next().await.unwrap().unwrap().into_text().unwrap();
+                let value: serde_json::Value = serde_json::from_str(&frame).unwrap();
+                assert_eq!(value["program"], probes().program(index));
+            }
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            for frame in [
+                json!({"type": "result_start"}),
+                json!({"type": "result_chunk"}),
+                json!({"type": "result_end", "row_count": 1}),
+                json!({"type": "result", "row_count": 1}),
+                json!({"type": "result", "row_count": 1}),
+            ] {
+                ws.send(Message::Text(frame.to_string())).await.unwrap();
+            }
+            let next = ws.next().await.unwrap().unwrap().into_text().unwrap();
+            let value: serde_json::Value = serde_json::from_str(&next).unwrap();
+            assert_eq!(value["program"], "+after(1)");
+            ws.send(Message::Text(
+                json!({"type": "result", "row_count": 1}).to_string(),
+            ))
+            .await
+            .unwrap();
+        };
+        let writer = async {
+            let mut client = Client::connect(addr, "default", "pw").await.unwrap();
+            let params = DeltaParams {
+                nodes: 0,
+                edges: 0,
+                subscribers: 1,
+                writes: 3,
+                interval_ms: 10,
+            };
+            let writes = write_schedule(&mut client, probes(), &params)
+                .await
+                .unwrap();
+            assert_eq!(writes.sent.len(), 3);
+            for pair in writes.sent.windows(2) {
+                assert_eq!(pair[1].duration_since(pair[0]), Duration::from_millis(10));
+            }
+            assert!(writes.ack_us.iter().all(|latency| *latency >= 40_000));
+            assert_eq!(client.execute("+after(1)").await.unwrap().1.row_count, 1);
+        };
+        tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(server, writer)
+        })
+        .await
+        .unwrap();
     }
 
     #[test]

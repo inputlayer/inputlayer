@@ -11,10 +11,14 @@ make test           # Unit + snapshot tests
 make e2e-test       # Snapshot tests only (parallel)
 make e2e-reactive   # Reactive agent path against real engine processes
 make test-affected  # Run only snapshots affected by uncommitted changes
+make pre-pr         # Before every push to a PR: formatting and affected component checks in parallel, then perf-gate
 make perf-gate      # Performance gate: this tree vs the approved baseline (same host)
 make bench-genbi    # Reactive agent benchmark on genbi-trust (needs GENBI_TRUST_DIR)
 make oracle-test    # Differential correctness oracle only (~15s)
 ```
+
+See [CONTRIBUTING](CONTRIBUTING#pre-commit-checks) for `make pre-pr` routing, base selection
+and required pre-push checks.
 
 ## Test Tiers
 
@@ -160,7 +164,10 @@ lands):
   consumers. The perf gate's `interference` fixture measures
   slow-consumer latency, not correctness.
 - Credential revocation. It is covered over a real `/ws` connection by
-  `tests/credential_revocation_tests.rs`, not here.
+  `tests/credential_revocation_tests.rs`, not here. Handler unit tests in
+  `src/protocol/handler/credential_mutation_tests.rs` also cover failed password
+  and role replacements followed by user recreation or admin bootstrap and
+  restart, including orphaned API keys and failed recreation attempts.
 - Gateway finding additions, resolutions and authoritative reset.
 - Running the same histories against recompute and persistent-dataflow modes
   (R4). Until then, the differential oracle (`make oracle-test`) compares
@@ -213,6 +220,7 @@ Source-to-category mapping:
 | `make test` | Unit + snapshot | Broad local check before a PR |
 | `make test-all` | Build + unit + snapshot + check | Full verification before merge |
 | `make test-affected` | Snapshot tests for changed files only | Fast E2E feedback |
+| `make pre-pr` | [Pre-PR pipeline](CONTRIBUTING#pre-commit-checks) | Before every push to a PR |
 | `make perf-gate` | Paired latency/throughput gate over `/ws` vs the approved baseline | Every implementation PR (see `perf-gate/README.md`) |
 | `make perf-gate-check` | Clippy + unit tests of the gate tool | After changing `perf-gate/` |
 | `make e2e-reactive` | Reactive agent path against real engines, latency samples | Subscription or wire changes |

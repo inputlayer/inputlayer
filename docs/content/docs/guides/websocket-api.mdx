@@ -74,7 +74,7 @@ On failure:
 
 The server allows 30 seconds for authentication before closing the connection.
 
-The connection stays bound to the credential it authenticated with. If that credential is revoked (`.apikey revoke`, `.user password`, `.user drop`) or its API key expires, the server sends nothing more for the connection except a final `{"type": "notice", "code": "credential_revoked", "message": "Credential revoked; reconnect with valid credentials"}` (`"code": "credential_expired"` and `Credential expired; ...` for an expired key) and closes it. See [Authentication](authentication#revocation).
+The connection stays bound to the credential it authenticated with. See [Authentication: Revocation](authentication#revocation) for which credential changes and key expiries end a session and how they affect in-flight results and writes.
 
 ## Executing Statements
 

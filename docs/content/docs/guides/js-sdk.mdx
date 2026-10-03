@@ -74,8 +74,12 @@ const kg = il.knowledgeGraph("myapp");
 const graphs = await il.listKnowledgeGraphs();
 
 // Drop a knowledge graph and all its data
+await il.knowledgeGraph("default").execute(".kg use default");
 await il.dropKnowledgeGraph("myapp");
 ```
+
+The server refuses to drop the session's current knowledge graph. Switch to
+another graph first, as above; `dropKnowledgeGraph()` does not switch for you.
 
 ## Defining Schemas
 
@@ -165,7 +169,7 @@ await kg.insert(Employee, [
 ]);
 ```
 
-The insert method returns an `InsertResult` whose `count` is the number of facts the engine newly stored; re-inserting an existing fact counts 0.
+The insert method returns an `InsertResult` whose `count` is the number of facts the engine newly stored; re-inserting an existing fact counts 0. This is a behaviour change: earlier SDK versions returned the number of facts sent.
 
 ## Deleting Data
 
@@ -382,6 +386,20 @@ If you need to drop down to raw IQL for something the OLM doesn't cover:
 const result = await kg.execute("?employee(Id, Name, _, Salary, _), Salary > 100000");
 ```
 
+To execute a local IQL file in Node.js, read it explicitly and pass its contents
+to `kg.execute()`:
+
+```typescript
+import { readFile } from "node:fs/promises";
+
+await kg.execute(await readFile("seed.iql", "utf8"));
+```
+
+`kg.load(path, mode?)` sends the server-file `.load` command; it does not read a
+local file. The server currently supports that command only in its interactive
+client, so calling it through the SDK rejects with `QueryError` and code
+`unsupported`.
+
 ## Derived Relations (Rules)
 
 Derived relations are computed views that InputLayer keeps up to date automatically. When the underlying data changes, derived results are recomputed incrementally - you never need to manually refresh them.
@@ -461,6 +479,10 @@ await kg.clearRule("reachable");
 ```
 
 ## Vector Search
+
+`vectorSearch()` forwards the legacy `top_k` / `within_radius` query syntax to
+the server. The current engine rejects these query forms with a typed
+`QueryError`; the SDK does not sort or truncate results locally.
 
 InputLayer supports HNSW indexes for approximate nearest-neighbor search over vector columns.
 
@@ -734,7 +756,7 @@ import {
 } from "inputlayer";
 
 try {
-  await kg.load("seed.iql");
+  await kg.execute("+edge(1, 2)\n+edge(2, 3)\n?edge(X, Y)");
 } catch (e) {
   if (e instanceof AuthenticationError) {
     console.log("Check your credentials");

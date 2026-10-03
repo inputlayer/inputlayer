@@ -188,6 +188,7 @@ impl Handler {
         owner: &str,
         ttl: Option<Duration>,
     ) -> Result<(String, ApiKeyTimes), ProgramError> {
+        let _credential_writes = self.credential_writes.lock();
         let storage = self.storage.read();
         let snapshot = storage.get_snapshot_for(auth::INTERNAL_KG)?;
         if read_api_keys(&snapshot)
@@ -255,6 +256,8 @@ impl Handler {
         label: &str,
         ttl: Duration,
     ) -> Result<QueryResult, ProgramError> {
+        let _credential_writes = self.credential_writes.lock();
+        let storage = self.storage.read();
         let at = now_ms().saturating_add(u64::try_from(ttl.as_millis()).unwrap_or(u64::MAX));
         let key_hash = self
             .credentials
@@ -267,7 +270,7 @@ impl Handler {
                      an expiry can only be brought forward"
                 ),
             })?;
-        replace_times(&self.storage.read(), EXPIRES_AT, &[(&key_hash, at)])?;
+        replace_times(&storage, EXPIRES_AT, &[(&key_hash, at)])?;
         self.credentials.expire_key(&key_hash, at);
 
         info!(label, expires_at = at, "audit_apikey_expiry_set");
@@ -280,6 +283,7 @@ impl Handler {
 
     /// `.apikey revoke`: delete a key and end its sessions now.
     pub fn handle_apikey_revoke(&self, label: &str) -> Result<QueryResult, ProgramError> {
+        let _credential_writes = self.credential_writes.lock();
         let storage = self.storage.read();
         let snapshot = storage.get_snapshot_for(auth::INTERNAL_KG)?;
         let deleted = delete_api_keys(&storage, &snapshot, |key| key.label == label)?;

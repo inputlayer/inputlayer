@@ -207,6 +207,10 @@ pub struct Handler {
     login_queue: Arc<tokio::sync::Semaphore>,
     /// Live users and API keys; sessions hold principals issued from it.
     credentials: crate::auth::CredentialRegistry,
+    /// Serializes credential mutations across validation, storage and
+    /// registry publication. A dedicated lock, so queries, proofs and replay
+    /// holding the storage read guard never delay a revocation.
+    credential_writes: parking_lot::Mutex<()>,
     /// Bumped after every change to the KG access lists (`kg_acls`).
     kg_acl_generation: AtomicU64,
 }
@@ -264,6 +268,43 @@ mod index_commands {
     ) -> Result<Vec<IndexStats>, String> {
         storage.index_stats_in(kg, name).map_err(|e| e.to_string())
     }
+}
+
+/// Label of the API key admin bootstrap issues.
+const BOOTSTRAP_KEY_LABEL: &str = "bootstrap";
+
+/// Record that admin bootstrap has issued its API key, so it never issues
+/// another.
+fn record_bootstrap_key(storage: &StorageEngine) -> Result<(), String> {
+    storage
+        .insert_tuples_into(
+            crate::auth::INTERNAL_KG,
+            crate::auth::stored::BOOTSTRAP_KEYS,
+            vec![Tuple::new(vec![Value::string(BOOTSTRAP_KEY_LABEL)])],
+        )
+        .map(drop)
+        .map_err(|e| e.to_string())
+}
+
+/// Store `key` as admin's bootstrap API key, recording its issue first so a
+/// crash in between never lets bootstrap issue it again.
+fn store_bootstrap_key(storage: &StorageEngine, key: &str) -> Result<(), String> {
+    use crate::auth;
+
+    record_bootstrap_key(storage)?;
+    api_keys::store_api_key(
+        storage,
+        &auth::ApiKeyRecord {
+            label: BOOTSTRAP_KEY_LABEL.to_string(),
+            key_hash: auth::hash_api_key(key),
+            username: "admin".to_string(),
+            times: auth::ApiKeyTimes {
+                created_at: Some(now_ms()),
+                ..auth::ApiKeyTimes::default()
+            },
+        },
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// Current epoch milliseconds.
@@ -418,6 +459,10 @@ mod proof_snapshot_tests;
 
 #[cfg(test)]
 mod revocation_tests;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod credential_mutation_tests;
 
 /// Self-contained snapshot of Handler state for executing a single query on a blocking thread.
 /// All fields are `Arc`-wrapped (`Send + Sync`), allowing the job to be moved into
@@ -778,6 +823,7 @@ impl Handler {
             password_permits: Arc::new(tokio::sync::Semaphore::new((ncpu / 4).clamp(1, 4))),
             login_queue: Arc::new(tokio::sync::Semaphore::new(MAX_QUEUED_LOGINS)),
             credentials: crate::auth::CredentialRegistry::default(),
+            credential_writes: parking_lot::Mutex::new(()),
             kg_acl_generation: AtomicU64::new(0),
         }
     }
@@ -819,6 +865,7 @@ impl Handler {
             password_permits: Arc::new(tokio::sync::Semaphore::new((ncpu / 4).clamp(1, 4))),
             login_queue: Arc::new(tokio::sync::Semaphore::new(MAX_QUEUED_LOGINS)),
             credentials: crate::auth::CredentialRegistry::default(),
+            credential_writes: parking_lot::Mutex::new(()),
             kg_acl_generation: AtomicU64::new(0),
         }
     }
@@ -1044,11 +1091,12 @@ impl Handler {
         }
     }
 
-    /// Insert the bootstrap admin user and API key when `_internal` has no users.
+    /// Insert the bootstrap admin user when `_internal` has no users, with an
+    /// API key only if bootstrap has never issued one for this data directory.
     fn seed_admin_credentials(&self) {
         use crate::auth;
-        use crate::value::Value;
 
+        let _credential_writes = self.credential_writes.lock();
         let storage = self.storage.read();
 
         // Create _internal KG if it doesn't exist
@@ -1076,11 +1124,25 @@ impl Handler {
             .input_tuples
             .get("users")
             .is_some_and(|t| !t.is_empty());
+        let key_recorded = snapshot
+            .input_tuples
+            .get(auth::stored::BOOTSTRAP_KEYS)
+            .is_some_and(|t| !t.is_empty());
+        let bootstrapped_before = has_users
+            || api_keys::read_api_keys(&snapshot)
+                .iter()
+                .any(|key| key.label == BOOTSTRAP_KEY_LABEL);
+        if !key_recorded && bootstrapped_before {
+            if let Err(e) = record_bootstrap_key(&storage) {
+                warn!(error = %e, "Failed to record bootstrap API key");
+            }
+        }
 
         if has_users {
             info!("Auth bootstrap: admin user already exists");
             return;
         }
+        let issue_api_key = !key_recorded && !bootstrapped_before;
 
         let credentials_path = self
             .config
@@ -1115,54 +1177,40 @@ impl Handler {
             persisted.admin_password,
             &mut to_persist.admin_password,
         );
-        let (api_key, key_generated) =
-            resolve(supplied_api_key, persisted.api_key, &mut to_persist.api_key);
-        let mut create_api_key = true;
+        let (mut api_key, key_generated) = if issue_api_key {
+            let (key, generated) =
+                resolve(supplied_api_key, persisted.api_key, &mut to_persist.api_key);
+            (Some(key), generated)
+        } else {
+            (None, false)
+        };
 
+        let mut saved = false;
         if password_generated || key_generated {
-            match to_persist.save(&credentials_path) {
-                Ok(()) => {
-                    info!(
-                        "Auth bootstrap: credentials saved to {}",
-                        credentials_path.display()
-                    );
-                    eprintln!();
-                    eprintln!("=== INITIAL ADMIN CREDENTIALS CREATED ===");
-                    // Masked to keep the key out of logs.
-                    let masked = match api_key.len() {
-                        n if n > 4 => api_key.get(n - 4..).unwrap_or(""),
-                        _ => "",
-                    };
-                    eprintln!("Admin API key: ****{masked}");
-                    eprintln!("==========================================");
-                    eprintln!();
+            if let Err(e) = to_persist.save(&credentials_path) {
+                warn!(
+                    error = %e,
+                    path = %credentials_path.display(),
+                    "Failed to save credentials file"
+                );
+                if password_generated {
                     eprintln!(
-                        "Generated credentials saved to: {}",
+                        "ERROR: cannot save generated credentials to {}: {e}. Admin user not created.",
                         credentials_path.display()
                     );
-                    eprintln!("Retrieve them with:  cat {}", credentials_path.display());
-                    eprintln!("Delete this file to generate new credentials on next boot.");
-                    eprintln!();
+                    return;
                 }
-                Err(e) => {
-                    warn!(
-                        error = %e,
-                        path = %credentials_path.display(),
-                        "Failed to save credentials file"
-                    );
-                    if password_generated {
-                        eprintln!(
-                            "ERROR: cannot save generated credentials to {}: {e}. Admin user not created.",
-                            credentials_path.display()
-                        );
-                        return;
-                    }
-                    eprintln!(
-                        "WARNING: cannot save generated API key to {}: {e}. Bootstrap API key not created.",
-                        credentials_path.display()
-                    );
-                    create_api_key = false;
-                }
+                eprintln!(
+                    "WARNING: cannot save generated API key to {}: {e}. Bootstrap API key not created.",
+                    credentials_path.display()
+                );
+                api_key = None;
+            } else {
+                saved = true;
+                info!(
+                    "Auth bootstrap: credentials saved to {}",
+                    credentials_path.display()
+                );
             }
         } else if to_persist != auth::PersistedCredentials::default() {
             info!(
@@ -1178,36 +1226,53 @@ impl Handler {
                 return;
             }
         };
-
-        // Insert admin user: (username, password_hash, role)
-        let tuple = crate::value::Tuple::new(vec![
-            Value::string("admin"),
-            Value::string(&hash),
-            Value::string("admin"),
-        ]);
-
-        if let Err(e) = storage.insert_tuples_into(auth::INTERNAL_KG, "users", vec![tuple]) {
+        if let Err(e) = self.create_user(
+            &storage,
+            auth::UserRecord {
+                username: "admin".to_string(),
+                password_hash: hash,
+                role: auth::Role::Admin,
+            },
+        ) {
             warn!(error = %e, "Failed to insert admin user");
             return;
         }
         info!("Auth bootstrap: admin user created");
 
-        if !create_api_key {
-            return;
+        if let Some(key) = &api_key {
+            if let Err(e) = store_bootstrap_key(&storage, key) {
+                warn!(error = %e, "Failed to insert bootstrap API key");
+                api_key = None;
+                if to_persist.api_key.take().is_some() {
+                    if let Err(e) = to_persist.save(&credentials_path) {
+                        warn!(error = %e, "Failed to remove unstored API key from credentials file");
+                    }
+                }
+            } else {
+                info!("Auth bootstrap: API key 'bootstrap' created for admin");
+            }
         }
-        let bootstrap_key = auth::ApiKeyRecord {
-            label: "bootstrap".to_string(),
-            key_hash: auth::hash_api_key(&api_key),
-            username: "admin".to_string(),
-            times: auth::ApiKeyTimes {
-                created_at: Some(now_ms()),
-                ..auth::ApiKeyTimes::default()
-            },
-        };
-        if let Err(e) = api_keys::store_api_key(&storage, &bootstrap_key) {
-            warn!(error = %e, "Failed to insert bootstrap API key");
-        } else {
-            info!("Auth bootstrap: API key 'bootstrap' created for admin");
+
+        if saved {
+            eprintln!();
+            eprintln!("=== INITIAL ADMIN CREDENTIALS CREATED ===");
+            if let Some(api_key) = &api_key {
+                // Masked to keep the key out of logs.
+                let masked = match api_key.len() {
+                    n if n > 4 => api_key.get(n - 4..).unwrap_or(""),
+                    _ => "",
+                };
+                eprintln!("Admin API key: ****{masked}");
+            }
+            eprintln!("==========================================");
+            eprintln!();
+            eprintln!(
+                "Generated credentials saved to: {}",
+                credentials_path.display()
+            );
+            eprintln!("Retrieve them with:  cat {}", credentials_path.display());
+            eprintln!("Delete this file to generate new credentials on next boot.");
+            eprintln!();
         }
     }
 
@@ -1365,13 +1430,36 @@ impl Handler {
         role_str: &str,
     ) -> Result<QueryResult, ProgramError> {
         use crate::auth;
-        use crate::value::Value;
         use std::str::FromStr;
 
         let role = auth::Role::from_str(role_str)?;
+        let password_hash = auth::hash_password(password)?;
 
-        // Check user doesn't already exist
+        let _credential_writes = self.credential_writes.lock();
         let storage = self.storage.read();
+        self.create_user(
+            &storage,
+            auth::UserRecord {
+                username: username.to_string(),
+                password_hash,
+                role,
+            },
+        )?;
+
+        tracing::info!(username, role = role_str, "audit_user_created");
+        Ok(self.message_result(&format!(
+            "User '{username}' created with role '{role_str}'."
+        )))
+    }
+
+    fn create_user(
+        &self,
+        storage: &StorageEngine,
+        user: crate::auth::UserRecord,
+    ) -> Result<(), ProgramError> {
+        use crate::auth;
+
+        let username = &user.username;
         let snapshot = storage
             .get_snapshot_for(auth::INTERNAL_KG)
             .map_err(ProgramError::from)?;
@@ -1387,26 +1475,77 @@ impl Handler {
             }
         }
 
-        let hash = auth::hash_password(password)?;
-        let tuple = crate::value::Tuple::new(vec![
+        self.credentials.remove_user(username);
+        self.delete_user_access(storage, username)?;
+        let tuple = Tuple::new(vec![
             Value::string(username),
-            Value::string(&hash),
-            Value::string(role_str),
+            Value::string(&user.password_hash),
+            Value::string(&user.role.to_string()),
         ]);
-
         storage
             .insert_tuples_into(auth::INTERNAL_KG, "users", vec![tuple])
             .map_err(ProgramError::from)?;
-        self.credentials.put_user(auth::UserRecord {
-            username: username.to_string(),
-            password_hash: hash,
-            role,
-        });
+        self.credentials.put_user(user);
+        Ok(())
+    }
 
-        tracing::info!(username, role = role_str, "audit_user_created");
-        Ok(self.message_result(&format!(
-            "User '{username}' created with role '{role_str}'."
-        )))
+    /// Delete everything `username` holds besides its user row: its API keys
+    /// (revoking them), their times and its KG grants. Shared by user drop and
+    /// user creation, so a recreated username never inherits orphaned access.
+    /// Keys and grants are separate writes: a transient failure of one does not
+    /// stop the other (strip as much access as possible), and its error is
+    /// returned at the end; an unknown outcome or a read-only store returns at
+    /// once.
+    fn delete_user_access(
+        &self,
+        storage: &StorageEngine,
+        username: &str,
+    ) -> Result<(), ProgramError> {
+        use crate::auth;
+        use crate::storage::StorageError;
+
+        let snapshot = storage
+            .get_snapshot_for(auth::INTERNAL_KG)
+            .map_err(ProgramError::from)?;
+        let mut deferred = None;
+        // An unknown outcome or a read-only store stops at once; any other
+        // failure is reported after the remaining cleanup ran.
+        let mut settle = |result: Result<(), StorageError>| match result {
+            Err(error @ (StorageError::OutcomeUnknown { .. } | StorageError::StoreReadOnly)) => {
+                Err(ProgramError::from(error))
+            }
+            Err(error) => {
+                deferred.get_or_insert(error);
+                Ok(())
+            }
+            Ok(()) => Ok(()),
+        };
+
+        settle(
+            api_keys::delete_api_keys(storage, &snapshot, |key| key.username == username).map(
+                |labels| {
+                    for label in labels {
+                        self.credentials.revoke_key(&label);
+                    }
+                },
+            ),
+        )?;
+        let grants: Vec<Tuple> = snapshot
+            .input_tuples
+            .get("kg_acls")
+            .into_iter()
+            .flatten()
+            .filter(|t| t.values().get(1).and_then(Value::as_str) == Some(username))
+            .cloned()
+            .collect();
+        if !grants.is_empty() {
+            settle(
+                storage
+                    .delete_tuples_from(auth::INTERNAL_KG, "kg_acls", grants)
+                    .map(|_| self.kg_acls_changed()),
+            )?;
+        }
+        deferred.map_or(Ok(()), |error| Err(error.into()))
     }
 
     /// Drop a user.
@@ -1417,6 +1556,7 @@ impl Handler {
             return Err("Cannot drop the 'admin' user".to_string().into());
         }
 
+        let _credential_writes = self.credential_writes.lock();
         let storage = self.storage.read();
         let snapshot = storage
             .get_snapshot_for(auth::INTERNAL_KG)
@@ -1437,50 +1577,11 @@ impl Handler {
 
         let tuple = found.ok_or_else(|| format!("User '{username}' not found"))?;
 
-        let mut cleanup_error = None;
-        for relation in ["api_keys", "kg_acls"] {
-            let result = if relation == "api_keys" {
-                api_keys::delete_api_keys(&storage, &snapshot, |key| key.username == username).map(
-                    |labels| {
-                        for label in labels {
-                            self.credentials.revoke_key(&label);
-                        }
-                    },
-                )
-            } else {
-                let to_delete: Vec<_> = snapshot
-                    .input_tuples
-                    .get(relation)
-                    .into_iter()
-                    .flatten()
-                    .filter(|t| t.values().get(1).and_then(|v| v.as_str()) == Some(username))
-                    .cloned()
-                    .collect();
-                if to_delete.is_empty() {
-                    continue;
-                }
-                storage
-                    .delete_tuples_from(auth::INTERNAL_KG, relation, to_delete)
-                    .map(|_| self.kg_acls_changed())
-            };
-            match result {
-                Ok(()) => {}
-                Err(
-                    error @ (crate::storage::StorageError::OutcomeUnknown { .. }
-                    | crate::storage::StorageError::StoreReadOnly),
-                ) => {
-                    return Err(error.into());
-                }
-                Err(error) => {
-                    cleanup_error.get_or_insert(error);
-                }
-            }
-        }
-        if let Some(error) = cleanup_error {
-            return Err(error.into());
-        }
-        storage.delete_tuples_from(auth::INTERNAL_KG, "users", vec![tuple])?;
+        // Keys, their times and KG grants go first, in one commit, so a failure
+        // leaves the user intact; the user row only after.
+        self.delete_user_access(&storage, username)?;
         self.credentials.remove_user(username);
+        storage.delete_tuples_from(auth::INTERNAL_KG, "users", vec![tuple])?;
 
         tracing::info!(username, "audit_user_dropped");
         Ok(self.message_result(&format!("User '{username}' dropped.")))
@@ -1495,6 +1596,8 @@ impl Handler {
         use crate::auth;
         use crate::value::Value;
 
+        let new_hash = auth::hash_password(new_password)?;
+        let _credential_writes = self.credential_writes.lock();
         let storage = self.storage.read();
         let snapshot = storage
             .get_snapshot_for(auth::INTERNAL_KG)
@@ -1519,23 +1622,52 @@ impl Handler {
         }
 
         let old = old_tuple.ok_or_else(|| format!("User '{username}' not found"))?;
-        let new_hash = auth::hash_password(new_password)?;
         let new_tuple = crate::value::Tuple::new(vec![
             Value::string(username),
             Value::string(&new_hash),
             Value::string(&role_str),
         ]);
 
-        storage
-            .delete_tuples_from(auth::INTERNAL_KG, "users", vec![old])
-            .map_err(ProgramError::from)?;
-        storage
-            .insert_tuples_into(auth::INTERNAL_KG, "users", vec![new_tuple])
-            .map_err(ProgramError::from)?;
+        self.replace_user_row(&storage, username, old, new_tuple)?;
         self.credentials.set_password(username, new_hash);
 
         tracing::info!(username, "audit_user_password_changed");
         Ok(self.message_result(&format!("Password updated for '{username}'.")))
+    }
+
+    /// Replace `old` with `new` in `users` as one program, so a failure
+    /// leaves the old row. A durable write whose outcome is unknown revokes
+    /// the user's live credentials, which may no longer match storage.
+    fn replace_user_row(
+        &self,
+        storage: &StorageEngine,
+        username: &str,
+        old: Tuple,
+        new: Tuple,
+    ) -> Result<(), ProgramError> {
+        use crate::storage_engine::{CommitError, FactChange, StagedChanges, WriteProgram};
+
+        let program = WriteProgram::single(StagedChanges::Facts(vec![
+            FactChange::Delete {
+                relation: "users".to_string(),
+                tuples: vec![old],
+            },
+            FactChange::Insert {
+                relation: "users".to_string(),
+                tuples: vec![new],
+            },
+        ]));
+        storage
+            .commit_program(crate::auth::INTERNAL_KG, program, None)
+            .map(drop)
+            .map_err(|e| {
+                // Durable but possibly unapplied, or possibly recovered on
+                // restart: fail closed until restart settles it.
+                if matches!(e, CommitError::Unknown(_) | CommitError::OutcomeUnknown(_)) {
+                    self.credentials.remove_user(username);
+                }
+                ProgramError::from(e.into_storage_error())
+            })
     }
 
     /// Change a user's role.
@@ -1554,6 +1686,7 @@ impl Handler {
             return Err("Cannot change the 'admin' user's role".to_string().into());
         }
 
+        let _credential_writes = self.credential_writes.lock();
         let storage = self.storage.read();
         let snapshot = storage
             .get_snapshot_for(auth::INTERNAL_KG)
@@ -1584,12 +1717,7 @@ impl Handler {
             Value::string(new_role),
         ]);
 
-        storage
-            .delete_tuples_from(auth::INTERNAL_KG, "users", vec![old])
-            .map_err(ProgramError::from)?;
-        storage
-            .insert_tuples_into(auth::INTERNAL_KG, "users", vec![new_tuple])
-            .map_err(ProgramError::from)?;
+        self.replace_user_row(&storage, username, old, new_tuple)?;
         self.credentials.set_role(username, role);
 
         Ok(self.message_result(&format!("Role updated to '{new_role}' for '{username}'.")))

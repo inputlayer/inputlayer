@@ -216,7 +216,9 @@ impl Agent {
     pub fn diverged(&self, truth: &BTreeMap<String, RowSet>) -> BTreeSet<String> {
         self.subscriptions
             .values()
-            .filter(|s| truth.get(&s.id).is_some_and(|t| keys_differ(&s.state, t)))
+            .filter(|s| {
+                s.error.is_some() || truth.get(&s.id).is_none_or(|t| keys_differ(&s.state, t))
+            })
             .map(|s| s.id.clone())
             .collect()
     }
@@ -243,6 +245,29 @@ mod tests {
 
     fn truth(id: &str, v: Value) -> BTreeMap<String, RowSet> {
         BTreeMap::from([(id.to_string(), row_set(rows(v)))])
+    }
+
+    #[tokio::test]
+    async fn convergence_requires_truth_for_every_subscription() {
+        let (_tx, pushes) = mpsc::unbounded_channel();
+        let mut agent = Agent {
+            subscriptions: BTreeMap::from([
+                ("q0".into(), Subscription::new("q0", rows(json!([[1]])))),
+                ("q1".into(), Subscription::new("q1", vec![])),
+            ]),
+            pushes,
+            reader: tokio::spawn(async {}),
+            fault: None,
+        };
+        let mut expected = truth("q0", json!([[1]]));
+        assert_eq!(agent.diverged(&expected), BTreeSet::from(["q1".into()]));
+        assert_eq!(agent.diverged(&BTreeMap::new()).len(), 2);
+        expected.insert("q1".into(), row_set(vec![]));
+        assert!(agent.diverged(&expected).is_empty());
+        agent.subscriptions.get_mut("q0").unwrap().state.clear();
+        assert_eq!(agent.diverged(&expected), BTreeSet::from(["q0".into()]));
+        agent.subscriptions.get_mut("q1").unwrap().error = Some("result truncated".into());
+        assert_eq!(agent.diverged(&expected).len(), 2);
     }
 
     #[test]

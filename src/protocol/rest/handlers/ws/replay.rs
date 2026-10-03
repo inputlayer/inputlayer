@@ -65,7 +65,10 @@ mod tests {
     use super::*;
     use crate::auth::{ApiKeyRecord, ApiKeyTimes, CredentialRegistry, Role, UserRecord};
 
-    /// A sink that revokes the connection's key once it accepted `revoke_after` frames.
+    /// A sink that revokes the connection's key once it accepted `revoke_after`
+    /// frames, as the next frame is prepared: between frames, like a revocation
+    /// from another connection. (Not inside `start_send`: the hand-off holds the
+    /// credential's end lock, which a revocation waits for.)
     struct RevokingSink {
         registry: CredentialRegistry,
         revoke_after: usize,
@@ -76,14 +79,14 @@ mod tests {
         type Error = std::convert::Infallible;
 
         fn poll_ready(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            if self.sent.len() == self.revoke_after {
+                self.registry.revoke_key("k");
+            }
             Poll::Ready(Ok(()))
         }
 
         fn start_send(mut self: Pin<&mut Self>, message: Message) -> Result<(), Self::Error> {
             self.sent.push(message);
-            if self.sent.len() == self.revoke_after {
-                self.registry.revoke_key("k");
-            }
             Ok(())
         }
 

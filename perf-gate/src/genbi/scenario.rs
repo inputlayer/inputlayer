@@ -412,19 +412,20 @@ fn record_deltas(
         })
         .map(|(id, _)| id.clone())
         .collect();
-    let mut converged_at = start;
+    // Per subscription: converged, and when its last delta frame arrived.
+    let mut arrivals = Vec::new();
     for (index, agent) in live.agents.iter_mut().enumerate() {
         let diverged = agent.diverged(truth);
         for (id, activity) in agent.take_activity() {
             let answer_changed = live.truth.get(&id) != truth.get(&id);
             let delta_us = match (start, activity.last) {
                 (Some(sent), Some(arrived)) if activity.frames > 0 => {
-                    converged_at = converged_at.max(Some(arrived));
                     Some(elapsed_us(sent, arrived))
                 }
                 _ => None,
             };
             let converged = !diverged.contains(&id);
+            arrivals.push((converged, activity.last.filter(|_| activity.frames > 0)));
             if let (true, true, Some(micros)) = (answer_changed, converged, delta_us) {
                 run.sample("delta_us", micros);
                 // Propagation after the durable commit was acknowledged.
@@ -461,7 +462,7 @@ fn record_deltas(
             });
         }
     }
-    if let (Some(sent), Some(end)) = (start, converged_at) {
+    if let Some(elapsed) = start.and_then(|sent| convergence_time(sent, &arrivals)) {
         let rate = run
             .rates
             .entry("converged_mutations".into())
@@ -470,9 +471,20 @@ fn record_deltas(
                 elapsed_us: 0,
             });
         rate.ops += 1;
-        rate.elapsed_us += micros(end.saturating_duration_since(sent));
+        rate.elapsed_us += micros(elapsed);
     }
     lost
+}
+
+/// Time from sending a mutation until every subscription converged: the
+/// latest delta arrival, or zero when no delta was due. `None` when any
+/// subscription diverged: that mutation did not converge.
+fn convergence_time(sent: Instant, arrivals: &[(bool, Option<Instant>)]) -> Option<Duration> {
+    if arrivals.iter().any(|(converged, _)| !converged) {
+        return None;
+    }
+    let end = arrivals.iter().filter_map(|(_, last)| *last).max();
+    Some(end.map_or(Duration::ZERO, |end| end.saturating_duration_since(sent)))
 }
 
 /// Evaluate a standing query once: its latency and rows, or the engine's
@@ -501,5 +513,38 @@ fn message(error: &serde_json::Value) -> String {
 fn gauge_rss(run: &mut ScenarioRun, server: &RunningServer, name: &str) {
     if let Some(rss) = server.rss_kb() {
         run.gauges.insert(name.to_string(), rss);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_divergent_subscription_means_the_mutation_did_not_converge() {
+        let sent = Instant::now();
+        let arrivals = [
+            (true, Some(sent + Duration::from_millis(5))),
+            (false, Some(sent + Duration::from_millis(9))),
+        ];
+        assert_eq!(convergence_time(sent, &arrivals), None);
+    }
+
+    #[test]
+    fn convergence_time_is_the_latest_arrival_of_converged_subscriptions() {
+        let sent = Instant::now();
+        let arrivals = [
+            (true, Some(sent + Duration::from_millis(5))),
+            (true, None),
+            (true, Some(sent + Duration::from_millis(9))),
+        ];
+        assert_eq!(
+            convergence_time(sent, &arrivals),
+            Some(Duration::from_millis(9))
+        );
+        assert_eq!(
+            convergence_time(sent, &[(true, None)]),
+            Some(Duration::ZERO)
+        );
     }
 }

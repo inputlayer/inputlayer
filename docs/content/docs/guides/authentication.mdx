@@ -220,15 +220,28 @@ Each WebSocket session is bound to the credential it authenticated with: one API
 | `.user password <name> <password>` | the user's previous password |
 | `.user drop <name>` | the user's password and all of the user's API keys |
 
-A key's expiry passing ends its sessions the same way, from the expiry instant. A revoked or expired session receives no further results, notifications or subscription pushes. A request that was already running when the credential was revoked or expired has its reply withheld; writes it committed before then stay committed. The server stops the session's standing queries, sends one final message and closes the connection:
+A key's expiry passing ends its sessions the same way, from the expiry instant. Once a credential is revoked or expires, no further results, notifications or subscription pushes are admitted to the session's transport; frames admitted before then can still arrive afterward. A request still running at that point has its reply withheld; writes it already committed stay committed. The server stops the session's standing queries, sends a final [`credential_revoked` notice](websocket-api#notices) and closes the connection.
 
-```json
-{"type": "error", "message": "Credential revoked; reconnect with valid credentials"}
-```
-
-For an expired key the message is `Credential expired; reconnect with valid credentials`.
+For an expired key the notice is `credential_expired`, with the message `Credential expired; reconnect with valid credentials`.
 
 `.user role` takes effect on the next request of every live session of that user without closing them. REST requests check the API key on every request.
+
+A password or role replacement commits the old user row's removal and its
+replacement as one write: if it fails, nothing changes, and the user's row, API
+keys and live sessions stay as they were. The exception is a write whose outcome
+is unknown (it reached the write-ahead log but was not applied): then the user's
+live credentials are revoked until restart. Creating a user removes any API keys
+or grants left under that username before publishing credentials, so a
+recreated user starts with no API keys and no grants. Admin bootstrap creates
+the admin the same way, so old keys cannot bind to it.
+
+Bootstrap issues its API key only once per data directory. It records the
+issue in the internal auth graph and never issues another key once that record
+exists, even after the key is revoked. A data directory that already has users
+or a bootstrap key when the server starts gets the record then, so upgrading
+never re-issues a key. The key is printed only after it is stored, and is
+removed from `credentials.toml` if storing it fails. For recovery, log in with
+the bootstrap password and create a new key instead.
 
 You can also set an API key for the CLI client via environment variable:
 
