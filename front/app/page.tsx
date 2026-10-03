@@ -470,8 +470,8 @@ export default function LandingPage() {
             <Card className="space-y-3">
               <h3 className="text-base font-semibold">Design-partner evaluation</h3>
               <p className="text-sm text-muted-foreground">
-                Bring one agent. In four weeks we move what it knows into InputLayer on your data and measure the
-                difference in freshness, correctness and cost.
+                Talk to us about a four-week evaluation on your data: bring one agent, and together we look at what
+                moving its knowledge into InputLayer does for freshness, correctness and cost.
               </p>
               <div className="flex flex-wrap gap-3 pt-2">
                 <a href={CONTACT_URL} className={secondaryButton}>

@@ -174,7 +174,7 @@ export_df = result.to_df()
 
 ### Notifications
 
-Subscribe to real-time data change events:
+Subscribe to live data change events:
 
 ```python
 @il.on("persistent_update", relation="sensor_reading")
