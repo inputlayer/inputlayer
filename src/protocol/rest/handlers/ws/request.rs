@@ -25,8 +25,14 @@ pub(super) struct Request {
 pub(super) enum Job {
     /// Answered without running anything (pong, malformed frame).
     Immediate(ServerFrame),
-    /// An IQL program through the handler.
-    Execute { program: String },
+    /// An IQL program through the handler, within `timeout_ms` of arrival
+    /// when the client set one.
+    Execute {
+        program: String,
+        timeout_ms: Option<u64>,
+    },
+    /// Cancel the unanswered request `target`; handled on arrival.
+    Cancel { target: RequestId },
     /// `.subscribe <name> ?<query>` on the connection's KG.
     Subscribe { name: String, query: String },
     /// `.unsubscribe <name>`.
@@ -62,7 +68,11 @@ impl Request {
             }
         };
         match frame {
-            ClientFrame::Execute { id, program } => {
+            ClientFrame::Execute {
+                id,
+                program,
+                timeout_ms,
+            } => {
                 let (access, job) = match subscription_command(&program) {
                     Some(MetaCommand::Subscribe { id: name, query }) => {
                         (Access::Exclusive, Job::Subscribe { name, query })
@@ -70,10 +80,23 @@ impl Request {
                     Some(MetaCommand::Unsubscribe(name)) => {
                         (Access::Exclusive, Job::Unsubscribe { name })
                     }
-                    _ => (program_access(&program), Job::Execute { program }),
+                    _ => (
+                        program_access(&program),
+                        Job::Execute {
+                            program,
+                            timeout_ms,
+                        },
+                    ),
                 };
                 (access, Self { id, job })
             }
+            ClientFrame::Cancel { id, target } => (
+                Access::Shared,
+                Self {
+                    id,
+                    job: Job::Cancel { target },
+                },
+            ),
             ClientFrame::Ping { id } => Self::immediate(ServerFrame::Pong { id }),
             ClientFrame::Login { id, .. } | ClientFrame::Authenticate { id, .. } => {
                 Self::immediate(ServerFrame::error(

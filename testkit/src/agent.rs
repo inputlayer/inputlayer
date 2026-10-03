@@ -221,9 +221,21 @@ impl Agent {
     }
 
     /// Send a request of the agent's own without waiting; deltas keep
-    /// arriving while it runs. Read its reply with [`Self::result`].
-    pub async fn send_execute(&mut self, program: &str) -> Checked<()> {
+    /// arriving while it runs. Returns its request id; read its reply with
+    /// [`Self::result`].
+    pub async fn send_execute(&mut self, program: &str) -> Checked<String> {
         self.client.send_execute(program).await
+    }
+
+    /// Cancel the agent's unanswered request `target`; read the outcome with
+    /// [`Self::cancel_ack`] after the target's reply.
+    pub async fn send_cancel(&mut self, target: &str) -> Checked<()> {
+        self.client.send_cancel(target).await
+    }
+
+    /// The outcome of the agent's oldest outstanding `cancel`.
+    pub async fn cancel_ack(&mut self) -> Checked<String> {
+        self.client.cancel_ack().await
     }
 
     /// The reply to the agent's oldest outstanding request.

@@ -236,7 +236,7 @@ pub use storage::{
 };
 
 // Re-export execution utilities (timeout)
-pub use execution::{CancelHandle, ExecutionError, ExecutionResult, QueryTimeout, TimeoutError};
+pub use execution::{ExecutionError, ExecutionResult, Halt, RequestControl, Stop};
 
 // Re-export optimization modules for extensibility
 pub use boolean_specialization::{BooleanSpecializer, SemiringAnnotation, SemiringType};
@@ -3224,15 +3224,15 @@ mod tests {
     /// never trips the request's cancel flag.
     #[test]
     fn test_result_limit_spares_intermediates() {
-        let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        code_generator::set_query_cancel_flag(Some(Arc::clone(&flag)));
+        let control = crate::execution::RequestControl::new(None);
+        code_generator::set_request_control(Some(Arc::clone(&control)));
         let filtered = limited_engine(3)
             .execute_tuples("big(X, Y) <- e(X, Y)\n__query__(Y) <- big(X, Y), X = 7");
         let filtered_truncated = last_result_truncated();
         let counted = limited_engine(3)
             .execute_tuples("big(X, Y) <- e(X, Y)\n__query__(count<X>) <- big(X, Y)");
-        let cancelled = flag.load(std::sync::atomic::Ordering::Relaxed);
-        code_generator::set_query_cancel_flag(None);
+        let cancelled = control.is_stopped();
+        code_generator::set_request_control(None);
 
         assert_eq!(filtered.unwrap(), vec![Tuple::new(vec![Value::Int64(107)])]);
         assert!(!filtered_truncated);

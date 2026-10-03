@@ -99,6 +99,11 @@ fn default_kg() -> String {
 /// {"type": "execute", "id": "2", "program": "?edge(X,Y)"}
 /// {"type": "ping", "id": "3"}
 /// ```
+/// An `execute` may set `timeout_ms`; its one deadline covers queueing,
+/// admission and computation (see [`crate::execution::RequestControl`]).
+/// `{"type": "cancel", "id": "4", "target": "2"}` stops the unanswered request
+/// `2` on arrival and is answered by `cancel_ack` with its `outcome`
+/// (`cancelled`, `too_late` or `not_found`).
 ///
 /// ## Server → Client
 ///
@@ -429,7 +434,7 @@ async fn handle_global_ws_connection(
                             request_id = request_seq,
                             msg_bytes = text.len()
                         );
-                        admit(&mut requests, &mut in_flight, access, request, span);
+                        admit(&handler, &mut requests, &mut in_flight, access, request, span);
                     }
                     Some(Ok(Message::Close(_))) => {
                         debug!(session_id = %session_id, "ws_close_frame_received");
@@ -512,6 +517,7 @@ async fn handle_global_ws_connection(
         }
         start_requests(
             &mut requests,
+            &in_flight,
             &handler,
             &session_id,
             &principal,
@@ -519,8 +525,9 @@ async fn handle_global_ws_connection(
         );
     }
 
-    // Abort reads in progress, let a started write finish, then stop
-    // standing queries before anything else is sent.
+    // Abort reads in progress and stop their computation, let a started
+    // write finish, then stop standing queries before anything else is sent.
+    in_flight.cancel_reads();
     requests.shutdown().await;
     drop(subscriptions);
     notify_if_revoked(&mut sender, &principal).await;
@@ -549,18 +556,35 @@ async fn notify_if_revoked(sender: &mut Outbound, principal: &Principal) {
 type Requests = RequestPipeline<(Request, tracing::Span), Reply>;
 
 /// Admit `request` to the pipeline. One reusing the id of an unanswered
-/// request is answered with `invalid_request` instead of running.
+/// request is answered with `invalid_request` instead of running. An
+/// `execute` gets its [`RequestControl`] here, so its deadline counts from
+/// arrival; a `cancel` acts here, ahead of the pipeline, and only its
+/// `cancel_ack` waits for its turn.
 fn admit(
+    handler: &Handler,
     requests: &mut Requests,
     in_flight: &mut InFlight,
     access: Access,
     request: Request,
     span: tracing::Span,
 ) {
+    if let Job::Cancel { target } = &request.job {
+        let outcome = in_flight.cancel(target);
+        debug!(target = target.as_str(), ?outcome, "ws_cancel");
+        let ack = ServerFrame::CancelAck {
+            id: request.id,
+            target: target.clone(),
+            outcome,
+        };
+        let (access, ack) = Request::immediate(ack);
+        requests.admit(access, (ack, span));
+        return;
+    }
+    let immediate = matches!(request.job, Job::Immediate(_));
     let duplicate = request
         .id
         .as_ref()
-        .filter(|id| !matches!(request.job, Job::Immediate(_)) && in_flight.contains(id));
+        .filter(|id| !immediate && in_flight.contains(id));
     if let Some(id) = duplicate {
         let rejected = ServerFrame::error(
             Some(id.clone()),
@@ -574,12 +598,14 @@ fn admit(
         requests.admit(access, (request, span));
         return;
     }
+    let control = match &request.job {
+        Job::Execute { timeout_ms, .. } => Some(handler.request_control(*timeout_ms)),
+        _ => None,
+    };
     let id = request.id.clone();
-    let immediate = matches!(request.job, Job::Immediate(_));
     let ticket = requests.admit(access, (request, span));
-    if let (Some(id), false) = (id, immediate) {
-        // Checked above: the id is not in flight.
-        let _ = in_flight.insert(id, ticket);
+    if !immediate {
+        in_flight.insert(ticket, id, access, control);
     }
 }
 
@@ -588,6 +614,7 @@ fn admit(
 /// the loop that owns that state.
 fn start_requests(
     requests: &mut Requests,
+    in_flight: &InFlight,
     handler: &Arc<Handler>,
     session_id: &str,
     principal: &Principal,
@@ -603,15 +630,34 @@ fn start_requests(
             Job::Immediate(frame) => {
                 requests.complete(ticket, Reply::Frames(vec![encode(&frame)]));
             }
-            Job::Execute { program } => {
+            Job::Execute { program, .. } => {
+                let control = match in_flight.control(ticket) {
+                    Some(control) => Arc::clone(control),
+                    None => handler.request_control(None),
+                };
+                // Stopped while queued behind the barrier: it never runs.
+                if control.expire_if_due() {
+                    let stop = control
+                        .stopped()
+                        .unwrap_or(crate::execution::Stop::Deadline);
+                    let error = crate::protocol::handler::stop_error(stop);
+                    let frame = ServerFrame::error(id, error.code, error.message);
+                    requests.complete(ticket, Reply::Frames(vec![encode(&frame)]));
+                    continue;
+                }
                 let work = execute::execute(
                     Arc::clone(handler),
                     session_id.to_string(),
                     id,
                     program,
                     principal.clone(),
+                    control,
                 );
                 requests.run(ticket, work.map(Reply::Frames).in_current_span());
+            }
+            Job::Cancel { .. } => {
+                // Handled on arrival by `admit`; never queued.
+                requests.complete(ticket, Reply::Frames(Vec::new()));
             }
             Job::Subscribe { name, query } => {
                 let started = std::time::Instant::now();

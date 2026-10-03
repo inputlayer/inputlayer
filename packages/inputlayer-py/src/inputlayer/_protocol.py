@@ -98,10 +98,16 @@ ErrorCode = Literal[
     "internal",
     "invalid_request",
     "rate_limited",
+    "deadline_exceeded",
+    "cancelled",
+    "outcome_unknown",
 ]
 """Why the engine rejected a statement or request (``code`` on ``error`` and ``errors[]``).
 
-``invalid_request`` and ``rate_limited`` reject a whole request before it runs."""
+``invalid_request`` and ``rate_limited`` reject a whole request before it runs.
+``deadline_exceeded`` and ``cancelled`` stop it before it began committing, so
+nothing was applied; ``outcome_unknown`` means its commit failed in a way that
+leaves the changes possibly applied: read the state back before retrying."""
 
 
 @dataclass(frozen=True)

@@ -79,7 +79,12 @@ export interface TimingBreakdown {
   rules?: RuleTiming[];
 }
 
-/** `invalid_request` and `rate_limited` reject a whole request before it runs. */
+/**
+ * `invalid_request` and `rate_limited` reject a whole request before it runs.
+ * `deadline_exceeded` and `cancelled` stop it before it began committing, so
+ * nothing was applied; `outcome_unknown` means its commit failed in a way that
+ * leaves the changes possibly applied: read the state back before retrying.
+ */
 export type ErrorCode =
   | 'validation'
   | 'not_found'
@@ -87,7 +92,10 @@ export type ErrorCode =
   | 'unsupported'
   | 'internal'
   | 'invalid_request'
-  | 'rate_limited';
+  | 'rate_limited'
+  | 'deadline_exceeded'
+  | 'cancelled'
+  | 'outcome_unknown';
 
 /** A failed statement of a multi-statement program (0-based `index`). */
 export interface StatementError {

@@ -78,6 +78,33 @@ info:
     `http.rate_limit.ws_max_in_flight_requests` (default 16) requests are
     unanswered at once; beyond that the server stops reading the connection.
 
+    ## Deadlines and cancellation
+
+    Every `execute` runs under one deadline that starts when the server reads it
+    and covers waiting behind earlier requests, waiting for a compute slot and
+    computing: `storage.performance.query_timeout_ms` (default 30 s), or the
+    request's own `timeout_ms` when that is sooner.
+
+    A `cancel` names an unanswered request by its `id` (`target`). It acts as
+    soon as it is read, even while the target waits behind other requests, and
+    is answered by `cancel_ack`, released in request order like any reply (so
+    after the target's own reply). Its `outcome`:
+
+    - `cancelled`: the target stopped before it began committing. Nothing it
+      would have changed is applied, it never runs later, and it replies with
+      an `error` of code `cancelled`.
+    - `too_late`: the target already finished or began committing. A commit is
+      never interrupted; the target's reply reports what it committed.
+    - `not_found`: no unanswered request of this connection has that `id`.
+
+    A request whose deadline passes is stopped the same way and fails with code
+    `deadline_exceeded`; a write that began committing completes. Code
+    `outcome_unknown` means the commit itself failed in a way that may have left
+    the changes applied: read the state back before retrying. Writes of facts
+    are idempotent (inserting a present fact or deleting an absent one changes
+    nothing), so after `cancelled`, `deadline_exceeded`, `outcome_unknown` or a
+    lost connection a client can resend the same write without duplicating it.
+
     ## Raw Text Protocol
 
     The `execute` message accepts any valid IQL statement or meta command as raw text.
@@ -124,6 +151,8 @@ channels:
         $ref: '#/components/messages/Execute'
       ping:
         $ref: '#/components/messages/Ping'
+      cancel:
+        $ref: '#/components/messages/Cancel'
       # Server → Client (auth)
       authenticated:
         $ref: '#/components/messages/Authenticated'
@@ -142,6 +171,8 @@ channels:
         $ref: '#/components/messages/Error'
       pong:
         $ref: '#/components/messages/Pong'
+      cancel_ack:
+        $ref: '#/components/messages/CancelAck'
       notification:
         $ref: '#/components/messages/Notification'
       subscription_delta:
@@ -216,6 +247,24 @@ operations:
     summary: Keep-alive ping
     messages:
       - $ref: '#/channels/ws/messages/ping'
+
+  cancel:
+    action: send
+    channel:
+      $ref: '#/channels/ws'
+    summary: Cancel an unanswered request by its id
+    description: |
+      Acts on arrival; answered by `cancel_ack`. See "Deadlines and cancellation".
+    messages:
+      - $ref: '#/channels/ws/messages/cancel'
+
+  onCancelAck:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: What a cancel did to its target
+    messages:
+      - $ref: '#/channels/ws/messages/cancel_ack'
 
   onAuthenticated:
     action: receive
@@ -358,6 +407,14 @@ components:
       payload:
         $ref: '#/components/schemas/PingRequest'
 
+    Cancel:
+      name: cancel
+      title: Cancel
+      summary: Cancel an unanswered request by its id
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/CancelRequest'
+
     Login:
       name: login
       title: Login
@@ -438,6 +495,14 @@ components:
       payload:
         $ref: '#/components/schemas/PongResponse'
 
+    CancelAck:
+      name: cancel_ack
+      title: Cancel acknowledgement
+      summary: What a cancel did to its target
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/CancelAckResponse'
+
     Notification:
       name: notification
       title: Notification
@@ -481,10 +546,13 @@ components:
 
     ErrorCode:
       type: string
-      enum: [validation, not_found, conflict, unsupported, internal, invalid_request, rate_limited]
+      enum: [validation, not_found, conflict, unsupported, internal, invalid_request, rate_limited, deadline_exceeded, cancelled, outcome_unknown]
       description: |
         Why a statement or request failed. `invalid_request` (malformed frame or `id`)
         and `rate_limited` reject a whole request before anything runs.
+        `deadline_exceeded` and `cancelled` stop it before it began committing, so
+        nothing was applied. `outcome_unknown`: the commit failed in a way that may
+        have left the changes applied; read the state back before retrying.
 
     StatementError:
       type: object
@@ -624,6 +692,12 @@ components:
           description: |
             Any valid IQL statement or meta command as raw text.
             Examples: "+edge[(1,2)]", "?edge(X,Y)", ".kg list", ".rule list"
+        timeout_ms:
+          type: integer
+          minimum: 0
+          description: |
+            Milliseconds the request may take from arrival (queueing, admission and
+            computation together). Capped by `storage.performance.query_timeout_ms`.
       examples:
         - type: execute
           id: "1"
@@ -647,6 +721,24 @@ components:
           $ref: '#/components/schemas/RequestId'
       examples:
         - type: ping
+
+    CancelRequest:
+      type: object
+      required:
+        - type
+        - target
+      properties:
+        type:
+          type: string
+          const: cancel
+        id:
+          $ref: '#/components/schemas/RequestId'
+        target:
+          $ref: '#/components/schemas/RequestId'
+      examples:
+        - type: cancel
+          id: "c1"
+          target: "42"
 
     LoginRequest:
       type: object
@@ -987,6 +1079,29 @@ components:
           $ref: '#/components/schemas/RequestId'
       examples:
         - type: pong
+
+    CancelAckResponse:
+      type: object
+      required:
+        - type
+        - target
+        - outcome
+      properties:
+        type:
+          type: string
+          const: cancel_ack
+        id:
+          $ref: '#/components/schemas/RequestId'
+        target:
+          $ref: '#/components/schemas/RequestId'
+        outcome:
+          type: string
+          enum: [cancelled, too_late, not_found]
+      examples:
+        - type: cancel_ack
+          id: "c1"
+          target: "42"
+          outcome: cancelled
 
     NotificationResponse:
       type: object

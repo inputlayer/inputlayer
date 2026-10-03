@@ -26,7 +26,13 @@ fn handler(dir: &TempDir) -> Handler {
 
 async fn run(handler: &Handler, program: &str) -> Result<QueryResult, ProgramError> {
     handler
-        .execute_program_status(None, Some(KG.to_string()), program.to_string(), None)
+        .execute_program_status(
+            None,
+            Some(KG.to_string()),
+            program.to_string(),
+            None,
+            &handler.request_control(None),
+        )
         .await
 }
 
@@ -277,8 +283,13 @@ async fn timed_out_program_applies_nothing() {
     let err = run(&handler, "+marker(1)\n-big(X, Y) <- big(X, Y), big(Y, Z)")
         .await
         .expect_err("the program must time out");
-    assert_eq!(err.message, "Query execution timed out");
-    // The abandoned task stops at its cancel flag; whatever it reached, it
+    assert_eq!(
+        err.code,
+        Some(ErrorCode::DeadlineExceeded),
+        "{}",
+        err.message
+    );
+    // The abandoned task stops at its deadline; whatever it reached, it
     // never commits.
     for _ in 0..40 {
         assert_eq!(count(), (4000, 0));

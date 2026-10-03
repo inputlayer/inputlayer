@@ -293,10 +293,37 @@ impl WsClient {
         self.result().await
     }
 
-    /// Send `program` without waiting; read its reply with [`Self::result`].
-    pub async fn send_execute(&mut self, program: &str) -> Checked<()> {
+    /// Send `program` without waiting; returns its request id (for
+    /// [`Self::send_cancel`]). Read its reply with [`Self::result`].
+    pub async fn send_execute(&mut self, program: &str) -> Checked<String> {
         self.send(json!({"type": "execute", "program": program}))
-            .await
+            .await?;
+        Ok(self.last_id.to_string())
+    }
+
+    /// Send a `cancel` of the unanswered request `target` without waiting.
+    /// Its acknowledgement comes after the target's reply: read it with
+    /// [`Self::cancel_ack`].
+    pub async fn send_cancel(&mut self, target: &str) -> Checked<()> {
+        self.send(json!({"type": "cancel", "target": target})).await
+    }
+
+    /// The `cancel_ack` answering the oldest outstanding request: its
+    /// `outcome` (`cancelled`, `too_late` or `not_found`).
+    pub async fn cancel_ack(&mut self) -> Checked<String> {
+        let reply = self.next_reply().await;
+        self.outstanding.pop_front();
+        let reply = reply?;
+        if reply.kind() != "cancel_ack" {
+            return Err(Violation::Transport(format!(
+                "expected cancel_ack: {}",
+                reply.value
+            )));
+        }
+        Ok(reply.value["outcome"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string())
     }
 
     /// The reply to the oldest request sent with [`Self::send_execute`]: its

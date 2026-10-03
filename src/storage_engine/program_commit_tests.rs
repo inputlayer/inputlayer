@@ -7,6 +7,7 @@
 
 use super::*;
 use crate::config::Config;
+use crate::execution::{Halt, RequestControl, Stop};
 use crate::schema::{ColumnSchema, SchemaType};
 use crate::storage::persist::wal::WalFault;
 use crate::value::Value;
@@ -328,17 +329,53 @@ fn cancelled_program_writes_nothing() {
     let temp = TempDir::new().unwrap();
     let storage = open(&temp);
     let before = wal_records(&temp);
-    let cancel = AtomicBool::new(true);
+    let control = RequestControl::new(None);
+    control.cancel();
     assert!(matches!(
         storage.commit_program(
             KG,
             program(vec![vec![insert("r", vec![t(1)])]]),
-            Some(&cancel)
+            Some(&control)
         ),
-        Err(CommitError::Cancelled)
+        Err(CommitError::Cancelled(Stop::Cancelled))
     ));
     assert_eq!(wal_records(&temp), before);
     assert!(rows(&storage, "r").is_empty());
+}
+
+#[test]
+fn passed_deadline_writes_nothing() {
+    let temp = TempDir::new().unwrap();
+    let storage = open(&temp);
+    let before = wal_records(&temp);
+    let control = RequestControl::new(Some(std::time::Instant::now()));
+    assert!(matches!(
+        storage.commit_program(
+            KG,
+            program(vec![vec![insert("r", vec![t(1)])]]),
+            Some(&control)
+        ),
+        Err(CommitError::Cancelled(Stop::Deadline))
+    ));
+    assert_eq!(wal_records(&temp), before);
+    assert!(rows(&storage, "r").is_empty());
+}
+
+#[test]
+fn a_stop_after_the_commit_began_is_too_late() {
+    let temp = TempDir::new().unwrap();
+    let storage = open(&temp);
+    let control = RequestControl::new(None);
+    storage
+        .commit_program(
+            KG,
+            program(vec![vec![insert("r", vec![t(1)])]]),
+            Some(&control),
+        )
+        .unwrap();
+    assert!(control.is_committing());
+    assert_eq!(control.cancel(), Halt::TooLate);
+    assert_eq!(rows(&storage, "r"), vec![t(1)]);
 }
 
 #[test]

@@ -213,9 +213,7 @@ fn rows(reply: &Value) -> Vec<Value> {
 fn answers_triangles(reply: &Value) -> bool {
     match reply["type"].as_str() {
         Some("result") => rows(reply).is_empty() && reply["errors"] == json!([]),
-        Some("error") => reply["message"]
-            .as_str()
-            .is_some_and(|m| m.contains("timed out")),
+        Some("error") => reply["code"] == "deadline_exceeded",
         _ => false,
     }
 }

@@ -100,7 +100,9 @@ async_io = true
 # Number of worker threads (0 = use all CPU cores)
 num_threads = 0
 
-# Query timeout in milliseconds (0 = no timeout)
+# Request deadline in milliseconds (0 = none): queueing, waiting for a
+# compute slot and computing together. A client's `timeout_ms` can only
+# shorten it. A write that began committing always completes.
 query_timeout_ms = 30000
 
 # Maximum query text size in bytes

@@ -259,7 +259,7 @@ async fn agent_receives_deltas_while_its_own_long_query_runs() -> Checked<()> {
             assert!(long.rows.is_empty(), "{:?}", long.rows);
             long.at
         }
-        Err(Violation::Rejected(message)) if message.contains("timed out") => {
+        Err(Violation::Rejected(message)) if message.contains("deadline exceeded") => {
             std::time::Instant::now()
         }
         Err(other) => return Err(other),
@@ -276,6 +276,48 @@ async fn agent_receives_deltas_while_its_own_long_query_runs() -> Checked<()> {
         "delta took {latency:?} after the ack"
     );
     log.finish().expect("write samples");
+    Ok(())
+}
+
+/// Cancel to error reply for a running query, computation stop included.
+const CANCEL_BUDGET: Duration = Duration::from_millis(500);
+
+#[tokio::test(flavor = "multi_thread")]
+async fn agent_cancels_its_long_query_and_keeps_its_subscription() -> Checked<()> {
+    let engine = engine().start().await.expect("start engine");
+    let side = BIPARTITE_SIDE;
+    Fixture::new("bipartite", KG)
+        .facts(
+            "edge",
+            (0..side).flat_map(|a| {
+                (side..2 * side).flat_map(move |b| [format!("({a}, {b})"), format!("({b}, {a})")])
+            }),
+        )
+        .facts("seen", ["(0)".to_string()])
+        .install(&engine)
+        .await?;
+    let mut agent = Agent::connect(&engine, KG).await?;
+    let mut writer = WsClient::connect(&engine, KG).await?;
+    agent.subscribe("seen", "?seen(X)").await?;
+
+    let long = agent.send_execute(TRIANGLES).await?;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let cancelled_at = std::time::Instant::now();
+    agent.send_cancel(&long).await?;
+    match agent.result().await {
+        Err(Violation::Rejected(message)) if message.contains("cancelled") => {}
+        other => panic!("the cancelled query answered {other:?}"),
+    }
+    let stopped_in = cancelled_at.elapsed();
+    assert!(stopped_in <= CANCEL_BUDGET, "cancel took {stopped_in:?}");
+    assert_eq!(agent.cancel_ack().await?, "cancelled");
+
+    // The subscription is untouched: the next commit still arrives as a delta.
+    let commit = writer.commit("+seen(1)").await?;
+    let delta = agent.next_delta("seen").await?;
+    delta.assert_rows(&[json!([1])], &[])?;
+    assert!(delta.at >= commit.sent_at);
+    agent.converge("seen", &[json!([0]), json!([1])]).await?;
     Ok(())
 }
 

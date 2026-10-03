@@ -6,7 +6,7 @@
 //! Dataflow propagates only changes between iterations, so evaluation is
 //! semi-naive across the whole SCC.
 
-use super::{format_panic_payload, is_query_cancelled, CodeGenerator, Iter};
+use super::{format_panic_payload, is_query_cancelled, CodeGenerator, Iter, QUERY_CANCELLED};
 use crate::boolean_specialization::SemiringType;
 use crate::ir::IRNode;
 use crate::semiring_types::{BooleanDiff, DiffType};
@@ -216,7 +216,7 @@ impl CodeGenerator {
         }
 
         if is_query_cancelled() {
-            return Err("Query cancelled due to timeout".to_string());
+            return Err(QUERY_CANCELLED.to_string());
         }
 
         Ok(out)

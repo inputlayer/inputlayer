@@ -14,6 +14,7 @@ use tracing::{info, warn};
 
 use super::outbound::encode;
 use crate::auth::Principal;
+use crate::execution::RequestControl;
 use crate::protocol::handler::{ProgramError, ValidationError, VALIDATION_ERROR_PREFIX};
 use crate::protocol::rest::handlers::wire_value_to_json;
 use crate::protocol::{Handler, QueryResult};
@@ -32,21 +33,22 @@ const INLINE_FRAME_ROWS: usize = 256;
 /// Maximum characters of a program logged as a preview.
 const LOG_PREVIEW_CHARS: usize = 80;
 
-/// Run `program` in `session_id` as `auth` for the request `id`; returns its
-/// reply frames.
+/// Run `program` in `session_id` as `auth` for the request `id`, under
+/// `control`; returns its reply frames.
 pub(super) async fn execute(
     handler: Arc<Handler>,
     session_id: String,
     id: Option<RequestId>,
     program: String,
     auth: Principal,
+    control: Arc<RequestControl>,
 ) -> Vec<String> {
     let start = Instant::now();
     let program_len = program.len();
     let program_preview = log_preview(&program);
     info!(program_len, program_preview = %program_preview, "ws_execute_start");
     let result = handler
-        .execute_program_status(Some(&session_id), None, program, Some(&auth))
+        .execute_program_status(Some(&session_id), None, program, Some(&auth), &control)
         .await;
     let elapsed_ms = start.elapsed().as_millis() as u64;
     let slow_query_ms = handler.config().storage.performance.slow_query_log_ms;

@@ -20,7 +20,13 @@ fn handler(dir: &Path) -> Handler {
 
 async fn run(handler: &Handler, program: &str) -> Result<QueryResult, ProgramError> {
     handler
-        .execute_program_status(None, Some(KG.to_string()), program.to_string(), None)
+        .execute_program_status(
+            None,
+            Some(KG.to_string()),
+            program.to_string(),
+            None,
+            &handler.request_control(None),
+        )
         .await
 }
 

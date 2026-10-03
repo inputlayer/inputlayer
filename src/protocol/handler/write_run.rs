@@ -189,12 +189,12 @@ impl QueryJob {
         kg: &str,
         queued: &[Queued],
     ) -> Result<ProgramCommit, RunFailure> {
-        let cancel = crate::code_generator::current_query_cancel_flag();
+        let control = crate::code_generator::current_request_control();
         let mut attempts = 0;
         loop {
             attempts += 1;
             let program = self.stage(storage, kg, queued)?;
-            match storage.commit_program(kg, program, cancel.as_deref()) {
+            match storage.commit_program(kg, program, control.as_deref()) {
                 Ok(commit) => return Ok(commit),
                 Err(CommitError::Stale) if attempts < MAX_STAGE_ATTEMPTS => {
                     // Spread writers contending for the same data apart. This
@@ -344,11 +344,19 @@ fn commit_failure(kg: &str, queued: &[Queued], error: CommitError) -> RunFailure
                 ),
             }
         }
-        CommitError::Cancelled => RunFailure {
+        CommitError::Cancelled(stop) => RunFailure {
             index: last,
-            code: ErrorCode::Internal,
-            message: "Program cancelled before its changes were committed; nothing was applied."
-                .to_string(),
+            code: super::supervise::stop_code(stop),
+            message: stop.message().to_string(),
+        },
+        CommitError::Unknown(error) => RunFailure {
+            index: last,
+            code: ErrorCode::OutcomeUnknown,
+            message: format!(
+                "The program's changes reached the write-ahead log but failed to apply \
+                 ({error}); they may or may not be visible until restart. Read the state \
+                 back before retrying."
+            ),
         },
     }
 }

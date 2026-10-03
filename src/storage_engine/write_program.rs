@@ -27,6 +27,7 @@ use super::catalog_change::{CatalogChange, CatalogOutcome};
 use super::KnowledgeGraphSnapshot;
 use crate::ast::dependencies::DependencyClosure;
 use crate::ast::Rule;
+use crate::execution::Stop;
 use crate::rule_catalog::RuleCatalog;
 use crate::storage::StorageError;
 use crate::value::{RelationMap, Tuple};
@@ -344,15 +345,15 @@ pub struct ProgramCommit {
     pub relations: Vec<RelationChange>,
 }
 
-/// Why a write program was not committed. In every case nothing was written,
-/// published or applied.
+/// Why a write program was not committed. In every case but
+/// [`CommitError::Unknown`] nothing was written, published or applied.
 #[derive(Debug)]
 pub enum CommitError {
     /// The KG published a new snapshot after the program read it. Stage the
     /// program again against the current snapshot.
     Stale,
-    /// The caller's cancel flag was set before the commit was written.
-    Cancelled,
+    /// The request was stopped (deadline or cancel) before the commit began.
+    Cancelled(Stop),
     /// Statement `statement` cannot apply to the KG's current state.
     Rejected {
         statement: usize,
@@ -360,6 +361,10 @@ pub enum CommitError {
     },
     /// The KG is gone or the transaction could not be persisted.
     Failed(StorageError),
+    /// The transaction reached the WAL, so it is durable and replays on
+    /// restart, but applying it to the live KG failed: this process may not
+    /// show it. The outcome is unknown to the caller.
+    Unknown(StorageError),
 }
 
 impl CommitError {
@@ -367,13 +372,15 @@ impl CommitError {
     pub fn into_storage_error(self) -> StorageError {
         match self {
             Self::Rejected { error, .. } | Self::Failed(error) => error,
+            Self::Unknown(error) => StorageError::Other(format!(
+                "The write is durable but failed to apply ({error}); its outcome is \
+                 unknown until restart."
+            )),
             Self::Stale => StorageError::Other(
                 "The knowledge graph changed while the write was staged; nothing was applied."
                     .to_string(),
             ),
-            Self::Cancelled => {
-                StorageError::Other("The write was cancelled; nothing was applied.".to_string())
-            }
+            Self::Cancelled(stop) => StorageError::Other(stop.message().to_string()),
         }
     }
 }

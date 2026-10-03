@@ -10,6 +10,7 @@
 //! Test code uses `expect()` with descriptive messages for better failure diagnostics.
 
 use crate::ast::Term;
+use crate::execution::RequestControl;
 use crate::index_manager::IndexStats;
 use crate::rule_catalog::validate_rule;
 
@@ -36,6 +37,8 @@ use write_run::{WriteRun, WriteStatement};
 mod catalog_staging;
 mod fact_staging;
 mod program_boundary;
+mod supervise;
+pub(crate) use supervise::stop_error;
 mod write_run;
 
 pub use inputlayer_ws_protocol::{Notification, ValidationError};
@@ -115,6 +118,43 @@ impl From<String> for ProgramError {
             message,
             code: None,
         }
+    }
+}
+
+/// Whether `stmt`, the only statement of its program, changes state in the
+/// intercepts of `run_execute_program` rather than in the program executor:
+/// ontology, user, key and access management, the agent, and (on a session)
+/// session state.
+fn intercepted_mutation(stmt: &statement::Statement, on_session: bool) -> bool {
+    use statement::Statement;
+    match stmt {
+        Statement::Meta(command) => matches!(
+            command,
+            MetaCommand::OntologyInstall(_)
+                | MetaCommand::OntologyRemove(_)
+                | MetaCommand::OntologyUpgrade(_)
+                | MetaCommand::UserCreate { .. }
+                | MetaCommand::UserDrop(_)
+                | MetaCommand::UserPassword { .. }
+                | MetaCommand::UserRole { .. }
+                | MetaCommand::ApiKeyCreate(_)
+                | MetaCommand::ApiKeyRevoke(_)
+                | MetaCommand::KgAclGrant { .. }
+                | MetaCommand::KgAclRevoke { .. }
+                | MetaCommand::AgentMessage(_)
+                | MetaCommand::AgentStart(_)
+                | MetaCommand::SessionClear
+                | MetaCommand::SessionDrop(_)
+                | MetaCommand::SessionDropName(_)
+        ),
+        Statement::SessionRule(_) | Statement::Fact(_) => on_session,
+        _ => false,
+    }
+}
+
+impl From<ProgramError> for String {
+    fn from(error: ProgramError) -> Self {
+        error.message
     }
 }
 
@@ -751,6 +791,21 @@ impl Handler {
             notification_buffer: Arc::clone(&self.notification_buffer),
             timing_histograms: Arc::clone(&self.timing_histograms),
         }
+    }
+
+    /// The control of a request arriving now: its deadline is
+    /// `query_timeout_ms` from now, or the client's `timeout_ms` when that is
+    /// sooner (no deadline when both are unset or the server's is 0).
+    pub fn request_control(&self, timeout_ms: Option<u64>) -> Arc<RequestControl> {
+        let server_ms = match self.config.storage.performance.query_timeout_ms {
+            0 => None,
+            ms => Some(ms),
+        };
+        let ms = match (timeout_ms, server_ms) {
+            (Some(client), Some(server)) => Some(client.min(server)),
+            (client, server) => client.or(server),
+        };
+        RequestControl::with_timeout(ms.map(std::time::Duration::from_millis))
     }
 
     /// Get reference to the handler's configuration.
@@ -2071,16 +2126,21 @@ impl Handler {
         knowledge_graph: Option<String>,
         program: String,
     ) -> Result<QueryResult, String> {
-        self.run_program(knowledge_graph, program, None).await
+        let control = self.request_control(None);
+        self.run_program(knowledge_graph, program, None, &control)
+            .await
+            .map_err(|e| e.message)
     }
 
-    /// `query_program` with `statements` already parsed by `parse_program`.
+    /// `query_program` with `statements` already parsed by `parse_program`,
+    /// under the request's deadline and cancellation.
     async fn run_program(
         &self,
         knowledge_graph: Option<String>,
         program: String,
         statements: Option<Vec<statement::Statement>>,
-    ) -> Result<QueryResult, String> {
+        control: &Arc<RequestControl>,
+    ) -> Result<QueryResult, ProgramError> {
         // Intercept .agent commands - these need async context for Claude API calls
         let trimmed = program.trim();
         if trimmed.starts_with(".agent ") || trimmed == ".agent" {
@@ -2186,102 +2246,37 @@ impl Handler {
                 "Query too large: {} bytes (max {})",
                 program.len(),
                 perf.max_query_size_bytes
-            ));
+            )
+            .into());
         }
 
-        // Acquire a semaphore permit to bound concurrent DD computations at ncpu.
-        // This prevents blocking-thread-pool explosion (without limiting, spawn_blocking
-        // allows unlimited parallelism, causing CPU thrash and longer individual runtimes).
-        // `acquire_owned()` is an async wait - Tokio workers remain free while queued.
-        // Timeout after 30s to reject requests when server is overloaded.
-        let wait_start = Instant::now();
-        let permit = match tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            Arc::clone(&self.query_semaphore).acquire_owned(),
-        )
-        .await
-        {
-            Ok(Ok(permit)) => permit,
-            Ok(Err(_)) => return Err("Query semaphore closed (server shutting down)".to_string()),
-            Err(_) => {
-                return Err("Server overloaded: query queue full (timed out after 30s)".to_string())
-            }
-        };
-        let queued_ms = wait_start.elapsed().as_millis() as u64;
-        if queued_ms > 0 {
-            info!(queued_ms, program_len, "query_semaphore_wait");
-        }
-
-        // Offload CPU-bound DD computation to the blocking thread pool.
-        // This keeps Tokio worker threads free for I/O and other async tasks.
+        // A compute permit bounds concurrent computations at ncpu (spawn_blocking
+        // alone would allow unlimited parallelism and CPU thrash). Waiting for
+        // it, queueing on the blocking pool and computing all count against the
+        // request's one deadline; see `supervise`.
         let job = self.make_query_job();
-        let timeout_ms = self.config.storage.performance.query_timeout_ms;
-
-        // Cooperative cancellation flag: set on timeout so DD spin loops exit promptly.
-        let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let cancel_flag_clone = Arc::clone(&cancel_flag);
-
-        // The permit is moved into the blocking task so it's released when DD finishes.
-        let blocking_task = tokio::task::spawn_blocking(move || {
-            crate::code_generator::set_query_cancel_flag(Some(cancel_flag_clone));
-            let result = job.execute(knowledge_graph, program, statements);
-            crate::code_generator::set_query_cancel_flag(None);
-            drop(permit); // Explicit drop; semaphore slot returned here
-            result
-        });
-
-        if timeout_ms > 0 {
-            let result =
-                tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), blocking_task)
-                    .await;
-            match result {
-                Ok(joined) => {
-                    let compute_ms = query_start.elapsed().as_millis() as u64;
-                    info!(program_len, compute_ms, "query_complete");
-                    let slow_ms = self.config.storage.performance.slow_query_log_ms;
-                    if slow_ms > 0 && compute_ms >= slow_ms {
-                        warn!(
-                            program_len,
-                            compute_ms,
-                            threshold_ms = slow_ms,
-                            "slow_query"
-                        );
-                    }
-                    joined.map_err(|e| {
-                        tracing::error!(error = %e, "Query task panicked");
-                        "Internal query execution error".to_string()
-                    })?
-                }
-                Err(_) => {
-                    // Signal the DD spin loop to stop
-                    cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                    warn!(
-                        program_len,
-                        timeout_ms,
-                        elapsed_ms = query_start.elapsed().as_millis() as u64,
-                        "query_timeout"
-                    );
-                    Err("Query execution timed out".to_string())
-                }
-            }
-        } else {
-            let joined = blocking_task.await.map_err(|e| {
-                tracing::error!(error = %e, "Query task panicked");
-                "Internal query execution error".to_string()
-            })?;
-            let compute_ms = query_start.elapsed().as_millis() as u64;
-            info!(program_len, compute_ms, "query_complete");
-            let slow_ms = self.config.storage.performance.slow_query_log_ms;
-            if slow_ms > 0 && compute_ms >= slow_ms {
-                warn!(
-                    program_len,
-                    compute_ms,
-                    threshold_ms = slow_ms,
-                    "slow_query"
-                );
-            }
-            joined
+        let result = supervise::run_blocking(&self.query_semaphore, control, move || {
+            job.execute(knowledge_graph, program, statements)
+                .map_err(ProgramError::from)
+        })
+        .await;
+        let compute_ms = query_start.elapsed().as_millis() as u64;
+        info!(
+            program_len,
+            compute_ms,
+            ok = result.is_ok(),
+            "query_complete"
+        );
+        let slow_ms = self.config.storage.performance.slow_query_log_ms;
+        if slow_ms > 0 && compute_ms >= slow_ms {
+            warn!(
+                program_len,
+                compute_ms,
+                threshold_ms = slow_ms,
+                "slow_query"
+            );
         }
+        result
     }
 }
 
@@ -2452,6 +2447,9 @@ impl QueryJob {
                 if !stmt_text.is_empty() {
                     if let Some((index, stmt)) = statements.next() {
                         stmt_index = index;
+                        if let Err(stop) = supervise::statement_gate(&stmt) {
+                            return Err(stop.message().to_string());
+                        }
                         match stmt {
                             statement::Statement::SchemaDecl(decl) => {
                                 queue!(WriteStatement::Catalog(CatalogStatement::Schema(decl)));
@@ -3437,19 +3435,23 @@ impl Handler {
         session_id: &SessionId,
         program: String,
     ) -> Result<QueryResult, String> {
-        self.run_program_with_session(session_id, None, program, None)
+        let control = self.request_control(None);
+        self.run_program_with_session(session_id, None, program, None, &control)
             .await
+            .map_err(|e| e.message)
     }
 
     /// `query_program_with_session` on `kg` instead of the session's binding,
-    /// including when the session is gone.
+    /// including when the session is gone, under the request's deadline and
+    /// cancellation.
     async fn run_program_with_session(
         &self,
         session_id: &SessionId,
         kg: Option<String>,
         program: String,
         statements: Option<Vec<statement::Statement>>,
-    ) -> Result<QueryResult, String> {
+        control: &Arc<RequestControl>,
+    ) -> Result<QueryResult, ProgramError> {
         // Input size validation (same as query_program)
         let perf = &self.config.storage.performance;
         if perf.max_query_size_bytes > 0 && program.len() > perf.max_query_size_bytes {
@@ -3457,14 +3459,15 @@ impl Handler {
                 "Query too large: {} bytes (max {})",
                 program.len(),
                 perf.max_query_size_bytes
-            ));
+            )
+            .into());
         }
 
         // Touch session to prevent idle reaping during query execution.
         // If session was reaped (e.g., WS reconnect), fall back to non-session query.
         if self.sessions.touch_session(session_id).is_err() {
             tracing::debug!(session_id = %session_id, "session_gone_fallback_to_query_program");
-            return self.run_program(kg, program, statements).await;
+            return self.run_program(kg, program, statements, control).await;
         }
 
         // Check if session is clean → fast path
@@ -3476,7 +3479,9 @@ impl Handler {
 
         if is_clean {
             // Fast path: no ephemeral state, use global snapshot directly
-            return self.run_program(Some(kg), program, statements).await;
+            return self
+                .run_program(Some(kg), program, statements, control)
+                .await;
         }
 
         // Slow path: combine ephemeral + persistent data
@@ -3520,98 +3525,57 @@ impl Handler {
             (snap, names)
         }; // storage read lock released here
 
-        // Acquire semaphore permit to bound concurrent DD computations (same as query_program)
-        let permit = match tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            Arc::clone(&self.query_semaphore).acquire_owned(),
-        )
-        .await
-        {
-            Ok(Ok(permit)) => permit,
-            Ok(Err(_)) => return Err("Query semaphore closed (server shutting down)".to_string()),
-            Err(_) => {
-                return Err("Server overloaded: query queue full (timed out after 30s)".to_string())
-            }
-        };
-
-        let timeout_ms = self.config.storage.performance.query_timeout_ms;
-        let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let cancel_flag_clone = Arc::clone(&cancel_flag);
-
-        // Offload CPU-bound DD computation to the blocking thread pool
+        // Offload CPU-bound DD computation to the blocking thread pool, under
+        // a compute permit and the request's deadline (same as query_program).
         let combined_program_clone = combined_program;
         let preprocessed_clone = preprocessed.clone();
         let timing_mode = self.config.storage.performance.timing_mode;
         let timing_histograms = Arc::clone(&self.timing_histograms);
         let needs_full = needs_full_result(&order_by, query_offset);
-        let blocking_task = tokio::task::spawn_blocking(move || {
-            crate::code_generator::set_query_cancel_flag(Some(cancel_flag_clone));
+        let (results, row_capped, baseline, timing_breakdown) =
+            supervise::run_blocking(&self.query_semaphore, control, move || {
+                // Run session query on snapshot (lock-free) with profiling
+                let run = || {
+                    snapshot.execute_with_session_facts_profiled(
+                        &combined_program_clone,
+                        session_facts,
+                        timing_mode,
+                    )
+                };
+                let (results, timing_breakdown) = if needs_full {
+                    crate::without_result_cap(run)
+                } else {
+                    run()
+                }
+                .map_err(|e| ProgramError::from(format!("Query execution failed: {e}")))?;
+                let row_capped = crate::last_result_truncated();
 
-            // Run session query on snapshot (lock-free) with profiling
-            let run = || {
-                snapshot.execute_with_session_facts_profiled(
-                    &combined_program_clone,
-                    session_facts,
-                    timing_mode,
-                )
-            };
-            let (results, timing_breakdown) = if needs_full {
-                crate::without_result_cap(run)
-            } else {
-                run()
-            }
-            .map_err(|e| format!("Query execution failed: {e}"))?;
-            let row_capped = crate::last_result_truncated();
+                // Record timing in Prometheus histograms
+                if let Some(ref tb) = timing_breakdown {
+                    timing_histograms.record(tb);
+                }
 
-            // Record timing in Prometheus histograms
-            if let Some(ref tb) = timing_breakdown {
-                timing_histograms.record(tb);
-            }
-
-            // Per-tuple provenance: run the original query (without ephemeral rules)
-            // against persistent-only data to identify ephemeral contributions.
-            // Uncapped, so a capped result is never compared to a different subset.
-            use std::collections::HashSet;
-            let baseline: HashSet<Tuple> = if results.is_empty() {
-                HashSet::new()
-            } else {
-                match crate::without_result_cap(|| {
-                    snapshot.execute_with_rules_tuples(&preprocessed_clone)
-                }) {
-                    Ok(tuples) => tuples.into_iter().collect(),
-                    Err(e) => {
-                        warn!(error = %e, "Provenance baseline query failed - all tuples tagged as ephemeral");
-                        HashSet::new()
+                // Per-tuple provenance: run the original query (without ephemeral rules)
+                // against persistent-only data to identify ephemeral contributions.
+                // Uncapped, so a capped result is never compared to a different subset.
+                use std::collections::HashSet;
+                let baseline: HashSet<Tuple> = if results.is_empty() {
+                    HashSet::new()
+                } else {
+                    match crate::without_result_cap(|| {
+                        snapshot.execute_with_rules_tuples(&preprocessed_clone)
+                    }) {
+                        Ok(tuples) => tuples.into_iter().collect(),
+                        Err(e) => {
+                            warn!(error = %e, "Provenance baseline query failed - all tuples tagged as ephemeral");
+                            HashSet::new()
+                        }
                     }
-                }
-            };
+                };
 
-            crate::code_generator::set_query_cancel_flag(None);
-            drop(permit); // Release semaphore slot
-
-            Ok::<_, String>((results, row_capped, baseline, timing_breakdown))
-        });
-
-        // Apply timeout if configured
-        let (results, row_capped, baseline, timing_breakdown) = if timeout_ms > 0 {
-            match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), blocking_task)
-                .await
-            {
-                Ok(joined) => joined.map_err(|e| {
-                    tracing::error!(error = %e, "Session query task panicked");
-                    "Internal query execution error".to_string()
-                })?,
-                Err(_) => {
-                    cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-                    return Err("Query execution timed out".to_string());
-                }
-            }
-        } else {
-            blocking_task.await.map_err(|e| {
-                tracing::error!(error = %e, "Session query task panicked");
-                "Internal query execution error".to_string()
-            })?
-        }?;
+                Ok((results, row_capped, baseline, timing_breakdown))
+            })
+            .await?;
 
         use crate::session::Provenance;
 
@@ -3819,23 +3783,32 @@ impl Handler {
         program: String,
         auth: Option<&crate::auth::Principal>,
     ) -> Result<QueryResult, String> {
-        self.execute_program_status(session_id, knowledge_graph, program, auth)
+        let control = self.request_control(None);
+        self.execute_program_status(session_id, knowledge_graph, program, auth, &control)
             .await
             .map_err(|e| e.message)
     }
 
-    /// `execute_program`, keeping the failed statement's `ErrorCode`.
+    /// `execute_program`, keeping the failed statement's `ErrorCode`, under
+    /// `control`: the request's deadline (see [`Self::request_control`]) and
+    /// cancellation. A request stopped before it began committing applied
+    /// nothing and fails with `deadline_exceeded` or `cancelled`; once it began
+    /// committing it runs to completion and returns what it committed.
     pub async fn execute_program_status(
         &self,
         session_id: Option<&SessionId>,
         knowledge_graph: Option<String>,
         program: String,
         auth: Option<&crate::auth::Principal>,
+        control: &Arc<RequestControl>,
     ) -> Result<QueryResult, ProgramError> {
         let single_statement = program_statement_count(&program) == 1;
         let result = self
-            .run_execute_program(session_id, knowledge_graph, program, auth)
+            .run_execute_program(session_id, knowledge_graph, program, auth, control)
             .await?;
+        // A stop that won the race discards a result that changed nothing; a
+        // later one is too late.
+        control.finish().map_err(supervise::stop_error)?;
         if let Some(principal) = auth {
             principal
                 .identity()
@@ -3856,7 +3829,8 @@ impl Handler {
         knowledge_graph: Option<String>,
         program: String,
         auth: Option<&crate::auth::Principal>,
-    ) -> Result<QueryResult, String> {
+        control: &Arc<RequestControl>,
+    ) -> Result<QueryResult, ProgramError> {
         // Input size validation (protects parsing and downstream handlers)
         let max_bytes = self.config.storage.performance.max_query_size_bytes;
         if max_bytes > 0 && program.len() > max_bytes {
@@ -3864,7 +3838,8 @@ impl Handler {
                 "Program too large: {} bytes (max {})",
                 program.len(),
                 max_bytes
-            ));
+            )
+            .into());
         }
 
         let trimmed = program.trim();
@@ -3888,7 +3863,8 @@ impl Handler {
                     Err(_) if trimmed.starts_with(".ontology") => {
                         return Err(
                             "session expired - reconnect before running .ontology commands"
-                                .to_string(),
+                                .to_string()
+                                .into(),
                         );
                     }
                     Err(_) => None,
@@ -3911,7 +3887,7 @@ impl Handler {
             if identity.role != crate::auth::Role::Admin
                 && current_kg == Some(crate::auth::INTERNAL_KG)
             {
-                return Err(internal_kg_denied());
+                return Err(internal_kg_denied().into());
             }
         }
 
@@ -3928,7 +3904,9 @@ impl Handler {
             })
         {
             return Err(
-                "'.kg create' and '.kg drop' must be sent as a single statement".to_string(),
+                "'.kg create' and '.kg drop' must be sent as a single statement"
+                    .to_string()
+                    .into(),
             );
         }
         // The single statement the intercepts below handle.
@@ -3936,6 +3914,13 @@ impl Handler {
             [stmt] => Some(stmt),
             _ => None,
         };
+
+        // Commands answered below, outside the program executor, change state
+        // as they run: they enter the commit first, so a stop either prevents
+        // them or cannot claim they did not happen.
+        if parsed.is_some_and(|stmt| intercepted_mutation(stmt, session_id.is_some())) {
+            control.begin_commit().map_err(supervise::stop_error)?;
+        }
 
         // Any session-bound activity should keep the session alive.
         // If the session was reaped (e.g., after WS reconnect), log and continue
@@ -3953,7 +3938,7 @@ impl Handler {
                 match meta {
                     MetaCommand::SessionList => {
                         let sid = session_id.ok_or_else(|| "No active session".to_string())?;
-                        return self.handle_session_list(sid);
+                        return Ok(self.handle_session_list(sid)?);
                     }
                     MetaCommand::SessionClear => {
                         let sid = session_id.ok_or_else(|| "No active session".to_string())?;
@@ -3972,11 +3957,11 @@ impl Handler {
                     }
                     MetaCommand::SessionDrop(index) => {
                         let sid = session_id.ok_or_else(|| "No active session".to_string())?;
-                        return self.handle_session_drop(sid, *index);
+                        return Ok(self.handle_session_drop(sid, *index)?);
                     }
                     MetaCommand::SessionDropName(name) => {
                         let sid = session_id.ok_or_else(|| "No active session".to_string())?;
-                        return self.handle_session_drop_name(sid, name);
+                        return Ok(self.handle_session_drop_name(sid, name)?);
                     }
 
                     // Ontology lifecycle: async (registry fetch + recursive
@@ -3984,53 +3969,53 @@ impl Handler {
                     // executor. Engine-owned; il and the Studio delegate.
                     MetaCommand::OntologyInstall(spec) => {
                         let spec = spec.clone();
-                        return self
+                        return Ok(self
                             .handle_ontology_install(session_id, knowledge_graph, &spec, auth)
-                            .await;
+                            .await?);
                     }
                     MetaCommand::OntologyRemove(name) => {
                         let name = name.clone();
-                        return self
+                        return Ok(self
                             .handle_ontology_remove(session_id, knowledge_graph, &name, auth)
-                            .await;
+                            .await?);
                     }
                     MetaCommand::OntologyUpgrade(spec) => {
                         let spec = spec.clone();
-                        return self
+                        return Ok(self
                             .handle_ontology_upgrade(session_id, knowledge_graph, &spec, auth)
-                            .await;
+                            .await?);
                     }
 
                     // User & API key management (handled directly, not via query_program)
                     MetaCommand::UserList => {
-                        return self.handle_user_list();
+                        return Ok(self.handle_user_list()?);
                     }
                     MetaCommand::UserCreate {
                         username,
                         password,
                         role,
                     } => {
-                        return self.handle_user_create(username, password, role);
+                        return Ok(self.handle_user_create(username, password, role)?);
                     }
                     MetaCommand::UserDrop(username) => {
-                        return self.handle_user_drop(username);
+                        return Ok(self.handle_user_drop(username)?);
                     }
                     MetaCommand::UserPassword { username, password } => {
-                        return self.handle_user_password(username, password);
+                        return Ok(self.handle_user_password(username, password)?);
                     }
                     MetaCommand::UserRole { username, role } => {
-                        return self.handle_user_role(username, role);
+                        return Ok(self.handle_user_role(username, role)?);
                     }
                     MetaCommand::ApiKeyCreate(label) => {
                         let owner = effective_auth
                             .map_or_else(|| "admin".to_string(), |a| a.username.clone());
-                        return self.handle_apikey_create(label, &owner);
+                        return Ok(self.handle_apikey_create(label, &owner)?);
                     }
                     MetaCommand::ApiKeyList => {
-                        return self.handle_apikey_list();
+                        return Ok(self.handle_apikey_list()?);
                     }
                     MetaCommand::ApiKeyRevoke(label) => {
-                        return self.handle_apikey_revoke(label);
+                        return Ok(self.handle_apikey_revoke(label)?);
                     }
 
                     // KG ACL management
@@ -4039,26 +4024,26 @@ impl Handler {
                             .as_deref()
                             .or(knowledge_graph.as_deref())
                             .unwrap_or("default");
-                        return self
+                        return Ok(self
                             .handle_kg_acl_list(effective_kg)
-                            .map(|msg| self.message_result(&msg));
+                            .map(|msg| self.message_result(&msg))?);
                     }
                     MetaCommand::KgAclGrant {
                         ref kg_name,
                         ref username,
                         ref role,
                     } => {
-                        return self
+                        return Ok(self
                             .handle_kg_acl_grant(kg_name, username, role)
-                            .map(|msg| self.message_result(&msg));
+                            .map(|msg| self.message_result(&msg))?);
                     }
                     MetaCommand::KgAclRevoke {
                         ref kg_name,
                         ref username,
                     } => {
-                        return self
+                        return Ok(self
                             .handle_kg_acl_revoke(kg_name, username)
-                            .map(|msg| self.message_result(&msg));
+                            .map(|msg| self.message_result(&msg))?);
                     }
 
                     _ => {} // handled by query_program
@@ -4141,10 +4126,13 @@ impl Handler {
         }
         let result = match session_id {
             Some(sid) if is_query => {
-                self.run_program_with_session(sid, exec_kg, program, statements)
+                self.run_program_with_session(sid, exec_kg, program, statements, control)
                     .await?
             }
-            _ => self.run_program(exec_kg, program, statements).await?,
+            _ => {
+                self.run_program(exec_kg, program, statements, control)
+                    .await?
+            }
         };
 
         // If KG was switched, update session binding
@@ -4579,8 +4567,14 @@ impl Handler {
         }
         let program_copy = program.clone();
 
-        let deploy =
-            Box::pin(self.run_execute_program(session_id, Some(kg.clone()), program, auth)).await?;
+        let deploy = Box::pin(self.run_execute_program(
+            session_id,
+            Some(kg.clone()),
+            program,
+            auth,
+            &self.request_control(None),
+        ))
+        .await?;
         let problems = Self::result_problem_rows(&deploy);
         if !problems.is_empty() {
             // The deploy program is one transaction: none of it was applied.
@@ -4659,8 +4653,14 @@ impl Handler {
                 "+pack_item[(\"{name}\", \"{kind}\", \"{item}\")]\n"
             ));
         }
-        let recorded =
-            Box::pin(self.run_execute_program(session_id, Some(kg.clone()), record, auth)).await?;
+        let recorded = Box::pin(self.run_execute_program(
+            session_id,
+            Some(kg.clone()),
+            record,
+            auth,
+            &self.request_control(None),
+        ))
+        .await?;
         let record_problems = Self::result_problem_rows(&recorded);
         if !record_problems.is_empty() {
             return Err(format!(
@@ -4747,9 +4747,14 @@ impl Handler {
         // sub-result row: drops that fail phrase their errors in many ways,
         // and silence here would misreport a partial removal.
         for program in programs {
-            let result =
-                Box::pin(self.run_execute_program(session_id, Some(kg.clone()), program, auth))
-                    .await?;
+            let result = Box::pin(self.run_execute_program(
+                session_id,
+                Some(kg.clone()),
+                program,
+                auth,
+                &self.request_control(None),
+            ))
+            .await?;
             for row in &result.rows {
                 if let Some(WireValue::String(s)) = row.values.first() {
                     messages.push(format!("  {s}"));
@@ -4794,6 +4799,7 @@ impl Handler {
                  -pack_meta(N, V, D) <- pack_meta(N, V, D), N = \"{name}\""
             ),
             auth,
+            &self.request_control(None),
         ))
         .await?;
         for problem in Self::result_problem_rows(&cleanup) {
@@ -4856,9 +4862,14 @@ impl Handler {
             "-pack_item(P, K, I) <- pack_item(P, K, I), P = \"{name}\", K = \"rule\"\n"
         ));
         if !program.is_empty() {
-            let result =
-                Box::pin(self.run_execute_program(session_id, Some(kg.clone()), program, auth))
-                    .await?;
+            let result = Box::pin(self.run_execute_program(
+                session_id,
+                Some(kg.clone()),
+                program,
+                auth,
+                &self.request_control(None),
+            ))
+            .await?;
             let problems = Self::result_problem_rows(&result);
             if !problems.is_empty() {
                 return Err(format!(

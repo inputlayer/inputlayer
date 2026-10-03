@@ -85,7 +85,11 @@ pub(super) async fn authenticate(
                     .authenticate_api_key(&api_key)
                     .inspect_err(|_| warn!(%peer, "ws_apikey_auth_failed")),
             ),
-            Ok(frame @ (ClientFrame::Execute { .. } | ClientFrame::Ping { .. })) => {
+            Ok(
+                frame @ (ClientFrame::Execute { .. }
+                | ClientFrame::Cancel { .. }
+                | ClientFrame::Ping { .. }),
+            ) => {
                 let message = "Authentication required. Send login or authenticate first.";
                 auth_error(sender, frame.id().cloned(), message.to_string()).await;
                 continue;
