@@ -103,7 +103,7 @@ impl Export {
 /// derived from the current UTC time.
 ///
 /// # Errors
-/// [`BackupError::InvalidName`] unless `name` is 1 to [`MAX_NAME_LEN`] ASCII
+/// [`BackupError::InvalidName`] unless `name` is 1 to `MAX_NAME_LEN` (128) ASCII
 /// letters, digits, `-`, `_` or `.`, not starting with `.`; so it can never
 /// name a parent, a hidden file or a path.
 pub fn checkpoint_name(name: Option<&str>) -> BackupResult<String> {

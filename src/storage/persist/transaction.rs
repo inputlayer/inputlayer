@@ -11,7 +11,7 @@
 //!
 //! Each kind of change has its own [`TxnOp`] variant with a typed payload, never
 //! strings to re-parse on replay. A record holding a variant this server does not
-//! know fails startup instead of being skipped; see [`super::wal_record`].
+//! know fails startup instead of being skipped; see the `wal_record` module.
 //!
 //! Rule and schema changes ([`TxnOp::Catalog`]) carry the state the commit leaves
 //! behind, not the edit that produced it, so replaying one over a catalog that
