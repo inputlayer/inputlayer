@@ -8,14 +8,16 @@
 //! [`super::publication`]), so the worker never waits for a connection.
 //!
 //! Commands are handled before notifications, so a subscriber detached before
-//! a commit is announced is not evaluated for it.
+//! a commit is announced is not evaluated for it. An attach first applies
+//! every notification already announced, so a subscriber never joins a view
+//! of rules replaced before it subscribed.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::broadcast::{self, error::RecvError};
+use tokio::sync::broadcast::{self, error::RecvError, error::TryRecvError};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::{AbortHandle, JoinError, JoinSet};
 use tokio::time::Instant;
@@ -135,22 +137,8 @@ impl Worker {
                     self.on_joined(joined);
                 }
                 notification = self.notifications.recv() => match notification {
-                    Ok(notification) => {
-                        let (knowledge_graph, change) = change_of(&notification);
-                        let now = Instant::now().into_std();
-                        let dispatches = if changes_rules(&notification) {
-                            self.registry.on_rule_change(knowledge_graph, &change, now)
-                        } else {
-                            self.registry.on_change(knowledge_graph, &change, now)
-                        };
-                        self.start_all(dispatches);
-                    }
-                    Err(RecvError::Lagged(missed)) => {
-                        debug!(missed, "subscription_hub_lagged");
-                        let now = Instant::now().into_std();
-                        let dispatches = self.registry.on_unknown_changes(now);
-                        self.start_all(dispatches);
-                    }
+                    Ok(notification) => self.on_notification(&notification),
+                    Err(RecvError::Lagged(missed)) => self.on_lagged(missed),
                     Err(RecvError::Closed) => break,
                 },
                 () = sleep_until(due), if due.is_some() => {
@@ -171,6 +159,7 @@ impl Worker {
                 query,
                 reply,
             } => {
+                self.drain_notifications();
                 let subscriber = doorbell.id();
                 match self.registry.attach(key, doorbell, || query) {
                     Attach::Attached(attachment) => self.answer(subscriber, reply, Ok(attachment)),
@@ -182,6 +171,33 @@ impl Worker {
             }
             Command::Detach(subscriber) => self.detach(subscriber),
         }
+    }
+
+    fn drain_notifications(&mut self) {
+        loop {
+            match self.notifications.try_recv() {
+                Ok(notification) => self.on_notification(&notification),
+                Err(TryRecvError::Lagged(missed)) => self.on_lagged(missed),
+                Err(TryRecvError::Empty | TryRecvError::Closed) => return,
+            }
+        }
+    }
+
+    fn on_notification(&mut self, notification: &Notification) {
+        let (knowledge_graph, change) = change_of(notification);
+        let now = Instant::now().into_std();
+        let dispatches = if changes_rules(notification) {
+            self.registry.on_rule_change(knowledge_graph, &change, now)
+        } else {
+            self.registry.on_change(knowledge_graph, &change, now)
+        };
+        self.start_all(dispatches);
+    }
+
+    fn on_lagged(&mut self, missed: u64) {
+        debug!(missed, "subscription_hub_lagged");
+        let dispatches = self.registry.on_unknown_changes(Instant::now().into_std());
+        self.start_all(dispatches);
     }
 
     fn detach(&mut self, subscriber: SubscriberId) {
@@ -243,5 +259,51 @@ async fn sleep_until(due: Option<std::time::Instant>) {
     match due {
         Some(due) => tokio::time::sleep_until(Instant::from_std(due)).await,
         None => std::future::pending().await,
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use crate::protocol::subscription::testing::{doorbell, rows, Scripted};
+
+    fn key() -> ViewKey {
+        ViewKey {
+            knowledge_graph: "kg".to_string(),
+            query: "?a(X)".to_string(),
+        }
+    }
+
+    fn rule_change() -> Notification {
+        Notification::RuleChange {
+            knowledge_graph: "kg".to_string(),
+            rule_name: "a".to_string(),
+            operation: "add".to_string(),
+            timestamp_ms: 0,
+            seq: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn an_attach_after_an_announced_rule_change_starts_a_new_view() {
+        let (announce, notifications) = broadcast::channel(16);
+        let metrics = Arc::new(SubscriptionMetrics::default());
+        let hub = SubscriptionHub::spawn(notifications, Arc::clone(&metrics), Duration::ZERO);
+        let (first, _m1) = doorbell(hub.next_subscriber_id());
+        let steps = vec![Ok((vec![1], "a")), Ok((vec![1], "a"))];
+        let old = hub
+            .attach(key(), first, Scripted::boxed(steps))
+            .await
+            .unwrap();
+
+        announce.send(rule_change()).unwrap();
+        let (second, _m2) = doorbell(hub.next_subscriber_id());
+        let new = hub
+            .attach(key(), second, Scripted::boxed([Ok((vec![2], "a"))]))
+            .await
+            .unwrap();
+        assert!(!Arc::ptr_eq(&new.cell, &old.cell));
+        assert_eq!(new.initial_rows.as_deref(), Some(&rows(&[2])));
     }
 }

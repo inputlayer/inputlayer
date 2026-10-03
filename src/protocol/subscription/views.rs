@@ -14,7 +14,7 @@
 //! change is evaluated at most one window (plus an evaluation in flight)
 //! after it is seen.
 //!
-//! A completed refresh that changed, failed or recovered the result becomes
+//! A completed refresh that changed, newly failed or recovered the result is
 //! the view's next [`Publication`], and every subscriber's doorbell rings. A
 //! subscriber joining a view without a current result (first evaluation, or a
 //! failed refresh) waits for the next evaluation, started at once if idle.
@@ -447,8 +447,7 @@ fn start(view: &mut View, refresh: Refresh) -> Arc<Vec<Row>> {
     Arc::new(refresh.inserted)
 }
 
-/// Publish a later refresh's outcome when there is news (a recovery from a
-/// failure is), ringing every subscriber. Returns those whose connection is gone.
+/// Publish a refresh's news and ring every subscriber; returns those whose connection is gone.
 fn publish(view: &mut View, result: Result<Refresh, String>) -> Vec<SubscriberId> {
     let Some(live) = &mut view.live else {
         return Vec::new();
@@ -475,6 +474,7 @@ fn publish(view: &mut View, result: Result<Refresh, String>) -> Vec<SubscriberId
                 },
             }
         }
+        Err(e) if matches!(&latest.outcome, Outcome::Failed(f) if *f == e) => return Vec::new(),
         Err(message) => Publication {
             number,
             revision: latest.revision,
