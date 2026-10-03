@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test python-test-live python-test-examples js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint perf-gate perf-gate-check test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test python-test-live python-test-examples js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -467,14 +467,27 @@ static-analysis: lint doc-check
 # Format code
 fmt:
 	cargo fmt --all
+	cargo fmt --manifest-path perf-gate/Cargo.toml
 
 # Check formatting (CI mode - fails if not formatted)
 fmt-check:
 	cargo fmt --all -- --check
+	cargo fmt --manifest-path perf-gate/Cargo.toml -- --check
 
 # Run clippy lints
 lint:
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+# Performance gate: this tree's server vs the approved baseline, same host.
+# Mandatory before calling a PR done; see perf-gate/README.md.
+# Pass options through PERF_GATE_ARGS, e.g. PERF_GATE_ARGS="--aa".
+perf-gate:
+	./scripts/perf-gate.sh $(PERF_GATE_ARGS)
+
+# Lint and unit-test the performance gate tool itself (its own workspace)
+perf-gate-check:
+	cargo clippy --manifest-path perf-gate/Cargo.toml --target-dir target --all-targets -- -D warnings
+	cargo test --manifest-path perf-gate/Cargo.toml --target-dir target
 
 # Check compilation + formatting + lints (quality gate)
 check: fmt-check lint

@@ -50,6 +50,10 @@ jobs:
       - name: Run Clippy
         run: make lint
 
+      # Tool only: measuring needs a quiet same-host runner, not a shared one.
+      - name: Performance gate tool (clippy + unit tests)
+        run: make perf-gate-check
+
   test:
     name: Tests
     runs-on: blacksmith-4vcpu-ubuntu-2404

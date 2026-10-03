@@ -10,6 +10,7 @@ make test-fast      # Unit tests only (~30s)
 make test           # Unit + snapshot tests
 make e2e-test       # Snapshot tests only (parallel)
 make test-affected  # Run only snapshots affected by uncommitted changes
+make perf-gate      # Performance gate: this tree vs the approved baseline (same host)
 ```
 
 ## Test Tiers
@@ -60,6 +61,17 @@ Environment variables:
 | `INPUTLAYER_TEST_PORT` | 8080 | Server port for tests |
 | `INPUTLAYER_RESTART_INTERVAL` | 500 | Restart server every N tests (sequential mode) |
 
+## Performance Gate
+
+`make perf-gate` is the performance acceptance check for every implementation
+PR. It builds the approved baseline commit and this tree's server, measures
+both on this host in interleaved rounds, and checks query latency,
+durable-write throughput and writer-to-subscribed-agent delta latency against
+the budgets in `perf-gate/policy.toml`. Only a PASS is acceptable. Attach
+`target/perf-gate/latest/report.md` to the PR. Method, fixtures and runner
+requirements are in [`perf-gate/README.md`](perf-gate/README.md). The
+Criterion benches in `benches/` are diagnostic only.
+
 ## Server Tracing (Debug Logs to File)
 
 Enable structured server tracing logs (useful for diagnosing hangs/timeouts):
@@ -101,6 +113,8 @@ Source-to-category mapping:
 | `make test` | Unit + snapshot | Pre-commit check |
 | `make test-all` | Build + unit + snapshot + check | Full verification before merge |
 | `make test-affected` | Snapshot tests for changed files only | Fast E2E feedback |
+| `make perf-gate` | Paired latency/throughput gate over `/ws` vs the approved baseline | Every implementation PR (see `perf-gate/README.md`) |
+| `make perf-gate-check` | Clippy + unit tests of the gate tool | After changing `perf-gate/` |
 
 ### Code Quality
 
