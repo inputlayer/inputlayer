@@ -44,6 +44,7 @@ services:
       <<: *demo-secrets
       ENGINE_URL: ws://inputlayer:8080/ws
       ENGINE_KG: shop
+      ENGINE_REQUEST_TIMEOUT: ${ENGINE_REQUEST_TIMEOUT:-10}
     depends_on:
       inputlayer:
         condition: service_healthy
@@ -78,6 +79,7 @@ services:
       <<: *demo-secrets
       ENGINE_URL: ws://inputlayer:8080/ws
       ENGINE_KG: shop
+      ENGINE_REQUEST_TIMEOUT: ${ENGINE_REQUEST_TIMEOUT:-10}
       ADAPTER_URL: http://adapter:8090
       DATABASE_URL: postgresql://postgres:${INGEST_POSTGRES_PASSWORD:?Run ./demo.sh first}@postgres:5432/shop
     depends_on:

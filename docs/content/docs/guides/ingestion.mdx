@@ -104,7 +104,9 @@ The adapter replies 2xx only after every change in the request is committed or w
 | `200 {"applied": n, "skipped": m}` | committed, or already applied | moves on |
 | `401` | missing, stale or wrong signature | fix the secret |
 | `422` | the event cannot be mapped (unknown table, null value, wrong type) or the engine rejected the facts; nothing was applied | retries; fix the mapping or data |
-| `503` | engine unreachable or adapter still starting | retries |
+| `503` | engine unreachable, request timed out, or adapter still starting | retries |
+
+`ENGINE_REQUEST_TIMEOUT` sets the engine request deadline in seconds (default `10`, positive and finite). It covers sending through the final reply, including all streamed chunks; connection establishment has the same timeout. Keep it below Debezium's 30-second HTTP timeout. On expiry the adapter closes the connection, with at most one additional second for cleanup, and returns `503`; the next request reconnects. A timed-out write may have committed, so retries still use the engine-side revision guard. Idle subscription listening has no request deadline.
 
 A `422` from `/cdc` stops the CDC stream at that event. This is fail closed: later changes never overtake a change that could not be applied. Fix the mapping, restart the adapter, and Debezium resumes from that event.
 

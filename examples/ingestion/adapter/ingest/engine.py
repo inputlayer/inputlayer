@@ -9,10 +9,12 @@ raises, so a rejected program can never be mistaken for a committed one.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections import deque
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from dataclasses import dataclass
 from itertools import count
 from typing import Any
@@ -64,8 +66,12 @@ class EngineSession:
     are logged).
     """
 
-    def __init__(self, ws: aiohttp.ClientWebSocketResponse, keep_pushes: frozenset[str]):
+    def __init__(
+        self, ws: aiohttp.ClientWebSocketResponse, keep_pushes: frozenset[str],
+        request_timeout: float,
+    ) -> None:
         self._ws = ws
+        self._request_timeout = request_timeout
         self._keep = keep_pushes
         self._buffered: deque[dict[str, Any]] = deque()
         self._ids = count(1)
@@ -79,13 +85,14 @@ class EngineSession:
     ) -> EngineSession:
         url = f"{settings.url}?kg={settings.knowledge_graph}"
         try:
-            ws = await http.ws_connect(url, max_msg_size=0)
+            async with asyncio.timeout(settings.request_timeout):
+                ws = await http.ws_connect(url, max_msg_size=0)
         except (aiohttp.ClientError, OSError) as err:
             raise EngineUnavailable(f"cannot connect to {url}: {err}") from err
-        session = cls(ws, keep_pushes)
+        session = cls(ws, keep_pushes, settings.request_timeout)
         try:
             auth = {"type": "authenticate", "api_key": settings.api_key}
-            _, reply = await session._send_request(auth, untagged_replies=_AUTH_REPLIES)
+            reply = await session._send_request(auth, untagged_replies=_AUTH_REPLIES)
             if reply.get("type") != "authenticated":
                 raise EngineError(f"authentication failed: {reply.get('message', reply)}")
             if reply.get("protocol_version", 1) < PROTOCOL_VERSION:
@@ -94,23 +101,23 @@ class EngineSession:
                     f" this client needs {PROTOCOL_VERSION} or later"
                 )
         except BaseException:
-            await ws.close()
+            await session.close()
             raise
         return session
 
     async def close(self) -> None:
-        await self._ws.close()
+        with suppress(TimeoutError):
+            async with asyncio.timeout(min(1.0, self._request_timeout)):
+                await self._ws.close()
 
     async def execute(self, program: str) -> Result:
         """Run one program; raises EngineError if any statement failed."""
-        request_id, reply = await self._send_request({"type": "execute", "program": program})
+        reply = await self._send_request({"type": "execute", "program": program})
         kind = reply.get("type")
         if kind == "error":
             raise EngineError(str(reply.get("message")), reply.get("code"))
-        if kind == "result":
+        if kind in {"result", "result_start"}:
             rows = reply.get("rows", [])
-        elif kind == "result_start":
-            rows = await self._read_stream(request_id)
         else:
             raise EngineError(f"unexpected reply {reply!r}")
         errors = reply.get("errors") or []
@@ -130,13 +137,23 @@ class EngineSession:
 
     async def _send_request(
         self, message: dict[str, Any], untagged_replies: frozenset[str] = frozenset()
-    ) -> tuple[str, dict[str, Any]]:
+    ) -> dict[str, Any]:
         request_id = str(next(self._ids))
         try:
-            await self._ws.send_str(json.dumps({**message, "id": request_id}))
-        except (aiohttp.ClientError, ConnectionError) as err:
-            raise EngineUnavailable(f"send failed: {err}") from err
-        return request_id, await self._reply(request_id, untagged_replies)
+            async with asyncio.timeout(self._request_timeout):
+                try:
+                    await self._ws.send_str(json.dumps({**message, "id": request_id}))
+                except (aiohttp.ClientError, ConnectionError) as err:
+                    raise EngineUnavailable(f"send failed: {err}") from err
+                reply = await self._reply(request_id, untagged_replies)
+                if reply.get("type") == "result_start":
+                    reply["rows"] = await self._read_stream(request_id)
+                return reply
+        except TimeoutError as err:
+            await self.close()
+            raise EngineUnavailable(
+                f"engine request timed out after {self._request_timeout:g}s"
+            ) from err
 
     async def _read_stream(self, request_id: str) -> list[list[Any]]:
         rows: list[list[Any]] = []

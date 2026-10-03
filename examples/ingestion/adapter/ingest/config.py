@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 
@@ -16,6 +17,11 @@ class EngineSettings:
     """WebSocket endpoint, e.g. `ws://inputlayer:8080/ws`."""
     api_key: str
     knowledge_graph: str
+    request_timeout: float = 10.0
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.request_timeout) or self.request_timeout <= 0:
+            raise ValueError("engine request timeout must be positive and finite")
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +38,7 @@ def engine_from_env() -> EngineSettings:
         url=os.environ.get("ENGINE_URL", "ws://localhost:8080/ws"),
         api_key=_required("ENGINE_API_KEY"),
         knowledge_graph=os.environ.get("ENGINE_KG", "shop"),
+        request_timeout=float(os.environ.get("ENGINE_REQUEST_TIMEOUT", "10")),
     )
 
 
