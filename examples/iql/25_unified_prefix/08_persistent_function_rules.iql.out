@@ -1,0 +1,56 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+
+> .kg create test_persistent_functions_n25t08
+Knowledge graph 'test_persistent_functions_n25t08' created.
+Switched to knowledge graph: test_persistent_functions_n25t08
+> .kg use test_persistent_functions_n25t08
+Switched to knowledge graph: test_persistent_functions_n25t08
+> +adapter_event(source_id: string, event_id: string, sequence: int, entity_key: string, op: string, payload_json: string)
+Schema for 'adapter_event' registered with 6 columns (persistent)
+> +adapter_event[("erp", "first", 2, "entity", "delete", "{}"), ("erp", "conflict", 2, "entity", "insert", "{}"), ("crm", "only", 1, "account", "insert", "{}")]
+Inserted 3 fact(s) into 'adapter_event'.
+> +event_content(S, K, N, Content) <- adapter_event(S, _, N, K, Op, Payload), Content = concat(Op, "|", Payload)
+Rule 'event_content' registered.
+> ?event_content(S, K, N, Content)
+┌───────┬───────────┬───┬─────────────┐
+│ S     │ K         │ N │ Content     │
+├───────┼───────────┼───┼─────────────┤
+│ "crm" │ "account" │ 1 │ "insert|{}" │
+│ "erp" │ "entity"  │ 2 │ "delete|{}" │
+│ "erp" │ "entity"  │ 2 │ "insert|{}" │
+└───────┴───────────┴───┴─────────────┘
+3 rows
+> +replay_conflict_direct(S, K, N) <- adapter_event(S, _, N, K, OpA, PayloadA), adapter_event(S, _, N, K, OpB, PayloadB), concat(OpA, "|", PayloadA) != concat(OpB, "|", PayloadB)
+Rule 'replay_conflict_direct' registered.
+> ?replay_conflict_direct(S, K, N)
+┌───────┬──────────┬───┐
+│ S     │ K        │ N │
+├───────┼──────────┼───┤
+│ "erp" │ "entity" │ 2 │
+└───────┴──────────┴───┘
+1 rows
+> +flag[("a", true), ("b", false)]
+Inserted 2 fact(s) into 'flag'.
+> +enabled(X) <- flag(X, B), B = true
+Rule 'enabled' registered.
+> ?enabled(X)
+┌─────┐
+│ X   │
+├─────┤
+│ "a" │
+└─────┘
+1 rows
+> .rule
+Rules:
+  enabled (1 clause(s))
+  event_content (1 clause(s))
+  replay_conflict_direct (1 clause(s))
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_persistent_functions_n25t08
+Knowledge graph 'test_persistent_functions_n25t08' dropped.

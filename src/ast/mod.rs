@@ -985,14 +985,11 @@ impl BodyPredicate {
     pub fn variables(&self) -> HashSet<String> {
         match self {
             BodyPredicate::Positive(atom) | BodyPredicate::Negated(atom) => atom.variables(),
+            // Including variables nested in arithmetic and function-call
+            // operands: `concat(A, B) != C` constrains A, B and C.
             BodyPredicate::Comparison(left, _, right) => {
-                let mut vars = HashSet::new();
-                if let Term::Variable(v) = left {
-                    vars.insert(v.clone());
-                }
-                if let Term::Variable(v) = right {
-                    vars.insert(v.clone());
-                }
+                let mut vars = left.variables();
+                vars.extend(right.variables());
                 vars
             }
             BodyPredicate::HnswNearest {
@@ -2120,6 +2117,14 @@ mod tests {
         let vars = cmp.variables();
         assert!(vars.contains("x"));
         assert!(vars.contains("y"));
+    }
+
+    #[test]
+    fn test_body_predicate_comparison_variables_include_nested_operands() {
+        let rule =
+            crate::parser::parse_rule(r#"c(S) <- e(S, A, P), concat(A, "|", P) != S + 1"#).unwrap();
+        let expected: HashSet<String> = ["A", "P", "S"].iter().map(|v| v.to_string()).collect();
+        assert_eq!(rule.body[1].variables(), expected);
     }
 
     // --- Rule ---

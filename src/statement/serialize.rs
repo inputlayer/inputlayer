@@ -3,7 +3,7 @@
 //! These types are used to persist rule definitions to disk.
 
 use crate::ast::{
-    AggregateFunc, ArithExpr, ArithOp, Atom, BodyPredicate, ComparisonOp, Rule, Term,
+    AggregateFunc, ArithExpr, ArithOp, Atom, BodyPredicate, BuiltinFunc, ComparisonOp, Rule, Term,
 };
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +24,10 @@ pub struct SerializableRule {
     pub body: Vec<SerializableBodyPred>,
 }
 
-/// Serializable term for JSON storage
+/// Serializable term for JSON storage.
+///
+/// Mirrors every [`Term`] variant so a persistent rule round-trips losslessly:
+/// a term stored as something else would silently change the rule's meaning.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SerializableTerm {
     Variable(String),
@@ -36,6 +39,15 @@ pub enum SerializableTerm {
     Aggregate(AggregateFunc, String),
     /// Arithmetic expression (e.g., D+1, X*Y)
     Arithmetic(SerializableArithExpr),
+    /// Built-in function call (e.g., `concat(Op, "|", Payload)`)
+    FunctionCall(BuiltinFunc, Vec<SerializableTerm>),
+    /// Vector literal (e.g., `[1.0, 2.0]`)
+    VectorLiteral(Vec<f64>),
+    BoolConstant(bool),
+    /// Field access on a record variable (e.g., `U.id`)
+    FieldAccess(Box<SerializableTerm>, String),
+    /// Record pattern in an atom argument (e.g., `{ id: X }`)
+    RecordPattern(Vec<(String, SerializableTerm)>),
 }
 
 /// Serializable arithmetic expression for JSON storage
@@ -76,6 +88,15 @@ pub enum SerializableBodyPred {
         left: SerializableTerm,
         op: SerializableComparisonOp,
         right: SerializableTerm,
+    },
+    /// HNSW nearest-neighbour search: `hnsw_nearest(index, query, k, Id, Dist)`
+    HnswNearest {
+        index_name: String,
+        query: SerializableTerm,
+        k: usize,
+        id_var: String,
+        distance_var: String,
+        ef_search: Option<usize>,
     },
 }
 
@@ -140,9 +161,22 @@ impl SerializableTerm {
             Term::Arithmetic(expr) => {
                 SerializableTerm::Arithmetic(SerializableArithExpr::from_arith_expr(expr))
             }
-            // For other complex terms (FunctionCall, VectorLiteral),
-            // we simplify to placeholder as they're not typically used in view definitions
-            _ => SerializableTerm::Placeholder,
+            Term::FunctionCall(func, args) => SerializableTerm::FunctionCall(
+                func.clone(),
+                args.iter().map(SerializableTerm::from_term).collect(),
+            ),
+            Term::VectorLiteral(v) => SerializableTerm::VectorLiteral(v.clone()),
+            Term::BoolConstant(b) => SerializableTerm::BoolConstant(*b),
+            Term::FieldAccess(base, field) => SerializableTerm::FieldAccess(
+                Box::new(SerializableTerm::from_term(base)),
+                field.clone(),
+            ),
+            Term::RecordPattern(fields) => SerializableTerm::RecordPattern(
+                fields
+                    .iter()
+                    .map(|(name, term)| (name.clone(), SerializableTerm::from_term(term)))
+                    .collect(),
+            ),
         }
     }
 
@@ -155,6 +189,21 @@ impl SerializableTerm {
             SerializableTerm::Placeholder => Term::Placeholder,
             SerializableTerm::Aggregate(func, var) => Term::Aggregate(func.clone(), var.clone()),
             SerializableTerm::Arithmetic(expr) => Term::Arithmetic(expr.to_arith_expr()),
+            SerializableTerm::FunctionCall(func, args) => Term::FunctionCall(
+                func.clone(),
+                args.iter().map(SerializableTerm::to_term).collect(),
+            ),
+            SerializableTerm::VectorLiteral(v) => Term::VectorLiteral(v.clone()),
+            SerializableTerm::BoolConstant(b) => Term::BoolConstant(*b),
+            SerializableTerm::FieldAccess(base, field) => {
+                Term::FieldAccess(Box::new(base.to_term()), field.clone())
+            }
+            SerializableTerm::RecordPattern(fields) => Term::RecordPattern(
+                fields
+                    .iter()
+                    .map(|(name, term)| (name.clone(), term.to_term()))
+                    .collect(),
+            ),
         }
     }
 }
@@ -233,11 +282,20 @@ impl SerializableBodyPred {
                 op: SerializableComparisonOp::from_op(op),
                 right: SerializableTerm::from_term(right),
             },
-            // HnswNearest is a runtime-only predicate, not serialized in rules
-            BodyPredicate::HnswNearest { .. } => SerializableBodyPred::Atom {
-                relation: "__hnsw_nearest__".to_string(),
-                args: vec![],
-                negated: false,
+            BodyPredicate::HnswNearest {
+                index_name,
+                query,
+                k,
+                id_var,
+                distance_var,
+                ef_search,
+            } => SerializableBodyPred::HnswNearest {
+                index_name: index_name.clone(),
+                query: SerializableTerm::from_term(query),
+                k: *k,
+                id_var: id_var.clone(),
+                distance_var: distance_var.clone(),
+                ef_search: *ef_search,
             },
         }
     }
@@ -262,6 +320,21 @@ impl SerializableBodyPred {
             SerializableBodyPred::Comparison { left, op, right } => {
                 BodyPredicate::Comparison(left.to_term(), op.to_op(), right.to_term())
             }
+            SerializableBodyPred::HnswNearest {
+                index_name,
+                query,
+                k,
+                id_var,
+                distance_var,
+                ef_search,
+            } => BodyPredicate::HnswNearest {
+                index_name: index_name.clone(),
+                query: query.to_term(),
+                k: *k,
+                id_var: id_var.clone(),
+                distance_var: distance_var.clone(),
+                ef_search: *ef_search,
+            },
         }
     }
 }
@@ -387,12 +460,52 @@ mod tests {
         assert!(matches!(back, Term::Aggregate(AggregateFunc::Count, _)));
     }
 
+    /// Round-trip `rule_str` through the on-disk JSON form.
+    fn json_roundtrip(rule_str: &str) -> (Rule, Rule) {
+        let rule = parse_rule(rule_str).unwrap();
+        let json = serde_json::to_string(&SerializableRule::from_rule(&rule)).unwrap();
+        let restored = serde_json::from_str::<SerializableRule>(&json)
+            .unwrap()
+            .to_rule();
+        (rule, restored)
+    }
+
+    /// IQL1 regression: a persistent rule's function calls used to be stored
+    /// as `_`, so `C = concat(..)` failed the safety check and
+    /// `concat(..) != concat(..)` lowered to `Placeholder NotEqual Placeholder`.
     #[test]
-    fn test_serializable_term_vector_becomes_placeholder() {
-        // VectorLiteral is not directly serializable, becomes Placeholder
-        let term = Term::VectorLiteral(vec![1.0, 2.0]);
-        let ser = SerializableTerm::from_term(&term);
-        assert!(matches!(ser, SerializableTerm::Placeholder));
+    fn test_function_calls_roundtrip_losslessly() {
+        for rule_str in [
+            r#"ev(S, C) <- adapter_event(S, Op, P), C = concat(Op, "|", P)"#,
+            r#"conflict(S) <- e(S, A, PA), e(S, B, PB), concat(A, "|", PA) != concat(B, "|", PB)"#,
+            "flagged(X) <- item(X, B), B = true",
+            "near(X, D) <- emb(X, V), D = euclidean(V, [1.0, 2.0])",
+            r#"nested(X, Y) <- n(X), Y = upper(lower(concat(X, "a")))"#,
+        ] {
+            let (rule, restored) = json_roundtrip(rule_str);
+            assert_eq!(restored, rule, "{rule_str}");
+        }
+    }
+
+    #[test]
+    fn test_hnsw_nearest_roundtrips_losslessly() {
+        let (rule, restored) =
+            json_roundtrip(r#"hit(Id, D) <- q(QV), hnsw_nearest("idx", QV, 3, Id, D)"#);
+        assert!(matches!(rule.body[1], BodyPredicate::HnswNearest { .. }));
+        assert_eq!(restored, rule);
+    }
+
+    #[test]
+    fn test_record_terms_roundtrip_losslessly() {
+        for term in [
+            Term::FieldAccess(Box::new(Term::Variable("U".to_string())), "id".to_string()),
+            Term::RecordPattern(vec![
+                ("id".to_string(), Term::Variable("X".to_string())),
+                ("name".to_string(), Term::Placeholder),
+            ]),
+        ] {
+            assert_eq!(SerializableTerm::from_term(&term).to_term(), term);
+        }
     }
 
     #[test]
