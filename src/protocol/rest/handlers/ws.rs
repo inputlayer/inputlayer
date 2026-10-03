@@ -8,7 +8,7 @@
 //!
 //! A connection is bound to the [`Principal`] it authenticated as. Revoking
 //! that credential closes the connection, and every outbound data frame is
-//! fenced by it (see [`outbound`]).
+//! fenced by it (see the `outbound` module).
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;

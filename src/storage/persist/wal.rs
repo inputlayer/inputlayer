@@ -1,7 +1,7 @@
 //! Write-Ahead Log for persist layer
 //!
 //! The WAL makes each committed [`Transaction`] durable until its updates are flushed
-//! to batch files. Every transaction is one record (see [`super::wal_record`]), written
+//! to batch files. Every transaction is one record (see the `wal_record` module), written
 //! with one append and, when durable, one fsync. A failed append is cut back off the
 //! file, so the WAL never holds a transaction whose commit returned an error.
 
