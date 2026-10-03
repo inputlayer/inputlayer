@@ -43,11 +43,11 @@ Inserted 2 fact(s) into 'nums'.
 > +sum_big(sum<X>) <- nums(X)
 Rule 'sum_big' registered.
 > ?sum_big(S)
-┌─────────────────────┐
-│ S                   │
-├─────────────────────┤
-│ 9223372036854775807 │
-└─────────────────────┘
+┌──────────────────────┐
+│ S                    │
+├──────────────────────┤
+│ 9.223372036854776e18 │
+└──────────────────────┘
 1 rows
 > .kg use default
 Switched to knowledge graph: default
