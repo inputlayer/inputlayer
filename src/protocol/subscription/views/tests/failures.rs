@@ -108,7 +108,11 @@ async fn a_commit_failing_the_same_way_still_reaches_every_subscriber() {
     let d = registry.on_change(KG, &change("a"), now()).remove(0);
     complete(&mut registry, d).await;
     let again = latest(&attachment);
-    assert_eq!(again.number, failed.number + 1, "each relevant commit reports the error");
+    assert_eq!(
+        again.number,
+        failed.number + 1,
+        "each relevant commit reports the error"
+    );
     assert!(matches!(&again.outcome, Outcome::Failed(m) if m == "capped"));
 }
 

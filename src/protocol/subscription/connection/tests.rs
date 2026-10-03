@@ -329,7 +329,10 @@ async fn reset_spares_a_newer_registration() {
     let mut subscriptions = ConnectionSubscriptions::new(Arc::clone(&handler), None);
     assert!(!subscriptions.reset("s", 1), "no such subscription");
     let (_, generation) = subscriptions.subscribe(KG, "s", "?p(X)").await.unwrap();
-    assert!(!subscriptions.reset("s", generation + 1), "no such generation");
+    assert!(
+        !subscriptions.reset("s", generation + 1),
+        "no such generation"
+    );
     assert!(!subscriptions.reset("other", generation));
     assert!(subscriptions.reset("s", generation));
     assert!(subscriptions.is_empty());
