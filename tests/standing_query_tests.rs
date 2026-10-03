@@ -356,13 +356,9 @@ async fn test_limit_duplicates_and_invalid_queries_are_errors() {
 }
 
 async fn admin(server: &Server, program: &str) {
-    let identity = inputlayer::auth::AuthIdentity {
-        username: "admin".to_string(),
-        role: inputlayer::auth::Role::Admin,
-    };
     server
         .handler
-        .execute_program(None, None, program.to_string(), Some(&identity))
+        .execute_program(None, None, program.to_string(), None)
         .await
         .unwrap_or_else(|e| panic!("{program:?} failed: {e}"));
 }

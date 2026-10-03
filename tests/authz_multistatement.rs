@@ -4,24 +4,24 @@
 // Test setup aborts on failure; `unwrap` is the intended behavior.
 #![allow(clippy::unwrap_used)]
 
-use inputlayer::auth::{AuthIdentity, Role};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use inputlayer::auth::{Principal, Role};
 use inputlayer::protocol::wire::QueryResult;
 use inputlayer::protocol::Handler;
 use inputlayer::{Config, StorageEngine};
 use tempfile::TempDir;
 
-fn admin() -> AuthIdentity {
-    AuthIdentity {
-        username: "admin".to_string(),
-        role: Role::Admin,
-    }
+fn admin(handler: &Handler) -> Principal {
+    user(handler, "admin")
 }
 
-fn user(name: &str, role: Role) -> AuthIdentity {
-    AuthIdentity {
-        username: name.to_string(),
-        role,
-    }
+/// A principal for `name`, through a fresh API key.
+fn user(handler: &Handler, name: &str) -> Principal {
+    static KEYS: AtomicU64 = AtomicU64::new(0);
+    let label = format!("test-{}", KEYS.fetch_add(1, Ordering::Relaxed));
+    let key = handler.create_api_key(&label, name).unwrap();
+    handler.authenticate_api_key(&key).unwrap()
 }
 
 /// `secret` holds a `creds` row; `public` grants `mallory` (global viewer)
@@ -40,7 +40,7 @@ async fn setup() -> (Handler, TempDir) {
         .handle_user_create("eve", "password-e", "editor")
         .unwrap();
 
-    let a = admin();
+    let a = admin(&handler);
     for (kg, prog) in [
         ("secret", "+creds[(\"alice\", \"hunter2\")]"),
         ("public", "+pub_data[(1,)]"),
@@ -64,7 +64,7 @@ async fn run(
     handler: &Handler,
     kg: &str,
     program: &str,
-    who: &AuthIdentity,
+    who: &Principal,
 ) -> Result<QueryResult, String> {
     handler
         .execute_program(None, Some(kg.to_string()), program.to_string(), Some(who))
@@ -82,7 +82,7 @@ fn assert_denied(result: Result<QueryResult, String>) {
 }
 
 async fn creds_rows(handler: &Handler) -> usize {
-    run(handler, "secret", "?creds(U, P)", &admin())
+    run(handler, "secret", "?creds(U, P)", &admin(handler))
         .await
         .unwrap()
         .rows
@@ -92,23 +92,23 @@ async fn creds_rows(handler: &Handler) -> usize {
 #[tokio::test]
 async fn single_read_without_acl_is_denied() {
     let (h, _t) = setup().await;
-    let m = user("mallory", Role::Viewer);
+    let m = user(&h, "mallory");
     assert_denied(run(&h, "secret", "?creds(U, P)", &m).await);
 }
 
 #[tokio::test]
 async fn multi_statement_read_without_acl_is_denied() {
     let (h, _t) = setup().await;
-    let m = user("mallory", Role::Viewer);
+    let m = user(&h, "mallory");
     assert_denied(run(&h, "secret", "?creds(U, P)\n?creds(U, P)", &m).await);
 }
 
 #[tokio::test]
 async fn multi_statement_write_on_viewer_kg_is_denied() {
     let (h, _t) = setup().await;
-    let e = user("eve", Role::Editor);
+    let e = user(&h, "eve");
     assert_denied(run(&h, "public", "+pub_data[(2,)]\n?pub_data(X)", &e).await);
-    let rows = run(&h, "public", "?pub_data(X)", &admin())
+    let rows = run(&h, "public", "?pub_data(X)", &admin(&h))
         .await
         .unwrap()
         .rows;
@@ -118,7 +118,7 @@ async fn multi_statement_write_on_viewer_kg_is_denied() {
 #[tokio::test]
 async fn multi_statement_write_without_acl_is_denied() {
     let (h, _t) = setup().await;
-    let m = user("mallory", Role::Viewer);
+    let m = user(&h, "mallory");
     assert_denied(
         run(
             &h,
@@ -134,7 +134,7 @@ async fn multi_statement_write_without_acl_is_denied() {
 #[tokio::test]
 async fn kg_use_switch_to_unauthorized_kg_is_denied() {
     let (h, _t) = setup().await;
-    let m = user("mallory", Role::Viewer);
+    let m = user(&h, "mallory");
     assert_denied(
         run(
             &h,
@@ -149,7 +149,7 @@ async fn kg_use_switch_to_unauthorized_kg_is_denied() {
 #[tokio::test]
 async fn kg_use_switch_to_internal_is_denied() {
     let (h, _t) = setup().await;
-    let m = user("mallory", Role::Viewer);
+    let m = user(&h, "mallory");
     assert_denied(
         run(
             &h,
@@ -173,7 +173,7 @@ async fn kg_use_switch_to_internal_is_denied() {
 #[tokio::test]
 async fn internal_kg_is_refused_even_for_admin() {
     let (h, _t) = setup().await;
-    let a = admin();
+    let a = admin(&h);
     assert!(run(
         &h,
         "public",
@@ -199,10 +199,10 @@ async fn internal_kg_is_refused_even_for_admin() {
 #[tokio::test]
 async fn later_statement_checked_against_switched_kg() {
     let (h, _t) = setup().await;
-    let a = admin();
+    let a = admin(&h);
     run(&h, "secret", ".kg create other", &a).await.unwrap();
     h.handle_kg_acl_grant("other", "mallory", "viewer").unwrap();
-    let m = user("mallory", Role::Viewer);
+    let m = user(&h, "mallory");
     // Allowed on `public`, but `secret` comes after the switch.
     assert_denied(run(&h, "public", ".kg use secret\n?creds(U, P)", &m).await);
     // Both KGs readable: allowed.
@@ -214,7 +214,7 @@ async fn later_statement_checked_against_switched_kg() {
 #[tokio::test]
 async fn admin_multi_statement_programs_work() {
     let (h, _t) = setup().await;
-    let a = admin();
+    let a = admin(&h);
     let r = run(&h, "secret", "+creds[(\"bob\", \"pw\")]\n?creds(U, P)", &a)
         .await
         .unwrap();
@@ -232,7 +232,7 @@ async fn admin_multi_statement_programs_work() {
 #[tokio::test]
 async fn authorized_viewer_multi_statement_read_works() {
     let (h, _t) = setup().await;
-    let m = user("mallory", Role::Viewer);
+    let m = user(&h, "mallory");
     let r = run(&h, "public", "?pub_data(X)\n?pub_data(X)", &m)
         .await
         .unwrap();
@@ -246,9 +246,9 @@ async fn statements_after_switch_are_checked_against_previous_kg_too() {
     // needs write access there too.
     h.get_storage().create_knowledge_graph("ghost").unwrap();
     h.handle_kg_acl_grant("ghost", "eve", "owner").unwrap();
-    let e = user("eve", Role::Editor);
+    let e = user(&h, "eve");
     assert_denied(run(&h, "public", ".kg use ghost\n+pub_data[(3,)]", &e).await);
-    let rows = run(&h, "public", "?pub_data(X)", &admin())
+    let rows = run(&h, "public", "?pub_data(X)", &admin(&h))
         .await
         .unwrap()
         .rows;
@@ -258,7 +258,7 @@ async fn statements_after_switch_are_checked_against_previous_kg_too() {
 #[tokio::test]
 async fn unparseable_program_without_acl_is_denied() {
     let (h, _t) = setup().await;
-    let m = user("mallory", Role::Viewer);
+    let m = user(&h, "mallory");
     assert_denied(run(&h, "secret", "?creds(U, P)\n?creds(U,", &m).await);
 }
 
@@ -266,7 +266,7 @@ async fn run_in_session(
     handler: &Handler,
     sid: &String,
     program: &str,
-    who: &AuthIdentity,
+    who: &Principal,
 ) -> Result<QueryResult, String> {
     handler
         .execute_program(Some(sid), None, program.to_string(), Some(who))
@@ -276,7 +276,7 @@ async fn run_in_session(
 #[tokio::test]
 async fn session_bound_switch_is_denied_and_binding_kept() {
     let (h, _t) = setup().await;
-    let m = user("mallory", Role::Viewer);
+    let m = user(&h, "mallory");
     let sid = h.create_session_with_auth("public", &m).unwrap();
     for program in [
         "?pub_data(X)\n.kg use secret\n?creds(U, P)",
@@ -295,8 +295,8 @@ async fn session_bound_switch_is_denied_and_binding_kept() {
 #[tokio::test]
 async fn storage_default_kg_is_checked() {
     let (h, _t) = setup().await;
-    let m = user("mallory", Role::Viewer);
-    let a = admin();
+    let m = user(&h, "mallory");
+    let a = admin(&h);
     let no_kg = |program: &str, who| h.execute_program(None, None, program.to_string(), who);
     assert_denied(no_kg("?pub_data(X)\n?pub_data(X)", Some(&m)).await);
     assert_denied(no_kg(".kg use public\n?pub_data(X)", Some(&m)).await);
@@ -306,7 +306,7 @@ async fn storage_default_kg_is_checked() {
 #[tokio::test]
 async fn reaped_session_runs_on_checked_kg() {
     let (h, _t) = setup().await;
-    let m = user("mallory", Role::Viewer);
+    let m = user(&h, "mallory");
     let sid = h.create_session_with_auth("public", &m).unwrap();
     h.close_session(&sid).unwrap();
     // The session's KG is gone; the storage default is checked instead.
@@ -315,7 +315,7 @@ async fn reaped_session_runs_on_checked_kg() {
         .unwrap();
     let r = run_in_session(&h, &sid, "?pub_data(X)", &m).await.unwrap();
     assert!(r.rows.is_empty(), "must run on default, not public");
-    assert!(run_in_session(&h, &sid, "+d[(1,)]", &admin())
+    assert!(run_in_session(&h, &sid, "+d[(1,)]", &admin(&h))
         .await
         .is_err());
 }
@@ -323,8 +323,8 @@ async fn reaped_session_runs_on_checked_kg() {
 #[tokio::test]
 async fn kg_create_and_drop_must_be_single_statement() {
     let (h, _t) = setup().await;
-    let a = admin();
-    let e = user("eve", Role::Editor);
+    let a = admin(&h);
+    let e = user(&h, "eve");
     assert!(run(&h, "public", ".kg create fresh\n.kg use public", &e)
         .await
         .is_err());
@@ -336,7 +336,11 @@ async fn kg_create_and_drop_must_be_single_statement() {
     assert!(kgs.contains(&"secret".to_string()));
 
     run(&h, "public", ".kg create fresh", &e).await.unwrap();
-    assert!(h.get_kg_role_for_user("fresh", "eve", &e.role).is_some());
+    assert!(h
+        .get_kg_role_for_user("fresh", "eve", &Role::Editor)
+        .is_some());
     run(&h, "public", ".kg drop fresh", &e).await.unwrap();
-    assert!(h.get_kg_role_for_user("fresh", "eve", &e.role).is_none());
+    assert!(h
+        .get_kg_role_for_user("fresh", "eve", &Role::Editor)
+        .is_none());
 }

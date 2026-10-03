@@ -12,6 +12,13 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
+mod credentials;
+
+pub use credentials::{
+    ApiKeyRecord, ApiKeyRejected, CredentialId, CredentialRegistry, CredentialRevoked,
+    PasswordCandidate, Principal, RevocationSignal, UserRecord,
+};
+
 /// Name of the internal knowledge graph used for auth data.
 pub const INTERNAL_KG: &str = "_internal";
 
@@ -49,8 +56,9 @@ impl FromStr for Role {
     }
 }
 
-/// Authenticated identity attached to a session.
-#[derive(Debug, Clone)]
+/// Immutable permission snapshot: who is acting and with which global role,
+/// taken from a live [`Principal`] for one request or one outbound message.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthIdentity {
     pub username: String,
     pub role: Role,
