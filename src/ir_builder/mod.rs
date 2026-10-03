@@ -18,9 +18,12 @@
 //! Takes IQL rules (AST) and converts them to intermediate representation (IR)
 //! suitable for optimization and code generation.
 
+mod comparison_operands;
+
 use crate::ast::{Atom, BodyPredicate, BuiltinFunc, ComparisonOp, Rule, Term};
 use crate::execution::timing::IrBuilderTiming;
 use crate::ir::{BuiltinFunction, IRExpression, IRNode, Predicate};
+use comparison_operands::{assignment_target, hoist_comparison_operands};
 use std::collections::{HashMap, HashSet};
 
 use crate::catalog::Catalog;
@@ -91,14 +94,15 @@ impl IRBuilder {
             }
         }
 
-        // 3. Apply computed columns (function calls in body)
-        // Save the pre-compute schema so build_comparison_filters can distinguish
-        // variables from scans vs variables added by computed columns.
-        let pre_compute_schema = current.output_schema();
-        current = self.build_computed_columns(current, rule)?;
+        // 3. Apply computed columns (function calls in body). Comparisons with
+        //    expression operands are first rewritten into assignments plus a
+        //    filter over the assigned columns.
+        let rule = &*hoist_comparison_operands(rule, &current.output_schema());
+        let (computed, assignments) = self.build_computed_columns(current, rule)?;
+        current = computed;
 
         // 4. Apply comparison filters (X = Y, X < 5, etc.)
-        current = self.build_comparison_filters(current, rule, &pre_compute_schema)?;
+        current = self.build_comparison_filters(current, rule, &assignments)?;
 
         // 5. Apply antijoins for negated predicates
         current = self.build_antijoins(current, rule)?;
@@ -161,14 +165,14 @@ impl IRBuilder {
         }
         timing.joins_us = start.elapsed().as_micros() as u64;
 
-        let pre_compute_schema = current.output_schema();
-
         let start = std::time::Instant::now();
-        current = self.build_computed_columns(current, rule)?;
+        let rule = &*hoist_comparison_operands(rule, &current.output_schema());
+        let (computed, assignments) = self.build_computed_columns(current, rule)?;
+        current = computed;
         timing.computed_us = start.elapsed().as_micros() as u64;
 
         let start = std::time::Instant::now();
-        current = self.build_comparison_filters(current, rule, &pre_compute_schema)?;
+        current = self.build_comparison_filters(current, rule, &assignments)?;
         timing.filters_us = start.elapsed().as_micros() as u64;
 
         let start = std::time::Instant::now();
@@ -480,140 +484,62 @@ impl IRBuilder {
     /// Build computed columns for function call and arithmetic assignments
     ///
     /// Handles comparisons like `Dist = euclidean(V, Q)` or `Y = X * 2` by creating
-    /// a Compute node that adds the computed column to the schema.
-    fn build_computed_columns(&self, input: IRNode, rule: &Rule) -> Result<IRNode, String> {
+    /// a Compute node that adds the computed column to the schema. Returns the
+    /// body indices of the comparisons consumed as assignments; every other
+    /// comparison is a filter for `build_comparison_filters`.
+    fn build_computed_columns(
+        &self,
+        input: IRNode,
+        rule: &Rule,
+    ) -> Result<(IRNode, HashSet<usize>), String> {
         let mut expressions = Vec::new();
+        let mut assignments = HashSet::new();
         // Track schema progressively - each computed column extends the schema for subsequent ones
         let mut schema = input.output_schema();
 
-        for pred in &rule.body {
-            if let BodyPredicate::Comparison(left, op, right) = pred {
-                // Only process equality assignments
-                if !matches!(op, ComparisonOp::Equal) {
-                    continue;
-                }
-
-                // Try function call assignment (Y = func(X))
-                if let Some((var_name, func, args)) = match (left, right) {
-                    (Term::Variable(v), Term::FunctionCall(f, a)) => Some((v, f, a)),
-                    (Term::FunctionCall(f, a), Term::Variable(v)) => Some((v, f, a)),
-                    _ => None,
-                } {
-                    // Validate argument count
-                    let expected_arity = func.arity();
-                    if args.len() != expected_arity {
-                        return Err(format!(
-                            "Function '{}' requires {} argument(s), but {} provided",
-                            func.as_str(),
-                            expected_arity,
-                            args.len()
-                        ));
-                    }
-
-                    // Convert AST function to IR function
-                    let ir_func = Self::ast_func_to_ir_func(func)?;
-
-                    // Convert AST arguments to IR expressions using current (progressive) schema
-                    let ir_args: Vec<IRExpression> = args
+        for (idx, pred) in rule.body.iter().enumerate() {
+            let BodyPredicate::Comparison(left, op, right) = pred else {
+                continue;
+            };
+            let Some(target) = assignment_target(left, op, right, &schema) else {
+                continue;
+            };
+            let value = if matches!(left, Term::Variable(v) if v == target) {
+                right
+            } else {
+                left
+            };
+            let ir_expr = match value {
+                Term::FunctionCall(..) => Self::term_to_ir_expr(value, &schema)?,
+                Term::Arithmetic(arith) => Self::arith_expr_to_ir_expression(arith, &schema)?,
+                Term::Variable(source) => {
+                    let col = schema
                         .iter()
-                        .map(|term| Self::term_to_ir_expr(term, &schema))
-                        .collect::<Result<Vec<_>, _>>()?;
-
-                    expressions.push((
-                        var_name.clone(),
-                        IRExpression::FunctionCall(ir_func, ir_args),
-                    ));
-
-                    // Extend schema with the newly computed column for subsequent expressions
-                    schema.push(var_name.clone());
-                    continue;
+                        .position(|s| s == source)
+                        .ok_or_else(|| format!("Variable '{source}' not found in schema"))?;
+                    IRExpression::Column(col)
                 }
-
-                // Try arithmetic assignment (Y = X * 2)
-                if let Some((var_name, arith_expr)) = match (left, right) {
-                    (Term::Variable(v), Term::Arithmetic(a)) => Some((v, a)),
-                    (Term::Arithmetic(a), Term::Variable(v)) => Some((v, a)),
-                    _ => None,
-                } {
-                    if schema.contains(var_name) {
-                        // Variable is already bound (from a body atom scan). This is a
-                        // filter, not a new computed column. Skip it here and let
-                        // build_comparison_filters handle it via ColumnCompareArith.
-                        continue;
-                    }
-
-                    // Convert arithmetic expression to IR expression
-                    let ir_expr = Self::arith_expr_to_ir_expression(arith_expr, &schema)?;
-
-                    expressions.push((var_name.clone(), ir_expr));
-                    // Extend schema with the newly computed column for subsequent expressions
-                    schema.push(var_name.clone());
-                    continue;
-                }
-
-                // Try variable alias (Y = X) - only if the target variable is not already in schema
-                if let Some((new_var, source_var)) = match (left, right) {
-                    (Term::Variable(v1), Term::Variable(v2))
-                        if !schema.contains(v1) && schema.contains(v2) =>
-                    {
-                        Some((v1, v2))
-                    }
-                    (Term::Variable(v1), Term::Variable(v2))
-                        if schema.contains(v1) && !schema.contains(v2) =>
-                    {
-                        Some((v2, v1))
-                    }
-                    _ => None,
-                } {
-                    if let Some(col_idx) = schema.iter().position(|s| s == source_var) {
-                        expressions.push((new_var.clone(), IRExpression::Column(col_idx)));
-                        schema.push(new_var.clone());
-                    }
-                    continue;
-                }
-
-                // Try constant assignment (Y = 100, Y = "str", Y = 1.5)
-                if let Some((var_name, ir_expr)) = match (left, right) {
-                    (Term::Variable(v), Term::Constant(val)) if !schema.contains(v) => {
-                        Some((v, IRExpression::IntConstant(*val)))
-                    }
-                    (Term::Constant(val), Term::Variable(v)) if !schema.contains(v) => {
-                        Some((v, IRExpression::IntConstant(*val)))
-                    }
-                    (Term::Variable(v), Term::FloatConstant(val)) if !schema.contains(v) => {
-                        Some((v, IRExpression::FloatConstant(*val)))
-                    }
-                    (Term::FloatConstant(val), Term::Variable(v)) if !schema.contains(v) => {
-                        Some((v, IRExpression::FloatConstant(*val)))
-                    }
-                    (Term::Variable(v), Term::StringConstant(val)) if !schema.contains(v) => {
-                        Some((v, IRExpression::StringConstant(val.clone())))
-                    }
-                    (Term::StringConstant(val), Term::Variable(v)) if !schema.contains(v) => {
-                        Some((v, IRExpression::StringConstant(val.clone())))
-                    }
-                    (Term::Variable(v), Term::BoolConstant(val)) if !schema.contains(v) => {
-                        Some((v, IRExpression::BoolConstant(*val)))
-                    }
-                    (Term::BoolConstant(val), Term::Variable(v)) if !schema.contains(v) => {
-                        Some((v, IRExpression::BoolConstant(*val)))
-                    }
-                    _ => None,
-                } {
-                    expressions.push((var_name.clone(), ir_expr));
-                    schema.push(var_name.clone());
-                }
-            }
+                Term::Constant(val) => IRExpression::IntConstant(*val),
+                Term::FloatConstant(val) => IRExpression::FloatConstant(*val),
+                Term::StringConstant(val) => IRExpression::StringConstant(val.clone()),
+                Term::BoolConstant(val) => IRExpression::BoolConstant(*val),
+                other => return Err(format!("Unsupported assignment value: {other:?}")),
+            };
+            expressions.push((target.to_string(), ir_expr));
+            // Extend schema with the newly computed column for subsequent expressions
+            schema.push(target.to_string());
+            assignments.insert(idx);
         }
 
-        if expressions.is_empty() {
-            Ok(input)
+        let node = if expressions.is_empty() {
+            input
         } else {
-            Ok(IRNode::Compute {
+            IRNode::Compute {
                 input: Box::new(input),
                 expressions,
-            })
-        }
+            }
+        };
+        Ok((node, assignments))
     }
 
     /// Check if an arithmetic comparison creates a join bridge between two scans.
@@ -774,28 +700,19 @@ impl IRBuilder {
 
     /// Build filter nodes for comparison predicates in the rule body
     ///
-    /// Handles predicates like X = Y, X != 5, X < Y, etc.
-    /// Skips function call assignments which are handled by `build_computed_columns`.
+    /// Handles predicates like X = Y, X != 5, X < Y, etc. Skips the
+    /// comparisons `build_computed_columns` consumed as assignments.
     fn build_comparison_filters(
         &self,
         mut input: IRNode,
         rule: &Rule,
-        pre_compute_schema: &[String],
+        assignments: &HashSet<usize>,
     ) -> Result<IRNode, String> {
         let schema = input.output_schema();
 
-        for pred in &rule.body {
+        for (idx, pred) in rule.body.iter().enumerate() {
             if let BodyPredicate::Comparison(left, op, right) = pred {
-                // Skip computed column assignments handled by build_computed_columns,
-                // but only if they were ACTUALLY processed (variable was new/unbound).
-                // Use the pre-compute schema to distinguish: if the variable was already
-                // bound BEFORE computed columns ran, it's a filter, not an assignment.
-                if Self::is_computed_column_assignment_in_schema(
-                    left,
-                    op,
-                    right,
-                    pre_compute_schema,
-                ) {
+                if assignments.contains(&idx) {
                     continue;
                 }
 
@@ -808,58 +725,6 @@ impl IRBuilder {
         }
 
         Ok(input)
-    }
-
-    /// Check if a comparison was handled as a computed column assignment by build_computed_columns.
-    ///
-    /// This is schema-aware: if the target variable is already bound in the schema,
-    /// the equality is a FILTER (e.g., `X = 5` when X is already bound checks X equals 5),
-    /// not an assignment. Only returns true for assignments that build_computed_columns processed.
-    fn is_computed_column_assignment_in_schema(
-        left: &Term,
-        op: &ComparisonOp,
-        right: &Term,
-        schema: &[String],
-    ) -> bool {
-        if !matches!(op, ComparisonOp::Equal) {
-            return false;
-        }
-        match (left, right) {
-            // Function calls are always computed columns
-            (Term::Variable(_), Term::FunctionCall(_, _))
-            | (Term::FunctionCall(_, _), Term::Variable(_)) => true,
-
-            // Arithmetic: if the variable is NOT in the pre-compute schema, it was
-            // added as a computed column - skip the filter. If it IS in the pre-compute
-            // schema, it was already bound from a body atom and build_computed_columns
-            // skipped it, so we need build_comparison_filters to emit a filter.
-            (Term::Variable(v), Term::Arithmetic(_)) | (Term::Arithmetic(_), Term::Variable(v)) => {
-                !schema.contains(v)
-            }
-
-            // Variable alias: only an assignment if at least one is new (not in schema)
-            (Term::Variable(v1), Term::Variable(v2)) => {
-                !(schema.contains(v1) && schema.contains(v2))
-            }
-
-            // Constant/float/string/bool assignment: only if the variable is new (not in schema)
-            (
-                Term::Variable(v),
-                Term::Constant(_)
-                | Term::FloatConstant(_)
-                | Term::StringConstant(_)
-                | Term::BoolConstant(_),
-            )
-            | (
-                Term::Constant(_)
-                | Term::FloatConstant(_)
-                | Term::StringConstant(_)
-                | Term::BoolConstant(_),
-                Term::Variable(v),
-            ) => !schema.contains(v),
-
-            _ => false,
-        }
     }
 
     /// Convert a comparison predicate to an IR Predicate
@@ -2861,81 +2726,86 @@ mod tests {
     }
 
     #[test]
-    fn test_is_computed_column_assignment_not_equal() {
+    fn test_assignment_target_not_equal() {
         use crate::ast::ComparisonOp;
         // Non-equality is never an assignment
         let schema = vec!["X".to_string()];
-        let result = IRBuilder::is_computed_column_assignment_in_schema(
+        let result = assignment_target(
             &Term::Variable("X".to_string()),
             &ComparisonOp::LessThan,
             &Term::Constant(5),
             &schema,
-        );
+        )
+        .is_some();
         assert!(!result);
     }
 
     #[test]
-    fn test_is_computed_column_assignment_both_vars_in_schema() {
+    fn test_assignment_target_both_vars_in_schema() {
         use crate::ast::ComparisonOp;
         // Both variables already bound → this is a filter, not assignment
         let schema = vec!["X".to_string(), "Y".to_string()];
-        let result = IRBuilder::is_computed_column_assignment_in_schema(
+        let result = assignment_target(
             &Term::Variable("X".to_string()),
             &ComparisonOp::Equal,
             &Term::Variable("Y".to_string()),
             &schema,
-        );
+        )
+        .is_some();
         assert!(!result);
     }
 
     #[test]
-    fn test_is_computed_column_assignment_one_var_new() {
+    fn test_assignment_target_one_var_new() {
         use crate::ast::ComparisonOp;
         // One variable not in schema → this IS an assignment
         let schema = vec!["X".to_string()];
-        let result = IRBuilder::is_computed_column_assignment_in_schema(
+        let result = assignment_target(
             &Term::Variable("X".to_string()),
             &ComparisonOp::Equal,
             &Term::Variable("Y".to_string()),
             &schema,
-        );
+        )
+        .is_some();
         assert!(result);
     }
 
     #[test]
-    fn test_is_computed_column_assignment_const_var_in_schema() {
+    fn test_assignment_target_const_var_in_schema() {
         use crate::ast::ComparisonOp;
         // Variable already in schema + constant → filter, not assignment
         let schema = vec!["X".to_string()];
-        let result = IRBuilder::is_computed_column_assignment_in_schema(
+        let result = assignment_target(
             &Term::Variable("X".to_string()),
             &ComparisonOp::Equal,
             &Term::Constant(5),
             &schema,
-        );
+        )
+        .is_some();
         assert!(!result);
     }
 
     #[test]
-    fn test_is_computed_column_assignment_const_var_new() {
+    fn test_assignment_target_const_var_new() {
         use crate::ast::ComparisonOp;
         // Variable NOT in schema + constant → assignment
         let schema = vec!["X".to_string()];
-        let result = IRBuilder::is_computed_column_assignment_in_schema(
+        let result = assignment_target(
             &Term::Variable("Y".to_string()),
             &ComparisonOp::Equal,
             &Term::Constant(5),
             &schema,
-        );
+        )
+        .is_some();
         assert!(result);
     }
 
     #[test]
-    fn test_is_computed_column_assignment_function_call() {
+    fn test_assignment_target_function_call() {
         use crate::ast::{BuiltinFunc, ComparisonOp};
-        // Function call → always an assignment
+        // Function call to an unbound variable → assignment
         let schema = vec!["X".to_string()];
-        let result = IRBuilder::is_computed_column_assignment_in_schema(
+        let result = assignment_target(
             &Term::Variable("D".to_string()),
             &ComparisonOp::Equal,
             &Term::FunctionCall(
@@ -2946,7 +2816,8 @@ mod tests {
                 ],
             ),
             &schema,
-        );
+        )
+        .is_some();
         assert!(result);
     }
 

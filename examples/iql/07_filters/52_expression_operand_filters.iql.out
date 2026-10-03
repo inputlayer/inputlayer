@@ -1,0 +1,58 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+
+> .kg create test_expr_filters_n07t52
+Knowledge graph 'test_expr_filters_n07t52' created.
+Switched to knowledge graph: test_expr_filters_n07t52
+> .kg use test_expr_filters_n07t52
+Switched to knowledge graph: test_expr_filters_n07t52
+> +word[("a", "A"), ("b", "x"), ("cc", "CC")]
+Inserted 3 fact(s) into 'word'.
+> +num[1, 2, 3]
+Inserted 3 fact(s) into 'num'.
+> ?word(X, Y), Y = upper(X)
+┌──────┬──────┐
+│ X    │ Y    │
+├──────┼──────┤
+│ "a"  │ "A"  │
+│ "cc" │ "CC" │
+└──────┴──────┘
+2 rows
+> ?word(X, Y), upper(X) = "A"
+┌─────┬─────┐
+│ X   │ Y   │
+├─────┼─────┤
+│ "a" │ "A" │
+└─────┴─────┘
+1 rows
+> ?word(X, Y), len(X) < 2
+┌─────┬─────┐
+│ X   │ Y   │
+├─────┼─────┤
+│ "a" │ "A" │
+│ "b" │ "x" │
+└─────┴─────┘
+2 rows
+> ?word(X, Y), upper(X) != upper(Y)
+┌─────┬─────┐
+│ X   │ Y   │
+├─────┼─────┤
+│ "b" │ "x" │
+└─────┴─────┘
+1 rows
+> ?num(N), N + 1 != N * 2
+┌───┐
+│ N │
+├───┤
+│ 2 │
+│ 3 │
+└───┘
+2 rows
+> .kg use default
+Switched to knowledge graph: default
+> .kg drop test_expr_filters_n07t52
+Knowledge graph 'test_expr_filters_n07t52' dropped.
