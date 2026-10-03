@@ -124,6 +124,10 @@ name = "inputlayer-server"
 path = "src/bin/server.rs"
 
 [[bin]]
+name = "inputlayer-backup"
+path = "src/bin/backup.rs"
+
+[[bin]]
 name = "inputlayer-client"
 path = "src/bin/client.rs"
 

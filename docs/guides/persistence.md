@@ -453,6 +453,7 @@ This enables:
 
 ## Next Steps
 
+- [Backup and Restore](backup.md) - Offline backup of the data directory
 - [Configuration Guide](configuration.md) - Full configuration reference
 - [WebSocket API (AsyncAPI)](../spec/asyncapi.yaml) - Programmatic access
 - [Temporal Functions](temporal.md) - Time-based queries on persisted data
