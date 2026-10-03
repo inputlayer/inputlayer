@@ -231,6 +231,11 @@ Define typed schemas for relations.
 
 ```iql
 ?person(Name, Age), Age >= 18, Age < 65
+
+// Either side may be an expression, evaluated per row. A variable already
+// bound by an atom compared with `=` filters rather than rebinds.
+?event(A, P), event(B, Q), concat(A, "|", P) != concat(B, "|", Q)
+?word(W, U), U = upper(W)
 ```
 
 | Operator | Description |

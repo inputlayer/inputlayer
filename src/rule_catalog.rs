@@ -133,15 +133,8 @@ pub fn validate_rule(rule: &Rule, name: &str) -> Result<(), String> {
     //       comparison variable must reach a head or non-comparison
     //       variable through the comparison co-occurrence graph.
     //
-    // Deep variable extraction (Term::variables) is used throughout;
-    // BodyPredicate::variables only sees top-level variables on comparison
-    // sides and misses arithmetic/function arguments.
-    let deep_cmp_vars = |left: &Term, right: &Term| -> HashSet<String> {
-        let mut vars = left.variables();
-        vars.extend(right.variables());
-        vars
-    };
-
+    // BodyPredicate::variables includes variables nested in arithmetic and
+    // function-call operands.
     for pred in &rule.body {
         if let BodyPredicate::Comparison(left, op, right) = pred {
             if matches!(op, ComparisonOp::Equal) {
@@ -167,7 +160,7 @@ pub fn validate_rule(rule: &Rule, name: &str) -> Result<(), String> {
             } else {
                 // (a) Non-equality comparisons filter; every variable they
                 // touch (however nested) must be bound.
-                let cmp_vars = deep_cmp_vars(left, right);
+                let cmp_vars = pred.variables();
                 let unbound: Vec<_> = cmp_vars.difference(&positive_vars).cloned().collect();
                 if !unbound.is_empty() {
                     let mut sorted_unbound = unbound;
@@ -199,7 +192,7 @@ pub fn validate_rule(rule: &Rule, name: &str) -> Result<(), String> {
         .body
         .iter()
         .filter_map(|pred| match pred {
-            BodyPredicate::Comparison(left, _, right) => Some(deep_cmp_vars(left, right)),
+            BodyPredicate::Comparison(..) => Some(pred.variables()),
             _ => None,
         })
         .collect();
@@ -2343,9 +2336,9 @@ mod tests {
 
     #[test]
     fn test_unbound_variables_nested_in_terms_rejected() {
-        // Review finding: BodyPredicate::variables only sees top-level
-        // variables, letting `Salary + 1 > 100` and `abs_int64(Y) > 5`
-        // escape to the old runtime schema error.
+        // Review finding: variables nested in comparison operands must count,
+        // or `Salary + 1 > 100` and `abs_int64(Y) > 5` escape to the old
+        // runtime schema error.
         for iql in [
             "bad(X) <- t(X), Salary + 1 > 100",
             "bad(X) <- t(X), abs_int64(Y) > 5",

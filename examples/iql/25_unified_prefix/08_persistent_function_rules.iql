@@ -1,0 +1,28 @@
+// Test: Persistent rules with function-call terms
+// Description: A persistent rule keeps its function calls, so a computed head
+// variable is range-restricted and two function calls can be compared, exactly
+// like the same rules written as session rules (GenBI replay reproducer).
+
+.kg create test_persistent_functions_n25t08
+.kg use test_persistent_functions_n25t08
+
++adapter_event(source_id: string, event_id: string, sequence: int, entity_key: string, op: string, payload_json: string)
++adapter_event[("erp", "first", 2, "entity", "delete", "{}"), ("erp", "conflict", 2, "entity", "insert", "{}"), ("crm", "only", 1, "account", "insert", "{}")]
+
+// Content is bound by the concat assignment
++event_content(S, K, N, Content) <- adapter_event(S, _, N, K, Op, Payload), Content = concat(Op, "|", Payload)
+?event_content(S, K, N, Content)
+
+// Two events at the same position with different content conflict
++replay_conflict_direct(S, K, N) <- adapter_event(S, _, N, K, OpA, PayloadA), adapter_event(S, _, N, K, OpB, PayloadB), concat(OpA, "|", PayloadA) != concat(OpB, "|", PayloadB)
+?replay_conflict_direct(S, K, N)
+
+// Boolean constants survive persistence too
++flag[("a", true), ("b", false)]
++enabled(X) <- flag(X, B), B = true
+?enabled(X)
+
+.rule
+
+.kg use default
+.kg drop test_persistent_functions_n25t08

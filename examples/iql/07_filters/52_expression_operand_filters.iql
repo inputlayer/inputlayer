@@ -1,0 +1,26 @@
+// Test: Filters over function-call and arithmetic operands
+// Description: A comparison whose side is a function call, or arithmetic on
+// both sides, filters rows; a bound variable equated to a function call is a
+// filter, not a new binding.
+
+.kg create test_expr_filters_n07t52
+.kg use test_expr_filters_n07t52
+
++word[("a", "A"), ("b", "x"), ("cc", "CC")]
++num[1, 2, 3]
+
+// Y is already bound by word: keep only rows where Y equals upper(X)
+?word(X, Y), Y = upper(X)
+
+// Function call against a literal
+?word(X, Y), upper(X) = "A"
+?word(X, Y), len(X) < 2
+
+// Function call against function call
+?word(X, Y), upper(X) != upper(Y)
+
+// Arithmetic on both sides: N + 1 = N * 2 holds only for N = 1
+?num(N), N + 1 != N * 2
+
+.kg use default
+.kg drop test_expr_filters_n07t52
