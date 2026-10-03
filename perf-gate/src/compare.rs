@@ -189,7 +189,7 @@ fn judge_metric(
         return verdict;
     }
     let interval = median_interval(&verdict.round_ratios, policy.confidence);
-    let (Some(point), Some((lo, hi))) = (verdict.cost_ratio, interval) else {
+    let Some((lo, hi)) = interval else {
         verdict.reason = format!(
             "{} rounds cannot give a {:.0}% interval; add rounds",
             verdict.round_ratios.len(),
@@ -197,7 +197,6 @@ fn judge_metric(
         );
         return verdict;
     };
-    verdict.cost_ratio = Some(point);
     verdict.interval = Some((lo, hi));
     let budget = 1.0 + tolerance;
     (verdict.status, verdict.reason) = if hi <= budget {

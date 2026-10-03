@@ -156,7 +156,16 @@ fn run(args: &RunArgs) -> Result<()> {
         args.build.clone(),
     );
     let runtime = tokio::runtime::Runtime::new().context("start runtime")?;
-    let record = runtime.block_on(runner::run(&plan, environment))?;
+    // On interrupt the run future is dropped, which kills its server.
+    let record = runtime.block_on(async {
+        tokio::select! {
+            record = runner::run(&plan, environment) => record,
+            signal = interrupted() => {
+                signal?;
+                anyhow::bail!("interrupted; no run file written")
+            }
+        }
+    })?;
     let json = serde_json::to_string(&record)?;
     std::fs::write(&args.out, json).with_context(|| format!("write {}", args.out.display()))?;
     eprintln!("run file: {}", args.out.display());
@@ -185,6 +194,16 @@ fn compare(args: &CompareArgs) -> Result<ExitCode> {
         Status::Inconclusive => 2,
         Status::Invalid => 3,
     }))
+}
+
+/// Resolves on SIGINT or SIGTERM.
+async fn interrupted() -> Result<()> {
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    tokio::select! {
+        result = tokio::signal::ctrl_c() => result?,
+        _ = terminate.recv() => {}
+    }
+    Ok(())
 }
 
 fn sha256_of(path: &Path) -> Result<String> {

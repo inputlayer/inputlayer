@@ -4,3 +4,5 @@
 # change: record the new commit and its calibration (A/A) run.
 commit = "e732cd5258c74d9247e99b2697a0ae080ccf9042"
 reason = "P00: main before any reactive-plan runtime change"
+# Calibration pending: the A/A run that records this host's noise is taken
+# in a quiet window at the release checkpoint and committed beside this file.

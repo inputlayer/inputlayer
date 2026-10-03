@@ -99,9 +99,10 @@ one, or changing the required set, needs a stated reason and review.
 
 ## Baseline
 
-`baselines/approved.toml` names the approved baseline commit. The
-`baselines/` directory keeps that commit's calibration run (`--aa`): the raw
-samples plus a report recording the host's run-to-run noise. Only move the
+`baselines/approved.toml` names the approved baseline commit. That commit's
+calibration run (`--aa`) belongs next to it: the gzipped raw samples, plus a
+report recording the host's run-to-run noise. Record it in a quiet window,
+because an A/A run taken on a busy host is evidence only of the noise. Only move the
 baseline in a reviewed change that states why, for example after an
 accepted improvement.
 
