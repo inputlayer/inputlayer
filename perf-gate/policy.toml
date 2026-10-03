@@ -41,6 +41,9 @@ required = [
     "delta_fanout.delta_us.p50",
     "delta_fanout.delta_us.p99",
     "delta_fanout.last_agent_us.p99",
+    # First write after subscribing (40 samples per round: p50 only).
+    "delta_first.first_delta_us.p50",
+    "delta_first.warm_delta_us.p50",
     "interference.delta_us.p50",
     "interference.delta_us.p99",
 ]

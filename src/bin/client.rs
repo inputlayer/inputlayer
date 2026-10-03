@@ -1299,6 +1299,8 @@ fn print_help() {
     println!("  .clear prefix <p>    Clear all facts from relations with prefix");
     println!("  .debug <query>       Show query plan without executing");
     println!("  .status              Server status");
+    println!("  .backup [name]       Export an online checkpoint (admin)");
+    println!("  .backup status       Progress or outcome of the last export");
     println!("  .help                Show this help");
     println!("  .quit                Exit");
     println!();

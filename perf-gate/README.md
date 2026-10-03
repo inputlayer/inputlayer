@@ -52,6 +52,7 @@ The report lands in `target/perf-gate/latest/report.md`. Next to it are
 | `insert_batch` | 20 durable batches of 1,000 facts | `ack_us`, `facts_per_sec` |
 | `delta_single` | 1 agent subscribed to `?two_hop(1, Z)` on 2.5K nodes / 10K edges; an external writer, open loop, every 20 ms, 150 writes | `delta_us` (writer send to delta at agent), `last_agent_us`, `ack_us`, `subscribe_us` |
 | `delta_fanout` | 64 agents on the same query, a write every 80 ms, 100 writes | same |
+| `delta_first` | 40 fresh agents, one after another, on the `delta_single` graph: each subscribes and the writer inserts a probe at once, then another after the agent has been quiet for 100 ms | `first_delta_us` (first write after subscribing, send to delta), `warm_delta_us` (the later write), `subscribe_us` |
 | `interference` | 1 probe agent while another connection loops a long join (`?two_hop(X, Z), edge(Z, X)`) and a slow consumer stops reading with large results pending; a write every 30 ms, 120 writes | `delta_us`, `ack_us`, `long_request_us` |
 
 Each fixture also records `server_peak_rss_kb`.
@@ -62,6 +63,13 @@ writes earlier, so the result size stays bounded and every retraction is
 measured as well. The writer runs open loop on a fixed schedule, so a slow
 server cannot hide latency by slowing the writer down (no coordinated
 omission).
+
+`delta_first` instead writes right after each subscription, the moment a
+reactive agent's first change typically follows it. Its first delta must
+cost what a warm one does: subscribing must leave no work, and no transport
+stall, for the first write to pay. (A ~40 ms first delta is the signature
+of Nagle's algorithm waiting on the agent's delayed ACK of the subscribe
+reply.)
 
 The `quick` profile is for developing the gate. It has too few samples for
 p99 and therefore never passes.

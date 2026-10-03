@@ -20,7 +20,8 @@ const LONG_REQUEST: &str = "?two_hop(X, Z), edge(Z, X)";
 const LARGE_RESULT: &str = "?two_hop(X, Z)";
 
 pub async fn run(server: &RunningServer, params: &InterferenceParams) -> Result<Measurement> {
-    let mut kg = delta::prepare(server, &params.delta).await?;
+    let d = &params.delta;
+    let mut kg = delta::prepare(server, d.nodes, d.edges, d.writes).await?;
 
     // The slow consumer subscribes too, so every write also targets it.
     let (mut slow, _) = kg.subscribe(server, "slow").await?;

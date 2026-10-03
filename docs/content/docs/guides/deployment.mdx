@@ -152,6 +152,7 @@ The image runs as a non-root `inputlayer` user with the following defaults:
 | Setting | Value |
 |---|---|
 | Binary | `/usr/local/bin/inputlayer-server` |
+| Backup tool | `/usr/local/bin/inputlayer-backup` ([Backup and Restore](backup)) |
 | Data volume | `/var/lib/inputlayer/data` |
 | GUI assets | `/var/lib/inputlayer/gui/dist/` |
 | Exposed port | `8080` |
@@ -395,7 +396,8 @@ InputLayer is a single writer per data directory: a server refuses to start
 while another one holds the volume's `LOCK` (see
 [Persistence](persistence#single-writer)). During a rolling
 update the new pod therefore fails and restarts until the old pod exits;
-keep `replicas: 1` per volume.
+keep `replicas: 1` per volume. For backups, see
+[Backup and Restore](backup#kubernetes).
 
 ### Deployment
 
@@ -615,7 +617,7 @@ InputLayer requires WebSocket authentication for all data operations. On first b
 1. Run as a dedicated non-root user
 2. Use `ProtectSystem=strict` in systemd to prevent writes outside allowed paths
 3. Set appropriate permissions on the data directory (`750` or stricter)
-4. Back up the data directory regularly -- the WAL and batch files are the source of truth
+4. Back up the data directory regularly with `inputlayer-backup` -- see [Backup and Restore](backup)
 
 ### Durability
 

@@ -1,0 +1,397 @@
+# Backup and Restore
+
+InputLayer keeps all of its state in one data directory (`storage.data_dir`).
+There are two ways to back it up, and one way to restore both:
+
+- **Online export** (`.backup`, no downtime): the running server captures a
+  checkpoint of every knowledge graph at one committed revision and writes it
+  out in the background while it keeps serving. See
+  [Online Export](#online-export).
+- **Offline copy** (`inputlayer-backup create`): stop the server, copy the
+  data directory, start the server again. The server is unavailable while
+  the copy runs (see [Timing](#timing)).
+
+Restoring either one (`inputlayer-backup restore`) gives every knowledge
+graph, fact, schema, rule, vector index, user, API key and ACL as it was at
+the backup.
+
+`inputlayer-backup` ships next to `inputlayer-server` (in the Docker image
+at `/usr/local/bin/inputlayer-backup`; from source, `cargo build --release
+--bin inputlayer-backup`).
+
+---
+
+## What a Backup Contains
+
+Every file and directory under the data directory:
+
+| Path | Contents |
+|---|---|
+| `metadata/` | Knowledge graph list, pending drops |
+| `persist/wal/` | Write-ahead log: committed writes not yet in batch files |
+| `persist/shards/`, `persist/batches/` | Shard metadata and Parquet batch files |
+| `<kg>/` | Per-KG rule and schema catalogs |
+| `_internal/` and its `persist/` shards | Users, password hashes, API key hashes, KG ACLs |
+| `credentials.toml` | Generated bootstrap credentials, if stored in the data directory |
+
+plus `inputlayer-backup.json`, the manifest that lists every directory and
+every file with its size and SHA-256.
+
+Not included: the `LOCK` file, a top-level `lost+found`, your configuration
+file, TLS certificates, a `credentials_file` configured outside the data
+directory, logs, and gateway state. Back those up separately.
+
+> **Important**: A backup holds password and API key hashes, and `credentials.toml` holds
+> generated credentials in plain text. Protect backups at least as strictly as
+> the data directory: restrict permissions (`chmod 700`) and encrypt copies you
+> move off the host.
+
+---
+
+## Guarantees
+
+- **No copy of a running server.** `create` takes the same exclusive lock
+  (`data/LOCK`) the server holds while it runs, and refuses a directory a
+  server is using:
+
+  ```
+  error: data directory /var/lib/inputlayer/data is in use by a running InputLayer server (pid 4242); stop the server first
+  ```
+
+  It writes nothing in that case. While the backup runs, a server cannot
+  start on the directory.
+- **Never overwrites.** Backup and restore write only into a directory that
+  does not exist yet or is empty (a fresh volume's `lost+found` is allowed).
+  Anything else is refused before a single byte is written, as is a
+  destination inside the directory being copied.
+- **Complete or rejected.** The manifest is written last, after every file
+  is copied and flushed to disk. A failed run removes what it wrote. A run
+  that was killed leaves a directory without a manifest, which `verify` and
+  `restore` refuse as incomplete; delete it and run again.
+- **Integrity checked.** `verify` and `restore` check that the backup holds
+  exactly the files in the manifest, no more and no fewer, with matching
+  sizes and SHA-256 sums. `restore` checks each file as it copies it.
+- **Restore is validated.** After copying, `restore` opens the restored
+  directory the way the server does at startup (WAL replay, shard and
+  catalog load) and prints what it holds. While copying it holds the target's
+  lock, so no server starts on a half-restored directory.
+
+> **Note**: The lock is an OS advisory lock: it sees servers on the same machine using
+> the same filesystem. If the volume can be mounted elsewhere (a network
+> filesystem, a volume that might still be attached to another node), make sure
+> the server is stopped before taking a backup. Treat the lock as a safety net,
+> not a substitute for stopping the server.
+
+---
+
+## Online Export
+
+A running server exports a consistent checkpoint of itself with the admin
+command `.backup`. Configure where exports go, outside the data directory:
+
+```toml
+[storage]
+backup_dir = "/var/backups/inputlayer"   # or INPUTLAYER_STORAGE__BACKUP_DIR
+```
+
+Then, as an admin (any client, for example `inputlayer-client`):
+
+```
+> .backup nightly
+Exporting the checkpoint at revision 48213 to /var/backups/inputlayer/nightly.
+Commits were held for 1180 us; check progress with .backup status.
+> .backup status
+Last export complete: revision 48213 in /var/backups/inputlayer/nightly.
+71 files, 10498117 bytes; commits held 1180 us, written in 380 ms.
+```
+
+`.backup` without a name uses `checkpoint-<UTC time>`. Names are plain
+directory names (letters, digits, `-`, `_`, `.`; not starting with `.`), and
+an existing name is refused. `.backup` returns as soon as the export has
+started; `.backup status` reports a running export or how the last one ended.
+
+### What an Export Holds
+
+Exactly the committed state at the revision it names: every commit up to
+that revision, in every knowledge graph, and none after it, including the
+`_internal` users, API key hashes and ACLs. Writes that commit while the
+export is written are not in it. The export is a complete, compacted data
+directory (one batch file per relation, no WAL, each knowledge graph's
+rule, schema and vector index catalogs) plus the same
+`inputlayer-backup.json` manifest as an offline backup, which also records
+the revision. `verify` and `restore` handle it like any other backup and
+print the revision:
+
+```bash
+inputlayer-backup verify /var/backups/inputlayer/nightly
+```
+
+```
+backup verified: /var/backups/inputlayer/nightly
+         71 files, 17 directories, 10498117 bytes in 74 ms
+revision: 48213 (online checkpoint)
+```
+
+Not included, unlike an offline copy: files the engine does not own, such as
+a `credentials.toml` kept in the data directory. Derived relations are not
+stored; the rules recompute them after restore, and vector indexes are
+rebuilt from their definitions.
+
+### How It Stays Consistent Without Stopping
+
+1. **Capture.** The server briefly holds off commits (and knowledge graph
+   creation) on every knowledge graph at once, notes the newest committed
+   revision, and takes shared references to each graph's facts and copies of
+   its rule, schema and index catalogs. No data is copied, so the pause is
+   short (see [Timing](#timing)); it is reported as "commits held". Queries
+   are not held off: they read published snapshots.
+2. **Write.** One background thread writes the captured state to the
+   destination, then makes every file durable, hashes it, and writes the
+   manifest last. It uses one core and one writer's disk bandwidth, never the
+   query thread pool, and holds no engine lock.
+
+While an export is written, the server keeps the captured facts in memory
+even if writes replace them, so memory grows by at most the data changed
+during the export, plus one relation's worth while that relation is written.
+
+### Guarantees
+
+- **One export at a time.** A second `.backup` while one runs is refused.
+- **Admin only.** `.backup` and `.backup status` require the admin role,
+  since they write to the server's filesystem.
+- **Never overwrites, never inside the data directory.** The destination is
+  claimed before anything is captured: an existing non-empty directory, or a
+  `backup_dir` inside the data directory, is refused at once.
+- **Complete or rejected.** A failed export removes what it wrote, and so
+  does a server shutdown during an export: shutdown cancels the export and
+  waits for that cleanup. A server killed mid-export leaves a directory
+  without a manifest, which `verify` and `restore` refuse as incomplete;
+  delete it and export again.
+- **Integrity checked** exactly as for offline backups.
+
+### Scheduling Exports
+
+Run `.backup` from cron or a Kubernetes CronJob with an admin API key, then
+check the result once it has had time to finish:
+
+```bash
+# /etc/inputlayer/backup.iql holds the single line: .backup
+inputlayer-client --server http://127.0.0.1:8080 --api-key "$INPUTLAYER_ADMIN_KEY" \
+  --script /etc/inputlayer/backup.iql
+```
+
+With Docker or Kubernetes, mount a separate volume (for example
+`/var/backups/inputlayer`) into the engine container and set
+`INPUTLAYER_STORAGE__BACKUP_DIR` to it. Prune old exports yourself; the
+server never deletes them.
+
+---
+
+## Back Up
+
+`create` backs up the data directory given by `--data-dir`, or else
+`storage.data_dir` from the same configuration the server reads
+(`config.toml`, `--config FILE`, `INPUTLAYER_STORAGE__DATA_DIR`).
+
+### Binary Install (systemd)
+
+```bash
+sudo systemctl stop inputlayer
+sudo -u inputlayer inputlayer-backup create \
+  /var/backups/inputlayer/$(date -u +%Y%m%dT%H%M%SZ) \
+  --data-dir /var/lib/inputlayer/data
+sudo systemctl start inputlayer
+```
+
+```
+backup created: /var/backups/inputlayer/20261003T180000Z
+         66 files, 15 directories, 10564662 bytes in 31 ms
+source:  /var/lib/inputlayer/data
+```
+
+Check a backup at any time, for example after moving it (read-only):
+
+```bash
+inputlayer-backup verify /var/backups/inputlayer/20261003T180000Z
+```
+
+A nightly backup is the same three steps; the service is down for the
+duration of the copy:
+
+```bash
+# /etc/cron.d/inputlayer-backup
+30 3 * * * root systemctl stop inputlayer && sudo -u inputlayer inputlayer-backup create /var/backups/inputlayer/$(date -u +\%Y\%m\%dT\%H\%M\%SZ) --data-dir /var/lib/inputlayer/data; systemctl start inputlayer
+```
+
+The `;` before `systemctl start` restarts the server even if the backup
+fails; check the cron mail or journal for `error:` lines.
+
+### Docker Compose
+
+Run the tool from the engine image against the stopped service's volume:
+
+```bash
+docker compose stop inputlayer
+mkdir -p backups
+docker compose run --rm --no-deps --user root \
+  -v "$PWD/backups:/backups" --entrypoint inputlayer-backup \
+  inputlayer create /backups/$(date -u +%Y%m%dT%H%M%SZ)
+docker compose start inputlayer
+```
+
+The image sets `INPUTLAYER_STORAGE__DATA_DIR`, so no `--data-dir` is needed.
+
+### Kubernetes
+
+Scale the engine to zero, run the backup as a Job that mounts the same
+claim, then scale back up:
+
+```bash
+kubectl scale deployment/inputlayer --replicas=0
+kubectl wait --for=delete pod -l app=inputlayer --timeout=120s
+kubectl apply -f inputlayer-backup-job.yaml
+kubectl wait --for=condition=complete job/inputlayer-backup --timeout=1h
+kubectl scale deployment/inputlayer --replicas=1
+```
+
+```yaml
+# inputlayer-backup-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: inputlayer-backup
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: backup
+          image: inputlayer:latest          # same image as the Deployment
+          command: ["sh", "-c"]
+          args:
+            - inputlayer-backup create /backups/$(date -u +%Y%m%dT%H%M%SZ)
+          env:
+            - name: INPUTLAYER_STORAGE__DATA_DIR
+              value: /var/lib/inputlayer/data
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/inputlayer/data
+            - name: backups
+              mountPath: /backups
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: inputlayer-data
+        - name: backups
+          persistentVolumeClaim:
+            claimName: inputlayer-backups   # a separate claim for backups
+```
+
+Give the Job the same `securityContext` as the Deployment so it can read the
+data volume. Delete the finished Job before running the next one.
+
+---
+
+## Restore
+
+Restore into a **new or empty** directory, then point the server at it. The
+current data directory is never touched, so you can go back to it until you
+have checked the restored one.
+
+### Binary Install (systemd)
+
+```bash
+sudo systemctl stop inputlayer
+sudo -u inputlayer inputlayer-backup restore \
+  /var/backups/inputlayer/20261003T180000Z /var/lib/inputlayer/data-restored
+```
+
+```
+backup restored: /var/lib/inputlayer/data-restored
+         66 files, 15 directories, 10564662 bytes in 28 ms
+validated: the engine loads /var/lib/inputlayer/data-restored
+  _internal: 3 relations, 4 facts, 0 rules
+  default: 0 relations, 0 facts, 0 rules
+  events: 1 relations, 500000 facts, 3 rules
+  graph: 1 relations, 49998 facts, 1 rules
+```
+
+Then swap the directories and start the server:
+
+```bash
+sudo mv /var/lib/inputlayer/data /var/lib/inputlayer/data-before-restore
+sudo mv /var/lib/inputlayer/data-restored /var/lib/inputlayer/data
+sudo systemctl start inputlayer
+```
+
+(or set `storage.data_dir` to the restored directory instead of moving it).
+
+### Docker Compose
+
+Restore into a new volume, then switch the service to it:
+
+```bash
+docker compose stop inputlayer
+docker volume create inputlayer-data-restored
+docker compose run --rm --no-deps --user root \
+  -v "$PWD/backups:/backups:ro" -v inputlayer-data-restored:/restore \
+  --entrypoint sh inputlayer -c \
+  'inputlayer-backup restore /backups/20261003T180000Z /restore && chown -R inputlayer:inputlayer /restore'
+```
+
+In `docker-compose.yml`, mount `inputlayer-data-restored` at
+`/var/lib/inputlayer/data` and declare it under `volumes:` with
+`external: true`; then `docker compose up -d inputlayer`. Keep the old volume
+until the restored service checks out.
+
+### Kubernetes
+
+Create a new claim, run a Job like the backup Job with
+`inputlayer-backup restore /backups/<name> /var/lib/inputlayer/data` and the
+new claim mounted at `/var/lib/inputlayer/data` (a fresh volume's mount point
+is empty apart from `lost+found`, which is allowed), then change the
+Deployment's `claimName` to the new claim and scale it back up.
+
+### Check the Restored Server
+
+The `validated:` summary shows the engine loads every knowledge graph. To
+check content, run a few known queries against the restored server and
+compare them with the answers from before the backup, and log in with an
+existing user or API key: users, keys and ACLs are restored with the data.
+
+If `restore` reports that the restored files match the backup but the engine
+cannot load them, the backup was taken by a server version this one cannot
+read; restore it with the version that wrote it (the manifest's
+`engine_version`).
+
+---
+
+## Timing
+
+Backup, verify and restore each print their duration. They read or write
+every byte once, compute SHA-256 on the way, and fsync every file and
+directory; files are copied in parallel so fsyncs overlap. A rough downtime
+estimate is server stop + data directory size / disk throughput + server
+start.
+
+For scale: a data directory with 550,000 facts in two knowledge graphs plus
+rules, users and ACLs (11 MB, 66 files) took 31 ms to back up, 78 ms to
+verify and 28 ms to restore on an ext4 SSD. Restore also loads the result
+once to validate it, which takes about as long as a server start.
+
+An online export holds off commits only for its capture, which takes shared
+references rather than copying data. With 51 knowledge graphs, 1,001
+relations and 501,000 facts, the capture took about 0.1 ms on an idle server
+and about 1.2 ms while a client committed continuously (it waits for the
+commits in flight), and writing the export took about 1.6 s. Commit and query
+latency on a busy knowledge graph stayed the same while exports ran back to
+back (commit p99 about 0.26 ms either way).
+
+---
+
+## Next Steps
+
+- [Persistence](persistence.md) - Data directory layout, WAL and batch files
+- [TLS Deployment](tls-deployment.md) - Docker and reverse proxy setup
+- [Troubleshooting](troubleshooting.md) - Common errors

@@ -33,6 +33,7 @@
 mod catalog_change;
 #[cfg(test)]
 mod catalog_commit_tests;
+mod checkpoint;
 #[cfg(test)]
 mod commit_tests;
 #[cfg(test)]
@@ -45,6 +46,7 @@ mod snapshot;
 mod vector_index;
 mod write_program;
 pub use catalog_change::{CatalogChange, CatalogOutcome};
+pub use checkpoint::{CheckpointExport, ExportStatus};
 pub use relation_store::RelationStore;
 pub use snapshot::KnowledgeGraphSnapshot;
 pub use write_program::{
@@ -57,6 +59,7 @@ use crate::incremental::IncrementalEngine;
 use crate::index_manager::IndexManager;
 use crate::naming;
 use crate::rule_catalog::RuleCatalog;
+use crate::schema::catalog::SCHEMA_CATALOG_FILE;
 use crate::schema::{RelationSchema, SchemaCatalog, ValidationEngine};
 use crate::statement::RuleDef;
 use crate::storage::persist::{
@@ -186,6 +189,12 @@ pub struct StorageEngine {
     has_relation_tombstones: AtomicBool,
     /// KG names whose drop cleanup is running.
     kg_drops_in_flight: parking_lot::Mutex<HashSet<String>>,
+    /// Held shared to add a KG to `knowledge_graphs`, exclusively by a
+    /// checkpoint capture, so no KG appears while one is taken. Never taken
+    /// by reads or commits.
+    kg_set: RwLock<()>,
+    /// The online checkpoint export slot.
+    checkpoint_exports: checkpoint::CheckpointExports,
     /// Single-writer ownership of `data_dir` for this engine's lifetime.
     /// Declared last so it is released only after every other field drops.
     _data_dir_lock: DataDirLock,
@@ -263,6 +272,8 @@ impl StorageEngine {
             tombstones: parking_lot::Mutex::new(DropTombstones::default()),
             has_relation_tombstones: AtomicBool::new(false),
             kg_drops_in_flight: parking_lot::Mutex::new(HashSet::new()),
+            kg_set: RwLock::new(()),
+            checkpoint_exports: checkpoint::CheckpointExports::default(),
             _data_dir_lock: data_dir_lock,
         };
 
@@ -308,6 +319,7 @@ impl StorageEngine {
 
         // Atomic check-and-insert to prevent TOCTOU race
         use dashmap::mapref::entry::Entry;
+        let adding = self.kg_set.read();
         let entry = self.knowledge_graphs.entry(name.to_string());
         match entry {
             Entry::Occupied(_) => {
@@ -330,6 +342,7 @@ impl StorageEngine {
                 vacant.insert(Arc::new(RwLock::new(kg)));
             }
         }
+        drop(adding);
 
         if let Err(e) = self.save_knowledge_graphs_metadata() {
             self.knowledge_graphs.remove(name);
@@ -1924,7 +1937,7 @@ impl StorageEngine {
             .map_err(|e| StorageError::Other(format!("Failed to load view catalog: {e}")))?;
 
         // Load schema catalog (will load existing schemas if present)
-        let schema_path = data_dir.join("schema.json");
+        let schema_path = data_dir.join(SCHEMA_CATALOG_FILE);
         let schema_catalog = if schema_path.exists() {
             SchemaCatalog::load(&schema_path).unwrap_or_else(|e| {
                 eprintln!(
@@ -2229,7 +2242,7 @@ impl KnowledgeGraph {
         });
 
         // Create schema catalog (will load existing schemas if present)
-        let schema_path = data_dir.join("schema.json");
+        let schema_path = data_dir.join(SCHEMA_CATALOG_FILE);
         let schema_catalog = if schema_path.exists() {
             SchemaCatalog::load(&schema_path).unwrap_or_else(|e| {
                 eprintln!(
@@ -2738,7 +2751,7 @@ impl KnowledgeGraph {
 
     /// Save schema catalog to disk
     fn save_schema_catalog(&self) -> Result<(), String> {
-        let schema_path = self.data_dir.join("schema.json");
+        let schema_path = self.data_dir.join(SCHEMA_CATALOG_FILE);
         self.schema_catalog
             .save(&schema_path)
             .map_err(|e| format!("Failed to save schema catalog: {e}"))

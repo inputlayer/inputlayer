@@ -74,6 +74,12 @@ pub struct StorageConfig {
     /// Maximum number of knowledge graphs allowed (0 = unlimited)
     #[serde(default = "default_max_knowledge_graphs")]
     pub max_knowledge_graphs: usize,
+
+    /// Directory that online checkpoint exports (`.backup`) are written
+    /// into, one subdirectory each. Must lie outside `data_dir`. Unset
+    /// disables `.backup`.
+    #[serde(default)]
+    pub backup_dir: Option<PathBuf>,
 }
 
 /// Persistence configuration (legacy)
@@ -919,6 +925,7 @@ impl Config {
                     timing_mode: crate::execution::TimingMode::default(),
                 },
                 max_knowledge_graphs: 1000,
+                backup_dir: None,
             },
             optimization: OptimizationConfig::default(),
             logging: LoggingConfig {

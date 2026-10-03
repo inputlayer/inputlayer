@@ -106,6 +106,9 @@ impl IndexType {
     }
 }
 
+/// File holding a knowledge graph's index definitions, in its directory.
+pub const INDEX_DEFINITIONS_FILE: &str = "indexes.json";
+
 /// Index definition (what `.index create` declares; persisted per KG)
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RegisteredIndex {
@@ -361,18 +364,31 @@ impl IndexManager {
         )
     }
 
+    /// Every index's definition.
+    pub fn definitions(&self) -> Vec<RegisteredIndex> {
+        self.indexes
+            .values()
+            .map(|m| m.definition.clone())
+            .collect()
+    }
+
     /// Persist all definitions to `path` (atomic replace; removes the file when empty).
     pub fn save_definitions(&self, path: &Path) -> Result<(), String> {
-        if self.indexes.is_empty() {
+        let definitions: Vec<&RegisteredIndex> =
+            self.indexes.values().map(|m| &m.definition).collect();
+        Self::write_definitions(path, &definitions)
+    }
+
+    /// Persist `definitions` to `path` as [`Self::save_definitions`] does.
+    pub fn write_definitions(path: &Path, definitions: &[&RegisteredIndex]) -> Result<(), String> {
+        if definitions.is_empty() {
             return match std::fs::remove_file(path) {
                 Ok(()) => Ok(()),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
                 Err(e) => Err(format!("Failed to remove {}: {e}", path.display())),
             };
         }
-        let definitions: Vec<&RegisteredIndex> =
-            self.indexes.values().map(|m| &m.definition).collect();
-        let json = serde_json::to_string_pretty(&definitions)
+        let json = serde_json::to_string_pretty(definitions)
             .map_err(|e| format!("Failed to serialize index definitions: {e}"))?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, json)

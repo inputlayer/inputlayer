@@ -10,7 +10,7 @@ use super::{KnowledgeGraph, StorageEngine, StorageResult};
 use crate::hnsw_index::{validate_vector, HnswIndex};
 use crate::index_manager::{
     DistanceMetric, HnswConfig, IdType, IndexStats, IndexType, ManagedIndex, RegisteredIndex,
-    TupleId,
+    TupleId, INDEX_DEFINITIONS_FILE,
 };
 use crate::schema::SchemaType;
 use crate::statement::IndexCreateOptions;
@@ -23,9 +23,6 @@ pub const COMPACT_RATIO: f64 = 0.3;
 
 /// Tombstones below this count never trigger a rebuild (avoids churn on tiny indexes).
 const COMPACT_MIN_DEAD: usize = 64;
-
-/// File holding this KG's index definitions.
-const DEFINITIONS_FILE: &str = "indexes.json";
 
 /// Extract `(id, id_type, vector)` from a row for `def`.
 fn index_row<'t>(
@@ -53,7 +50,7 @@ fn index_row<'t>(
 
 impl KnowledgeGraph {
     fn index_definitions_path(&self) -> PathBuf {
-        self.data_dir.join(DEFINITIONS_FILE)
+        self.data_dir.join(INDEX_DEFINITIONS_FILE)
     }
 
     /// Resolve `.index create` options against this KG's schema.

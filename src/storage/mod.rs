@@ -6,6 +6,7 @@
 //! - CSV serialization (human-readable, interoperable)
 //! - Metadata management
 //! - Exclusive data directory ownership
+//! - Offline backup and restore of a data directory
 //! - Error handling
 //!
 //! ## Persistence Model
@@ -21,6 +22,7 @@
 //! - Parquet: Best for large datasets, analytics workloads, and production use
 //! - CSV: Best for data exchange, debugging, and human inspection
 
+pub mod backup;
 pub mod csv;
 pub mod data_dir_lock;
 pub mod error;

@@ -519,6 +519,12 @@ pub async fn start_http_server(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
+    // Every response and WebSocket frame is a whole message a client waits
+    // for. With Nagle's algorithm a push sent while the client still delays
+    // its ACK of the previous frame (e.g. the first delta right after
+    // `.subscribe` answered) stalls for the delayed-ACK timeout, ~40 ms on
+    // Linux.
+    .tcp_nodelay(true)
     .with_graceful_shutdown(shutdown_signal())
     .await?;
 
