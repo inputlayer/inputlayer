@@ -4,5 +4,7 @@
 # change: record the new commit and its calibration (A/A) run.
 commit = "e732cd5258c74d9247e99b2697a0ae080ccf9042"
 reason = "P00: main before any reactive-plan runtime change"
-# Calibration pending: the A/A run that records this host's noise is taken
-# in a quiet window at the release checkpoint and committed beside this file.
+# Calibration (release checkpoint 1, quiet window, 20 rounds, pinned servers):
+# e732cd52-aa.report.md and e732cd52-aa.run.json.gz. The A/A verdict is
+# INCONCLUSIVE: durable-ack p50 and interference delta p99 are noisier on
+# this host than their budgets; all other required metrics pass A/A.
