@@ -190,6 +190,16 @@ impl SubscriptionRegistry {
         self.entries.remove(id).is_some()
     }
 
+    /// Remove `id` if it is still registration `generation`. Returns whether
+    /// it was.
+    pub fn remove_generation(&mut self, id: &str, generation: u64) -> bool {
+        if self.entries.get(id).is_some_and(|e| e.token == generation) {
+            self.entries.remove(id);
+            return true;
+        }
+        false
+    }
+
     /// Remove every subscription; returns how many there were.
     pub fn clear(&mut self) -> usize {
         let count = self.entries.len();
@@ -494,6 +504,20 @@ mod tests {
         assert_eq!(registry.len(), 1);
         assert!(registry.on_change("one", &ChangeSet::Everything).is_empty());
         assert_eq!(registry.on_change("two", &ChangeSet::Everything).len(), 1);
+    }
+
+    #[test]
+    fn test_registry_remove_generation_spares_a_newer_registration() {
+        let mut registry = registry_with(vec![]);
+        assert!(!registry.remove_generation("s", 2), "no such generation");
+        assert!(!registry.remove_generation("other", 1));
+        assert!(registry.remove_generation("s", 1));
+        assert!(registry.is_empty());
+        let generation = registry
+            .add("s", "kg", Box::new(Scripted(vec![])), deps_on("a"))
+            .unwrap();
+        assert!(!registry.remove_generation("s", 1), "an old generation");
+        assert!(registry.remove_generation("s", generation));
     }
 
     #[test]

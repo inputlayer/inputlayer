@@ -134,6 +134,11 @@ impl SubscriptionAdapter {
                 subscription,
                 message,
                 ..
+            }
+            | SubscriptionPush::SubscriptionReset {
+                subscription,
+                message,
+                ..
             } => {
                 if let Some(view) = self.views.get_mut(&subscription) {
                     if view.result.is_ok() {
@@ -141,6 +146,13 @@ impl SubscriptionAdapter {
                             Err(AdapterError::Failed(format!("refresh failed: {message}")));
                     }
                 }
+            }
+            SubscriptionPush::SubscriptionDeltaStart { .. }
+            | SubscriptionPush::SubscriptionDeltaChunk { .. }
+            | SubscriptionPush::SubscriptionDeltaEnd { .. } => {
+                unreachable!(
+                    "streaming is the WebSocket's framing; the registry pushes whole deltas"
+                )
             }
         }
     }

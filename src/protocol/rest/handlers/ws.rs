@@ -33,8 +33,7 @@ use axum::{
 };
 use futures_util::{FutureExt, StreamExt};
 use inputlayer_ws_protocol::{
-    probe_request_id, ErrorCode, NoticeCode, ServerFrame, Subscribed, SubscriptionPush,
-    PROTOCOL_VERSION,
+    probe_request_id, ErrorCode, NoticeCode, ServerFrame, Subscribed, PROTOCOL_VERSION,
 };
 use serde::Deserialize;
 use tracing::{debug, info, warn, Instrument};
@@ -42,11 +41,14 @@ use tracing::{debug, info, warn, Instrument};
 mod access;
 mod auth;
 mod execute;
+mod framing;
 mod in_flight;
 mod outbound;
 mod pipeline;
+mod push;
 mod replay;
 mod request;
+mod stream;
 
 use access::KgReadAccess;
 use in_flight::InFlight;
@@ -152,6 +154,14 @@ fn default_kg() -> String {
 /// {"type": "subscription_error", "subscription": "<name>", "generation": 1, "message": "..."}
 /// ```
 /// `.unsubscribe <name>` removes one; disconnecting or switching KG removes all.
+///
+/// A result, snapshot or delta too large for one frame is streamed as one
+/// logical payload that applies only at its end frame (`result_start` /
+/// `result_chunk` / `result_end`, `subscription_delta_start` /
+/// `subscription_delta_chunk` / `subscription_delta_end`). What cannot be
+/// delivered whole is reported instead of any part of it: an `error` for a
+/// reply, or a `subscription_reset` that ends the subscription. A client that
+/// leaves a frame unread for `http.ws_send_timeout_ms` is disconnected.
 ///
 /// **Notices**, never with an `id`: connection events, most of them followed
 /// by the server closing the connection:
@@ -270,7 +280,8 @@ async fn handle_global_ws_connection(
     preauth_slot: crate::protocol::rest::PreAuthSlot,
 ) {
     let (sink, mut receiver) = socket.split();
-    let mut sender = Outbound::new(sink);
+    let send_timeout = std::time::Duration::from_millis(handler.config().http.ws_send_timeout_ms);
+    let mut sender = Outbound::new(sink).with_send_timeout(send_timeout);
 
     info!(kg = %kg, "ws_connection_start");
 
@@ -484,8 +495,8 @@ async fn handle_global_ws_connection(
             // Standing-query evaluation finished
             completion = subscriptions.next_completion() => {
                 if let Some(push) = subscriptions.on_completion(completion) {
-                    let push = kg_access.fence(&handler, &principal, push);
-                    if !send_subscription_push(&mut sender, push).await {
+                    let access = kg_access.fence(&handler, &principal, &push);
+                    if !push::deliver(&mut sender, &mut subscriptions, push, access).await {
                         break;
                     }
                 }
@@ -699,7 +710,7 @@ fn start_requests(
             }
             Job::Unsubscribe { name } => {
                 let frame = match subscriptions.unsubscribe(&name) {
-                    Ok(()) => execute::subscription_reply(
+                    Ok(()) => ServerFrame::Result(execute::subscription_reply(
                         id,
                         vec!["message".to_string()],
                         vec![vec![serde_json::Value::String(format!(
@@ -707,7 +718,7 @@ fn start_requests(
                         ))]],
                         None,
                         std::time::Instant::now(),
-                    ),
+                    )),
                     Err(message) => ServerFrame::error(id, None, message),
                 };
                 requests.complete(ticket, Reply::Frames(vec![encode(&frame)]));
@@ -731,23 +742,32 @@ fn release_reply(
             name: subscription,
             opened,
             started,
-        }) => {
-            let frame = match subscriptions.finish_subscribe(opened) {
-                Ok((snapshot, generation)) => execute::subscription_reply(
-                    id,
+        }) => match subscriptions.finish_subscribe(opened) {
+            Ok((snapshot, generation)) => {
+                let reply = execute::subscription_reply(
+                    id.clone(),
                     snapshot.columns,
                     snapshot.inserted,
                     Some(Subscribed {
-                        subscription,
+                        subscription: subscription.clone(),
                         generation,
                         revision: snapshot.revision,
                     }),
                     started,
-                ),
-                Err(message) => ServerFrame::error(id, None, message),
-            };
-            vec![encode(&frame)]
-        }
+                );
+                stream::result_frames(reply).unwrap_or_else(|reason| {
+                    // A snapshot that cannot be delivered whole registers
+                    // nothing; no push for it was sent yet.
+                    subscriptions.reset(&subscription, generation);
+                    vec![encode(&ServerFrame::error(
+                        id,
+                        Some(ErrorCode::Internal),
+                        reason,
+                    ))]
+                })
+            }
+            Err(message) => vec![encode(&ServerFrame::error(id, None, message))],
+        },
         None => vec![encode(&ServerFrame::error(
             id,
             Some(ErrorCode::Internal),
@@ -775,37 +795,6 @@ async fn send_frames(sender: &mut Outbound, frames: Vec<String>) -> bool {
         }
     }
     true
-}
-
-/// Send a subscription push; one that cannot be sent becomes a
-/// `subscription_error` for the same subscription. Returns `false` if the
-/// connection is dead.
-async fn send_subscription_push(sender: &mut Outbound, push: SubscriptionPush) -> bool {
-    let frame = ServerFrame::Subscription(push);
-    let json = match serde_json::to_string(&frame) {
-        Ok(json) if json.len() <= MAX_MESSAGE_SIZE => json,
-        result => {
-            let reason = match result {
-                Ok(json) => format!(
-                    "Delta too large ({} bytes, max {MAX_MESSAGE_SIZE}); narrow the query",
-                    json.len()
-                ),
-                Err(e) => format!("Failed to serialize delta: {e}"),
-            };
-            warn!(%reason, "ws_subscription_push_failed");
-            let ServerFrame::Subscription(push) = &frame else {
-                unreachable!("constructed as a subscription push above");
-            };
-            let (subscription, generation) = push.subscription();
-            let error = ServerFrame::Subscription(SubscriptionPush::SubscriptionError {
-                subscription: subscription.to_string(),
-                generation,
-                message: reason,
-            });
-            return sender.send_frame(&error).await;
-        }
-    };
-    sender.send(Message::Text(json)).await.is_ok()
 }
 
 #[cfg(test)]

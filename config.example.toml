@@ -148,6 +148,10 @@ cors_origins = []
 # Milliseconds a WebSocket client has to authenticate
 ws_auth_timeout_ms = 5000
 
+# Milliseconds a WebSocket client may leave an outbound frame unread before
+# the server closes the connection (0 = wait forever)
+ws_send_timeout_ms = 30000
+
 # Proxies (IPs or CIDR blocks) whose X-Forwarded-For / X-Real-IP headers are
 # trusted for the client IP. Empty = always use the TCP peer address.
 # Per-IP limits key IPv6 clients by their /64.

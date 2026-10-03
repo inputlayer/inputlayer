@@ -57,6 +57,7 @@ fn every_reply_echoes_its_id() {
             proof_trees: None,
             timing_breakdown: None,
             errors: Vec::new(),
+            subscribed: None,
         }),
         ServerFrame::ResultChunk {
             id: id("a"),
@@ -114,6 +115,35 @@ fn notices_and_pushes_never_carry_an_id() {
             generation: 2,
             message: "boom".into(),
         }),
+        ServerFrame::Subscription(SubscriptionPush::SubscriptionDeltaStart {
+            subscription: "s".into(),
+            generation: 2,
+            knowledge_graph: "default".into(),
+            seq: 2,
+            revision: 13,
+            columns: vec!["x".into()],
+        }),
+        ServerFrame::Subscription(SubscriptionPush::SubscriptionDeltaChunk {
+            subscription: "s".into(),
+            generation: 2,
+            seq: 2,
+            chunk_index: 0,
+            inserted: vec![vec![serde_json::json!(2)]],
+            retracted: vec![vec![serde_json::json!(1)]],
+        }),
+        ServerFrame::Subscription(SubscriptionPush::SubscriptionDeltaEnd {
+            subscription: "s".into(),
+            generation: 2,
+            seq: 2,
+            chunk_count: 1,
+            inserted_count: 1,
+            retracted_count: 1,
+        }),
+        ServerFrame::Subscription(SubscriptionPush::SubscriptionReset {
+            subscription: "s".into(),
+            generation: 2,
+            message: "gone".into(),
+        }),
         ServerFrame::Notification(Notification::KgChange {
             knowledge_graph: "kg".into(),
             operation: "created".into(),
@@ -166,6 +196,39 @@ fn push_wire_shape() {
     };
     assert_eq!(notification.knowledge_graph(), "default");
     assert_eq!(notification.seq(), 42);
+}
+
+#[test]
+fn streamed_delta_wire_shape() {
+    let frames = [
+        r#"{"type":"subscription_delta_start","subscription":"s","generation":4,
+            "knowledge_graph":"default","seq":3,"revision":9,"columns":["X"]}"#,
+        r#"{"type":"subscription_delta_chunk","subscription":"s","generation":4,"seq":3,
+            "chunk_index":0,"inserted":[[3]],"retracted":[]}"#,
+        r#"{"type":"subscription_delta_end","subscription":"s","generation":4,"seq":3,
+            "chunk_count":1,"inserted_count":1,"retracted_count":0}"#,
+        r#"{"type":"subscription_reset","subscription":"s","generation":4,"message":"m"}"#,
+    ];
+    for json in frames {
+        let frame: ServerFrame =
+            serde_json::from_str(json).unwrap_or_else(|e| panic!("{json}: {e}"));
+        let ServerFrame::Subscription(push) = &frame else {
+            panic!("{frame:?}");
+        };
+        assert_eq!(push.subscription(), ("s", 4));
+        assert_eq!(frame.class(), FrameClass::Push);
+    }
+}
+
+#[test]
+fn streamed_subscribe_reply_names_the_subscription() {
+    let json = r#"{"type":"result_start","id":"r","columns":["X"],"total_count":2,
+        "truncated":false,"execution_time_ms":1,
+        "subscribed":{"subscription":"s","generation":7,"revision":3}}"#;
+    let ServerFrame::ResultStart(start) = serde_json::from_str(json).unwrap() else {
+        panic!("not a result_start");
+    };
+    assert_eq!(start.subscribed.map(|s| s.generation), Some(7));
 }
 
 #[test]

@@ -1,6 +1,6 @@
 """WebSocket wire protocol: message serialization and deserialization.
 
-Matches the AsyncAPI spec at ``docs/spec/asyncapi.yaml`` (protocol version 2,
+Matches the AsyncAPI spec at ``docs/spec/asyncapi.yaml`` (protocol version 3,
 defined by the ``inputlayer-ws-protocol`` crate).
 
 Any request may carry an ``id``; every reply to it (``authenticated``,
@@ -15,7 +15,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Literal
 
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
 """The ``/ws`` protocol version this SDK speaks (``authenticated.protocol_version``)."""
 
 
@@ -171,6 +171,8 @@ class ResultStartResponse:
     proof_trees: list[dict[str, Any]] | None = None
     timing_breakdown: dict[str, Any] | None = None
     errors: list[StatementError] | None = None
+    subscribed: Subscribed | None = None
+    """Set on a streamed reply to ``.subscribe``: the chunks hold the snapshot."""
     id: str | None = None
 
 
@@ -237,8 +239,55 @@ class SubscriptionDeltaResponse:
 
 
 @dataclass(frozen=True)
+class SubscriptionDeltaStartResponse:
+    """Header of a delta streamed in chunks: a ``subscription_delta`` without
+    its rows. The delta applies only at its ``subscription_delta_end``."""
+
+    subscription: str
+    generation: int
+    knowledge_graph: str
+    seq: int
+    revision: int
+    columns: list[str]
+
+
+@dataclass(frozen=True)
+class SubscriptionDeltaChunkResponse:
+    """Rows of a streamed delta, in order from ``chunk_index`` 0."""
+
+    subscription: str
+    generation: int
+    seq: int
+    chunk_index: int
+    inserted: list[list[Any]]
+    retracted: list[list[Any]]
+
+
+@dataclass(frozen=True)
+class SubscriptionDeltaEndResponse:
+    """End of a streamed delta: the counts its chunks must add up to."""
+
+    subscription: str
+    generation: int
+    seq: int
+    chunk_count: int
+    inserted_count: int
+    retracted_count: int
+
+
+@dataclass(frozen=True)
 class SubscriptionErrorResponse:
     """A standing query failed to re-evaluate; it stays registered."""
+
+    subscription: str
+    generation: int
+    message: str
+
+
+@dataclass(frozen=True)
+class SubscriptionResetResponse:
+    """The server ended a subscription whose next change it could not deliver
+    whole: discard its rows and subscribe again."""
 
     subscription: str
     generation: int
@@ -276,11 +325,22 @@ ServerMessage = (
     | NoticeResponse
     | NotificationResponse
     | SubscriptionDeltaResponse
+    | SubscriptionDeltaStartResponse
+    | SubscriptionDeltaChunkResponse
+    | SubscriptionDeltaEndResponse
     | SubscriptionErrorResponse
+    | SubscriptionResetResponse
 )
 
 PushMessage = (
-    NoticeResponse | NotificationResponse | SubscriptionDeltaResponse | SubscriptionErrorResponse
+    NoticeResponse
+    | NotificationResponse
+    | SubscriptionDeltaResponse
+    | SubscriptionDeltaStartResponse
+    | SubscriptionDeltaChunkResponse
+    | SubscriptionDeltaEndResponse
+    | SubscriptionErrorResponse
+    | SubscriptionResetResponse
 )
 """Frames the server sends unprompted: never the reply to a request."""
 
@@ -367,6 +427,7 @@ def deserialize_message(data: str | bytes) -> ServerMessage:
             proof_trees=obj.get("proof_trees"),
             timing_breakdown=obj.get("timing_breakdown"),
             errors=_statement_errors(obj.get("errors")),
+            subscribed=_subscribed(obj.get("subscribed")),
             id=obj.get("id"),
         )
     if msg_type == "result_chunk":
@@ -397,8 +458,41 @@ def deserialize_message(data: str | bytes) -> ServerMessage:
             inserted=obj["inserted"],
             retracted=obj["retracted"],
         )
+    if msg_type == "subscription_delta_start":
+        return SubscriptionDeltaStartResponse(
+            subscription=obj["subscription"],
+            generation=obj["generation"],
+            knowledge_graph=obj["knowledge_graph"],
+            seq=obj["seq"],
+            revision=obj["revision"],
+            columns=obj["columns"],
+        )
+    if msg_type == "subscription_delta_chunk":
+        return SubscriptionDeltaChunkResponse(
+            subscription=obj["subscription"],
+            generation=obj["generation"],
+            seq=obj["seq"],
+            chunk_index=obj["chunk_index"],
+            inserted=obj["inserted"],
+            retracted=obj["retracted"],
+        )
+    if msg_type == "subscription_delta_end":
+        return SubscriptionDeltaEndResponse(
+            subscription=obj["subscription"],
+            generation=obj["generation"],
+            seq=obj["seq"],
+            chunk_count=obj["chunk_count"],
+            inserted_count=obj["inserted_count"],
+            retracted_count=obj["retracted_count"],
+        )
     if msg_type == "subscription_error":
         return SubscriptionErrorResponse(
+            subscription=obj["subscription"],
+            generation=obj["generation"],
+            message=obj["message"],
+        )
+    if msg_type == "subscription_reset":
+        return SubscriptionResetResponse(
             subscription=obj["subscription"],
             generation=obj["generation"],
             message=obj["message"],

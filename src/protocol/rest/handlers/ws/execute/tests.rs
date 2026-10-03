@@ -1,5 +1,4 @@
 use super::*;
-use crate::protocol::MAX_MESSAGE_SIZE;
 
 fn id(s: &str) -> Option<RequestId> {
     RequestId::new(s).ok()
@@ -115,13 +114,4 @@ fn test_result_frame_carries_id_rows_and_provenance() {
     assert_eq!(frame.row_provenance, ["unknown"]);
     assert_eq!(frame.row_count, 1);
     assert_eq!(frame.switched_kg.as_deref(), Some("kg"));
-}
-
-#[test]
-fn test_streaming_threshold_constants() {
-    assert_eq!(STREAMING_THRESHOLD, 1024 * 1024);
-    assert_eq!(STREAMING_CHUNK_ROWS, 500);
-    // A streamed chunk must always fit in one message.
-    let ratio = MAX_MESSAGE_SIZE / STREAMING_THRESHOLD;
-    assert!(ratio >= 2, "ratio={ratio}");
 }

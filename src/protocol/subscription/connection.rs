@@ -156,6 +156,17 @@ impl ConnectionSubscriptions {
         Ok(())
     }
 
+    /// End registration `generation` of `id`, whose change could not be
+    /// delivered; a newer registration under the same id stays. Returns
+    /// whether it was registered.
+    pub fn reset(&mut self, id: &str, generation: u64) -> bool {
+        let removed = self.registry.remove_generation(id, generation);
+        if removed {
+            self.handler.subscription_metrics().remove_active(1);
+        }
+        removed
+    }
+
     /// Remove every subscription.
     pub fn clear(&mut self) {
         let removed = self.registry.clear() as u64;

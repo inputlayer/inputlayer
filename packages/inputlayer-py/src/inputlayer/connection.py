@@ -26,8 +26,12 @@ from inputlayer._protocol import (
     ResultResponse,
     ResultStartResponse,
     ServerMessage,
+    SubscriptionDeltaChunkResponse,
+    SubscriptionDeltaEndResponse,
     SubscriptionDeltaResponse,
+    SubscriptionDeltaStartResponse,
     SubscriptionErrorResponse,
+    SubscriptionResetResponse,
     deserialize_message,
 )
 from inputlayer.exceptions import (
@@ -40,6 +44,15 @@ from inputlayer.exceptions import (
 from inputlayer.notifications import NotificationDispatcher, NotificationEvent
 
 logger = logging.getLogger("inputlayer")
+
+_SUBSCRIPTION_PUSHES = (
+    SubscriptionDeltaResponse,
+    SubscriptionDeltaStartResponse,
+    SubscriptionDeltaChunkResponse,
+    SubscriptionDeltaEndResponse,
+    SubscriptionErrorResponse,
+    SubscriptionResetResponse,
+)
 
 
 class Connection:
@@ -335,7 +348,7 @@ class Connection:
             level = logging.WARNING if response.closes_connection else logging.INFO
             logger.log(level, "server notice (%s): %s", response.code, response.message)
             return True
-        return isinstance(response, (SubscriptionDeltaResponse, SubscriptionErrorResponse))
+        return isinstance(response, _SUBSCRIPTION_PUSHES)
 
     def _dispatch_notification(self, notif: NotificationResponse) -> None:
         event = NotificationEvent(

@@ -358,15 +358,39 @@ impl WsClient {
                 result.extend_rows(&header);
                 Ok(result)
             }
+            // Complete only at a `result_end` its chunks add up to.
             "result_start" => {
                 let mut result = QueryResult::from_header(&header);
+                let mut chunks = 0;
                 loop {
                     let frame = self.next_reply().await?;
                     match frame.kind() {
-                        "result_chunk" => result.extend_rows(&frame),
+                        "result_chunk" if frame.value["chunk_index"].as_u64() == Some(chunks) => {
+                            result.extend_rows(&frame);
+                            chunks += 1;
+                        }
                         "result_end" => {
+                            let announced = (
+                                frame.value["row_count"].as_u64(),
+                                frame.value["chunk_count"].as_u64(),
+                            );
+                            if announced != (Some(result.rows.len() as u64), Some(chunks)) {
+                                return Err(Violation::IncompleteSnapshot {
+                                    rows: result.rows.len(),
+                                    detail: format!(
+                                        "{chunks} chunk(s) received, end announces {}",
+                                        frame.value
+                                    ),
+                                });
+                            }
                             result.at = frame.at;
                             return Ok(result);
+                        }
+                        "error" => {
+                            return Err(Violation::Rejected(format!(
+                                "streamed result failed: {}",
+                                frame.value["message"].as_str().unwrap_or_default()
+                            )))
                         }
                         _ => {
                             return Err(Violation::Transport(format!(

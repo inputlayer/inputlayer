@@ -54,34 +54,24 @@ impl KgReadAccess {
         readable
     }
 
-    /// `push`, or a `subscription_error` in place of a delta whose knowledge
-    /// graph `principal` may no longer read: its rows must not leave. The
-    /// withheld delta's `seq` is not reused, so a client that later receives
-    /// a delta sees the gap and resubscribes.
+    /// Whether `push` may leave: a delta for a knowledge graph `principal`
+    /// may no longer read is withheld, for the returned reason, and its rows
+    /// must not leave.
     pub(super) fn fence(
         &mut self,
         handler: &Handler,
         principal: &Principal,
-        push: SubscriptionPush,
-    ) -> SubscriptionPush {
+        push: &SubscriptionPush,
+    ) -> Result<(), String> {
         match push {
             SubscriptionPush::SubscriptionDelta {
-                subscription,
-                generation,
                 knowledge_graph,
                 seq,
                 ..
-            } if !self.allows(handler, principal, &knowledge_graph) => {
-                SubscriptionPush::SubscriptionError {
-                    subscription,
-                    generation,
-                    message: format!(
-                        "Access denied to knowledge graph '{knowledge_graph}'; delta {seq} was \
-                         withheld. Resubscribe once access is restored."
-                    ),
-                }
-            }
-            push => push,
+            } if !self.allows(handler, principal, knowledge_graph) => Err(format!(
+                "Access denied to knowledge graph '{knowledge_graph}'; delta {seq} was withheld"
+            )),
+            _ => Ok(()),
         }
     }
 }
@@ -145,18 +135,12 @@ mod tests {
     fn a_delta_for_an_unreadable_graph_is_withheld() {
         let (handler, bob, _tmp) = handler_with_bob();
         let mut access = KgReadAccess::default();
-        assert_eq!(access.fence(&handler, &bob, delta()), delta());
+        assert_eq!(access.fence(&handler, &bob, &delta()), Ok(()));
 
         handler.handle_kg_acl_revoke(KG, "bob").unwrap();
-        let SubscriptionPush::SubscriptionError {
-            subscription,
-            generation,
-            message,
-        } = access.fence(&handler, &bob, delta())
-        else {
-            panic!("the delta's rows must not leave");
-        };
-        assert_eq!((subscription.as_str(), generation), ("s", 1));
-        assert!(message.contains("delta 3 was withheld"), "{message}");
+        let withheld = access
+            .fence(&handler, &bob, &delta())
+            .expect_err("the delta's rows must not leave");
+        assert!(withheld.contains("delta 3 was withheld"), "{withheld}");
     }
 }

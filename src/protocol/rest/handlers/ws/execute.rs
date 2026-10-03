@@ -8,23 +8,17 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use inputlayer_ws_protocol::{
-    ErrorCode, RequestId, ResultFrame, ResultStartFrame, ServerFrame, SessionMetadata, Subscribed,
+    ErrorCode, RequestId, ResultFrame, ServerFrame, SessionMetadata, Subscribed,
 };
 use tracing::{info, warn};
 
 use super::outbound::encode;
+use super::stream;
 use crate::auth::Principal;
 use crate::execution::RequestControl;
 use crate::protocol::handler::{ProgramError, ValidationError, VALIDATION_ERROR_PREFIX};
 use crate::protocol::rest::handlers::wire_value_to_json;
 use crate::protocol::{Handler, QueryResult};
-
-/// Results whose single-frame JSON exceeds this many bytes are streamed as
-/// `result_start` / `result_chunk` / `result_end`.
-const STREAMING_THRESHOLD: usize = 1024 * 1024; // 1 MB
-
-/// Maximum number of rows per `result_chunk`.
-const STREAMING_CHUNK_ROWS: usize = 500;
 
 /// Results with more rows than this are serialized on the blocking pool, so
 /// a large result never stalls the connection loop polling the request.
@@ -86,30 +80,26 @@ pub(super) async fn execute(
     }
 }
 
-/// Frames of a successful program: one `result` frame, or for results over
-/// [`STREAMING_THRESHOLD`] a `result_start`, `result_chunk`s of up to
-/// [`STREAMING_CHUNK_ROWS`] rows and a `result_end`.
+/// Frames of a successful program: one `result` frame, or streamed when
+/// large (see [`stream::result_frames`]); an `error` for one that cannot be
+/// delivered whole.
 fn program_frames(id: Option<RequestId>, response: QueryResult) -> Vec<String> {
-    let frame = result_frame(id, response);
-    let json = match serde_json::to_string(&frame) {
-        Ok(json) => json,
-        // Reports the failure to the client.
-        Err(_) => return vec![encode(&frame)],
-    };
-    if json.len() <= STREAMING_THRESHOLD {
-        return vec![json];
+    match result_frame(id.clone(), response) {
+        ServerFrame::Result(result) => reply_frames(id, result),
+        other => vec![encode(&other)],
     }
-    let json_size = json.len();
-    drop(json);
-    let ServerFrame::Result(result) = frame else {
-        // Only a result frame can be this large.
-        return vec![encode(&frame)];
-    };
-    info!(
-        row_count = result.row_count,
-        json_size, "ws_streaming_result"
-    );
-    stream_frames(result)
+}
+
+/// Frames of the reply `result` to request `id`, or one `error` when it
+/// cannot be delivered whole: never part of it.
+pub(super) fn reply_frames(id: Option<RequestId>, result: ResultFrame) -> Vec<String> {
+    stream::result_frames(result).unwrap_or_else(|reason| {
+        vec![encode(&ServerFrame::error(
+            id,
+            Some(ErrorCode::Internal),
+            reason,
+        ))]
+    })
 }
 
 /// The single-frame reply for a program's result.
@@ -158,70 +148,16 @@ fn result_frame(id: Option<RequestId>, response: QueryResult) -> ServerFrame {
     })
 }
 
-/// `result` as `result_start`, chunks and `result_end`.
-fn stream_frames(result: ResultFrame) -> Vec<String> {
-    let ResultFrame {
-        id,
-        columns,
-        rows,
-        row_count,
-        total_count,
-        truncated,
-        execution_time_ms,
-        row_provenance,
-        metadata,
-        switched_kg,
-        proof_trees,
-        timing_breakdown,
-        errors,
-        subscribed: _,
-    } = result;
-    let mut frames = vec![encode(&ServerFrame::ResultStart(ResultStartFrame {
-        id: id.clone(),
-        columns,
-        total_count,
-        truncated,
-        execution_time_ms,
-        metadata,
-        switched_kg,
-        proof_trees,
-        timing_breakdown,
-        errors,
-    }))];
-    let mut chunk_count = 0;
-    let mut rows = rows.into_iter();
-    let mut provenance = row_provenance.into_iter();
-    loop {
-        let chunk: Vec<_> = rows.by_ref().take(STREAMING_CHUNK_ROWS).collect();
-        if chunk.is_empty() {
-            break;
-        }
-        frames.push(encode(&ServerFrame::ResultChunk {
-            id: id.clone(),
-            row_provenance: provenance.by_ref().take(chunk.len()).collect(),
-            rows: chunk,
-            chunk_index: chunk_count,
-        }));
-        chunk_count += 1;
-    }
-    frames.push(encode(&ServerFrame::ResultEnd {
-        id,
-        row_count,
-        chunk_count,
-    }));
-    frames
-}
-
-/// The `result` frame of a subscription command. A `.subscribe` reply holds
-/// the snapshot and names the subscription's generation.
+/// The `result` of a subscription command. A `.subscribe` reply holds the
+/// snapshot and names the subscription's generation.
 pub(super) fn subscription_reply(
     id: Option<RequestId>,
     columns: Vec<String>,
     rows: Vec<Vec<serde_json::Value>>,
     subscribed: Option<Subscribed>,
     started: Instant,
-) -> ServerFrame {
-    ServerFrame::Result(ResultFrame {
+) -> ResultFrame {
+    ResultFrame {
         id,
         columns,
         row_count: rows.len(),
@@ -238,7 +174,7 @@ pub(super) fn subscription_reply(
         timing_breakdown: None,
         errors: Vec::new(),
         subscribed,
-    })
+    }
 }
 
 /// The `error` frame for a failed program, unpacking parse errors.

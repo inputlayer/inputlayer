@@ -184,6 +184,10 @@ cors_allow_all = false
 # WebSocket idle timeout in milliseconds (default: 5 minutes)
 ws_idle_timeout_ms = 300000
 
+# Close a WebSocket whose client leaves an outbound frame unread this long,
+# in milliseconds (default: 30 seconds; 0 = wait forever)
+ws_send_timeout_ms = 30000
+
 # Graceful shutdown timeout in seconds (default: 30)
 shutdown_timeout_secs = 30
 

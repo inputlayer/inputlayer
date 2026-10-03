@@ -89,6 +89,21 @@ impl Notification {
 
 /// A change to a standing query's result, addressed by the subscription's name
 /// and generation (see [`crate::Subscribed`]).
+///
+/// A delta is delivered whole or not at all. One that fits a frame is a
+/// single `subscription_delta`; a larger one is streamed as
+/// `subscription_delta_start`, `subscription_delta_chunk`s and
+/// `subscription_delta_end`, which together are that same one delta. A client
+/// applies a streamed delta only at its end, after checking that the chunks
+/// arrived in order and add up to the announced counts; until then its result
+/// stays at the previous revision. Frames of a streamed delta arrive in order,
+/// but other frames (replies, notifications, other subscriptions' pushes) may
+/// arrive between them. A connection that closes mid-stream delivered nothing
+/// of that delta.
+///
+/// A delta the server cannot deliver whole ends its subscription with a
+/// `subscription_reset` instead: the client's rows for it are no longer
+/// maintained and it must subscribe again.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SubscriptionPush {
@@ -109,8 +124,47 @@ pub enum SubscriptionPush {
         inserted: Vec<Row>,
         retracted: Vec<Row>,
     },
-    /// Re-evaluation failed; the subscription stays registered.
+    /// Header of a delta streamed in chunks: what
+    /// [`SubscriptionDelta`](Self::SubscriptionDelta) carries besides its rows.
+    SubscriptionDeltaStart {
+        subscription: String,
+        generation: u64,
+        knowledge_graph: String,
+        seq: u64,
+        revision: u64,
+        columns: Vec<String>,
+    },
+    /// Rows of the streamed delta `seq`, in order from `chunk_index` 0.
+    SubscriptionDeltaChunk {
+        subscription: String,
+        generation: u64,
+        seq: u64,
+        chunk_index: usize,
+        inserted: Vec<Row>,
+        retracted: Vec<Row>,
+    },
+    /// End of the streamed delta `seq`: the counts its chunks must add up to.
+    /// Only now does the delta apply.
+    SubscriptionDeltaEnd {
+        subscription: String,
+        generation: u64,
+        seq: u64,
+        chunk_count: usize,
+        inserted_count: usize,
+        retracted_count: usize,
+    },
+    /// Re-evaluation failed; the subscription stays registered and its result
+    /// is unchanged, so the next delta applies to the last one delivered.
     SubscriptionError {
+        subscription: String,
+        generation: u64,
+        message: String,
+    },
+    /// The server ended the subscription because it could not deliver its
+    /// next change (the change cannot be framed, or read access was lost).
+    /// Discard its rows, including a streamed delta still in progress, and
+    /// subscribe again for a fresh snapshot.
+    SubscriptionReset {
         subscription: String,
         generation: u64,
         message: String,
@@ -126,7 +180,27 @@ impl SubscriptionPush {
                 generation,
                 ..
             }
+            | Self::SubscriptionDeltaStart {
+                subscription,
+                generation,
+                ..
+            }
+            | Self::SubscriptionDeltaChunk {
+                subscription,
+                generation,
+                ..
+            }
+            | Self::SubscriptionDeltaEnd {
+                subscription,
+                generation,
+                ..
+            }
             | Self::SubscriptionError {
+                subscription,
+                generation,
+                ..
+            }
+            | Self::SubscriptionReset {
                 subscription,
                 generation,
                 ..

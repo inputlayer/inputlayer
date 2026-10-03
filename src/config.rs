@@ -407,6 +407,12 @@ pub struct HttpConfig {
     #[serde(default = "default_ws_auth_timeout_ms")]
     pub ws_auth_timeout_ms: u64,
 
+    /// Longest time, in milliseconds, a WebSocket client may leave one
+    /// outbound frame unread before the server closes the connection
+    /// (a client that stopped reading). 0 = wait forever.
+    #[serde(default = "default_ws_send_timeout_ms")]
+    pub ws_send_timeout_ms: u64,
+
     /// Proxies (IPs or CIDR blocks) whose `X-Forwarded-For` / `X-Real-IP`
     /// headers are trusted. Empty: the client IP is always the TCP peer.
     #[serde(default)]
@@ -613,6 +619,9 @@ fn default_ws_idle_timeout_ms() -> u64 {
 }
 fn default_ws_auth_timeout_ms() -> u64 {
     5_000
+}
+fn default_ws_send_timeout_ms() -> u64 {
+    30_000
 }
 fn default_shutdown_timeout_secs() -> u64 {
     30
@@ -983,6 +992,7 @@ impl Default for HttpConfig {
             auth: AuthConfig::default(),
             ws_idle_timeout_ms: default_ws_idle_timeout_ms(),
             ws_auth_timeout_ms: default_ws_auth_timeout_ms(),
+            ws_send_timeout_ms: default_ws_send_timeout_ms(),
             trusted_proxies: Vec::new(),
             shutdown_timeout_secs: default_shutdown_timeout_secs(),
             stats_timeout_secs: default_stats_timeout_secs(),
@@ -1318,6 +1328,7 @@ mod tests {
     fn test_ws_idle_timeout_config() {
         let config = HttpConfig::default();
         assert_eq!(config.ws_idle_timeout_ms, 300_000);
+        assert_eq!(config.ws_send_timeout_ms, 30_000);
 
         let full = Config::default();
         let toml_str = toml::to_string(&full).unwrap();

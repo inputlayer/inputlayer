@@ -8,16 +8,17 @@
 //! The target is `test = false`: plain `cargo test` skips it; select it with
 //! `--test e2e_reactive` (as `make e2e-reactive`, `test-all` and CI do).
 //!
-//! `stream` covers the notification stream and snapshot handoff contract.
-//! `known_defects` holds expected failures for defects tracked by the reactive
-//! plan; each flips to a required pass when its plan item lands.
+//! `stream` covers the notification stream and snapshot handoff contract,
+//! `delivery` results and deltas too large for one frame. Expected failures
+//! for defects the reactive plan still tracks go in a `known_defects` module
+//! (see `inputlayer_testkit::KnownDefect`); none is open.
 //!
 //! Agents use the testkit's thin `/ws` client until an SDK subscribe API
 //! exists; switch them to the SDK then.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod known_defects;
+mod delivery;
 mod reactive;
 mod stream;
 mod wire;

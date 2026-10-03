@@ -35,6 +35,17 @@ pub enum Violation {
         subscription: String,
         message: String,
     },
+    /// The engine ended the subscription with `subscription_reset`.
+    SubscriptionReset {
+        subscription: String,
+        message: String,
+    },
+    /// A streamed delta's frames were out of order, missing, duplicated or
+    /// did not add up to its end frame.
+    BrokenStream {
+        subscription: String,
+        detail: String,
+    },
     /// The agent's maintained result differs from a fresh full query.
     Diverged {
         subscription: String,
@@ -95,6 +106,17 @@ impl fmt::Display for Violation {
                 subscription,
                 message,
             } => write!(f, "subscription '{subscription}' error: {message}"),
+            Self::SubscriptionReset {
+                subscription,
+                message,
+            } => write!(f, "subscription '{subscription}' reset: {message}"),
+            Self::BrokenStream {
+                subscription,
+                detail,
+            } => write!(
+                f,
+                "subscription '{subscription}': broken streamed delta: {detail}"
+            ),
             Self::Diverged {
                 subscription,
                 missing,
