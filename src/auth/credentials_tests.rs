@@ -169,9 +169,14 @@ async fn revocation_signal_fires_once_revoked_and_after_the_fact() {
         .await
         .unwrap()
         .unwrap();
-    tokio::time::timeout(Duration::from_secs(5), principal.revocation())
+    let mut fired = principal.revocation();
+    tokio::time::timeout(Duration::from_secs(5), &mut fired)
         .await
         .unwrap();
+    assert!(
+        futures_util::poll!(&mut fired).is_ready(),
+        "a fired signal stays fired"
+    );
     assert!(
         futures_util::poll!(&mut unrelated).is_pending(),
         "another key's signal must not fire"

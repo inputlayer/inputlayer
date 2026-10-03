@@ -291,27 +291,53 @@ fn debug_query(
 
 /// Test seam: runs once on the executing thread just before `QueryJob::execute`
 /// dispatches a meta command, while it holds its storage read guard.
+/// `Handler::query_program` carries a hook set on the calling thread to the
+/// blocking thread that runs the job.
 #[cfg(test)]
 mod meta_dispatch_hook {
     use std::cell::RefCell;
 
+    type Hook = Box<dyn FnOnce() + Send>;
+
     thread_local! {
-        static HOOK: RefCell<Option<Box<dyn FnOnce()>>> = const { RefCell::new(None) };
+        static HOOK: RefCell<Option<Hook>> = const { RefCell::new(None) };
     }
 
-    pub(super) fn set(hook: impl FnOnce() + 'static) {
+    pub(super) fn set(hook: impl FnOnce() + Send + 'static) {
         HOOK.with(|h| *h.borrow_mut() = Some(Box::new(hook)));
     }
 
     pub(super) fn run() {
-        if let Some(hook) = HOOK.with(|h| h.borrow_mut().take()) {
+        if let Some(hook) = take() {
             hook();
+        }
+    }
+
+    pub(super) fn take() -> Option<Hook> {
+        HOOK.with(|h| h.borrow_mut().take())
+    }
+
+    /// Installs `hook` on this thread until the returned guard drops, so an
+    /// unused hook never reaches a later job on a pooled thread.
+    pub(super) fn install(hook: Option<Hook>) -> Installed {
+        HOOK.with(|h| *h.borrow_mut() = hook);
+        Installed
+    }
+
+    pub(super) struct Installed;
+
+    impl Drop for Installed {
+        fn drop(&mut self) {
+            drop(take());
         }
     }
 }
 
 #[cfg(test)]
 mod guard_reentry_tests;
+
+#[cfg(test)]
+mod revocation_tests;
 
 /// Self-contained snapshot of Handler state for executing a single query on a blocking thread.
 /// All fields are `Arc`-wrapped (`Send + Sync`), allowing the job to be moved into
@@ -888,47 +914,16 @@ impl Handler {
 
     /// Load every user and API key from `_internal` into the registry.
     fn load_credentials(&self) {
-        use crate::auth::{self, ApiKeyRecord, UserRecord};
+        use crate::auth;
 
-        let snapshot = match self.storage.read().get_snapshot_for(auth::INTERNAL_KG) {
-            Ok(snapshot) => snapshot,
-            Err(e) => {
-                warn!(error = %e, "auth_credentials_load_failed");
-                return;
+        let snapshot = self.storage.read().get_snapshot_for(auth::INTERNAL_KG);
+        match snapshot {
+            Ok(snapshot) => {
+                let (users, keys) = auth::stored_credentials(&snapshot.input_tuples);
+                self.credentials.load(users, keys);
             }
-        };
-        let rows = |relation: &str| {
-            snapshot
-                .input_tuples
-                .get(relation)
-                .into_iter()
-                .flatten()
-                .filter_map(|tuple| match tuple.values() {
-                    [a, b, c, ..] => Some((a.as_str()?, b.as_str()?, c.as_str()?)),
-                    _ => None,
-                })
-        };
-        let users = rows("users")
-            .filter_map(|(username, hash, role)| match role.parse() {
-                Ok(role) => Some(UserRecord {
-                    username: username.to_string(),
-                    password_hash: hash.to_string(),
-                    role,
-                }),
-                Err(e) => {
-                    warn!(username, error = %e, "auth_user_skipped");
-                    None
-                }
-            })
-            .collect();
-        let keys = rows("api_keys")
-            .map(|(label, key_hash, username)| ApiKeyRecord {
-                label: label.to_string(),
-                key_hash: key_hash.to_string(),
-                username: username.to_string(),
-            })
-            .collect();
-        self.credentials.load(users, keys);
+            Err(e) => warn!(error = %e, "auth_credentials_load_failed"),
+        }
     }
 
     /// Insert the bootstrap admin user and API key when `_internal` has no users.
@@ -2197,8 +2192,12 @@ impl Handler {
         let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let cancel_flag_clone = Arc::clone(&cancel_flag);
 
+        #[cfg(test)]
+        let hook = meta_dispatch_hook::take();
         // The permit is moved into the blocking task so it's released when DD finishes.
         let blocking_task = tokio::task::spawn_blocking(move || {
+            #[cfg(test)]
+            let _hook = meta_dispatch_hook::install(hook);
             crate::code_generator::set_query_cancel_flag(Some(cancel_flag_clone));
             let result = job.execute(knowledge_graph, program, statements);
             crate::code_generator::set_query_cancel_flag(None);
