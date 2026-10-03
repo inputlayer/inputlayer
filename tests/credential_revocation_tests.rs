@@ -31,7 +31,7 @@ struct Server {
     task: tokio::task::JoinHandle<()>,
     /// Credential upkeep, as the server binary runs it.
     upkeep: tokio::task::JoinHandle<()>,
-    _tmp: TempDir,
+    tmp: TempDir,
 }
 
 impl Drop for Server {
@@ -76,7 +76,7 @@ async fn start_server_with(configure: impl FnOnce(&mut Config)) -> Server {
         addr,
         task,
         upkeep,
-        _tmp: tmp,
+        tmp,
     };
     server.write("+d[(0,)]").await;
     server
@@ -170,7 +170,7 @@ async fn failed_replacement_keys_stay_revoked_over_ws_after_restart() {
                 .unwrap();
 
             let config = server.handler.config().clone();
-            let temp = std::mem::replace(&mut server._tmp, TempDir::new().unwrap());
+            let temp = std::mem::replace(&mut server.tmp, TempDir::new().unwrap());
             server.task.abort();
             let _ = (&mut server.task).await;
             server.handler.shutdown();
@@ -191,16 +191,14 @@ async fn failed_replacement_keys_stay_revoked_over_ws_after_restart() {
             };
             handler.bootstrap_auth();
             let app = create_router(Arc::clone(&handler), &handler.config().http);
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-                .await
-                .unwrap();
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let addr = listener.local_addr().unwrap();
             let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
             let restarted = Server {
                 handler,
                 addr,
                 task,
-                _tmp: temp,
+                tmp: temp,
             };
             let mut admin =
                 Client::connect(&restarted, Login::Password("admin", ADMIN_PASSWORD)).await;
