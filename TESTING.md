@@ -10,6 +10,7 @@ make test-fast      # Unit tests only (~30s)
 make test           # Unit + snapshot tests
 make e2e-test       # Snapshot tests only (parallel)
 make test-affected  # Run only snapshots affected by uncommitted changes
+make oracle-test    # Differential correctness oracle only (~15s)
 ```
 
 ## Test Tiers
@@ -30,6 +31,27 @@ Rust integration tests in `tests/`. Exercise the engine end-to-end within a sing
 
 ```bash
 make integration-test   # cargo test --all-features --test '*'
+```
+
+### Differential Correctness Oracle
+
+`tests/differential_oracle/` replays one history (statements, restarts and named checkpoints) through independent adapters and compares their results at every checkpoint:
+
+| Adapter | What it is |
+|---------|------------|
+| `reference` | Naive finite evaluator in the test: stratified naive fixpoint over sets. Shares only the parser with the engine. |
+| `recompute` | The engine's snapshot evaluator, queried afresh. |
+| `subscription` | Standing queries assembled purely from pushed `inserted`/`retracted` deltas, through the real notification, dependency-filtering and coalescing path a subscribed agent uses. |
+| `spec` | Results recorded in `.iql.out` transcripts (corpus cases only). |
+
+Histories come from hand-written scenarios (duplicate supports, recursive edge removal, negation, aggregates, rule replacement, restart), seeded random generation, and the `.iql.out` corpus of the derived-result categories. Results are compared as Z-sets, so a row reported twice or retracted without being present is a divergence of its own. A divergence is minimized (delta debugging) to a short reproducing script.
+
+Constructs the reference does not model (e.g. `avg`, `top_k`, arithmetic, floats, session state) are reported as explicit skips with a reason, never counted as agreement; the engine adapters are still compared with each other and the spec. A new evaluation strategy (such as persistent per-KG dataflows) joins by implementing the `Adapter` trait: `observe` takes the revision the result must reflect.
+
+```bash
+make oracle-test                                  # All oracle tests
+INPUTLAYER_ORACLE_SEEDS=500 make oracle-test      # More random histories
+INPUTLAYER_ORACLE_SEED=17 cargo test --all-features --test differential_oracle seeded  # One seed
 ```
 
 ### Tier 3: Snapshot Tests (E2E)
@@ -101,6 +123,7 @@ Source-to-category mapping:
 | `make test` | Unit + snapshot | Pre-commit check |
 | `make test-all` | Build + unit + snapshot + check | Full verification before merge |
 | `make test-affected` | Snapshot tests for changed files only | Fast E2E feedback |
+| `make oracle-test` | Differential correctness oracle only | Changing evaluation, subscriptions or rule maintenance |
 
 ### Code Quality
 

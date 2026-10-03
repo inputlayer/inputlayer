@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test python-test-live python-test-examples js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test python-test-live python-test-examples js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -290,6 +290,11 @@ unit-test:
 # Tier 2: Integration tests only
 integration-test:
 	cargo test --workspace --all-features --test '*'
+
+# Differential correctness oracle (part of unit-test; this runs it alone).
+# Scale random histories with INPUTLAYER_ORACLE_SEEDS=<n>.
+oracle-test:
+	cargo test --all-features --test differential_oracle
 
 # Tier 3: E2E snapshot tests (parallel, against live server)
 e2e-test:

@@ -29,7 +29,7 @@ pub mod standing_query;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-pub use connection::ConnectionSubscriptions;
+pub use connection::{change_of, ConnectionSubscriptions};
 pub use dependencies::Dependencies;
 pub use reevaluate::ReevaluatingQuery;
 pub use registry::{ChangeSet, Completion, Dispatch, Push, SubscriptionRegistry};
