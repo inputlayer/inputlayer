@@ -30,6 +30,8 @@
 //! storage.save_knowledge_graph("analytics").unwrap();
 //! ```
 
+#[cfg(test)]
+mod materialize_tests;
 mod relation_store;
 mod snapshot;
 mod vector_index;
@@ -64,7 +66,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Cleanup token returned by Phase 1 of KG drop.
 /// Carries the data needed for Phase 2 (slow file I/O cleanup).
@@ -145,6 +147,8 @@ pub struct KnowledgeGraph {
     snapshot: ArcSwap<KnowledgeGraphSnapshot>,
     /// Persistent DD computation for incremental updates (shadow writes)
     incremental: Option<IncrementalEngine>,
+    /// Recompute every rule into the incremental engine on each publish (off by default)
+    auto_materialize: bool,
     /// Vector indexes, kept in sync with base relations on every write
     indexes: IndexManager,
     /// Number of workers for parallel query execution
@@ -1828,6 +1832,7 @@ impl StorageEngine {
             schema_catalog,
             snapshot,
             incremental: None,
+            auto_materialize: false,
             indexes: IndexManager::new(),
             num_workers,
             max_result_rows: self.config.storage.performance.max_result_rows,
@@ -2087,6 +2092,7 @@ impl KnowledgeGraph {
             schema_catalog,
             snapshot,
             incremental: None,
+            auto_materialize: false,
             indexes: IndexManager::new(),
             num_workers,
             max_result_rows: 0,
@@ -2132,6 +2138,20 @@ impl KnowledgeGraph {
         Ok(())
     }
 
+    /// Serve rules from materializations recomputed on every publish.
+    ///
+    /// Takes effect only with the incremental engine enabled. Turning it off
+    /// drops every materialization, since nothing keeps them fresh.
+    pub fn set_auto_materialize(&mut self, enabled: bool) {
+        self.auto_materialize = enabled;
+        if !enabled {
+            if let Some(dd) = &self.incremental {
+                dd.derived_relations().lock().clear_all_materialized();
+            }
+        }
+        self.publish_snapshot();
+    }
+
     /// Get a reference to the IncrementalEngine (if enabled).
     ///
     /// Used for reading from DD arrangements and verifying consistency.
@@ -2155,6 +2175,9 @@ impl KnowledgeGraph {
     /// reading them and publishing the snapshot.
     fn publish_snapshot(&self) {
         let snapshot_start = Instant::now();
+        if self.auto_materialize {
+            self.refresh_materializations();
+        }
         // Start with base relation data
         let mut input_tuples = self.store.relations().clone();
         let rules = self.rule_catalog.all_rules();
@@ -2300,9 +2323,7 @@ impl KnowledgeGraph {
         self.metadata
             .add_relation(relation.to_string(), schema, tuple_count);
 
-        // Shadow write new tuples to IncrementalEngine (if enabled).
-        // Uses the logical timestamp from StorageEngine for proper time tracking.
-        // Time advancement is lazy  -  only happens when a consistent read is requested.
+        // Shadow write to IncrementalEngine (if enabled).
         if new_count > 0 {
             self.index_inserted(relation, &added);
             if let Some(dd) = &self.incremental {
@@ -2385,11 +2406,8 @@ impl KnowledgeGraph {
     /// Register a persistent view
     /// Returns whether view was created or rule was added
     ///
-    /// When a persistent rule is registered, we automatically:
-    /// 1. Register it with IncrementalEngine for dependency tracking
-    /// 2. Execute the rule against current base data
-    /// 3. Store the results as materialized data
-    /// This enables session rules to immediately use the materialized output.
+    /// With the incremental engine on, the rule is also registered there for
+    /// dependency tracking.
     pub fn register_rule(
         &mut self,
         rule_def: &RuleDef,
@@ -2400,16 +2418,7 @@ impl KnowledgeGraph {
         if let Some(ref dd) = self.incremental {
             let compiled_rule = self.compile_rule_for_dd(rule_def);
             if let Err(e) = dd.register_rule(compiled_rule) {
-                eprintln!("Warning: failed to register rule with IncrementalEngine: {e}");
-            }
-
-            // Auto-materialize the rule
-            // Execute the rule against current base data and store results
-            if let Err(e) = self.auto_materialize_rule(&rule_def.name) {
-                eprintln!(
-                    "Warning: failed to auto-materialize rule '{}': {e}",
-                    rule_def.name
-                );
+                warn!(rule = %rule_def.name, error = %e, "incremental_register_rule_failed");
             }
         }
 
@@ -2417,51 +2426,49 @@ impl KnowledgeGraph {
         Ok(result)
     }
 
-    /// Auto-materialize a single rule by executing it and storing results
+    /// Recompute every rule from base data into the incremental engine.
     ///
-    /// This is called when a rule is registered to ensure session rules
-    /// can immediately use the materialized output.
-    fn auto_materialize_rule(&self, rule_name: &str) -> Result<(), String> {
-        // Get the rule definition
-        let rule = self
+    /// A rule that fails to evaluate loses its materialization, so queries
+    /// fall back to evaluating it.
+    fn refresh_materializations(&self) {
+        let Some(dd) = &self.incremental else {
+            return;
+        };
+        for name in self.rule_catalog.list() {
+            match self.evaluate_rule(&name) {
+                Ok(tuples) => {
+                    let _ = dd.set_materialized(&name, tuples);
+                }
+                Err(e) => {
+                    dd.derived_relations().lock().clear_materialized(&name);
+                    warn!(rule = %name, error = %e, "auto_materialize_failed");
+                }
+            }
+        }
+    }
+
+    /// Evaluate one rule over base data with every registered rule in scope.
+    fn evaluate_rule(&self, rule_name: &str) -> Result<Vec<Tuple>, String> {
+        let arity = self
             .rule_catalog
-            .get(rule_name)
+            .rule_arity(rule_name)
             .ok_or_else(|| format!("Rule '{rule_name}' not found"))?;
 
-        // Build program from all rule clauses
-        let clauses = rule.to_rules();
-        if clauses.is_empty() {
-            return Ok(());
-        }
-
-        // Build the query program
         let mut program = String::new();
-        for clause in &clauses {
-            program.push_str(&format_rule(clause));
+        for clause in self.rule_catalog.all_rules() {
+            program.push_str(&format_rule(&clause));
             program.push('\n');
         }
+        let vars = (0..arity)
+            .map(|i| format!("V{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        program.push_str(&format!("__materialize({vars}) <- {rule_name}({vars})"));
 
-        // Query for all results: ?rule_name(X, Y, ...)
-        // We need to figure out the arity from the head
-        let first_clause = &clauses[0];
-        let arity = first_clause.head.effective_arity();
-        let vars: Vec<String> = (0..arity).map(|i| format!("V{i}")).collect();
-        let query = format!("?{}({})", rule_name, vars.join(", "));
-        program.push_str(&query);
-
-        // Execute using a fresh engine with cloned data (like snapshot execution)
-        // This avoids needing &mut self
         let mut temp_engine = crate::IQLEngine::with_config(self.optimization.clone());
         temp_engine.set_inputs(self.store.relations().clone());
         temp_engine.set_num_workers(self.num_workers);
-        let tuples = temp_engine.execute_tuples(&program)?;
-
-        // Store as materialized
-        if let Some(ref dd) = self.incremental {
-            dd.set_materialized(rule_name, tuples)?;
-        }
-
-        Ok(())
+        temp_engine.execute_tuples(&program)
     }
 
     /// Compile a RuleDef into a CompiledRule for IncrementalEngine
@@ -2516,7 +2523,7 @@ impl KnowledgeGraph {
         // Remove from IncrementalEngine
         if let Some(ref dd) = self.incremental {
             if let Err(e) = dd.remove_rule(name) {
-                eprintln!("Warning: failed to remove rule from IncrementalEngine: {e}");
+                warn!(rule = %name, error = %e, "incremental_remove_rule_failed");
             }
         }
 
@@ -2569,9 +2576,7 @@ impl KnowledgeGraph {
         if let Some(ref dd) = self.incremental {
             for name in &dropped {
                 if let Err(e) = dd.remove_rule(name) {
-                    eprintln!(
-                        "Warning: failed to remove rule '{name}' from IncrementalEngine: {e}"
-                    );
+                    warn!(rule = %name, error = %e, "incremental_remove_rule_failed");
                 }
             }
         }

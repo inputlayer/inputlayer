@@ -8,18 +8,19 @@
 //! ## Architecture
 //!
 //! ```text
-//! Main thread --command_tx--► Worker thread (timely::execute_directly)
+//! Main thread --command_tx--► Worker thread (timely, idle merging on)
 //!                              ├─ InputSessions (one per base relation)
 //!                              ├─ Arrangements (queryable via cursor)
-//!                              ├─ DerivedRelationsManager (rule tracking)
-//!                              └─ Command loop (blocking recv + batch)
+//!                              └─ Command loop (steps and compacts per window)
+//! Main thread --mutex--------► DerivedRelationsManager (rule tracking)
 //! ```
 //!
 //! ## Thread Safety
 //!
 //! InputSessions and TraceAgents are NOT Send/Sync (Rc-based internally).
-//! All DD state lives on the worker thread. The main thread communicates
-//! exclusively through the command channel.
+//! All DD state lives on the worker thread and is reached only through the
+//! command channel. Writes are queued sends; the channel holds 1024 commands,
+//! so a worker that falls behind blocks writers.
 
 use crate::derived_relations::{CompiledRule, DerivedRelationsManager};
 use crate::value::Tuple;
@@ -29,12 +30,40 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+/// Merge effort each idle arrangement spends per scheduling quantum.
+const IDLE_MERGE_EFFORT: isize = 1 << 12;
+
+/// Buffered input updates that close a window even while commands keep arriving.
+const SETTLE_UPDATES: usize = 1 << 16;
+
+/// Idle merge steps between commands, so a busy trace cannot starve the queue.
+const MAX_IDLE_MERGE_STEPS: usize = 1 << 12;
+
+/// `timely::execute_directly` with idle merging on, so traces compact while
+/// no commands arrive.
+fn execute_with_idle_merging<F>(func: F)
+where
+    F: FnOnce(&mut timely::worker::Worker<timely::communication::allocator::thread::Thread>),
+{
+    let mut config = timely::WorkerConfig::default();
+    differential_dataflow::configure(
+        &mut config,
+        &differential_dataflow::Config::default().idle_merge_effort(Some(IDLE_MERGE_EFFORT)),
+    );
+    let alloc = timely::communication::allocator::thread::Thread::default();
+    let mut worker = timely::worker::Worker::new(config, alloc, Some(std::time::Instant::now()));
+    func(&mut worker);
+    while worker.has_dataflows() {
+        worker.step_or_park(None);
+    }
+}
+
 /// Commands sent from the main thread to the worker thread.
 enum EngineCommand {
     // === Base Relation Operations ===
     InsertDelta {
         relation: String,
-        updates: Vec<(Tuple, u64, isize)>,
+        updates: Vec<(Tuple, isize)>,
     },
     AdvanceTime(u64),
     WaitUntilCaughtUp {
@@ -52,31 +81,9 @@ enum EngineCommand {
     Shutdown {
         response: channel::Sender<()>,
     },
-
-    // === Derived Relations ===
-    RegisterRule {
-        rule: CompiledRule,
-        response: channel::Sender<Result<(), String>>,
-    },
-    RemoveRule {
-        name: String,
-        response: channel::Sender<()>,
-    },
-    ReadDerivedRelation {
+    TraceUpdates {
         relation: String,
-        response: channel::Sender<Option<Vec<Tuple>>>,
-    },
-    SetMaterialized {
-        relation: String,
-        tuples: Vec<Tuple>,
-        response: channel::Sender<()>,
-    },
-    NotifyBaseUpdate {
-        relation: String,
-        response: channel::Sender<Vec<String>>,
-    },
-    GetDerivedStats {
-        response: channel::Sender<(usize, usize, usize)>,
+        response: channel::Sender<usize>,
     },
 }
 
@@ -104,12 +111,11 @@ impl IncrementalEngine {
         let max_write_time = Arc::new(AtomicU64::new(0));
         let known_relations = Mutex::new(relations.iter().cloned().collect());
         let derived_relations = Arc::new(Mutex::new(DerivedRelationsManager::new()));
-        let derived_clone = Arc::clone(&derived_relations);
 
         let worker_handle = std::thread::Builder::new()
             .name("incremental-worker".to_string())
             .spawn(move || {
-                Self::worker_loop(relations, command_rx, derived_clone);
+                Self::worker_loop(relations, command_rx);
             })
             .map_err(|e| format!("Failed to spawn worker thread: {e}"))?;
 
@@ -127,18 +133,17 @@ impl IncrementalEngine {
     ///
     /// Creates a timely computation with u64 timestamps, InputSessions for
     /// each relation, and arrangements. Processes commands via blocking recv.
-    fn worker_loop(
-        relations: Vec<String>,
-        command_rx: channel::Receiver<EngineCommand>,
-        derived_relations: Arc<Mutex<DerivedRelationsManager>>,
-    ) {
+    fn worker_loop(relations: Vec<String>, command_rx: channel::Receiver<EngineCommand>) {
         use differential_dataflow::input::Input;
         use differential_dataflow::trace::cursor::Cursor;
-        use differential_dataflow::trace::TraceReader;
+        use differential_dataflow::trace::{BatchReader, TraceReader};
+        use std::time::Duration;
         use timely::dataflow::operators::Probe;
         use timely::dataflow::ProbeHandle;
+        use timely::progress::frontier::AntichainRef;
+        use timely::scheduling::Scheduler;
 
-        timely::execute_directly(move |worker| {
+        execute_with_idle_merging(move |worker| {
             let probe = ProbeHandle::<u64>::new();
 
             let mut input_sessions: HashMap<
@@ -164,132 +169,143 @@ impl IncrementalEngine {
                 }
             });
 
-            // Command processing loop: blocking recv + batch drain
-            loop {
-                let first_cmd = match command_rx.recv() {
-                    Ok(cmd) => cmd,
-                    Err(_) => return, // channel disconnected
-                };
-
-                let mut commands = vec![first_cmd];
-                while let Ok(cmd) = command_rx.try_recv() {
-                    commands.push(cmd);
-                }
-
-                for cmd in commands {
-                    match cmd {
-                        EngineCommand::InsertDelta { relation, updates } => {
-                            if let Some(session) = input_sessions.get_mut(&relation) {
-                                for (data, time, diff) in updates {
-                                    session.update_at(data, time, diff);
-                                }
+            // Updates land at the inputs' current time, so the batcher cancels
+            // retractions within a window. A window closes when the queue
+            // drains or grows large: inputs advance, the worker steps, and the
+            // traces compact, so memory follows the live collections.
+            let mut frontier: u64 = 0;
+            let mut pending: usize = 0;
+            macro_rules! settle {
+                () => {
+                    if pending > 0 {
+                        for session in input_sessions.values_mut() {
+                            if *session.time() < frontier {
+                                session.advance_to(frontier);
                             }
+                            session.flush();
                         }
-
-                        EngineCommand::AdvanceTime(time) => {
-                            for session in input_sessions.values_mut() {
-                                session.advance_to(time);
-                                session.flush();
-                            }
+                        while probe.less_than(&frontier) {
                             worker.step();
                         }
-
-                        EngineCommand::WaitUntilCaughtUp { time, response } => {
-                            for session in input_sessions.values_mut() {
-                                session.flush();
-                            }
-                            while probe.less_than(&time) {
-                                worker.step();
-                                std::thread::yield_now();
-                            }
-                            let _ = response.send(());
+                        let compact = [frontier];
+                        for trace in traces.values_mut() {
+                            trace.set_logical_compaction(AntichainRef::new(&compact));
+                            trace.set_physical_compaction(AntichainRef::new(&compact));
                         }
+                        worker.step();
+                        pending = 0;
+                    }
+                };
+            }
 
-                        EngineCommand::ReadRelation { relation, response } => {
-                            let mut result = Vec::new();
-                            if let Some(trace) = traces.get_mut(&relation) {
-                                let (mut cursor, storage) = trace.cursor();
-                                while cursor.key_valid(&storage) {
-                                    let key = cursor.key(&storage).clone();
-                                    let mut total_diff: isize = 0;
-                                    cursor.map_times(&storage, |_time, diff| {
-                                        total_diff += *diff;
-                                    });
-                                    if total_diff > 0 {
-                                        result.push(key);
-                                    }
-                                    cursor.step_key(&storage);
-                                }
-                            }
-                            let _ = response.send(result);
+            loop {
+                let mut idle_steps = 0;
+                let cmd = loop {
+                    match command_rx.try_recv() {
+                        Ok(cmd) => break cmd,
+                        Err(channel::TryRecvError::Disconnected) => return,
+                        Err(channel::TryRecvError::Empty) => {}
+                    }
+                    settle!();
+                    // Spend idle time merging trace batches until they are compact.
+                    let merging = worker.activations().borrow().empty_for() == Some(Duration::ZERO);
+                    if merging && idle_steps < MAX_IDLE_MERGE_STEPS {
+                        idle_steps += 1;
+                        worker.step();
+                    } else {
+                        match command_rx.recv() {
+                            Ok(cmd) => break cmd,
+                            Err(_) => return, // channel disconnected
                         }
+                    }
+                };
+                if !matches!(cmd, EngineCommand::InsertDelta { .. }) {
+                    settle!();
+                }
 
-                        EngineCommand::AddRelation { name, response } => {
-                            if !input_sessions.contains_key(&name) {
-                                worker.dataflow::<u64, _, _>(|scope| {
-                                    let (session, collection) =
-                                        scope.new_collection::<Tuple, isize>();
-                                    input_sessions.insert(name.clone(), session);
-                                    let arranged = collection.arrange_by_self();
-                                    arranged.stream.probe_with(&probe);
-                                    traces.insert(name.clone(), arranged.trace.clone());
+                match cmd {
+                    EngineCommand::InsertDelta { relation, updates } => {
+                        if let Some(session) = input_sessions.get_mut(&relation) {
+                            frontier = frontier.max(*session.time() + 1);
+                            pending += updates.len();
+                            for (data, diff) in updates {
+                                session.update(data, diff);
+                            }
+                        }
+                        if pending >= SETTLE_UPDATES {
+                            settle!();
+                        }
+                    }
+
+                    EngineCommand::AdvanceTime(time) => {
+                        for session in input_sessions.values_mut() {
+                            if *session.time() < time {
+                                session.advance_to(time);
+                            }
+                            session.flush();
+                        }
+                        worker.step();
+                    }
+
+                    EngineCommand::WaitUntilCaughtUp { time, response } => {
+                        for session in input_sessions.values_mut() {
+                            session.flush();
+                        }
+                        while probe.less_than(&time) {
+                            worker.step();
+                            std::thread::yield_now();
+                        }
+                        let _ = response.send(());
+                    }
+
+                    EngineCommand::ReadRelation { relation, response } => {
+                        let mut result = Vec::new();
+                        if let Some(trace) = traces.get_mut(&relation) {
+                            let (mut cursor, storage) = trace.cursor();
+                            while cursor.key_valid(&storage) {
+                                let key = cursor.key(&storage).clone();
+                                let mut total_diff: isize = 0;
+                                cursor.map_times(&storage, |_time, diff| {
+                                    total_diff += *diff;
                                 });
+                                if total_diff > 0 {
+                                    result.push(key);
+                                }
+                                cursor.step_key(&storage);
                             }
-                            let _ = response.send(());
                         }
+                        let _ = response.send(result);
+                    }
 
-                        EngineCommand::Shutdown { response } => {
-                            // Drop sessions without stepping to avoid merge batcher issues
-                            input_sessions.clear();
-                            traces.clear();
-                            let _ = response.send(());
-                            return;
+                    EngineCommand::AddRelation { name, response } => {
+                        if !input_sessions.contains_key(&name) {
+                            worker.dataflow::<u64, _, _>(|scope| {
+                                let (mut session, collection) =
+                                    scope.new_collection::<Tuple, isize>();
+                                session.advance_to(frontier);
+                                input_sessions.insert(name.clone(), session);
+                                let arranged = collection.arrange_by_self();
+                                arranged.stream.probe_with(&probe);
+                                traces.insert(name.clone(), arranged.trace.clone());
+                            });
                         }
+                        let _ = response.send(());
+                    }
 
-                        // === Derived Relations ===
-                        EngineCommand::RegisterRule { rule, response } => {
-                            let mut mgr = derived_relations.lock();
-                            mgr.register_rule(rule);
-                            let _ = response.send(Ok(()));
-                        }
+                    EngineCommand::Shutdown { response } => {
+                        // Drop sessions without stepping to avoid merge batcher issues
+                        input_sessions.clear();
+                        traces.clear();
+                        let _ = response.send(());
+                        return;
+                    }
 
-                        EngineCommand::RemoveRule { name, response } => {
-                            let mut mgr = derived_relations.lock();
-                            mgr.remove_rule(&name);
-                            let _ = response.send(());
+                    EngineCommand::TraceUpdates { relation, response } => {
+                        let mut count = 0;
+                        if let Some(trace) = traces.get_mut(&relation) {
+                            trace.map_batches(|batch| count += batch.len());
                         }
-
-                        EngineCommand::ReadDerivedRelation { relation, response } => {
-                            let mgr = derived_relations.lock();
-                            let result = mgr.get_materialized(&relation).map(|m| m.tuples.clone());
-                            let _ = response.send(result);
-                        }
-
-                        EngineCommand::SetMaterialized {
-                            relation,
-                            tuples,
-                            response,
-                        } => {
-                            let mut mgr = derived_relations.lock();
-                            mgr.set_materialized(&relation, tuples);
-                            let _ = response.send(());
-                        }
-
-                        EngineCommand::NotifyBaseUpdate { relation, response } => {
-                            let mut mgr = derived_relations.lock();
-                            let invalidated = mgr.notify_base_update(&relation);
-                            let _ = response.send(invalidated);
-                        }
-
-                        EngineCommand::GetDerivedStats { response } => {
-                            let mgr = derived_relations.lock();
-                            let stats = mgr.stats();
-                            let _ = response.send((
-                                stats.total_rules,
-                                stats.materialized_count,
-                                stats.invalid_count,
-                            ));
-                        }
+                        let _ = response.send(count);
                     }
                 }
             }
@@ -298,11 +314,11 @@ impl IncrementalEngine {
 
     // === Base Relation Operations ===
 
-    /// Insert tuples into a base relation at the given logical time.
+    /// Insert tuples into a base relation; `time` feeds `max_write_time`.
     pub fn insert(&self, relation: &str, tuples: Vec<Tuple>, time: u64) -> Result<(), String> {
         self.ensure_relation(relation)?;
         self.max_write_time.fetch_max(time, Ordering::SeqCst);
-        let updates: Vec<(Tuple, u64, isize)> = tuples.into_iter().map(|t| (t, time, 1)).collect();
+        let updates: Vec<(Tuple, isize)> = tuples.into_iter().map(|t| (t, 1)).collect();
         self.command_tx
             .send(EngineCommand::InsertDelta {
                 relation: relation.to_string(),
@@ -311,11 +327,11 @@ impl IncrementalEngine {
             .map_err(|_| "Worker disconnected".to_string())
     }
 
-    /// Delete tuples from a base relation at the given logical time.
+    /// Delete tuples from a base relation; `time` feeds `max_write_time`.
     pub fn delete(&self, relation: &str, tuples: Vec<Tuple>, time: u64) -> Result<(), String> {
         self.ensure_relation(relation)?;
         self.max_write_time.fetch_max(time, Ordering::SeqCst);
-        let updates: Vec<(Tuple, u64, isize)> = tuples.into_iter().map(|t| (t, time, -1)).collect();
+        let updates: Vec<(Tuple, isize)> = tuples.into_iter().map(|t| (t, -1)).collect();
         self.command_tx
             .send(EngineCommand::InsertDelta {
                 relation: relation.to_string(),
@@ -395,79 +411,63 @@ impl IncrementalEngine {
         Ok(())
     }
 
+    /// Updates held in a relation's trace (memory proxy for tests).
+    pub fn trace_updates(&self, relation: &str) -> Result<usize, String> {
+        let (tx, rx) = channel::bounded(1);
+        self.command_tx
+            .send(EngineCommand::TraceUpdates {
+                relation: relation.to_string(),
+                response: tx,
+            })
+            .map_err(|_| "Worker disconnected".to_string())?;
+        rx.recv()
+            .map_err(|_| "Worker disconnected while reading trace".to_string())
+    }
+
     // === Derived Relations API ===
 
     /// Register a compiled rule for materialization.
     pub fn register_rule(&self, rule: CompiledRule) -> Result<(), String> {
-        let (tx, rx) = channel::bounded(1);
-        self.command_tx
-            .send(EngineCommand::RegisterRule { rule, response: tx })
-            .map_err(|_| "Worker disconnected".to_string())?;
-        rx.recv()
-            .map_err(|_| "Worker disconnected while registering rule".to_string())?
+        self.derived_relations.lock().register_rule(rule);
+        Ok(())
     }
 
     /// Remove a rule and its materialization.
     pub fn remove_rule(&self, name: &str) -> Result<(), String> {
-        let (tx, rx) = channel::bounded(1);
-        self.command_tx
-            .send(EngineCommand::RemoveRule {
-                name: name.to_string(),
-                response: tx,
-            })
-            .map_err(|_| "Worker disconnected".to_string())?;
-        rx.recv()
-            .map_err(|_| "Worker disconnected while removing rule".to_string())
+        self.derived_relations.lock().remove_rule(name);
+        Ok(())
     }
 
     /// Read materialized data for a derived relation.
     pub fn read_derived_relation(&self, relation: &str) -> Result<Option<Vec<Tuple>>, String> {
-        let (tx, rx) = channel::bounded(1);
-        self.command_tx
-            .send(EngineCommand::ReadDerivedRelation {
-                relation: relation.to_string(),
-                response: tx,
-            })
-            .map_err(|_| "Worker disconnected".to_string())?;
-        rx.recv()
-            .map_err(|_| "Worker disconnected while reading derived".to_string())
+        Ok(self
+            .derived_relations
+            .lock()
+            .get_materialized(relation)
+            .map(|m| m.tuples.clone()))
     }
 
     /// Set materialized data for a derived relation.
     pub fn set_materialized(&self, relation: &str, tuples: Vec<Tuple>) -> Result<(), String> {
-        let (tx, rx) = channel::bounded(1);
-        self.command_tx
-            .send(EngineCommand::SetMaterialized {
-                relation: relation.to_string(),
-                tuples,
-                response: tx,
-            })
-            .map_err(|_| "Worker disconnected".to_string())?;
-        rx.recv()
-            .map_err(|_| "Worker disconnected while setting materialized".to_string())
+        self.derived_relations
+            .lock()
+            .set_materialized(relation, tuples);
+        Ok(())
     }
 
     /// Notify that a base relation was updated. Returns invalidated relation names.
     pub fn notify_base_update(&self, relation: &str) -> Result<Vec<String>, String> {
-        let (tx, rx) = channel::bounded(1);
-        self.command_tx
-            .send(EngineCommand::NotifyBaseUpdate {
-                relation: relation.to_string(),
-                response: tx,
-            })
-            .map_err(|_| "Worker disconnected".to_string())?;
-        rx.recv()
-            .map_err(|_| "Worker disconnected while notifying".to_string())
+        Ok(self.derived_relations.lock().notify_base_update(relation))
     }
 
     /// Get (total_rules, materialized_count, invalid_count).
     pub fn get_derived_stats(&self) -> Result<(usize, usize, usize), String> {
-        let (tx, rx) = channel::bounded(1);
-        self.command_tx
-            .send(EngineCommand::GetDerivedStats { response: tx })
-            .map_err(|_| "Worker disconnected".to_string())?;
-        rx.recv()
-            .map_err(|_| "Worker disconnected while getting stats".to_string())
+        let stats = self.derived_relations.lock().stats();
+        Ok((
+            stats.total_rules,
+            stats.materialized_count,
+            stats.invalid_count,
+        ))
     }
 
     /// Check if a relation is derived (has a registered rule).
@@ -1201,6 +1201,38 @@ mod tests {
         engine.remove_rule("view").unwrap();
         assert!(!engine.is_derived_relation("view"));
 
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_sustained_writes_keep_queue_and_trace_bounded() {
+        let engine = IncrementalEngine::new(vec!["data".to_string()]).unwrap();
+        let rows = |range: std::ops::Range<i64>| -> Vec<Tuple> {
+            range.map(|i| Tuple::new(vec![Value::Int64(i)])).collect()
+        };
+        let mut time = 1;
+        for chunk in 0..1_000 {
+            engine
+                .insert("data", rows(chunk * 100..(chunk + 1) * 100), time)
+                .unwrap();
+            time += 1;
+        }
+        for chunk in 0..1_000 {
+            engine
+                .delete("data", rows(chunk * 100..(chunk + 1) * 100), time)
+                .unwrap();
+            time += 1;
+        }
+        engine.insert("data", rows(0..10), time).unwrap();
+
+        assert_eq!(engine.read_relation("data").unwrap().len(), 10);
+        // No commands arrive while idle merging compacts the trace.
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let held = engine.trace_updates("data").unwrap();
+        assert!(
+            held <= 1_000,
+            "trace holds {held} of 200010 written updates"
+        );
         engine.shutdown().unwrap();
     }
 

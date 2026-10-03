@@ -393,3 +393,23 @@ async fn test_drop_relation_drops_index() {
     exec(&handler, ".rel drop docs").await;
     assert!(text(&exec(&handler, ".index list").await).contains("No indexes."));
 }
+
+/// Rules registered with an index present see later writes.
+#[tokio::test]
+async fn test_rule_with_index_tracks_writes() {
+    let temp = TempDir::new().unwrap();
+    let handler = handler_at(temp.path());
+    setup(&handler).await;
+    exec(&handler, "+near(Id) <- docs(Id, _, _)").await;
+    let ids = |r: QueryResult| sorted(int_column(&r, "Id"));
+    assert_eq!(ids(exec(&handler, "?near(Id)").await), vec![1, 2, 3, 4]);
+    exec(&handler, r#"+docs[(5, "neg", [-1.0, 0.0, 0.0])]"#).await;
+    exec(&handler, r#"-docs(1, "x", [1.0, 0.0, 0.0])"#).await;
+    assert_eq!(ids(exec(&handler, "?near(Id)").await), vec![2, 3, 4, 5]);
+    let joined = exec(
+        &handler,
+        r#"?hnsw_nearest("doc_idx", [-1.0, 0.0, 0.0], 1, Id, Dist), near(Id)"#,
+    )
+    .await;
+    assert_eq!(int_column(&joined, "Id"), vec![5]);
+}
