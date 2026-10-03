@@ -3,6 +3,8 @@
 # never enter the engine crate.
 [workspace]
 members = ["gateway", "ontology-client"]
+# Resolve dependencies to versions compatible with `rust-version`.
+resolver = "3"
 
 [package]
 name = "inputlayer"
