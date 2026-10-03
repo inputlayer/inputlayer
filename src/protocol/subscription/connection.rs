@@ -89,26 +89,7 @@ impl ConnectionSubscriptions {
         if self.registry.is_empty() {
             return;
         }
-        let (knowledge_graph, change) = match notification {
-            PersistentNotification::PersistentUpdate {
-                knowledge_graph,
-                relation,
-                ..
-            } => (knowledge_graph, ChangeSet::relation(relation)),
-            PersistentNotification::RuleChange {
-                knowledge_graph,
-                rule_name,
-                ..
-            } => (knowledge_graph, ChangeSet::relation(rule_name)),
-            PersistentNotification::SchemaChange {
-                knowledge_graph,
-                entity,
-                ..
-            } => (knowledge_graph, ChangeSet::relation(entity)),
-            PersistentNotification::KgChange {
-                knowledge_graph, ..
-            } => (knowledge_graph, ChangeSet::Everything),
-        };
+        let (knowledge_graph, change) = change_of(notification);
         for dispatch in self.registry.on_change(knowledge_graph, &change) {
             self.start(dispatch);
         }
@@ -145,6 +126,30 @@ impl ConnectionSubscriptions {
         // Counted here, synchronously, so callers observe it in order with pushes.
         self.handler.subscription_metrics().record_evaluation();
         self.in_flight.spawn(dispatch.run());
+    }
+}
+
+/// The knowledge graph a notification is about and what it changed there.
+pub fn change_of(notification: &PersistentNotification) -> (&str, ChangeSet) {
+    match notification {
+        PersistentNotification::PersistentUpdate {
+            knowledge_graph,
+            relation,
+            ..
+        } => (knowledge_graph, ChangeSet::relation(relation)),
+        PersistentNotification::RuleChange {
+            knowledge_graph,
+            rule_name,
+            ..
+        } => (knowledge_graph, ChangeSet::relation(rule_name)),
+        PersistentNotification::SchemaChange {
+            knowledge_graph,
+            entity,
+            ..
+        } => (knowledge_graph, ChangeSet::relation(entity)),
+        PersistentNotification::KgChange {
+            knowledge_graph, ..
+        } => (knowledge_graph, ChangeSet::Everything),
     }
 }
 
