@@ -145,6 +145,14 @@ port = 8080
 # Specify origins for production, e.g., ["https://myapp.com"]
 cors_origins = []
 
+# Milliseconds a WebSocket client has to authenticate
+ws_auth_timeout_ms = 5000
+
+# Proxies (IPs or CIDR blocks) whose X-Forwarded-For / X-Real-IP headers are
+# trusted for the client IP. Empty = always use the TCP peer address.
+# Per-IP limits key IPv6 clients by their /64.
+# trusted_proxies = ["127.0.0.1", "10.0.0.0/8"]
+
 [http.gui]
 # Enable GUI dashboard serving
 # When enabled, static files from static_dir are served at /
@@ -159,10 +167,14 @@ static_dir = "./gui/dist"
 # with a password from one of these sources (checked in order):
 #   1. INPUTLAYER_ADMIN_PASSWORD environment variable
 #   2. bootstrap_admin_password config value below
-#   3. Auto-generated random password (printed to stderr)
+#   3. The credentials file (below), from an earlier boot
+#   4. Auto-generated random password
 #
-# A bootstrap API key is also created and printed to stderr on first boot.
-# Use it with the CLI: inputlayer-client --api-key <key>
+# A bootstrap API key is also created (INPUTLAYER_BOOTSTRAP_API_KEY, or generated).
+# Generated secrets are saved, owner-only, to the credentials file.
+# Use the key with the CLI: inputlayer-client --api-key <key>
+
+# credentials_file = "./data/credentials.toml"  # default: <data_dir>/credentials.toml
 
 # bootstrap_admin_password = "your-secure-password"
 
@@ -187,6 +199,9 @@ ws_max_subscriptions = 64
 
 # Maximum HTTP requests per second per IP address (0 = unlimited, not recommended)
 per_ip_max_rps = 100
+
+# Maximum unauthenticated WebSocket connections per IP address (0 = unlimited)
+ws_max_preauth_per_ip = 16
 
 # Notification ring buffer size for reconnect replay
 notification_buffer_size = 4096

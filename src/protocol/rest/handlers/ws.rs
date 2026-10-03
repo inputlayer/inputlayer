@@ -6,6 +6,7 @@
 //! (`.subscribe` / `.unsubscribe`) push `subscription_delta` and
 //! `subscription_error`; see [`crate::protocol::subscription`].
 
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 
 use axum::{
@@ -26,7 +27,7 @@ use crate::protocol::handler::{
 };
 use crate::protocol::rest::dto::SessionQueryMetadataDto;
 use crate::protocol::rest::error::RestError;
-use crate::protocol::rest::WsSemaphore;
+use crate::protocol::rest::{ClientIp, PreAuthSlots, WsSemaphore};
 use crate::protocol::subscription::{ConnectionSubscriptions, Push};
 use crate::protocol::wire::{ErrorCode, StatementError};
 use crate::protocol::Handler;
@@ -40,6 +41,9 @@ const STREAMING_THRESHOLD: usize = 1024 * 1024; // 1 MB
 
 /// Maximum number of rows per `result_chunk` message.
 const STREAMING_CHUNK_ROWS: usize = 500;
+
+/// Failed authentications allowed per connection before it is closed.
+const MAX_AUTH_FAILURES: u32 = 3;
 
 // =============================================================================
 // Global WebSocket Endpoint (/ws)
@@ -218,9 +222,22 @@ enum GlobalWsResponse {
 pub async fn global_websocket(
     Extension(handler): Extension<Arc<Handler>>,
     Extension(ws_sem): Extension<WsSemaphore>,
+    Extension(preauth_slots): Extension<PreAuthSlots>,
+    client_ip: Option<Extension<ClientIp>>,
     ws: WebSocketUpgrade,
     Query(params): Query<WsConnectParams>,
 ) -> Result<impl IntoResponse, RestError> {
+    let peer = client_ip.map_or(
+        IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+        |Extension(ClientIp(ip))| ip,
+    );
+    let Some(preauth_slot) = preauth_slots.try_acquire(peer) else {
+        warn!(%peer, "ws_preauth_limit_exceeded");
+        return Err(RestError::too_many_requests(
+            "Too many unauthenticated WebSocket connections".to_string(),
+        ));
+    };
+
     // Enforce WebSocket connection limit
     let ws_permit = if let Some(ref sem) = ws_sem.0 {
         match sem.clone().try_acquire_owned() {
@@ -241,10 +258,57 @@ pub async fn global_websocket(
         .on_upgrade(move |socket| {
             let permit = ws_permit;
             async move {
-                handle_global_ws_connection(socket, handler, params.kg, params.last_seq).await;
+                handle_global_ws_connection(
+                    socket,
+                    handler,
+                    params.kg,
+                    params.last_seq,
+                    peer,
+                    preauth_slot,
+                )
+                .await;
                 drop(permit);
             }
         }))
+}
+
+/// Per-connection message rate limit over one-second windows.
+struct MessageRate {
+    max_per_sec: u32,
+    window_start: std::time::Instant,
+    count: u32,
+}
+
+impl MessageRate {
+    fn new(max_per_sec: u32) -> Self {
+        Self {
+            max_per_sec,
+            window_start: std::time::Instant::now(),
+            count: 0,
+        }
+    }
+
+    /// Count one message; `false` once the window is over the limit.
+    fn allow(&mut self) -> bool {
+        if self.max_per_sec == 0 {
+            return true;
+        }
+        let now = std::time::Instant::now();
+        if now.duration_since(self.window_start) >= std::time::Duration::from_secs(1) {
+            self.window_start = now;
+            self.count = 0;
+        }
+        self.count += 1;
+        self.count <= self.max_per_sec
+    }
+}
+
+/// Send `auth_error` with `message`; `false` if the connection is dead.
+async fn send_auth_error(
+    sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    message: String,
+) -> bool {
+    send_global_response(sender, &GlobalWsResponse::AuthError { message }).await
 }
 
 /// Handle a global WebSocket connection with auth loop + message loop.
@@ -253,6 +317,8 @@ async fn handle_global_ws_connection(
     handler: Arc<Handler>,
     kg: String,
     last_seq: Option<u64>,
+    peer: IpAddr,
+    preauth_slot: crate::protocol::rest::PreAuthSlot,
 ) {
     use crate::auth::AuthIdentity;
 
@@ -260,87 +326,29 @@ async fn handle_global_ws_connection(
 
     info!(kg = %kg, "ws_connection_start");
 
+    // Per-connection message rate limiting, auth phase included
+    let max_msgs_per_sec = handler.config().http.rate_limit.ws_max_messages_per_sec;
+    let mut rate = MessageRate::new(max_msgs_per_sec);
+
     // ── Auth Loop: wait for Login or Authenticate ────────────────────────
-    let auth_timeout = std::time::Duration::from_secs(30);
+    let auth_timeout = std::time::Duration::from_millis(handler.config().http.ws_auth_timeout_ms);
     let auth_deadline = tokio::time::Instant::now() + auth_timeout;
+    let timeout_message = format!("Authentication timeout ({}s)", auth_timeout.as_secs_f32());
+    let mut auth_failures = 0;
     let auth_identity: AuthIdentity;
 
     loop {
         let msg = tokio::select! {
             () = tokio::time::sleep_until(auth_deadline) => {
-                let err = GlobalWsResponse::AuthError {
-                    message: "Authentication timeout (30s)".to_string(),
-                };
-                if let Ok(json) = serde_json::to_string(&err) {
-                    let _ = sender.send(Message::Text(json)).await;
-                }
+                send_auth_error(&mut sender, timeout_message).await;
                 let _ = sender.send(Message::Close(None)).await;
                 return;
             }
             msg = receiver.next() => msg,
         };
 
-        match msg {
-            Some(Ok(Message::Text(text))) => {
-                let request: GlobalWsRequest = match serde_json::from_str(&text) {
-                    Ok(r) => r,
-                    Err(_) => {
-                        let err = GlobalWsResponse::AuthError {
-                            message: "Invalid message format. Send login or authenticate."
-                                .to_string(),
-                        };
-                        if let Ok(json) = serde_json::to_string(&err) {
-                            let _ = sender.send(Message::Text(json)).await;
-                        }
-                        continue;
-                    }
-                };
-
-                match request {
-                    GlobalWsRequest::Login { username, password } => {
-                        match handler.authenticate_user(&username, &password) {
-                            Ok(identity) => {
-                                auth_identity = identity;
-                                break;
-                            }
-                            Err(e) => {
-                                warn!(username = %username, "ws_login_failed");
-                                let err = GlobalWsResponse::AuthError { message: e };
-                                if let Ok(json) = serde_json::to_string(&err) {
-                                    let _ = sender.send(Message::Text(json)).await;
-                                }
-                                continue; // Allow retry
-                            }
-                        }
-                    }
-                    GlobalWsRequest::Authenticate { api_key } => {
-                        match handler.authenticate_api_key(&api_key) {
-                            Ok(identity) => {
-                                auth_identity = identity;
-                                break;
-                            }
-                            Err(e) => {
-                                warn!("ws_apikey_auth_failed");
-                                let err = GlobalWsResponse::AuthError { message: e };
-                                if let Ok(json) = serde_json::to_string(&err) {
-                                    let _ = sender.send(Message::Text(json)).await;
-                                }
-                                continue; // Allow retry
-                            }
-                        }
-                    }
-                    GlobalWsRequest::Execute { .. } | GlobalWsRequest::Ping => {
-                        let err = GlobalWsResponse::AuthError {
-                            message: "Authentication required. Send login or authenticate first."
-                                .to_string(),
-                        };
-                        if let Ok(json) = serde_json::to_string(&err) {
-                            let _ = sender.send(Message::Text(json)).await;
-                        }
-                        continue;
-                    }
-                }
-            }
+        let text = match msg {
+            Some(Ok(Message::Text(text))) => text,
             Some(Ok(Message::Close(_))) | None => {
                 let _ = sender.send(Message::Close(None)).await;
                 return;
@@ -350,8 +358,69 @@ async fn handle_global_ws_connection(
                 return;
             }
             _ => continue,
+        };
+
+        if !rate.allow() {
+            warn!(%peer, "ws_auth_rate_limited");
+            send_auth_error(
+                &mut sender,
+                format!("Rate limit exceeded ({max_msgs_per_sec} msgs/sec)"),
+            )
+            .await;
+            let _ = sender.send(Message::Close(None)).await;
+            return;
+        }
+
+        let outcome = match serde_json::from_str::<GlobalWsRequest>(&text) {
+            Ok(GlobalWsRequest::Login { username, password }) => {
+                let login = handler.login(&username, &password, peer);
+                match tokio::time::timeout_at(auth_deadline, login).await {
+                    Ok(outcome) => outcome,
+                    Err(_) => {
+                        send_auth_error(&mut sender, timeout_message).await;
+                        let _ = sender.send(Message::Close(None)).await;
+                        return;
+                    }
+                }
+            }
+            Ok(GlobalWsRequest::Authenticate { api_key }) => handler
+                .authenticate_api_key(&api_key)
+                .inspect_err(|_| warn!(%peer, "ws_apikey_auth_failed")),
+            Ok(GlobalWsRequest::Execute { .. } | GlobalWsRequest::Ping) => {
+                send_auth_error(
+                    &mut sender,
+                    "Authentication required. Send login or authenticate first.".to_string(),
+                )
+                .await;
+                continue;
+            }
+            Err(_) => {
+                send_auth_error(
+                    &mut sender,
+                    "Invalid message format. Send login or authenticate.".to_string(),
+                )
+                .await;
+                continue;
+            }
+        };
+
+        match outcome {
+            Ok(identity) => {
+                auth_identity = identity;
+                break;
+            }
+            Err(message) => {
+                auth_failures += 1;
+                send_auth_error(&mut sender, message).await;
+                if auth_failures >= MAX_AUTH_FAILURES {
+                    warn!(%peer, auth_failures, "ws_auth_failures_exceeded");
+                    let _ = sender.send(Message::Close(None)).await;
+                    return;
+                }
+            }
         }
     }
+    drop(preauth_slot);
 
     // ── Authenticated: create session ────────────────────────────────────
     info!(
@@ -467,11 +536,6 @@ async fn handle_global_ws_connection(
         None
     };
 
-    // Per-connection message rate limiting
-    let max_msgs_per_sec = handler.config().http.rate_limit.ws_max_messages_per_sec;
-    let mut rate_window_start = std::time::Instant::now();
-    let mut rate_window_count: u32 = 0;
-
     // Server-initiated heartbeat: send ping every 30s to detect dead connections
     let mut heartbeat_interval = tokio::time::interval(std::time::Duration::from_secs(30));
     heartbeat_interval.tick().await; // consume the immediate first tick
@@ -531,25 +595,16 @@ async fn handle_global_ws_connection(
                         last_activity = std::time::Instant::now();
                         request_seq = request_seq.saturating_add(1);
 
-                        // Per-connection message rate limiting
-                        if max_msgs_per_sec > 0 {
-                            let now = std::time::Instant::now();
-                            if now.duration_since(rate_window_start) >= std::time::Duration::from_secs(1) {
-                                rate_window_start = now;
-                                rate_window_count = 0;
+                        if !rate.allow() {
+                            let err_msg = GlobalWsResponse::Error {
+                                message: format!("Rate limit exceeded ({max_msgs_per_sec} msgs/sec)"),
+                                validation_errors: None,
+                                code: None,
+                            };
+                            if let Ok(json) = serde_json::to_string(&err_msg) {
+                                let _ = sender.send(Message::Text(json)).await;
                             }
-                            rate_window_count += 1;
-                            if rate_window_count > max_msgs_per_sec {
-                                let err_msg = GlobalWsResponse::Error {
-                                    message: format!("Rate limit exceeded ({max_msgs_per_sec} msgs/sec)"),
-                                    validation_errors: None,
-                                    code: None,
-                                };
-                                if let Ok(json) = serde_json::to_string(&err_msg) {
-                                    let _ = sender.send(Message::Text(json)).await;
-                                }
-                                continue;
-                            }
+                            continue;
                         }
                         let span = tracing::info_span!(
                             "ws_request",
