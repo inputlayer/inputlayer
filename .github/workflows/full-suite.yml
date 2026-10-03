@@ -236,6 +236,61 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Lint and unit-test the performance gate tool only: measuring needs a
+  # quiet same-host runner, not a shared one (perf-gate/README.md).
+  perf-gate-tool:
+    name: Performance gate tool
+    needs: gate
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Clippy and unit tests
+        run: make perf-gate-check
+
+  # Verified Completions false-alarm/revision gate (issue #88): corpus
+  # scenarios, controls included, and recorded reference extractions through
+  # the rule pack on a throwaway engine. No model calls.
+  verified-completions:
+    name: Verified Completions gate
+    needs: gate
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: useblacksmith/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/release
+          key: ${{ runner.os }}-cargo-vc-gate-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-vc-gate-
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Run gate
+        run: make vc-gate
+
   msrv:
     name: Minimum Supported Rust Version
     needs: gate

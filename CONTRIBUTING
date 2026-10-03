@@ -359,7 +359,7 @@ CI runs in two tiers so small PRs stay cheap and expensive checks run at release
 
 **Fast gate** (`.github/workflows/ci.yml`) runs only on PRs targeting `main`: format (`make fmt-check`), clippy (`make lint`, which also type-checks every target) and the unit + integration tests (`make unit-test`). The Rust jobs are skipped entirely when a change touches no Rust inputs, as defined by the [workflow's path filter](.github/workflows/ci.yml) (for example `front/`-only or SDK-only PRs). A newer push to a PR cancels its in-progress run.
 
-**Full suite** (`.github/workflows/full-suite.yml`) runs on release commits or a manual run on `main`: the release build with all tests and snapshot specs, Python and JS SDK tests, the Python live-server integration, coverage, MSRV, `make doc-check` and the website build. Docker image builds (`docker.yml`) run on release commits only.
+**Full suite** (`.github/workflows/full-suite.yml`) runs on release commits or a manual run on `main`: the release build with all tests, snapshot specs and the reactive agent path (`make e2e-reactive`), Python and JS SDK tests, the Python live-server integration, coverage, MSRV, `make doc-check`, the website build, the performance gate tool's own checks (`make perf-gate-check`; measuring needs a quiet same-host runner, so `make perf-gate` itself runs locally through `make pre-pr`) and the Verified Completions gate (`make vc-gate`). Docker image builds (`docker.yml`) run on release commits only.
 
 The triggers are:
 
