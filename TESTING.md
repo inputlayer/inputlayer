@@ -11,6 +11,7 @@ make test           # Unit + snapshot tests
 make e2e-test       # Snapshot tests only (parallel)
 make e2e-reactive   # Reactive agent path against real engine processes
 make test-affected  # Run only snapshots affected by uncommitted changes
+make pre-pr         # Before every PR: fmt, clippy, affected tests in parallel, then perf-gate
 make perf-gate      # Performance gate: this tree vs the approved baseline (same host)
 make bench-genbi    # Reactive agent benchmark on genbi-trust (needs GENBI_TRUST_DIR)
 make oracle-test    # Differential correctness oracle only (~15s)
@@ -207,6 +208,7 @@ Source-to-category mapping:
 | `make test` | Unit + snapshot | Broad local check before a PR |
 | `make test-all` | Build + unit + snapshot + check | Full verification before merge |
 | `make test-affected` | Snapshot tests for changed files only | Fast E2E feedback |
+| `make pre-pr` | fmt-check, clippy and affected tests in parallel, then `make perf-gate` | Must pass before opening a PR |
 | `make perf-gate` | Paired latency/throughput gate over `/ws` vs the approved baseline | Every implementation PR (see `perf-gate/README.md`) |
 | `make perf-gate-check` | Clippy + unit tests of the gate tool | After changing `perf-gate/` |
 | `make e2e-reactive` | Reactive agent path against real engines, latency samples | Subscription or wire changes |

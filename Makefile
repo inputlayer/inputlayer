@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint perf-gate perf-gate-check secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-tests perf-gate perf-gate-check secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -520,6 +520,19 @@ fmt-check:
 lint:
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
 	cargo clippy --all-features --test e2e_reactive -- -D warnings
+
+# Pre-PR gate: must pass before opening a PR. Runs the fast checks in
+# parallel - formatting, clippy, and the tests that apply (workspace unit and
+# integration tests plus the snapshot categories affected since PRE_PR_BASE) -
+# then the performance gate against the approved baseline.
+PRE_PR_BASE ?= $(shell git merge-base HEAD origin/main 2>/dev/null || echo HEAD)
+pre-pr:
+	$(MAKE) --no-print-directory -j3 --output-sync=target fmt-check lint pre-pr-tests
+	$(MAKE) --no-print-directory perf-gate
+
+pre-pr-tests:
+	cargo test --workspace --all-features
+	./scripts/test-affected.sh $(PRE_PR_BASE)
 
 # Performance gate: this tree's server vs the approved baseline, same host.
 # Mandatory before calling a PR done; see perf-gate/README.md.

@@ -2,8 +2,9 @@
 
 `make perf-gate` measures this tree's `inputlayer-server` against the
 **approved baseline** on the same host, over the real `/ws` protocol, and
-exits zero only when no required metric is worse than its budget. Run it
-for every implementation PR and attach the report to the PR record. Changes
+exits zero only when no required metric is worse than its budget. It runs
+before every PR as the last step of `make pre-pr`, after the fast checks;
+attach the report to the PR record. Changes
 that do not touch the runtime still record the run, as evidence that runtime
 is unchanged. Being test-only or off the hot path is a statement in the
 record, not an exemption.

@@ -71,11 +71,14 @@ Hooks never run tests. Before each commit, run the tests that cover your
 change: `make test-fast` (or the touched crate's `cargo test -p ...`) and the
 affected snapshot specs (`make test-affected`).
 
-Before calling an implementation PR done, run the performance gate and attach
-its report (`target/perf-gate/latest/report.md`) to the PR:
+Before opening a PR, `make pre-pr` must pass. It runs formatting, clippy and
+the tests that apply (workspace tests plus the snapshot categories affected
+since your branch left `main`) in parallel, then the performance gate. Attach
+the gate's report (`target/perf-gate/latest/report.md`) to the PR:
 
 ```bash
-make perf-gate                      # must PASS; see perf-gate/README.md
+make pre-pr                         # fast checks in parallel, then make perf-gate
+make perf-gate                      # the gate alone; see perf-gate/README.md
 ```
 
 Changes to subscriptions, notifications or the WebSocket protocol also run
