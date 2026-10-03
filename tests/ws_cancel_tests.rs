@@ -26,7 +26,9 @@ const TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Complete bipartite graph, both directions: [`TRIANGLES`] finds nothing
 /// but its cyclic join runs for seconds.
-const SIDE: i64 = 10;
+/// The join grows with `SIDE^3`; a release build runs it many times faster,
+/// so it needs a larger graph to still run well past the timing budgets.
+const SIDE: i64 = if cfg!(debug_assertions) { 10 } else { 20 };
 const TRIANGLES: &str = "?edge(X, Y), edge(Y, Z), edge(Z, X)";
 /// A cancelled or expired computation must answer within this.
 const STOP_BUDGET: Duration = Duration::from_millis(2_000);

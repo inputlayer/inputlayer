@@ -970,12 +970,12 @@ cleaned(R) <-
 
 ---
 
-### concat(s1, s2, ...)
+### concat(s1, s2, s3)
 
-Concatenate multiple values into a string. Variable arity (2+ arguments).
+Concatenate three values into a string. Takes exactly 3 arguments; pass `""` to join only two values.
 
 ```iql
-R = concat(S1, S2)
+R = concat(S1, S2, S3)
 
 // Example - Build full name
 full_name(First, Last, Full) <-
@@ -985,7 +985,7 @@ full_name(First, Last, Full) <-
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| s1, s2, ... | String/Int64/Float64 | Values to concatenate |
+| s1, s2, s3 | String/Int64/Float64 | Values to concatenate |
 | **Returns** | String | Concatenated string |
 
 **Note**: Non-string values are automatically converted to their string representation.

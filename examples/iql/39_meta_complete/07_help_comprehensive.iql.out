@@ -28,6 +28,8 @@ Meta Commands:
   .clear prefix <p>    Clear all facts from relations with prefix
   .debug <query>       Show query plan without executing
   .status              Server status
+  .backup [name]       Export an online checkpoint (admin)
+  .backup status       Progress or outcome of the last export
   .help                Show this help
   .quit                Exit
 
@@ -66,6 +68,8 @@ Meta Commands:
   .clear prefix <p>    Clear all facts from relations with prefix
   .debug <query>       Show query plan without executing
   .status              Server status
+  .backup [name]       Export an online checkpoint (admin)
+  .backup status       Progress or outcome of the last export
   .help                Show this help
   .quit                Exit
 
@@ -104,6 +108,8 @@ Meta Commands:
   .clear prefix <p>    Clear all facts from relations with prefix
   .debug <query>       Show query plan without executing
   .status              Server status
+  .backup [name]       Export an online checkpoint (admin)
+  .backup status       Progress or outcome of the last export
   .help                Show this help
   .quit                Exit
 
@@ -142,6 +148,8 @@ Meta Commands:
   .clear prefix <p>    Clear all facts from relations with prefix
   .debug <query>       Show query plan without executing
   .status              Server status
+  .backup [name]       Export an online checkpoint (admin)
+  .backup status       Progress or outcome of the last export
   .help                Show this help
   .quit                Exit
 
@@ -180,6 +188,8 @@ Meta Commands:
   .clear prefix <p>    Clear all facts from relations with prefix
   .debug <query>       Show query plan without executing
   .status              Server status
+  .backup [name]       Export an online checkpoint (admin)
+  .backup status       Progress or outcome of the last export
   .help                Show this help
   .quit                Exit
 

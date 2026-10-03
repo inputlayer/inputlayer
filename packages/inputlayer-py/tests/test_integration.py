@@ -256,15 +256,15 @@ class TestErrors:
             await client.drop_knowledge_graph("test_err_count_py")
 
     @pytest.mark.asyncio
-    async def test_partial_failure_names_each_statement(self, client: InputLayer):
+    async def test_failed_statement_is_named_and_program_not_applied(self, client: InputLayer):
         kg = client.knowledge_graph("test_err_partial_py")
         try:
             await kg.define(Edge)
             with pytest.raises(StatementFailedError) as caught:
-                await kg.execute("+edge[(1, 2)]\n.rel drop no_such_rel\n+edge[(2, 3)]")
+                await kg.execute("+edge[(1, 2)]\n.rule drop no_such_rule\n+edge[(2, 3)]")
             assert [(e.index, e.code) for e in caught.value.errors] == [(1, "not_found")]
-            # The engine ran the other statements.
-            assert len(await kg.query(Edge)) == 2
+            # A writing program is atomic: nothing was applied.
+            assert len(await kg.query(Edge)) == 0
         finally:
             await client.drop_knowledge_graph("test_err_partial_py")
 
