@@ -3,29 +3,30 @@
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-Elastic%202.0-blue.svg)](./LICENSE)
 
-**The streaming engine for AI agents.**
+**The live knowledge graph for AI agents.**
 
-### Agents that react in milliseconds, not on the next run.
+### Models think. InputLayer knows.
 
-Today's agents are batch jobs. They wake up, re-read everything, reason, act and go back to sleep: stale between runs, slow to react, and paying to recompute what didn't change. InputLayer makes your agents streaming. Every change is reasoned over the moment it lands, only what changed is recomputed, and a conclusion that stops being true is withdrawn right away.
+A fact changes. InputLayer derives what it means for your agent, without another prompt.
+
+InputLayer applies your rules as facts change, updating what your agent should say or do, even while other work continues. Keep your models and framework; connect them to current results and evidence.
+
+<sub>"Knows" means accepted facts plus rule-derived conclusions; source freshness and delivery still apply.</sub>
 
 Self-hosted, source-available under the Elastic License 2.0. Rust engine with Python and JS SDKs.
 
-> Your data stack went streaming years ago. Your agents are the last batch jobs left.
+> Decision models judge. Language models think. InputLayer knows.
 
 ---
 
-## Why Streaming Agents
+## Separate Knowing from Thinking
 
-- **React when it happens, not when the cron fires.** A batch agent learns about a change on its next run, seconds to hours later. A streaming agent knows within milliseconds and can act while it still matters.
-- **Never act on something that stopped being true.** Batch agents see what's there and miss what disappeared: the cancelled order, the revoked approval, the delay that cleared. InputLayer withdraws a conclusion the moment its last reason goes away.
-- **Pay for change, not for re-reading the world.** Batch cost grows with data volume times how often you run. Streaming cost grows with what actually changed.
+Every turn, agents ask the model things the system already knows: is this order late, is this customer eligible, what else is affected. With InputLayer, facts and rules live outside the prompt, so the agent is not limited by the context window. Facts stream in, your rules derive the answers, and only the answers enter the prompt.
 
-## How It Works
-
-1. **Stream facts in** from the systems you already run: orders, carriers, permissions, inventory, written as they change from CDC, webhooks or your app.
-2. **Declare the reasoning** as rules, not glue code. Rules chain, recurse and combine with vector similarity.
-3. **React to changes.** When a fact changes, InputLayer updates just the affected conclusions and tells the agent what was added and what was withdrawn, with the facts and rules behind each one.
+- **Current, exact answers.** A fact changes and the affected conclusions update, including the ones that stop being true, with the facts and rules behind each.
+- **Not limited by the context window.** Facts and rules live outside the prompt; only the derived answers go in.
+- **A deterministic fast path.** A small intent model picks which known question was asked; the engine answers it exactly from live facts, with no generative model on that path. Open questions still go to the LLM.
+- **Fits the stack you have.** [LangGraph](https://inputlayer.ai/docs/guides/langgraph/) memory, state and checkpointer; [LangChain](https://inputlayer.ai/docs/guides/langchain/) tool and retriever; an OpenAI-compatible [fact-checking gateway](https://inputlayer.ai/docs/guides/verified-completions/); and change triggers your agent can wake on.
 
 ```iql
 // rules, written once
@@ -34,13 +35,17 @@ Self-hosted, source-available under the Elastic License 2.0. Rust engine with Py
 ```
 
 ```python
-# agent: react to what changed
+# agent: told what changed, no re-reading
 for change in kg.watch("?can_offer(O, C)"):
     for row in change.added:   offer(row)
     for row in change.removed: withdraw(row)
 ```
 
 The SDK form shown is the upcoming release; standing queries run over the [WebSocket API](https://inputlayer.ai/docs/guides/websocket-api/) today.
+
+**Example.** "Where's order 4821, can it still make Friday?" A small intent model maps it to `ask_status(4821)`; the engine answers "due Thursday" from live facts and a template speaks it. The carrier update lands mid-sentence: the old answer is withdrawn and the agent says "Correction: Friday". Only open questions go to the LLM.
+
+**Why now.** Your data stack went live years ago: nightly ETL became change data capture, cron jobs became event-driven services, full refreshes became incremental views. Your agents are the last batch jobs left.
 
 ---
 
@@ -167,7 +172,7 @@ See [Python SDK docs](https://inputlayer.ai/docs/guides/python-sdk/) and [TypeSc
 
 ## Use Cases
 
-Built for agents that act on a world that keeps changing. Keep your LLM, your vector store for documents and your systems of record; InputLayer is the streaming layer between your data and your agent's decisions.
+Built for agents that act on a world that keeps changing. Keep your LLM, your vector store for documents and your systems of record; InputLayer is the live knowledge graph between your data and your agent's decisions.
 
 - **[Financial Risk](https://inputlayer.ai/use-cases/financial-risk/)** - Sanctions and ownership flags that update the moment an ownership link changes. A flag is withdrawn only when every path supporting it is gone.
 - **[Conversational Commerce](https://inputlayer.ai/use-cases/commerce/)** - Compatibility rules + vector similarity in one query, with recommendations withdrawn the moment stock runs out.

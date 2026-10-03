@@ -74,7 +74,7 @@ export function SiteFooter() {
             <span className="text-sm text-muted-foreground">Source-available, Elastic License 2.0</span>
           </div>
           <p className="text-xs text-muted-foreground">
-            The streaming engine for AI agents.
+            The live knowledge graph for AI agents.
           </p>
         </div>
       </div>

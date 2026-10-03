@@ -1,6 +1,6 @@
 # inputlayer-client-dev
 
-Python Object-Logic Mapper (OLM) for [InputLayer](https://github.com/inputlayer/inputlayer) - the streaming engine for AI agents.
+Python Object-Logic Mapper (OLM) for [InputLayer](https://github.com/inputlayer/inputlayer) - the live knowledge graph for AI agents.
 
 Write Python. No query syntax required. The OLM compiles typed Python classes into InputLayer queries over WebSocket.
 

@@ -24,7 +24,7 @@ export function UseCasesIndexClient({ useCases }: UseCasesIndexClientProps) {
     <PageLayout>
       <ContentHero
         heading="Use Cases"
-        subtitle="Agents that act on a world that keeps changing: what changes under each one, and what streaming gives it."
+        subtitle="Agents that act on a world that keeps changing: what changes under each one, and what InputLayer knows for it."
       />
 
       <section className="mx-auto max-w-6xl px-6 py-12">
@@ -57,8 +57,8 @@ export function UseCasesIndexClient({ useCases }: UseCasesIndexClientProps) {
       </section>
 
       <CTABanner
-        heading="Turn one batch agent into a streaming agent"
-        description="Self-hosted and source-available under the Elastic License 2.0. Install the engine and watch an agent react to changes in a few minutes."
+        heading="Models think. InputLayer knows."
+        description="The live knowledge graph for AI agents. Self-hosted and source-available under the Elastic License 2.0."
         buttons={[
           { label: "Quickstart", href: "/docs/guides/quickstart/" },
           { label: "Read the docs", href: "/docs/", variant: "secondary" },

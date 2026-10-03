@@ -3,9 +3,8 @@ import type { ReactNode } from "react"
 import { ArrowRight } from "lucide-react"
 import { SiteHeader } from "@/components/site-header"
 import { SiteFooter } from "@/components/site-footer"
-import { StatCard } from "@/components/stat-card"
 import { ComparisonTable } from "@/components/comparison-table"
-import { BatchVsStreamingDiagram } from "@/components/batch-vs-streaming-diagram"
+import { BatchVsLiveDiagram } from "@/components/batch-vs-live-diagram"
 import { highlightToHtml } from "@/lib/syntax-highlight"
 import { highlightGeneric } from "@/lib/generic-highlight"
 
@@ -15,22 +14,23 @@ const CONTACT_URL = "mailto:sam@inputlayer.ai?subject=Design-partner%20evaluatio
 
 // ── Code samples ────────────────────────────────────────────────────────
 
-const batchAgentCode = `while ticket.open:                    # every turn / every 5 min
+const todayAgentCode = `while ticket.open:                    # every turn / every 5 min
     order  = oms.get_order(id)        # re-fetch
     eta    = carrier.get_eta(order)   # re-fetch
     policy = policies.eligibility(c)  # re-fetch
-    ok = eta > order.promised and policy.allows("expedite")
+    prompt = render(order, eta, policy)  # stuff it, again
+    ok     = llm.decide(prompt)       # the model re-derives it
     ...
 # + one cache-invalidation handler per upstream event
 # + the handler nobody wrote for the rare case
 # + a cron job that recomputes everything`
 
-const streamingRulesCode = `// rules, written once
+const rulesCode = `// rules, written once
 +late(O) <- shipment(O,S), eta(S,T), promised(O,P), T > P
 +can_offer(O,C) <- late(O), customer(O,C),
                    eligible(C, "expedite")`
 
-const streamingAgentCode = `# agent: react to what changed
+const agentCode = `# agent: told what changed, no re-reading
 for change in kg.watch("?can_offer(O, C)"):
     for row in change.added:   offer(row)
     for row in change.removed: withdraw(row)`
@@ -87,9 +87,9 @@ const secondaryButton =
 // ── Page ─────────────────────────────────────────────────────────────────
 
 export default function LandingPage() {
-  const batchHtml = highlightGeneric(batchAgentCode, "python") ?? batchAgentCode
-  const rulesHtml = highlightToHtml(streamingRulesCode)
-  const agentHtml = highlightGeneric(streamingAgentCode, "python") ?? streamingAgentCode
+  const todayHtml = highlightGeneric(todayAgentCode, "python") ?? todayAgentCode
+  const rulesHtml = highlightToHtml(rulesCode)
+  const agentHtml = highlightGeneric(agentCode, "python") ?? agentCode
 
   return (
     <div className="flex flex-col min-h-dvh">
@@ -101,131 +101,88 @@ export default function LandingPage() {
           <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent" />
           <div className="relative mx-auto max-w-6xl px-6 py-24 lg:py-32">
             <p className="font-mono text-sm font-medium uppercase tracking-wider text-primary">
-              The streaming engine for AI agents
+              The live knowledge graph for AI agents
             </p>
-            <h1 className="mt-4 text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.08] max-w-4xl">
-              Agents that react in milliseconds,
-              <br className="hidden sm:block" /> <span className="text-primary">not on the next run.</span>
+            <h1 className="mt-4 text-5xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight leading-[1.05] max-w-4xl">
+              Models think.
+              <br className="hidden sm:block" /> <span className="text-primary">InputLayer knows.</span>
             </h1>
-            <p className="mt-6 text-lg text-muted-foreground max-w-3xl">
-              Today&apos;s agents are batch jobs. They wake up, re-read everything, reason, act and go back to sleep:
-              stale between runs, slow to react, and paying to recompute what didn&apos;t change. InputLayer makes your
-              agents streaming. Every change is reasoned over the moment it lands, only what changed is recomputed, and a
-              conclusion that stops being true is withdrawn right away.
+            <p className="mt-6 text-xl sm:text-2xl font-semibold max-w-3xl">
+              A fact changes. InputLayer derives what it means for your agent, without another prompt.
+            </p>
+            <p className="mt-4 text-lg text-muted-foreground max-w-3xl">
+              InputLayer applies your rules as facts change, updating what your agent should say or do, even while other
+              work continues. Keep your models and framework; connect them to current results and evidence.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <a href="#start" className={primaryButton}>
-                Turn one batch agent into a streaming agent
+              <Link href={QUICKSTART_URL} className={primaryButton}>
+                Quickstart
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
-              </a>
+              </Link>
               <a href="#how" className={secondaryButton}>
                 See how it works
               </a>
             </div>
-            <p className="mt-6 text-xs text-muted-foreground">
+            <p className="mt-6 text-xs text-muted-foreground max-w-3xl">
+              &ldquo;Knows&rdquo; means accepted facts plus rule-derived conclusions; source freshness and delivery
+              still apply.
+            </p>
+            <p className="mt-2 text-xs text-muted-foreground">
               Self-hosted · source-available under the Elastic License 2.0 · Rust engine with Python and JS SDKs
             </p>
           </div>
         </section>
 
-        {/* ── The problem ────────────────────────────────────────────── */}
-        <Section
-          eyebrow="The problem"
-          title={
-            <>
-              Your data stack went streaming years ago.
-              <br className="hidden sm:block" /> Your agents are the last batch jobs left.
-            </>
-          }
-        >
-          <Card className="overflow-x-auto">
-            <BatchVsStreamingDiagram />
-          </Card>
-          <p className="mt-6 text-muted-foreground max-w-3xl">
-            Nightly ETL became streaming. Cron jobs became event-driven services. Full refreshes became incremental
-            views. Agents are still built the old way: a trigger fires, the agent fetches the world, reasons over all of
-            it, acts, and stops. Everything that changes before the next trigger is invisible.
-          </p>
-        </Section>
-
-        {/* ── Why streaming agents ───────────────────────────────────── */}
-        <Section eyebrow="Why streaming agents" title="Three things batch agents can't do">
+        {/* ── The stack line ─────────────────────────────────────────── */}
+        <Section eyebrow="Where it sits" title="Decision models judge. Language models think. InputLayer knows.">
           <div className="grid gap-6 md:grid-cols-3">
             {[
               {
-                mark: "ms",
-                title: "React when it happens, not when the cron fires",
-                body: "A batch agent learns about a change on its next run, seconds to hours later. A streaming agent knows within milliseconds and can act while it still matters.",
+                tag: "Decision models",
+                title: "Judge",
+                body: "Small models that turn messy input into a typed choice: which question was asked, which command was meant.",
               },
               {
-                mark: "−1",
-                title: "Never act on something that stopped being true",
-                body: "Batch agents see what's there and miss what disappeared: the cancelled order, the revoked approval, the delay that cleared. InputLayer withdraws a conclusion the moment its last reason goes away.",
+                tag: "Language models",
+                title: "Think",
+                body: "Language, planning and judgement in situations nobody wrote a rule for. They write the sentence and the plan.",
               },
               {
-                mark: "Δ",
-                title: "Pay for change, not for re-reading the world",
-                body: "Batch cost grows with data volume × how often you run. Streaming cost grows with what actually changed. Fewer recomputes, fewer fetches, fewer tokens spent re-deriving the same answer.",
+                tag: "InputLayer",
+                title: "Knows",
+                body: "The facts you supply and what your rules derive from them, kept current as facts change, with the evidence behind each answer.",
               },
-            ].map((reason) => (
-              <Card key={reason.title} className="space-y-3">
-                <p aria-hidden="true" className="font-mono text-3xl font-medium leading-none text-primary">
-                  {reason.mark}
-                </p>
-                <h3 className="text-base font-semibold">{reason.title}</h3>
-                <p className="text-sm text-muted-foreground">{reason.body}</p>
+            ].map((job) => (
+              <Card key={job.tag} className="space-y-3">
+                <Tag tone={job.tag === "InputLayer" ? "ok" : "neutral"}>{job.tag}</Tag>
+                <h3 className="text-2xl font-bold">{job.title}</h3>
+                <p className="text-sm text-muted-foreground">{job.body}</p>
               </Card>
             ))}
           </div>
-          <Card className="mt-6 space-y-3">
-            <h3 className="text-base font-semibold">The math every lead runs in their head</h3>
-            <p className="text-muted-foreground">
-              10,000 open support tickets. The agent re-checks each one every 5 minutes. That is{" "}
-              <strong className="text-foreground">2.9 million evaluations a day</strong>, almost all on tickets where
-              nothing changed, and it is still up to 5 minutes late on the ones that did. A streaming agent works only on
-              the tickets whose facts changed, at the moment they change.
-            </p>
-            <p className="text-xs text-muted-foreground">Illustrative arithmetic, not a benchmark.</p>
-          </Card>
+          <p className="mt-6 text-muted-foreground max-w-3xl">
+            Three jobs, three measures. Models interpret, rules derive, and your application acts.
+          </p>
         </Section>
 
-        {/* ── How it works ───────────────────────────────────────────── */}
-        <Section id="how" eyebrow="How it works" title="Feed it facts. Write the rules once. React to what changes.">
-          <ol className="grid gap-6 md:grid-cols-3">
-            {[
-              {
-                tag: "1 · Stream facts in",
-                title: "From the systems you already run",
-                body: "Orders, carriers, permissions, inventory: write facts as they change, from CDC, webhooks or your app. Your systems of record stay where they are.",
-              },
-              {
-                tag: "2 · Declare the reasoning",
-                title: "Rules, not glue code",
-                body: "\"An order is late if its ETA passed its promise.\" \"A replacement may be offered if the order is late and the customer is eligible.\" Rules chain, recurse and combine with vector similarity.",
-              },
-              {
-                tag: "3 · React to changes",
-                title: "Your agent gets only what changed",
-                body: "When a fact changes, InputLayer updates just the affected conclusions and tells the agent what was added and what was withdrawn, with the facts and rules behind each one.",
-              },
-            ].map((step) => (
-              <li key={step.tag} className="rounded-xl border border-border bg-card p-6 min-w-0 space-y-3">
-                <Tag>{step.tag}</Tag>
-                <h3 className="text-base font-semibold">{step.title}</h3>
-                <p className="text-sm text-muted-foreground">{step.body}</p>
-              </li>
-            ))}
-          </ol>
+        {/* ── The shift ──────────────────────────────────────────────── */}
+        <Section eyebrow="The shift" title="Separate knowing from thinking">
+          <p className="text-muted-foreground max-w-3xl">
+            Every turn, agents ask the model things the system already knows: is this order late, is this customer
+            eligible, what else is affected. With InputLayer, facts and rules live outside the prompt, so the agent is
+            not limited by the context window. Facts stream in, your rules derive the answers, and only the answers
+            enter the prompt. The prompt becomes a view, not the store.
+          </p>
 
-          <div className="mt-6 grid gap-6 lg:grid-cols-2">
+          <div className="mt-8 grid gap-6 lg:grid-cols-2">
             <Card>
-              <Tag tone="bad">Batch agent today</Tag>
-              <CodeBlock html={batchHtml} label="Batch agent loop that re-fetches every input on every turn" />
+              <Tag tone="bad">Today: the model knows nothing until told, every turn</Tag>
+              <CodeBlock html={todayHtml} label="Agent loop that re-fetches every input and re-derives the answer on every turn" />
             </Card>
             <Card>
-              <Tag tone="ok">Streaming agent with InputLayer</Tag>
+              <Tag tone="ok">With InputLayer: the graph knows, the model thinks</Tag>
               <CodeBlock html={rulesHtml} label="Rules written once" />
-              <CodeBlock html={agentHtml} label="Agent loop that reacts to added and removed rows" />
+              <CodeBlock html={agentHtml} label="Agent loop that is told which answers were added and withdrawn" />
               <p className="mt-3 text-xs text-muted-foreground">
                 The SDK form shown is the upcoming release; standing queries run over the{" "}
                 <Link href={WEBSOCKET_DOCS_URL} className="text-primary hover:underline">
@@ -237,85 +194,206 @@ export default function LandingPage() {
           </div>
 
           <p className="mt-8 border-l-4 border-primary pl-4 text-lg font-semibold max-w-3xl">
-            Deleted: the re-fetching, the invalidation handlers, the recompute job, the polling loop. Added: a few rules
-            and one watch.
+            Deleted: the re-fetching, the prompt stuffing, the invalidation handlers, the recompute job. Added: a few
+            rules and one watch.
           </p>
         </Section>
 
-        {/* ── Proof ──────────────────────────────────────────────────── */}
-        <Section eyebrow="Proof" title="Measured, not promised">
-          <div className="grid gap-6 md:grid-cols-3">
-            <StatCard
-              value="5 ms"
-              description="typical time from a committed change to the agent receiving the update (13 ms worst case), warm, engine-side"
-            />
-            <StatCard
-              value="96"
-              description="on real retail data in our streaming-agents benchmark, checked after every change"
-            />
-            <StatCard
-              value="100%"
-              description="of live answers equal to a fresh full query at every checkpoint; every withdrawal check passed"
-            />
+        {/* ── Why engineers adopt it ─────────────────────────────────── */}
+        <Section eyebrow="Why engineers adopt it" title="Four reasons to move knowing out of the prompt">
+          <div className="grid gap-6 md:grid-cols-2">
+            {[
+              {
+                title: "Current, exact answers",
+                body: "A fact changes and the affected conclusions update, including the ones that stop being true, with the facts and rules behind each.",
+              },
+              {
+                title: "Not limited by the context window",
+                body: "Facts and rules live outside the prompt; only the derived answers go in. Fewer tokens, nothing lost in the middle.",
+              },
+              {
+                title: "A deterministic fast path",
+                body: "A small intent model picks which known question was asked; the engine answers it exactly from live facts, with no generative model on that path. Open questions still go to the LLM.",
+              },
+              {
+                title: "Fits the stack you have",
+                body: "LangGraph memory, state and checkpointer; LangChain tool and retriever; an OpenAI-compatible fact-checking gateway; and change triggers your agent can wake on.",
+              },
+            ].map((reason, i) => (
+              <Card key={reason.title} className="space-y-3">
+                <p aria-hidden="true" className="font-mono text-sm font-medium text-primary">
+                  {String(i + 1).padStart(2, "0")}
+                </p>
+                <h3 className="text-base font-semibold">{reason.title}</h3>
+                <p className="text-sm text-muted-foreground">{reason.body}</p>
+              </Card>
+            ))}
+          </div>
+        </Section>
+
+        {/* ── How it works: the fast path ────────────────────────────── */}
+        <Section id="how" eyebrow="How it works" title="A fast path for what your system already knows">
+          <ol className="grid gap-4 md:grid-cols-4">
+            {[
+              { tag: "1 · Ask", body: "\"Where's order 4821, can it still make Friday?\"" },
+              { tag: "2 · Pick the question", body: "A small intent model maps it to a known question: ask_status(4821)." },
+              { tag: "3 · Answer exactly", body: "InputLayer answers \"due Thursday\" from live facts, with the facts and rules behind it." },
+              { tag: "4 · Speak", body: "A template speaks the answer. No generative model on this path." },
+            ].map((step) => (
+              <li key={step.tag} className="rounded-xl border border-border bg-card p-5 min-w-0 space-y-2">
+                <Tag>{step.tag}</Tag>
+                <p className="text-sm">{step.body}</p>
+              </li>
+            ))}
+          </ol>
+
+          <div className="mt-6 grid gap-6 lg:grid-cols-2">
+            <Card className="space-y-3">
+              <Tag tone="ok">The world changes mid-sentence</Tag>
+              <p className="text-sm text-muted-foreground">
+                The carrier update lands while the agent is speaking. The old answer is withdrawn, the unplayed audio is
+                dropped, and the agent says <strong className="text-foreground">&ldquo;Correction: Friday&rdquo;</strong>{" "}
+                while a carrier check runs in parallel. No new turn, no new prompt.
+              </p>
+            </Card>
+            <Card className="space-y-3">
+              <Tag>Open questions take the slow path</Tag>
+              <p className="text-sm text-muted-foreground">
+                &ldquo;Why is it late, and what would you do?&rdquo; goes to the LLM, with the current answers already in
+                its context. Only open questions go to the LLM; known ones never wait for it.
+              </p>
+            </Card>
           </div>
           <p className="mt-6 text-xs text-muted-foreground max-w-3xl">
-            Preliminary results from a shared development machine; official numbers will be published from a dedicated
-            benchmark host with raw samples. Model latency and ingestion are on top of engine time.
+            The voice agent is our flagship demo and is being built on today&apos;s standing queries. On the fast path a
+            wrong answer can only come from a wrong fact or a wrong route, and both are inspectable.
           </p>
         </Section>
 
-        {/* ── Where it fits ──────────────────────────────────────────── */}
-        <Section eyebrow="Where it fits" title="Built for agents that act on a world that keeps changing">
+        {/* ── Fits your stack ────────────────────────────────────────── */}
+        <Section eyebrow="Fits your stack" title="Keep your models and framework">
+          <ComparisonTable
+            rowHeader="Integration"
+            align="left"
+            columns={["What it gives your agent"]}
+            rows={[
+              {
+                capability: "LangGraph memory, state and checkpointer",
+                values: {
+                  "What it gives your agent": "Graph state, semantic memory and resumable checkpoints stored as facts, with routing by rules",
+                },
+              },
+              {
+                capability: "LangChain tool and retriever",
+                values: {
+                  "What it gives your agent": "Typed tools generated from your relations and a retriever over derived answers; the model never writes queries",
+                },
+              },
+              {
+                capability: "OpenAI-compatible fact-checking gateway",
+                values: {
+                  "What it gives your agent": "Point any OpenAI SDK at it; conversations become facts and your rules check them, with quoted evidence",
+                },
+              },
+              {
+                capability: "Change triggers",
+                values: {
+                  "What it gives your agent": "Standing queries that tell your agent which answers were added and withdrawn, so it wakes on change",
+                },
+              },
+            ]}
+          />
+          <p className="mt-6 text-sm text-muted-foreground max-w-3xl">
+            Keep your LLM, your vector store for documents and your systems of record. See the{" "}
+            <Link href="/docs/guides/langgraph/" className="text-primary hover:underline">
+              LangGraph
+            </Link>
+            ,{" "}
+            <Link href="/docs/guides/langchain/" className="text-primary hover:underline">
+              LangChain
+            </Link>{" "}
+            and{" "}
+            <Link href="/docs/guides/verified-completions/" className="text-primary hover:underline">
+              gateway
+            </Link>{" "}
+            guides.
+          </p>
+        </Section>
+
+        {/* ── Why now ────────────────────────────────────────────────── */}
+        <Section
+          eyebrow="Why now"
+          title={
+            <>
+              Your data stack went live years ago.
+              <br className="hidden sm:block" /> Your agents are the last batch jobs left.
+            </>
+          }
+        >
+          <Card className="overflow-x-auto">
+            <BatchVsLiveDiagram />
+          </Card>
+          <p className="mt-6 text-muted-foreground max-w-3xl">
+            Nightly ETL became change data capture. Cron jobs became event-driven services. Full refreshes became
+            incremental views. Agents are still built the old way: a trigger fires, the agent fetches the world, reasons
+            over all of it, acts, and stops. Everything that changes before the next trigger is invisible. A live
+            knowledge graph closes that gap.
+          </p>
+        </Section>
+
+        {/* ── Who it is for ──────────────────────────────────────────── */}
+        <Section eyebrow="Who it is for" title="Built for agents that act on a world that keeps changing">
           <ComparisonTable
             rowHeader="Agent"
             align="left"
-            columns={["What changes under it", "What streaming gives you"]}
+            columns={["What changes under it", "What InputLayer knows for it"]}
             rows={[
               {
                 capability: "Support & customer service",
                 values: {
                   "What changes under it": "Order status, ETAs, refunds, eligibility",
-                  "What streaming gives you": "Promises that stay true while the ticket is open",
+                  "What InputLayer knows for it": "Which promises still hold while the ticket is open",
                 },
               },
               {
                 capability: "Fulfilment & logistics",
                 values: {
                   "What changes under it": "Carrier events, stock, capacity",
-                  "What streaming gives you": "Re-plans the moment a shipment slips",
+                  "What InputLayer knows for it": "Which shipments slipped and what they affect",
                 },
               },
               {
                 capability: "Risk, fraud & compliance",
                 values: {
                   "What changes under it": "Transactions, sanctions, approvals",
-                  "What streaming gives you": "Blocks and releases as soon as the facts change",
+                  "What InputLayer knows for it": "Which flags hold now, and which were withdrawn",
                 },
               },
               {
                 capability: "Operations & monitoring",
                 values: {
                   "What changes under it": "Metrics, incidents, dependencies",
-                  "What streaming gives you": "Root cause and impact recomputed per event, not per sweep",
+                  "What InputLayer knows for it": "Root cause and impact, updated per event, not per sweep",
                 },
               },
               {
-                capability: "Voice & real-time assistants",
+                capability: "Voice & live assistants",
                 values: {
                   "What changes under it": "What the user just said, what the world just did",
-                  "What streaming gives you": "Corrects itself mid-sentence instead of on the next turn",
+                  "What InputLayer knows for it": "The current answer, so the agent can correct itself mid-sentence",
                 },
               },
             ]}
           />
           <p className="mt-6 text-sm text-muted-foreground max-w-3xl">
-            Keep your LLM, your vector store for documents and your systems of record. InputLayer is the streaming layer
-            between your data and your agent&apos;s decisions.
+            A good fit when the agent acts on structured facts that change, the answer is derived through a chain of facts
+            or rules, a stale answer has a real cost, and the agent lives long enough for the world to change under it.
+            Document chat and one-shot Q&amp;A are better served by retrieval alone.
           </p>
         </Section>
 
         {/* ── Compared with what you'd build yourself ────────────────── */}
-        <Section eyebrow="Compared with what you'd build yourself" title="The streaming layer agents never had">
+        <Section eyebrow="Compared with what you'd build yourself" title="What each option knows when a fact changes">
           <ComparisonTable
             rowHeader=""
             align="left"
@@ -372,13 +450,12 @@ export default function LandingPage() {
         </Section>
 
         {/* ── Get started ────────────────────────────────────────────── */}
-        <Section id="start" eyebrow="Get started" title="Turn one batch agent into a streaming agent">
+        <Section id="start" eyebrow="Get started" title="Give your agent a live knowledge graph">
           <div className="grid gap-6 lg:grid-cols-2">
             <Card className="space-y-3">
               <h3 className="text-base font-semibold">Run it yourself</h3>
               <p className="text-sm text-muted-foreground">
-                Install the engine, load a sample, and watch an agent react to changes in a few minutes. Free to
-                self-host.
+                Install the engine, load a sample, and watch conclusions change as facts do. Free to self-host.
               </p>
               <div className="flex flex-wrap gap-3 pt-2">
                 <Link href={QUICKSTART_URL} className={primaryButton}>
@@ -393,7 +470,7 @@ export default function LandingPage() {
             <Card className="space-y-3">
               <h3 className="text-base font-semibold">Design-partner evaluation</h3>
               <p className="text-sm text-muted-foreground">
-                Bring one batch agent. In four weeks we turn it into a streaming agent on your data and measure the
+                Bring one agent. In four weeks we move what it knows into InputLayer on your data and measure the
                 difference in freshness, correctness and cost.
               </p>
               <div className="flex flex-wrap gap-3 pt-2">

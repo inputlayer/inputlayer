@@ -56,8 +56,8 @@ export function CustomersIndexClient({ stories }: CustomersIndexClientProps) {
       </section>
 
       <CTABanner
-        heading="Turn one batch agent into a streaming agent"
-        description="Self-hosted and source-available under the Elastic License 2.0. Install the engine and watch an agent react to changes in a few minutes."
+        heading="Models think. InputLayer knows."
+        description="The live knowledge graph for AI agents. Self-hosted and source-available under the Elastic License 2.0."
         buttons={[
           { label: "Quickstart", href: "/docs/guides/quickstart/" },
           { label: "Read the docs", href: "/docs/", variant: "secondary" },

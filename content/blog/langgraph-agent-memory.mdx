@@ -15,7 +15,7 @@ This post walks through `InputLayerMemory`, a LangGraph component that stores co
 
 ## The idea: facts + rules = derived memory
 
-[InputLayer](https://github.com/inputlayer/inputlayer) is the streaming engine for AI agents. You give it facts, write rules over them, and it keeps all derived conclusions up to date as new facts arrive. When you add a new turn, only the conclusions touched by that turn get recomputed, so the semantic layer stays in sync with the conversation instead of being rebuilt from scratch on every reply.
+[InputLayer](https://github.com/inputlayer/inputlayer) is the live knowledge graph for AI agents. You give it facts, write rules over them, and it keeps all derived conclusions up to date as new facts arrive. When you add a new turn, only the conclusions touched by that turn get recomputed, so the semantic layer stays in sync with the conversation instead of being rebuilt from scratch on every reply.
 
 `InputLayerMemory` is a [LangGraph](https://github.com/langchain-ai/langgraph) component that stores conversation turns as **facts** and uses **rules** to derive what's relevant. You drop it into your graph as a node, and it handles the storage and retrieval for you.
 

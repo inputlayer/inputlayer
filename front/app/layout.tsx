@@ -7,9 +7,9 @@ import { ThemeProvider } from "@/components/theme-provider"
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist-sans" })
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" })
 
-const siteTitle = "InputLayer - The streaming engine for AI agents"
+const siteTitle = "InputLayer - The live knowledge graph for AI agents"
 const siteDescription =
-  "Agents that react in milliseconds, not on the next run. InputLayer makes your agents streaming: every change is reasoned over the moment it lands, only what changed is recomputed, and a conclusion that stops being true is withdrawn right away."
+  "Models think. InputLayer knows. A fact changes. InputLayer derives what it means for your agent, without another prompt. Keep your models and framework; connect them to current results and evidence."
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://inputlayer.ai"),

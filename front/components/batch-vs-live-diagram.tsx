@@ -1,5 +1,5 @@
 // Two timelines: a batch agent that only sees changes when its next run fires,
-// and a streaming agent that reacts to each change as it lands.
+// and a live agent that is told about each change as it lands.
 
 const changes = [160, 330, 470, 610, 790]
 const runs = [
@@ -14,16 +14,16 @@ const changeLabels = [
   { x: 760, text: "stock runs out" },
 ]
 
-export function BatchVsStreamingDiagram() {
+export function BatchVsLiveDiagram() {
   return (
     <svg
       viewBox="0 0 1000 300"
       role="img"
-      aria-labelledby="batch-vs-streaming-title"
+      aria-labelledby="batch-vs-live-title"
       className="block h-auto w-full min-w-[640px] text-foreground"
     >
-      <title id="batch-vs-streaming-title">
-        A batch agent is blind between runs; a streaming agent reacts to each change
+      <title id="batch-vs-live-title">
+        A batch agent is blind between runs; a live agent is told about each change
       </title>
       <defs>
         <marker id="bvs-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
@@ -33,7 +33,7 @@ export function BatchVsStreamingDiagram() {
 
       <g fill="currentColor" fontSize="15" fontWeight="700">
         <text x="0" y="24">Batch agent</text>
-        <text x="0" y="168">Streaming agent</text>
+        <text x="0" y="168">Live agent</text>
       </g>
 
       <g stroke="currentColor" strokeOpacity="0.35" strokeWidth="2">
@@ -69,7 +69,7 @@ export function BatchVsStreamingDiagram() {
         <text x="660" y="52">blind until next run</text>
       </g>
 
-      {/* Streaming lane: every change produces a reaction */}
+      {/* Live lane: every change reaches the agent */}
       <g fill="var(--destructive)">
         {changes.map((cx) => (
           <circle key={cx} cx={cx} cy="226" r="5" />
@@ -80,8 +80,8 @@ export function BatchVsStreamingDiagram() {
           <line key={x} x1={x} y1="226" x2={x} y2="262" markerEnd="url(#bvs-arrow)" />
         ))}
       </g>
-      <text x="120" y="290" fill="currentColor" fillOpacity="0.7" fontSize="12.5">
-        agent reacts within milliseconds of every change, including the ones that make a conclusion false
+      <text x="160" y="290" fill="currentColor" fillOpacity="0.7" fontSize="12.5">
+        the agent is told what changed, including the conclusions that stopped being true
       </text>
     </svg>
   )

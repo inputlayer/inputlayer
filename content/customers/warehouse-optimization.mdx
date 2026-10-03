@@ -8,7 +8,7 @@ keyMetric: "<50ms reasoning latency"
 
 A European appliance manufacturer needed sub-50ms routing decisions for their warehouse picking robots. Their existing databases handled inventory tracking and order management well. The problem was the gap between them: when a robot needed the optimal route, application code had to pull from inventory, cross-reference with order priorities, factor in the warehouse layout, and compute a path. That added hundreds of milliseconds per decision.
 
-They added InputLayer as the streaming layer between those systems and the routing decisions. Warehouse layout, inventory positions, and order priorities are ingested as facts. The routing logic is expressed as rules. Result: sub-50ms query latency, down from hundreds of milliseconds.
+They added InputLayer as a live knowledge graph between those systems and the routing decisions. Warehouse layout, inventory positions, and order priorities are ingested as facts. The routing logic is expressed as rules. Result: sub-50ms query latency, down from hundreds of milliseconds.
 
 ## The challenge
 

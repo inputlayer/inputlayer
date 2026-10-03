@@ -4,9 +4,9 @@ title: InputLayer Documentation
 
 # InputLayer
 
-**The streaming engine for AI agents.** Agents that react in milliseconds, not on the next run.
+**The live knowledge graph for AI agents.** Models think. InputLayer knows.
 
-Today's agents are batch jobs: they wake up, re-read everything, reason, act and go back to sleep. InputLayer makes them streaming. You write facts as they change and declare the reasoning as rules - compatibility, ownership, access policies - and the engine derives what follows. When a fact changes, only the affected conclusions are recomputed, a conclusion that stops being true is withdrawn right away, and every result traces back to the rules and facts that produced it.
+A fact changes. InputLayer derives what it means for your agent, without another prompt. You write facts as they change and declare the reasoning as rules - compatibility, ownership, access policies - and the engine derives what follows. Facts and rules live outside the prompt, so your agent is not limited by the context window: when a fact changes, only the affected conclusions are recomputed, a conclusion that stops being true is withdrawn, and every result traces back to the rules and facts that produced it.
 
 These docs cover the mechanism: facts, rules, queries, and the [standing queries](/docs/guides/websocket-api) (subscriptions) that push changes to your agent.
 

@@ -1,6 +1,6 @@
 # InputLayer Benchmarks
 
-InputLayer is the streaming engine for AI agents, built on Differential Dataflow. This file records engine microbenchmarks for the techniques underneath it: Magic Sets for demand-driven recursive queries (up to 1,587x faster than full materialization), correct retraction through recursive fixpoints, and sub-50ms multi-hop deductive queries over knowledge graphs.
+InputLayer is the live knowledge graph for AI agents, built on Differential Dataflow. This file records engine microbenchmarks for the techniques underneath it: Magic Sets for demand-driven recursive queries (up to 1,587x faster than full materialization), correct retraction through recursive fixpoints, and sub-50ms multi-hop deductive queries over knowledge graphs.
 
 These are Criterion in-process microbenchmarks (`cargo bench`): means, used for diagnosis and comparison with other systems. The acceptance check for latency and throughput regressions is the performance gate (`make perf-gate`, see [`perf-gate/README.md`](perf-gate/README.md)), which measures p50/p99 end to end over the WebSocket protocol.
 
