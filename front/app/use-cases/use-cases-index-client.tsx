@@ -24,7 +24,7 @@ export function UseCasesIndexClient({ useCases }: UseCasesIndexClientProps) {
     <PageLayout>
       <ContentHero
         heading="Use Cases"
-        subtitle="See how teams use InputLayer to build AI applications that require reasoning, not just retrieval."
+        subtitle="Agents that act on a world that keeps changing: what changes under each one, and what streaming gives it."
       />
 
       <section className="mx-auto max-w-6xl px-6 py-12">
@@ -57,10 +57,10 @@ export function UseCasesIndexClient({ useCases }: UseCasesIndexClientProps) {
       </section>
 
       <CTABanner
-        heading="See InputLayer in action"
-        description="Try the interactive demo or read the documentation to get started."
+        heading="Turn one batch agent into a streaming agent"
+        description="Self-hosted and source-available under the Elastic License 2.0. Install the engine and watch an agent react to changes in a few minutes."
         buttons={[
-          { label: "Launch demo", href: "https://demo.inputlayer.ai", external: true },
+          { label: "Quickstart", href: "/docs/guides/quickstart/" },
           { label: "Read the docs", href: "/docs/", variant: "secondary" },
         ]}
       />

@@ -12,8 +12,13 @@ const cellConfig: Record<CellValue, { icon: React.ReactNode; label?: string }> =
   none: { icon: <XCircle className="h-4 w-4 text-muted-foreground/40" /> },
 }
 
-function ComparisonCell({ value }: { value: CellValue }) {
-  const config = cellConfig[value] ?? cellConfig.none
+function isCellValue(value: string): value is CellValue {
+  return value in cellConfig
+}
+
+function ComparisonCell({ value }: { value: string }) {
+  if (!isCellValue(value)) return <span>{value}</span>
+  const config = cellConfig[value]
   return (
     <span className="inline-flex flex-col items-center gap-0.5">
       {config.icon}
@@ -24,26 +29,30 @@ function ComparisonCell({ value }: { value: CellValue }) {
 
 interface ComparisonRow {
   capability: string
-  values: Record<string, CellValue>
+  // A CellValue renders as an icon; any other string renders as text.
+  values: Record<string, CellValue | string>
 }
 
 interface ComparisonTableProps {
   columns: string[]
   highlightColumn?: string
   rows: ComparisonRow[]
+  rowHeader?: string
+  align?: "center" | "left"
 }
 
-export function ComparisonTable({ columns, highlightColumn, rows }: ComparisonTableProps) {
+export function ComparisonTable({ columns, highlightColumn, rows, rowHeader = "Capability", align = "center" }: ComparisonTableProps) {
+  const alignClass = align === "left" ? "text-left" : "text-center"
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="border-b border-border">
-            <th className="text-left py-3 px-4 font-semibold">Capability</th>
+            <th className="text-left py-3 px-4 font-semibold">{rowHeader}</th>
             {columns.map((col) => (
               <th
                 key={col}
-                className={`text-center py-3 px-4 font-semibold ${
+                className={`${alignClass} py-3 px-4 font-semibold ${
                   col === highlightColumn ? "text-primary" : "text-muted-foreground"
                 }`}
               >
@@ -55,12 +64,25 @@ export function ComparisonTable({ columns, highlightColumn, rows }: ComparisonTa
         <tbody>
           {rows.map((row) => (
             <tr key={row.capability} className="border-b border-border/50">
-              <td className="py-3 px-4">{row.capability}</td>
+              <td className={`py-3 px-4 ${align === "left" ? "align-top font-medium" : ""}`}>{row.capability}</td>
               {columns.map((col) => (
-                <td key={col} className="py-3 px-4 text-center">
-                  <span className="inline-flex justify-center w-full">
+                <td
+                  key={col}
+                  className={`py-3 px-4 ${alignClass} ${
+                    align === "left"
+                      ? col === highlightColumn
+                        ? "align-top font-medium"
+                        : "align-top text-muted-foreground"
+                      : ""
+                  }`}
+                >
+                  {align === "left" ? (
                     <ComparisonCell value={row.values[col] || "none"} />
-                  </span>
+                  ) : (
+                    <span className="inline-flex justify-center w-full">
+                      <ComparisonCell value={row.values[col] || "none"} />
+                    </span>
+                  )}
                 </td>
               ))}
             </tr>

@@ -1,549 +1,410 @@
-"use client"
-
 import Link from "next/link"
-import { useState, useEffect } from "react"
+import type { ReactNode } from "react"
+import { ArrowRight } from "lucide-react"
 import { SiteHeader } from "@/components/site-header"
 import { SiteFooter } from "@/components/site-footer"
-import { EmbeddingDiagram, DiamondDiagram, WaterfallDiagram, ProvenanceTreeDiagram, VisualCodeTabs, HeroVisualization } from "@/components/landing-diagrams"
-import { RotatingHero } from "@/components/rotating-hero"
+import { StatCard } from "@/components/stat-card"
 import { ComparisonTable } from "@/components/comparison-table"
-import {
-  ArrowRight,
-  ExternalLink,
-  Zap,
-  Shield,
-  Brain,
-  GitBranch,
-  Copy,
-  Check,
-  Terminal,
-  BookOpen,
-  Server,
-  FileText,
-  Play,
-} from "lucide-react"
+import { BatchVsStreamingDiagram } from "@/components/batch-vs-streaming-diagram"
+import { highlightToHtml } from "@/lib/syntax-highlight"
+import { highlightGeneric } from "@/lib/generic-highlight"
 
-const DEMO_BASE_URL = "https://demo.inputlayer.ai"
+const QUICKSTART_URL = "/docs/guides/quickstart/"
+const WEBSOCKET_DOCS_URL = "/docs/guides/websocket-api/"
+const CONTACT_URL = "mailto:sam@inputlayer.ai?subject=Design-partner%20evaluation"
 
-// ── Syntax-highlighted code blocks ──────────────────────────────────────
+// ── Code samples ────────────────────────────────────────────────────────
 
-const rulesVectorsCode = `// Flight network
-+direct_flight[("new_york", "london", 7.0),
-               ("london", "paris", 1.5),
-               ("paris", "tokyo", 12.0),
-               ("tokyo", "sydney", 9.5)]
+const batchAgentCode = `while ticket.open:                    # every turn / every 5 min
+    order  = oms.get_order(id)        # re-fetch
+    eta    = carrier.get_eta(order)   # re-fetch
+    policy = policies.eligibility(c)  # re-fetch
+    ok = eta > order.promised and policy.allows("expedite")
+    ...
+# + one cache-invalidation handler per upstream event
+# + the handler nobody wrote for the rare case
+# + a cron job that recomputes everything`
 
-// What each destination is like (culture, beach, food, nightlife)
-+destination[("london", [0.82, 0.15, 0.71, 0.68]),
-             ("paris",  [0.88, 0.12, 0.63, 0.95]),
-             ("tokyo",  [0.76, 0.22, 0.85, 0.94]),
-             ("sydney", [0.31, 0.91, 0.42, 0.67])]
+const streamingRulesCode = `// rules, written once
++late(O) <- shipment(O,S), eta(S,T), promised(O,P), T > P
++can_offer(O,C) <- late(O), customer(O,C),
+                   eligible(C, "expedite")`
 
-// If you can get there (even with connections), you can reach it
-+can_reach(A, B) <- direct_flight(A, B, _)
-+can_reach(A, C) <- direct_flight(A, B, _), can_reach(B, C)
+const streamingAgentCode = `# agent: react to what changed
+for change in kg.watch("?can_offer(O, C)"):
+    for row in change.added:   offer(row)
+    for row in change.removed: withdraw(row)`
 
-// Where can I fly from NYC that feels like a beach vacation?
-?can_reach("new_york", Dest),
- destination(Dest, Emb),
- Dist = cosine(Emb, [0.25, 0.95, 0.40, 0.55])
-// -> sydney  0.08  (best match - beaches & outdoors)
-// -> tokyo   0.52
-// -> london  0.61
-// -> paris   0.65
-// Logic finds where you CAN go, search ranks by what you WANT`
+// ── Section building blocks ─────────────────────────────────────────────
 
-const retractionCode = `// Two independent routes to Sydney
-+direct_flight[("new_york", "london", 7.0),
-               ("london", "paris", 1.5),
-               ("paris", "tokyo", 12.0),
-               ("tokyo", "sydney", 9.5),
-               ("london", "dubai", 7.0),
-               ("dubai", "sydney", 11.0)]
-
-+can_reach(A, B) <- direct_flight(A, B, _)
-+can_reach(A, C) <- direct_flight(A, B, _), can_reach(B, C)
-
-?can_reach("new_york", "sydney")
-// -> reachable              (via Tokyo AND via Dubai)
-
-// Dubai route cancelled:
--direct_flight("london", "dubai", 7.0)
-?can_reach("new_york", "sydney")
-// -> reachable              (still reachable via Tokyo)
-
-// Tokyo route also cancelled:
--direct_flight("tokyo", "sydney", 9.5)
-?can_reach("new_york", "sydney")
-// -> No results.            (correctly unreachable)`
-
-const incrementalCode = `+direct_flight[("new_york", "london", 7.0),
-               ("london", "paris", 1.5),
-               ("paris", "tokyo", 12.0),
-               ("tokyo", "sydney", 9.5)]
-
-+can_reach(A, B) <- direct_flight(A, B, _)
-+can_reach(A, C) <- direct_flight(A, B, _), can_reach(B, C)
-
-?can_reach("new_york", Dest)
-// -> london, paris, tokyo, sydney   (4 destinations)
-
-// Add one new route:
-+direct_flight("london", "dubai", 7.0)
-
-?can_reach("new_york", Dest)
-// -> london, paris, tokyo, sydney, dubai
-// Only new connections calculated - not everything from scratch`
-
-const provenanceCode = `+direct_flight[("new_york", "london", 7.0),
-               ("london", "paris", 1.5),
-               ("paris", "tokyo", 12.0),
-               ("tokyo", "sydney", 9.5)]
-
-+can_reach(A, B) <- direct_flight(A, B, _)
-+can_reach(A, C) <- direct_flight(A, B, _), can_reach(B, C)
-
-// How can I get from New York to Sydney?
-.why ?can_reach("new_york", "sydney")
-// [rule] can_reach (clause 1)
-//   [base] direct_flight("new_york", "london", 7.0)
-//   [rule] can_reach("london", "sydney")
-//     [base] direct_flight("london", "paris", 1.5)
-//     [rule] can_reach("paris", "sydney")
-//       [base] direct_flight("paris", "tokyo", 12.0)
-//       [base] direct_flight("tokyo", "sydney", 9.5)
-
-// Why can't I reach São Paulo?
-.why_not can_reach("new_york", "sao_paulo")
-// No flights to "sao_paulo" from anywhere in the network`
-
-const dockerCommand = "docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer"
-
-// ── Helper components ───────────────────────────────────────────────────
-
-function RotatingWord({ words }: { words: string[] }) {
-  const [index, setIndex] = useState(0)
-  useEffect(() => {
-    const timer = setInterval(() => setIndex((i) => (i + 1) % words.length), 2000)
-    return () => clearInterval(timer)
-  }, [words.length])
+function Section({ id, eyebrow, title, children }: { id?: string; eyebrow: string; title: ReactNode; children: ReactNode }) {
+  const headingId = id ? `${id}-heading` : undefined
   return (
-    <span className="inline-block min-w-[80px] text-primary font-semibold transition-opacity duration-300">
-      {words[index]}
-    </span>
+    <section id={id} aria-labelledby={headingId} className="border-b border-border/50 scroll-mt-16">
+      <div className="mx-auto max-w-6xl px-6 py-20">
+        <p className="text-sm font-semibold text-primary uppercase tracking-wider mb-2">{eyebrow}</p>
+        <h2 id={headingId} className="text-3xl font-bold tracking-tight max-w-3xl mb-10">
+          {title}
+        </h2>
+        {children}
+      </div>
+    </section>
   )
 }
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
+function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return <div className={`rounded-xl border border-border bg-card p-6 min-w-0 ${className}`}>{children}</div>
+}
+
+function Tag({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "bad" | "ok" }) {
+  const toneClass =
+    tone === "bad"
+      ? "bg-destructive/15 text-foreground"
+      : tone === "ok"
+        ? "bg-[var(--success)]/20 text-foreground"
+        : "bg-muted text-muted-foreground"
   return (
-    <button
-      onClick={() => {
-        navigator.clipboard.writeText(text)
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
-      }}
-      className="absolute top-3 right-3 inline-flex items-center gap-1.5 rounded-md border border-border bg-background/80 px-2.5 py-1.5 text-xs text-muted-foreground backdrop-blur transition-colors hover:text-foreground hover:bg-background"
+    <span className={`inline-block rounded-full px-2.5 py-0.5 font-mono text-xs ${toneClass}`}>{children}</span>
+  )
+}
+
+function CodeBlock({ html, label }: { html: string; label: string }) {
+  return (
+    <pre
+      aria-label={label}
+      className="mt-3 rounded-lg bg-[var(--code-bg)] p-4 overflow-x-auto text-xs leading-relaxed font-mono"
     >
-      {copied ? (
-        <>
-          <Check className="h-3.5 w-3.5 text-emerald-500" />
-          Copied
-        </>
-      ) : (
-        <>
-          <Copy className="h-3.5 w-3.5" />
-          Copy
-        </>
-      )}
-    </button>
+      <code dangerouslySetInnerHTML={{ __html: html }} />
+    </pre>
   )
 }
+
+const primaryButton =
+  "inline-flex items-center gap-2 rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+const secondaryButton =
+  "inline-flex items-center gap-2 rounded-md border border-border bg-background px-5 py-2.5 text-sm font-medium hover:bg-secondary transition-colors"
 
 // ── Page ─────────────────────────────────────────────────────────────────
 
 export default function LandingPage() {
+  const batchHtml = highlightGeneric(batchAgentCode, "python") ?? batchAgentCode
+  const rulesHtml = highlightToHtml(streamingRulesCode)
+  const agentHtml = highlightGeneric(streamingAgentCode, "python") ?? streamingAgentCode
+
   return (
     <div className="flex flex-col min-h-dvh">
       <SiteHeader />
 
-      {/* ── Hero ───────────────────────────────────────────────────── */}
-      <section className="relative overflow-hidden border-b border-border/50">
-        <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent" />
-        <div className="relative mx-auto max-w-6xl px-6 py-24 lg:py-32">
-          <div className="grid gap-12 lg:grid-cols-2 lg:gap-16 items-center">
-            <div className="space-y-8">
-              <RotatingHero />
-              <p className="text-lg text-muted-foreground max-w-[540px]">
-                Store facts. Write rules. InputLayer draws conclusions, keeps them up to date as things change, and can show exactly how it got every conclusion.
-              </p>
-              <div className="flex flex-wrap gap-3 pt-2">
-                <a
-                  href={`${DEMO_BASE_URL}/demo/request-access?kg=flights`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 rounded-md bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-                >
-                  Try the demo
-                  <ArrowRight className="h-4 w-4" />
-                </a>
-                <Link
-                  href="/docs/"
-                  className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-5 py-2.5 text-sm font-medium hover:bg-secondary transition-colors"
-                >
-                  Read the docs
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </Link>
-              </div>
+      <main className="flex-1">
+        {/* ── Hero ───────────────────────────────────────────────────── */}
+        <section className="relative overflow-hidden border-b border-border/50">
+          <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent" />
+          <div className="relative mx-auto max-w-6xl px-6 py-24 lg:py-32">
+            <p className="font-mono text-sm font-medium uppercase tracking-wider text-primary">
+              The streaming engine for AI agents
+            </p>
+            <h1 className="mt-4 text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.08] max-w-4xl">
+              Agents that react in milliseconds,
+              <br className="hidden sm:block" /> <span className="text-primary">not on the next run.</span>
+            </h1>
+            <p className="mt-6 text-lg text-muted-foreground max-w-3xl">
+              Today&apos;s agents are batch jobs. They wake up, re-read everything, reason, act and go back to sleep:
+              stale between runs, slow to react, and paying to recompute what didn&apos;t change. InputLayer makes your
+              agents streaming. Every change is reasoned over the moment it lands, only what changed is recomputed, and a
+              conclusion that stops being true is withdrawn right away.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <a href="#start" className={primaryButton}>
+                Turn one batch agent into a streaming agent
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </a>
+              <a href="#how" className={secondaryButton}>
+                See how it works
+              </a>
             </div>
-            <div>
-              <HeroVisualization />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Who Builds With InputLayer ─────────────────────────────── */}
-      <section className="border-b border-border/50">
-        <div className="mx-auto max-w-6xl px-6 py-20">
-          <div className="max-w-2xl mb-12">
-            <p className="text-sm font-semibold text-primary uppercase tracking-wider mb-2">How it works</p>
-            <h2 className="text-3xl font-bold tracking-tight">
-              Give your AI conclusions it can trust
-            </h2>
-            <p className="text-muted-foreground mt-4">
-              InputLayer figures out what&apos;s true from the facts and rules you give it. Your AI gets reliable, up-to-date conclusions instead of guessing, and every conclusion can be traced back to the facts behind it.
+            <p className="mt-6 text-xs text-muted-foreground">
+              Self-hosted · source-available under the Elastic License 2.0 · Rust engine with Python and JS SDKs
             </p>
           </div>
+        </section>
 
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+        {/* ── The problem ────────────────────────────────────────────── */}
+        <Section
+          eyebrow="The problem"
+          title={
+            <>
+              Your data stack went streaming years ago.
+              <br className="hidden sm:block" /> Your agents are the last batch jobs left.
+            </>
+          }
+        >
+          <Card>
+            <BatchVsStreamingDiagram />
+          </Card>
+          <p className="mt-6 text-muted-foreground max-w-3xl">
+            Nightly ETL became streaming. Cron jobs became event-driven services. Full refreshes became incremental
+            views. Agents are still built the old way: a trigger fires, the agent fetches the world, reasons over all of
+            it, acts, and stops. Everything that changes before the next trigger is invisible.
+          </p>
+        </Section>
+
+        {/* ── Why streaming agents ───────────────────────────────────── */}
+        <Section eyebrow="Why streaming agents" title="Three things batch agents can't do">
+          <div className="grid gap-6 md:grid-cols-3">
             {[
-              { icon: <Brain className="h-6 w-6 text-primary" />, title: "Thinks, not just stores", desc: "Your AI stores facts. InputLayer connects the dots and draws conclusions automatically." },
-              { icon: <Zap className="h-6 w-6 text-primary" />, title: "Search + logic together", desc: "Find things by similarity, then filter by what's actually true. One query, both at once." },
-              { icon: <Shield className="h-6 w-6 text-primary" />, title: "Shows its work", desc: "Every conclusion traces back to the facts and rules that produced it. Ask \"why?\" on any result." },
-              { icon: <GitBranch className="h-6 w-6 text-primary" />, title: "Always up to date", desc: "When a fact changes, every affected conclusion updates in milliseconds. No waiting, no rebuilding." },
-            ].map((persona) => (
-              <div
-                key={persona.title}
-                className="rounded-xl border border-border bg-card p-6 space-y-3"
-              >
-                {persona.icon}
-                <h3 className="text-sm font-semibold">{persona.title}</h3>
-                <p className="text-sm text-muted-foreground">{persona.desc}</p>
-              </div>
+              {
+                mark: "ms",
+                title: "React when it happens, not when the cron fires",
+                body: "A batch agent learns about a change on its next run, seconds to hours later. A streaming agent knows within milliseconds and can act while it still matters.",
+              },
+              {
+                mark: "−1",
+                title: "Never act on something that stopped being true",
+                body: "Batch agents see what's there and miss what disappeared: the cancelled order, the revoked approval, the delay that cleared. InputLayer withdraws a conclusion the moment its last reason goes away.",
+              },
+              {
+                mark: "Δ",
+                title: "Pay for change, not for re-reading the world",
+                body: "Batch cost grows with data volume × how often you run. Streaming cost grows with what actually changed. Fewer recomputes, fewer fetches, fewer tokens spent re-deriving the same answer.",
+              },
+            ].map((reason) => (
+              <Card key={reason.title} className="space-y-3">
+                <p aria-hidden="true" className="font-mono text-3xl font-medium leading-none text-primary">
+                  {reason.mark}
+                </p>
+                <h3 className="text-base font-semibold">{reason.title}</h3>
+                <p className="text-sm text-muted-foreground">{reason.body}</p>
+              </Card>
             ))}
           </div>
-        </div>
-      </section>
-
-      {/* ── Comparison ──────────────────────────────────────────────── */}
-      <section className="border-b border-border/50">
-        <div className="mx-auto max-w-6xl px-6 py-20">
-          <div className="space-y-6 mb-12">
-            <p className="text-sm font-semibold text-primary uppercase tracking-wider">Comparison</p>
-            <h2 className="text-3xl font-bold tracking-tight">
-              What you get that other tools don&apos;t do
-            </h2>
-            <p className="text-muted-foreground max-w-2xl">
-              Databases store data. InputLayer thinks about it, combining search, logic, and live updates in one place.
+          <Card className="mt-6 space-y-3">
+            <h3 className="text-base font-semibold">The math every lead runs in their head</h3>
+            <p className="text-muted-foreground">
+              10,000 open support tickets. The agent re-checks each one every 5 minutes. That is{" "}
+              <strong className="text-foreground">2.9 million evaluations a day</strong>, almost all on tickets where
+              nothing changed, and it is still up to 5 minutes late on the ones that did. A streaming agent works only on
+              the tickets whose facts changed, at the moment they change.
             </p>
+            <p className="text-xs text-muted-foreground">Illustrative arithmetic, not a benchmark.</p>
+          </Card>
+        </Section>
+
+        {/* ── How it works ───────────────────────────────────────────── */}
+        <Section id="how" eyebrow="How it works" title="Feed it facts. Write the rules once. React to what changes.">
+          <ol className="grid gap-6 md:grid-cols-3">
+            {[
+              {
+                tag: "1 · Stream facts in",
+                title: "From the systems you already run",
+                body: "Orders, carriers, permissions, inventory: write facts as they change, from CDC, webhooks or your app. Your systems of record stay where they are.",
+              },
+              {
+                tag: "2 · Declare the reasoning",
+                title: "Rules, not glue code",
+                body: "\"An order is late if its ETA passed its promise.\" \"A replacement may be offered if the order is late and the customer is eligible.\" Rules chain, recurse and combine with vector similarity.",
+              },
+              {
+                tag: "3 · React to changes",
+                title: "Your agent gets only what changed",
+                body: "When a fact changes, InputLayer updates just the affected conclusions and tells the agent what was added and what was withdrawn, with the facts and rules behind each one.",
+              },
+            ].map((step) => (
+              <li key={step.tag} className="rounded-xl border border-border bg-card p-6 min-w-0 space-y-3">
+                <Tag>{step.tag}</Tag>
+                <h3 className="text-base font-semibold">{step.title}</h3>
+                <p className="text-sm text-muted-foreground">{step.body}</p>
+              </li>
+            ))}
+          </ol>
+
+          <div className="mt-6 grid gap-6 lg:grid-cols-2">
+            <Card>
+              <Tag tone="bad">Batch agent today</Tag>
+              <CodeBlock html={batchHtml} label="Batch agent loop that re-fetches every input on every turn" />
+            </Card>
+            <Card>
+              <Tag tone="ok">Streaming agent with InputLayer</Tag>
+              <CodeBlock html={rulesHtml} label="Rules written once" />
+              <CodeBlock html={agentHtml} label="Agent loop that reacts to added and removed rows" />
+              <p className="mt-3 text-xs text-muted-foreground">
+                The SDK form shown is the upcoming release; standing queries run over the{" "}
+                <Link href={WEBSOCKET_DOCS_URL} className="text-primary hover:underline">
+                  WebSocket API
+                </Link>{" "}
+                today.
+              </p>
+            </Card>
           </div>
 
+          <p className="mt-8 border-l-4 border-primary pl-4 text-lg font-semibold max-w-3xl">
+            Deleted: the re-fetching, the invalidation handlers, the recompute job, the polling loop. Added: a few rules
+            and one watch.
+          </p>
+        </Section>
+
+        {/* ── Proof ──────────────────────────────────────────────────── */}
+        <Section eyebrow="Proof" title="Measured, not promised">
+          <div className="grid gap-6 md:grid-cols-3">
+            <StatCard
+              value="5 ms"
+              description="typical time from a committed change to the agent receiving the update (13 ms worst case), warm, engine-side"
+            />
+            <StatCard
+              value="96"
+              description="on real retail data in our streaming-agents benchmark, checked after every change"
+            />
+            <StatCard
+              value="100%"
+              description="of live answers equal to a fresh full query at every checkpoint; every withdrawal check passed"
+            />
+          </div>
+          <p className="mt-6 text-xs text-muted-foreground max-w-3xl">
+            Preliminary results from a shared development machine; official numbers will be published from a dedicated
+            benchmark host with raw samples. Model latency and ingestion are on top of engine time.
+          </p>
+        </Section>
+
+        {/* ── Where it fits ──────────────────────────────────────────── */}
+        <Section eyebrow="Where it fits" title="Built for agents that act on a world that keeps changing">
           <ComparisonTable
-            columns={["Vector DBs", "Graph DBs", "SQL", "InputLayer"]}
-            highlightColumn="InputLayer"
+            rowHeader="Agent"
+            align="left"
+            columns={["What changes under it", "What streaming gives you"]}
             rows={[
-              { capability: "Find by similarity", values: { "Vector DBs": "native", "Graph DBs": "plugin", "SQL": "plugin", "InputLayer": "native" } },
-              { capability: "Follow connections", values: { "Vector DBs": "none", "Graph DBs": "native", "SQL": "partial", "InputLayer": "native" } },
-              { capability: "Apply rules", values: { "Vector DBs": "none", "Graph DBs": "partial", "SQL": "partial", "InputLayer": "native" } },
-              { capability: "Chain logic together", values: { "Vector DBs": "none", "Graph DBs": "native", "SQL": "native", "InputLayer": "native" } },
-              { capability: "Live updates", values: { "Vector DBs": "none", "Graph DBs": "none", "SQL": "partial", "InputLayer": "native" } },
-              { capability: "Undo when facts change", values: { "Vector DBs": "none", "Graph DBs": "recompute", "SQL": "recompute", "InputLayer": "native" } },
-              { capability: "Explain every conclusion", values: { "Vector DBs": "none", "Graph DBs": "partial", "SQL": "partial", "InputLayer": "native" } },
+              {
+                capability: "Support & customer service",
+                values: {
+                  "What changes under it": "Order status, ETAs, refunds, eligibility",
+                  "What streaming gives you": "Promises that stay true while the ticket is open",
+                },
+              },
+              {
+                capability: "Fulfilment & logistics",
+                values: {
+                  "What changes under it": "Carrier events, stock, capacity",
+                  "What streaming gives you": "Re-plans the moment a shipment slips",
+                },
+              },
+              {
+                capability: "Risk, fraud & compliance",
+                values: {
+                  "What changes under it": "Transactions, sanctions, approvals",
+                  "What streaming gives you": "Blocks and releases as soon as the facts change",
+                },
+              },
+              {
+                capability: "Operations & monitoring",
+                values: {
+                  "What changes under it": "Metrics, incidents, dependencies",
+                  "What streaming gives you": "Root cause and impact recomputed per event, not per sweep",
+                },
+              },
+              {
+                capability: "Voice & real-time assistants",
+                values: {
+                  "What changes under it": "What the user just said, what the world just did",
+                  "What streaming gives you": "Corrects itself mid-sentence instead of on the next turn",
+                },
+              },
             ]}
           />
-        </div>
-      </section>
+          <p className="mt-6 text-sm text-muted-foreground max-w-3xl">
+            Keep your LLM, your vector store for documents and your systems of record. InputLayer is the streaming layer
+            between your data and your agent&apos;s decisions.
+          </p>
+        </Section>
 
-      {/* ── Rules + Vectors ────────────────────────────────────────── */}
-      <section className="border-b border-border/50">
-        <div className="mx-auto max-w-6xl px-6 py-20">
-          <div className="grid gap-12 lg:grid-cols-2 items-start">
-            <div className="space-y-6">
-              <p className="text-sm font-semibold text-primary uppercase tracking-wider">Search + logic</p>
-              <h2 className="text-3xl font-bold tracking-tight">
-                Where can I fly that feels like a beach vacation?
-              </h2>
-              <p className="text-muted-foreground">
-                You're in New York and want beach destinations, but only ones you can actually get to. First, InputLayer follows the flight network to figure out which cities are reachable (even with connecting flights). Then it ranks those cities by how well they match "beach vacation."
-              </p>
-              <p className="text-sm font-semibold text-primary uppercase tracking-wider pt-2">One query does both</p>
-              <p className="text-muted-foreground">
-                Rules figure out where you can go. Search ranks by what you want. InputLayer does both in a <strong>single query</strong>. No stitching things together, no extra steps.
-              </p>
-              <a
-                href={`${DEMO_BASE_URL}/demo/request-access?kg=flights`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-sm text-primary font-medium hover:underline pt-2"
-              >
-                <Play className="h-3.5 w-3.5" />
-                Open in Studio
-              </a>
-            </div>
-            <VisualCodeTabs visual={<EmbeddingDiagram />} code={rulesVectorsCode} />
-          </div>
-        </div>
-      </section>
-
-      {/* ── Correct Retraction ─────────────────────────────────────── */}
-      <section className="border-b border-border/50">
-        <div className="mx-auto max-w-6xl px-6 py-20">
-          <div className="grid gap-12 lg:grid-cols-2 items-start">
-            <div className="space-y-6">
-              <p className="text-sm font-semibold text-primary uppercase tracking-wider">Smart undo</p>
-              <h2 className="text-3xl font-bold tracking-tight">
-                Cancel a route. Does the destination stay reachable?
-              </h2>
-              <p className="text-muted-foreground">
-                Sydney is reachable from New York two ways, through Tokyo and through Dubai. Cancel the Dubai route, and most systems would just wipe the conclusion. But the Tokyo route still works.
-              </p>
-              <p className="text-muted-foreground">
-                InputLayer tracks both paths. It only removes a conclusion when every way to reach it is gone. Sydney stays reachable until both routes are cancelled. No wrong removals, no stale conclusions.
-              </p>
-              <a
-                href={`${DEMO_BASE_URL}/demo/request-access?kg=flights`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-sm text-primary font-medium hover:underline pt-2"
-              >
-                <Play className="h-3.5 w-3.5" />
-                Open in Studio
-              </a>
-            </div>
-            <VisualCodeTabs visual={<DiamondDiagram />} code={retractionCode} />
-          </div>
-        </div>
-      </section>
-
-      {/* ── Incremental Updates ─────────────────────────────────────── */}
-      <section className="border-b border-border/50">
-        <div className="mx-auto max-w-6xl px-6 py-20">
-          <div className="grid gap-12 lg:grid-cols-2 items-start">
-            <div className="space-y-6">
-              <p className="text-sm font-semibold text-primary uppercase tracking-wider">Instant updates</p>
-              <h2 className="text-3xl font-bold tracking-tight">
-                Add a route. Only the affected conclusions update.
-              </h2>
-              <p className="text-muted-foreground">
-                Your flight network has 2,000 airports and hundreds of thousands of possible connections. Add one new route, say London to Dubai, and most systems recalculate everything from scratch. InputLayer only updates the conclusions that actually changed.
-              </p>
-              <div className="flex gap-8 pt-2">
-                <div>
-                  <span className="text-4xl font-extrabold text-primary">6.83ms</span>
-                  <p className="text-xs text-muted-foreground mt-1">incremental update</p>
-                </div>
-                <div>
-                  <span className="text-4xl font-extrabold text-muted-foreground/30">11.3s</span>
-                  <p className="text-xs text-muted-foreground mt-1">full recompute</p>
-                </div>
-                <div>
-                  <span className="text-4xl font-extrabold text-primary">1,652x</span>
-                  <p className="text-xs text-muted-foreground mt-1">faster</p>
-                </div>
-              </div>
-              <a
-                href={`${DEMO_BASE_URL}/demo/request-access?kg=flights`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-sm text-primary font-medium hover:underline pt-2"
-              >
-                <Play className="h-3.5 w-3.5" />
-                Open in Studio
-              </a>
-            </div>
-            <VisualCodeTabs visual={<WaterfallDiagram />} code={incrementalCode} />
-          </div>
-        </div>
-      </section>
-
-      {/* ── Provenance ─────────────────────────────────────────────── */}
-      <section className="border-b border-border/50">
-        <div className="mx-auto max-w-6xl px-6 py-20">
-          <div className="grid gap-12 lg:grid-cols-2 items-start">
-            <div className="space-y-6">
-              <p className="text-sm font-semibold text-primary uppercase tracking-wider">Explainability</p>
-              <h2 className="text-3xl font-bold tracking-tight">
-                Ask &quot;why?&quot; and get the full reasoning chain
-              </h2>
-              <p className="text-muted-foreground">
-                How does New York connect to Sydney? Ask <code className="text-xs bg-muted/50 px-1.5 py-0.5 rounded">.why</code> and see every step: NY to London, London to Paris, Paris to Tokyo, Tokyo to Sydney. Or ask <code className="text-xs bg-muted/50 px-1.5 py-0.5 rounded">.why_not</code> to see why São Paulo can&apos;t be reached. Every conclusion comes with the receipts.
-              </p>
-              <div className="flex justify-center pt-2">
-                <div className="text-center">
-                  <span className="text-5xl font-extrabold text-primary">100%</span>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    of results fully <RotatingWord words={["explainable", "traceable", "verifiable", "reproducible"]} />
-                  </p>
-                </div>
-              </div>
-              <a
-                href={`${DEMO_BASE_URL}/demo/request-access?kg=flights`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-sm text-primary font-medium hover:underline pt-2"
-              >
-                <Play className="h-3.5 w-3.5" />
-                Open in Studio
-              </a>
-            </div>
-            <VisualCodeTabs visual={<ProvenanceTreeDiagram />} code={provenanceCode} />
-          </div>
-        </div>
-      </section>
-
-      {/* ── Deep Dives ─────────────────────────────────────────────── */}
-      <section className="border-b border-border/50">
-        <div className="mx-auto max-w-6xl px-6 py-20">
-          <div className="flex items-center justify-between mb-12">
-            <div>
-              <p className="text-sm font-semibold text-primary uppercase tracking-wider mb-2">Go deeper</p>
-              <h2 className="text-3xl font-bold tracking-tight">The problems behind the features</h2>
-            </div>
-            <Link
-              href="/blog/"
-              className="hidden sm:inline-flex items-center gap-1 text-sm text-primary font-medium hover:underline"
-            >
-              All posts <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
-          </div>
-
-          <div className="grid gap-6 md:grid-cols-2">
-            {[
+        {/* ── Compared with what you'd build yourself ────────────────── */}
+        <Section eyebrow="Compared with what you'd build yourself" title="The streaming layer agents never had">
+          <ComparisonTable
+            rowHeader=""
+            align="left"
+            highlightColumn="InputLayer"
+            columns={["Re-query + cache + cron", "Kafka / CDC alone", "Vector store / memory layer", "InputLayer"]}
+            rows={[
               {
-                slug: "why-vector-search-alone-fails",
-                context: "Extends: Search + logic",
-                title: "Why Search Alone Isn't Enough for Your AI Agent",
-                desc: "Finding similar items is useful, but it can't tell you which destinations are actually reachable. See how rules and search work together in one query.",
+                capability: "Knows something changed",
+                values: {
+                  "Re-query + cache + cron": "On the next run",
+                  "Kafka / CDC alone": "Yes, raw events",
+                  "Vector store / memory layer": "When re-indexed",
+                  InputLayer: "Yes",
+                },
               },
               {
-                slug: "correct-retraction-why-delete-should-actually-delete",
-                context: "Extends: Smart undo",
-                title: "Why Delete Should Actually Delete",
-                desc: "When a route gets cancelled, which destinations become unreachable? Getting the right conclusion is harder than it sounds, and getting it wrong can break everything downstream.",
+                capability: "Knows which conclusions changed",
+                values: {
+                  "Re-query + cache + cron": "No, you recompute",
+                  "Kafka / CDC alone": "No, you write the logic",
+                  "Vector store / memory layer": "No",
+                  InputLayer: "Yes, only affected ones",
+                },
               },
-            ].map((post) => (
-              <Link
-                key={post.slug}
-                href={`/blog/${post.slug}/`}
-                className="group rounded-xl border border-border bg-card p-8 space-y-3 transition-colors hover:border-primary/30 hover:bg-card/80"
-              >
-                <span className="text-[10px] font-semibold text-primary uppercase tracking-wider">{post.context}</span>
-                <h3 className="text-xl font-semibold group-hover:text-primary transition-colors">{post.title}</h3>
-                <p className="text-sm text-muted-foreground leading-relaxed">{post.desc}</p>
-                <span className="inline-flex items-center gap-1 text-sm text-primary font-medium pt-1">
-                  Read the deep dive <ArrowRight className="h-3.5 w-3.5" />
-                </span>
-              </Link>
-            ))}
-          </div>
+              {
+                capability: "Withdraws conclusions that stop holding",
+                values: {
+                  "Re-query + cache + cron": "Hand-written invalidation",
+                  "Kafka / CDC alone": "Hand-written",
+                  "Vector store / memory layer": "No",
+                  InputLayer: "Built in",
+                },
+              },
+              {
+                capability: "Explains why an answer holds",
+                values: {
+                  "Re-query + cache + cron": "No",
+                  "Kafka / CDC alone": "No",
+                  "Vector store / memory layer": "Similarity scores",
+                  InputLayer: "Facts and rules behind each row",
+                },
+              },
+              {
+                capability: "Where it wins",
+                values: {
+                  "Re-query + cache + cron": "Simple, already there",
+                  "Kafka / CDC alone": "Durable event transport",
+                  "Vector store / memory layer": "Unstructured text",
+                  InputLayer: "Changing structured facts with chained rules",
+                },
+              },
+            ]}
+          />
+        </Section>
 
-          <div className="mt-8 text-center sm:hidden">
-            <Link
-              href="/blog/"
-              className="inline-flex items-center gap-1 text-sm text-primary font-medium hover:underline"
-            >
-              All posts <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Get Started ───────────────────────────────────────────── */}
-      <section className="border-b border-border/50">
-        <div className="mx-auto max-w-6xl px-6 py-20">
-          <div className="relative rounded-2xl border border-border bg-gradient-to-br from-primary/10 via-transparent to-primary/5 p-12 space-y-10">
-            <div className="text-center space-y-3">
-              <h2 className="text-3xl font-bold tracking-tight">
-                Source-available. Run it yourself.
-              </h2>
-              <p className="text-muted-foreground text-lg max-w-xl mx-auto">
-                No account, no API key, no vendor lock-in. From first query to production in four steps.
+        {/* ── Get started ────────────────────────────────────────────── */}
+        <Section id="start" eyebrow="Get started" title="Turn one batch agent into a streaming agent">
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card className="space-y-3">
+              <h3 className="text-base font-semibold">Run it yourself</h3>
+              <p className="text-sm text-muted-foreground">
+                Install the engine, load a sample, and watch an agent react to changes in a few minutes. Free to
+                self-host.
               </p>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {[
-                {
-                  step: "1",
-                  icon: <Terminal className="h-5 w-5 text-primary" />,
-                  title: "Try it in 30 seconds",
-                  desc: "One Docker command, instant local instance.",
-                  href: "https://demo.inputlayer.ai",
-                  external: true,
-                  label: "Launch demo",
-                },
-                {
-                  step: "2",
-                  icon: <BookOpen className="h-5 w-5 text-primary" />,
-                  title: "Learn the syntax",
-                  desc: "How to write facts, rules, and queries. The full reference.",
-                  href: "/docs/",
-                  external: false,
-                  label: "Read the docs",
-                },
-                {
-                  step: "3",
-                  icon: <Server className="h-5 w-5 text-primary" />,
-                  title: "Deploy with your stack",
-                  desc: "Self-hosted Docker or Kubernetes. Your infra, your data.",
-                  href: "/docs/guides/configuration/",
-                  external: false,
-                  label: "Deployment guide",
-                },
-                {
-                  step: "4",
-                  icon: <FileText className="h-5 w-5 text-primary" />,
-                  title: "Go to production",
-                  desc: "Elastic License 2.0 core, Apache 2.0 SDKs. Commercial license when you need it.",
-                  href: "/commercial/",
-                  external: false,
-                  label: "View license",
-                },
-              ].map((s) => (
-                <div key={s.step} className="relative rounded-xl border border-border bg-background/50 p-5 space-y-3">
-                  <div className="flex items-center gap-3">
-                    <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary/10 text-xs font-bold text-primary">{s.step}</span>
-                    {s.icon}
-                  </div>
-                  <h3 className="text-sm font-semibold">{s.title}</h3>
-                  <p className="text-xs text-muted-foreground leading-relaxed">{s.desc}</p>
-                  {s.external ? (
-                    <a href={s.href} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-primary font-medium hover:underline">
-                      {s.label} <ExternalLink className="h-3 w-3" />
-                    </a>
-                  ) : (
-                    <Link href={s.href} className="inline-flex items-center gap-1 text-xs text-primary font-medium hover:underline">
-                      {s.label} <ArrowRight className="h-3 w-3" />
-                    </Link>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <div className="mx-auto max-w-lg">
-              <div className="relative">
-                <pre className="rounded-lg bg-[var(--code-bg)] py-4 px-12 overflow-x-auto text-sm font-mono text-center">
-                  <code>
-                    <span className="syn-builtin">docker</span> run -p 8080:8080 ghcr.io/inputlayer/inputlayer
-                  </code>
-                </pre>
-                <CopyButton text={dockerCommand} />
+              <div className="flex flex-wrap gap-3 pt-2">
+                <Link href={QUICKSTART_URL} className={primaryButton}>
+                  Quickstart
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </Link>
+                <Link href="/docs/" className={secondaryButton}>
+                  Read the docs
+                </Link>
               </div>
-            </div>
+            </Card>
+            <Card className="space-y-3">
+              <h3 className="text-base font-semibold">Design-partner evaluation</h3>
+              <p className="text-sm text-muted-foreground">
+                Bring one batch agent. In four weeks we turn it into a streaming agent on your data and measure the
+                difference in freshness, correctness and cost.
+              </p>
+              <div className="flex flex-wrap gap-3 pt-2">
+                <a href={CONTACT_URL} className={secondaryButton}>
+                  Talk to us
+                </a>
+              </div>
+            </Card>
           </div>
-        </div>
-      </section>
+        </Section>
+      </main>
 
       <SiteFooter />
     </div>

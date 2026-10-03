@@ -48,11 +48,11 @@ export function UseCaseClient({ useCase, slug }: UseCaseClientProps) {
       </article>
 
       <CTABanner
-        heading="Ready to build?"
-        description="InputLayer is source-available and free to use. Pull the Docker image and start building in minutes."
+        heading="Turn one batch agent into a streaming agent"
+        description="Self-hosted and source-available under the Elastic License 2.0. Install the engine and watch an agent react to changes in a few minutes."
         buttons={[
-          { label: "Read the docs", href: "/docs/" },
-          { label: "Launch demo", href: "https://demo.inputlayer.ai", variant: "secondary", external: true },
+          { label: "Quickstart", href: "/docs/guides/quickstart/" },
+          { label: "Read the docs", href: "/docs/", variant: "secondary" },
         ]}
       />
     </PageLayout>

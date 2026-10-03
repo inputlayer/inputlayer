@@ -16,7 +16,7 @@ export function CompareIndexClient({ pages }: CompareIndexClientProps) {
     <PageLayout>
       <ContentHero
         heading="Compare"
-        subtitle="See how InputLayer complements vector databases, graph databases, and other tools in your stack."
+        subtitle="How InputLayer compares with the tools already in your stack, starting with where each of them wins."
       />
 
       <section className="mx-auto max-w-6xl px-6 py-12">
@@ -55,11 +55,11 @@ export function CompareIndexClient({ pages }: CompareIndexClientProps) {
       </section>
 
       <CTABanner
-        heading="Try InputLayer yourself"
-        description="The best way to compare is to try it. Pull the Docker image and start querying."
+        heading="Turn one batch agent into a streaming agent"
+        description="Self-hosted and source-available under the Elastic License 2.0. Install the engine and watch an agent react to changes in a few minutes."
         buttons={[
-          { label: "Get started", href: "/docs/guides/quickstart/" },
-          { label: "Launch demo", href: "https://demo.inputlayer.ai", variant: "secondary", external: true },
+          { label: "Quickstart", href: "/docs/guides/quickstart/" },
+          { label: "Read the docs", href: "/docs/", variant: "secondary" },
         ]}
       />
     </PageLayout>

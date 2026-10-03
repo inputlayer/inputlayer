@@ -5,7 +5,7 @@ import { useEffect, useState } from "react"
 import { Logo } from "@/components/logo"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { MobileNav } from "@/components/mobile-nav"
-import { ExternalLink, Star, GitFork } from "lucide-react"
+import { Star, GitFork } from "lucide-react"
 
 function GitHubStats() {
   const [stars, setStars] = useState<number | null>(null)
@@ -78,15 +78,12 @@ export function SiteHeader() {
           >
             Blog
           </Link>
-          <a
-            href="https://demo.inputlayer.ai"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-muted-foreground transition-colors hover:text-foreground"
+          <Link
+            href="/docs/guides/quickstart/"
+            className="text-muted-foreground transition-colors hover:text-foreground"
           >
-            Demo
-            <ExternalLink className="h-3 w-3" />
-          </a>
+            Quickstart
+          </Link>
         </nav>
 
         <div className="ml-auto flex items-center gap-3">
