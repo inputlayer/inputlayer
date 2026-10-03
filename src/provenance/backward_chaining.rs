@@ -4,13 +4,14 @@
 //! to build a proof tree DAG explaining why the tuple was derived.
 
 use crate::ast::{Rule, Term};
+use crate::provenance::proof_relations::ProofRelations;
 use crate::provenance::proof_tree::{
     AggregateInfo, Conclusion, FactSource, NodeId, NodeKind, ProofNode, ProofTree,
     ProofTreeBuilder, TruncatedInfo,
 };
 use crate::provenance::unification::unify_head;
 use crate::provenance::ProofConfig;
-use crate::value::{Tuple, Value};
+use crate::value::{RelationMap, Tuple, Value};
 use std::collections::{HashMap, HashSet};
 
 /// Metadata about an HNSW index for proof enrichment.
@@ -23,13 +24,17 @@ pub struct IndexProofInfo {
 }
 
 /// Context holding all data needed for backward chaining.
+///
+/// Borrows the rules and relations it reads; nothing is copied per proof
+/// call. Bound-column indexes built during the call live as long as the
+/// context, so create one context per call and prove every tuple with it.
 pub struct ProofContext<'a> {
     /// All rules in the knowledge graph
     pub rules: &'a [Rule],
-    /// Base relation data: relation_name -> list of tuples
-    pub base_data: &'a HashMap<String, Vec<Tuple>>,
-    /// Derived/materialized relation data from the evaluation engine.
-    pub derived_data: Option<&'a HashMap<String, Vec<Tuple>>>,
+    /// Base relations, including valid materializations of derived relations.
+    pub base_data: ProofRelations<'a>,
+    /// Derived relations from the evaluation that produced the results.
+    pub derived_data: Option<ProofRelations<'a>>,
     /// Names of relations that are derived (have rules defining them)
     pub derived_relations: HashSet<String>,
     /// Configuration (depth limit, full mode, etc.)
@@ -40,27 +45,14 @@ pub struct ProofContext<'a> {
 
 impl<'a> ProofContext<'a> {
     /// Create a new proof context, computing derived relation set from rules.
-    pub fn new(
-        rules: &'a [Rule],
-        base_data: &'a HashMap<String, Vec<Tuple>>,
-        config: ProofConfig,
-    ) -> Self {
-        let derived_relations: HashSet<String> =
-            rules.iter().map(|r| r.head.relation.clone()).collect();
-        Self {
-            rules,
-            base_data,
-            derived_data: None,
-            derived_relations,
-            config,
-            index_info: HashMap::new(),
-        }
+    pub fn new(rules: &'a [Rule], base_data: &'a RelationMap, config: ProofConfig) -> Self {
+        Self::with_index_info(rules, base_data, config, HashMap::new())
     }
 
     /// Create a proof context with HNSW index metadata.
     pub fn with_index_info(
         rules: &'a [Rule],
-        base_data: &'a HashMap<String, Vec<Tuple>>,
+        base_data: &'a RelationMap,
         config: ProofConfig,
         index_info: HashMap<String, IndexProofInfo>,
     ) -> Self {
@@ -68,7 +60,7 @@ impl<'a> ProofContext<'a> {
             rules.iter().map(|r| r.head.relation.clone()).collect();
         Self {
             rules,
-            base_data,
+            base_data: ProofRelations::new(base_data),
             derived_data: None,
             derived_relations,
             config,
@@ -77,8 +69,18 @@ impl<'a> ProofContext<'a> {
     }
 
     /// Set derived/materialized relation data for candidate lookup.
-    pub fn with_derived_data(mut self, derived_data: &'a HashMap<String, Vec<Tuple>>) -> Self {
-        self.derived_data = Some(derived_data);
+    pub fn with_derived_data(mut self, derived_data: &'a RelationMap) -> Self {
+        self.derived_data = Some(ProofRelations::new(derived_data));
+        self
+    }
+
+    /// Index each lookup pattern after `scans` linear scans of it.
+    #[cfg(test)]
+    pub(crate) fn with_scans_before_index(mut self, scans: usize) -> Self {
+        self.base_data = self.base_data.with_scans_before_index(scans);
+        self.derived_data = self
+            .derived_data
+            .map(|derived| derived.with_scans_before_index(scans));
         self
     }
 
@@ -189,10 +191,11 @@ pub(crate) fn build_node(
     let mut result_ids = Vec::new();
 
     // Base relation: check if tuple exists as a fact (in base_data or derived_data)
-    let in_base = tuple_exists_in(relation, tuple, ctx.base_data);
+    let in_base = ctx.base_data.contains(relation, tuple);
     let in_derived = ctx
         .derived_data
-        .is_some_and(|d| tuple_exists_in(relation, tuple, d));
+        .as_ref()
+        .is_some_and(|d| d.contains(relation, tuple));
 
     if !ctx.is_derived(relation) {
         if in_base || in_derived {
@@ -400,56 +403,57 @@ fn build_aggregate_node(
     let mut contributing_count: usize = 0;
 
     if let Some(crate::ast::BodyPredicate::Positive(body_atom)) = rule.body.first() {
-        let body_tuples = ctx
+        let body_relations = ctx
             .derived_data
-            .and_then(|d| d.get(&body_atom.relation))
-            .or_else(|| ctx.base_data.get(&body_atom.relation));
+            .as_ref()
+            .filter(|d| d.get(&body_atom.relation).is_some())
+            .unwrap_or(&ctx.base_data);
+
+        // Body columns holding a group-by variable must equal its value.
+        let (group_columns, group_key): (Vec<usize>, Vec<&Value>) = body_atom
+            .args
+            .iter()
+            .enumerate()
+            .filter_map(|(arg_idx, arg)| match arg {
+                Term::Variable(var_name) => group_bindings.get(var_name).map(|v| (arg_idx, v)),
+                _ => None,
+            })
+            .unzip();
 
         // Determine expected arity from the body atom's args
         let body_arity = body_atom.args.len();
 
-        if let Some(tuples) = body_tuples {
-            for t in tuples {
-                let mut matches = true;
-                for (arg_idx, arg) in body_atom.args.iter().enumerate() {
-                    if let Term::Variable(var_name) = arg {
-                        if let Some(expected) = group_bindings.get(var_name) {
-                            if let Some(actual) = t.get(arg_idx) {
-                                if actual != expected {
-                                    matches = false;
-                                    break;
-                                }
-                            }
-                        }
-                    }
+        for t in body_relations.candidates(&body_atom.relation, &group_columns, &group_key) {
+            let matches = group_columns
+                .iter()
+                .zip(&group_key)
+                .all(|(&column, &expected)| t.get(column).is_none_or(|actual| actual == expected));
+            if matches {
+                contributing_count += 1;
+
+                // Truncate to body atom arity (engine may return wider tuples)
+                let truncated_vals: Vec<Value> = (0..body_arity.min(t.arity()))
+                    .filter_map(|i| t.get(i).cloned())
+                    .collect();
+
+                if ctx.config.full_mode || all_inputs.len() < sample_limit {
+                    all_inputs.push(truncated_vals.clone());
                 }
-                if matches {
-                    contributing_count += 1;
-
-                    // Truncate to body atom arity (engine may return wider tuples)
-                    let truncated_vals: Vec<Value> = (0..body_arity.min(t.arity()))
-                        .filter_map(|i| t.get(i).cloned())
-                        .collect();
-
-                    if ctx.config.full_mode || all_inputs.len() < sample_limit {
-                        all_inputs.push(truncated_vals.clone());
-                    }
-                    // Build child proof nodes for contributing tuples
-                    // (capped to avoid explosion on large aggregations)
-                    if child_ids.len() < sample_limit {
-                        let truncated_tuple = Tuple::new(truncated_vals);
-                        let child_result = build_node(
-                            &body_atom.relation,
-                            &truncated_tuple,
-                            ctx,
-                            builder,
-                            visited,
-                            depth + 1,
-                        );
-                        if let Ok(ids) = child_result {
-                            if let Some(id) = ids.into_iter().next() {
-                                child_ids.push(id);
-                            }
+                // Build child proof nodes for contributing tuples
+                // (capped to avoid explosion on large aggregations)
+                if child_ids.len() < sample_limit {
+                    let truncated_tuple = Tuple::new(truncated_vals);
+                    let child_result = build_node(
+                        &body_atom.relation,
+                        &truncated_tuple,
+                        ctx,
+                        builder,
+                        visited,
+                        depth + 1,
+                    );
+                    if let Ok(ids) = child_result {
+                        if let Some(id) = ids.into_iter().next() {
+                            child_ids.push(id);
                         }
                     }
                 }
@@ -495,12 +499,6 @@ fn build_aggregate_node(
     })
 }
 
-fn tuple_exists_in(relation: &str, tuple: &Tuple, base_data: &HashMap<String, Vec<Tuple>>) -> bool {
-    base_data
-        .get(relation)
-        .is_some_and(|tuples| tuples.contains(tuple))
-}
-
 pub(crate) fn tuple_values(tuple: &Tuple) -> Vec<Value> {
     (0..tuple.arity())
         .filter_map(|i| tuple.get(i).cloned())
@@ -521,6 +519,7 @@ mod tests {
     use crate::ast::BodyPredicate;
     use crate::ast::Term;
     use crate::provenance::proof_tree::NodeKind;
+    use crate::value::Relation;
 
     fn int(v: i32) -> Value {
         Value::Int32(v)
@@ -530,7 +529,7 @@ mod tests {
         Tuple::new(vals)
     }
 
-    fn base_data(entries: Vec<(&str, Vec<Vec<Value>>)>) -> HashMap<String, Vec<Tuple>> {
+    fn base_data(entries: Vec<(&str, Vec<Vec<Value>>)>) -> RelationMap {
         entries
             .into_iter()
             .map(|(name, rows)| (name.to_string(), rows.into_iter().map(Tuple::new).collect()))
@@ -671,17 +670,17 @@ mod tests {
         )]);
 
         let derived = {
-            let mut m = HashMap::new();
+            let mut m = RelationMap::new();
             m.insert(
                 "path".to_string(),
-                vec![
+                Relation::from(vec![
                     Tuple::new(vec![int(1), int(2)]),
                     Tuple::new(vec![int(1), int(3)]),
                     Tuple::new(vec![int(1), int(4)]),
                     Tuple::new(vec![int(2), int(3)]),
                     Tuple::new(vec![int(2), int(4)]),
                     Tuple::new(vec![int(3), int(4)]),
-                ],
+                ]),
             );
             m
         };
@@ -809,14 +808,14 @@ mod tests {
 
         let data = base_data(vec![]);
         let derived = {
-            let mut m = HashMap::new();
+            let mut m = RelationMap::new();
             m.insert(
                 "can_reach".to_string(),
-                vec![
+                Relation::from(vec![
                     Tuple::new(vec![Value::string("berlin"), Value::string("dubai")]),
                     Tuple::new(vec![Value::string("berlin"), Value::string("tokyo")]),
                     Tuple::new(vec![Value::string("berlin"), Value::string("sydney")]),
-                ],
+                ]),
             );
             m
         };
@@ -1015,10 +1014,10 @@ mod tests {
         )]);
 
         let derived = {
-            let mut m = HashMap::new();
+            let mut m = RelationMap::new();
             m.insert(
                 "can_reach".to_string(),
-                vec![
+                Relation::from(vec![
                     Tuple::new(vec![int(1), int(2)]),
                     Tuple::new(vec![int(1), int(3)]),
                     Tuple::new(vec![int(1), int(4)]),
@@ -1029,7 +1028,7 @@ mod tests {
                     Tuple::new(vec![int(3), int(4)]),
                     Tuple::new(vec![int(3), int(5)]),
                     Tuple::new(vec![int(4), int(5)]),
-                ],
+                ]),
             );
             m
         };

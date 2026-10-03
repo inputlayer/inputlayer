@@ -40,11 +40,11 @@ pub fn prove_body(
                     let bound = substitute_atom(atom, bindings);
 
                     // First try base data
-                    let mut matches = find_matching_tuples(&atom.relation, &bound, ctx.base_data);
+                    let mut matches = find_matching_tuples(&atom.relation, &bound, &ctx.base_data);
 
                     // Then try derived data
                     if matches.is_empty() && ctx.is_derived(&atom.relation) {
-                        if let Some(derived_data) = ctx.derived_data {
+                        if let Some(derived_data) = &ctx.derived_data {
                             matches = find_matching_tuples(&atom.relation, &bound, derived_data);
                         }
                     }
@@ -83,7 +83,7 @@ pub fn prove_body(
                 }
                 BodyPredicate::Negated(atom) => {
                     let bound = substitute_atom(atom, bindings);
-                    let matches = find_matching_tuples(&atom.relation, &bound, ctx.base_data);
+                    let matches = find_matching_tuples(&atom.relation, &bound, &ctx.base_data);
                     if matches.is_empty() {
                         let pattern_str = format_bound_terms(&bound);
                         let node_id = builder.insert_unique(ProofNode {
@@ -329,14 +329,13 @@ mod tests {
     use crate::provenance::backward_chaining::ProofContext;
     use crate::provenance::proof_tree::NodeKind;
     use crate::provenance::ProofConfig;
-    use crate::value::{Tuple, Value};
-    use std::collections::HashMap;
+    use crate::value::{Relation, RelationMap, Tuple, Value};
 
     fn int(v: i32) -> Value {
         Value::Int32(v)
     }
 
-    fn base_data(entries: Vec<(&str, Vec<Vec<Value>>)>) -> HashMap<String, Vec<Tuple>> {
+    fn base_data(entries: Vec<(&str, Vec<Vec<Value>>)>) -> RelationMap {
         entries
             .into_iter()
             .map(|(name, rows)| (name.to_string(), rows.into_iter().map(Tuple::new).collect()))
@@ -384,8 +383,11 @@ mod tests {
     fn test_positive_derived_fallback() {
         let data = base_data(vec![]);
         let derived = {
-            let mut m = HashMap::new();
-            m.insert("path".to_string(), vec![Tuple::new(vec![int(1), int(3)])]);
+            let mut m = RelationMap::new();
+            m.insert(
+                "path".to_string(),
+                Relation::from(vec![Tuple::new(vec![int(1), int(3)])]),
+            );
             m
         };
         let rules = vec![crate::ast::Rule {
@@ -540,7 +542,7 @@ mod tests {
             data_entries.push((base_name, tuples.into_iter().map(Tuple::new).collect()));
         }
 
-        let base_data_map: HashMap<String, Vec<Tuple>> = data_entries.into_iter().collect();
+        let base_data_map: RelationMap = data_entries.into_iter().collect();
         let ctx = ProofContext::new(&rules, &base_data_map, ProofConfig::default());
 
         let bound_terms = vec![BoundTerm::Unbound("X".into())];

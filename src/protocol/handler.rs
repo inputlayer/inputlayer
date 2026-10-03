@@ -329,38 +329,48 @@ fn debug_query(
     Ok((trace.format_trace(), optimizations))
 }
 
-/// Test seam: runs once on the executing thread just before `QueryJob::execute`
-/// dispatches a meta command, while it holds its storage read guard.
-/// `Handler::query_program` carries a hook set on the calling thread to the
-/// blocking thread that runs the job.
+/// Test seams: a hook runs once, on the executing thread, when
+/// `QueryJob::execute` reaches its point. `Handler::query_program` carries
+/// hooks set on the calling thread to the blocking thread that runs the job.
 #[cfg(test)]
-mod meta_dispatch_hook {
+mod test_hook {
     use std::cell::RefCell;
+    use std::collections::HashMap;
 
-    type Hook = Box<dyn FnOnce() + Send>;
+    #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+    pub(super) enum Point {
+        /// Just before a meta command is dispatched, while the storage read
+        /// guard is held.
+        MetaDispatch,
+        /// After a proof captured its snapshot and released the guard, before
+        /// proof search.
+        ProofSearch,
+    }
+
+    type Hooks = HashMap<Point, Box<dyn FnOnce() + Send>>;
 
     thread_local! {
-        static HOOK: RefCell<Option<Hook>> = const { RefCell::new(None) };
+        static HOOKS: RefCell<Hooks> = RefCell::default();
     }
 
-    pub(super) fn set(hook: impl FnOnce() + Send + 'static) {
-        HOOK.with(|h| *h.borrow_mut() = Some(Box::new(hook)));
+    pub(super) fn set(point: Point, hook: impl FnOnce() + Send + 'static) {
+        HOOKS.with(|hooks| hooks.borrow_mut().insert(point, Box::new(hook)));
     }
 
-    pub(super) fn run() {
-        if let Some(hook) = take() {
+    pub(super) fn run(point: Point) {
+        if let Some(hook) = HOOKS.with(|hooks| hooks.borrow_mut().remove(&point)) {
             hook();
         }
     }
 
-    pub(super) fn take() -> Option<Hook> {
-        HOOK.with(|h| h.borrow_mut().take())
+    pub(super) fn take() -> Hooks {
+        HOOKS.with(|hooks| std::mem::take(&mut *hooks.borrow_mut()))
     }
 
-    /// Installs `hook` on this thread until the returned guard drops, so an
+    /// Installs `hooks` on this thread until the returned guard drops, so an
     /// unused hook never reaches a later job on a pooled thread.
-    pub(super) fn install(hook: Option<Hook>) -> Installed {
-        HOOK.with(|h| *h.borrow_mut() = hook);
+    pub(super) fn install(hooks: Hooks) -> Installed {
+        HOOKS.with(|h| *h.borrow_mut() = hooks);
         Installed
     }
 
@@ -375,6 +385,9 @@ mod meta_dispatch_hook {
 
 #[cfg(test)]
 mod guard_reentry_tests;
+
+#[cfg(test)]
+mod proof_snapshot_tests;
 
 #[cfg(test)]
 mod revocation_tests;
@@ -516,8 +529,6 @@ impl ProofSnapshot {
         }
 
         result_tuples.sort();
-        let (rules, base_data) = self.snapshot.proof_inputs();
-        let derived_data = crate::value::relation::to_vec_map(&derived_data);
 
         let relation = extract_query_relation(query)
             .ok_or_else(|| "Could not determine query relation name".to_string())?;
@@ -543,8 +554,13 @@ impl ProofSnapshot {
                 )
             })
             .collect();
-        let ctx = ProofContext::with_index_info(&rules, &base_data, config.clone(), index_info)
-            .with_derived_data(&derived_data);
+        let ctx = ProofContext::with_index_info(
+            &self.snapshot.rules,
+            &self.snapshot.input_tuples,
+            config.clone(),
+            index_info,
+        )
+        .with_derived_data(&derived_data);
 
         // Build wire rows and proof trees
         let schema = extract_query_schema(query, &result_tuples);
@@ -629,8 +645,11 @@ impl ProofSnapshot {
         let start = std::time::Instant::now();
         let (relation, tuple) = parse_why_not_target(input)?;
         let query_start = std::time::Instant::now();
-        let (rules, base_data) = self.snapshot.proof_inputs();
-        let ctx = ProofContext::new(&rules, &base_data, ProofConfig::default());
+        let ctx = ProofContext::new(
+            &self.snapshot.rules,
+            &self.snapshot.input_tuples,
+            ProofConfig::default(),
+        );
         let query_us = query_start.elapsed().as_micros() as u64;
 
         let explain_start = std::time::Instant::now();
@@ -2234,10 +2253,10 @@ impl Handler {
         // it, queueing on the blocking pool and computing all count against the
         // request's one deadline; see `supervise`.
         #[cfg(test)]
-        let hook = meta_dispatch_hook::take();
+        let hook = test_hook::take();
         let result = supervise::run_blocking(&self.query_semaphore, control, move || {
             #[cfg(test)]
-            let _hook = meta_dispatch_hook::install(hook);
+            let _hook = test_hook::install(hook);
             job.execute(knowledge_graph, program, statements)
                 .map_err(ProgramError::from)
         })
@@ -2389,6 +2408,8 @@ impl QueryJob {
                 match ProofSnapshot::capture(&storage, $kg) {
                     Ok($proof) => {
                         drop(storage);
+                        #[cfg(test)]
+                        test_hook::run(test_hook::Point::ProofSearch);
                         match $eval {
                             Ok(qr) => return Ok(QueryResult { errors, ..qr }),
                             Err(e) => {
@@ -2497,7 +2518,7 @@ impl QueryJob {
                             statement::Statement::Meta(meta) => {
                                 let kg = kg_name.as_str();
                                 #[cfg(test)]
-                                meta_dispatch_hook::run();
+                                test_hook::run(test_hook::Point::MetaDispatch);
                                 match meta {
                                     // === Knowledge Graph commands ===
                                     MetaCommand::KgShow => {

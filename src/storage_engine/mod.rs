@@ -70,7 +70,6 @@ use crate::storage::{
     DataDirLock, DropTombstones, KnowledgeGraphMetadata, KnowledgeGraphsMetadata,
     RelationTombstone, StorageError, StorageResult,
 };
-use crate::value::relation::to_vec_map;
 use crate::value::{Relation, Tuple};
 use arc_swap::ArcSwap;
 use chrono::Utc;
@@ -893,33 +892,6 @@ impl StorageEngine {
 
         let db_guard = db.read();
         Ok((db_guard.snapshot(), db_guard.index_metrics()))
-    }
-
-    /// Execute a query with rules and return both results and proof context.
-    ///
-    /// Uses a single snapshot for consistency between the query results
-    /// and the rules/data used for proof tree construction.
-    pub fn execute_and_get_context(
-        &self,
-        kg: &str,
-        program: &str,
-    ) -> StorageResult<(
-        Vec<Tuple>,
-        Vec<crate::ast::Rule>,
-        std::collections::HashMap<String, Vec<Tuple>>,
-        std::collections::HashMap<String, Vec<Tuple>>, // derived relation data
-        std::collections::HashMap<String, String>,     // index_name -> metric
-    )> {
-        let (snapshot, index_metrics) = self.proof_snapshot_on(kg)?;
-
-        let (result_tuples, derived_data) = snapshot
-            .execute_with_rules_tuples_and_derived(program)
-            .map_err(|e| StorageError::Other(format!("Query execution failed: {e}")))?;
-
-        let (rules, base_data) = snapshot.proof_inputs();
-        let derived_data = to_vec_map(&derived_data);
-
-        Ok((result_tuples, rules, base_data, derived_data, index_metrics))
     }
 
     /// Save a specific knowledge graph to disk (flush persist buffers)

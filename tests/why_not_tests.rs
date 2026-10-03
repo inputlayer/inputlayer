@@ -5,8 +5,7 @@ use inputlayer::provenance::backward_chaining::ProofContext;
 use inputlayer::provenance::proof_tree::NodeKind;
 use inputlayer::provenance::why_not::{explain_why_not, format_why_not_text};
 use inputlayer::provenance::{Blocker, ProofConfig};
-use inputlayer::value::{Tuple, Value};
-use std::collections::HashMap;
+use inputlayer::value::{RelationMap, Tuple, Value};
 
 fn int(v: i32) -> Value {
     Value::Int32(v)
@@ -16,7 +15,7 @@ fn tuple(vals: Vec<Value>) -> Tuple {
     Tuple::new(vals)
 }
 
-fn base_data(entries: Vec<(&str, Vec<Vec<Value>>)>) -> HashMap<String, Vec<Tuple>> {
+fn base_data(entries: Vec<(&str, Vec<Vec<Value>>)>) -> RelationMap {
     entries
         .into_iter()
         .map(|(name, rows)| (name.to_string(), rows.into_iter().map(Tuple::new).collect()))
@@ -172,7 +171,7 @@ fn test_why_not_wrong_arity() {
 
 #[test]
 fn test_why_not_nonexistent_relation() {
-    let data = HashMap::new();
+    let data = RelationMap::new();
     let ctx = ProofContext::new(&[], &data, ProofConfig::default());
 
     let graph = explain_why_not("nonexistent", &tuple(vec![int(1)]), &ctx);
