@@ -11,6 +11,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+use crate::parser::lexer::escape;
+
 pub mod builders;
 pub mod dependencies;
 
@@ -1044,7 +1046,7 @@ impl BodyPredicate {
 }
 
 /// Represents a single IQL rule
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Rule {
     pub head: Atom,
     pub body: Vec<BodyPredicate>,
@@ -1359,7 +1361,7 @@ impl std::fmt::Display for ArithExpr {
         match self {
             ArithExpr::Variable(name) => write!(f, "{name}"),
             ArithExpr::Constant(val) => write!(f, "{val}"),
-            ArithExpr::FloatConstant(bits) => write!(f, "{}", f64::from_bits(*bits)),
+            ArithExpr::FloatConstant(bits) => write!(f, "{:?}", f64::from_bits(*bits)),
             ArithExpr::Binary { op, left, right } => {
                 let parent_prec = op.precedence();
 
@@ -1475,9 +1477,9 @@ impl std::fmt::Display for Term {
         match self {
             Term::Variable(name) => write!(f, "{name}"),
             Term::Constant(val) => write!(f, "{val}"),
-            Term::StringConstant(s) => write!(f, "\"{s}\""),
+            Term::StringConstant(s) => write!(f, "\"{}\"", escape(s)),
             Term::BoolConstant(b) => write!(f, "{b}"),
-            Term::FloatConstant(val) => write!(f, "{val}"),
+            Term::FloatConstant(val) => write!(f, "{val:?}"),
             Term::Placeholder => write!(f, "_"),
             Term::Arithmetic(expr) => write!(f, "{expr}"),
             Term::Aggregate(func, var) => {
@@ -1553,12 +1555,14 @@ impl std::fmt::Display for BodyPredicate {
                 if let Some(ef) = ef_search {
                     write!(
                         f,
-                        "hnsw_nearest(\"{index_name}\", {query}, {k}, {id_var}, {distance_var}, {ef})"
+                        "hnsw_nearest(\"{}\", {query}, {k}, {id_var}, {distance_var}, {ef})",
+                        escape(index_name)
                     )
                 } else {
                     write!(
                         f,
-                        "hnsw_nearest(\"{index_name}\", {query}, {k}, {id_var}, {distance_var})"
+                        "hnsw_nearest(\"{}\", {query}, {k}, {id_var}, {distance_var})",
+                        escape(index_name)
                     )
                 }
             }

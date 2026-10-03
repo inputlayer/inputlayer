@@ -87,6 +87,9 @@ class TestCompileValue:
     def test_str_with_backslash(self):
         assert compile_value("a\\b") == '"a\\\\b"'
 
+    def test_str_with_control_chars(self):
+        assert compile_value("a\nb\r\tc") == '"a\\nb\\r\\tc"'
+
     def test_bool_true(self):
         assert compile_value(True) == "true"
 

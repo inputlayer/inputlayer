@@ -4,6 +4,7 @@
 //! - `type Name: TypeExpr.`
 //! - Type expressions: base types, lists, records, refined types
 
+use crate::parser::lexer::{code_chars, escape, is_string_literal, unescape};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -117,7 +118,7 @@ impl fmt::Display for TypeExpr {
                             match arg {
                                 RefinementArg::Int(n) => write!(f, "{n}")?,
                                 RefinementArg::Float(n) => write!(f, "{n}")?,
-                                RefinementArg::String(s) => write!(f, "\"{s}\"")?,
+                                RefinementArg::String(s) => write!(f, "\"{}\"", escape(s))?,
                                 RefinementArg::Bool(b) => write!(f, "{b}")?,
                             }
                         }
@@ -338,8 +339,8 @@ fn parse_refinement_args(input: &str) -> Result<Vec<RefinementArg>, String> {
         }
 
         // String argument
-        if part.starts_with('"') && part.ends_with('"') && part.len() >= 2 {
-            args.push(RefinementArg::String(part[1..part.len() - 1].to_string()));
+        if is_string_literal(part) {
+            args.push(RefinementArg::String(unescape(&part[1..part.len() - 1])));
             continue;
         }
 
@@ -367,115 +368,42 @@ fn parse_refinement_args(input: &str) -> Result<Vec<RefinementArg>, String> {
 }
 
 // String Splitting Utilities
-/// Split by comma, respecting braces and parentheses
-pub fn split_respecting_braces(input: &str) -> Vec<String> {
-    let mut result = Vec::new();
-    let mut current = String::new();
-    let mut brace_depth: i32 = 0;
-    let mut paren_depth: i32 = 0;
-    let mut in_string = false;
 
-    for ch in input.chars() {
-        match ch {
-            '"' => {
-                in_string = !in_string;
-                current.push(ch);
-            }
-            '{' if !in_string => {
-                brace_depth += 1;
-                current.push(ch);
-            }
-            '}' if !in_string => {
-                // Clamp to 0 to handle malformed input
-                brace_depth = (brace_depth - 1).max(0);
-                current.push(ch);
-            }
-            '(' if !in_string => {
-                paren_depth += 1;
-                current.push(ch);
-            }
-            ')' if !in_string => {
-                // Clamp to 0 to handle malformed input
-                paren_depth = (paren_depth - 1).max(0);
-                current.push(ch);
-            }
-            ',' if brace_depth == 0 && paren_depth == 0 && !in_string => {
-                result.push(current.clone());
-                current.clear();
-            }
-            _ => current.push(ch),
+/// Split by comma outside string literals and the given bracket pairs.
+/// A trailing blank part is dropped.
+fn split_outside(input: &str, pairs: &[(char, char)]) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut start = 0;
+    let mut depth = vec![0i32; pairs.len()];
+    for (i, ch) in code_chars(input) {
+        if let Some(k) = pairs.iter().position(|p| p.0 == ch) {
+            depth[k] += 1;
+        } else if let Some(k) = pairs.iter().position(|p| p.1 == ch) {
+            depth[k] = (depth[k] - 1).max(0);
+        } else if ch == ',' && depth.iter().all(|&d| d == 0) {
+            result.push(input[start..i].to_string());
+            start = i + 1;
         }
     }
-
-    if !current.trim().is_empty() {
-        result.push(current);
+    if !input[start..].trim().is_empty() {
+        result.push(input[start..].to_string());
     }
-
     result
+}
+
+/// Split by comma, respecting braces and parentheses
+pub fn split_respecting_braces(input: &str) -> Vec<String> {
+    split_outside(input, &[('{', '}'), ('(', ')')])
 }
 
 /// Split by comma, respecting parentheses only
 pub fn split_respecting_parens(input: &str) -> Vec<String> {
-    let mut result = Vec::new();
-    let mut current = String::new();
-    let mut paren_depth: i32 = 0;
-    let mut in_string = false;
-
-    for ch in input.chars() {
-        match ch {
-            '"' => {
-                in_string = !in_string;
-                current.push(ch);
-            }
-            '(' if !in_string => {
-                paren_depth += 1;
-                current.push(ch);
-            }
-            ')' if !in_string => {
-                // Clamp to 0 to handle malformed input
-                paren_depth = (paren_depth - 1).max(0);
-                current.push(ch);
-            }
-            ',' if paren_depth == 0 && !in_string => {
-                result.push(current.clone());
-                current.clear();
-            }
-            _ => current.push(ch),
-        }
-    }
-
-    if !current.trim().is_empty() {
-        result.push(current);
-    }
-
-    result
+    split_outside(input, &[('(', ')')])
 }
 
 /// Split by comma, respecting strings
 pub fn split_respecting_strings(input: &str) -> Vec<String> {
-    let mut result = Vec::new();
-    let mut current = String::new();
-    let mut in_string = false;
-
-    for ch in input.chars() {
-        match ch {
-            '"' => {
-                in_string = !in_string;
-                current.push(ch);
-            }
-            ',' if !in_string => {
-                result.push(current.clone());
-                current.clear();
-            }
-            _ => current.push(ch),
-        }
-    }
-
-    if !current.trim().is_empty() {
-        result.push(current);
-    }
-
-    result
+    split_outside(input, &[])
 }
 
 #[cfg(test)]
@@ -798,6 +726,18 @@ mod tests {
     fn test_split_respecting_parens_nested() {
         let result = split_respecting_parens("range(1, 2), not_empty");
         assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_split_respecting_strings_escaped_quote() {
+        let result = split_respecting_strings(r#""a\", b", c"#);
+        assert_eq!(result, vec![r#""a\", b""#, " c"]);
+    }
+
+    #[test]
+    fn test_refinement_string_arg_unescaped() {
+        let args = parse_refinement_args(r#""say \"hi\"", 2"#).unwrap();
+        assert!(matches!(args[0], RefinementArg::String(ref s) if s == "say \"hi\""));
     }
 
     // === split_respecting_strings ===

@@ -17,6 +17,7 @@
 //! cargo run --bin inputlayer-client -- --script examples/iql/basic/same_component.iql
 //! ```
 
+use inputlayer::parser::lexer::{code_chars, escape, find_outside_strings, strip_block_comments};
 use inputlayer::statement::{parse_statement, MetaCommand, Statement};
 
 use futures_util::{SinkExt, StreamExt};
@@ -1207,7 +1208,7 @@ fn format_cell_value(value: &serde_json::Value) -> String {
             let s = n.to_string();
             s.replace("e+", "e")
         }
-        serde_json::Value::String(s) => format!("\"{s}\""),
+        serde_json::Value::String(s) => format!("\"{}\"", escape(s)),
         serde_json::Value::Bool(b) => b.to_string(),
         serde_json::Value::Array(arr) => {
             let items: Vec<String> = arr.iter().map(format_cell_value).collect();
@@ -1418,49 +1419,12 @@ fn display_relation_table(
 
 // ── Text processing utilities ───────────────────────────────────
 
-/// Strip block comments (/* ... */) from source text.
-/// Respects string literals - doesn't strip comments inside strings.
-fn strip_block_comments(source: &str) -> String {
-    let mut result = String::with_capacity(source.len());
-    let mut chars = source.chars().peekable();
-    let mut depth = 0;
-    let mut in_string = false;
-
-    while let Some(c) = chars.next() {
-        if c == '"' && depth == 0 {
-            in_string = !in_string;
-            result.push(c);
-        } else if in_string {
-            result.push(c);
-        } else if c == '/' && chars.peek() == Some(&'*') {
-            chars.next();
-            depth += 1;
-        } else if c == '*' && chars.peek() == Some(&'/') && depth > 0 {
-            chars.next();
-            depth -= 1;
-            if depth == 0 {
-                result.push(' ');
-            }
-        } else if depth == 0 {
-            result.push(c);
-        }
-    }
-
-    result
-}
-
-/// Strip inline comments (`//`) from a line, respecting string literals.
+/// Strip an inline `//` comment outside string literals.
 fn strip_inline_comment(line: &str) -> &str {
-    let mut in_string = false;
-    let bytes = line.as_bytes();
-    for i in 0..bytes.len() {
-        if bytes[i] == b'"' {
-            in_string = !in_string;
-        } else if !in_string && bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
-            return line[..i].trim_end();
-        }
+    match find_outside_strings(line, "//") {
+        Some(i) => line[..i].trim_end(),
+        None => line,
     }
-    line
 }
 
 fn is_complete_statement(line: &str) -> bool {
@@ -1472,17 +1436,13 @@ fn is_complete_statement(line: &str) -> bool {
     if stripped.starts_with('.') {
         return true;
     }
-    // Track delimiter balance: (), []
-    let mut paren: i32 = 0;
-    let mut bracket: i32 = 0;
-    let mut in_string = false;
-    for c in stripped.chars() {
+    let (mut paren, mut bracket) = (0i32, 0i32);
+    for (_, c) in code_chars(stripped) {
         match c {
-            '"' => in_string = !in_string,
-            '(' if !in_string => paren += 1,
-            ')' if !in_string => paren -= 1,
-            '[' if !in_string => bracket += 1,
-            ']' if !in_string => bracket -= 1,
+            '(' => paren += 1,
+            ')' => paren -= 1,
+            '[' => bracket += 1,
+            ']' => bracket -= 1,
             _ => {}
         }
     }
@@ -1708,6 +1668,12 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_format_cell_value_escapes_strings() {
+        let v = serde_json::Value::String("say \"hi\"\n\\".to_string());
+        assert_eq!(format_cell_value(&v), r#""say \"hi\"\n\\""#);
+    }
+
     // strip_block_comments tests
     #[test]
     fn test_strip_block_comments() {
@@ -1725,5 +1691,15 @@ mod tests {
         assert_eq!(strip_inline_comment("foo // bar"), "foo");
         assert_eq!(strip_inline_comment(r#""a // b" // c"#), r#""a // b""#);
         assert_eq!(strip_inline_comment("no comment"), "no comment");
+        assert_eq!(
+            strip_inline_comment(r#"+n("a \" // b") // c"#),
+            r#"+n("a \" // b")"#
+        );
+    }
+
+    #[test]
+    fn test_is_complete_statement_escaped_quote() {
+        assert!(is_complete_statement(r#"+note(3, "a \" b")"#));
+        assert!(!is_complete_statement(r#"+note(3, "a \" ) b""#));
     }
 }
