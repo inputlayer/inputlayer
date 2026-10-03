@@ -46,14 +46,30 @@ cargo fmt --check
 
 ### Pre-commit Checks
 
-Before every commit:
+Optional git hooks run the fast checks CI also runs, with the same commands:
 
 ```bash
-cargo fmt                           # Format code
-cargo clippy -- -D warnings         # Lint check
-cargo test                          # Unit tests
-./scripts/run_snapshot_tests.sh     # Snapshot tests
+make install-hooks                  # once per clone; make uninstall-hooks removes them
+make install-gitleaks               # pinned scanner in target/tools/, if gitleaks is not on PATH
 ```
+
+| Hook | Runs | CI job |
+|------|------|--------|
+| pre-commit | `make fmt-check` (only when `.rs` files are staged), then `scripts/secret-scan.sh --staged` | Format, Secret scan |
+| pre-push | `make lint` | Clippy |
+
+`core.hooksPath` is per clone, so the hooks cover every worktree of it; the
+installer refuses to replace a hooks path you already use. Bypass a hook once
+with `--no-verify`. If the secret scan fires, remove the credential and rotate
+it if it ever left your machine; a documentation placeholder that trips the
+scan goes into `.gitleaks.toml` as an exact value, never as a path or rule
+exemption. `make secret-check` scans every commit reachable from HEAD, and
+`make hooks-test` proves the hooks reject misformatted Rust and a staged
+credential. ESLint for the GUI is not hooked; it belongs to the deferred UI work.
+
+Hooks never run tests. Before each commit, run the tests that cover your
+change: `make test-fast` (or the touched crate's `cargo test -p ...`) and the
+affected snapshot specs (`make test-affected`).
 
 Before calling an implementation PR done, run the performance gate and attach
 its report (`target/perf-gate/latest/report.md`) to the PR:
