@@ -1,0 +1,91 @@
+# Ingestion recipe: Postgres --(Debezium CDC)--> adapter --> InputLayer,
+# plus billing webhooks --> adapter --> InputLayer. Run ./demo.sh.
+#
+x-demo-secrets: &demo-secrets
+  ENGINE_API_KEY: &engine-key ${INGEST_ENGINE_API_KEY:?Run ./demo.sh first}
+  CDC_WEBHOOK_SECRET: &cdc-secret ${INGEST_CDC_WEBHOOK_SECRET:?Run ./demo.sh first}
+  WEBHOOK_SECRET_BILLING: ${INGEST_WEBHOOK_SECRET_BILLING:?Run ./demo.sh first}
+
+services:
+  inputlayer:
+    image: ${INPUTLAYER_IMAGE:-ghcr.io/inputlayer/inputlayer:latest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${INPUTLAYER_PORT:-8080}:8080"
+    environment:
+      INPUTLAYER_BOOTSTRAP_API_KEY: *engine-key
+      INPUTLAYER_HTTP__HOST: "0.0.0.0"
+    volumes:
+      - inputlayer-data:/var/lib/inputlayer/data
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    command: ["postgres", "-c", "wal_level=logical"]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${INGEST_POSTGRES_PASSWORD:?Run ./demo.sh first}
+      POSTGRES_DB: shop
+    volumes:
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d shop"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  adapter:
+    build: ./adapter
+    image: inputlayer-ingest-adapter
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${ADAPTER_PORT:-8090}:8090"
+    environment:
+      <<: *demo-secrets
+      ENGINE_URL: ws://inputlayer:8080/ws
+      ENGINE_KG: shop
+      ENGINE_REQUEST_TIMEOUT: ${ENGINE_REQUEST_TIMEOUT:-10}
+    depends_on:
+      inputlayer:
+        condition: service_healthy
+
+  debezium:
+    image: quay.io/debezium/server:3.0
+    # Debezium Server exits when the sink is unreachable; on restart it resumes
+    # from its last committed offset and the adapter skips what it already applied.
+    restart: unless-stopped
+    environment:
+      CDC_SINK_URL: http://adapter:8090/cdc
+      CDC_WEBHOOK_SECRET: *cdc-secret
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${INGEST_POSTGRES_PASSWORD:?Run ./demo.sh first}
+      POSTGRES_DB: shop
+    volumes:
+      - ./debezium/application.properties:/debezium/config/application.properties:ro
+      - debezium-data:/debezium/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      adapter:
+        condition: service_healthy
+
+  # The demo driver and watching client: `docker compose run --rm demo`.
+  demo:
+    image: inputlayer-ingest-adapter
+    profiles: ["demo"]
+    command: ["python", "-m", "ingest.demo"]
+    environment:
+      <<: *demo-secrets
+      ENGINE_URL: ws://inputlayer:8080/ws
+      ENGINE_KG: shop
+      ENGINE_REQUEST_TIMEOUT: ${ENGINE_REQUEST_TIMEOUT:-10}
+      ADAPTER_URL: http://adapter:8090
+      DATABASE_URL: postgresql://postgres:${INGEST_POSTGRES_PASSWORD:?Run ./demo.sh first}@postgres:5432/shop
+    depends_on:
+      adapter:
+        condition: service_healthy
+
+volumes:
+  inputlayer-data:
+  debezium-data:

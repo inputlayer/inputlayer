@@ -1,0 +1,166 @@
+# Ingestion: Postgres CDC and Webhooks
+
+Feed InputLayer from the systems that already hold your data. This guide walks through a runnable recipe in [`examples/ingestion/`](https://github.com/inputlayer/inputlayer/tree/main/examples/ingestion):
+
+- **Postgres change data capture.** Debezium Server reads Postgres logical replication and posts every row insert, update and delete to a small adapter.
+- **SaaS webhooks.** The same adapter accepts signed webhook events, for example from a billing system.
+- **Reactive answers.** The adapter turns both feeds into fact inserts and retractions. Rules derive an answer from them, and a watching client (an AI agent, say) receives every change to that answer as it happens.
+
+```
+Postgres --logical replication--> Debezium Server --POST /cdc------------+
+                                                                         +--> adapter --WebSocket--> InputLayer --subscription_delta--> agent
+SaaS -------------------------------------------POST /webhooks/billing--+
+```
+
+## Run it
+
+You need Docker with Compose v2 and OpenSSL.
+
+```bash
+cd examples/ingestion
+./demo.sh
+```
+
+The script generates fresh engine, webhook and database credentials in an ignored, owner-readable `.env` file, then starts Postgres, InputLayer, the adapter and Debezium from scratch, then runs a self-checking scenario. A client subscribes to `?needs_attention(Id, Name, Invoice)`, which lists enterprise customers (from Postgres) with an unpaid invoice (from billing webhooks). The script then changes rows and sends webhooks, and asserts that the client receives exactly the expected deltas:
+
+```
+watching ?needs_attention(Id, Name, Invoice); snapshot: []
+
+[1] billing webhook: payment.failed inv_100 for Acme (enterprise)
+    adapter: {'applied': 1, 'skipped': 0}
+    watcher: seq=1 + [1, 'Acme', 'inv_100']  (33 ms)
+
+[2] the same webhook delivered again (a SaaS retry)
+    adapter: {'applied': 0, 'skipped': 1}
+    watcher: no delta within 1.5s, as expected
+...
+[6] Postgres: UPDATE customers SET name = 'Globex Corp' WHERE id = 2
+    watcher: seq=3 - [2, 'Globex', 'inv_200']  (46 ms)
+    watcher: seq=3 + [2, 'Globex Corp', 'inv_200']  (46 ms)
+
+[7] Postgres: DELETE FROM customers WHERE id = 1
+    watcher: seq=4 - [1, 'Acme', 'inv_100']  (59 ms)
+...
+all deltas matched: CDC and webhooks drive the standing query.
+```
+
+The millisecond figures measure the time from the SQL statement or webhook to the watcher receiving the delta, including Debezium's polling. The stack keeps running so you can experiment:
+
+```bash
+docker compose exec postgres psql -U postgres -d shop \
+  -c "UPDATE customers SET tier = 'free' WHERE id = 2"
+
+# watch any query (Ctrl-C to stop)
+docker compose run --rm --no-deps demo python -m ingest.watch '?customer(Id, Name, Tier)'
+
+docker compose down -v   # stop and delete everything
+```
+
+The engine image defaults to `ghcr.io/inputlayer/inputlayer:latest`. To use another build, set `INPUTLAYER_IMAGE`. The adapter needs an engine that speaks WebSocket protocol 2 (request ids), and refuses older ones at connect time. `INPUTLAYER_PORT` and `ADAPTER_PORT` move the published ports, which bind only to `127.0.0.1`.
+
+## How changes become facts
+
+Each adapter-fed relation has **key columns**, like a primary key. Every source event maps to one keyed change:
+
+| Source event | Change |
+|---|---|
+| Debezium `r` (snapshot), `c` (insert), `u` (update) | set the fact for the key to the new row |
+| Debezium `d` (delete) | retract the fact for the key |
+| Webhook type mapped as an upsert (`payment.failed`) | set the fact for the key from `data` |
+| Webhook type mapped as a retraction (`payment.succeeded`) | retract the fact for the key |
+| Webhook type with no mapping | ignored (200, nothing applied) |
+
+For each request, the adapter keeps the highest revision per key, filters out changes already covered by the stored watermarks, and sends the remaining changes to the engine as a single program. For each key, the program initializes a missing watermark to `-1`, then replaces data and advances the watermark only if the incoming revision is newer:
+
+```iql
++ingest_revision("customer", "[2]", -1)
+-ingest_revision("customer", "[2]", -1) <- ingest_revision("customer", "[2]", Revision), Revision >= 0
+-customer(2, V1, V2) <- customer(2, V1, V2), ingest_revision("customer", "[2]", Revision), Revision < 26405816
+-ingest_revision("customer", "[2]", Revision), +customer(2, "Globex Corp", "enterprise"), +ingest_revision("customer", "[2]", 26405816) <- ingest_revision("customer", "[2]", Revision), Revision < 26405816
+```
+
+A program commits as one transaction (see [Programs Commit Together](core-concepts#programs-commit-together)). Subscribers therefore see the old and new row swap in one delta, and an update that leaves the row unchanged pushes nothing. This recipe requires an engine with atomic programs and commit-time validation of conditional reads.
+
+The mapping lives in one file, `adapter/ingest/mappings.py`. It names each relation's typed columns and key, the Postgres table that feeds it, and the webhook event types that set or retract it. The adapter declares those schemas when it starts. Relation columns are read from source fields of the same name.
+
+## Ordering and replays
+
+Every delivery path here is at least once. Debezium resends anything it has not seen acknowledged, and SaaS senders retry. Events can also arrive late. The adapter makes this safe with **revisions**:
+
+- Every change carries a revision that increases for the same key. For CDC this is the Postgres LSN (`source.lsn`). For webhooks it is a per-object sequence or version field the sender provides (`sequence` in the demo).
+- `ingest_revision(relation, key, revision)` stores the last applied revision per key, **in the same transaction as the data**. A change at or below the stored revision is skipped, which covers both replays and late, out-of-order events.
+- A retraction keeps its revision as a tombstone. A replayed older insert therefore cannot resurrect a deleted fact.
+
+The revision comparison runs inside the transaction and is validated at commit. An older in-flight request finishing after a reconnect cannot overwrite a newer revision; a sender can safely retry an unknown outcome. The adapter is the single writer of the relations it owns: run one adapter per set of relations, not several replicas against the same relations.
+
+## Failure behavior
+
+The adapter replies 2xx only after the mapped changes are committed or skipped under the revision rules above. Lower revisions coalesced within a batch are superseded without being applied individually; unmapped webhook event types are ignored.
+
+`applied` counts watermark advances reported by the engine's committed conditional updates; `skipped` counts the remaining input changes, including duplicates coalesced within a batch. The preliminary revision read only filters candidates and does not determine these counters.
+
+| Reply | Meaning | Sender |
+|---|---|---|
+| `200 {"applied": n, "skipped": m}` | committed or skipped under the revision rules; unmapped webhook types return zero counts | moves on |
+| `401` | missing, stale or wrong signature | fix the secret |
+| `422` | the event cannot be mapped (unknown table, null value, wrong type) or the engine rejected the facts; nothing was applied | retries; fix the mapping or data |
+| `503` | engine unreachable, request timed out, or adapter still starting | retries |
+
+`ENGINE_REQUEST_TIMEOUT` sets the engine request deadline in seconds (default `10`, positive and finite). It covers sending through the final reply, including all streamed chunks; connection establishment has the same timeout. Keep it below Debezium's 30-second HTTP timeout. On expiry the adapter closes the connection, with at most one additional second for cleanup, and returns `503`; the next request reconnects. A timed-out write may have committed, so retries still use the engine-side revision guard. Idle subscription listening has no request deadline.
+
+A `422` from `/cdc` stops the CDC stream at that event. This is fail closed: later changes never overtake a change that could not be applied. Fix the mapping, restart the adapter, and Debezium resumes from that event.
+
+## Postgres and Debezium
+
+`debezium/application.properties` configures Debezium Server with Postgres's built-in `pgoutput` plugin and the HTTP sink:
+
+- Postgres needs `wal_level=logical`. The table needs a primary key and `REPLICA IDENTITY FULL`, as configured in `postgres/init.sql`, so unchanged TOASTed columns remain available. The adapter rejects Debezium's `__debezium_unavailable_value` placeholder in mapped fields instead of storing it as data.
+- Debezium snapshots existing rows on first start (`r` events), then streams changes. Its offsets live on the `debezium-data` volume and are committed after the adapter's 2xx reply. When a restart resends events, the adapter skips them.
+- An update that changes the primary key arrives as a delete of the old key and an insert of the new one.
+- Mapped columns must be `NOT NULL`: IQL facts have no null value. Map nullable columns to a separate relation, or give them a default in a view.
+- `TRUNCATE` is not mapped. Debezium skips it by default.
+- If Debezium's offsets are lost, it re-snapshots, and the re-applied rows push no deltas. Rows deleted while the offsets were missing are not retracted by a snapshot, so reconcile them separately.
+
+## Webhooks
+
+Every write endpoint verifies [Standard Webhooks](https://www.standardwebhooks.com) signatures. That covers Debezium's `/cdc`, signed with `debezium.sink.http.authentication.type=standard-webhooks`, and each `/webhooks/<source>`. A request carries `webhook-id`, `webhook-timestamp` and `webhook-signature` headers. The signature is an HMAC-SHA256 over `id.timestamp.body` under the base64 key in a `whsec_...` secret. Messages signed more than five minutes from now are rejected.
+
+A billing event looks like this:
+
+```json
+{"id": "evt_1", "type": "payment.failed", "sequence": 7,
+ "data": {"invoice": "inv_100", "customer_id": 1, "amount_cents": 4200}}
+```
+
+Senders that sign differently need their own verifier in `adapter/ingest/server.py`. Senders without a per-object version need one derived from a monotonic field, such as an update timestamp in milliseconds.
+
+## Watching the answer
+
+The demo's rule joins both feeds:
+
+```iql
++needs_attention(Id, Name, Invoice) <- customer(Id, Name, "enterprise"), payment_issue(Invoice, Id, _)
+```
+
+A client subscribes over the [WebSocket API](websocket-api#standing-queries) and receives a delta each time the result changes:
+
+```json
+{"type": "execute", "program": ".subscribe attention ?needs_attention(Id, Name, Invoice)"}
+```
+
+```json
+{"type": "subscription_delta", "subscription": "attention", "generation": 1,
+ "knowledge_graph": "shop", "seq": 3, "revision": 42,
+ "columns": ["Id", "Name", "Invoice"],
+ "inserted": [[2, "Globex Corp", "inv_200"]], "retracted": [[2, "Globex", "inv_200"]]}
+```
+
+`adapter/ingest/watch.py` is a minimal Python client for this. It drops pushes from a stale subscription `generation`, and it raises on a gap in `seq`, because a lost delta means its copy of the answer can no longer be trusted. Resubscribe to get a fresh snapshot.
+
+## Before production
+
+- Provision production credentials separately from the demo-generated `.env` file: the engine API key, both `whsec_` secrets and the database password.
+- Give the adapter an API key with write access to its knowledge graph only, not the bootstrap admin key (see [Authentication](authentication)).
+- Expose `/webhooks/*` to senders only through TLS. Keep `/cdc` on the private network.
+- Keep the Debezium offsets volume and the replication slot. A dropped slot loses changes made while it was gone.
+- Alert on adapter `422` and `503` replies: either one stops that feed until it is resolved.

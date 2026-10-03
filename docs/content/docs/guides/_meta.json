@@ -14,6 +14,7 @@
   "temporal": "Temporal Reasoning",
   "persistence": "Persistence",
   "backup": "Backup and Restore",
+  "ingestion": "Ingestion (CDC & Webhooks)",
   "configuration": "Configuration",
   "rest-api": "REST API",
   "python-sdk": "Python SDK",
