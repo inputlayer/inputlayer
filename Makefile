@@ -525,12 +525,16 @@ lint:
 # then the same-host performance gate. Formatting always runs; PRE_PR_BASE
 # routes Rust inputs to lint, workspace tests and affected snapshots, SDK
 # inputs to their tests (plus JS type checking), and perf-gate/ to its checks.
-PRE_PR_BASE ?= $(shell git merge-base HEAD origin/main 2>/dev/null || echo HEAD)
-PRE_PR_RUST_INPUTS := src tests benches examples gateway ontology-client testkit docs/spec Cargo.toml Cargo.lock config.toml clippy.toml Makefile scripts/test-affected.sh scripts/run_snapshot_tests.sh
+PRE_PR_BASE ?= $(shell git merge-base HEAD origin/main 2>/dev/null)
+PRE_PR_RUST_INPUTS := src tests benches examples gateway ontology-client testkit ws-protocol docs/spec Cargo.toml Cargo.lock config.toml clippy.toml Makefile scripts/test-affected.sh scripts/run_snapshot_tests.sh
 pre-pr:
 	@set -e; \
 	targets="fmt-check"; \
-	git rev-parse --verify "$(PRE_PR_BASE)^{commit}" >/dev/null; \
+	if ! base=$$(git rev-parse --verify "$(PRE_PR_BASE)^{commit}" 2>/dev/null) || \
+		[ "$$base" = "$$(git rev-parse HEAD)" ]; then \
+		echo "pre-pr requires a merge base with origin/main or an explicit PRE_PR_BASE resolving to a commit other than HEAD" >&2; \
+		exit 1; \
+	fi; \
 	if ! git diff --quiet "$(PRE_PR_BASE)" -- $(PRE_PR_RUST_INPUTS); then \
 		targets="$$targets lint pre-pr-tests pre-pr-snapshots"; \
 	fi; \

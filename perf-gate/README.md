@@ -201,7 +201,10 @@ Per scenario, on a fresh server with the gate's configuration:
 Memory is `/proc` RSS after load, after subscribing and at the end, plus
 peak RSS. Throughput is `load_statements` (seed statements per second of
 cold load) and `converged_mutations` (mutations per second of send-to-
-converged time, one serial writer).
+converged time, one serial writer). Convergence requires a successful, complete
+re-query for every subscription and a matching maintained answer without a
+subscription error. Missing ground truth (including truncated re-queries) never
+counts as convergence or contributes a convergence latency sample.
 
 The summary lists the reactive-path categories first (multiple supports and
 retraction, change impact, event replay, conversation revisions, change

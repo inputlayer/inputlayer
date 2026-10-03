@@ -17,6 +17,10 @@ make bench-genbi    # Reactive agent benchmark on genbi-trust (needs GENBI_TRUST
 make oracle-test    # Differential correctness oracle only (~15s)
 ```
 
+`make pre-pr` compares against the merge base with `origin/main`, or an explicit
+`PRE_PR_BASE`. A missing, invalid, or `HEAD` base fails before any checks run.
+All Rust workspace members, including `ws-protocol`, route to Rust checks.
+
 ## Test Tiers
 
 ### Tier 1: Unit Tests
@@ -155,7 +159,10 @@ lands):
   consumers. The perf gate's `interference` fixture measures
   slow-consumer latency, not correctness.
 - Credential revocation. It is covered over a real `/ws` connection by
-  `tests/credential_revocation_tests.rs`, not here.
+  `tests/credential_revocation_tests.rs`, not here. Handler unit tests in
+  `src/protocol/handler/credential_mutation_tests.rs` also cover failed password
+  and role replacements followed by user recreation or admin bootstrap and
+  restart, including orphaned API keys and failed recreation attempts.
 - Gateway finding additions, resolutions and authoritative reset.
 - Running the same histories against recompute and persistent-dataflow modes
   (R4). Until then, the differential oracle (`make oracle-test`) compares

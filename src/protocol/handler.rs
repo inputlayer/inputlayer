@@ -1013,7 +1013,11 @@ impl Handler {
         use crate::auth;
         use crate::value::Value;
 
-        let storage = self.storage.read();
+        let storage = self.storage.write();
+        let mut create_api_key = !storage
+            .list_knowledge_graphs()
+            .iter()
+            .any(|name| name == auth::INTERNAL_KG);
 
         // Create _internal KG if it doesn't exist
         if storage.ensure_knowledge_graph(auth::INTERNAL_KG).is_err() {
@@ -1081,7 +1085,6 @@ impl Handler {
         );
         let (api_key, key_generated) =
             resolve(supplied_api_key, persisted.api_key, &mut to_persist.api_key);
-        let mut create_api_key = true;
 
         if password_generated || key_generated {
             match to_persist.save(&credentials_path) {
@@ -1143,14 +1146,14 @@ impl Handler {
             }
         };
 
-        // Insert admin user: (username, password_hash, role)
-        let tuple = crate::value::Tuple::new(vec![
-            Value::string("admin"),
-            Value::string(&hash),
-            Value::string("admin"),
-        ]);
-
-        if let Err(e) = storage.insert_tuples_into(auth::INTERNAL_KG, "users", vec![tuple]) {
+        if let Err(e) = self.create_user(
+            &storage,
+            auth::UserRecord {
+                username: "admin".to_string(),
+                password_hash: hash,
+                role: auth::Role::Admin,
+            },
+        ) {
             warn!(error = %e, "Failed to insert admin user");
             return;
         }
@@ -1329,13 +1332,36 @@ impl Handler {
         role_str: &str,
     ) -> Result<QueryResult, String> {
         use crate::auth;
-        use crate::value::Value;
         use std::str::FromStr;
 
         let role = auth::Role::from_str(role_str)?;
 
-        // Check user doesn't already exist
         let storage = self.storage.write();
+        self.create_user(
+            &storage,
+            auth::UserRecord {
+                username: username.to_string(),
+                password_hash: auth::hash_password(password)?,
+                role,
+            },
+        )?;
+
+        tracing::info!(username, role = role_str, "audit_user_created");
+        Ok(self.message_result(&format!(
+            "User '{username}' created with role '{role_str}'."
+        )))
+    }
+
+    fn create_user(
+        &self,
+        storage: &StorageEngine,
+        user: crate::auth::UserRecord,
+    ) -> Result<(), String> {
+        use crate::auth;
+        use crate::storage_engine::{FactChange, StagedChanges, WriteProgram};
+        use crate::value::Value;
+
+        let username = &user.username;
         let snapshot = storage
             .get_snapshot_for(auth::INTERNAL_KG)
             .map_err(|e| format!("Auth storage error: {e}"))?;
@@ -1351,26 +1377,38 @@ impl Handler {
             }
         }
 
-        let hash = auth::hash_password(password)?;
+        let orphaned_keys: Vec<_> = snapshot
+            .input_tuples
+            .get("api_keys")
+            .into_iter()
+            .flatten()
+            .filter(|t| t.values().get(2).and_then(|v| v.as_str()) == Some(username.as_str()))
+            .cloned()
+            .collect();
         let tuple = crate::value::Tuple::new(vec![
             Value::string(username),
-            Value::string(&hash),
-            Value::string(role_str),
+            Value::string(&user.password_hash),
+            Value::string(&user.role.to_string()),
         ]);
-
+        self.credentials.remove_user(username);
         storage
-            .insert_tuples_into(auth::INTERNAL_KG, "users", vec![tuple])
-            .map_err(|e| format!("Failed to create user: {e}"))?;
-        self.credentials.put_user(auth::UserRecord {
-            username: username.to_string(),
-            password_hash: hash,
-            role,
-        });
-
-        tracing::info!(username, role = role_str, "audit_user_created");
-        Ok(self.message_result(&format!(
-            "User '{username}' created with role '{role_str}'."
-        )))
+            .commit_program(
+                auth::INTERNAL_KG,
+                WriteProgram::single(StagedChanges::Facts(vec![
+                    FactChange::Delete {
+                        relation: "api_keys".to_string(),
+                        tuples: orphaned_keys,
+                    },
+                    FactChange::Insert {
+                        relation: "users".to_string(),
+                        tuples: vec![tuple],
+                    },
+                ])),
+                None,
+            )
+            .map_err(|e| format!("Failed to create user: {}", e.into_storage_error()))?;
+        self.credentials.put_user(user);
+        Ok(())
     }
 
     /// Drop a user.

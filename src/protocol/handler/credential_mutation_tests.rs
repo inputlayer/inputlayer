@@ -92,6 +92,107 @@ fn failed_user_replacement_revokes_password_and_keys() {
 }
 
 #[test]
+fn orphaned_keys_cannot_rebind_after_recreation_or_bootstrap() {
+    for (username, revoke_first) in [("bob", false), ("admin", false), ("admin", true)] {
+        for password_change in [true, false] {
+            let (handler, _temp) = fixture();
+            let config = handler.config().clone();
+            let key = handler.create_api_key("old-key", username).unwrap();
+            let mut revoked_keys = vec![key];
+            let keeper = if username == "admin" {
+                handler.handle_user_drop("bob").unwrap();
+                let persisted = crate::auth::PersistedCredentials::load(
+                    &config.storage.data_dir.join("credentials.toml"),
+                )
+                .unwrap();
+                revoked_keys.push(
+                    std::env::var("INPUTLAYER_BOOTSTRAP_API_KEY")
+                        .ok()
+                        .filter(|key| !key.is_empty())
+                        .or(persisted.api_key)
+                        .unwrap(),
+                );
+                None
+            } else {
+                Some(handler.create_api_key("keeper", "admin").unwrap())
+            };
+            if revoke_first {
+                handler.handle_apikey_revoke("old-key").unwrap();
+                handler.handle_apikey_revoke("bootstrap").unwrap();
+            }
+            handler
+                .storage
+                .read()
+                .register_schema_in(
+                    INTERNAL_KG,
+                    RelationSchema::new("users")
+                        .with_column(ColumnSchema::new("name", SchemaType::String)),
+                )
+                .unwrap();
+            let result = if password_change {
+                handler.handle_user_password(username, "new_pw")
+            } else {
+                handler.handle_user_role(username, "admin")
+            };
+            assert!(result.is_err());
+            assert!(handler.handle_user_create(username, "pw", "admin").is_err());
+            let snapshot = handler
+                .storage
+                .read()
+                .get_snapshot_for(INTERNAL_KG)
+                .unwrap();
+            assert_eq!(
+                snapshot.input_tuples["api_keys"]
+                    .iter()
+                    .any(|tuple| tuple.values()[2].as_str() == Some(username)),
+                !revoke_first
+            );
+            handler
+                .storage
+                .read()
+                .remove_schema_in(INTERNAL_KG, "users")
+                .unwrap();
+            handler.shutdown();
+            drop(handler);
+
+            let handler = Handler::from_config(config.clone()).unwrap();
+            handler.bootstrap_auth();
+            if username == "bob" {
+                handler.handle_user_create(username, "pw", "admin").unwrap();
+            }
+            for key in &revoked_keys {
+                assert!(handler.authenticate_api_key(key).is_err());
+            }
+            assert!(handler.authenticate_user(username, "pw").is_ok());
+            let snapshot = handler
+                .storage
+                .read()
+                .get_snapshot_for(INTERNAL_KG)
+                .unwrap();
+            assert!(!snapshot
+                .input_tuples
+                .get("api_keys")
+                .into_iter()
+                .flatten()
+                .any(|tuple| tuple.values()[2].as_str() == Some(username)));
+            let new_key = handler.create_api_key("old-key", username).unwrap();
+            handler.shutdown();
+            drop(handler);
+
+            let handler = Handler::from_config(config).unwrap();
+            handler.bootstrap_auth();
+            for key in &revoked_keys {
+                assert!(handler.authenticate_api_key(key).is_err());
+            }
+            assert!(handler.authenticate_api_key(&new_key).is_ok());
+            if let Some(key) = keeper {
+                assert!(handler.authenticate_api_key(&key).is_ok());
+            }
+        }
+    }
+}
+
+#[test]
 fn successful_credential_mutations_preserve_live_identity() {
     let (handler, _temp) = fixture();
     let password = handler.authenticate_user("bob", "pw").unwrap();
