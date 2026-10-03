@@ -54,6 +54,8 @@ pub enum MetaCommand {
 
     // System commands
     Compact,
+    Backup(Option<String>), // .backup [name] - export an online checkpoint into backup_dir
+    BackupStatus,           // .backup status - progress or outcome of the last export
     Status,
     Debug(String),   // .debug <query> - show query plan without executing
     Why(String),     // .why <query> - show proof trees for query results
@@ -183,6 +185,8 @@ fn format_meta_debug(cmd: &MetaCommand) -> String {
         MetaCommand::IndexRebuild(s) => format!("IndexRebuild({s:?})"),
         MetaCommand::ClearPrefix(s) => format!("ClearPrefix({s:?})"),
         MetaCommand::Compact => "Compact".to_string(),
+        MetaCommand::Backup(name) => format!("Backup({name:?})"),
+        MetaCommand::BackupStatus => "BackupStatus".to_string(),
         MetaCommand::Status => "Status".to_string(),
         MetaCommand::Debug(s) => format!("Debug({s:?})"),
         MetaCommand::Why(s) => format!("Why({s:?})"),
@@ -276,6 +280,12 @@ pub fn parse_meta_command(input: &str) -> Result<MetaCommand, String> {
         "index" | "idx" => parse_index_command(&parts, input),
         "clear" => parse_clear_command(&parts),
         "compact" => Ok(MetaCommand::Compact),
+        "backup" => match &parts[1..] {
+            [] => Ok(MetaCommand::Backup(None)),
+            ["status"] => Ok(MetaCommand::BackupStatus),
+            [name] => Ok(MetaCommand::Backup(Some(name.to_string()))),
+            _ => Err("Usage: .backup [name] | .backup status".to_string()),
+        },
         "status" => Ok(MetaCommand::Status),
         "debug" => {
             if parts.len() < 2 {
@@ -1053,6 +1063,23 @@ mod tests {
     fn test_parse_compact() {
         let cmd = parse_meta_command(".compact").unwrap();
         assert!(matches!(cmd, MetaCommand::Compact));
+    }
+
+    #[test]
+    fn test_parse_backup() {
+        assert_eq!(
+            parse_meta_command(".backup").unwrap(),
+            MetaCommand::Backup(None)
+        );
+        assert_eq!(
+            parse_meta_command(".backup nightly").unwrap(),
+            MetaCommand::Backup(Some("nightly".to_string()))
+        );
+        assert_eq!(
+            parse_meta_command(".backup status").unwrap(),
+            MetaCommand::BackupStatus
+        );
+        assert!(parse_meta_command(".backup a b").is_err());
     }
 
     #[test]

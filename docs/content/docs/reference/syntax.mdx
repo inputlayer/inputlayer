@@ -426,6 +426,8 @@ Commands that control the REPL environment.
 ```iql
 .status                 // System status
 .compact                // Compact storage
+.backup [name]          // Export an online checkpoint (admin)
+.backup status          // Last export's progress or outcome
 .debug <query>        // Show query plan
 .help                   // Help message
 .quit                   // Exit REPL

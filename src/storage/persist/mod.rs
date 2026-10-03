@@ -31,12 +31,13 @@
 //!
 //! Rule and schema changes in the WAL are handed to the engine
 //! ([`FilePersist::take_recovered_catalog`]), which applies them over the catalog
-//! files; see [`catalog_log`] for how long the WAL keeps them.
+//! files; see the `catalog_log` module for how long the WAL keeps them.
 
 pub mod batch;
 mod catalog_log;
 pub mod codec;
 pub mod consolidate;
+mod export_writer;
 mod migrate;
 pub mod transaction;
 pub mod wal;
@@ -47,6 +48,7 @@ pub use consolidate::{
     consolidate, consolidate_to_current, filter_since, set_semantics_corrections, to_tuples,
     to_tuples_with_multiplicity,
 };
+pub use export_writer::ExportWriter;
 pub use transaction::{CatalogEntry, CatalogRecord, Transaction, TxnOp};
 pub use wal::PersistWal;
 
@@ -785,8 +787,7 @@ fn rebase_batch_paths(meta: &mut ShardMeta, batches_dir: &Path) {
 fn write_shard_meta(shards_dir: &Path, meta: &ShardMeta) -> StorageResult<()> {
     let final_path = shard_meta_path(shards_dir, &meta.name);
     let tmp_path = final_path.with_extension("json.tmp");
-    let content = serde_json::to_string_pretty(meta)
-        .map_err(|e| StorageError::Other(format!("Failed to serialize shard metadata: {e}")))?;
+    let content = shard_meta_json(meta)?;
 
     if let Err(e) = fs::write(&tmp_path, &content) {
         eprintln!(
@@ -812,6 +813,12 @@ fn write_shard_meta(shards_dir: &Path, meta: &ShardMeta) -> StorageResult<()> {
     Ok(())
 }
 
+/// The JSON a shard's metadata file holds.
+fn shard_meta_json(meta: &ShardMeta) -> StorageResult<String> {
+    serde_json::to_string_pretty(meta)
+        .map_err(|e| StorageError::Other(format!("Failed to serialize shard metadata: {e}")))
+}
+
 // Parquet I/O for Update batches
 
 /// Parquet key-value metadata key holding the batch format version.
@@ -831,6 +838,45 @@ fn write_updates_parquet(path: &Path, updates: &[Update]) -> StorageResult<()> {
         return Ok(());
     }
 
+    // Write to temp file then rename atomically (crash-safe).
+    // If we crash mid-write, the temp file is orphaned but the original path
+    // is never left in a corrupt half-written state.
+    let tmp_path = path.with_extension("parquet.tmp");
+
+    let file = match fs::File::create(&tmp_path) {
+        Ok(f) => f,
+        Err(e) => {
+            // ENOSPC or permission error - no temp file to clean up
+            return Err(StorageError::Other(format!(
+                "Failed to create batch file '{}': {e}",
+                tmp_path.display()
+            )));
+        }
+    };
+    // Helper: clean up temp file on any write error (ENOSPC, etc.)
+    let write_result = (|| -> StorageResult<()> {
+        encode_updates_parquet(file, updates)?;
+        fs::File::open(&tmp_path)?.sync_all()?;
+        Ok(())
+    })();
+
+    if let Err(e) = write_result {
+        // Clean up partial temp file so it doesn't consume disk space
+        let _ = fs::remove_file(&tmp_path);
+        return Err(e);
+    }
+
+    // Atomic rename (POSIX guarantees atomicity)
+    fs::rename(&tmp_path, path)?;
+    if let Some(dir) = path.parent() {
+        sync_directory(dir);
+    }
+
+    Ok(())
+}
+
+/// Encode `updates` as a Parquet batch into `file`, without syncing it.
+fn encode_updates_parquet(file: fs::File, updates: &[Update]) -> StorageResult<()> {
     let mut buf = Vec::new();
     let mut offsets = Vec::with_capacity(updates.len() + 1);
     offsets.push(0i64);
@@ -862,47 +908,13 @@ fn write_updates_parquet(path: &Path, updates: &[Update]) -> StorageResult<()> {
 
     let batch = RecordBatch::try_new(full_schema.clone(), columns).map_err(StorageError::Arrow)?;
 
-    // Write to temp file then rename atomically (crash-safe).
-    // If we crash mid-write, the temp file is orphaned but the original path
-    // is never left in a corrupt half-written state.
-    let tmp_path = path.with_extension("parquet.tmp");
-
-    let file = match fs::File::create(&tmp_path) {
-        Ok(f) => f,
-        Err(e) => {
-            // ENOSPC or permission error - no temp file to clean up
-            return Err(StorageError::Other(format!(
-                "Failed to create batch file '{}': {e}",
-                tmp_path.display()
-            )));
-        }
-    };
     let props = WriterProperties::builder()
         .set_compression(Compression::SNAPPY)
         .build();
-
-    // Helper: clean up temp file on any write error (ENOSPC, etc.)
-    let write_result = (|| -> StorageResult<()> {
-        let mut writer =
-            ArrowWriter::try_new(file, full_schema, Some(props)).map_err(StorageError::Parquet)?;
-        writer.write(&batch).map_err(StorageError::Parquet)?;
-        writer.close().map_err(StorageError::Parquet)?;
-        fs::File::open(&tmp_path)?.sync_all()?;
-        Ok(())
-    })();
-
-    if let Err(e) = write_result {
-        // Clean up partial temp file so it doesn't consume disk space
-        let _ = fs::remove_file(&tmp_path);
-        return Err(e);
-    }
-
-    // Atomic rename (POSIX guarantees atomicity)
-    fs::rename(&tmp_path, path)?;
-    if let Some(dir) = path.parent() {
-        sync_directory(dir);
-    }
-
+    let mut writer =
+        ArrowWriter::try_new(file, full_schema, Some(props)).map_err(StorageError::Parquet)?;
+    writer.write(&batch).map_err(StorageError::Parquet)?;
+    writer.close().map_err(StorageError::Parquet)?;
     Ok(())
 }
 

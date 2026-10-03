@@ -35,6 +35,7 @@ use fact_staging::FactStatement;
 pub use inputlayer_ws_protocol::{Notification, ValidationError};
 use write_run::{WriteRun, WriteStatement};
 
+mod backup_command;
 mod catalog_staging;
 mod fact_staging;
 mod program_boundary;
@@ -2827,6 +2828,15 @@ impl QueryJob {
                                                 );
                                             }
                                         }
+                                    }
+                                    MetaCommand::Backup(name) => {
+                                        match backup_command::start(&storage, name.as_deref()) {
+                                            Ok(rows) => messages.extend(rows),
+                                            Err((code, message)) => fail!(code, message),
+                                        }
+                                    }
+                                    MetaCommand::BackupStatus => {
+                                        messages.extend(backup_command::status(&storage));
                                     }
 
                                     // === Debug command ===

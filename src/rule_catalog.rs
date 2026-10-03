@@ -35,7 +35,7 @@ use crate::statement::{RuleDef, SerializableRule};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Rule catalog file format version.
 const CATALOG_VERSION: u32 = 1;
@@ -978,16 +978,27 @@ impl RuleCatalog {
             return Ok(());
         }
         if let Some(path) = &self.catalog_path {
-            let catalog_file = CatalogFile {
-                version: CATALOG_VERSION,
-                revision: self.revision,
-                rules: self.rules.clone(),
-            };
-            crate::storage::metadata::save_json_atomic(&catalog_file, path)
-                .map_err(|e| format!("Failed to write catalog: {e}"))?;
+            self.write_file(path)?;
         }
         self.dirty = false;
         Ok(())
+    }
+
+    /// Save these rules and their revision as the catalog of the database
+    /// directory `db_dir`, leaving this catalog unchanged. For writing a
+    /// copy, such as a checkpoint export.
+    pub fn save_copy_to(&self, db_dir: &Path) -> Result<(), String> {
+        self.write_file(&db_dir.join("rules").join("catalog.json"))
+    }
+
+    fn write_file(&self, path: &Path) -> Result<(), String> {
+        let catalog_file = CatalogFile {
+            version: CATALOG_VERSION,
+            revision: self.revision,
+            rules: self.rules.clone(),
+        };
+        crate::storage::metadata::save_json_atomic(&catalog_file, path)
+            .map_err(|e| format!("Failed to write catalog: {e}"))
     }
 
     /// Force a reload from disk
