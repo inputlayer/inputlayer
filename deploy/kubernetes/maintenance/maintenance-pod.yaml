@@ -1,0 +1,43 @@
+# Offline access to the engine's volume for backup and restore (runbook:
+# docs/content/docs/guides/deployment.mdx, "Backup and Restore"). It holds
+# the engine's own data-dir LOCK for as long as it runs: it fails to start
+# while an engine owns the volume, and an engine started meanwhile refuses
+# the volume. Delete it before scaling the StatefulSet back up.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: inputlayer-maintenance
+  labels:
+    app.kubernetes.io/name: inputlayer
+    app.kubernetes.io/component: maintenance
+spec:
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  restartPolicy: Never
+  # flock/sleep ignore SIGTERM as PID 1; nothing here needs a graceful stop.
+  terminationGracePeriodSeconds: 1
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 999
+    runAsGroup: 999
+    fsGroup: 999
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: maintenance
+      # Any engine image works: the pod only needs sh, tar and flock.
+      image: ghcr.io/inputlayer/inputlayer
+      command: ["flock", "--nonblock", "/var/lib/inputlayer/data/LOCK", "sleep", "infinity"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      volumeMounts:
+        - name: data
+          mountPath: /var/lib/inputlayer/data
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: inputlayer-data

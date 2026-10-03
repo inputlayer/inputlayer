@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: inputlayer-data
+  labels:
+    app.kubernetes.io/name: inputlayer
+    app.kubernetes.io/component: engine
+spec:
+  # ReadWriteOnce stops a second node attaching the volume. Pods on the same
+  # node can still share it; the engine's data-dir LOCK refuses the second
+  # writer. Use ReadWriteOncePod where the CSI driver supports it.
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

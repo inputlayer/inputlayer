@@ -156,7 +156,7 @@ The image runs as a non-root `inputlayer` user with the following defaults:
 | Data volume | `/var/lib/inputlayer/data` |
 | GUI assets | `/var/lib/inputlayer/gui/dist/` |
 | Exposed port | `8080` |
-| User | `inputlayer` (non-root) |
+| User | `inputlayer`, uid/gid `999` (non-root) |
 
 ### Custom Configuration in Docker
 
@@ -392,161 +392,163 @@ No additional TLS configuration is needed. Caddy handles certificates, HTTPS red
 
 ## Kubernetes
 
-InputLayer is a single writer per data directory: a server refuses to start
-while another one holds the volume's `LOCK` (see
-[Persistence](persistence#single-writer)). During a rolling
-update the new pod therefore fails and restarts until the old pod exits;
-keep `replicas: 1` per volume. For backups, see
-[Backup and Restore](backup#kubernetes).
+The repository ships Kustomize manifests in `deploy/kubernetes/`. Install one
+engine per tenant: each tenant gets its own namespace, volume and engine.
 
-### Deployment
+| Path | Contents |
+|---|---|
+| `base/statefulset.yaml` | The engine: one replica, non-root, probes, graceful shutdown |
+| `base/pvc.yaml` | `inputlayer-data`, the engine's `ReadWriteOnce` volume |
+| `base/service.yaml` | `inputlayer`, a ClusterIP Service on port `8080` |
+| `base/configmap.yaml` | `config.toml`, mounted at `/etc/inputlayer/config.toml` |
+| `components/ingress/` | Optional ingress-nginx Ingress with TLS |
+| `overlays/tenant-example/` | A per-tenant overlay: namespace, image tag, Ingress host |
+| `maintenance/maintenance-pod.yaml` | Offline volume access for [backup and restore](#backup-and-restore) |
 
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: inputlayer
-  labels:
-    app: inputlayer
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: inputlayer
-  template:
-    metadata:
-      labels:
-        app: inputlayer
-    spec:
-      containers:
-        - name: inputlayer
-          image: inputlayer:latest
-          ports:
-            - containerPort: 8080
-              name: http
-          env:
-            - name: INPUTLAYER_HTTP__HOST
-              value: "0.0.0.0"
-            - name: INPUTLAYER_HTTP__PORT
-              value: "8080"
-            - name: INPUTLAYER_STORAGE__DATA_DIR
-              value: "/var/lib/inputlayer/data"
-            - name: INPUTLAYER_STORAGE__PERSIST__ENABLED
-              value: "true"
-            - name: INPUTLAYER_STORAGE__PERSIST__DURABILITY_MODE
-              value: "immediate"
-            - name: INPUTLAYER_TRACE_LEVEL
-              value: "info"
-            - name: INPUTLAYER_TRACE_JSON
-              value: "1"
-            - name: INPUTLAYER_ADMIN_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: inputlayer-secrets
-                  key: admin-password
-          volumeMounts:
-            - name: data
-              mountPath: /var/lib/inputlayer/data
-          livenessProbe:
-            httpGet:
-              path: /live
-              port: http
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 3
-          readinessProbe:
-            httpGet:
-              path: /ready
-              port: http
-            initialDelaySeconds: 3
-            periodSeconds: 5
-            timeoutSeconds: 3
-          resources:
-            requests:
-              cpu: "500m"
-              memory: "512Mi"
-            limits:
-              cpu: "4"
-              memory: "4Gi"
-      volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: inputlayer-data
-```
+### Install a Tenant
 
-### Service
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: inputlayer
-spec:
-  selector:
-    app: inputlayer
-  ports:
-    - port: 8080
-      targetPort: http
-      name: http
-  type: ClusterIP
-```
-
-### PersistentVolumeClaim
-
-```yaml
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: inputlayer-data
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
-```
-
-### Secret
+Copy `overlays/tenant-example` to a directory of your own. Then set the
+namespace, pin the image tag and set the Ingress host. If the tenant has no
+public endpoint, drop the `components` entry and the Ingress patch. Then:
 
 ```bash
-kubectl create secret generic inputlayer-secrets \
-  --from-literal=admin-password='your-secure-password'
+kubectl apply -f my-overlays/acme/namespace.yaml
+kubectl -n inputlayer-acme create secret generic inputlayer-secrets \
+  --from-literal=admin-password='your-secure-password' \
+  --from-literal=bootstrap-api-key='your-agent-api-key'   # optional
+kubectl apply -k my-overlays/acme
+kubectl -n inputlayer-acme rollout status statefulset/inputlayer
 ```
 
-### Ingress
+If you leave out `bootstrap-api-key`, the engine generates an admin API key on
+first boot and stores it in `credentials.toml` on the volume:
 
-Using the nginx ingress controller with TLS:
-
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: inputlayer
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
-    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
-    # Required for WebSocket support
-    nginx.ingress.kubernetes.io/websocket-services: "inputlayer"
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-spec:
-  ingressClassName: nginx
-  tls:
-    - hosts:
-        - inputlayer.example.com
-      secretName: inputlayer-tls
-  rules:
-    - host: inputlayer.example.com
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: inputlayer
-                port:
-                  number: 8080
+```bash
+kubectl -n inputlayer-acme exec inputlayer-0 -- cat /var/lib/inputlayer/data/credentials.toml
 ```
+
+Agents in the cluster connect to `ws://inputlayer.inputlayer-acme.svc:8080/ws`.
+Agents outside it connect through the Ingress at `wss://<host>/ws`.
+
+### Single Writer
+
+InputLayer is a single writer per data directory (see
+[Persistence](persistence#single-writer)). The manifests stack three
+safeguards:
+
+1. **One replica.** `replicas: 1` on a StatefulSet. Never raise it, and never
+   point an autoscaler at it.
+2. **No overlap on replacement.** With one replica, a StatefulSet rolling
+   update deletes `inputlayer-0`, waits for it to terminate, and only then
+   creates the replacement. A Deployment's default `RollingUpdate` starts the
+   new pod first. If you deploy the engine as a Deployment, use
+   `strategy: Recreate`.
+3. **The data-dir lock.** `ReadWriteOnce` stops a second node attaching the
+   volume. Pods on the same node can still mount it, and there the engine's
+   `LOCK` refuses the second writer, which exits with `in use by another
+   InputLayer process`.
+
+None of this prevents every duplicate writer. A force-deleted pod
+(`kubectl delete pod --force`), or a pod on a partitioned node, can still be
+running when its replacement starts. Then only the volume and the lock
+remain. They do not hold on storage that attaches read-write to several nodes,
+or on a filesystem whose `flock` is not shared between clients (some NFS
+setups). Keep the data on block storage. Where the CSI driver supports it,
+set `accessModes: [ReadWriteOncePod]` in `pvc.yaml`. Do not force-delete
+the engine pod unless you know that its node is down.
+
+### Security Context
+
+The engine runs as uid/gid `999`, the image's `inputlayer` user (pinned in the
+`Dockerfile`). `fsGroup: 999` makes a freshly provisioned, root-owned volume
+writable. The root filesystem is read-only, all capabilities are dropped,
+privilege escalation is off and the seccomp profile is `RuntimeDefault`. The
+pod passes the `restricted` Pod Security Standard, which the example overlay
+enforces on its namespace. The pod gets no service account token.
+`enableServiceLinks: false` keeps Kubernetes from injecting `INPUTLAYER_*`
+service variables into the engine's config namespace.
+
+### Configuration
+
+`base/configmap.yaml` holds `config.toml`. Environment variables override it,
+and the engine image sets `http.host`, `http.port`, `storage.data_dir`,
+`logging.level` and `storage.auto_create_knowledge_graphs` as environment
+variables. Change those five keys in `statefulset.yaml`. A ConfigMap change does not
+restart the pod, so restart it after applying:
+
+```bash
+kubectl -n inputlayer-acme rollout restart statefulset/inputlayer
+```
+
+Behind the Ingress, every request comes from the ingress controller. Set
+`http.trusted_proxies` to the controller's pod CIDR. Otherwise the per-IP rate
+limit and the pre-auth WebSocket cap (`ws_max_preauth_per_ip`) apply to
+the controller instead of to each client. The Ingress keeps idle WebSockets
+open for an hour, so the engine's `http.ws_idle_timeout_ms` decides when idle
+subscriptions close.
+
+### Probes, Shutdown and Upgrades
+
+- The HTTP server starts only after the WAL replay. The startup probe on
+  `/live` therefore sets the replay budget: 10 minutes. Raise
+  `failureThreshold` for large data sets.
+- `/live` drives the liveness probe and `/ready` (storage reachable) drives
+  readiness. See [Health Checks](#health-checks).
+- `terminationGracePeriodSeconds: 60` exceeds `http.shutdown_timeout_secs: 30`
+  so the WAL flush on `SIGTERM` can finish.
+- To upgrade, change the image tag in the overlay and `kubectl apply -k` it.
+  The engine is down from its shutdown until the new pod finishes replay.
+  Take a backup first.
+
+### Backup and Restore
+
+Back up and restore with the engine stopped. The maintenance pod mounts the
+volume as the engine's user and holds the engine's `LOCK` while it runs. It
+fails to start while an engine owns the volume, and an engine started in the
+meantime refuses the volume. Point kubectl at the tenant's namespace first:
+
+```bash
+kubectl config set-context --current --namespace=inputlayer-acme
+```
+
+**Back up**
+
+```bash
+kubectl scale statefulset/inputlayer --replicas=0
+kubectl wait --for=delete pod/inputlayer-0 --timeout=120s
+kubectl apply -f deploy/kubernetes/maintenance/maintenance-pod.yaml
+kubectl wait --for=condition=Ready pod/inputlayer-maintenance --timeout=180s
+kubectl exec inputlayer-maintenance -- sh -c 'cd /var/lib/inputlayer/data &&
+  find . -mindepth 1 -maxdepth 1 ! -name LOCK ! -name lost+found -print0 |
+  tar --null -T - -czf -' > inputlayer-backup.tgz
+kubectl delete pod inputlayer-maintenance
+kubectl scale statefulset/inputlayer --replicas=1
+```
+
+The archive holds every knowledge graph, the WAL and the user and API key
+store. If the engine generated its credentials, the archive also holds
+`credentials.toml`. Treat the archive as a secret.
+
+**Restore** into a new, empty volume. This step deletes the current volume,
+so back it up first if you might need it.
+
+```bash
+kubectl scale statefulset/inputlayer --replicas=0
+kubectl wait --for=delete pod/inputlayer-0 --timeout=120s
+kubectl delete pvc inputlayer-data
+kubectl apply -f deploy/kubernetes/base/pvc.yaml   # only the PVC: re-applying the overlay would also restore replicas: 1
+kubectl apply -f deploy/kubernetes/maintenance/maintenance-pod.yaml
+kubectl wait --for=condition=Ready pod/inputlayer-maintenance --timeout=180s
+kubectl exec -i inputlayer-maintenance -- tar -C /var/lib/inputlayer/data -xzf - < inputlayer-backup.tgz
+kubectl delete pod inputlayer-maintenance
+kubectl scale statefulset/inputlayer --replicas=1
+kubectl rollout status statefulset/inputlayer
+```
+
+If your overlay changes the PVC (storage class, size), apply your overlay's
+rendered PVC instead of `base/pvc.yaml`. CSI `VolumeSnapshot`s also work
+as backups. Take them while the StatefulSet is scaled to 0, and restore by
+creating `inputlayer-data` from the snapshot (`spec.dataSource`).
 
 ## Resource Sizing
 
@@ -617,7 +619,7 @@ InputLayer requires WebSocket authentication for all data operations. On first b
 1. Run as a dedicated non-root user
 2. Use `ProtectSystem=strict` in systemd to prevent writes outside allowed paths
 3. Set appropriate permissions on the data directory (`750` or stricter)
-4. Back up the data directory regularly with `inputlayer-backup` -- see [Backup and Restore](backup)
+4. Back up the data directory regularly with `inputlayer-backup` -- see [Backup and Restore](backup) (Kubernetes: [Backup and Restore](#backup-and-restore))
 
 ### Durability
 

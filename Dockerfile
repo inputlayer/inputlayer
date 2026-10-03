@@ -89,7 +89,10 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates curl && \
     rm -rf /var/lib/apt/lists/*
 
-RUN useradd -r -s /bin/false -m -d /var/lib/inputlayer inputlayer
+# uid/gid 999 is pinned: deploy/kubernetes runs the engine as 999 and
+# existing volumes are owned by it.
+RUN groupadd -r -g 999 inputlayer && \
+    useradd -r -u 999 -g inputlayer -s /bin/false -m -d /var/lib/inputlayer inputlayer
 
 COPY --from=builder /build/target/release/inputlayer-server /usr/local/bin/
 # Offline backup/restore of the data volume (docs/guides/backup.md)

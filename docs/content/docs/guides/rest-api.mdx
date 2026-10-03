@@ -273,20 +273,30 @@ curl -H "Authorization: Bearer your-api-key" http://localhost:8080/metrics
 
 ### Kubernetes Probes
 
+`deploy/kubernetes/base/statefulset.yaml` wires these up. It adds a startup
+probe on `/live` that covers the WAL replay before the HTTP server starts:
+
 ```yaml
+startupProbe:
+  httpGet:
+    path: /live
+    port: http
+  periodSeconds: 5
+  failureThreshold: 120
 livenessProbe:
   httpGet:
     path: /live
-    port: 8080
-  initialDelaySeconds: 5
+    port: http
   periodSeconds: 10
-
+  timeoutSeconds: 3
+  failureThreshold: 3
 readinessProbe:
   httpGet:
     path: /ready
-    port: 8080
-  initialDelaySeconds: 5
+    port: http
   periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
 ```
 
 ---

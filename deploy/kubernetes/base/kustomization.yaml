@@ -1,0 +1,14 @@
+# InputLayer engine for one tenant: `kubectl apply -k deploy/kubernetes/base -n <ns>`.
+# For a real install, build an overlay instead (see ../overlays/tenant-example).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - configmap.yaml
+  - pvc.yaml
+  - service.yaml
+  - statefulset.yaml
+
+images:
+  - name: ghcr.io/inputlayer/inputlayer
+    newTag: latest # pin a released version in production

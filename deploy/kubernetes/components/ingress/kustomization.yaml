@@ -1,0 +1,8 @@
+# Optional public endpoint. Enable it from an overlay with
+#   components: [<path>/deploy/kubernetes/components/ingress]
+# and patch the host (see deploy/kubernetes/overlays/tenant-example).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - ingress.yaml

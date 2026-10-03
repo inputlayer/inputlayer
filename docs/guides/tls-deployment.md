@@ -49,32 +49,13 @@ Caddy automatically provisions and renews Let's Encrypt certificates.
 
 ## Kubernetes Ingress
 
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: inputlayer
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
-    cert-manager.io/cluster-issuer: letsencrypt-prod
-spec:
-  tls:
-    - hosts:
-        - inputlayer.example.com
-      secretName: inputlayer-tls
-  rules:
-    - host: inputlayer.example.com
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: inputlayer
-                port:
-                  number: 8080
-```
+Use the ingress-nginx Ingress shipped in
+`deploy/kubernetes/components/ingress/ingress.yaml`. It terminates TLS from
+the `inputlayer-tls` secret (for example, issued by cert-manager) and keeps idle
+WebSocket subscriptions open for an hour. Enable it from a tenant overlay, as
+in `deploy/kubernetes/overlays/tenant-example`. Set `http.trusted_proxies` to
+the ingress controller's pod CIDR. See the Kubernetes section of the
+Deployment guide (`docs/content/docs/guides/deployment.mdx`).
 
 ## Docker Compose with Traefik
 

@@ -1,0 +1,126 @@
+# One engine, one volume. InputLayer is a single writer per data directory:
+# never raise replicas. Each tenant gets its own namespace and its own copy.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: inputlayer
+  labels:
+    app.kubernetes.io/name: inputlayer
+    app.kubernetes.io/component: engine
+spec:
+  replicas: 1
+  serviceName: inputlayer
+  # With one replica a rolling update deletes inputlayer-0, waits until it has
+  # terminated, then creates the replacement: the old and new engine never run
+  # at the same time. (A Deployment would need `strategy: Recreate` for this;
+  # its default RollingUpdate starts the new pod first, which the data-dir
+  # LOCK then refuses until the old pod exits.)
+  updateStrategy:
+    type: RollingUpdate
+  podManagementPolicy: OrderedReady
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: inputlayer
+      app.kubernetes.io/component: engine
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: inputlayer
+        app.kubernetes.io/component: engine
+    spec:
+      automountServiceAccountToken: false
+      # Service links inject INPUTLAYER_* variables (INPUTLAYER_PORT, ...)
+      # into the pod, colliding with the engine's config prefix.
+      enableServiceLinks: false
+      # Above http.shutdown_timeout_secs so the WAL flush on SIGTERM finishes.
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        # uid/gid 999 is the image's `inputlayer` user (pinned in Dockerfile).
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        # Makes a freshly provisioned (root-owned) volume writable by 999.
+        fsGroup: 999
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: inputlayer
+          image: ghcr.io/inputlayer/inputlayer
+          args: ["--config", "/etc/inputlayer/config.toml"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # The image sets these as ENV; restated so the manifest is the
+            # single place to change them (ENV overrides config.toml).
+            - name: INPUTLAYER_HTTP__HOST
+              value: "0.0.0.0"
+            - name: INPUTLAYER_HTTP__PORT
+              value: "8080"
+            - name: INPUTLAYER_STORAGE__DATA_DIR
+              value: /var/lib/inputlayer/data
+            - name: INPUTLAYER_STORAGE__AUTO_CREATE_KNOWLEDGE_GRAPHS
+              value: "true"
+            - name: INPUTLAYER_LOGGING__LEVEL
+              value: info
+            - name: INPUTLAYER_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: inputlayer-secrets
+                  key: admin-password
+            # Optional. Without it the engine generates a key on first boot
+            # and stores it in <data_dir>/credentials.toml.
+            - name: INPUTLAYER_BOOTSTRAP_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: inputlayer-secrets
+                  key: bootstrap-api-key
+                  optional: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/inputlayer/data
+            - name: config
+              mountPath: /etc/inputlayer
+              readOnly: true
+          # HTTP starts only after the WAL replay, so the startup probe is the
+          # replay budget (here 10 minutes). Raise it for large data sets.
+          startupProbe:
+            httpGet:
+              path: /live
+              port: http
+            periodSeconds: 5
+            failureThreshold: 120
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # No CPU limit: throttling adds latency to reactive results.
+          resources:
+            requests:
+              cpu: "1"
+              memory: 1Gi
+            limits:
+              memory: 4Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: inputlayer-data
+        - name: config
+          configMap:
+            name: inputlayer-config
