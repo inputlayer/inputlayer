@@ -13,6 +13,12 @@
 //! A connection is bound to the [`Principal`] it authenticated as. Revoking
 //! that credential closes the connection, and every outbound data frame is
 //! fenced by it (see the `outbound` module).
+//!
+//! Each connection is one loop that owns the socket's read half, the single
+//! writer, its subscriptions and its request `pipeline`. Requests run as
+//! pipeline tasks (see the `request` module), so a long query never holds up
+//! the connection's pushes; the pipeline releases replies in request order
+//! and keeps writes, KG switches and session changes in order.
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
@@ -25,9 +31,9 @@ use axum::{
     response::IntoResponse,
     Extension,
 };
-use futures_util::StreamExt;
+use futures_util::{FutureExt, StreamExt};
 use inputlayer_ws_protocol::{
-    probe_request_id, ClientFrame, ErrorCode, NoticeCode, ServerFrame, SubscriptionPush,
+    probe_request_id, ErrorCode, NoticeCode, ServerFrame, Subscribed, SubscriptionPush,
     PROTOCOL_VERSION,
 };
 use serde::Deserialize;
@@ -36,11 +42,17 @@ use tracing::{debug, info, warn, Instrument};
 mod access;
 mod auth;
 mod execute;
+mod in_flight;
 mod outbound;
+mod pipeline;
 mod replay;
+mod request;
 
 use access::KgReadAccess;
-use outbound::Outbound;
+use in_flight::InFlight;
+use outbound::{encode, Outbound};
+use pipeline::{Access, Released, RequestPipeline, Startable};
+use request::{Job, Reply, Request};
 
 use crate::auth::{Principal, Role, INTERNAL_KG};
 use crate::protocol::handler::Notification;
@@ -92,8 +104,9 @@ fn default_kg() -> String {
 ///
 /// ## Client → Server
 ///
-/// Any request may carry an `id` (a non-empty string of at most 64 bytes),
-/// echoed on every frame answering it:
+/// Any request may carry an `id` (a non-empty string of at most 64 bytes,
+/// unique among the connection's unanswered requests), echoed on every frame
+/// answering it:
 /// ```json
 /// {"type": "authenticate", "id": "1", "api_key": "..."}
 /// {"type": "execute", "id": "2", "program": "?edge(X,Y)"}
@@ -110,8 +123,12 @@ fn default_kg() -> String {
 ///  "row_count": 1, "total_count": 1, "truncated": false, "execution_time_ms": 5, "errors": []}
 /// {"type": "error", "id": "2", "message": "...", "code": "not_found"}
 /// ```
-/// A malformed request gets one `error` with code `invalid_request` (and its
-/// `id` when readable); an over-rate one gets code `rate_limited`.
+/// A malformed request, or one reusing the `id` of an unanswered request,
+/// gets one `error` with code `invalid_request` (and its `id` when readable);
+/// an over-rate one gets code `rate_limited`.
+///
+/// Requests may be pipelined. Replies come back in request order; programs
+/// made only of queries overlap, and everything else runs alone, in order.
 ///
 /// **Pushes**, never with an `id`: data changes in the connection's KG,
 /// ```json
@@ -315,6 +332,9 @@ async fn handle_global_ws_connection(
     let mut request_seq: u64 = 0;
     let mut subscriptions =
         ConnectionSubscriptions::new(Arc::clone(&handler), Some(principal.clone()));
+    let mut requests: Requests =
+        RequestPipeline::new(handler.config().http.rate_limit.ws_max_in_flight_requests);
+    let mut in_flight = InFlight::default();
 
     // Read access to the KG of each pushed frame, re-checked when ACLs change.
     let mut kg_access = KgReadAccess::default();
@@ -353,7 +373,15 @@ async fn handle_global_ws_connection(
     } else {
         None
     };
-    let mut last_activity = std::time::Instant::now();
+    // One timer, moved on activity: re-arming it every loop turn would cost a
+    // timer registration per request.
+    let idle_timer = tokio::time::sleep(idle_duration.unwrap_or_default());
+    tokio::pin!(idle_timer);
+    let touch = |timer: std::pin::Pin<&mut tokio::time::Sleep>| {
+        if let Some(duration) = idle_duration {
+            timer.reset(tokio::time::Instant::now() + duration);
+        }
+    };
 
     // Connection lifetime limit
     let connection_start = std::time::Instant::now();
@@ -372,21 +400,6 @@ async fn handle_global_ws_connection(
     heartbeat_interval.tick().await; // consume the immediate first tick
 
     loop {
-        // Compute remaining idle time for this iteration
-        let idle_sleep: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> =
-            match idle_duration {
-                Some(dur) => {
-                    let elapsed = last_activity.elapsed();
-                    if elapsed >= dur {
-                        // Already exceeded idle timeout
-                        Box::pin(std::future::ready(()))
-                    } else {
-                        Box::pin(tokio::time::sleep(dur.saturating_sub(elapsed)))
-                    }
-                }
-                None => Box::pin(std::future::pending()),
-            };
-
         // Check connection lifetime
         if let Some(max_lt) = max_lifetime {
             if connection_start.elapsed() >= max_lt {
@@ -405,46 +418,33 @@ async fn handle_global_ws_connection(
                 info!(credential = %principal.credential(), "ws_credential_revoked");
                 break;
             }
-            // Idle timeout
-            () = idle_sleep => {
-                if idle_duration.is_some() {
-                    info!(idle_ms, "ws_idle_timeout");
-                    sender.send_notice(NoticeCode::IdleTimeout, "Idle timeout".to_string()).await;
-                    break;
-                }
+            // Idle timeout; a connection with requests in progress is not idle
+            () = &mut idle_timer, if idle_duration.is_some() && requests.is_idle() => {
+                info!(idle_ms, "ws_idle_timeout");
+                sender.send_notice(NoticeCode::IdleTimeout, "Idle timeout".to_string()).await;
+                break;
             }
-            // Client message
-            msg = receiver.next() => {
+            // Client message, read only while the pipeline has room
+            msg = receiver.next(), if requests.has_capacity() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        last_activity = std::time::Instant::now();
+                        touch(idle_timer.as_mut());
                         request_seq = request_seq.saturating_add(1);
-
-                        if !rate.allow() {
-                            let rejected = ServerFrame::error(
+                        let (access, request) = if rate.allow() {
+                            Request::from_text(&text)
+                        } else {
+                            Request::immediate(ServerFrame::error(
                                 probe_request_id(&text),
                                 Some(ErrorCode::RateLimited),
                                 format!("Rate limit exceeded ({} msgs/sec)", rate.max_per_sec()),
-                            );
-                            if !sender.send_frame(&rejected).await {
-                                break;
-                            }
-                            continue;
-                        }
+                            ))
+                        };
                         let span = tracing::info_span!(
                             "ws_request",
                             request_id = request_seq,
                             msg_bytes = text.len()
                         );
-                        let send_ok = handle_request(
-                            &handler, &session_id, &text, &principal, &mut sender,
-                            &mut subscriptions,
-                        )
-                        .instrument(span)
-                        .await;
-                        if !send_ok {
-                            break;
-                        }
+                        admit(&mut requests, &mut in_flight, access, request, span);
                     }
                     Some(Ok(Message::Close(_))) => {
                         debug!(session_id = %session_id, "ws_close_frame_received");
@@ -465,6 +465,15 @@ async fn handle_global_ws_connection(
             _ = heartbeat_interval.tick() => {
                 if sender.send(Message::Ping(Vec::new())).await.is_err() {
                     break; // Connection dead
+                }
+            }
+            // A request's reply, in request order
+            released = requests.next_reply() => {
+                touch(idle_timer.as_mut());
+                let id = in_flight.release(released.ticket);
+                let frames = release_reply(&handler, &session_id, id, released, &mut subscriptions);
+                if !send_frames(&mut sender, frames).await {
+                    break;
                 }
             }
             // Standing-query evaluation finished
@@ -518,9 +527,18 @@ async fn handle_global_ws_connection(
                 }
             }
         }
+        start_requests(
+            &mut requests,
+            &handler,
+            &session_id,
+            &principal,
+            &mut subscriptions,
+        );
     }
 
-    // Stop standing queries before anything else is sent.
+    // Abort reads in progress, let a started write finish, then stop
+    // standing queries before anything else is sent.
+    requests.shutdown().await;
     drop(subscriptions);
     notify_if_revoked(&mut sender, &principal).await;
     // Send close frame before cleanup (prevents "connection reset without handshake" warnings)
@@ -544,51 +562,173 @@ async fn notify_if_revoked(sender: &mut Outbound, principal: &Principal) {
     }
 }
 
-/// Answer one request of an authenticated connection. Returns `true` if the
-/// connection is still alive, `false` if it should close.
-async fn handle_request(
+/// The connection's requests: each with its tracing span.
+type Requests = RequestPipeline<(Request, tracing::Span), Reply>;
+
+/// Admit `request` to the pipeline. One reusing the id of an unanswered
+/// request is answered with `invalid_request` instead of running.
+fn admit(
+    requests: &mut Requests,
+    in_flight: &mut InFlight,
+    access: Access,
+    request: Request,
+    span: tracing::Span,
+) {
+    let duplicate = request
+        .id
+        .as_ref()
+        .filter(|id| !matches!(request.job, Job::Immediate(_)) && in_flight.contains(id));
+    if let Some(id) = duplicate {
+        let rejected = ServerFrame::error(
+            Some(id.clone()),
+            Some(ErrorCode::InvalidRequest),
+            format!(
+                "Request id '{}' is already in use by an unanswered request",
+                id.as_str()
+            ),
+        );
+        let (access, request) = Request::immediate(rejected);
+        requests.admit(access, (request, span));
+        return;
+    }
+    let id = request.id.clone();
+    let immediate = matches!(request.job, Job::Immediate(_));
+    let ticket = requests.admit(access, (request, span));
+    if let (Some(id), false) = (id, immediate) {
+        // Checked above: the id is not in flight.
+        let _ = in_flight.insert(id, ticket);
+    }
+}
+
+/// Start every request the pipeline's ordering barriers now allow. Work that
+/// computes runs as a pipeline future; connection-state changes happen here, on
+/// the loop that owns that state.
+fn start_requests(
+    requests: &mut Requests,
     handler: &Arc<Handler>,
     session_id: &str,
-    text: &str,
-    auth: &Principal,
-    sender: &mut Outbound,
+    principal: &Principal,
     subscriptions: &mut ConnectionSubscriptions,
-) -> bool {
-    let request = match serde_json::from_str::<ClientFrame>(text) {
-        Ok(request) => request,
-        Err(e) => {
-            debug!(error = %e, "ws_invalid_request");
-            let rejected = ServerFrame::error(
-                probe_request_id(text),
-                Some(ErrorCode::InvalidRequest),
-                format!("Invalid message format: {e}"),
-            );
-            return sender.send_frame(&rejected).await;
-        }
-    };
-    match request {
-        ClientFrame::Execute { id, program } => {
-            execute::execute(
-                handler,
-                session_id,
-                id,
-                program,
-                auth,
-                sender,
-                subscriptions,
-            )
-            .await
-        }
-        ClientFrame::Ping { id } => sender.send_frame(&ServerFrame::Pong { id }).await,
-        ClientFrame::Login { id, .. } | ClientFrame::Authenticate { id, .. } => {
-            let rejected = ServerFrame::error(
-                id,
-                Some(ErrorCode::InvalidRequest),
-                "Already authenticated".to_string(),
-            );
-            sender.send_frame(&rejected).await
+) {
+    while let Some(Startable {
+        ticket,
+        job: (Request { id, job }, span),
+    }) = requests.next_startable()
+    {
+        let _entered = span.enter();
+        match job {
+            Job::Immediate(frame) => {
+                requests.complete(ticket, Reply::Frames(vec![encode(&frame)]));
+            }
+            Job::Execute { program } => {
+                let work = execute::execute(
+                    Arc::clone(handler),
+                    session_id.to_string(),
+                    id,
+                    program,
+                    principal.clone(),
+                );
+                requests.run(ticket, work.map(Reply::Frames).in_current_span());
+            }
+            Job::Subscribe { name, query } => {
+                let started = std::time::Instant::now();
+                let opening = handler
+                    .session_manager()
+                    .session_kg(&session_id.to_string())
+                    .and_then(|kg| subscriptions.begin_subscribe(&kg, &name, &query));
+                match opening {
+                    Ok(opening) => {
+                        let work = opening.run().map(move |opened| Reply::Subscribed {
+                            name,
+                            opened,
+                            started,
+                        });
+                        requests.run(ticket, work.in_current_span());
+                    }
+                    Err(message) => {
+                        let frame = encode(&ServerFrame::error(id, None, message));
+                        requests.complete(ticket, Reply::Frames(vec![frame]));
+                    }
+                }
+            }
+            Job::Unsubscribe { name } => {
+                let frame = match subscriptions.unsubscribe(&name) {
+                    Ok(()) => execute::subscription_reply(
+                        id,
+                        vec!["message".to_string()],
+                        vec![vec![serde_json::Value::String(format!(
+                            "Unsubscribed '{name}'."
+                        ))]],
+                        None,
+                        std::time::Instant::now(),
+                    ),
+                    Err(message) => ServerFrame::error(id, None, message),
+                };
+                requests.complete(ticket, Reply::Frames(vec![encode(&frame)]));
+            }
         }
     }
+}
+
+/// Apply a released request's effect on the connection; returns its frames.
+/// `id` is the request's id, for replies built here.
+fn release_reply(
+    handler: &Handler,
+    session_id: &str,
+    id: Option<inputlayer_ws_protocol::RequestId>,
+    released: Released<Reply>,
+    subscriptions: &mut ConnectionSubscriptions,
+) -> Vec<String> {
+    let frames = match released.reply {
+        Some(Reply::Frames(frames)) => frames,
+        Some(Reply::Subscribed {
+            name: subscription,
+            opened,
+            started,
+        }) => {
+            let frame = match subscriptions.finish_subscribe(opened) {
+                Ok((snapshot, generation)) => execute::subscription_reply(
+                    id,
+                    snapshot.columns,
+                    snapshot.inserted,
+                    Some(Subscribed {
+                        subscription,
+                        generation,
+                        revision: snapshot.revision,
+                    }),
+                    started,
+                ),
+                Err(message) => ServerFrame::error(id, None, message),
+            };
+            vec![encode(&frame)]
+        }
+        None => vec![encode(&ServerFrame::error(
+            id,
+            Some(ErrorCode::Internal),
+            "Internal server error".to_string(),
+        ))],
+    };
+    if released.access == Access::Exclusive {
+        // Subscriptions are scoped to the connection's KG: switching drops them.
+        match handler
+            .session_manager()
+            .session_kg(&session_id.to_string())
+        {
+            Ok(kg) => subscriptions.retain_knowledge_graph(&kg),
+            Err(_) => subscriptions.clear(),
+        }
+    }
+    frames
+}
+
+/// Write `frames` in order; `false` if the connection is dead.
+async fn send_frames(sender: &mut Outbound, frames: Vec<String>) -> bool {
+    for frame in frames {
+        if sender.send(Message::Text(frame)).await.is_err() {
+            return false;
+        }
+    }
+    true
 }
 
 /// Send a subscription push; one that cannot be sent becomes a

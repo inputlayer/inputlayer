@@ -59,9 +59,10 @@ info:
     Any request (`login`, `authenticate`, `execute`, `ping`) may carry an `id`: a
     non-empty string of at most 64 bytes. Every frame answering that request echoes it:
     `authenticated`, `auth_error`, `result`, `result_start`, `result_chunk`, `result_end`,
-    `error` and `pong`. A request without an `id` gets replies without one. Keep an `id`
-    unique among your requests still awaiting a reply; it may be reused once answered.
-    The server answers requests one at a time, in the order received.
+    `error` and `pong`. A request without an `id` gets replies without one. An `id` must
+    be unique among your requests still awaiting a reply; it may be reused once answered.
+    A request reusing the `id` of an unanswered request gets an `invalid_request` error
+    and does not run. Replies come back in request order (see Pipelining).
 
     Frames the client did not ask for never carry an `id` and have their own types, so
     they can never be mistaken for a reply:
@@ -88,6 +89,16 @@ info:
     5. For large results (>1 MB), the server streams: `result_start` → `result_chunk` (×N) → `result_end`
     6. Server may push change notifications (`persistent_update`, `rule_change`, ...), for `.subscribe`d queries `subscription_delta` / `subscription_error`, and connection `notice`s
     7. Client disconnects → Server auto-closes session
+
+    ## Pipelining
+
+    Clients may send requests without waiting for replies. Replies come back in
+    request order. Programs made only of queries run concurrently; any other
+    request (writes, rules, session changes, `.kg use`, `.subscribe`, ...) starts
+    after every earlier request has replied and finishes before any later one
+    starts. Pushes are delivered while requests run, between replies. At most
+    `http.rate_limit.ws_max_in_flight_requests` (default 16) requests are
+    unanswered at once; beyond that the server stops reading the connection.
 
     ## Raw Text Protocol
 

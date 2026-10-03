@@ -97,11 +97,22 @@ Any request (`login`, `authenticate`, `execute`, `ping`) may carry an `id`, a no
 {"type": "execute", "id": "42", "program": "?edge(X, Y)"}
 ```
 
-Every frame answering it echoes the `id`: `authenticated`, `auth_error`, `result`, `result_start`, `result_chunk`, `result_end`, `error` and `pong`. A request without an `id` gets replies without one. Keep an `id` unique among your requests still awaiting a reply; it can be reused once answered. The server answers requests one at a time, in the order received.
+Every frame answering it echoes the `id`: `authenticated`, `auth_error`, `result`, `result_start`, `result_chunk`, `result_end`, `error` and `pong`. A request without an `id` gets replies without one. An `id` must be unique among your requests still awaiting a reply; it can be reused once answered. A request reusing an `id` that is still awaiting its reply gets an `invalid_request` error and does not run.
 
 Frames you did not ask for never carry an `id` and have their own types, so they cannot be read as a reply: [notifications](#notifications), [standing-query pushes](#standing-queries) and [notices](#notices).
 
 A request that is not a valid frame (bad JSON, unknown `type`, a missing field, or an `id` that is not a 1-64 byte string or appears twice) gets exactly one `error` with code `invalid_request`, carrying the `id` when it could be read. Nothing runs and the connection stays usable.
+
+### Pipelining
+
+A client may send several requests without waiting for each reply:
+
+- **Replies come back in request order**, one reply (or one streamed `result_start` ... `result_end` sequence) per request, even when a later request finishes first.
+- **Queries overlap.** A program made only of queries (`?...`) runs concurrently with the connection's other queries.
+- **Everything else runs alone, in order**: inserts, deletes, rules, session rules and facts, meta commands such as `.kg use`, `.session clear`, `.subscribe` and `.unsubscribe`. Such a request starts only after every earlier request has replied, and no later request starts before it replies. A query sent after `.kg use other` therefore always reads `other`, and an insert sent after it always writes there.
+- **Pushes are not held up by requests.** Notifications and subscription deltas are delivered while the connection's own requests run, between replies (never inside a streamed result).
+- At most `http.rate_limit.ws_max_in_flight_requests` requests (default 16) are admitted and not yet answered; at that bound the server stops reading the connection until a reply goes out.
+- Closing the connection abandons its running queries; a running write finishes before the session is closed.
 
 ### Result Response
 

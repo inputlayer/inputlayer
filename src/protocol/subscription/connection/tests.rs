@@ -55,10 +55,8 @@ async fn a_commit_between_snapshot_and_registration_is_delivered() {
         handler: Arc::clone(&handler),
         program: Some("+p(2)"),
     };
-    let (snapshot, _) = subscriptions
-        .register(KG, "s", Box::new(view))
-        .await
-        .unwrap();
+    let opening = subscriptions.open(KG, "s", Box::new(view));
+    let (snapshot, _) = subscriptions.finish_subscribe(opening.run().await).unwrap();
     assert_eq!(snapshot.inserted, [vec![json!(1)]]);
 
     // No notification is fed: only the registration check can catch p(2).
@@ -90,7 +88,8 @@ async fn a_snapshot_at_the_current_revision_needs_no_second_evaluation() {
     let (handler, _tmp) = handler();
     write(&handler, "+p(1)").await;
     let mut subscriptions = ConnectionSubscriptions::new(Arc::clone(&handler), None);
-    let (snapshot, generation) = subscriptions.subscribe(KG, "s", "?p(X)").await.unwrap();
+    let opening = subscriptions.begin_subscribe(KG, "s", "?p(X)").unwrap();
+    let (snapshot, generation) = subscriptions.finish_subscribe(opening.run().await).unwrap();
     assert_eq!(generation, 1);
     assert_eq!(
         snapshot.revision,

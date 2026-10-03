@@ -225,6 +225,10 @@ ws_max_messages_per_sec = 1000
 # Maximum WebSocket connection lifetime in seconds (0 = unlimited, default: 24h)
 ws_max_lifetime_secs = 86400
 
+# Maximum requests per WebSocket connection admitted and not yet answered
+# (at least 1, default: 16). Queries overlap up to this bound; replies stay in request order.
+ws_max_in_flight_requests = 16
+
 # Maximum HTTP requests per second per IP address (0 = unlimited)
 per_ip_max_rps = 0
 

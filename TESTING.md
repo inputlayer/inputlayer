@@ -106,7 +106,8 @@ added/retracted rows as `subscription_delta` pushes, with contiguous `seq` and
 increasing `revision`, and end equal to a fresh full query on another
 connection, without re-querying.
 Scenarios cover one subscriber, 64 subscribers, reconnect/resubscribe and
-crash-restart, unrelated writes, and write bursts.
+crash-restart, unrelated writes, write bursts, and deltas arriving while the
+agent's own long query runs on its connection.
 
 Every request the harness sends carries an `id`, and a reply that does not
 echo it fails the scenario (`Violation::Uncorrelated`); a `notice` is never

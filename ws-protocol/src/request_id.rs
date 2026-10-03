@@ -11,7 +11,8 @@ pub const MAX_REQUEST_ID_LEN: usize = 64;
 ///
 /// A non-empty JSON string of at most [`MAX_REQUEST_ID_LEN`] bytes. The client
 /// chooses it and keeps it unique among its requests still awaiting a reply;
-/// the engine only copies it back.
+/// the engine copies it back, and refuses a request reusing an id whose
+/// request is still unanswered.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[serde(transparent)]
 pub struct RequestId(String);
