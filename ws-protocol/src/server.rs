@@ -33,6 +33,11 @@ pub enum ServerFrame {
         role: String,
         /// [`crate::PROTOCOL_VERSION`] of the engine.
         protocol_version: u32,
+        /// Identifies this run of the engine. Notification `seq` numbers and
+        /// knowledge graph revisions are meaningful only within one epoch; a
+        /// restarted engine has a new one. Pass it back with `last_seq` when
+        /// reconnecting.
+        stream_epoch: String,
     },
     /// Authentication failed, or a request arrived before authentication.
     AuthError {
@@ -219,10 +224,19 @@ pub struct SessionMetadata {
 /// A name can be reused after `.unsubscribe`; the generation is unique per
 /// connection, so a push whose generation differs from the one returned here
 /// belongs to an earlier registration and is stale.
+///
+/// A subscription lives and dies with its connection: it is never resumed
+/// on another one. After a reconnect, subscribe again and start over from
+/// the new snapshot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Subscribed {
     pub subscription: String,
     pub generation: u64,
+    /// The knowledge graph revision the snapshot is the exact answer at.
+    /// Every later delta names a higher revision. Revisions order the
+    /// states of one knowledge graph within one stream epoch; they are not
+    /// comparable across epochs or knowledge graphs.
+    pub revision: u64,
 }
 
 #[cfg(test)]

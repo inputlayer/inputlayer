@@ -87,9 +87,11 @@ class TestDeserializeAuthenticated:
             "version": "0.1.0",
             "role": "admin",
             "protocol_version": 2,
+            "stream_epoch": "00112233aabbccdd",
         })
         msg = deserialize_message(data)
         assert isinstance(msg, AuthenticatedResponse)
+        assert msg.stream_epoch == "00112233aabbccdd"
         assert msg.session_id == "42"
         assert msg.knowledge_graph == "default"
         assert msg.version == "0.1.0"
@@ -324,10 +326,11 @@ class TestRequestIds:
             "type": "result", "id": "s", "columns": ["x"], "rows": [],
             "row_count": 0, "total_count": 0, "truncated": False,
             "execution_time_ms": 0, "errors": [],
-            "subscribed": {"subscription": "live", "generation": 3},
+            "subscribed": {"subscription": "live", "generation": 3, "revision": 11},
         }))
         assert result.subscribed.subscription == "live"
         assert result.subscribed.generation == 3
+        assert result.subscribed.revision == 11
 
 
 class TestDeserializePushes:
@@ -339,15 +342,19 @@ class TestDeserializePushes:
         assert not notice.closes_connection
         idle = deserialize_message('{"type":"notice","code":"idle_timeout","message":"Idle"}')
         assert idle.closes_connection
+        gap = deserialize_message('{"type":"notice","code":"replay_gap","message":"re-read"}')
+        assert gap.code == "replay_gap"
+        assert not gap.closes_connection
 
     def test_subscription_frames(self):
         delta = deserialize_message(json.dumps({
             "type": "subscription_delta", "subscription": "live", "generation": 3,
-            "knowledge_graph": "default", "seq": 1, "columns": ["x"],
+            "knowledge_graph": "default", "seq": 1, "revision": 12, "columns": ["x"],
             "inserted": [[1]], "retracted": [],
         }))
         assert isinstance(delta, SubscriptionDeltaResponse)
         assert (delta.subscription, delta.generation, delta.inserted) == ("live", 3, [[1]])
+        assert (delta.seq, delta.revision) == (1, 12)
         error = deserialize_message(json.dumps({
             "type": "subscription_error", "subscription": "live", "generation": 3,
             "message": "boom",

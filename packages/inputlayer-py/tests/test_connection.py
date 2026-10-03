@@ -21,6 +21,7 @@ def _auth_response() -> str:
         "version": "0.1.0",
         "role": "admin",
         "protocol_version": 2,
+        "stream_epoch": "00112233aabbccdd",
     })
 
 
@@ -207,7 +208,7 @@ class TestConnectionNotifications:
             json.dumps({"type": "notice", "code": "notifications_missed", "message": "Missed 2"}),
             json.dumps({
                 "type": "subscription_delta", "subscription": "s", "generation": 1,
-                "knowledge_graph": "default", "seq": 1, "columns": ["x"],
+                "knowledge_graph": "default", "seq": 1, "revision": 4, "columns": ["x"],
                 "inserted": [[1]], "retracted": [],
             }),
             _result_response(["x"], [[42]]),

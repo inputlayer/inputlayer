@@ -208,6 +208,25 @@ async fn test_subscribe_returns_snapshot_and_insert_produces_delta() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_snapshot_and_deltas_name_strictly_increasing_revisions() {
+    let server = start_server(64).await;
+    server.write("+n(1)").await;
+    let mut client = Client::connect(&server).await;
+    let snapshot = client.subscribe("n", "?n(X)").await;
+    let mut revision = snapshot["subscribed"]["revision"].as_u64().unwrap();
+    assert!(revision > 0, "{snapshot}");
+
+    for (i, write) in ["+n(2)", "-n(1)", "+other(1)\n+n(3)"].iter().enumerate() {
+        server.write(write).await;
+        let delta = client.next_push_for("n").await;
+        assert_eq!(delta["seq"], i + 1, "{delta}");
+        let next = delta["revision"].as_u64().unwrap();
+        assert!(next > revision, "revision {next} after {revision}: {delta}");
+        revision = next;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_delete_produces_retraction() {
     let server = start_server(64).await;
     server.write("+likes(1, 10)\n+likes(1, 11)").await;

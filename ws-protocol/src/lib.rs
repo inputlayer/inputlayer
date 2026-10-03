@@ -23,6 +23,16 @@
 //! A request whose frame or `id` is malformed is answered by one `error` with
 //! code [`ErrorCode::InvalidRequest`], carrying the `id` when it could be read.
 //!
+//! # Streams
+//!
+//! Notifications and subscription results are separate streams. Notification
+//! [`seq`](Notification::seq) numbers increase in delivery order within one
+//! stream epoch (`authenticated.stream_epoch`); a reconnect cursor (`last_seq`
+//! with `epoch`) is replayed or answered with a [`NoticeCode::ReplayGap`]. A
+//! subscription's pushes have their own gapless `seq` and name the knowledge
+//! graph revision they reach, above the snapshot's
+//! [`Subscribed::revision`]; subscriptions never outlive their connection.
+//!
 //! # Deadlines and cancellation
 //!
 //! An `execute` runs under one deadline covering its queueing, admission and

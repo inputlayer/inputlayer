@@ -7,6 +7,10 @@
 //! accumulated and checked against the *new* dependency set on completion, so
 //! a burst of commits costs one follow-up evaluation and the final state is
 //! never dropped.
+//!
+//! Every delta names the knowledge graph revision its refresh evaluated, so a
+//! subscription's pushes carry strictly increasing revisions after the
+//! snapshot's.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -29,8 +33,7 @@ impl ChangeSet {
         Self::Relations(BTreeSet::from([name.to_string()]))
     }
 
-    /// Add `other` to this change.
-    pub fn merge(&mut self, other: &ChangeSet) {
+    fn merge(&mut self, other: &ChangeSet) {
         match (&mut *self, other) {
             (Self::Everything, _) => {}
             (_, Self::Everything) => *self = Self::Everything,
@@ -139,43 +142,47 @@ impl SubscriptionRegistry {
     }
 
     /// Register a subscription whose initial refresh already ran; returns its
-    /// generation, unique within this registry. `missed` holds the changes
-    /// committed while that refresh was in flight; if they can affect the
-    /// result, the returned evaluation brings it up to date.
+    /// generation, unique within this registry.
     pub fn add(
         &mut self,
         id: &str,
         knowledge_graph: &str,
         view: Box<dyn StandingQuery>,
         dependencies: Dependencies,
-        missed: Option<&ChangeSet>,
-    ) -> Result<(u64, Option<Dispatch>), String> {
+    ) -> Result<u64, String> {
         self.check_can_add(id)?;
         self.next_token += 1;
-        let token = self.next_token;
-        let stale = missed.is_some_and(|change| dependencies.is_affected_by(change));
-        let (view, dispatch) = if stale {
-            let dispatch = Dispatch {
-                id: id.to_string(),
-                token,
-                view,
-            };
-            (None, Some(dispatch))
-        } else {
-            (Some(view), None)
-        };
         self.entries.insert(
             id.to_string(),
             Entry {
-                token,
+                token: self.next_token,
                 knowledge_graph: knowledge_graph.to_string(),
                 seq: 0,
                 dependencies,
-                view,
+                view: Some(view),
                 pending: None,
             },
         );
-        Ok((token, dispatch))
+        Ok(self.next_token)
+    }
+
+    /// Re-evaluate `id` whatever changed: its knowledge graph may have moved
+    /// past its last refresh without a notification reaching it. Returns the
+    /// evaluation to start when the subscription is idle; one in flight runs
+    /// again on completion.
+    pub fn invalidate(&mut self, id: &str) -> Option<Dispatch> {
+        let entry = self.entries.get_mut(id)?;
+        match entry.view.take() {
+            Some(view) => Some(Dispatch {
+                id: id.to_string(),
+                token: entry.token,
+                view,
+            }),
+            None => {
+                entry.pending = Some(ChangeSet::Everything);
+                None
+            }
+        }
     }
 
     /// Remove a subscription. Returns false if it did not exist.
@@ -263,6 +270,7 @@ impl SubscriptionRegistry {
                         generation: token,
                         knowledge_graph: entry.knowledge_graph.clone(),
                         seq: entry.seq,
+                        revision: refresh.revision,
                         columns: refresh.columns,
                         inserted: refresh.inserted,
                         retracted: refresh.retracted,
@@ -317,13 +325,21 @@ mod tests {
             inserted: rows(inserted),
             retracted: rows(retracted),
             dependencies: deps_on(relation),
+            revision: 0,
+        }
+    }
+
+    fn at(revision: u64, refresh: Refresh) -> Refresh {
+        Refresh {
+            revision,
+            ..refresh
         }
     }
 
     fn registry_with(script: Vec<Result<Refresh, String>>) -> SubscriptionRegistry {
         let mut registry = SubscriptionRegistry::new(4);
         registry
-            .add("s", "kg", Box::new(Scripted(script)), deps_on("a"), None)
+            .add("s", "kg", Box::new(Scripted(script)), deps_on("a"))
             .unwrap();
         registry
     }
@@ -447,8 +463,8 @@ mod tests {
             .on_change("kg", &ChangeSet::relation("a"))
             .remove(0);
         assert!(registry.remove("s"));
-        let (generation, _) = registry
-            .add("s", "kg", Box::new(Scripted(vec![])), deps_on("a"), None)
+        let generation = registry
+            .add("s", "kg", Box::new(Scripted(vec![])), deps_on("a"))
             .unwrap();
         assert_eq!(generation, 2, "a reused name gets a new generation");
         let (push, follow_up) = complete(&mut registry, stale).await;
@@ -459,72 +475,21 @@ mod tests {
     fn test_registry_rejects_duplicates_and_enforces_limit() {
         let mut registry = SubscriptionRegistry::new(2);
         let view = || Box::new(Scripted(vec![])) as Box<dyn StandingQuery>;
-        registry.add("a", "kg", view(), deps_on("r"), None).unwrap();
-        assert!(registry.add("a", "kg", view(), deps_on("r"), None).is_err());
-        registry.add("b", "kg", view(), deps_on("r"), None).unwrap();
-        let err = registry
-            .add("c", "kg", view(), deps_on("r"), None)
-            .err()
-            .unwrap();
+        registry.add("a", "kg", view(), deps_on("r")).unwrap();
+        assert!(registry.add("a", "kg", view(), deps_on("r")).is_err());
+        registry.add("b", "kg", view(), deps_on("r")).unwrap();
+        let err = registry.add("c", "kg", view(), deps_on("r")).unwrap_err();
         assert!(err.contains("limit"), "{err}");
         assert_eq!(registry.clear(), 2);
         assert!(registry.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_registry_add_reevaluates_after_missed_relevant_change() {
-        let mut registry = SubscriptionRegistry::new(4);
-        let view = Box::new(Scripted(vec![Ok(refresh(&[7], &[], "a"))]));
-        let dispatch = registry
-            .add(
-                "s",
-                "kg",
-                view,
-                deps_on("a"),
-                Some(&ChangeSet::relation("a")),
-            )
-            .unwrap()
-            .1
-            .expect("a change committed during the snapshot must be evaluated");
-        // In flight: further changes wait for the follow-up.
-        assert!(registry
-            .on_change("kg", &ChangeSet::relation("a"))
-            .is_empty());
-        let (push, follow_up) = complete(&mut registry, dispatch).await;
-        assert!(matches!(
-            push,
-            Some(SubscriptionPush::SubscriptionDelta { seq: 1, .. })
-        ));
-        assert!(follow_up.is_some());
-    }
-
-    #[test]
-    fn test_registry_add_ignores_missed_unrelated_change() {
-        let mut registry = SubscriptionRegistry::new(4);
-        let view = Box::new(Scripted(vec![]));
-        let (_, dispatch) = registry
-            .add(
-                "s",
-                "kg",
-                view,
-                deps_on("a"),
-                Some(&ChangeSet::relation("b")),
-            )
-            .unwrap();
-        assert!(dispatch.is_none());
-        assert_eq!(registry.on_change("kg", &ChangeSet::relation("a")).len(), 1);
     }
 
     #[test]
     fn test_registry_retain_knowledge_graph() {
         let mut registry = SubscriptionRegistry::new(4);
         let view = || Box::new(Scripted(vec![])) as Box<dyn StandingQuery>;
-        registry
-            .add("a", "one", view(), deps_on("r"), None)
-            .unwrap();
-        registry
-            .add("b", "two", view(), deps_on("r"), None)
-            .unwrap();
+        registry.add("a", "one", view(), deps_on("r")).unwrap();
+        registry.add("b", "two", view(), deps_on("r")).unwrap();
         assert_eq!(registry.retain_knowledge_graph("two"), 1);
         assert_eq!(registry.len(), 1);
         assert!(registry.on_change("one", &ChangeSet::Everything).is_empty());
@@ -535,5 +500,45 @@ mod tests {
     fn test_registry_unknown_changes_dispatch_everything() {
         let mut registry = registry_with(vec![]);
         assert_eq!(registry.on_unknown_changes().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_registry_delta_names_the_revision_it_evaluated() {
+        let mut registry = registry_with(vec![Ok(at(42, refresh(&[1], &[], "a")))]);
+        let d = registry
+            .on_change("kg", &ChangeSet::relation("a"))
+            .remove(0);
+        let (push, _) = complete(&mut registry, d).await;
+        assert!(matches!(
+            push,
+            Some(SubscriptionPush::SubscriptionDelta {
+                seq: 1,
+                revision: 42,
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_registry_invalidate_dispatches_idle_and_reruns_in_flight() {
+        let mut registry = registry_with(vec![
+            Ok(refresh(&[], &[], "a")),
+            Ok(refresh(&[1], &[], "a")),
+            Ok(refresh(&[2], &[], "a")),
+        ]);
+        // Idle: evaluated now, although nothing it depends on was announced.
+        let idle = registry
+            .invalidate("s")
+            .expect("idle subscription dispatches");
+        assert!(registry.invalidate("s").is_none(), "in flight: rerun later");
+        let (push, follow_up) = complete(&mut registry, idle).await;
+        assert!(push.is_none());
+        let (push, follow_up) = complete(&mut registry, follow_up.expect("rerun")).await;
+        assert!(matches!(
+            push,
+            Some(SubscriptionPush::SubscriptionDelta { seq: 1, .. })
+        ));
+        assert!(follow_up.is_none());
+        assert!(registry.invalidate("missing").is_none());
     }
 }

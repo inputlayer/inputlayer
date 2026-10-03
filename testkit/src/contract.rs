@@ -19,6 +19,12 @@ pub enum Violation {
         expected: u64,
         got: u64,
     },
+    /// A delta did not name a higher revision than the state it applies to.
+    StaleRevision {
+        subscription: String,
+        previous: u64,
+        got: u64,
+    },
     /// A delta retracted an absent row or inserted a present one.
     Inconsistent {
         subscription: String,
@@ -68,6 +74,15 @@ impl fmt::Display for Violation {
             } => write!(
                 f,
                 "subscription '{subscription}': expected delta seq {expected}, got {got}"
+            ),
+            Self::StaleRevision {
+                subscription,
+                previous,
+                got,
+            } => write!(
+                f,
+                "subscription '{subscription}': delta at revision {got} applied to revision \
+                 {previous}"
             ),
             Self::Inconsistent {
                 subscription,

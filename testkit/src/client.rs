@@ -75,6 +75,8 @@ pub struct QueryResult {
     pub errors: Vec<Value>,
     /// When the result's last frame arrived.
     pub at: Instant,
+    /// For a `.subscribe` reply: the revision the snapshot is the answer at.
+    pub subscribed_revision: Option<u64>,
 }
 
 impl QueryResult {
@@ -98,6 +100,7 @@ impl QueryResult {
             truncated: header["truncated"].as_bool().unwrap_or_default(),
             errors: header["errors"].as_array().cloned().unwrap_or_default(),
             at,
+            subscribed_revision: header["subscribed"]["revision"].as_u64(),
         }
     }
 
@@ -152,6 +155,8 @@ pub struct WsClient {
     notices: Vec<Frame>,
     /// Id of the last request sent.
     last_id: u64,
+    /// The engine run's `stream_epoch`, from `authenticated`.
+    stream_epoch: String,
     reader: JoinHandle<()>,
 }
 
@@ -192,6 +197,7 @@ impl WsClient {
             outstanding: VecDeque::new(),
             notices: Vec::new(),
             last_id: 0,
+            stream_epoch: String::new(),
             reader,
         };
         let reply = client
@@ -203,12 +209,21 @@ impl WsClient {
                 reply.value
             )));
         }
+        client.stream_epoch = reply.value["stream_epoch"]
+            .as_str()
+            .ok_or_else(|| Violation::Transport(format!("no stream_epoch: {}", reply.value)))?
+            .to_string();
         Ok(client)
     }
 
     /// Connection notices received so far that did not close the connection.
     pub fn notices(&self) -> &[Frame] {
         &self.notices
+    }
+
+    /// The engine run's stream epoch, for a reconnect cursor.
+    pub fn stream_epoch(&self) -> &str {
+        &self.stream_epoch
     }
 
     /// Send `request` tagged with a fresh id; returns its whole reply, which

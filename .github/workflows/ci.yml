@@ -45,6 +45,8 @@ jobs:
               - 'examples/**'
               - 'gateway/**'
               - 'ontology-client/**'
+              - 'ws-protocol/**'
+              - 'perf-gate/**'
               - 'docs/spec/**'
               - '**/Cargo.toml'
               - 'config.toml'

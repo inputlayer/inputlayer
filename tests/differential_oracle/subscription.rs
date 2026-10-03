@@ -78,9 +78,8 @@ impl SubscriptionAdapter {
             .host
             .block_on(view.refresh())
             .map_err(|e| AdapterError::Failed(format!("initial snapshot: {e}")))?;
-        // Nothing commits between the snapshot and registration here.
         self.registry
-            .add(id, KG, Box::new(view), snapshot.dependencies, None)
+            .add(id, KG, Box::new(view), snapshot.dependencies)
             .map_err(AdapterError::Failed)?;
         Ok(Observation::from_rows(snapshot.inserted.iter().map(cells)))
     }

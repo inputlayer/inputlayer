@@ -21,7 +21,7 @@ pub enum Notification {
         /// Session that triggered the change (none for API-key or system operations).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_id: Option<String>,
-        /// Monotonic sequence number for dedup on reconnect.
+        /// Position in the engine's notification stream (see [`Notification::seq`]).
         seq: u64,
     },
     /// A rule was registered, removed or dropped.
@@ -71,7 +71,12 @@ impl Notification {
         }
     }
 
-    /// The change's sequence number.
+    /// The change's position in the engine's notification stream: strictly
+    /// increasing in delivery order within one stream epoch
+    /// (`authenticated.stream_epoch`), from 1. A restarted engine starts a new
+    /// epoch and numbers from 1 again, so a sequence number means nothing
+    /// without its epoch. Notification sequence numbers are unrelated to a
+    /// subscription's delta `seq`.
     pub fn seq(&self) -> u64 {
         match self {
             Self::PersistentUpdate { seq, .. }
@@ -92,8 +97,14 @@ pub enum SubscriptionPush {
         subscription: String,
         generation: u64,
         knowledge_graph: String,
-        /// Delta number within this generation, from 1.
+        /// Delta number within this generation, from 1, without gaps: a
+        /// client that sees any other number has lost a delta and must
+        /// resubscribe.
         seq: u64,
+        /// The knowledge graph revision whose result this delta produces: the
+        /// previous result plus this delta is the query's exact answer at
+        /// `revision` (see [`crate::Subscribed::revision`]).
+        revision: u64,
         columns: Vec<String>,
         inserted: Vec<Row>,
         retracted: Vec<Row>,

@@ -2,7 +2,8 @@
 //! with the previous result.
 //!
 //! Bound queries go through Magic Sets, so a re-run touches only the relevant
-//! slice of the KG. Evaluation uses the normal query path (`execute_program`),
+//! slice of the KG. Each evaluation pins the KG's current snapshot and runs
+//! the query on it through the normal query path ([`Handler::query_snapshot`]),
 //! which runs on the blocking pool under the query semaphore and re-checks the
 //! subscriber's credential and read permission every time.
 
@@ -62,23 +63,22 @@ impl ReevaluatingQuery {
     }
 
     async fn evaluate(&mut self) -> Result<Refresh, String> {
-        // Dependencies come from the rules before the query runs: a rule
-        // added in between is announced by its own notification afterwards.
-        let rules = {
-            let storage = self.handler.get_storage();
-            let snapshot = storage
-                .get_snapshot_for(&self.knowledge_graph)
-                .map_err(|e| format!("Knowledge graph '{}': {e}", self.knowledge_graph))?;
-            Arc::clone(&snapshot.rules)
-        };
-        let dependencies = Dependencies::for_query(&self.goal, &rules);
+        // One snapshot for everything: its rules give the dependencies, the
+        // query reads its data, and its revision names the result.
+        let snapshot = self
+            .handler
+            .get_storage()
+            .get_snapshot_for(&self.knowledge_graph)
+            .map_err(|e| format!("Knowledge graph '{}': {e}", self.knowledge_graph))?;
+        let dependencies = Dependencies::for_query(&self.goal, &snapshot.rules);
+        let revision = snapshot.revision;
 
         let result = self
             .handler
-            .execute_program(
-                None,
-                Some(self.knowledge_graph.clone()),
-                self.query.clone(),
+            .query_snapshot(
+                &self.knowledge_graph,
+                snapshot,
+                &self.query,
                 self.auth.as_ref(),
             )
             .await?;
@@ -109,6 +109,7 @@ impl ReevaluatingQuery {
             inserted,
             retracted,
             dependencies,
+            revision,
         })
     }
 }

@@ -85,6 +85,11 @@ impl<S: Sink<Message> + Unpin> Outbound<S> {
     pub(super) async fn close(&mut self) {
         let _ = self.sink.close().await;
     }
+
+    #[cfg(test)]
+    pub(super) fn sink(&self) -> &S {
+        &self.sink
+    }
 }
 
 /// JSON of `frame`, or of an `error` answering the same request when it

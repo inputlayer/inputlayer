@@ -76,6 +76,7 @@ class ScriptedEngine {
               version: 'test',
               role: 'admin',
               protocol_version: 2,
+              stream_epoch: '00112233aabbccdd',
             }),
           );
           return;
@@ -170,6 +171,7 @@ describe('error frames', () => {
         generation: 1,
         knowledge_graph: 'default',
         seq: 1,
+        revision: 4,
         columns: ['x'],
         inserted: [[9]],
         retracted: [],

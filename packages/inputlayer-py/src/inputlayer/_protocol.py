@@ -81,6 +81,9 @@ class AuthenticatedResponse:
     version: str
     role: str
     protocol_version: int
+    stream_epoch: str
+    """This engine run's id; notification ``seq`` numbers belong to it. Pass it
+    back with ``last_seq`` when reconnecting."""
     id: str | None = None
 
 
@@ -121,10 +124,14 @@ class StatementError:
 
 @dataclass(frozen=True)
 class Subscribed:
-    """The subscription a ``.subscribe`` registered; pushes for it carry this generation."""
+    """The subscription a ``.subscribe`` registered; pushes for it carry this generation.
+
+    ``revision`` is the knowledge graph revision the snapshot is the exact answer
+    at; every later delta names a higher one."""
 
     subscription: str
     generation: int
+    revision: int
 
 
 @dataclass(frozen=True)
@@ -189,6 +196,7 @@ class PongResponse:
 
 NoticeCode = Literal[
     "notifications_missed",
+    "replay_gap",
     "slow_consumer",
     "idle_timeout",
     "lifetime_exceeded",
@@ -197,7 +205,7 @@ NoticeCode = Literal[
     "server_shutdown",
 ]
 """A connection event. The server closes the connection after every one but
-``notifications_missed``."""
+``notifications_missed`` and ``replay_gap``."""
 
 
 @dataclass(frozen=True)
@@ -209,7 +217,7 @@ class NoticeResponse:
 
     @property
     def closes_connection(self) -> bool:
-        return self.code != "notifications_missed"
+        return self.code not in ("notifications_missed", "replay_gap")
 
 
 @dataclass(frozen=True)
@@ -220,6 +228,9 @@ class SubscriptionDeltaResponse:
     generation: int
     knowledge_graph: str
     seq: int
+    """Delta number within the generation, from 1, without gaps."""
+    revision: int
+    """The knowledge graph revision the result reaches with this delta."""
     columns: list[str]
     inserted: list[list[Any]]
     retracted: list[list[Any]]
@@ -295,7 +306,11 @@ def _statement_errors(raw: list[dict[str, Any]] | None) -> list[StatementError] 
 def _subscribed(raw: dict[str, Any] | None) -> Subscribed | None:
     if raw is None:
         return None
-    return Subscribed(subscription=raw["subscription"], generation=raw["generation"])
+    return Subscribed(
+        subscription=raw["subscription"],
+        generation=raw["generation"],
+        revision=raw["revision"],
+    )
 
 
 def deserialize_message(data: str | bytes) -> ServerMessage:
@@ -312,6 +327,7 @@ def deserialize_message(data: str | bytes) -> ServerMessage:
             version=obj["version"],
             role=obj["role"],
             protocol_version=obj["protocol_version"],
+            stream_epoch=obj["stream_epoch"],
             id=obj.get("id"),
         )
     if msg_type == "auth_error":
@@ -376,6 +392,7 @@ def deserialize_message(data: str | bytes) -> ServerMessage:
             generation=obj["generation"],
             knowledge_graph=obj["knowledge_graph"],
             seq=obj["seq"],
+            revision=obj["revision"],
             columns=obj["columns"],
             inserted=obj["inserted"],
             retracted=obj["retracted"],
