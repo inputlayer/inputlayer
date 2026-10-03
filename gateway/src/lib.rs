@@ -13,5 +13,7 @@ pub mod locks;
 pub mod mapper;
 pub mod model;
 pub mod ontology;
+pub mod openai_compatible;
 pub mod pipeline;
+pub mod provider;
 pub mod turns;

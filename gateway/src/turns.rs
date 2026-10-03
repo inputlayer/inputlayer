@@ -23,11 +23,13 @@ pub struct TurnOutcome {
 }
 
 /// Run one turn for one (kg, ontology) pair. The caller holds the
-/// conversation's lock for the duration.
+/// conversation's lock for the duration. `model` is the extraction model
+/// the provider routing resolved for this pack.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_turn(
     pool: &EnginePool,
     extractor: &dyn Extractor,
+    model: &str,
     ontology: &LoadedOntology,
     kg: &str,
     conversation: &str,
@@ -57,12 +59,7 @@ pub async fn run_turn(
 
     let started = std::time::Instant::now();
     let extraction = extractor
-        .extract(
-            &ontology.extraction_model,
-            &prompt.system,
-            &prompt.user,
-            &ontology.schema,
-        )
+        .extract(model, &prompt.system, &prompt.user, &ontology.schema)
         .await?;
     let extract_ms = started.elapsed().as_millis();
 
@@ -76,7 +73,7 @@ pub async fn run_turn(
     };
     let mut eval = evaluate(pool, ontology, &request, extraction.output).await?;
     if let Some(trace) = eval.trace.as_mut().and_then(|t| t.as_object_mut()) {
-        trace.insert("model".to_string(), json!(ontology.extraction_model));
+        trace.insert("model".to_string(), json!(model));
         trace.insert("extract_ms".to_string(), json!(extract_ms));
         trace.insert("usage".to_string(), extraction.usage);
         trace.insert("prompt".to_string(), json!(prompt.user));
