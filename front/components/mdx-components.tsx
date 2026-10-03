@@ -7,6 +7,7 @@ import { createElement, isValidElement } from "react"
 import { highlightToHtml } from "@/lib/syntax-highlight"
 import { highlightGeneric } from "@/lib/generic-highlight"
 import { isDiagramLanguage, DiagramRenderer, type DiagramLanguage } from "@/components/diagrams"
+import { InlineSvg } from "@/components/inline-svg"
 
 function HeadingWithId({
   level,
@@ -70,6 +71,12 @@ export const MdxComponents: Components = {
       </a>
     )
   },
+
+  // Figures: same-origin SVGs are inlined so they follow the site theme
+  // (see components/inline-svg.tsx); other images render as plain <img>.
+  img: ({ src, alt }) => (
+    <InlineSvg src={typeof src === "string" ? src : undefined} alt={alt} />
+  ),
 
   pre: ({ children, ...props }) => {
     // If the child code block is a diagram language, render without pre wrapper
