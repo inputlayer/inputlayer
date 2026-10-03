@@ -1,6 +1,7 @@
 use super::*;
 use crate::auth::{Role, INTERNAL_KG};
 use crate::schema::SchemaType;
+use crate::{ColumnSchema, RelationSchema};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -74,7 +75,7 @@ fn failed_user_replacement_revokes_password_and_keys() {
         } else {
             handler.handle_user_role("bob", "viewer")
         };
-        assert!(result.unwrap_err().contains("Arity mismatch"));
+        assert!(result.unwrap_err().contains("Insert rejected for 'users'"));
         assert!(password.is_revoked());
         assert!(principal.is_revoked());
         assert!(handler.authenticate_api_key(&key).is_err());

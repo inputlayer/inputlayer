@@ -548,7 +548,10 @@ async fn revocation_during_a_proof_withholds_it() {
         .send(json!({"type": "execute", "program": proof}))
         .await;
     assert_revoked(&client.drain().await);
-    assert!(principal.is_revoked(), "output-boundary hook did not revoke");
+    assert!(
+        principal.is_revoked(),
+        "output-boundary hook did not revoke"
+    );
 }
 
 /// Revoking a user's access to a knowledge graph stops its change
