@@ -31,7 +31,7 @@
 //!
 //! Rule and schema changes in the WAL are handed to the engine
 //! ([`FilePersist::take_recovered_catalog`]), which applies them over the catalog
-//! files; see [`catalog_log`] for how long the WAL keeps them.
+//! files; see the `catalog_log` module for how long the WAL keeps them.
 
 pub mod batch;
 mod catalog_log;
