@@ -1044,7 +1044,8 @@ impl Handler {
         }
     }
 
-    /// Insert the bootstrap admin user and API key when `_internal` has no users.
+    /// Insert the bootstrap admin user when `_internal` has no users, with an
+    /// API key only if bootstrap has never issued one for this data directory.
     fn seed_admin_credentials(&self) {
         use crate::auth;
 
