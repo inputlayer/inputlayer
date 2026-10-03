@@ -184,6 +184,11 @@ name = "vector_index_benchmarks"
 path = "benches/vector_index_benchmarks.rs"
 harness = false
 
+[[bench]]
+name = "startup_benchmarks"
+path = "benches/startup_benchmarks.rs"
+harness = false
+
 [features]
 default = []
 # Enable vector similarity search operations

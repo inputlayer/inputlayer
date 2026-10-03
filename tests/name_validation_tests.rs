@@ -5,7 +5,9 @@
 
 use inputlayer::protocol::{ErrorCode, Handler};
 use inputlayer::storage::persist::{FilePersist, PersistBackend, PersistConfig, Transaction};
-use inputlayer::storage::{KnowledgeGraphInfo, KnowledgeGraphsMetadata, StorageError};
+use inputlayer::storage::{
+    DropTombstones, KnowledgeGraphInfo, KnowledgeGraphsMetadata, RelationTombstone, StorageError,
+};
 use inputlayer::{Config, DurabilityMode, RelationSchema, StorageEngine, Tuple, Value};
 use std::path::Path;
 use tempfile::TempDir;
@@ -251,6 +253,65 @@ fn stale_metadata_keeps_legacy_colon_kg_separate() {
     let storage = StorageEngine::new(config(temp.path())).unwrap();
     assert_eq!(storage.list_knowledge_graphs(), ["default", "user:42"]);
     assert_eq!(relations(&storage, "user:42"), [("fact".to_string(), 3)]);
+}
+
+/// Every loaded KG with its relations and tuple counts.
+fn ownership(storage: &StorageEngine) -> Vec<(String, Vec<(String, usize)>)> {
+    storage
+        .list_knowledge_graphs()
+        .into_iter()
+        .map(|kg| {
+            let rels = relations(storage, &kg);
+            (kg, rels)
+        })
+        .collect()
+}
+
+#[test]
+fn mixed_legacy_and_canonical_names_load_exact_ownership() {
+    let temp = TempDir::new().unwrap();
+    seed_legacy(
+        temp.path(),
+        Some(&["default", "user", "user:42", "user:42:x", "team", "team_a"]),
+        &[
+            ("user:fact", &[1]),
+            ("user:42:fact", &[1, 2]),
+            ("user:42:gone", &[1]),
+            ("user:42:x:fact", &[1, 2, 3]),
+            ("team:edge", &[1]),
+            ("team_a:edge", &[1, 2]),
+            ("team:a:edge", &[1, 2, 3, 4]),
+            ("orphan:edge", &[5]),
+        ],
+    );
+    let mut tombstones = DropTombstones::default();
+    tombstones.knowledge_graphs.insert("user:42:x".to_string());
+    tombstones
+        .relations
+        .insert(RelationTombstone::new("user:42", "gone"));
+    tombstones
+        .save(&temp.path().join("metadata/dropping.json"))
+        .unwrap();
+
+    let rel = |name: &str, count| (name.to_string(), count);
+    let expected = vec![
+        ("default".to_string(), vec![]),
+        ("orphan".to_string(), vec![rel("edge", 1)]),
+        ("team".to_string(), vec![rel("edge", 1)]),
+        ("team:a".to_string(), vec![rel("edge", 4)]),
+        ("team_a".to_string(), vec![rel("edge", 2)]),
+        ("user".to_string(), vec![rel("fact", 1)]),
+        ("user:42".to_string(), vec![rel("fact", 2)]),
+    ];
+    let first = ownership(&StorageEngine::new(config(temp.path())).unwrap());
+    assert_eq!(first, expected);
+    // The finished drops are gone from disk, so a restart loads the same.
+    let restarted = ownership(&StorageEngine::new(config(temp.path())).unwrap());
+    assert_eq!(restarted, expected);
+    assert_eq!(
+        DropTombstones::load(&temp.path().join("metadata/dropping.json")).unwrap(),
+        DropTombstones::default()
+    );
 }
 
 #[test]

@@ -132,9 +132,9 @@ fn delete_kg_files(persist: &FilePersist, name: &str, data_dir: &Path, kgs: &[St
     let mut clean = true;
     match persist.list_shards() {
         Ok(shards) => {
+            let owners = naming::ShardOwners::new(kgs.iter().map(String::as_str));
             for shard in &shards {
-                let owner = naming::shard_owner(shard, kgs.iter().map(String::as_str));
-                if owner.is_some_and(|(kg, _)| kg == name) {
+                if owners.owner(shard).is_some_and(|(kg, _)| kg == name) {
                     if let Err(e) = persist.delete_shard(shard) {
                         warn!(kg = %name, shard = %shard, error = %e, "kg_drop_shard_delete_failed");
                         clean = false;
@@ -412,8 +412,7 @@ impl StorageEngine {
     /// Delete dropped KG `name`'s files, re-save the KG listing, then clear
     /// its tombstone. Returns whether the tombstone was cleared.
     fn cleanup_dropped_kg(&self, name: &str) -> bool {
-        let mut kgs = self.list_knowledge_graphs();
-        kgs.extend(self.tombstones.lock().knowledge_graphs.iter().cloned());
+        let kgs = self.shard_owner_names();
         let data_dir = self.config.storage.data_dir.join(name);
         if !delete_kg_files(&self.persist, name, &data_dir, &kgs) {
             warn!(kg = %name, "kg_drop_cleanup_incomplete");
@@ -430,6 +429,14 @@ impl StorageEngine {
             return false;
         }
         true
+    }
+
+    /// Every KG that may own persist shards: the loaded ones and those whose
+    /// drop is not finished.
+    fn shard_owner_names(&self) -> Vec<String> {
+        let mut kgs = self.list_knowledge_graphs();
+        kgs.extend(self.tombstones.lock().knowledge_graphs.iter().cloned());
+        kgs
     }
 
     /// Retry the cleanup of tombstoned KG `name` unless a drop of it is
@@ -909,10 +916,11 @@ impl StorageEngine {
             return Err(StorageError::KnowledgeGraphNotFound(name.to_string()));
         }
 
-        // Flush all shards for this knowledge graph
-        let prefix = format!("{name}:");
+        // Flush the shards this knowledge graph owns
+        let kgs = self.shard_owner_names();
+        let owners = naming::ShardOwners::new(kgs.iter().map(String::as_str));
         for shard_name in self.persist.list_shards()? {
-            if shard_name.starts_with(&prefix) {
+            if owners.owner(&shard_name).is_some_and(|(kg, _)| kg == name) {
                 self.persist.flush(&shard_name)?;
             }
         }
@@ -1765,12 +1773,10 @@ impl StorageEngine {
         // Metadata is missing or stale when no listed KG claims a shard, or the
         // claimed relation contains ':' (a legacy colon KG). Infer the KG as
         // everything before the last ':'.
+        let listed = naming::ShardOwners::new(kg_names.iter().map(String::as_str));
         let inferred: HashSet<String> = shard_names
             .iter()
-            .filter(|shard| {
-                naming::shard_owner(shard, kg_names.iter().map(String::as_str))
-                    .is_none_or(|(_, rel)| rel.contains(':'))
-            })
+            .filter(|shard| listed.owner(shard).is_none_or(|(_, rel)| rel.contains(':')))
             .filter_map(|shard| shard.rsplit_once(':').map(|(kg, _)| kg.to_string()))
             .filter(|kg| !kg_names.contains(kg) && !tombstones.knowledge_graphs.contains(kg))
             .collect();
@@ -1779,12 +1785,11 @@ impl StorageEngine {
         }
         kg_names.extend(inferred);
 
+        let owners = naming::ShardOwners::new(kg_names.iter().map(String::as_str));
         let mut kg_shards: std::collections::HashMap<String, Vec<(String, String)>> =
             std::collections::HashMap::new();
         for shard in &shard_names {
-            if let Some((kg, relation)) =
-                naming::shard_owner(shard, kg_names.iter().map(String::as_str))
-            {
+            if let Some((kg, relation)) = owners.owner(shard) {
                 if tombstones
                     .relations
                     .contains(&RelationTombstone::new(kg, relation))
