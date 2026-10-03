@@ -55,9 +55,12 @@ On success:
   "session_id": "a1b2c3d4",
   "knowledge_graph": "default",
   "version": "0.1.0",
-  "role": "admin"
+  "role": "admin",
+  "protocol_version": 2
 }
 ```
+
+`protocol_version` is the version of this protocol the server speaks (currently 2).
 
 On failure:
 
@@ -70,7 +73,7 @@ On failure:
 
 The server allows 30 seconds for authentication before closing the connection.
 
-The connection stays bound to the credential it authenticated with. If that credential is revoked (`.apikey revoke`, `.user password`, `.user drop`), the server sends nothing more for the connection except a final `{"type": "error", "message": "Credential revoked; reconnect with valid credentials"}` and closes it. See [Authentication](authentication#revocation).
+The connection stays bound to the credential it authenticated with. If that credential is revoked (`.apikey revoke`, `.user password`, `.user drop`), the server sends nothing more for the connection except a final `{"type": "notice", "code": "credential_revoked", "message": "Credential revoked; reconnect with valid credentials"}` and closes it. See [Authentication](authentication#revocation).
 
 ## Executing Statements
 
@@ -84,6 +87,20 @@ Send any InputLayer statement or meta command:
 ```
 
 The `program` field accepts any valid InputLayer statement: queries, inserts, rule definitions, meta commands, etc.
+
+### Request IDs
+
+Any request (`login`, `authenticate`, `execute`, `ping`) may carry an `id`, a non-empty string of at most 64 bytes:
+
+```json
+{"type": "execute", "id": "42", "program": "?edge(X, Y)"}
+```
+
+Every frame answering it echoes the `id`: `authenticated`, `auth_error`, `result`, `result_start`, `result_chunk`, `result_end`, `error` and `pong`. A request without an `id` gets replies without one. An `id` must be unique among your requests still awaiting a reply; it can be reused once answered. A request reusing an `id` that is still awaiting its reply gets an `invalid_request` error and does not run.
+
+Frames you did not ask for never carry an `id` and have their own types, so they cannot be read as a reply: [notifications](#notifications), [standing-query pushes](#standing-queries) and [notices](#notices).
+
+A request that is not a valid frame (bad JSON, unknown `type`, a missing field, or an `id` that is not a 1-64 byte string or appears twice) gets exactly one `error` with code `invalid_request`, carrying the `id` when it could be read. Nothing runs and the connection stays usable.
 
 ### Pipelining
 
@@ -121,7 +138,7 @@ A client may send several requests without waiting for each reply:
 }
 ```
 
-A program of one statement that fails gets an `error`. `code` says why: `validation`, `not_found`, `conflict`, `unsupported` or `internal`; it is absent for connection, auth and engine failures.
+A program of one statement that fails gets an `error`. `code` says why: `validation`, `not_found`, `conflict`, `unsupported` or `internal`; `invalid_request` and `rate_limited` reject a request before it runs. It is absent for auth and other engine failures.
 
 ### Statement Failures
 
@@ -326,7 +343,14 @@ A standing query keeps a query's result current: after each committed change tha
 {"type": "execute", "program": ".subscribe late_orders ?late(Order, Customer)"}
 ```
 
-The reply is a normal [result](#result-response) holding the initial snapshot. The subscription is bound to the connection and to its current knowledge graph.
+The reply is a normal [result](#result-response) holding the initial snapshot, plus `subscribed`:
+
+```json
+{"type": "result", "columns": ["Order", "Customer"], "rows": [[1007, "globex"]],
+ "subscribed": {"subscription": "late_orders", "generation": 3}, "errors": [], "...": "..."}
+```
+
+The subscription is bound to the connection and to its current knowledge graph. Its `generation` is unique per connection and is carried by every push for it, so after `.unsubscribe` and a new `.subscribe` with the same name, a push with the old generation is recognizably stale.
 
 `<id>` is client-chosen: 1-128 characters from `[A-Za-z0-9_.:-]`, unique per connection.
 
@@ -336,6 +360,7 @@ The reply is a normal [result](#result-response) holding the initial snapshot. T
 {
   "type": "subscription_delta",
   "subscription": "late_orders",
+  "generation": 3,
   "knowledge_graph": "default",
   "seq": 1,
   "columns": ["Order", "Customer"],
@@ -355,7 +380,7 @@ The reply is a normal [result](#result-response) holding the initial snapshot. T
 If re-evaluation fails (for example read access was revoked), the server pushes:
 
 ```json
-{"type": "subscription_error", "subscription": "late_orders", "message": "Access denied"}
+{"type": "subscription_error", "subscription": "late_orders", "generation": 3, "message": "Access denied"}
 ```
 
 The subscription stays registered; the next successful evaluation's delta is relative to the last good result.
@@ -416,6 +441,24 @@ await websocket.close()
 ws.close(1000, "Normal closure");
 ```
 
+## Notices
+
+The server announces connection events with a `notice`, never with an `error`:
+
+```json
+{"type": "notice", "code": "idle_timeout", "message": "Idle timeout"}
+```
+
+| `code` | Meaning |
+|---|---|
+| `notifications_missed` | The client read too slowly and change notifications were dropped; standing queries re-evaluate. The connection stays open. |
+| `slow_consumer` | Too many notifications were dropped; the connection closes. |
+| `idle_timeout` | No request within `http.ws_idle_timeout_ms`; the connection closes. |
+| `lifetime_exceeded` | The connection reached `http.rate_limit.ws_max_lifetime_secs`; it closes. |
+| `auth_timeout` | No authentication in time; the connection closes. |
+| `credential_revoked` | The connection's credential was revoked; it closes. |
+| `server_shutdown` | The server is stopping; the connection closes. |
+
 ## Reconnection
 
 If the connection drops:
@@ -433,7 +476,9 @@ The server applies per-connection rate limiting (default: 1000 messages/sec, con
 ```json
 {
   "type": "error",
-  "message": "Rate limit exceeded (1000 msgs/sec)"
+  "id": "42",
+  "message": "Rate limit exceeded (1000 msgs/sec)",
+  "code": "rate_limited"
 }
 ```
 

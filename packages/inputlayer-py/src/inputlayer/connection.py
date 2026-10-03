@@ -17,6 +17,7 @@ from inputlayer._protocol import (
     ErrorResponse,
     ExecuteMessage,
     LoginMessage,
+    NoticeResponse,
     NotificationResponse,
     PingMessage,
     PongResponse,
@@ -24,6 +25,9 @@ from inputlayer._protocol import (
     ResultEndResponse,
     ResultResponse,
     ResultStartResponse,
+    ServerMessage,
+    SubscriptionDeltaResponse,
+    SubscriptionErrorResponse,
     deserialize_message,
 )
 from inputlayer.exceptions import (
@@ -171,7 +175,7 @@ class Connection:
         raw = await self._ws.recv()
         response = deserialize_message(raw)
 
-        if isinstance(response, AuthErrorResponse):
+        if isinstance(response, (AuthErrorResponse, NoticeResponse)):
             raise AuthenticationError(response.message)
         if isinstance(response, AuthenticatedResponse):
             self._session_id = response.session_id
@@ -250,8 +254,7 @@ class Connection:
             raw = await self._ws.recv()
             response = deserialize_message(raw)
 
-            if isinstance(response, NotificationResponse):
-                self._dispatch_notification(response)
+            if self._handle_push(response):
                 continue
 
             if isinstance(response, PongResponse):
@@ -286,8 +289,7 @@ class Connection:
             raw = await self._ws.recv()
             response = deserialize_message(raw)
 
-            if isinstance(response, NotificationResponse):
-                self._dispatch_notification(response)
+            if self._handle_push(response):
                 continue
 
             if isinstance(response, ResultChunkResponse):
@@ -319,6 +321,22 @@ class Connection:
 
     # ── Notification handling ─────────────────────────────────────────
 
+    def _handle_push(self, response: ServerMessage) -> bool:
+        """Handle a frame the server sent unprompted; ``False`` for replies.
+
+        Notices are logged (a closing one is followed by the socket closing,
+        which fails the pending call). Subscription pushes have no consumer
+        in this SDK yet and are dropped.
+        """
+        if isinstance(response, NotificationResponse):
+            self._dispatch_notification(response)
+            return True
+        if isinstance(response, NoticeResponse):
+            level = logging.WARNING if response.closes_connection else logging.INFO
+            logger.log(level, "server notice (%s): %s", response.code, response.message)
+            return True
+        return isinstance(response, (SubscriptionDeltaResponse, SubscriptionErrorResponse))
+
     def _dispatch_notification(self, notif: NotificationResponse) -> None:
         event = NotificationEvent(
             type=notif.type,
@@ -339,12 +357,8 @@ class Connection:
         assert self._ws is not None
         try:
             async for raw in self._ws:
-                try:
-                    response = deserialize_message(raw)
-                    if isinstance(response, NotificationResponse):
-                        self._dispatch_notification(response)
-                except Exception:
-                    pass
+                with contextlib.suppress(Exception):
+                    self._handle_push(deserialize_message(raw))
         except asyncio.CancelledError:
             pass
         except Exception:

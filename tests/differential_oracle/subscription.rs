@@ -10,11 +10,11 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
-use inputlayer::protocol::handler::PersistentNotification;
+use inputlayer::protocol::handler::Notification;
 use inputlayer::protocol::subscription::{
-    change_of, Dispatch, Push, ReevaluatingQuery, Row as WireRow, StandingQuery,
-    SubscriptionRegistry,
+    change_of, Dispatch, ReevaluatingQuery, Row as WireRow, StandingQuery, SubscriptionRegistry,
 };
+use inputlayer_ws_protocol::SubscriptionPush;
 use tokio::sync::broadcast::{self, error::TryRecvError};
 
 use crate::adapter::Adapter;
@@ -38,7 +38,7 @@ struct View {
 
 pub struct SubscriptionAdapter {
     host: EngineHost,
-    notifications: broadcast::Receiver<PersistentNotification>,
+    notifications: broadcast::Receiver<Notification>,
     registry: SubscriptionRegistry,
     /// Keyed by subscription id.
     views: BTreeMap<String, View>,
@@ -109,9 +109,9 @@ impl SubscriptionAdapter {
         }
     }
 
-    fn apply(&mut self, push: Push) {
+    fn apply(&mut self, push: SubscriptionPush) {
         match push {
-            Push::SubscriptionDelta {
+            SubscriptionPush::SubscriptionDelta {
                 subscription,
                 inserted,
                 retracted,
@@ -131,9 +131,10 @@ impl SubscriptionAdapter {
                     }
                 }
             }
-            Push::SubscriptionError {
+            SubscriptionPush::SubscriptionError {
                 subscription,
                 message,
+                ..
             } => {
                 if let Some(view) = self.views.get_mut(&subscription) {
                     if view.result.is_ok() {

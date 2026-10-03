@@ -510,11 +510,21 @@ pub struct Update {
     pub diff: i64,  // +1 for insert, -1 for delete
 }
 
-pub struct WalEntry {
-    pub shard: String,
-    pub update: Update,
+/// All changes of one commit, applied atomically at one revision.
+pub struct Transaction {
+    revision: u64,     // Logical time of every change in the commit
+    ops: Vec<TxnOp>,   // Changes in commit order
+}
+
+pub enum TxnOp {
+    Facts { shard: String, changes: Vec<(Tuple, i64)> },
 }
 ```
+
+Each transaction is one WAL record, `<crc32>:<json>\n`, and the trailing
+newline is its commit boundary. Recovery replays the longest intact prefix of
+records, so a crash recovers whole transactions only (see the persistence
+guide).
 
 ### 8.2 Batch Files (Parquet)
 
@@ -533,7 +543,7 @@ pub struct ShardMeta {
 1. Load shard metadata from disk
 2. Create DDComputation for each KG
 3. Replay batch files through InputSessions
-4. Replay WAL entries since last batch
+4. Replay WAL transactions since last batch
 5. Step workers until frontier advances past WAL upper
 6. DDComputation is live and ready
 ```

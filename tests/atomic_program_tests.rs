@@ -3,7 +3,7 @@
 //! and rules unchanged, readers and subscribers see one rule generation, and a
 //! command that cannot join the transaction fails the program before any write.
 
-use inputlayer::protocol::handler::PersistentNotification;
+use inputlayer::protocol::handler::Notification;
 use inputlayer::protocol::{ErrorCode, Handler, ProgramError, QueryResult, WireValue};
 use inputlayer::{Config, StorageEngine};
 use std::path::Path;
@@ -136,12 +136,12 @@ async fn rule_and_data_replacement_notifies_after_one_commit() {
     let mut seen = Vec::new();
     while let Ok(notification) = notifications.try_recv() {
         match notification {
-            PersistentNotification::RuleChange {
+            Notification::RuleChange {
                 rule_name,
                 operation,
                 ..
             } => seen.push(format!("rule {rule_name} {operation}")),
-            PersistentNotification::PersistentUpdate {
+            Notification::PersistentUpdate {
                 relation,
                 operation,
                 ..

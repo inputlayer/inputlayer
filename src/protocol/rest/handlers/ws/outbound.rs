@@ -10,8 +10,11 @@
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::stream::SplitSink;
 use futures_util::{Sink, SinkExt};
+use inputlayer_ws_protocol::{ErrorCode, NoticeCode, ServerFrame};
+use tracing::warn;
 
 use crate::auth::Principal;
+use crate::protocol::MAX_MESSAGE_SIZE;
 
 /// Why a frame was not sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,10 +59,27 @@ impl<S: Sink<Message> + Unpin> Outbound<S> {
         self.sink.flush().await.map_err(|_| SendError::Closed)
     }
 
-    /// Send `json` past the fence: only for telling the client its
-    /// credential was revoked.
-    pub(super) async fn send_revocation_notice(&mut self, json: String) {
-        let _ = self.sink.send(Message::Text(json)).await;
+    /// Serialize and send `frame`; `false` if the connection is dead. A frame
+    /// over [`MAX_MESSAGE_SIZE`] is replaced by an `error` for the same request.
+    pub(super) async fn send_frame(&mut self, frame: &ServerFrame) -> bool {
+        let json = encode(frame);
+        self.send(Message::Text(json)).await.is_ok()
+    }
+
+    /// Send a `notice`; `false` if the connection is dead.
+    pub(super) async fn send_notice(&mut self, code: NoticeCode, message: String) -> bool {
+        self.send_frame(&ServerFrame::Notice { code, message })
+            .await
+    }
+
+    /// Tell the client its credential was revoked: the one data frame sent
+    /// past the fence.
+    pub(super) async fn send_revocation_notice(&mut self) {
+        let notice = ServerFrame::Notice {
+            code: NoticeCode::CredentialRevoked,
+            message: "Credential revoked; reconnect with valid credentials".to_string(),
+        };
+        let _ = self.sink.send(Message::Text(encode(&notice))).await;
     }
 
     pub(super) async fn close(&mut self) {
@@ -67,11 +87,42 @@ impl<S: Sink<Message> + Unpin> Outbound<S> {
     }
 }
 
+/// JSON of `frame`, or of an `error` answering the same request when it
+/// cannot be sent.
+pub(super) fn encode(frame: &ServerFrame) -> String {
+    let failure = match serde_json::to_string(frame) {
+        Ok(json) if json.len() <= MAX_MESSAGE_SIZE => return json,
+        Ok(json) => {
+            warn!(
+                size = json.len(),
+                max = MAX_MESSAGE_SIZE,
+                "ws_frame_too_large"
+            );
+            format!(
+                "Result too large ({} bytes, max {MAX_MESSAGE_SIZE})",
+                json.len()
+            )
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "ws_frame_serialize_failed");
+            "Internal server error".to_string()
+        }
+    };
+    let error = ServerFrame::error(
+        frame.request_id().cloned(),
+        Some(ErrorCode::Internal),
+        failure,
+    );
+    serde_json::to_string(&error)
+        .unwrap_or_else(|_| r#"{"type":"error","message":"Internal serialization error"}"#.into())
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::auth::{ApiKeyRecord, CredentialRegistry, Role, UserRecord};
+    use inputlayer_ws_protocol::RequestId;
 
     fn principal(registry: &CredentialRegistry) -> Principal {
         registry.load(
@@ -106,17 +157,26 @@ mod tests {
             Err(SendError::Revoked)
         );
         outbound.send(Message::Ping(Vec::new())).await.unwrap();
-        outbound.send_revocation_notice("revoked".into()).await;
+        assert!(!outbound.send_frame(&ServerFrame::Pong { id: None }).await);
+        outbound.send_revocation_notice().await;
         outbound.close().await;
 
+        assert_eq!(outbound.sink.len(), 3, "{:?}", outbound.sink);
         assert_eq!(
-            outbound.sink,
-            vec![
-                Message::Text("before".into()),
-                Message::Ping(Vec::new()),
-                Message::Text("revoked".into()),
-            ]
+            outbound.sink[..2],
+            [Message::Text("before".into()), Message::Ping(Vec::new())]
         );
+        let Message::Text(notice) = &outbound.sink[2] else {
+            panic!("{:?}", outbound.sink[2]);
+        };
+        let notice: ServerFrame = serde_json::from_str(notice).unwrap();
+        assert!(matches!(
+            notice,
+            ServerFrame::Notice {
+                code: NoticeCode::CredentialRevoked,
+                ..
+            }
+        ));
     }
 
     #[tokio::test]
@@ -127,5 +187,24 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outbound.sink, vec![Message::Text("auth_error".into())]);
+    }
+
+    #[test]
+    fn oversized_frame_becomes_an_error_for_the_same_request() {
+        let frame = ServerFrame::error(
+            Some(RequestId::new("big").unwrap()),
+            None,
+            "x".repeat(MAX_MESSAGE_SIZE),
+        );
+        let reply: ServerFrame = serde_json::from_str(&encode(&frame)).unwrap();
+        let ServerFrame::Error {
+            id, code, message, ..
+        } = reply
+        else {
+            panic!("{reply:?}");
+        };
+        assert_eq!(id.unwrap().as_str(), "big");
+        assert_eq!(code, Some(ErrorCode::Internal));
+        assert!(message.starts_with("Result too large"), "{message}");
     }
 }

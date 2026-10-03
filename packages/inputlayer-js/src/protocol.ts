@@ -1,28 +1,40 @@
 /**
  * WebSocket wire protocol: message serialization and deserialization.
- * Matches the AsyncAPI spec at docs/spec/asyncapi.yaml.
+ * Matches the AsyncAPI spec at docs/spec/asyncapi.yaml (protocol version 2,
+ * defined by the `inputlayer-ws-protocol` crate).
+ *
+ * Any request may carry an `id`; every reply to it echoes it. Pushes
+ * (notifications, subscription deltas) and `notice` frames never carry one
+ * and are never replies.
  */
+
+/** The `/ws` protocol version this SDK speaks (`authenticated.protocol_version`). */
+export const PROTOCOL_VERSION = 2;
 
 // ── Client -> Server messages ───────────────────────────────────────
 
 export interface LoginMessage {
   type: 'login';
+  id?: string;
   username: string;
   password: string;
 }
 
 export interface AuthenticateMessage {
   type: 'authenticate';
+  id?: string;
   api_key: string;
 }
 
 export interface ExecuteMessage {
   type: 'execute';
+  id?: string;
   program: string;
 }
 
 export interface PingMessage {
   type: 'ping';
+  id?: string;
 }
 
 export type ClientMessage =
@@ -35,14 +47,17 @@ export type ClientMessage =
 
 export interface AuthenticatedResponse {
   type: 'authenticated';
+  id?: string;
   session_id: string;
   knowledge_graph: string;
   version: string;
   role: string;
+  protocol_version: number;
 }
 
 export interface AuthErrorResponse {
   type: 'auth_error';
+  id?: string;
   message: string;
 }
 
@@ -64,7 +79,15 @@ export interface TimingBreakdown {
   rules?: RuleTiming[];
 }
 
-export type ErrorCode = 'validation' | 'not_found' | 'conflict' | 'unsupported' | 'internal';
+/** `invalid_request` and `rate_limited` reject a whole request before it runs. */
+export type ErrorCode =
+  | 'validation'
+  | 'not_found'
+  | 'conflict'
+  | 'unsupported'
+  | 'internal'
+  | 'invalid_request'
+  | 'rate_limited';
 
 /** A failed statement of a multi-statement program (0-based `index`). */
 export interface StatementError {
@@ -73,8 +96,15 @@ export interface StatementError {
   message: string;
 }
 
+/** The subscription a `.subscribe` registered; pushes for it carry this generation. */
+export interface Subscribed {
+  subscription: string;
+  generation: number;
+}
+
 export interface ResultResponse {
   type: 'result';
+  id?: string;
   columns: string[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   rows: any[][];
@@ -90,10 +120,12 @@ export interface ResultResponse {
   proof_trees?: any[];
   timing_breakdown?: TimingBreakdown;
   errors?: StatementError[];
+  subscribed?: Subscribed;
 }
 
 export interface ErrorResponse {
   type: 'error';
+  id?: string;
   message: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   validation_errors?: Array<Record<string, any>>;
@@ -102,6 +134,7 @@ export interface ErrorResponse {
 
 export interface ResultStartResponse {
   type: 'result_start';
+  id?: string;
   columns: string[];
   total_count: number;
   truncated: boolean;
@@ -117,6 +150,7 @@ export interface ResultStartResponse {
 
 export interface ResultChunkResponse {
   type: 'result_chunk';
+  id?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   rows: any[][];
   chunk_index: number;
@@ -125,12 +159,53 @@ export interface ResultChunkResponse {
 
 export interface ResultEndResponse {
   type: 'result_end';
+  id?: string;
   row_count: number;
   chunk_count: number;
 }
 
 export interface PongResponse {
   type: 'pong';
+  id?: string;
+}
+
+/** A connection event. The server closes the connection after every one but `notifications_missed`. */
+export type NoticeCode =
+  | 'notifications_missed'
+  | 'slow_consumer'
+  | 'idle_timeout'
+  | 'lifetime_exceeded'
+  | 'auth_timeout'
+  | 'credential_revoked'
+  | 'server_shutdown';
+
+/** A connection event announced by the server; never a reply. */
+export interface NoticeResponse {
+  type: 'notice';
+  code: NoticeCode;
+  message: string;
+}
+
+/** Rows that entered and left a standing query's result. */
+export interface SubscriptionDeltaResponse {
+  type: 'subscription_delta';
+  subscription: string;
+  generation: number;
+  knowledge_graph: string;
+  seq: number;
+  columns: string[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  inserted: any[][];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  retracted: any[][];
+}
+
+/** A standing query failed to re-evaluate; it stays registered. */
+export interface SubscriptionErrorResponse {
+  type: 'subscription_error';
+  subscription: string;
+  generation: number;
+  message: string;
 }
 
 export interface NotificationResponse {
@@ -158,7 +233,32 @@ export type ServerMessage =
   | ResultChunkResponse
   | ResultEndResponse
   | PongResponse
-  | NotificationResponse;
+  | NoticeResponse
+  | NotificationResponse
+  | SubscriptionDeltaResponse
+  | SubscriptionErrorResponse;
+
+/** Frames the server sends unprompted: never the reply to a request. */
+export type PushMessage =
+  | NoticeResponse
+  | NotificationResponse
+  | SubscriptionDeltaResponse
+  | SubscriptionErrorResponse;
+
+const PUSH_TYPES: ReadonlySet<string> = new Set([
+  'notice',
+  'persistent_update',
+  'rule_change',
+  'kg_change',
+  'schema_change',
+  'subscription_delta',
+  'subscription_error',
+]);
+
+/** Whether `msg` was sent unprompted rather than in reply to a request. */
+export function isPush(msg: ServerMessage): msg is PushMessage {
+  return PUSH_TYPES.has(msg.type);
+}
 
 // ── Serialization ───────────────────────────────────────────────────
 
@@ -193,6 +293,15 @@ export function deserializeMessage(data: string): ServerMessage {
   }
   if (type === 'pong') {
     return obj as PongResponse;
+  }
+  if (type === 'notice') {
+    return obj as NoticeResponse;
+  }
+  if (type === 'subscription_delta') {
+    return obj as SubscriptionDeltaResponse;
+  }
+  if (type === 'subscription_error') {
+    return obj as SubscriptionErrorResponse;
   }
   if (
     type === 'persistent_update' ||

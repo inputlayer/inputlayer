@@ -199,7 +199,8 @@ impl Client {
 /// The frames a revoked connection receives: only the notice, then close.
 fn assert_revoked(frames: &[Value]) {
     assert_eq!(frames.len(), 1, "{frames:?}");
-    assert_eq!(frames[0]["type"], "error");
+    assert_eq!(frames[0]["type"], "notice");
+    assert_eq!(frames[0]["code"], "credential_revoked");
     assert_eq!(frames[0]["message"], REVOKED);
 }
 
@@ -450,35 +451,44 @@ async fn revocation_fences_a_subscription_held_at_the_result_cap() {
 #[tokio::test(flavor = "multi_thread")]
 async fn revocation_during_a_proof_withholds_it() {
     let server = start_server().await;
-    // Proof search dominates: one tree per row, far costlier than the query.
-    let edges: Vec<String> = (0..2000).map(|i| format!("({i}, {})", i + 1)).collect();
-    server
-        .write(&format!(
-            "+edge[{}]\n+path(X, Y) <- edge(X, Y)",
-            edges.join(", ")
-        ))
-        .await;
+    server.write("+path(X, Y) <- edge(X, Y)").await;
     let proof = ".why full ?path(X, Y)";
-
     let key = server.key("bob-why", "bob");
     let principal = server.handler.authenticate_api_key(&key).unwrap();
-    let started = Instant::now();
-    let result = server
-        .handler
-        .execute_program(
-            None,
-            Some(KG.to_string()),
-            proof.to_string(),
-            Some(&principal),
-        )
-        .await
-        .unwrap();
-    let evaluation = started.elapsed();
-    assert_eq!(result.proof_trees.map(|trees| trees.len()), Some(2000));
-    assert!(
-        evaluation >= Duration::from_millis(100),
-        "the proof must be slow enough to revoke during it ({evaluation:?})"
-    );
+
+    // Proof search dominates (one tree per row, far costlier than the query)
+    // and grows faster than linearly: add edges until a proof takes long
+    // enough to revoke during it, in debug and release builds alike. The
+    // fastest of two runs is the estimate, so one slow run cannot push the
+    // revocation past the end of the proof.
+    let mut rows = 0;
+    let evaluation = loop {
+        let edges: Vec<String> = (rows..rows + 1000)
+            .map(|i| format!("({i}, {})", i + 1))
+            .collect();
+        server.write(&format!("+edge[{}]", edges.join(", "))).await;
+        rows += 1000;
+        let mut fastest = Duration::MAX;
+        for _ in 0..2 {
+            let started = Instant::now();
+            let result = server
+                .handler
+                .execute_program(
+                    None,
+                    Some(KG.to_string()),
+                    proof.to_string(),
+                    Some(&principal),
+                )
+                .await
+                .unwrap();
+            fastest = fastest.min(started.elapsed());
+            assert_eq!(result.proof_trees.map(|trees| trees.len()), Some(rows));
+        }
+        if fastest >= Duration::from_millis(100) {
+            break fastest;
+        }
+        assert!(rows < 16_000, "proofs stay too fast to revoke during one");
+    };
 
     let mut client = Client::connect(&server, Login::Key(&key)).await;
     client

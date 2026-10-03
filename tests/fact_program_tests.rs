@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use inputlayer::protocol::handler::PersistentNotification;
+use inputlayer::protocol::handler::Notification;
 use inputlayer::protocol::{ErrorCode, Handler, ProgramError, QueryResult, WireValue};
 use inputlayer::value::Tuple;
 use inputlayer::{Config, StorageEngine};
@@ -175,7 +175,7 @@ async fn subscribers_get_one_notification_per_relation_after_the_commit() {
         .unwrap();
     let mut updates = Vec::new();
     while let Ok(notification) = notifications.try_recv() {
-        if let PersistentNotification::PersistentUpdate {
+        if let Notification::PersistentUpdate {
             relation,
             operation,
             count,
@@ -198,7 +198,7 @@ async fn subscribers_get_one_notification_per_relation_after_the_commit() {
         .await
         .unwrap();
     match notifications.try_recv() {
-        Ok(PersistentNotification::PersistentUpdate {
+        Ok(Notification::PersistentUpdate {
             relation,
             operation,
             ..

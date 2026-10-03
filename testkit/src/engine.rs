@@ -29,6 +29,8 @@ pub struct EngineSettings {
     pub max_result_rows: Option<usize>,
     /// `http.rate_limit.ws_max_subscriptions`; `None` keeps the default.
     pub ws_max_subscriptions: Option<usize>,
+    /// `http.rate_limit.notification_buffer_size`; `None` keeps the default.
+    pub notification_buffer_size: Option<usize>,
 }
 
 /// Configures and starts an [`Engine`].
@@ -61,6 +63,15 @@ impl EngineBuilder {
     #[must_use]
     pub fn ws_max_subscriptions(mut self, limit: usize) -> Self {
         self.settings.ws_max_subscriptions = Some(limit);
+        self
+    }
+
+    /// Buffer `size` notifications per connection; a connection that falls
+    /// further behind is told it missed some (then, past `size` in total,
+    /// disconnected).
+    #[must_use]
+    pub fn notification_buffer_size(mut self, size: usize) -> Self {
+        self.settings.notification_buffer_size = Some(size);
         self
     }
 
@@ -221,6 +232,9 @@ impl Engine {
         rate_limit.insert("per_ip_max_rps".into(), 0.into());
         if let Some(limit) = self.settings.ws_max_subscriptions {
             rate_limit.insert("ws_max_subscriptions".into(), integer(limit)?);
+        }
+        if let Some(size) = self.settings.notification_buffer_size {
+            rate_limit.insert("notification_buffer_size".into(), integer(size)?);
         }
         let mut http = toml::Table::new();
         http.insert("enabled".into(), true.into());

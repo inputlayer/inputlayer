@@ -20,6 +20,7 @@ def _auth_response() -> str:
         "knowledge_graph": "default",
         "version": "0.1.0",
         "role": "admin",
+        "protocol_version": 2,
     })
 
 
@@ -197,6 +198,27 @@ class TestConnectionNotifications:
         assert result.rows == [[42]]
         assert len(received_events) == 1
         assert received_events[0].relation == "edge"
+
+    @pytest.mark.asyncio
+    async def test_notices_and_subscription_pushes_are_not_replies(self):
+        """A notice or subscription push before the reply must not answer the call."""
+        conn = Connection("ws://localhost:8080/ws", username="admin", password="admin")
+        responses = [
+            json.dumps({"type": "notice", "code": "notifications_missed", "message": "Missed 2"}),
+            json.dumps({
+                "type": "subscription_delta", "subscription": "s", "generation": 1,
+                "knowledge_graph": "default", "seq": 1, "columns": ["x"],
+                "inserted": [[1]], "retracted": [],
+            }),
+            _result_response(["x"], [[42]]),
+        ]
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=responses)
+        conn._ws = mock_ws
+        conn._connected = True
+
+        result = await conn.execute("?x(X)")
+        assert result.rows == [[42]]
 
 
     def test_failing_callback_does_not_crash_dispatcher(self) -> None:

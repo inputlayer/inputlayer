@@ -54,6 +54,7 @@ pub(super) struct Startable<J> {
 
 /// A request's reply, released in admission order.
 pub(super) struct Released<R> {
+    pub ticket: Ticket,
     pub access: Access,
     /// `None` when the request panicked.
     pub reply: Option<R>,
@@ -112,9 +113,10 @@ impl<J, R: Send + 'static> RequestPipeline<J, R> {
         self.started.values().any(|a| *a == Access::Exclusive)
     }
 
-    /// Queue `job`. The caller checks [`Self::has_capacity`] first; admission
-    /// past capacity is still accepted so a request is never lost.
-    pub(super) fn admit(&mut self, access: Access, job: J) {
+    /// Queue `job`; returns its ticket. The caller checks
+    /// [`Self::has_capacity`] first; admission past capacity is still accepted
+    /// so a request is never lost.
+    pub(super) fn admit(&mut self, access: Access, job: J) -> Ticket {
         let ticket = Ticket(self.next_ticket);
         self.next_ticket += 1;
         self.queued.push_back(Queued {
@@ -122,6 +124,7 @@ impl<J, R: Send + 'static> RequestPipeline<J, R> {
             access,
             job,
         });
+        ticket
     }
 
     /// The next queued request the ordering barriers allow to start, if any.
@@ -170,7 +173,11 @@ impl<J, R: Send + 'static> RequestPipeline<J, R> {
             if let Some(reply) = self.finished.remove(&head) {
                 self.next_release += 1;
                 let access = self.started.remove(&head).unwrap_or(Access::Exclusive);
-                return Released { access, reply };
+                return Released {
+                    ticket: head,
+                    access,
+                    reply,
+                };
             }
             match self.running.next().await {
                 Some((ticket, reply)) => {

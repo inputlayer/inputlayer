@@ -21,6 +21,9 @@ use inputlayer::parser::lexer::{code_chars, escape, find_outside_strings, strip_
 use inputlayer::statement::{parse_statement, MetaCommand, Statement};
 
 use futures_util::{SinkExt, StreamExt};
+use inputlayer_ws_protocol::{
+    ClientFrame, FrameClass, RequestId, ResultFrame, ResultStartFrame, ServerFrame,
+};
 use reqwest::Client;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
@@ -56,155 +59,10 @@ struct HealthResponse {
     uptime_secs: u64,
 }
 
-// ── WebSocket protocol types (matching server GlobalWs*) ────────
-
-/// Client → Server message
-#[derive(Debug, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum WsRequest {
-    /// Authenticate with an API key
-    Authenticate {
-        api_key: String,
-    },
-    /// Authenticate with username and password
-    #[allow(dead_code)]
-    Login {
-        username: String,
-        password: String,
-    },
-    Execute {
-        program: String,
-    },
-    #[allow(dead_code)]
-    Ping,
-}
-
-/// Server → Client message
-#[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum WsResponse {
-    /// Legacy: Sent by older servers without auth
-    Connected {
-        #[allow(dead_code)]
-        session_id: String,
-        knowledge_graph: String,
-    },
-    /// Sent after successful authentication
-    Authenticated {
-        #[allow(dead_code)]
-        session_id: String,
-        knowledge_graph: String,
-        #[allow(dead_code)]
-        role: String,
-    },
-    /// Authentication failed
-    AuthError {
-        message: String,
-    },
-    Result {
-        columns: Vec<String>,
-        rows: Vec<Vec<serde_json::Value>>,
-        #[allow(dead_code)]
-        row_count: usize,
-        #[allow(dead_code)]
-        total_count: usize,
-        #[allow(dead_code)]
-        truncated: bool,
-        execution_time_ms: u64,
-        #[serde(default)]
-        #[allow(dead_code)]
-        row_provenance: Vec<String>,
-        #[serde(default)]
-        switched_kg: Option<String>,
-    },
-    /// Streaming: header with schema and metadata (large results)
-    ResultStart {
-        columns: Vec<String>,
-        #[allow(dead_code)]
-        total_count: usize,
-        #[allow(dead_code)]
-        truncated: bool,
-        execution_time_ms: u64,
-        #[serde(default)]
-        switched_kg: Option<String>,
-    },
-    /// Streaming: a batch of rows
-    ResultChunk {
-        rows: Vec<Vec<serde_json::Value>>,
-        #[allow(dead_code)]
-        row_provenance: Vec<String>,
-        #[allow(dead_code)]
-        chunk_index: usize,
-    },
-    /// Streaming: end marker after all chunks
-    ResultEnd {
-        #[allow(dead_code)]
-        row_count: usize,
-        #[allow(dead_code)]
-        chunk_count: usize,
-    },
-    Error {
-        message: String,
-    },
-    Pong,
-    #[allow(dead_code)]
-    Notification {
-        event: String,
-        knowledge_graph: String,
-        relation: String,
-        operation: String,
-        count: usize,
-    },
-    /// Persistent data change notification
-    #[allow(dead_code)]
-    PersistentUpdate {
-        knowledge_graph: String,
-        relation: String,
-        operation: String,
-        count: usize,
-        #[serde(default)]
-        timestamp_ms: u64,
-        #[serde(default)]
-        seq: u64,
-    },
-    /// Rule change notification
-    #[allow(dead_code)]
-    RuleChange {
-        knowledge_graph: String,
-        rule_name: String,
-        operation: String,
-        #[serde(default)]
-        timestamp_ms: u64,
-        #[serde(default)]
-        seq: u64,
-    },
-    /// Knowledge graph change notification
-    #[allow(dead_code)]
-    KgChange {
-        knowledge_graph: String,
-        operation: String,
-        #[serde(default)]
-        timestamp_ms: u64,
-        #[serde(default)]
-        seq: u64,
-    },
-    /// Schema change notification
-    #[allow(dead_code)]
-    SchemaChange {
-        knowledge_graph: String,
-        entity: String,
-        operation: String,
-        #[serde(default)]
-        timestamp_ms: u64,
-        #[serde(default)]
-        seq: u64,
-    },
-}
-
 // ── Internal channel message for WS background reader ───────────
 
 enum WsMessage {
-    Response(WsResponse),
+    Frame(ServerFrame),
     Closed,
     Error(String),
 }
@@ -216,16 +74,24 @@ type WsSink = futures_util::stream::SplitSink<
     tungstenite::Message,
 >;
 
+/// Fields of the `authenticated` reply the REPL shows.
+struct Connected {
+    knowledge_graph: String,
+    role: String,
+}
+
 struct WsClient {
     sender: WsSink,
     msg_rx: tokio::sync::mpsc::UnboundedReceiver<WsMessage>,
     timeout_secs: u64,
+    /// Id of the last request sent; the next reply must echo it.
+    last_id: u64,
 }
 
 impl WsClient {
     /// Connect to the WebSocket endpoint, authenticate with an API key,
     /// and spawn a background reader task.
-    async fn connect(ws_url: &str, api_key: &str) -> Result<(Self, WsResponse), String> {
+    async fn connect(ws_url: &str, api_key: &str) -> Result<(Self, Connected), String> {
         let (ws_stream, _) = tokio::time::timeout(
             std::time::Duration::from_secs(10),
             tokio_tungstenite::connect_async(ws_url),
@@ -237,7 +103,8 @@ impl WsClient {
         let (mut sender, mut receiver) = ws_stream.split();
 
         // Send authenticate message
-        let auth_req = WsRequest::Authenticate {
+        let auth_req = ClientFrame::Authenticate {
+            id: Some(RequestId::from(0)),
             api_key: api_key.to_string(),
         };
         let auth_text =
@@ -251,11 +118,23 @@ impl WsClient {
         let connected = loop {
             match tokio::time::timeout(std::time::Duration::from_secs(10), receiver.next()).await {
                 Ok(Some(Ok(tungstenite::Message::Text(text)))) => {
-                    let resp: WsResponse = serde_json::from_str(&text)
+                    let frame: ServerFrame = serde_json::from_str(&text)
                         .map_err(|e| format!("Failed to parse auth response: {e}"))?;
-                    match &resp {
-                        WsResponse::Authenticated { .. } => break resp,
-                        WsResponse::AuthError { message } => {
+                    match frame {
+                        ServerFrame::Authenticated {
+                            knowledge_graph,
+                            role,
+                            ..
+                        } => {
+                            break Connected {
+                                knowledge_graph,
+                                role,
+                            }
+                        }
+                        ServerFrame::AuthError { message, .. } => {
+                            return Err(format!("Authentication failed: {message}"));
+                        }
+                        ServerFrame::Notice { message, .. } => {
                             return Err(format!("Authentication failed: {message}"));
                         }
                         _ => continue, // skip unexpected messages
@@ -274,20 +153,12 @@ impl WsClient {
             while let Some(msg_result) = receiver.next().await {
                 match msg_result {
                     Ok(tungstenite::Message::Text(text)) => {
-                        match serde_json::from_str::<WsResponse>(&text) {
-                            Ok(resp) => {
-                                if msg_tx.send(WsMessage::Response(resp)).is_err() {
-                                    break;
-                                }
-                            }
-                            Err(e) => {
-                                if msg_tx
-                                    .send(WsMessage::Error(format!("Parse error: {e}")))
-                                    .is_err()
-                                {
-                                    break;
-                                }
-                            }
+                        let msg = match serde_json::from_str::<ServerFrame>(&text) {
+                            Ok(frame) => WsMessage::Frame(frame),
+                            Err(e) => WsMessage::Error(format!("Parse error: {e}")),
+                        };
+                        if msg_tx.send(msg).is_err() {
+                            break;
                         }
                     }
                     Ok(tungstenite::Message::Close(_)) => {
@@ -310,6 +181,7 @@ impl WsClient {
                 sender,
                 msg_rx,
                 timeout_secs: 120, // default, overridden after construction
+                last_id: 0,
             },
             connected,
         ))
@@ -317,7 +189,9 @@ impl WsClient {
 
     /// Send an execute message to the server.
     async fn send_execute(&mut self, program: &str) -> Result<(), String> {
-        let req = WsRequest::Execute {
+        self.last_id += 1;
+        let req = ClientFrame::Execute {
+            id: Some(RequestId::from(self.last_id)),
             program: program.to_string(),
         };
         let text = serde_json::to_string(&req).map_err(|e| format!("Serialize error: {e}"))?;
@@ -327,49 +201,31 @@ impl WsClient {
             .map_err(|e| format!("Send failed: {e}"))
     }
 
-    /// Receive the next non-notification response. Notifications are silently skipped.
+    /// Next reply to the last request: pushes are skipped and notices shown.
     /// Times out after the configured timeout to prevent hanging under server load.
-    ///
-    /// If the server streams a large result (result_start / result_chunk / result_end),
-    /// this method transparently accumulates all chunks and returns a single synthetic
-    /// `WsResponse::Result` to the caller.
-    async fn recv_response(&mut self) -> Result<WsResponse, String> {
+    async fn next_reply(&mut self) -> Result<ServerFrame, String> {
         let timeout = std::time::Duration::from_secs(self.timeout_secs);
         loop {
             match tokio::time::timeout(timeout, self.msg_rx.recv()).await {
-                Ok(Some(WsMessage::Response(resp))) => {
-                    if matches!(
-                        &resp,
-                        WsResponse::Notification { .. }
-                            | WsResponse::PersistentUpdate { .. }
-                            | WsResponse::RuleChange { .. }
-                            | WsResponse::KgChange { .. }
-                            | WsResponse::SchemaChange { .. }
-                    ) {
-                        // Skip notifications - they'll be displayed by the REPL idle loop
-                        continue;
+                Ok(Some(WsMessage::Frame(frame))) => match frame.class() {
+                    FrameClass::Reply => {
+                        let expected = RequestId::from(self.last_id);
+                        if frame.request_id() != Some(&expected) {
+                            return Err(format!(
+                                "Reply for request {:?} while waiting for {expected}",
+                                frame.request_id().map(RequestId::as_str)
+                            ));
+                        }
+                        return Ok(frame);
                     }
-                    // Handle streaming: accumulate chunks into a single Result
-                    if let WsResponse::ResultStart {
-                        columns,
-                        total_count,
-                        truncated,
-                        execution_time_ms,
-                        switched_kg,
-                    } = resp
-                    {
-                        return self
-                            .accumulate_streamed_result(
-                                columns,
-                                total_count,
-                                truncated,
-                                execution_time_ms,
-                                switched_kg,
-                            )
-                            .await;
+                    FrameClass::Notice => {
+                        if let ServerFrame::Notice { message, .. } = frame {
+                            eprintln!("Server notice: {message}");
+                        }
                     }
-                    return Ok(resp);
-                }
+                    // Displayed by nothing in script mode; the REPL ignores them too.
+                    FrameClass::Push => {}
+                },
                 Ok(Some(WsMessage::Error(e))) => return Err(e),
                 Ok(Some(WsMessage::Closed) | None) => {
                     return Err("WebSocket connection closed".to_string())
@@ -379,60 +235,63 @@ impl WsClient {
         }
     }
 
+    /// The result of the last request. A streamed result (result_start /
+    /// result_chunk / result_end) is assembled into one; an `error` reply is
+    /// returned as `Err` with its message.
+    async fn recv_response(&mut self) -> Result<ResultFrame, String> {
+        match self.next_reply().await? {
+            ServerFrame::Result(result) => Ok(result),
+            ServerFrame::ResultStart(start) => self.accumulate_streamed_result(start).await,
+            ServerFrame::Error { message, .. } => Err(message),
+            _ => Err("Unexpected response from server".to_string()),
+        }
+    }
+
     /// Accumulate streamed result chunks after receiving a `result_start`.
-    /// Returns a synthetic `WsResponse::Result` with all rows combined.
     async fn accumulate_streamed_result(
         &mut self,
-        columns: Vec<String>,
-        total_count: usize,
-        truncated: bool,
-        execution_time_ms: u64,
-        switched_kg: Option<String>,
-    ) -> Result<WsResponse, String> {
-        let timeout = std::time::Duration::from_secs(self.timeout_secs);
+        start: ResultStartFrame,
+    ) -> Result<ResultFrame, String> {
         let mut all_rows: Vec<Vec<serde_json::Value>> = Vec::new();
         let mut all_provenance: Vec<String> = Vec::new();
 
         loop {
-            match tokio::time::timeout(timeout, self.msg_rx.recv()).await {
-                Ok(Some(WsMessage::Response(resp))) => match resp {
-                    WsResponse::ResultChunk {
-                        rows,
-                        row_provenance,
-                        ..
-                    } => {
-                        all_rows.extend(rows);
-                        all_provenance.extend(row_provenance);
-                    }
-                    WsResponse::ResultEnd { .. } => {
-                        let row_count = all_rows.len();
-                        return Ok(WsResponse::Result {
-                            columns,
-                            rows: all_rows,
-                            row_count,
-                            total_count,
-                            truncated,
-                            execution_time_ms,
-                            row_provenance: all_provenance,
-                            switched_kg,
-                        });
-                    }
-                    WsResponse::Error { message } => {
-                        return Err(format!("Error during streaming: {message}"));
-                    }
-                    // Skip notifications during streaming
-                    _ => continue,
-                },
-                Ok(Some(WsMessage::Error(e))) => return Err(e),
-                Ok(Some(WsMessage::Closed) | None) => {
-                    return Err("Connection closed during streaming".to_string())
+            let frame = self
+                .next_reply()
+                .await
+                .map_err(|e| format!("{e} - streaming stopped after {} rows", all_rows.len()))?;
+            match frame {
+                ServerFrame::ResultChunk {
+                    rows,
+                    row_provenance,
+                    ..
+                } => {
+                    all_rows.extend(rows);
+                    all_provenance.extend(row_provenance);
                 }
-                Err(_) => {
-                    return Err(format!(
-                        "Streaming timeout ({}s) - received {} rows so far",
-                        self.timeout_secs,
-                        all_rows.len()
-                    ))
+                ServerFrame::ResultEnd { .. } => {
+                    return Ok(ResultFrame {
+                        id: start.id,
+                        columns: start.columns,
+                        row_count: all_rows.len(),
+                        rows: all_rows,
+                        total_count: start.total_count,
+                        truncated: start.truncated,
+                        execution_time_ms: start.execution_time_ms,
+                        row_provenance: all_provenance,
+                        metadata: start.metadata,
+                        switched_kg: start.switched_kg,
+                        proof_trees: start.proof_trees,
+                        timing_breakdown: start.timing_breakdown,
+                        errors: start.errors,
+                        subscribed: None,
+                    });
+                }
+                ServerFrame::Error { message, .. } => {
+                    return Err(format!("Error during streaming: {message}"));
+                }
+                other => {
+                    return Err(format!("Unexpected frame during streaming: {other:?}"));
                 }
             }
         }
@@ -698,25 +557,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut ws_client, connected) =
         ws_result.ok_or("WebSocket connection failed after retries")?;
 
-    let current_kg = match &connected {
-        WsResponse::Authenticated {
-            knowledge_graph,
-            role,
-            ..
-        } => {
-            println!("Authenticated as: {role}");
-            println!("Current knowledge graph: {knowledge_graph}");
-            Some(knowledge_graph.clone())
-        }
-        // Backward compat with older servers
-        WsResponse::Connected {
-            knowledge_graph, ..
-        } => {
-            println!("Current knowledge graph: {knowledge_graph}");
-            Some(knowledge_graph.clone())
-        }
-        _ => None,
-    };
+    println!("Authenticated as: {}", connected.role);
+    println!("Current knowledge graph: {}", connected.knowledge_graph);
+    let current_kg = Some(connected.knowledge_graph);
     println!();
 
     // Display config: script mode defaults to unlimited + no timing, REPL defaults to 50 + timing
@@ -975,10 +818,8 @@ async fn run_repl(state: &mut ReplState) -> Result<(), Box<dyn std::error::Error
             // Watch for WS disconnection or notifications while idle
             msg = state.ws.msg_rx.recv() => {
                 match msg {
-                    Some(WsMessage::Response(WsResponse::Notification {
-                        relation, operation, count, ..
-                    })) => {
-                        eprintln!("[notification] {operation} {count} in {relation}");
+                    Some(WsMessage::Frame(ServerFrame::Notice { message, .. })) => {
+                        eprintln!("Server notice: {message}");
                     }
                     Some(WsMessage::Closed) | None => {
                         eprintln!();
@@ -1039,16 +880,9 @@ async fn handle_statement(
             // Send the rule to the server (silently - don't display "Session rule added")
             state.ws.send_execute(raw_text).await?;
             let resp = state.ws.recv_response().await?;
-            if let WsResponse::Error { message } = resp {
-                return Err(message);
-            }
             // Handle switched_kg if present
-            if let WsResponse::Result {
-                switched_kg: Some(ref kg),
-                ..
-            } = resp
-            {
-                state.current_kg = Some(kg.clone());
+            if let Some(kg) = resp.switched_kg {
+                state.current_kg = Some(kg);
             }
 
             // Build and execute a follow-up query on the head relation
@@ -1122,41 +956,36 @@ async fn handle_rel_describe(
     state.ws.send_execute(raw_text).await?;
     let resp = state.ws.recv_response().await?;
 
-    match resp {
-        WsResponse::Result {
-            columns,
-            rows,
-            total_count,
-            switched_kg,
-            ..
-        } => {
-            if let Some(ref new_kg) = switched_kg {
-                state.current_kg = Some(new_kg.clone());
-            }
-
-            // Check for message-style response (error or "not found")
-            if columns.len() == 1 && columns[0] == "message" {
-                for row in &rows {
-                    if let Some(msg) = row.first().and_then(|v| v.as_str()) {
-                        println!("{msg}");
-                    }
-                }
-                return Ok(());
-            }
-
-            println!("Relation: {name}");
-            if rows.is_empty() {
-                println!("  No data.");
-            } else {
-                // Display table without timing
-                display_relation_table(&columns, &rows, &state.display_config);
-                println!("{} of {} total rows", rows.len(), total_count);
-            }
-            Ok(())
-        }
-        WsResponse::Error { message } => Err(message),
-        _ => Err("Unexpected response from server".to_string()),
+    let ResultFrame {
+        columns,
+        rows,
+        total_count,
+        switched_kg,
+        ..
+    } = resp;
+    if let Some(ref new_kg) = switched_kg {
+        state.current_kg = Some(new_kg.clone());
     }
+
+    // Check for message-style response (error or "not found")
+    if columns.len() == 1 && columns[0] == "message" {
+        for row in &rows {
+            if let Some(msg) = row.first().and_then(|v| v.as_str()) {
+                println!("{msg}");
+            }
+        }
+        return Ok(());
+    }
+
+    println!("Relation: {name}");
+    if rows.is_empty() {
+        println!("  No data.");
+    } else {
+        // Display table without timing
+        display_relation_table(&columns, &rows, &state.display_config);
+        println!("{} of {} total rows", rows.len(), total_count);
+    }
+    Ok(())
 }
 
 /// Send a raw text program to the server and display the result.
@@ -1164,38 +993,33 @@ async fn ws_execute_and_display(state: &mut ReplState, program: &str) -> Result<
     state.ws.send_execute(program).await?;
     let resp = state.ws.recv_response().await?;
 
-    match resp {
-        WsResponse::Result {
-            columns,
-            rows,
-            execution_time_ms,
-            switched_kg,
-            ..
-        } => {
-            // Handle KG switch signal from server
-            if let Some(ref new_kg) = switched_kg {
-                state.current_kg = Some(new_kg.clone());
-            }
-
-            // Display based on response type
-            if columns.len() == 1 && columns[0] == "message" {
-                // Message-style output (meta commands, inserts, deletes, etc.)
-                for row in &rows {
-                    if let Some(msg) = row.first().and_then(|v| v.as_str()) {
-                        println!("{msg}");
-                    }
-                }
-            } else if rows.is_empty() {
-                println!("No results.");
-            } else {
-                // Table display (query results)
-                display_table_result(&columns, &rows, execution_time_ms, &state.display_config);
-            }
-            Ok(())
-        }
-        WsResponse::Error { message } => Err(message),
-        _ => Err("Unexpected response from server".to_string()),
+    let ResultFrame {
+        columns,
+        rows,
+        execution_time_ms,
+        switched_kg,
+        ..
+    } = resp;
+    // Handle KG switch signal from server
+    if let Some(ref new_kg) = switched_kg {
+        state.current_kg = Some(new_kg.clone());
     }
+
+    // Display based on response type
+    if columns.len() == 1 && columns[0] == "message" {
+        // Message-style output (meta commands, inserts, deletes, etc.)
+        for row in &rows {
+            if let Some(msg) = row.first().and_then(|v| v.as_str()) {
+                println!("{msg}");
+            }
+        }
+    } else if rows.is_empty() {
+        println!("No results.");
+    } else {
+        // Table display (query results)
+        display_table_result(&columns, &rows, execution_time_ms, &state.display_config);
+    }
+    Ok(())
 }
 
 // ── Table formatting ────────────────────────────────────────────
@@ -1551,104 +1375,6 @@ mod tests {
     #[test]
     fn test_complete_statement_session_rule_no_plus() {
         assert!(is_complete_statement("mortal(X) <- human(X)"));
-    }
-
-    // WsRequest serialization tests
-    #[test]
-    fn test_ws_request_execute_serialize() {
-        let req = WsRequest::Execute {
-            program: "+edge(1,2).".to_string(),
-        };
-        let json = serde_json::to_string(&req).unwrap();
-        assert!(json.contains(r#""type":"execute""#));
-        assert!(json.contains(r#""program":"+edge(1,2).""#));
-    }
-
-    #[test]
-    fn test_ws_request_authenticate_serialize() {
-        let req = WsRequest::Authenticate {
-            api_key: "test-key-123".to_string(),
-        };
-        let json = serde_json::to_string(&req).unwrap();
-        assert!(json.contains(r#""type":"authenticate""#));
-        assert!(json.contains(r#""api_key":"test-key-123""#));
-    }
-
-    #[test]
-    fn test_ws_request_ping_serialize() {
-        let req = WsRequest::Ping;
-        let json = serde_json::to_string(&req).unwrap();
-        assert!(json.contains(r#""type":"ping""#));
-    }
-
-    // WsResponse deserialization tests
-    #[test]
-    fn test_ws_response_authenticated_deserialize() {
-        let json = r#"{"type":"authenticated","session_id":"42","knowledge_graph":"default","version":"0.1","role":"admin"}"#;
-        let resp: WsResponse = serde_json::from_str(json).unwrap();
-        assert!(matches!(
-            resp,
-            WsResponse::Authenticated {
-                ref role,
-                ref knowledge_graph,
-                ..
-            } if role == "admin" && knowledge_graph == "default"
-        ));
-    }
-
-    #[test]
-    fn test_ws_response_auth_error_deserialize() {
-        let json = r#"{"type":"auth_error","message":"Invalid credentials"}"#;
-        let resp: WsResponse = serde_json::from_str(json).unwrap();
-        assert!(
-            matches!(resp, WsResponse::AuthError { message } if message == "Invalid credentials")
-        );
-    }
-
-    #[test]
-    fn test_ws_response_connected_deserialize() {
-        let json = r#"{"type":"connected","session_id":"42","knowledge_graph":"default"}"#;
-        let resp: WsResponse = serde_json::from_str(json).unwrap();
-        assert!(matches!(
-            resp,
-            WsResponse::Connected {
-                ref session_id,
-                ref knowledge_graph,
-            } if session_id == "42" && knowledge_graph == "default"
-        ));
-    }
-
-    #[test]
-    fn test_ws_response_result_deserialize() {
-        let json = r#"{"type":"result","columns":["col0"],"rows":[[1]],"row_count":1,"total_count":1,"truncated":false,"execution_time_ms":5}"#;
-        let resp: WsResponse = serde_json::from_str(json).unwrap();
-        assert!(matches!(resp, WsResponse::Result { row_count: 1, .. }));
-    }
-
-    #[test]
-    fn test_ws_response_result_with_switched_kg() {
-        let json = r#"{"type":"result","columns":["message"],"rows":[["Switched."]],"row_count":1,"total_count":1,"truncated":false,"execution_time_ms":0,"switched_kg":"test"}"#;
-        let resp: WsResponse = serde_json::from_str(json).unwrap();
-        match resp {
-            WsResponse::Result { switched_kg, .. } => {
-                assert_eq!(switched_kg.as_deref(), Some("test"));
-            }
-            _ => panic!("Expected Result"),
-        }
-    }
-
-    #[test]
-    fn test_ws_response_error_deserialize() {
-        let json = r#"{"type":"error","message":"bad query"}"#;
-        let resp: WsResponse = serde_json::from_str(json).unwrap();
-        assert!(matches!(resp, WsResponse::Error { message } if message == "bad query"));
-    }
-
-    #[test]
-    fn test_ws_response_pong_deserialize() {
-        let json = r#"{"type":"pong"}"#;
-        let resp: WsResponse = serde_json::from_str(json).unwrap();
-        assert!(matches!(resp, WsResponse::Pong));
     }
 
     // URL conversion test

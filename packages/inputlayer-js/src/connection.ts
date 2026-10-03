@@ -12,6 +12,7 @@ import {
   type ResultStartResponse,
   serializeMessage,
   deserializeMessage,
+  isPush,
 } from './protocol.js';
 import {
   AuthenticationError,
@@ -144,8 +145,12 @@ export class Connection {
       } catch {
         return; // Ignore parse errors in background
       }
-      if (this.isNotification(msg)) {
-        this.dispatchNotification(msg as NotificationResponse);
+      if (isPush(msg)) {
+        // Subscription pushes have no consumer in this SDK yet; a closing
+        // notice is followed by `close`, which fails the call in flight.
+        if (this.isNotification(msg)) {
+          this.dispatchNotification(msg as NotificationResponse);
+        }
       } else if (this.nextFrame) {
         const deliver = this.nextFrame;
         this.nextFrame = undefined;
@@ -197,7 +202,7 @@ export class Connection {
     this.ws.send(serializeMessage(msg));
     const response = await this.receiveOne();
 
-    if (response.type === 'auth_error') {
+    if (response.type === 'auth_error' || response.type === 'notice') {
       throw new AuthenticationError(response.message);
     }
     if (response.type === 'authenticated') {

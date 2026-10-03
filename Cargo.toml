@@ -2,7 +2,7 @@
 # per #82); the gateway is a separate member so HTTP/LLM client dependencies
 # never enter the engine crate.
 [workspace]
-members = ["gateway", "ontology-client", "testkit"]
+members = ["gateway", "ontology-client", "testkit", "ws-protocol"]
 # The performance gate is its own workspace: bench-only dependencies stay out
 # of the engine build and the release image.
 exclude = ["perf-gate"]
@@ -101,6 +101,9 @@ crc32fast = "1.5.0"
 
 # Exclusive data_dir lock (flock / LockFileEx)
 fs4 = { version = "1.1", features = ["sync"] }
+
+# /ws frame types, shared with the Rust clients
+inputlayer-ws-protocol = { path = "ws-protocol", version = "0.1.0" }
 
 # Shared registry + WS client (il CLI, gateway)
 inputlayer-ontology-client = { path = "ontology-client", version = "0.1.0" }
