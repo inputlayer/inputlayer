@@ -1,8 +1,10 @@
 //! `inputlayer-backup` - offline backup and restore of a data directory.
 //!
 //! The server must be stopped: `create` takes the data directory lock and
-//! refuses a directory a server is running on. Every command writes only
-//! into a new or empty directory, never over existing data.
+//! refuses a directory a server is running on. A running server exports an
+//! online checkpoint itself (`.backup`, admin only); `verify` and `restore`
+//! handle those exports too. Every command writes only into a new or empty
+//! directory, never over existing data.
 //!
 //! ```bash
 //! # Back up the configured data directory (server stopped)
@@ -18,7 +20,7 @@
 //! See `docs/guides/backup.md` for the full runbook.
 
 use clap::{Parser, Subcommand};
-use inputlayer::storage::backup::{self, Report};
+use inputlayer::storage::backup::{self, Manifest, Report};
 use inputlayer::{Config, StorageEngine};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -88,6 +90,7 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Verify { backup_dir } => {
             let report = backup::verify(&backup_dir).map_err(|e| e.to_string())?;
             print_report("backup verified", &report);
+            print_revision(&backup_dir)?;
         }
         Command::Restore {
             backup_dir,
@@ -96,6 +99,7 @@ fn run(cli: Cli) -> Result<(), String> {
             let config = load_config(cli.config.as_deref())?;
             let report = backup::restore(&backup_dir, &target_dir).map_err(|e| e.to_string())?;
             print_report("backup restored", &report);
+            print_revision(&backup_dir)?;
             validate_restored(config, &report.dir)?;
         }
     }
@@ -136,6 +140,16 @@ fn validate_restored(mut config: Config, target: &Path) -> Result<(), String> {
             relations.len(),
             rules.len()
         );
+    }
+    Ok(())
+}
+
+/// Name the revision an online checkpoint export holds; an offline backup
+/// holds whatever the stopped server had committed.
+fn print_revision(backup_dir: &Path) -> Result<(), String> {
+    let manifest = Manifest::load(backup_dir).map_err(|e| e.to_string())?;
+    if let Some(revision) = manifest.revision {
+        println!("revision: {revision} (online checkpoint)");
     }
     Ok(())
 }

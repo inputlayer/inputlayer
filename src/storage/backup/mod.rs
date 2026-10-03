@@ -18,12 +18,24 @@
 //!
 //! The source of a backup is never modified apart from the pid recorded in
 //! its `LOCK` file while the backup holds the lock.
+//!
+//! ## Online export
+//!
+//! A running server backs itself up without stopping: it captures a
+//! [`Checkpoint`] of every knowledge graph at one committed revision, then
+//! [`Export`] writes it out on a background thread as a complete data
+//! directory with the same manifest, marked with that revision. [`verify`]
+//! and [`restore`] treat it like any other backup.
 
+mod checkpoint;
 mod destination;
+mod export;
 mod manifest;
 mod offline;
 mod tree;
 
+pub use checkpoint::{Checkpoint, KgCheckpoint};
+pub use export::{checkpoint_name, Export};
 pub use manifest::{FileEntry, Manifest, MANIFEST_FILE_NAME};
 pub use offline::{create, restore, verify, Report};
 
@@ -101,9 +113,32 @@ pub enum BackupError {
     #[error("cannot back up {}: {1} not supported", .0.display())]
     UnsupportedEntry(PathBuf, &'static str),
 
-    /// Taking the lock failed for a reason other than another owner.
+    /// The checkpoint name is not a plain directory name.
+    #[error(
+        "invalid checkpoint name '{0}': use letters, digits, '-', '_' and '.', \
+         not starting with '.', at most {max} characters",
+        max = export::MAX_NAME_LEN
+    )]
+    InvalidName(String),
+
+    /// No directory is configured for online checkpoint exports.
+    #[error(
+        "no backup directory configured: set storage.backup_dir \
+         (INPUTLAYER_STORAGE__BACKUP_DIR) to a directory outside the data directory"
+    )]
+    NoBackupDir,
+
+    /// Another online checkpoint export is still being written.
+    #[error("a checkpoint export into {} is still running; wait for it to finish", .0.display())]
+    ExportRunning(PathBuf),
+
+    /// The export stopped before it finished; nothing was left behind.
+    #[error("checkpoint export cancelled before it finished (the server is shutting down)")]
+    Cancelled,
+
+    /// A storage operation failed (taking a lock, writing engine files).
     #[error(transparent)]
-    Lock(StorageError),
+    Storage(StorageError),
 
     /// Filesystem failure on a specific path.
     #[error("{}: {source}", path.display())]
@@ -143,7 +178,7 @@ impl From<StorageError> for BackupError {
     fn from(e: StorageError) -> Self {
         match e {
             StorageError::DataDirLocked { dir, owner } => Self::SourceInUse { dir, owner },
-            other => Self::Lock(other),
+            other => Self::Storage(other),
         }
     }
 }

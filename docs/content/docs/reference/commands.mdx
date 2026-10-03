@@ -456,6 +456,17 @@ Compact storage by consolidating WAL and batch files.
 .compact
 ```
 
+### `.backup`
+
+Export a consistent checkpoint of the running server into `storage.backup_dir`
+(admin only). The export runs in the background; `.backup status` reports its
+progress or outcome. See [Backup and Restore](../guides/backup#online-export).
+
+```
+.backup [name]
+.backup status
+```
+
 ### `.help`
 
 Show help message.

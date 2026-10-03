@@ -104,6 +104,18 @@ pub fn copy_hashed(from: &Path, to: &Path) -> BackupResult<(u64, String)> {
 /// Size and SHA-256 hex of `path`, read in place.
 pub fn hash_file(path: &Path) -> BackupResult<(u64, String)> {
     let mut file = File::open(path).map_err(|e| BackupError::io(path, e))?;
+    hash_open(&mut file, path)
+}
+
+/// Size and SHA-256 hex of `path`, after making its contents durable.
+pub fn seal_file(path: &Path) -> BackupResult<(u64, String)> {
+    let mut file = File::open(path).map_err(|e| BackupError::io(path, e))?;
+    let digest = hash_open(&mut file, path)?;
+    file.sync_all().map_err(|e| BackupError::io(path, e))?;
+    Ok(digest)
+}
+
+fn hash_open(file: &mut File, path: &Path) -> BackupResult<(u64, String)> {
     let mut hasher = Sha256::new();
     let mut buf = vec![0u8; COPY_BUF_BYTES];
     let mut size = 0u64;

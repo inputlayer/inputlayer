@@ -182,7 +182,7 @@ fn sync_tree(root: &Path, directories: &[PathBuf]) -> BackupResult<()> {
     sync_dir(root)
 }
 
-fn report(dir: PathBuf, manifest: &Manifest, start: Instant) -> Report {
+pub(super) fn report(dir: PathBuf, manifest: &Manifest, start: Instant) -> Report {
     Report {
         dir,
         directories: manifest.directories.len(),

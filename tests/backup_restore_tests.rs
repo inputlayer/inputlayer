@@ -25,6 +25,7 @@ fn config(dir: &Path) -> Config {
     config.storage.persist.durability_mode = DurabilityMode::Immediate;
     config.storage.persist.buffer_size = 3;
     config.http.auth.credentials_file = Some(dir.join("credentials.toml"));
+    config.storage.backup_dir = Some(dir.with_file_name("backups"));
     config
 }
 
@@ -43,8 +44,8 @@ fn admin(handler: &Handler) -> Principal {
 }
 
 /// Per KG, the program that builds it: typed schema, facts, a delete,
-/// recursive and negated persistent rules.
-const KGS: [(&str, &str); 2] = [
+/// recursive and negated persistent rules, a vector index.
+const KGS: [(&str, &str); 3] = [
     (
         "graph",
         "+edge[(1, 2), (2, 3), (3, 4), (4, 5), (9, 9)]\n\
@@ -61,15 +62,25 @@ const KGS: [(&str, &str); 2] = [
          +dept[(10, \"Eng\"), (20, \"Sales\")]\n\
          +works_in(N, D) <- employee(_, N, I), dept(I, D)",
     ),
+    (
+        "vec",
+        "+docs(id: int, title: string, emb: vector)\n\
+         +docs[(1, \"x\", [1.0, 0.0, 0.0]), (2, \"y\", [0.0, 1.0, 0.0]), (3, \"xy\", [0.7, 0.7, 0.0])]\n\
+         .index create doc_idx on docs(emb) metric cosine",
+    ),
 ];
 
 /// Queries whose answers must survive the round trip unchanged.
-const QUERIES: [(&str, &str); 5] = [
+const QUERIES: [(&str, &str); 6] = [
     ("graph", "?reach(X, Y)"),
     ("graph", "?isolated(X)"),
     ("graph", "?edge(X, Y)"),
     ("hr", "?works_in(N, D)"),
     ("hr", "?employee(I, N, D)"),
+    (
+        "vec",
+        "?hnsw_nearest(\"doc_idx\", [1.0, 0.1, 0.0], 2, Id, Dist)",
+    ),
 ];
 
 /// Build the representative state, then stop without a graceful shutdown,
@@ -112,7 +123,7 @@ async fn observe(handler: &Handler) -> Vec<String> {
         seen.push(format!("{kg} {query} -> {}", rows.join(" ")));
     }
     let storage = handler.get_storage();
-    for kg in ["graph", "hr"] {
+    for kg in ["graph", "hr", "vec"] {
         seen.push(format!(
             "{kg} rules {:?}",
             storage.list_rules_in(kg).unwrap()
@@ -234,4 +245,79 @@ async fn cli_refuses_a_live_directory_and_round_trips_a_stopped_one() {
     let (ok, text) = cli(&["restore".as_ref(), &backup_dir, &restored]);
     assert!(!ok);
     assert!(text.contains("already exists"), "{text}");
+}
+
+/// The message rows of running `program` on `kg` as `principal`.
+async fn run(handler: &Handler, kg: &str, program: &str, principal: &Principal) -> Vec<String> {
+    let result = handler
+        .execute_program(None, Some(kg.into()), program.into(), Some(principal))
+        .await
+        .unwrap();
+    assert!(result.errors.is_empty(), "{program}: {:?}", result.errors);
+    result
+        .rows
+        .iter()
+        .map(|r| serde_json::to_string(&r.values[0]).unwrap())
+        .collect()
+}
+
+#[tokio::test]
+async fn online_export_of_a_running_server_restores_what_it_served() {
+    let temp = TempDir::new().unwrap();
+    let (data, restored) = (temp.path().join("data"), temp.path().join("restored"));
+    populate(&data).await;
+    let handler = open(&data);
+    let expected = observe(&handler).await;
+    let admin = admin(&handler);
+
+    // Only admins may write backups on the server's filesystem.
+    let mallory = handler.authenticate_user("mallory", "password-m").unwrap();
+    for command in [".backup", ".backup status"] {
+        let denied = handler
+            .execute_program(None, Some("graph".into()), command.into(), Some(&mallory))
+            .await;
+        assert!(denied.is_err(), "{command} allowed for a viewer");
+    }
+
+    let started = run(&handler, "graph", ".backup nightly", &admin).await;
+    assert!(
+        started[0].contains("Exporting the checkpoint at revision"),
+        "{started:?}"
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let status = loop {
+        let status = run(&handler, "graph", ".backup status", &admin).await;
+        if !status[0].contains("Exporting") {
+            break status;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "export never finished"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    };
+    assert!(status[0].contains("Last export complete"), "{status:?}");
+
+    let export = temp.path().join("backups/nightly");
+    let manifest = Manifest::load(&export).unwrap();
+    assert!(manifest.revision.is_some());
+    assert!(
+        started[0].contains(&format!("revision {}", manifest.revision.unwrap())),
+        "{started:?}"
+    );
+    backup::verify(&export).unwrap();
+    backup::restore(&export, &restored).unwrap();
+    assert_eq!(observe(&open(&restored)).await, expected);
+
+    // A second export may not reuse a name.
+    let again = handler
+        .execute_program(
+            None,
+            Some("graph".into()),
+            ".backup nightly".into(),
+            Some(&admin),
+        )
+        .await
+        .unwrap_err();
+    assert!(again.contains("already exists"), "{again}");
 }

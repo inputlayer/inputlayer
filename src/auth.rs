@@ -513,6 +513,8 @@ fn authorize_kg_editor(stmt: &Statement) -> Result<(), String> {
             | MetaCommand::AgentExamples => Ok(()),
             // System administration (admin only, should not reach per-KG check)
             MetaCommand::Compact
+            | MetaCommand::Backup(_)
+            | MetaCommand::BackupStatus
             | MetaCommand::UserList
             | MetaCommand::UserCreate { .. }
             | MetaCommand::UserDrop(_)
@@ -712,6 +714,9 @@ fn authorize_non_admin_meta(role: &Role, cmd: &MetaCommand) -> Result<(), String
 
         // System administration - admin only
         MetaCommand::Compact => Err("Permission denied: only admins can compact".to_string()),
+        MetaCommand::Backup(_) | MetaCommand::BackupStatus => {
+            Err("Permission denied: only admins can back up the server".to_string())
+        }
         MetaCommand::UserList
         | MetaCommand::UserCreate { .. }
         | MetaCommand::UserDrop(_)
@@ -811,6 +816,8 @@ mod tests {
             ".kg create test",
             ".kg drop test",
             ".compact",
+            ".backup",
+            ".backup status",
             ".user list",
             ".apikey list",
         ];
@@ -845,6 +852,8 @@ mod tests {
         // System operations remain admin-only
         let denied = vec![
             ".compact",
+            ".backup",
+            ".backup status",
             ".user list",
             ".user create bob pass editor",
             ".apikey create mykey",
@@ -883,7 +892,15 @@ mod tests {
         }
 
         // Only KG creation and system ops are blocked at global level
-        let denied = vec![".kg create test", ".compact", ".user list", ".apikey list"];
+        let denied = vec![
+            ".kg create test",
+            ".compact",
+            ".backup",
+            ".backup nightly",
+            ".backup status",
+            ".user list",
+            ".apikey list",
+        ];
         for s in denied {
             let stmt = parse_statement(s).unwrap();
             assert!(

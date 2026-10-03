@@ -1,14 +1,19 @@
 # Backup and Restore
 
 InputLayer keeps all of its state in one data directory (`storage.data_dir`).
-`inputlayer-backup` makes an **offline** copy of it: stop the server, take
-the backup, start the server again. Restoring a backup is equivalent to
-restarting the server that was stopped, with every knowledge graph, fact,
-schema, rule, user, API key and ACL as it was.
+There are two ways to back it up, and one way to restore both:
 
-The server is unavailable while the backup runs. Copy time grows with the
-size of the data directory (see [Timing](#timing)). Online backups without
-downtime are not available yet.
+- **Online export** (`.backup`, no downtime): the running server captures a
+  checkpoint of every knowledge graph at one committed revision and writes it
+  out in the background while it keeps serving. See
+  [Online Export](#online-export).
+- **Offline copy** (`inputlayer-backup create`): stop the server, copy the
+  data directory, start the server again. The server is unavailable while
+  the copy runs (see [Timing](#timing)).
+
+Restoring either one (`inputlayer-backup restore`) gives every knowledge
+graph, fact, schema, rule, vector index, user, API key and ACL as it was at
+the backup.
 
 `inputlayer-backup` ships next to `inputlayer-server` (in the Docker image
 at `/usr/local/bin/inputlayer-backup`; from source, `cargo build --release
@@ -76,6 +81,109 @@ directory, logs, and gateway state. Back those up separately.
 > filesystem, a volume that might still be attached to another node), make sure
 > the server is stopped before taking a backup. Treat the lock as a safety net,
 > not a substitute for stopping the server.
+
+---
+
+## Online Export
+
+A running server exports a consistent checkpoint of itself with the admin
+command `.backup`. Configure where exports go, outside the data directory:
+
+```toml
+[storage]
+backup_dir = "/var/backups/inputlayer"   # or INPUTLAYER_STORAGE__BACKUP_DIR
+```
+
+Then, as an admin (any client, for example `inputlayer-client`):
+
+```
+> .backup nightly
+Exporting the checkpoint at revision 48213 to /var/backups/inputlayer/nightly.
+Commits were held for 1180 us; check progress with .backup status.
+> .backup status
+Last export complete: revision 48213 in /var/backups/inputlayer/nightly.
+71 files, 10498117 bytes; commits held 1180 us, written in 380 ms.
+```
+
+`.backup` without a name uses `checkpoint-<UTC time>`. Names are plain
+directory names (letters, digits, `-`, `_`, `.`; not starting with `.`), and
+an existing name is refused. `.backup` returns as soon as the export has
+started; `.backup status` reports a running export or how the last one ended.
+
+### What an Export Holds
+
+Exactly the committed state at the revision it names: every commit up to
+that revision, in every knowledge graph, and none after it, including the
+`_internal` users, API key hashes and ACLs. Writes that commit while the
+export is written are not in it. The export is a complete, compacted data
+directory (one batch file per relation, no WAL, each knowledge graph's
+rule, schema and vector index catalogs) plus the same
+`inputlayer-backup.json` manifest as an offline backup, which also records
+the revision. `verify` and `restore` handle it like any other backup and
+print the revision:
+
+```bash
+inputlayer-backup verify /var/backups/inputlayer/nightly
+```
+
+```
+backup verified: /var/backups/inputlayer/nightly
+         71 files, 17 directories, 10498117 bytes in 74 ms
+revision: 48213 (online checkpoint)
+```
+
+Not included, unlike an offline copy: files the engine does not own, such as
+a `credentials.toml` kept in the data directory. Derived relations are not
+stored; the rules recompute them after restore, and vector indexes are
+rebuilt from their definitions.
+
+### How It Stays Consistent Without Stopping
+
+1. **Capture.** The server briefly holds off commits (and knowledge graph
+   creation) on every knowledge graph at once, notes the newest committed
+   revision, and takes shared references to each graph's facts and copies of
+   its rule, schema and index catalogs. No data is copied, so the pause is
+   short (see [Timing](#timing)); it is reported as "commits held". Queries
+   are not held off: they read published snapshots.
+2. **Write.** One background thread writes the captured state to the
+   destination, then makes every file durable, hashes it, and writes the
+   manifest last. It uses one core and one writer's disk bandwidth, never the
+   query thread pool, and holds no engine lock.
+
+While an export is written, the server keeps the captured facts in memory
+even if writes replace them, so memory grows by at most the data changed
+during the export, plus one relation's worth while that relation is written.
+
+### Guarantees
+
+- **One export at a time.** A second `.backup` while one runs is refused.
+- **Admin only.** `.backup` and `.backup status` require the admin role,
+  since they write to the server's filesystem.
+- **Never overwrites, never inside the data directory.** The destination is
+  claimed before anything is captured: an existing non-empty directory, or a
+  `backup_dir` inside the data directory, is refused at once.
+- **Complete or rejected.** A failed export removes what it wrote, and so
+  does a server shutdown during an export: shutdown cancels the export and
+  waits for that cleanup. A server killed mid-export leaves a directory
+  without a manifest, which `verify` and `restore` refuse as incomplete;
+  delete it and export again.
+- **Integrity checked** exactly as for offline backups.
+
+### Scheduling Exports
+
+Run `.backup` from cron or a Kubernetes CronJob with an admin API key, then
+check the result once it has had time to finish:
+
+```bash
+# /etc/inputlayer/backup.iql holds the single line: .backup
+inputlayer-client --server http://127.0.0.1:8080 --api-key "$INPUTLAYER_ADMIN_KEY" \
+  --script /etc/inputlayer/backup.iql
+```
+
+With Docker or Kubernetes, mount a separate volume (for example
+`/var/backups/inputlayer`) into the engine container and set
+`INPUTLAYER_STORAGE__BACKUP_DIR` to it. Prune old exports yourself; the
+server never deletes them.
 
 ---
 
@@ -271,6 +379,14 @@ For scale: a data directory with 550,000 facts in two knowledge graphs plus
 rules, users and ACLs (11 MB, 66 files) took 31 ms to back up, 78 ms to
 verify and 28 ms to restore on an ext4 SSD. Restore also loads the result
 once to validate it, which takes about as long as a server start.
+
+An online export holds off commits only for its capture, which takes shared
+references rather than copying data. With 51 knowledge graphs, 1,001
+relations and 501,000 facts, the capture took about 0.1 ms on an idle server
+and about 1.2 ms while a client committed continuously (it waits for the
+commits in flight), and writing the export took about 1.6 s. Commit and query
+latency on a busy knowledge graph stayed the same while exports ran back to
+back (commit p99 about 0.26 ms either way).
 
 ---
 

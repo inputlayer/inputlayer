@@ -46,6 +46,10 @@ pub struct Manifest {
     pub created_at: String,
     /// Data directory the backup was taken from.
     pub source: PathBuf,
+    /// The committed revision an online export holds: every commit up to
+    /// it and none after. `None` for an offline copy of a stopped server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
     /// Every directory, relative and `/`-separated, parents before children.
     /// Empty directories (e.g. a new KG's `relations/`) are part of the state.
     pub directories: Vec<String>,
@@ -62,9 +66,18 @@ impl Manifest {
             engine_version: env!("CARGO_PKG_VERSION").to_string(),
             created_at: chrono::Utc::now().to_rfc3339(),
             source,
+            revision: None,
             directories,
             files,
         }
+    }
+
+    /// The same manifest, recording that the backup holds exactly the
+    /// committed state at `revision`.
+    #[must_use]
+    pub fn at_revision(mut self, revision: u64) -> Self {
+        self.revision = Some(revision);
+        self
     }
 
     /// Total bytes of file content.
@@ -210,6 +223,21 @@ mod tests {
             .path()
             .join(format!("{MANIFEST_FILE_NAME}.tmp"))
             .exists());
+    }
+
+    #[test]
+    fn revision_round_trips_and_is_absent_from_offline_manifests() {
+        let tmp = tempfile::tempdir().unwrap();
+        let offline = Manifest::new(PathBuf::from("/data"), vec![], vec![]);
+        offline.store(tmp.path()).unwrap();
+        let json = fs::read_to_string(tmp.path().join(MANIFEST_FILE_NAME)).unwrap();
+        assert!(!json.contains("revision"), "{json}");
+        assert_eq!(Manifest::load(tmp.path()).unwrap().revision, None);
+
+        let online = offline.at_revision(42);
+        fs::remove_file(tmp.path().join(MANIFEST_FILE_NAME)).unwrap();
+        online.store(tmp.path()).unwrap();
+        assert_eq!(Manifest::load(tmp.path()).unwrap().revision, Some(42));
     }
 
     #[test]

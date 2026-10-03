@@ -32,6 +32,9 @@ pub enum SchemaError {
     IoError(String),
 }
 
+/// File name of a knowledge graph's persistent schema catalog, in its directory.
+pub const SCHEMA_CATALOG_FILE: &str = "schema.json";
+
 /// Catalog for storing and looking up relation schemas.
 /// Supports both persistent schemas (saved to disk) and session schemas (memory only).
 ///

@@ -64,6 +64,11 @@ impl Destination {
         }
     }
 
+    /// The claimed directory.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
     /// Run `work` on the destination and return its path. If `work` fails,
     /// a directory this claim created is removed and an existing one is
     /// emptied again, before the error is returned.
@@ -82,6 +87,11 @@ impl Destination {
                 }),
             },
         }
+    }
+
+    /// Give the directory back unused, as [`Self::fill`] does on failure.
+    pub fn release(self) -> std::io::Result<()> {
+        self.reset()
     }
 
     fn reset(&self) -> std::io::Result<()> {

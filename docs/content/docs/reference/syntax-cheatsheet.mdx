@@ -73,6 +73,8 @@ Meta commands start with `.` and control the system:
 
 .debug <query>     Show query plan without executing
 .compact             Compact WAL and consolidate batch files
+.backup [name]       Export an online checkpoint (admin)
+.backup status       Progress or outcome of the last export
 .status              Show system status
 .help                Show this help
 .quit                Exit client
