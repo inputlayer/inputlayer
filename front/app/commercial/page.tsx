@@ -6,7 +6,7 @@ import type { Metadata } from "next"
 export const metadata: Metadata = {
   title: "Commercial Licensing - InputLayer",
   description:
-    "Commercial licensing for InputLayer. Core source-available under the Elastic License 2.0; client SDKs Apache 2.0. Commercial license available for hosted services and redistribution.",
+    "Commercial licensing for InputLayer, the live knowledge graph for AI agents. Core source-available under the Elastic License 2.0; client SDKs Apache 2.0. Commercial license available for offering InputLayer as a hosted or managed service.",
 }
 
 export default function CommercialPage() {
@@ -14,7 +14,7 @@ export default function CommercialPage() {
     <PageLayout>
       <ContentHero
         heading="Commercial licensing"
-        subtitle="The InputLayer core is source-available under the Elastic License 2.0, and the client SDKs are Apache 2.0. You can use it all commercially - the only restriction is on offering InputLayer itself as a hosted service or redistributing it under other terms."
+        subtitle="The InputLayer core is source-available under the Elastic License 2.0, and the client SDKs are Apache 2.0. You are free to use, modify, run in production and redistribute it under the same licence. You may not offer InputLayer itself as a hosted or managed service."
       />
 
       <section className="mx-auto max-w-3xl px-6 py-12 space-y-12">
@@ -43,6 +43,10 @@ export default function CommercialPage() {
               <span className="text-emerald-500 mt-0.5 shrink-0">&#10003;</span>
               <span>Evaluating InputLayer for any purpose</span>
             </li>
+            <li className="flex items-start gap-3">
+              <span className="text-emerald-500 mt-0.5 shrink-0">&#10003;</span>
+              <span>Redistributing InputLayer, modified or not, under the Elastic License 2.0 with its notices intact</span>
+            </li>
           </ul>
         </div>
 
@@ -53,19 +57,19 @@ export default function CommercialPage() {
           <ul className="space-y-2 text-muted-foreground">
             <li className="flex items-start gap-3">
               <span className="text-destructive mt-0.5 shrink-0">&#10005;</span>
-              <span>Reselling or redistributing InputLayer itself as a standalone product</span>
+              <span>Offering InputLayer (or a fork of it) to third parties as a hosted or managed service that gives them access to a substantial set of its features</span>
             </li>
             <li className="flex items-start gap-3">
               <span className="text-destructive mt-0.5 shrink-0">&#10005;</span>
-              <span>Offering InputLayer as a hosted or managed service, selling access to its functionality directly</span>
+              <span>Redistributing InputLayer or a fork under any terms other than the Elastic License 2.0</span>
             </li>
             <li className="flex items-start gap-3">
               <span className="text-destructive mt-0.5 shrink-0">&#10005;</span>
-              <span>Forking InputLayer and selling the fork as a competing product</span>
+              <span>Removing or obscuring the licensing, copyright or other notices in the software</span>
             </li>
           </ul>
           <p className="text-muted-foreground text-sm pt-2">
-            In short: use it to build your thing, but don&apos;t sell our thing.
+            In short: build and ship your product on InputLayer, but don&apos;t offer InputLayer itself as a service.
           </p>
         </div>
 
@@ -74,7 +78,7 @@ export default function CommercialPage() {
             What a commercial license includes
           </h2>
           <ul className="space-y-2 text-muted-foreground">
-            <li>Rights to redistribute or host InputLayer commercially</li>
+            <li>Rights to offer InputLayer as a hosted or managed service</li>
             <li>Access to the commercial product roadmap</li>
             <li>Direct support from the InputLayer engineering team</li>
             <li>SLA options for production deployments</li>
@@ -103,14 +107,10 @@ export default function CommercialPage() {
       </section>
 
       <CTABanner
-        heading="Ready to get started?"
-        description="Try InputLayer now or read the documentation."
+        heading="Models think. InputLayer knows."
+        description="The live knowledge graph for AI agents. Self-hosted and source-available under the Elastic License 2.0."
         buttons={[
-          {
-            label: "Launch demo",
-            href: "https://demo.inputlayer.ai",
-            external: true,
-          },
+          { label: "Quickstart", href: "/docs/guides/quickstart/" },
           { label: "Read the docs", href: "/docs/", variant: "secondary" },
         ]}
       />

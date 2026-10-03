@@ -16,7 +16,7 @@ export function CustomersIndexClient({ stories }: CustomersIndexClientProps) {
     <PageLayout>
       <ContentHero
         heading="Customer Stories"
-        subtitle="See how teams use InputLayer in production."
+        subtitle="Illustrative stories of how teams could use InputLayer. They are not confirmed customer references."
       />
 
       <section className="mx-auto max-w-6xl px-6 py-12">
@@ -30,11 +30,16 @@ export function CustomersIndexClient({ stories }: CustomersIndexClientProps) {
                 href={`/customers/${story.slug}/`}
                 className="group rounded-xl border border-border bg-card p-6 space-y-4 transition-colors hover:border-primary/30 hover:bg-card/80"
               >
-                {story.industry && (
+                <div className="flex flex-wrap gap-2">
                   <span className="inline-flex items-center rounded-full border border-border bg-secondary/50 px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
-                    {story.industry}
+                    Illustrative
                   </span>
-                )}
+                  {story.industry && (
+                    <span className="inline-flex items-center rounded-full border border-border bg-secondary/50 px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                      {story.industry}
+                    </span>
+                  )}
+                </div>
                 <h3 className="text-lg font-semibold group-hover:text-primary transition-colors">
                   {story.title}
                 </h3>
@@ -51,11 +56,11 @@ export function CustomersIndexClient({ stories }: CustomersIndexClientProps) {
       </section>
 
       <CTABanner
-        heading="Ready to get started?"
-        description="InputLayer is source-available and free to use. Pull the Docker image and start building."
+        heading="Models think. InputLayer knows."
+        description="The live knowledge graph for AI agents. Self-hosted and source-available under the Elastic License 2.0."
         buttons={[
-          { label: "Read the docs", href: "/docs/" },
-          { label: "View on GitHub", href: "https://github.com/inputlayer/inputlayer", variant: "secondary", external: true },
+          { label: "Quickstart", href: "/docs/guides/quickstart/" },
+          { label: "Read the docs", href: "/docs/", variant: "secondary" },
         ]}
       />
     </PageLayout>

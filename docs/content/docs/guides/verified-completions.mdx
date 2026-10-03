@@ -207,7 +207,7 @@ You receive only events with `seq > 41`. Two control events say when that is not
 | `{"type": "lagged", "after_seq": N, "skipped": K}` | Events N+1..N+K left the ring (or were dropped live while you fell behind) | Treat them as lost; resume from the next `seq` you receive |
 | `{"type": "resync", "after_seq": N, "latest_seq": L}` | N is ahead of the stream: the gateway restarted or evicted the conversation | Reset your cursor; the full ring follows |
 
-## 4. Extract-only turns for real-time agents
+## 4. Extract-only turns for live agents
 
 A voice agent (or any caller that produces its own replies) does not want a completion - it wants each new utterance checked against everything said so far, at the cost of that utterance only. `POST /v1/conversations/{id}/turns` does exactly that:
 

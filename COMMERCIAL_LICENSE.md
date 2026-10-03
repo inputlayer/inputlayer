@@ -5,8 +5,8 @@ Client SDKs are separately licensed under Apache 2.0 / MIT (see the License
 section of the README for the full map).
 
 You can use InputLayer commercially - build products with it, run it in production,
-integrate it into your infrastructure. The only restriction is on redistributing
-InputLayer itself for profit.
+integrate it into your infrastructure, and redistribute it under the same licence.
+You may not offer InputLayer itself to third parties as a hosted or managed service.
 
 ## You do NOT need a commercial license if you are:
 
@@ -15,6 +15,8 @@ InputLayer itself for profit.
 - Building and selling a product that uses InputLayer as a component
 - An individual, researcher, or open source contributor
 - Evaluating InputLayer for any purpose
+- Redistributing InputLayer, modified or not, under the Elastic License 2.0
+  with its notices intact
 
 ## You DO need a commercial license if you are:
 
@@ -26,7 +28,8 @@ InputLayer itself for profit.
   (license-key functionality and licensing notices may never be circumvented
   or removed)
 
-In short: use it to build your thing, but don't sell our thing.
+In short: build and ship your product on InputLayer, but don't offer InputLayer
+itself as a service.
 
 ## How to obtain a commercial license
 
@@ -37,7 +40,7 @@ within 2 business days.
 
 ## What a commercial license includes
 
-- Rights to redistribute or host InputLayer commercially
+- Rights to offer InputLayer as a hosted or managed service
 - Access to the commercial product roadmap
 - Direct support from the InputLayer engineering team
 - SLA options available for production deployments

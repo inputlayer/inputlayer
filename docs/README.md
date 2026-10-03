@@ -1,6 +1,6 @@
 # InputLayer Documentation
 
-Welcome to the InputLayer documentation. InputLayer is a streaming reasoning layer for AI systems - an incremental rules engine with vector search, graph traversal, and explainable derivation traces.
+Welcome to the InputLayer documentation. InputLayer is the live knowledge graph for AI agents - an incremental rules engine with vector search, graph traversal, and explainable derivation traces.
 
 ## Documentation Structure
 

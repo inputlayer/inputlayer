@@ -1,16 +1,12 @@
-import { useCases } from "@/lib/content-bundle"
-import { UseCaseClient } from "./use-case-client"
+import { RedirectNotice } from "@/components/redirect-notice"
+import { RETIRED_USE_CASE_SLUGS, USE_CASE_REDIRECT, USE_CASE_REDIRECT_LABEL, redirectMetadata } from "../redirect"
 
-interface UseCasePageProps {
-  params: Promise<{ slug: string }>
-}
+export const metadata = redirectMetadata
 
-export default async function UseCasePage({ params }: UseCasePageProps) {
-  const { slug } = await params
-  const useCase = useCases.find((uc) => uc.slug === slug) ?? null
-  return <UseCaseClient useCase={useCase} slug={slug} />
+export default function UseCasePage() {
+  return <RedirectNotice to={USE_CASE_REDIRECT} label={USE_CASE_REDIRECT_LABEL} />
 }
 
 export function generateStaticParams() {
-  return useCases.map((uc) => ({ slug: uc.slug }))
+  return RETIRED_USE_CASE_SLUGS.map((slug) => ({ slug }))
 }

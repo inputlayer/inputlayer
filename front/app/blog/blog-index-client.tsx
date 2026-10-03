@@ -39,11 +39,11 @@ export function BlogIndexClient({ posts }: BlogIndexClientProps) {
       </section>
 
       <CTABanner
-        heading="Try InputLayer"
-        description="Pull the Docker image and start querying in seconds."
+        heading="Models think. InputLayer knows."
+        description="The live knowledge graph for AI agents. Self-hosted and source-available under the Elastic License 2.0."
         buttons={[
-          { label: "Read the docs", href: "/docs/" },
-          { label: "Launch demo", href: "https://demo.inputlayer.ai", variant: "secondary", external: true },
+          { label: "Quickstart", href: "/docs/guides/quickstart/" },
+          { label: "Read the docs", href: "/docs/", variant: "secondary" },
         ]}
       />
     </PageLayout>

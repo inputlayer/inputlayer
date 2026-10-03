@@ -33,13 +33,17 @@ export function CustomerClient({ story, slug }: CustomerClientProps) {
     <PageLayout>
       <ContentHero
         heading={story.title}
-        subtitle={story.industry ? `Industry: ${story.industry}` : undefined}
+        subtitle={`Illustrative story${story.industry ? ` · Industry: ${story.industry}` : ""}`}
         breadcrumbs={[
           { label: "Customers", href: "/customers/" },
         ]}
       />
 
       <article className="mx-auto max-w-3xl px-6 py-12">
+        <p className="mb-8 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+          This is an illustrative story, not a confirmed customer reference. Figures in it are not independently
+          measured.
+        </p>
         <div className="docs-prose">
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={MdxComponents}>
             {story.content}
@@ -48,11 +52,11 @@ export function CustomerClient({ story, slug }: CustomerClientProps) {
       </article>
 
       <CTABanner
-        heading="See what InputLayer can do for you"
-        description="Source-available. Single Docker container. Start building in minutes."
+        heading="Models think. InputLayer knows."
+        description="The live knowledge graph for AI agents. Self-hosted and source-available under the Elastic License 2.0."
         buttons={[
-          { label: "Get started", href: "/docs/guides/quickstart/" },
-          { label: "Launch demo", href: "https://demo.inputlayer.ai", variant: "secondary", external: true },
+          { label: "Quickstart", href: "/docs/guides/quickstart/" },
+          { label: "Read the docs", href: "/docs/", variant: "secondary" },
         ]}
       />
     </PageLayout>

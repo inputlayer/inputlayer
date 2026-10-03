@@ -10,8 +10,9 @@ interface FooterLink {
 
 const footerLinks: Record<string, FooterLink[]> = {
   Product: [
-    { label: "Features", href: "/#features" },
-    { label: "Demo", href: "https://demo.inputlayer.ai", external: true },
+    { label: "How it works", href: "/#how" },
+    { label: "Get started", href: "/#start" },
+    { label: "Compare", href: "/compare/" },
   ],
   Resources: [
     { label: "Documentation", href: "/docs/" },
@@ -69,10 +70,10 @@ export function SiteFooter() {
         <div className="mt-10 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-border/50 pt-8">
           <div className="flex items-center gap-4">
             <Logo size="sm" />
-            <span className="text-sm text-muted-foreground">Elastic License 2.0</span>
+            <span className="text-sm text-muted-foreground">Source-available, Elastic License 2.0</span>
           </div>
           <p className="text-xs text-muted-foreground">
-            Streaming reasoning layer for AI systems.
+            The live knowledge graph for AI agents.
           </p>
         </div>
       </div>

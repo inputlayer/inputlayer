@@ -575,7 +575,7 @@ function WelcomePanel({ sidebarOpen, onStartExample }: { sidebarOpen?: boolean; 
       <div className="max-w-md px-4 py-8 text-center">
         <h2 className="text-lg font-semibold text-foreground">Welcome to InputLayer</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          A reasoning engine that derives conclusions from facts and rules, and explains why.
+          The live knowledge graph for AI agents: conclusions from facts and rules, kept current as facts change, with the reasons behind each one.
         </p>
         {sidebarOpen ? (
           <p className="mt-4 text-sm text-muted-foreground">

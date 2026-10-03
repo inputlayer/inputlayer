@@ -2,7 +2,7 @@
 
 InputLayer's Python SDK is an Object-Logic Mapper (OLM) that lets you work with your knowledge graph using plain Python classes. You define schemas as typed dataclasses, build queries with lambdas and operators, and the SDK compiles everything into InputLayer Query Language (IQL) behind the scenes. You never have to write IQL by hand for normal application code.
 
-The SDK connects over WebSocket, so you get persistent connections, real-time notifications, and session-scoped state out of the box. For LangChain users, see the dedicated [LangChain Integration](langchain) guide.
+The SDK connects over WebSocket, so you get persistent connections, live notifications, and session-scoped state out of the box. For LangChain users, see the dedicated [LangChain Integration](langchain) guide.
 
 ## Installation
 
@@ -558,7 +558,7 @@ await kg.session.clear()
 
 ## Notifications
 
-Subscribe to real-time events as data changes in the knowledge graph. This is useful for building reactive pipelines, dashboards, or audit logs.
+Subscribe to live events as data changes in the knowledge graph. This is useful for building reactive pipelines, dashboards, or audit logs.
 
 ```python
 # Register a callback for a specific relation

@@ -224,7 +224,7 @@ await kg.session.clear()  # or just disconnect
 
 ## Notifications
 
-Subscribe to real-time data change events:
+Subscribe to live data change events:
 
 ```python
 @il.on("persistent_update", relation="sensor_reading")
@@ -388,7 +388,7 @@ with InputLayerSync("ws://localhost:8080/ws", username="admin", password="admin"
 
 ## Examples
 
-See [`packages/inputlayer-py/examples/`](../../packages/inputlayer-py/examples/) for complete runnable examples covering social networks, RAG pipelines, e-commerce, RBAC, real-time dashboards, DataFrame ETL, session rules, and access control.
+See [`packages/inputlayer-py/examples/`](../../packages/inputlayer-py/examples/) for complete runnable examples covering social networks, RAG pipelines, e-commerce, RBAC, live dashboards, DataFrame ETL, session rules, and access control.
 
 ## API Reference
 

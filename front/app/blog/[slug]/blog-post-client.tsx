@@ -48,11 +48,11 @@ export function BlogPostClient({ post, slug }: BlogPostClientProps) {
       </article>
 
       <CTABanner
-        heading="Ready to get started?"
-        description="InputLayer is source-available and free to use. Pull the Docker image and start building."
+        heading="Models think. InputLayer knows."
+        description="The live knowledge graph for AI agents. Self-hosted and source-available under the Elastic License 2.0."
         buttons={[
-          { label: "Read the docs", href: "/docs/" },
-          { label: "View on GitHub", href: "https://github.com/inputlayer/inputlayer", variant: "secondary", external: true },
+          { label: "Quickstart", href: "/docs/guides/quickstart/" },
+          { label: "Read the docs", href: "/docs/", variant: "secondary" },
         ]}
       />
     </PageLayout>

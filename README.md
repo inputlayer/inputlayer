@@ -3,9 +3,49 @@
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-Elastic%202.0-blue.svg)](./LICENSE)
 
-**Streaming reasoning layer for AI systems.**
+**The live knowledge graph for AI agents.**
 
-Store facts. Define rules. InputLayer derives the conclusions, keeps them current as data changes, and explains every result with a proof tree. Combine recursive reasoning with vector search in a single query. Source-available and free to use.
+### Models think. InputLayer knows.
+
+A fact changes. InputLayer derives what it means for your agent, without another prompt.
+
+InputLayer applies your rules as facts change, updating what your agent should say or do, even while other work continues. Keep your models and framework; connect them to current results and evidence.
+
+<sub>"Knows" means accepted facts plus rule-derived conclusions; source freshness and delivery still apply.</sub>
+
+Self-hosted, source-available under the Elastic License 2.0. Rust engine with Python and JS SDKs.
+
+> Decision models judge. Language models think. InputLayer knows.
+
+---
+
+## Separate Knowing from Thinking
+
+Every turn, agents ask the model things the system already knows: is this order late, is this customer eligible, what else is affected. With InputLayer, facts and rules live outside the prompt, so the agent is not limited by the context window. Facts stream in, your rules derive the answers, and only the answers enter the prompt.
+
+- **Current, exact answers.** A fact changes and the affected conclusions update, including the ones that stop being true, with the facts and rules behind each.
+- **Not limited by the context window.** Facts and rules live outside the prompt; only the derived answers go in.
+- **A deterministic fast path.** A small intent model picks which known question was asked; the engine answers it exactly from live facts, with no generative model on that path. Open questions still go to the LLM.
+- **Fits the stack you have.** [LangGraph](https://inputlayer.ai/docs/guides/langgraph/) memory, state and checkpointer; [LangChain](https://inputlayer.ai/docs/guides/langchain/) tool and retriever; an OpenAI-compatible [fact-checking gateway](https://inputlayer.ai/docs/guides/verified-completions/); and change triggers your agent can wake on.
+
+```iql
+// rules, written once
++late(O) <- shipment(O,S), eta(S,T), promised(O,P), T > P
++can_offer(O,C) <- late(O), customer(O,C), eligible(C, "expedite")
+```
+
+```python
+# agent: told what changed, no re-reading
+for change in kg.watch("?can_offer(O, C)"):
+    for row in change.added:   offer(row)
+    for row in change.removed: withdraw(row)
+```
+
+The SDK form shown is the upcoming release; standing queries run over the [WebSocket API](https://inputlayer.ai/docs/guides/websocket-api/) today.
+
+**Example.** "Where's order 4821, can it still make Friday?" A small intent model maps it to `ask_status(4821)`; the engine answers "due Thursday" from live facts and a template speaks it. The carrier update lands mid-sentence: the old answer is withdrawn and the agent says "Correction: Friday". Only open questions go to the LLM.
+
+**Why now.** Your data stack went live years ago: nightly ETL became change data capture, cron jobs became event-driven services, full refreshes became incremental views. Your agents are the last batch jobs left.
 
 ---
 
@@ -88,7 +128,7 @@ cargo build --release
 
 Open [http://localhost:8080](http://localhost:8080) for the interactive GUI, or connect via WebSocket at `ws://localhost:8080/ws`.
 
-If you know SQL, the query language takes about 10 minutes to learn. See the [Quick Start Guide](https://inputlayer.ai/docs/guides/quickstart/).
+See the [Quick Start Guide](https://inputlayer.ai/docs/guides/quickstart/) to load a sample and watch conclusions change as facts do.
 
 ---
 
@@ -130,13 +170,11 @@ See [Python SDK docs](https://inputlayer.ai/docs/guides/python-sdk/) and [TypeSc
 
 ---
 
-## Use Cases
+## Flagship Guide
 
-- **[Financial Risk](https://inputlayer.ai/use-cases/financial-risk/)** - Trace ownership chains to any depth for sanctions screening. Correct retraction handles the diamond problem.
-- **[Conversational Commerce](https://inputlayer.ai/use-cases/commerce/)** - Compatibility rules + vector similarity in one query. The wrong cartridge never gets recommended.
-- **[Manufacturing](https://inputlayer.ai/use-cases/manufacturing/)** - Multi-hop dependency chains from training records to production line availability, updated in milliseconds.
-- **[Supply Chain](https://inputlayer.ai/use-cases/supply-chain/)** - A port closes and every affected supplier, order, and SLA penalty is identified across the graph.
-- **[Agentic AI](https://inputlayer.ai/use-cases/agentic-ai/)** - Agent memory as a knowledge graph with `.why` proof trees for every conclusion.
+**[How to build a voice agent that knows](https://inputlayer.ai/blog/building-a-voice-agent-that-knows/)** - a voice pipeline with InputLayer at its heart: facts and rules in a live knowledge graph, known questions answered without a model, and an agent that corrects itself mid-sentence when the world changes.
+
+Keep your LLM, your vector store for documents and your systems of record; InputLayer is the live knowledge graph between your data and your agent's decisions.
 
 ---
 

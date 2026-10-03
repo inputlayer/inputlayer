@@ -7,10 +7,26 @@ import { ThemeProvider } from "@/components/theme-provider"
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist-sans" })
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" })
 
+const siteTitle = "InputLayer - The live knowledge graph for AI agents"
+const siteDescription =
+  "Models think. InputLayer knows. A fact changes. InputLayer derives what it means for your agent, without another prompt. Keep your models and framework; connect them to current results and evidence."
+
 export const metadata: Metadata = {
-  title: "InputLayer - Streaming reasoning layer for AI systems",
-  description:
-    "Store facts, define rules, and derive everything that logically follows. Vector search, graph traversal, and incremental computation in one system.",
+  metadataBase: new URL("https://inputlayer.ai"),
+  title: siteTitle,
+  description: siteDescription,
+  openGraph: {
+    type: "website",
+    url: "/",
+    siteName: "InputLayer",
+    title: siteTitle,
+    description: siteDescription,
+  },
+  twitter: {
+    card: "summary",
+    title: siteTitle,
+    description: siteDescription,
+  },
   icons: {
     icon: [
       { url: "/favicon.ico", sizes: "any" },

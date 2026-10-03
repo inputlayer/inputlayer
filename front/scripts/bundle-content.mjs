@@ -3,9 +3,9 @@
 /**
  * bundle-content.mjs
  *
- * Reads content/ MDX files (blog, use-cases, compare, customers),
+ * Reads content/ MDX files (blog, compare, customers),
  * parses frontmatter, and generates front/lib/content-bundle.ts with
- * typed exports: blogPosts[], useCases[], comparisonPages[], customerStories[].
+ * typed exports: blogPosts[], comparisonPages[], customerStories[].
  */
 
 import fs from 'fs'
@@ -153,20 +153,6 @@ const blogPosts = readContentDir(blogDir).map(item => ({
 // Sort by date descending
 blogPosts.sort((a, b) => b.date.localeCompare(a.date))
 
-// Use cases
-const useCasesDir = path.join(CONTENT_DIR, 'use-cases')
-const useCases = readContentDir(useCasesDir).map(item => ({
-  slug: item.slug,
-  title: item.title,
-  icon: item.icon || '',
-  subtitle: item.subtitle || '',
-  order: parseInt(item.order, 10) || 99,
-  content: item.content,
-  toc: item.toc,
-}))
-// Sort by order ascending
-useCases.sort((a, b) => a.order - b.order)
-
 // Comparison pages
 const compareDir = path.join(CONTENT_DIR, 'compare')
 const comparisonPages = readContentDir(compareDir).map(item => ({
@@ -208,16 +194,6 @@ export interface BlogPost {
   toc: TocEntry[]
 }
 
-export interface UseCase {
-  slug: string
-  title: string
-  icon: string
-  subtitle: string
-  order: number
-  content: string
-  toc: TocEntry[]
-}
-
 export interface ComparisonPage {
   slug: string
   title: string
@@ -237,12 +213,10 @@ export interface CustomerStory {
 
 export const blogPosts: BlogPost[] = ${JSON.stringify(blogPosts, null, 2)}
 
-export const useCases: UseCase[] = ${JSON.stringify(useCases, null, 2)}
-
 export const comparisonPages: ComparisonPage[] = ${JSON.stringify(comparisonPages, null, 2)}
 
 export const customerStories: CustomerStory[] = ${JSON.stringify(customerStories, null, 2)}
 `
 
 fs.writeFileSync(OUTPUT_FILE, output, 'utf-8')
-console.log(`Wrote ${blogPosts.length} blog posts, ${useCases.length} use cases, ${comparisonPages.length} comparisons, ${customerStories.length} customer stories to ${OUTPUT_FILE}`)
+console.log(`Wrote ${blogPosts.length} blog posts, ${comparisonPages.length} comparisons, ${customerStories.length} customer stories to ${OUTPUT_FILE}`)

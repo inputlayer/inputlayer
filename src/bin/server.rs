@@ -38,7 +38,7 @@ use std::sync::OnceLock;
 
 static TRACE_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
 
-/// InputLayer - streaming reasoning layer for AI systems
+/// InputLayer - the live knowledge graph for AI agents
 #[derive(Parser, Debug)]
 #[command(name = "inputlayer-server", version, about)]
 struct Cli {

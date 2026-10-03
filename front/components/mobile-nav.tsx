@@ -4,10 +4,10 @@ import { useState } from "react"
 import Link from "next/link"
 import { Menu, X, ExternalLink } from "lucide-react"
 
-const navLinks = [
+const navLinks: { label: string; href: string; external?: boolean }[] = [
   { label: "Docs", href: "/docs/" },
   { label: "Blog", href: "/blog/" },
-  { label: "Demo", href: "https://demo.inputlayer.ai", external: true },
+  { label: "Quickstart", href: "/docs/guides/quickstart/" },
 ]
 
 export function MobileNav() {

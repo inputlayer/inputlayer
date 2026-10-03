@@ -47,11 +47,11 @@ export function CompareClient({ page, slug }: CompareClientProps) {
       </article>
 
       <CTABanner
-        heading="See the difference"
-        description="Try InputLayer in your browser. No installation required."
+        heading="Models think. InputLayer knows."
+        description="The live knowledge graph for AI agents. Self-hosted and source-available under the Elastic License 2.0."
         buttons={[
-          { label: "Launch demo", href: "https://demo.inputlayer.ai", external: true },
-          { label: "Get started", href: "/docs/guides/quickstart/", variant: "secondary" },
+          { label: "Quickstart", href: "/docs/guides/quickstart/" },
+          { label: "Read the docs", href: "/docs/", variant: "secondary" },
         ]}
       />
     </PageLayout>
