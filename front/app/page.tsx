@@ -138,7 +138,7 @@ export default function LandingPage() {
             </>
           }
         >
-          <Card>
+          <Card className="overflow-x-auto">
             <BatchVsStreamingDiagram />
           </Card>
           <p className="mt-6 text-muted-foreground max-w-3xl">

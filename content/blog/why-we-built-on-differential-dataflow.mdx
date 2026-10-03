@@ -23,7 +23,7 @@ But then a single fact changes. One employee transfers departments. One entity g
 100K facts + 50 rules -> 2M derived facts [primary] -> 1 fact changes -> ~100 affected [highlight]
 ```
 
-With a naive approach, you throw away all 2 million derived facts and recompute them from scratch. For small graphs, that's fast enough. For production workloads, it doesn't work. At 11 seconds per recomputation on a 2,000-node graph, you're locked into batch processing. Real-time permission checks, live compliance screening, instant recommendation updates. None of that is practical.
+With a naive approach, you throw away all 2 million derived facts and recompute them from scratch. For small graphs, that's fast enough. For production workloads, it doesn't work. At 11 seconds per recomputation on a 2,000-node graph, you're locked into batch processing. Live permission checks, live compliance screening, instant recommendation updates. None of that is practical.
 
 We needed an engine that could update just the affected derivations, correctly, in milliseconds.
 
@@ -68,7 +68,7 @@ This sounds simple in theory. In practice, getting it right through multiple lev
 
 Building on Differential Dataflow gave us three properties that show up directly in what you can build with InputLayer.
 
-**Incremental maintenance:** When a fact changes, only the affected derivations recompute. On a 2,000-node graph with 400,000 derived relationships, updating a single edge takes 6.83ms instead of 11.3 seconds. That's a 1,652x speedup that turns batch-only workloads into real-time operations.
+**Incremental maintenance:** When a fact changes, only the affected derivations recompute. After inserting 100 edges into a 2,000-node graph, a bound reachability query answers in 6.83ms, versus 11.3 seconds to recompute the full transitive closure (single machine; see [BENCHMARKS.md](https://github.com/inputlayer/inputlayer/blob/main/BENCHMARKS.md)). That's the difference between a batch-only workload and a streaming one.
 
 **Correct retraction:** Delete a fact, and everything derived through it disappears, but only if there's no alternative reasoning path. Phantom permissions, stale recommendations, lingering compliance flags. These bugs simply don't exist when the engine handles retraction correctly.
 

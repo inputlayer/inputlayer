@@ -20,7 +20,7 @@ export function BatchVsStreamingDiagram() {
       viewBox="0 0 1000 300"
       role="img"
       aria-labelledby="batch-vs-streaming-title"
-      className="block h-auto w-full max-w-full text-foreground"
+      className="block h-auto w-full min-w-[640px] text-foreground"
     >
       <title id="batch-vs-streaming-title">
         A batch agent is blind between runs; a streaming agent reacts to each change
