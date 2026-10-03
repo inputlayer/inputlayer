@@ -16,9 +16,30 @@ info:
 
     ## Connection
 
-    Connect to `ws://<host>:<port>/ws?kg=<name>&last_seq=<n>` where `kg` is the initial
-    knowledge graph to bind to (defaults to "default") and `last_seq` is an optional
-    sequence number for notification replay on reconnect.
+    Connect to `ws://<host>:<port>/ws?kg=<name>&last_seq=<n>&epoch=<stream_epoch>` where
+    `kg` is the initial knowledge graph to bind to (defaults to "default") and
+    `last_seq` with `epoch` is an optional reconnect cursor for notification replay.
+
+    ## Streams, epochs and revisions
+
+    Change notifications and standing-query results are two separate streams.
+
+    - Notifications are numbered by `seq`, strictly increasing in delivery order, within
+      one *stream epoch*: an id of the engine run, sent as `stream_epoch` in
+      `authenticated`. A restarted engine has a new epoch and numbers from 1 again. On
+      reconnect, pass `last_seq` and `epoch`: the server replays the retained
+      notifications after the cursor, then live ones, with nothing skipped or repeated.
+      When it cannot (the cursor is from another engine run, names no epoch, is past the
+      stream, or notifications after it were evicted from the bounded ring) it replays
+      nothing and sends one `replay_gap` notice; re-read the state you track.
+      Notifications are not a durable history.
+    - A subscription's pushes are numbered by its own `seq` (from 1, without gaps) and
+      name the knowledge graph `revision` they bring the result to. The `.subscribe`
+      reply's `subscribed.revision` is the revision its snapshot is the exact answer at;
+      every delta names a higher one. A commit published after the snapshot is never
+      lost. Subscriptions are never resumed across connections: after a reconnect,
+      subscribe again and start from the new snapshot. Revisions are comparable only
+      within one knowledge graph and one stream epoch.
 
     After WebSocket upgrade, the client must authenticate before any other operation.
     Send a `login` message (username/password) or an `authenticate` message (API key).
@@ -49,7 +70,8 @@ info:
       `schema_change`) and standing-query results (`subscription_delta`,
       `subscription_error`), addressed by subscription name and generation;
     - `notice`: connection events such as an idle timeout, typed by `code`. Every code
-      except `notifications_missed` is followed by the server closing the connection.
+      except `notifications_missed` and `replay_gap` is followed by the server closing
+      the connection.
 
     A request that is not a valid frame (bad JSON, unknown `type`, missing field, or an
     `id` that is not a 1-64 byte string or is given twice) is answered by exactly one
@@ -61,7 +83,7 @@ info:
 
     1. Client connects → must authenticate first
     2. Client sends `login` or `authenticate` → Server responds with `authenticated` or `auth_error`
-    3. If `last_seq` was provided, server replays missed notifications
+    3. If `last_seq` and `epoch` were provided, the server replays missed notifications or sends a `replay_gap` notice
     4. Client sends `execute` messages → Server responds with `result` or `error`, echoing the request `id`
     5. For large results (>1 MB), the server streams: `result_start` → `result_chunk` (×N) → `result_end`
     6. Server may push change notifications (`persistent_update`, `rule_change`, ...), for `.subscribe`d queries `subscription_delta` / `subscription_error`, and connection `notice`s
@@ -98,10 +120,14 @@ channels:
         default: default
       last_seq:
         description: |
-          Sequence number for notification replay on reconnect.
-          When provided, the server replays all buffered notifications with seq > last_seq
-          before normal operation resumes. Useful for clients that disconnect and want to
-          catch up on missed changes without a full refresh.
+          Last notification `seq` the client saw, for replay on reconnect. With the
+          matching `epoch`, the server replays the retained notifications with a higher
+          seq before live ones; otherwise it sends one `replay_gap` notice and replays
+          nothing.
+      epoch:
+        description: |
+          The `stream_epoch` from `authenticated` that `last_seq` belongs to. A cursor
+          without it, or from another engine run, gets `replay_gap`.
     messages:
       # Client → Server (auth)
       login:
@@ -301,7 +327,8 @@ operations:
     description: |
       Pushed after a committed persistent change to a relation the subscribed
       query depends on (directly or through persistent rules) altered its result.
-      Set semantics; `seq` starts at 1 per subscription. Persistent data only.
+      Set semantics; `seq` starts at 1 per subscription and has no gaps; `revision`
+      increases with every delta. Persistent data only.
     messages:
       - $ref: '#/channels/ws/messages/subscription_delta'
 
@@ -312,7 +339,7 @@ operations:
     summary: Connection event
     description: |
       Sent unprompted, never as a reply and never with an `id`. All codes but
-      `notifications_missed` are followed by the server closing the connection;
+      `notifications_missed` and `replay_gap` are followed by the server closing the connection;
       `credential_revoked` is the last frame of a revoked connection.
     messages:
       - $ref: '#/channels/ws/messages/notice'
@@ -498,6 +525,7 @@ components:
           type: string
           enum:
             - notifications_missed
+            - replay_gap
             - slow_consumer
             - idle_timeout
             - lifetime_exceeded
@@ -507,6 +535,8 @@ components:
           description: |
             `notifications_missed`: the client read too slowly and change notifications
             were dropped; standing queries re-evaluate and the connection stays open.
+            `replay_gap`: the reconnect cursor could not be honoured and nothing was
+            replayed; re-read the state you track. The connection stays open.
             Every other code is followed by the server closing the connection.
         message:
           type: string
@@ -520,21 +550,29 @@ components:
 
     Subscribed:
       type: object
-      required: [subscription, generation]
+      required: [subscription, generation, revision]
       description: |
         The subscription a `.subscribe` registered. A name can be reused after
         `.unsubscribe`; the generation is unique per connection, so a push whose
         generation differs belongs to an earlier registration and is stale.
+        Subscriptions end with their connection.
       properties:
         subscription:
           type: string
         generation:
           type: integer
           format: int64
+        revision:
+          type: integer
+          format: int64
+          description: |
+            Knowledge graph revision the snapshot is the exact answer at; every later
+            delta names a higher one. Comparable only within one knowledge graph and
+            stream epoch.
 
     SubscriptionDeltaResponse:
       type: object
-      required: [type, subscription, generation, knowledge_graph, seq, columns, inserted, retracted]
+      required: [type, subscription, generation, knowledge_graph, seq, revision, columns, inserted, retracted]
       properties:
         type:
           type: string
@@ -551,7 +589,15 @@ components:
         seq:
           type: integer
           format: int64
-          description: Per-subscription delta number, starting at 1
+          description: |
+            Per-subscription delta number, starting at 1, without gaps. Any other number
+            means a delta was lost: resubscribe.
+        revision:
+          type: integer
+          format: int64
+          description: |
+            Knowledge graph revision this delta brings the result to: the previous result
+            plus this delta is the query's exact answer at `revision`.
         columns:
           type: array
           items:
@@ -572,6 +618,7 @@ components:
           generation: 1
           knowledge_graph: default
           seq: 1
+          revision: 17
           columns: [Order, Customer]
           inserted: [[1042, acme]]
           retracted: []
@@ -687,6 +734,7 @@ components:
         - version
         - role
         - protocol_version
+        - stream_epoch
       properties:
         type:
           type: string
@@ -708,10 +756,16 @@ components:
         protocol_version:
           type: integer
           description: Version of this protocol the server speaks (2)
+        stream_epoch:
+          type: string
+          description: |
+            Id of this engine run. Notification `seq` numbers and knowledge graph
+            revisions belong to it; pass it back as `epoch` with `last_seq` on reconnect.
       examples:
         - type: authenticated
           id: "1"
           protocol_version: 2
+          stream_epoch: 3f9c2a7e01b4d865
           session_id: "42"
           knowledge_graph: default
           version: "0.1.0"
@@ -986,8 +1040,9 @@ components:
       discriminator: type
       description: |
         Push notification for data/schema/rule/KG changes. The `type` field
-        discriminates the event kind. All notifications carry a monotonically
-        increasing `seq` number for replay on reconnect (see `last_seq` query param).
+        discriminates the event kind. All notifications carry a `seq` number,
+        strictly increasing in delivery order within the stream epoch, for replay on
+        reconnect (see the `last_seq` and `epoch` query params).
         A session receives changes to its own knowledge graph; `kg_change` for
         other knowledge graphs is sent to admin sessions only. Changes to
         `_internal` are never sent. Replay applies the same rules.
@@ -999,7 +1054,9 @@ components:
         seq:
           type: integer
           format: int64
-          description: Monotonically increasing sequence number (1-based)
+          description: |
+            Position in the stream epoch's notification stream (1-based, strictly
+            increasing in delivery order). Unrelated to a subscription's `seq`.
         timestamp_ms:
           type: integer
           format: int64

@@ -164,7 +164,8 @@ describe('request ids and pushes', () => {
   it('classifies notices and subscription frames as pushes', () => {
     const frames = [
       '{"type":"notice","code":"idle_timeout","message":"Idle timeout"}',
-      '{"type":"subscription_delta","subscription":"s","generation":2,"knowledge_graph":"kg","seq":1,"columns":["x"],"inserted":[[1]],"retracted":[]}',
+      '{"type":"notice","code":"replay_gap","message":"re-read state"}',
+      '{"type":"subscription_delta","subscription":"s","generation":2,"knowledge_graph":"kg","seq":1,"revision":5,"columns":["x"],"inserted":[[1]],"retracted":[]}',
       '{"type":"subscription_error","subscription":"s","generation":2,"message":"boom"}',
       '{"type":"kg_change","knowledge_graph":"kg","operation":"created","timestamp_ms":1,"seq":1}',
     ];

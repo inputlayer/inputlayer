@@ -102,8 +102,9 @@ Criterion benches in `benches/` are diagnostic only.
 starts a real `inputlayer-server` process with its own data directory, agents
 subscribe to standing queries over `/ws`, and independent writer connections
 insert and retract facts and change rules. Agents must receive the exact
-added/retracted rows as `subscription_delta` pushes, with contiguous `seq`, and
-end equal to a fresh full query on another connection, without re-querying.
+added/retracted rows as `subscription_delta` pushes, with contiguous `seq` and
+increasing `revision`, and end equal to a fresh full query on another
+connection, without re-querying.
 Scenarios cover one subscriber, 64 subscribers, reconnect/resubscribe and
 crash-restart, unrelated writes, and write bursts.
 
@@ -118,13 +119,17 @@ make e2e-reactive                                   # release build, writes late
 cargo test --test e2e_reactive                      # same scenarios, debug build
 ```
 
+`tests/e2e_reactive/stream.rs` requires the stream contract: notifications
+arrive in strictly increasing `seq` order under concurrent writers, a reconnect
+cursor from before an engine restart gets one `replay_gap` notice and nothing
+replayed, and commits racing a `.subscribe` all reach the agent.
+
 Results over `storage.performance.max_result_rows` are required to fail
 closed: the subscription is refused, or a refresh pushes `subscription_error`
 and the next delta is relative to the last complete result.
 
 Defects tracked by the reactive plan run as **expected failures**
-(`tests/e2e_reactive/known_defects.rs`): out-of-order and restart-cursor
-notification delivery (W04), and an oversized delta that advances the
+(`tests/e2e_reactive/known_defects.rs`): an oversized delta that advances the
 subscription without delivery (W05). Each asserts the correct contract; its
 own violation passes as `XFAIL`, any other violation fails, and a holding
 contract fails as `XPASS` so the marker is removed and the scenario becomes
@@ -136,8 +141,8 @@ lands):
 - Public Python and JavaScript SDK agents. Agents use the testkit's raw `/ws`
   client until the SDKs have a subscribe API; cross-SDK conformance comes with
   R3.
-- Pending calls interleaved with pushes on one connection, snapshot/write
-  races, and slow consumers. The perf gate's `interference` fixture measures
+- Pending calls interleaved with pushes on one connection, and slow
+  consumers. The perf gate's `interference` fixture measures
   slow-consumer latency, not correctness.
 - Credential revocation. It is covered over a real `/ws` connection by
   `tests/credential_revocation_tests.rs`, not here.

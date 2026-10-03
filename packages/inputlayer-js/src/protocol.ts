@@ -53,6 +53,8 @@ export interface AuthenticatedResponse {
   version: string;
   role: string;
   protocol_version: number;
+  /** This engine run's id; notification `seq` numbers belong to it. Pass it back with `last_seq` when reconnecting. */
+  stream_epoch: string;
 }
 
 export interface AuthErrorResponse {
@@ -100,6 +102,8 @@ export interface StatementError {
 export interface Subscribed {
   subscription: string;
   generation: number;
+  /** The knowledge graph revision the snapshot is the exact answer at; every later delta names a higher one. */
+  revision: number;
 }
 
 export interface ResultResponse {
@@ -169,9 +173,10 @@ export interface PongResponse {
   id?: string;
 }
 
-/** A connection event. The server closes the connection after every one but `notifications_missed`. */
+/** A connection event. The server closes the connection after every one but `notifications_missed` and `replay_gap`. */
 export type NoticeCode =
   | 'notifications_missed'
+  | 'replay_gap'
   | 'slow_consumer'
   | 'idle_timeout'
   | 'lifetime_exceeded'
@@ -192,7 +197,10 @@ export interface SubscriptionDeltaResponse {
   subscription: string;
   generation: number;
   knowledge_graph: string;
+  /** Delta number within the generation, from 1, without gaps. */
   seq: number;
+  /** The knowledge graph revision the result reaches with this delta. */
+  revision: number;
   columns: string[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   inserted: any[][];

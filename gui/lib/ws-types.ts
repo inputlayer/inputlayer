@@ -47,6 +47,8 @@ export interface WsAuthenticatedMessage {
   knowledge_graph: string
   version: string
   role: string
+  /** This engine run's id; notification `seq` numbers belong to it. */
+  stream_epoch: string
 }
 
 export interface WsAuthErrorMessage {
@@ -226,11 +228,12 @@ export interface WsResultEndMessage {
   chunk_count: number
 }
 
-/** A connection event; all but `notifications_missed` precede the server closing the connection. */
+/** A connection event; all but `notifications_missed` and `replay_gap` precede the server closing the connection. */
 export interface WsNoticeMessage {
   type: "notice"
   code:
     | "notifications_missed"
+    | "replay_gap"
     | "slow_consumer"
     | "idle_timeout"
     | "lifetime_exceeded"
@@ -246,6 +249,8 @@ export interface WsSubscriptionDeltaMessage {
   generation: number
   knowledge_graph: string
   seq: number
+  /** The knowledge graph revision the result reaches with this delta. */
+  revision: number
   columns: string[]
   inserted: (string | number | boolean | null)[][]
   retracted: (string | number | boolean | null)[][]
