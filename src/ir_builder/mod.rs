@@ -290,8 +290,8 @@ impl IRBuilder {
     /// Build a single scan node
     ///
     /// `atom_idx` is the index of the body predicate, used to generate unique
-    /// column names for constants. This prevents naming collisions when the same
-    /// relation appears multiple times with different constants (e.g., self-joins).
+    /// column names for constants and `_` placeholders. This prevents naming
+    /// collisions when the same relation appears multiple times (e.g., self-joins).
     fn build_scan(&self, atom: &Atom, atom_idx: usize) -> Result<IRNode, String> {
         check_body_atom_args(atom)?;
         // Schema comes from the atom's arguments (variable bindings)
@@ -303,7 +303,8 @@ impl IRBuilder {
             .map(|(i, term)| match term {
                 Term::Variable(v) => v.clone(),
                 Term::Constant(_) => format!("_const_a{atom_idx}_c{i}"),
-                Term::Placeholder => format!("_ph_{}_{}", atom.relation, i),
+                // Each `_` is a fresh anonymous variable, never joined
+                Term::Placeholder => format!("_ph_a{atom_idx}_c{i}"),
                 // Aggregates in body atoms refer to the variable they aggregate
                 Term::Aggregate(_, v) => v.clone(),
                 Term::Arithmetic(_) | Term::FunctionCall(_, _) => {
@@ -2505,6 +2506,42 @@ mod tests {
                 assert!(schema[1].starts_with("_ph_"));
             }
             _ => panic!("Expected Scan"),
+        }
+    }
+
+    #[test]
+    fn test_placeholders_in_a_self_join_are_not_join_keys() {
+        let catalog = make_catalog();
+        let builder = IRBuilder::new(catalog);
+
+        // w(X, Y) <- edge(X, _), edge(Y, _)
+        let rule = Rule::new_simple(
+            Atom::new(
+                "w".to_string(),
+                vec![
+                    Term::Variable("X".to_string()),
+                    Term::Variable("Y".to_string()),
+                ],
+            ),
+            vec![
+                Atom::new(
+                    "edge".to_string(),
+                    vec![Term::Variable("X".to_string()), Term::Placeholder],
+                ),
+                Atom::new(
+                    "edge".to_string(),
+                    vec![Term::Variable("Y".to_string()), Term::Placeholder],
+                ),
+            ],
+        );
+
+        let scans = builder.build_scans(&rule).unwrap();
+        let joined = builder
+            .build_join(scans[0].clone(), scans[1].clone())
+            .unwrap();
+        match joined {
+            IRNode::Join { left_keys, .. } => assert!(left_keys.is_empty(), "{left_keys:?}"),
+            other => panic!("Expected Join, got {other:?}"),
         }
     }
 

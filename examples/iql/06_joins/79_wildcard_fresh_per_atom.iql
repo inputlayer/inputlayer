@@ -1,0 +1,39 @@
+// Test: Each `_` is a fresh anonymous variable
+// Description: A `_` in one body atom never joins a `_` in another, even when
+// both atoms read the same relation at the same position. Session rules,
+// persistent rules, negation, aggregates and recursion all agree with the query.
+
+.kg create test_wildcard_fresh_n06t79
+.kg use test_wildcard_fresh_n06t79
+
++user[(1, "ann", true), (2, "bob", false), (3, "cy", true)]
+
+// All nine pairs, exactly like the query below
++w(A, B) <- user(A, _, _), user(B, _, _)
+?w(A, B)
+
+pairs(A, B) <- user(A, _, _), user(B, _, _)
+?pairs(A, B)
+
+// Two-hop paths whose hops carry different labels
++e[(1, 2, "a"), (2, 3, "b"), (3, 4, "c")]
++two(X, Z) <- e(X, Y, _), e(Y, Z, _)
+?two(X, Z)
+
+// A `_` in a negated atom is existential
++muted[(1, 99)]
++unmuted_pair(A, B) <- user(A, _, _), user(B, _, _), !muted(A, _)
+?unmuted_pair(A, B)
+
+// Each user has three peers
++peers(A, count<B>) <- user(A, _, _), user(B, _, _)
+?peers(A, N)
+
+// The recursive step composes hops with different labels
++r(X, Y, L) <- e(X, Y, L)
++r(X, Z, "via") <- r(X, Y, _), r(Y, Z, _)
++reach(X, Y) <- r(X, Y, _)
+?reach(X, Y)
+
+.kg use default
+.kg drop test_wildcard_fresh_n06t79
