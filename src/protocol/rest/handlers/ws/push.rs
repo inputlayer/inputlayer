@@ -20,9 +20,8 @@ use super::outbound::Outbound;
 use super::stream::{self, Undeliverable};
 use crate::protocol::subscription::ConnectionSubscriptions;
 
-/// Bytes estimated for a JSON number: the longest an `i64`, `u64` or `f64`
-/// serializes to.
-const NUMBER_BYTES: usize = 24;
+/// Bytes estimated for a JSON float: the longest an `f64` serializes to.
+const FLOAT_BYTES: usize = 24;
 
 /// Deliver `push`, which `access` allows or withholds for this reason.
 /// Returns `false` if the connection is dead.
@@ -108,7 +107,7 @@ fn row_width(row: &Row) -> usize {
 fn value_width(value: &Value) -> usize {
     match value {
         Value::Null | Value::Bool(_) => 5,
-        Value::Number(_) => NUMBER_BYTES,
+        Value::Number(n) => number_width(n),
         Value::String(s) => s.len() + 2,
         Value::Array(items) => items.iter().map(|v| value_width(v) + 1).sum::<usize>() + 2,
         Value::Object(fields) => {
@@ -118,6 +117,16 @@ fn value_width(value: &Value) -> usize {
                 .sum::<usize>()
                 + 2
         }
+    }
+}
+
+/// Exact for integers, counted digit by digit; [`FLOAT_BYTES`] for floats.
+fn number_width(n: &serde_json::Number) -> usize {
+    let digits = |u: u64| u.checked_ilog10().map_or(1, |d| d as usize + 1);
+    match (n.as_u64(), n.as_i64()) {
+        (Some(u), _) => digits(u),
+        (None, Some(i)) => 1 + digits(i.unsigned_abs()),
+        (None, None) => FLOAT_BYTES,
     }
 }
 
