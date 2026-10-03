@@ -747,7 +747,7 @@ except InputLayerError as e:
     print(f"InputLayer error: {e}")
 ```
 
-Every SDK call that reaches the engine raises on failure: no failed statement is returned as a result row. `insert()` returns the number of facts the engine newly stored, so re-inserting an existing fact counts 0.
+Every SDK call that reaches the engine raises on failure: no failed statement is returned as a result row. `insert()` returns the number of facts the engine newly stored, so re-inserting an existing fact counts 0. This is a behaviour change: earlier SDK versions returned the number of facts sent.
 
 ## Migrations
 

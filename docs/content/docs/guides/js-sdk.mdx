@@ -165,7 +165,7 @@ await kg.insert(Employee, [
 ]);
 ```
 
-The insert method returns an `InsertResult` whose `count` is the number of facts the engine newly stored; re-inserting an existing fact counts 0.
+The insert method returns an `InsertResult` whose `count` is the number of facts the engine newly stored; re-inserting an existing fact counts 0. This is a behaviour change: earlier SDK versions returned the number of facts sent.
 
 ## Deleting Data
 
@@ -732,7 +732,7 @@ import {
 } from "inputlayer";
 
 try {
-  await kg.load("seed.iql");
+  await kg.execute("+edge(1, 2)\n+edge(2, 3)\n?edge(X, Y)");
 } catch (e) {
   if (e instanceof AuthenticationError) {
     console.log("Check your credentials");

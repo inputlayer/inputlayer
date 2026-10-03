@@ -24,9 +24,6 @@ import {
   QueryError,
   StatementFailedError,
 } from '../src/index';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
 const SERVER_URL = process.env.INPUTLAYER_TEST_SERVER ?? '';
 const USERNAME = process.env.INPUTLAYER_TEST_USER ?? 'admin';
@@ -822,12 +819,10 @@ describe.skipIf(SKIP)('Integration: Engine failures', () => {
     expect(err.result.rows).toHaveLength(20_000);
   });
 
-  it('load rejects on a failed statement', async () => {
+  it('load is refused over the WebSocket with a typed error', async () => {
     const kg = client.knowledgeGraph(kg_name);
-    const path = join(mkdtempSync(join(tmpdir(), 'il-load-')), 'seed.iql');
-    writeFileSync(path, '+edge[(300, 301)]\n+edge[(1, 2, 3)]\n');
-    const err = (await kg.load(path).catch((e: unknown) => e)) as StatementFailedError;
-    expect(err).toBeInstanceOf(StatementFailedError);
-    expect(err.errors.map((e) => [e.index, e.code])).toEqual([[1, 'validation']]);
+    const err = (await kg.load('seed.iql').catch((e: unknown) => e)) as QueryError;
+    expect(err).toBeInstanceOf(QueryError);
+    expect(err.code).toBe('unsupported');
   });
 });

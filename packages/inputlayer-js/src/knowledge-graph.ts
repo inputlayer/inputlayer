@@ -2,7 +2,6 @@
  * KnowledgeGraph - the primary workspace for data, queries, and rules.
  */
 
-import { readFile } from 'node:fs/promises';
 import type { Connection } from './connection.js';
 import type { ResultResponse } from './protocol.js';
 import type { Expr, BoolExpr, OrderedColumn } from './ast.js';
@@ -661,18 +660,16 @@ export class KnowledgeGraph {
   }
 
   /**
-   * Load a local IQL file into this knowledge graph.
+   * Load data from a file on the server (`.load <path> [mode]`).
    *
-   * The file is read locally and sent as one multi-statement program. A
-   * parse error rejects the whole program before any statement runs.
-   * Otherwise the engine runs every statement, and a failed one rejects
-   * with `StatementFailedError` listing each failure; the statements it
-   * does not list took effect.
+   * The engine serves `.load` only to its interactive client today, so over
+   * the WebSocket this rejects with `QueryError` (code `unsupported`).
    */
-  async load(path: string): Promise<void> {
-    const program = await readFile(path, 'utf-8');
+  async load(path: string, mode?: string): Promise<void> {
     await this.ensureKg();
-    await this.conn.execute(program);
+    let cmd = `.load ${path}`;
+    if (mode) cmd += ` ${mode}`;
+    await this.conn.execute(cmd);
   }
 
   /** Clear all relations matching a prefix. */
