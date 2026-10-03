@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-tests pre-pr-snapshots pre-pr-js perf-gate perf-gate-check secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js perf-gate perf-gate-check secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -536,7 +536,7 @@ pre-pr:
 		exit 1; \
 	fi; \
 	if ! git diff --quiet "$(PRE_PR_BASE)" -- $(PRE_PR_RUST_INPUTS); then \
-		targets="$$targets lint pre-pr-tests pre-pr-snapshots"; \
+		targets="$$targets lint unit-test pre-pr-snapshots"; \
 	fi; \
 	if ! git diff --quiet "$(PRE_PR_BASE)" -- packages/inputlayer-py; then \
 		targets="$$targets python-test"; \
@@ -549,9 +549,6 @@ pre-pr:
 	fi; \
 	$(MAKE) --no-print-directory -j6 --output-sync=target $$targets
 	$(MAKE) --no-print-directory perf-gate
-
-pre-pr-tests:
-	cargo test --workspace --all-features
 
 pre-pr-snapshots:
 	./scripts/test-affected.sh "$(PRE_PR_BASE)"
