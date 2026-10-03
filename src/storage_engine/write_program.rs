@@ -346,7 +346,8 @@ pub struct ProgramCommit {
 }
 
 /// Why a write program was not committed. In every case but
-/// [`CommitError::Unknown`] nothing was written, published or applied.
+/// [`CommitError::Unknown`] and [`CommitError::OutcomeUnknown`] nothing was
+/// written, published or applied.
 #[derive(Debug)]
 pub enum CommitError {
     /// The KG published a new snapshot after the program read it. Stage the
@@ -365,13 +366,31 @@ pub enum CommitError {
     /// restart, but applying it to the live KG failed: this process may not
     /// show it. The outcome is unknown to the caller.
     Unknown(StorageError),
+    /// The WAL write failed and could not be undone, so a restart may still
+    /// recover it; the store is read-only until restart recovery.
+    OutcomeUnknown(StorageError),
+    /// The store is read-only until restart recovery; nothing was written.
+    StoreReadOnly,
+}
+
+impl From<StorageError> for CommitError {
+    fn from(error: StorageError) -> Self {
+        match error {
+            StorageError::OutcomeUnknown { .. } => Self::OutcomeUnknown(error),
+            StorageError::StoreReadOnly => Self::StoreReadOnly,
+            _ => Self::Failed(error),
+        }
+    }
 }
 
 impl CommitError {
     /// This failure as a plain storage error, for single-write APIs.
     pub fn into_storage_error(self) -> StorageError {
         match self {
-            Self::Rejected { error, .. } | Self::Failed(error) => error,
+            Self::Rejected { error, .. } | Self::Failed(error) | Self::OutcomeUnknown(error) => {
+                error
+            }
+            Self::StoreReadOnly => StorageError::StoreReadOnly,
             Self::Unknown(error) => StorageError::Other(format!(
                 "The write is durable but failed to apply ({error}); its outcome is \
                  unknown until restart."

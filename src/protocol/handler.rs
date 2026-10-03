@@ -106,11 +106,21 @@ const MAX_QUEUED_LOGINS: usize = 64;
 pub const VALIDATION_ERROR_PREFIX: &str = "VALIDATION_ERRORS:";
 
 /// A program that failed as a whole.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
 pub struct ProgramError {
     pub message: String,
     /// Set when the program's only statement failed.
     pub code: Option<ErrorCode>,
+}
+
+impl From<crate::storage::StorageError> for ProgramError {
+    fn from(error: crate::storage::StorageError) -> Self {
+        Self {
+            code: Some(storage_error_code(&error, ErrorCode::Internal)),
+            message: error.to_string(),
+        }
+    }
 }
 
 impl From<String> for ProgramError {
@@ -200,6 +210,7 @@ pub struct Handler {
 
 /// `.index` command implementations shared by `Handler` and `QueryJob`.
 mod index_commands {
+    use super::ProgramError;
     use crate::index_manager::IndexStats;
     use crate::statement::meta::IndexCreateOptions;
     use crate::StorageEngine;
@@ -208,25 +219,35 @@ mod index_commands {
         storage: &StorageEngine,
         kg: &str,
         opts: &IndexCreateOptions,
-    ) -> Result<String, String> {
+    ) -> Result<String, ProgramError> {
         let stats = storage
             .create_index_in(kg, opts)
-            .map_err(|e| e.to_string())?;
+            .map_err(ProgramError::from)?;
         Ok(format!(
             "Index '{}' created on {}.{} ({} vectors).",
             stats.name, stats.relation, stats.column, stats.tuple_count
         ))
     }
 
-    pub(super) fn drop(storage: &StorageEngine, kg: &str, name: &str) -> Result<String, String> {
-        storage.drop_index_in(kg, name).map_err(|e| e.to_string())?;
+    pub(super) fn drop(
+        storage: &StorageEngine,
+        kg: &str,
+        name: &str,
+    ) -> Result<String, ProgramError> {
+        storage
+            .drop_index_in(kg, name)
+            .map_err(ProgramError::from)?;
         Ok(format!("Index '{name}' dropped."))
     }
 
-    pub(super) fn rebuild(storage: &StorageEngine, kg: &str, name: &str) -> Result<String, String> {
+    pub(super) fn rebuild(
+        storage: &StorageEngine,
+        kg: &str,
+        name: &str,
+    ) -> Result<String, ProgramError> {
         let stats = storage
             .rebuild_index_in(kg, name)
-            .map_err(|e| e.to_string())?;
+            .map_err(ProgramError::from)?;
         Ok(format!(
             "Index '{name}' rebuilt ({} vectors).",
             stats.tuple_count
@@ -1267,13 +1288,13 @@ impl Handler {
     // ── User CRUD ───────────────────────────────────────────────────────────
 
     /// List all users (returns username and role, never the hash).
-    pub fn handle_user_list(&self) -> Result<QueryResult, String> {
+    pub fn handle_user_list(&self) -> Result<QueryResult, ProgramError> {
         use crate::auth;
 
         let storage = self.storage.read();
         let snapshot = storage
             .get_snapshot_for(auth::INTERNAL_KG)
-            .map_err(|e| format!("Auth storage error: {e}"))?;
+            .map_err(ProgramError::from)?;
         drop(storage);
 
         let empty_vec = crate::value::Relation::new();
@@ -1323,7 +1344,7 @@ impl Handler {
         username: &str,
         password: &str,
         role_str: &str,
-    ) -> Result<QueryResult, String> {
+    ) -> Result<QueryResult, ProgramError> {
         use crate::auth;
         use crate::value::Value;
         use std::str::FromStr;
@@ -1334,14 +1355,14 @@ impl Handler {
         let storage = self.storage.read();
         let snapshot = storage
             .get_snapshot_for(auth::INTERNAL_KG)
-            .map_err(|e| format!("Auth storage error: {e}"))?;
+            .map_err(ProgramError::from)?;
 
         let users = snapshot.input_tuples.get("users");
         if let Some(users) = users {
             for tuple in users {
                 if let Some(u) = tuple.values().first().and_then(|v| v.as_str()) {
                     if u == username {
-                        return Err(format!("User '{username}' already exists"));
+                        return Err(format!("User '{username}' already exists").into());
                     }
                 }
             }
@@ -1356,7 +1377,7 @@ impl Handler {
 
         storage
             .insert_tuples_into(auth::INTERNAL_KG, "users", vec![tuple])
-            .map_err(|e| format!("Failed to create user: {e}"))?;
+            .map_err(ProgramError::from)?;
         self.credentials.put_user(auth::UserRecord {
             username: username.to_string(),
             password_hash: hash,
@@ -1370,17 +1391,17 @@ impl Handler {
     }
 
     /// Drop a user.
-    pub fn handle_user_drop(&self, username: &str) -> Result<QueryResult, String> {
+    pub fn handle_user_drop(&self, username: &str) -> Result<QueryResult, ProgramError> {
         use crate::auth;
 
         if username == "admin" {
-            return Err("Cannot drop the 'admin' user".to_string());
+            return Err("Cannot drop the 'admin' user".to_string().into());
         }
 
         let storage = self.storage.read();
         let snapshot = storage
             .get_snapshot_for(auth::INTERNAL_KG)
-            .map_err(|e| format!("Auth storage error: {e}"))?;
+            .map_err(ProgramError::from)?;
 
         // Find user tuple to delete
         let empty_vec = crate::value::Relation::new();
@@ -1397,35 +1418,50 @@ impl Handler {
 
         let tuple = found.ok_or_else(|| format!("User '{username}' not found"))?;
 
-        storage
-            .delete_tuples_from(auth::INTERNAL_KG, "users", vec![tuple])
-            .map_err(|e| format!("Failed to drop user: {e}"))?;
-        self.credentials.remove_user(username);
-
-        // Also delete all API keys owned by this user
-        if let Err(e) =
-            api_keys::delete_api_keys(&storage, &snapshot, |key| key.username == username)
-        {
-            warn!(username, error = %e, "apikey_delete_failed");
-        }
-
-        // Also revoke all KG ACL entries for this user
-        if let Some(acls) = snapshot.input_tuples.get("kg_acls") {
-            let to_delete: Vec<_> = acls
-                .iter()
-                .filter(|t| {
-                    t.values()
-                        .get(1)
-                        .and_then(|v| v.as_str())
-                        .is_some_and(|u| u == username)
-                })
-                .cloned()
-                .collect();
-            if !to_delete.is_empty() {
-                let _ = storage.delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_delete);
-                self.kg_acls_changed();
+        let mut cleanup_error = None;
+        for relation in ["api_keys", "kg_acls"] {
+            let result = if relation == "api_keys" {
+                api_keys::delete_api_keys(&storage, &snapshot, |key| key.username == username).map(
+                    |labels| {
+                        for label in labels {
+                            self.credentials.revoke_key(&label);
+                        }
+                    },
+                )
+            } else {
+                let to_delete: Vec<_> = snapshot
+                    .input_tuples
+                    .get(relation)
+                    .into_iter()
+                    .flatten()
+                    .filter(|t| t.values().get(1).and_then(|v| v.as_str()) == Some(username))
+                    .cloned()
+                    .collect();
+                if to_delete.is_empty() {
+                    continue;
+                }
+                storage
+                    .delete_tuples_from(auth::INTERNAL_KG, relation, to_delete)
+                    .map(|_| self.kg_acls_changed())
+            };
+            match result {
+                Ok(()) => {}
+                Err(
+                    error @ (crate::storage::StorageError::OutcomeUnknown { .. }
+                    | crate::storage::StorageError::StoreReadOnly),
+                ) => {
+                    return Err(error.into());
+                }
+                Err(error) => {
+                    cleanup_error.get_or_insert(error);
+                }
             }
         }
+        if let Some(error) = cleanup_error {
+            return Err(error.into());
+        }
+        storage.delete_tuples_from(auth::INTERNAL_KG, "users", vec![tuple])?;
+        self.credentials.remove_user(username);
 
         tracing::info!(username, "audit_user_dropped");
         Ok(self.message_result(&format!("User '{username}' dropped.")))
@@ -1436,14 +1472,14 @@ impl Handler {
         &self,
         username: &str,
         new_password: &str,
-    ) -> Result<QueryResult, String> {
+    ) -> Result<QueryResult, ProgramError> {
         use crate::auth;
         use crate::value::Value;
 
         let storage = self.storage.read();
         let snapshot = storage
             .get_snapshot_for(auth::INTERNAL_KG)
-            .map_err(|e| format!("Auth storage error: {e}"))?;
+            .map_err(ProgramError::from)?;
 
         // Find existing user
         let empty_vec = crate::value::Relation::new();
@@ -1473,10 +1509,10 @@ impl Handler {
 
         storage
             .delete_tuples_from(auth::INTERNAL_KG, "users", vec![old])
-            .map_err(|e| format!("Failed to update password: {e}"))?;
+            .map_err(ProgramError::from)?;
         storage
             .insert_tuples_into(auth::INTERNAL_KG, "users", vec![new_tuple])
-            .map_err(|e| format!("Failed to update password: {e}"))?;
+            .map_err(ProgramError::from)?;
         self.credentials.set_password(username, new_hash);
 
         tracing::info!(username, "audit_user_password_changed");
@@ -1484,7 +1520,11 @@ impl Handler {
     }
 
     /// Change a user's role.
-    pub fn handle_user_role(&self, username: &str, new_role: &str) -> Result<QueryResult, String> {
+    pub fn handle_user_role(
+        &self,
+        username: &str,
+        new_role: &str,
+    ) -> Result<QueryResult, ProgramError> {
         use crate::auth;
         use crate::value::Value;
         use std::str::FromStr;
@@ -1492,13 +1532,13 @@ impl Handler {
         let role = auth::Role::from_str(new_role)?;
 
         if username == "admin" && new_role != "admin" {
-            return Err("Cannot change the 'admin' user's role".to_string());
+            return Err("Cannot change the 'admin' user's role".to_string().into());
         }
 
         let storage = self.storage.read();
         let snapshot = storage
             .get_snapshot_for(auth::INTERNAL_KG)
-            .map_err(|e| format!("Auth storage error: {e}"))?;
+            .map_err(ProgramError::from)?;
 
         // Find existing user
         let empty_vec = crate::value::Relation::new();
@@ -1527,10 +1567,10 @@ impl Handler {
 
         storage
             .delete_tuples_from(auth::INTERNAL_KG, "users", vec![old])
-            .map_err(|e| format!("Failed to update role: {e}"))?;
+            .map_err(ProgramError::from)?;
         storage
             .insert_tuples_into(auth::INTERNAL_KG, "users", vec![new_tuple])
-            .map_err(|e| format!("Failed to update role: {e}"))?;
+            .map_err(ProgramError::from)?;
         self.credentials.set_role(username, role);
 
         Ok(self.message_result(&format!("Role updated to '{new_role}' for '{username}'.")))
@@ -1581,13 +1621,13 @@ impl Handler {
     }
 
     /// List ACL entries for a knowledge graph.
-    pub fn handle_kg_acl_list(&self, kg_name: &str) -> Result<String, String> {
+    pub fn handle_kg_acl_list(&self, kg_name: &str) -> Result<String, ProgramError> {
         use crate::auth;
 
         let storage = self.storage.read();
         let snapshot = storage
             .get_snapshot_for(auth::INTERNAL_KG)
-            .map_err(|e| format!("Auth storage error: {e}"))?;
+            .map_err(ProgramError::from)?;
 
         let empty_vec = crate::value::Relation::new();
         let acls = snapshot.input_tuples.get("kg_acls").unwrap_or(&empty_vec);
@@ -1624,7 +1664,7 @@ impl Handler {
         kg_name: &str,
         username: &str,
         role: &str,
-    ) -> Result<String, String> {
+    ) -> Result<String, ProgramError> {
         use crate::auth;
         use crate::Tuple;
         use crate::Value;
@@ -1644,7 +1684,7 @@ impl Handler {
         // Remove existing ACL for this user+kg (if any)
         let snapshot = storage
             .get_snapshot_for(auth::INTERNAL_KG)
-            .map_err(|e| format!("Auth storage error: {e}"))?;
+            .map_err(ProgramError::from)?;
 
         let empty_vec = crate::value::Relation::new();
         let acls = snapshot.input_tuples.get("kg_acls").unwrap_or(&empty_vec);
@@ -1664,7 +1704,7 @@ impl Handler {
         if !to_remove.is_empty() {
             let removed = storage.delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove);
             self.kg_acls_changed();
-            removed.map_err(|e| format!("Failed to update ACL: {e}"))?;
+            removed.map_err(ProgramError::from)?;
         }
 
         // Insert new ACL entry
@@ -1675,7 +1715,7 @@ impl Handler {
         ]);
         let granted = storage.insert_tuples_into(auth::INTERNAL_KG, "kg_acls", vec![tuple]);
         self.kg_acls_changed();
-        granted.map_err(|e| format!("Failed to grant ACL: {e}"))?;
+        granted.map_err(ProgramError::from)?;
 
         tracing::info!(kg = kg_name, user = username, role, "audit_kg_acl_granted");
         Ok(format!(
@@ -1695,13 +1735,17 @@ impl Handler {
     }
 
     /// Revoke a user's access to a knowledge graph.
-    pub fn handle_kg_acl_revoke(&self, kg_name: &str, username: &str) -> Result<String, String> {
+    pub fn handle_kg_acl_revoke(
+        &self,
+        kg_name: &str,
+        username: &str,
+    ) -> Result<String, ProgramError> {
         use crate::auth;
 
         let storage = self.storage.read();
         let snapshot = storage
             .get_snapshot_for(auth::INTERNAL_KG)
-            .map_err(|e| format!("Auth storage error: {e}"))?;
+            .map_err(ProgramError::from)?;
 
         let empty_vec = crate::value::Relation::new();
         let acls = snapshot.input_tuples.get("kg_acls").unwrap_or(&empty_vec);
@@ -1719,28 +1763,23 @@ impl Handler {
         }
 
         if to_remove.is_empty() {
-            return Err(format!(
-                "No ACL entry found for user '{username}' on '{kg_name}'"
-            ));
+            return Err(format!("No ACL entry found for user '{username}' on '{kg_name}'").into());
         }
 
         let revoked = storage.delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove);
         self.kg_acls_changed();
-        revoked.map_err(|e| format!("Failed to revoke ACL: {e}"))?;
+        revoked.map_err(ProgramError::from)?;
 
         tracing::info!(kg = kg_name, user = username, "audit_kg_acl_revoked");
         Ok(format!("Revoked access on '{kg_name}' from '{username}'."))
     }
 
     /// Remove all ACL entries for a dropped knowledge graph.
-    fn cleanup_kg_acls(&self, kg_name: &str) {
+    fn cleanup_kg_acls(&self, kg_name: &str) -> Result<(), ProgramError> {
         use crate::auth;
 
         let storage = self.storage.read();
-        let snapshot = match storage.get_snapshot_for(auth::INTERNAL_KG) {
-            Ok(s) => s,
-            Err(_) => return,
-        };
+        let snapshot = storage.get_snapshot_for(auth::INTERNAL_KG)?;
 
         let empty_vec = crate::value::Relation::new();
         let acls = snapshot.input_tuples.get("kg_acls").unwrap_or(&empty_vec);
@@ -1758,10 +1797,12 @@ impl Handler {
 
         if !to_remove.is_empty() {
             let count = to_remove.len();
-            let _ = storage.delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove);
+            let removed = storage.delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove);
             self.kg_acls_changed();
+            removed?;
             tracing::info!(kg = kg_name, count, "audit_kg_acls_cleaned_up");
         }
+        Ok(())
     }
 
     /// Get mutable access to the storage engine.
@@ -1814,30 +1855,38 @@ impl Handler {
         &self,
         kg: &str,
         prefix: &str,
-    ) -> Result<Vec<(String, usize)>, String> {
+    ) -> Result<Vec<(String, usize)>, ProgramError> {
         let storage = self.storage.read();
         storage
             .clear_relations_by_prefix_in(kg, prefix)
-            .map_err(|e| e.to_string())
+            .map_err(ProgramError::from)
     }
 
     /// Drop all rules matching a prefix in a knowledge graph.
-    pub fn drop_rules_by_prefix_in(&self, kg: &str, prefix: &str) -> Result<Vec<String>, String> {
+    pub fn drop_rules_by_prefix_in(
+        &self,
+        kg: &str,
+        prefix: &str,
+    ) -> Result<Vec<String>, ProgramError> {
         let storage = self.storage.read();
         storage
             .drop_rules_by_prefix_in(kg, prefix)
-            .map_err(|e| e.to_string())
+            .map_err(ProgramError::from)
     }
 
     // === Index Management API ===
 
     /// Create and build an HNSW index on a knowledge graph.
-    pub fn create_index(&self, kg: &str, opts: &IndexCreateOptions) -> Result<String, String> {
+    pub fn create_index(
+        &self,
+        kg: &str,
+        opts: &IndexCreateOptions,
+    ) -> Result<String, ProgramError> {
         index_commands::create(&self.storage.read(), kg, opts)
     }
 
     /// Drop an index.
-    pub fn drop_index(&self, kg: &str, name: &str) -> Result<String, String> {
+    pub fn drop_index(&self, kg: &str, name: &str) -> Result<String, ProgramError> {
         index_commands::drop(&self.storage.read(), kg, name)
     }
 
@@ -1852,7 +1901,7 @@ impl Handler {
     }
 
     /// Rebuild an index from base data, dropping tombstones.
-    pub fn rebuild_index(&self, kg: &str, name: &str) -> Result<String, String> {
+    pub fn rebuild_index(&self, kg: &str, name: &str) -> Result<String, ProgramError> {
         index_commands::rebuild(&self.storage.read(), kg, name)
     }
 
@@ -2813,13 +2862,19 @@ impl QueryJob {
                                             Err(e) => {
                                                 info!(index = %opts.name, error = %e, "meta_index_create_err");
                                                 fail!(
-                                                    index_error_code(
-                                                        &storage,
-                                                        kg,
-                                                        &opts.name,
-                                                        ErrorCode::Validation,
-                                                        ErrorCode::Conflict
-                                                    ),
+                                                    e.code
+                                                        .filter(|code| matches!(
+                                                            code,
+                                                            ErrorCode::OutcomeUnknown
+                                                                | ErrorCode::StoreReadOnly
+                                                        ))
+                                                        .unwrap_or_else(|| index_error_code(
+                                                            &storage,
+                                                            kg,
+                                                            &opts.name,
+                                                            ErrorCode::Validation,
+                                                            ErrorCode::Conflict
+                                                        )),
                                                     format!("Index error: {e}")
                                                 );
                                             }
@@ -2835,13 +2890,19 @@ impl QueryJob {
                                             Err(e) => {
                                                 info!(index = %name, error = %e, "meta_index_drop_err");
                                                 fail!(
-                                                    index_error_code(
-                                                        &storage,
-                                                        kg,
-                                                        &name,
-                                                        ErrorCode::NotFound,
-                                                        ErrorCode::Internal
-                                                    ),
+                                                    e.code
+                                                        .filter(|code| matches!(
+                                                            code,
+                                                            ErrorCode::OutcomeUnknown
+                                                                | ErrorCode::StoreReadOnly
+                                                        ))
+                                                        .unwrap_or_else(|| index_error_code(
+                                                            &storage,
+                                                            kg,
+                                                            &name,
+                                                            ErrorCode::NotFound,
+                                                            ErrorCode::Internal
+                                                        )),
                                                     format!("Index error: {e}")
                                                 );
                                             }
@@ -2904,13 +2965,19 @@ impl QueryJob {
                                         match index_commands::rebuild(&storage, kg, &name) {
                                             Ok(msg) => messages.push(msg),
                                             Err(e) => fail!(
-                                                index_error_code(
-                                                    &storage,
-                                                    kg,
-                                                    &name,
-                                                    ErrorCode::NotFound,
-                                                    ErrorCode::Internal
-                                                ),
+                                                e.code
+                                                    .filter(|code| matches!(
+                                                        code,
+                                                        ErrorCode::OutcomeUnknown
+                                                            | ErrorCode::StoreReadOnly
+                                                    ))
+                                                    .unwrap_or_else(|| index_error_code(
+                                                        &storage,
+                                                        kg,
+                                                        &name,
+                                                        ErrorCode::NotFound,
+                                                        ErrorCode::Internal
+                                                    )),
                                                 format!("Index error: {e}")
                                             ),
                                         }
@@ -3633,11 +3700,10 @@ impl Handler {
         knowledge_graph: Option<String>,
         program: String,
         auth: Option<&crate::auth::Principal>,
-    ) -> Result<QueryResult, String> {
+    ) -> Result<QueryResult, ProgramError> {
         let control = self.request_control(None);
         self.execute_program_status(session_id, knowledge_graph, program, auth, &control)
             .await
-            .map_err(|e| e.message)
     }
 
     /// `execute_program`, keeping the failed statement's `ErrorCode`, under
@@ -3850,56 +3916,56 @@ impl Handler {
                     // executor. Engine-owned; il and the Studio delegate.
                     MetaCommand::OntologyInstall(spec) => {
                         let spec = spec.clone();
-                        return Ok(self
+                        return self
                             .handle_ontology_install(session_id, knowledge_graph, &spec, auth)
-                            .await?);
+                            .await;
                     }
                     MetaCommand::OntologyRemove(name) => {
                         let name = name.clone();
-                        return Ok(self
+                        return self
                             .handle_ontology_remove(session_id, knowledge_graph, &name, auth)
-                            .await?);
+                            .await;
                     }
                     MetaCommand::OntologyUpgrade(spec) => {
                         let spec = spec.clone();
-                        return Ok(self
+                        return self
                             .handle_ontology_upgrade(session_id, knowledge_graph, &spec, auth)
-                            .await?);
+                            .await;
                     }
 
                     // User & API key management (handled directly, not via query_program)
                     MetaCommand::UserList => {
-                        return Ok(self.handle_user_list()?);
+                        return self.handle_user_list();
                     }
                     MetaCommand::UserCreate {
                         username,
                         password,
                         role,
                     } => {
-                        return Ok(self.handle_user_create(username, password, role)?);
+                        return self.handle_user_create(username, password, role);
                     }
                     MetaCommand::UserDrop(username) => {
-                        return Ok(self.handle_user_drop(username)?);
+                        return self.handle_user_drop(username);
                     }
                     MetaCommand::UserPassword { username, password } => {
-                        return Ok(self.handle_user_password(username, password)?);
+                        return self.handle_user_password(username, password);
                     }
                     MetaCommand::UserRole { username, role } => {
-                        return Ok(self.handle_user_role(username, role)?);
+                        return self.handle_user_role(username, role);
                     }
                     MetaCommand::ApiKeyCreate { label, ttl } => {
                         let owner = effective_auth
                             .map_or_else(|| "admin".to_string(), |a| a.username.clone());
-                        return Ok(self.handle_apikey_create(label, &owner, *ttl)?);
+                        return self.handle_apikey_create(label, &owner, *ttl);
                     }
                     MetaCommand::ApiKeyList => {
                         return Ok(self.handle_apikey_list());
                     }
                     MetaCommand::ApiKeyRevoke(label) => {
-                        return Ok(self.handle_apikey_revoke(label)?);
+                        return self.handle_apikey_revoke(label);
                     }
                     MetaCommand::ApiKeyExpire { label, ttl } => {
-                        return Ok(self.handle_apikey_expire(label, *ttl)?);
+                        return self.handle_apikey_expire(label, *ttl);
                     }
 
                     // KG ACL management
@@ -3908,26 +3974,26 @@ impl Handler {
                             .as_deref()
                             .or(knowledge_graph.as_deref())
                             .unwrap_or("default");
-                        return Ok(self
+                        return self
                             .handle_kg_acl_list(effective_kg)
-                            .map(|msg| self.message_result(&msg))?);
+                            .map(|msg| self.message_result(&msg));
                     }
                     MetaCommand::KgAclGrant {
                         ref kg_name,
                         ref username,
                         ref role,
                     } => {
-                        return Ok(self
+                        return self
                             .handle_kg_acl_grant(kg_name, username, role)
-                            .map(|msg| self.message_result(&msg))?);
+                            .map(|msg| self.message_result(&msg));
                     }
                     MetaCommand::KgAclRevoke {
                         ref kg_name,
                         ref username,
                     } => {
-                        return Ok(self
+                        return self
                             .handle_kg_acl_revoke(kg_name, username)
-                            .map(|msg| self.message_result(&msg))?);
+                            .map(|msg| self.message_result(&msg));
                     }
 
                     _ => {} // handled by query_program
@@ -4008,7 +4074,7 @@ impl Handler {
         if let (Some(sid), None, false) = (session_id, &knowledge_graph, is_query) {
             self.sessions.session_kg(sid)?;
         }
-        let result = match session_id {
+        let mut result = match session_id {
             Some(sid) if is_query => {
                 self.run_program_with_session(sid, exec_kg, program, statements, control)
                     .await?
@@ -4030,7 +4096,15 @@ impl Handler {
             if identity.role != crate::auth::Role::Admin {
                 if let Some(ref name) = kg_create_name {
                     if result.switched_kg.as_deref() == Some(name.as_str()) {
-                        let _ = self.handle_kg_acl_grant(name, &identity.username, "owner");
+                        if let Err(error) =
+                            self.handle_kg_acl_grant(name, &identity.username, "owner")
+                        {
+                            result.errors.push(StatementError {
+                                index: 0,
+                                code: error.code.unwrap_or(ErrorCode::Internal),
+                                message: error.message,
+                            });
+                        }
                     }
                 }
             }
@@ -4040,7 +4114,22 @@ impl Handler {
         if let Some(ref name) = kg_drop_name {
             if result.errors.is_empty() {
                 self.sessions.close_sessions_for_kg(name);
-                self.cleanup_kg_acls(name);
+                if let Err(error) = self.cleanup_kg_acls(name) {
+                    if matches!(
+                        error.code,
+                        Some(ErrorCode::OutcomeUnknown | ErrorCode::StoreReadOnly)
+                    ) {
+                        return Err(error);
+                    }
+                    warn!(kg = %name, error = %error, "kg_drop_acl_cleanup_failed");
+                    result.rows.push(WireTuple {
+                        values: vec![WireValue::String(format!(
+                            "Access entries for '{name}' were not removed: {error}"
+                        ))],
+                        provenance: None,
+                    });
+                    result.total_count = result.rows.len();
+                }
             }
         }
 
@@ -4185,8 +4274,18 @@ impl Handler {
     }
 
     /// Messages of the statements that failed in `result`.
-    fn result_problem_rows(result: &QueryResult) -> Vec<String> {
-        result.errors.iter().map(|e| e.message.clone()).collect()
+    fn result_problem_rows(result: &QueryResult) -> Result<Vec<String>, ProgramError> {
+        if let Some(error) = result
+            .errors
+            .iter()
+            .find(|e| matches!(e.code, ErrorCode::OutcomeUnknown | ErrorCode::StoreReadOnly))
+        {
+            return Err(ProgramError {
+                code: Some(error.code),
+                message: error.message.clone(),
+            });
+        }
+        Ok(result.errors.iter().map(|e| e.message.clone()).collect())
     }
 
     /// The result of a one-statement program whose statement failed.
@@ -4330,7 +4429,7 @@ impl Handler {
         knowledge_graph: Option<String>,
         spec: &str,
         auth: Option<&crate::auth::Principal>,
-    ) -> Result<QueryResult, String> {
+    ) -> Result<QueryResult, ProgramError> {
         use inputlayer_ontology_client::registry;
         let kg = self.resolve_ontology_kg(session_id, knowledge_graph.as_ref())?;
         let reg = Self::ontology_registry();
@@ -4389,7 +4488,8 @@ impl Handler {
                 return Err(format!(
                     "pack {name} writes a reserved relation (pack_meta, pack_item, \
                      and il_conversation belong to the engine)"
-                ));
+                )
+                .into());
             }
             match statement::parse_statement(line) {
                 Ok(
@@ -4405,7 +4505,8 @@ impl Handler {
                     return Err(format!(
                         "pack {name} uses a session fact (`rel(...).`); packs must use \
                          persistent inserts (`+rel[(...)]`)"
-                    ));
+                    )
+                    .into());
                 }
                 Ok(other) => {
                     return Err(format!(
@@ -4420,10 +4521,11 @@ impl Handler {
                             statement::Statement::DeleteRelationOrRule(_) => "drop",
                             _ => "unsupported statement",
                         }
-                    ));
+                    )
+                    .into());
                 }
                 Err(err) => {
-                    return Err(format!("pack {name} has an unparsable statement: {err}"));
+                    return Err(format!("pack {name} has an unparsable statement: {err}").into());
                 }
             }
         }
@@ -4446,7 +4548,8 @@ impl Handler {
                     "ontology '{name}' is already installed in '{kg}' at {pinned_version}; \
                      use .ontology upgrade {name}@{} to replace it",
                     entry.version
-                ));
+                )
+                .into());
             }
         }
         let program_copy = program.clone();
@@ -4459,13 +4562,14 @@ impl Handler {
             &self.request_control(None),
         ))
         .await?;
-        let problems = Self::result_problem_rows(&deploy);
+        let problems = Self::result_problem_rows(&deploy)?;
         if !problems.is_empty() {
             // The deploy program is one transaction: none of it was applied.
             return Err(format!(
                 "pack deployment failed; nothing was applied: {}",
                 problems.join("; ")
-            ));
+            )
+            .into());
         }
 
         let (rules_after, rels_after) = {
@@ -4509,17 +4613,19 @@ impl Handler {
         }
 
         // Bookkeeping relations; the decls may already exist.
-        let _ = Box::pin(
-            self.execute_program(
+        let declared = Box::pin(
+            self.run_execute_program(
                 session_id,
                 Some(kg.clone()),
                 "+pack_meta(name: string, version: string, digest: string)\n\
              +pack_item(pack: string, kind: string, item: string)"
                     .to_string(),
                 auth,
+                &self.request_control(None),
             ),
         )
-        .await;
+        .await?;
+        Self::result_problem_rows(&declared)?;
         // Replace any previous pin/inventory rows for this pack, then record.
         let mut record = String::new();
         record.push_str(&format!(
@@ -4545,12 +4651,13 @@ impl Handler {
             &self.request_control(None),
         ))
         .await?;
-        let record_problems = Self::result_problem_rows(&recorded);
+        let record_problems = Self::result_problem_rows(&recorded)?;
         if !record_problems.is_empty() {
             return Err(format!(
                 "pack deployed but pin/inventory recording failed: {}",
                 record_problems.join("; ")
-            ));
+            )
+            .into());
         }
 
         Ok(Self::messages_result(vec![
@@ -4575,7 +4682,7 @@ impl Handler {
         knowledge_graph: Option<String>,
         name: &str,
         auth: Option<&crate::auth::Principal>,
-    ) -> Result<QueryResult, String> {
+    ) -> Result<QueryResult, ProgramError> {
         inputlayer_ontology_client::registry::validate_component("ontology name", name)
             .map_err(|e| e.to_string())?;
         let kg = self.resolve_ontology_kg(session_id, knowledge_graph.as_ref())?;
@@ -4583,7 +4690,8 @@ impl Handler {
         if items.is_empty() {
             return Err(format!(
                 "ontology '{name}' is not installed in '{kg}' (no pack_item inventory)"
-            ));
+            )
+            .into());
         }
         // Rules and relations another installed pack also declares are
         // SHARED: dropping them would delete the other pack's data and
@@ -4595,7 +4703,8 @@ impl Handler {
             return Err(format!(
                 "every item of '{name}' in '{kg}' is shared with another installed pack; \
                  nothing to remove safely"
-            ));
+            )
+            .into());
         }
         // Rules first (they depend on the relations), as one transaction of
         // the rules still present; then each relation on its own, since
@@ -4639,6 +4748,7 @@ impl Handler {
                 &self.request_control(None),
             ))
             .await?;
+            Self::result_problem_rows(&result)?;
             for row in &result.rows {
                 if let Some(WireValue::String(s)) = row.values.first() {
                     messages.push(format!("  {s}"));
@@ -4672,7 +4782,8 @@ impl Handler {
                 "removal incomplete: still present after drop: {} \
                  (pack_meta and pack_item left in place - retry or inspect the KG)",
                 leftovers.join(", ")
-            ));
+            )
+            .into());
         }
         // Only now that the drops are verified: clear the pin and inventory.
         let cleanup = Box::pin(self.run_execute_program(
@@ -4686,7 +4797,7 @@ impl Handler {
             &self.request_control(None),
         ))
         .await?;
-        for problem in Self::result_problem_rows(&cleanup) {
+        for problem in Self::result_problem_rows(&cleanup)? {
             messages.push(format!("  warning: {problem}"));
         }
         if !retained.is_empty() {
@@ -4707,7 +4818,7 @@ impl Handler {
         knowledge_graph: Option<String>,
         spec: &str,
         auth: Option<&crate::auth::Principal>,
-    ) -> Result<QueryResult, String> {
+    ) -> Result<QueryResult, ProgramError> {
         let name = spec.split('@').next().unwrap_or(spec).to_string();
         inputlayer_ontology_client::registry::validate_component("ontology name", &name)
             .map_err(|e| e.to_string())?;
@@ -4716,7 +4827,8 @@ impl Handler {
         if items.is_empty() {
             return Err(format!(
                 "ontology '{name}' is not installed in '{kg}' - use .ontology install"
-            ));
+            )
+            .into());
         }
         let rule_items: Vec<&(String, String)> =
             items.iter().filter(|(k, _)| k == "rule").collect();
@@ -4754,22 +4866,24 @@ impl Handler {
                 &self.request_control(None),
             ))
             .await?;
-            let problems = Self::result_problem_rows(&result);
+            let problems = Self::result_problem_rows(&result)?;
             if !problems.is_empty() {
                 return Err(format!(
                     "upgrade aborted while dropping old rules: {}",
                     problems.join("; ")
-                ));
+                )
+                .into());
             }
         }
         let install = self
             .handle_ontology_install(session_id, Some(kg.clone()), spec, auth)
             .await
-            .map_err(|err| {
-                format!(
+            .map_err(|err| ProgramError {
+                code: err.code,
+                message: format!(
                     "upgrade of '{name}' in '{kg}' left the KG WITHOUT rules and unpinned \
                      (evaluation refuses until a successful install): {err}"
-                )
+                ),
             })?;
         let mut messages = vec![format!(
             "upgraded {name} in {kg} (dropped {} old rule(s), data kept)",
@@ -5099,6 +5213,8 @@ fn targets_internal_kg(stmt: &statement::Statement) -> bool {
 fn storage_error_code(error: &crate::storage::StorageError, default: ErrorCode) -> ErrorCode {
     use crate::storage::StorageError;
     match error {
+        StorageError::OutcomeUnknown { .. } => ErrorCode::OutcomeUnknown,
+        StorageError::StoreReadOnly => ErrorCode::StoreReadOnly,
         StorageError::KnowledgeGraphNotFound(_) | StorageError::RelationNotFound(..) => {
             ErrorCode::NotFound
         }
@@ -5164,7 +5280,7 @@ fn settle_result(
             .map_err(|revoked| ProgramError::from(String::from(revoked)))?;
     }
     match result.errors.as_slice() {
-        [error] if single_statement => Err(ProgramError {
+        [error] if single_statement && result.switched_kg.is_none() => Err(ProgramError {
             message: error.message.clone(),
             code: Some(error.code),
         }),
@@ -5305,6 +5421,364 @@ mod tests {
             StorageEngine::new(config).expect("storage creation failed"),
             tmp,
         )
+    }
+
+    #[tokio::test]
+    async fn durability_graph_switch_survives_unknown_owner_grant() {
+        use crate::storage::persist::wal::WalFault;
+        let (mut config, _temp) = make_test_config();
+        config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
+        config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+        let handler = Handler::from_config(config).unwrap();
+        handler.bootstrap_auth();
+        handler
+            .handle_user_create("editor", "password123", "editor")
+            .unwrap();
+        handler
+            .handle_kg_acl_grant("default", "editor", "editor")
+            .unwrap();
+        let principal = handler.authenticate_user("editor", "password123").unwrap();
+        let session = handler
+            .create_session_with_auth("default", &principal)
+            .unwrap();
+        for fault in [WalFault::Sync, WalFault::Restore, WalFault::SaveCut] {
+            handler.storage.read().inject_wal_fault(fault);
+        }
+        let result = handler
+            .execute_program_status(
+                Some(&session),
+                None,
+                ".kg create new_graph".to_string(),
+                Some(&principal),
+                &handler.request_control(None),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.switched_kg.as_deref(), Some("new_graph"));
+        assert_eq!(handler.sessions.session_kg(&session).unwrap(), "new_graph");
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].code, ErrorCode::OutcomeUnknown);
+        let switched_back = handler
+            .execute_program_status(
+                Some(&session),
+                None,
+                ".kg use default".to_string(),
+                Some(&principal),
+                &handler.request_control(None),
+            )
+            .await
+            .unwrap();
+        assert_eq!(switched_back.switched_kg.as_deref(), Some("default"));
+        assert!(switched_back.errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn durability_protocol_preserves_unknown_and_read_only() {
+        use crate::storage::persist::wal::WalFault;
+        for program in ["+r(1)", "+r(1)\n+r(2)"] {
+            let (mut config, _temp) = make_test_config();
+            config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
+            let handler = Handler::from_config(config).unwrap();
+            for fault in [WalFault::Sync, WalFault::Restore, WalFault::SaveCut] {
+                handler.storage.read().inject_wal_fault(fault);
+            }
+            let result = handler
+                .execute_program_status(
+                    None,
+                    None,
+                    program.to_string(),
+                    None,
+                    &handler.request_control(None),
+                )
+                .await;
+            if program.contains('\n') {
+                let result = result.unwrap();
+                assert_eq!(result.errors[0].code, ErrorCode::OutcomeUnknown);
+                assert!(!result.errors[0].message.contains("nothing was applied"));
+                assert!(!result.errors[0].message.contains("rolled back"));
+            } else {
+                assert_eq!(result.unwrap_err().code, Some(ErrorCode::OutcomeUnknown));
+            }
+            let error = handler
+                .execute_program_status(
+                    None,
+                    None,
+                    "+r(3)".to_string(),
+                    None,
+                    &handler.request_control(None),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, Some(ErrorCode::StoreReadOnly));
+            let result = handler
+                .execute_program_status(
+                    None,
+                    None,
+                    "?r(X)".to_string(),
+                    None,
+                    &handler.request_control(None),
+                )
+                .await;
+            assert!(!matches!(
+                result,
+                Err(ProgramError {
+                    code: Some(ErrorCode::StoreReadOnly),
+                    ..
+                })
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn durability_ontology_preserves_unknown_outcomes() {
+        use crate::storage::persist::wal::WalFault;
+        for command in [".ontology remove demo", ".ontology upgrade demo"] {
+            let (mut config, _temp) = make_test_config();
+            config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
+            let handler = Handler::from_config(config).unwrap();
+            handler.execute_program_status(None, None,
+                "+seed(1)\n+r(X) <- seed(X)\n+pack_meta[(\"demo\", \"1\", \"sha\")]\n+pack_item[(\"demo\", \"rule\", \"r\")]".to_string(), None, &handler.request_control(None)).await.unwrap();
+            for fault in [WalFault::Sync, WalFault::Restore, WalFault::SaveCut] {
+                handler.storage.read().inject_wal_fault(fault);
+            }
+            let error = handler
+                .execute_program_status(
+                    None,
+                    None,
+                    command.to_string(),
+                    None,
+                    &handler.request_control(None),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.code,
+                Some(ErrorCode::OutcomeUnknown),
+                "{command}: {error}"
+            );
+            assert!(!error.message.contains("nothing was applied"));
+            let error = handler
+                .execute_program_status(
+                    None,
+                    None,
+                    ".ontology remove demo".to_string(),
+                    None,
+                    &handler.request_control(None),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, Some(ErrorCode::StoreReadOnly));
+        }
+    }
+
+    #[test]
+    fn user_drop_cleanup_continues_after_transient_failure() {
+        use crate::auth::{Role, INTERNAL_KG};
+        use crate::storage::persist::wal::WalFault;
+
+        for with_key in [true, false] {
+            let (mut config, _temp) = make_test_config();
+            config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
+            config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+            let handler = Handler::from_config(config.clone()).unwrap();
+            handler.bootstrap_auth();
+            handler
+                .handle_user_create("bob", "password123", "viewer")
+                .unwrap();
+            handler
+                .storage
+                .write()
+                .create_knowledge_graph("private")
+                .unwrap();
+            handler
+                .handle_kg_acl_grant("private", "bob", "viewer")
+                .unwrap();
+            let key = with_key.then(|| handler.create_api_key("old-key", "bob", None).unwrap());
+            handler.storage.read().inject_wal_fault(WalFault::Sync);
+
+            let error = handler.handle_user_drop("bob").unwrap_err();
+            assert_ne!(error.code, Some(ErrorCode::OutcomeUnknown));
+            assert_ne!(error.code, Some(ErrorCode::StoreReadOnly));
+            let snapshot = handler
+                .storage
+                .read()
+                .get_snapshot_for(INTERNAL_KG)
+                .unwrap();
+            assert!(snapshot.input_tuples["users"]
+                .iter()
+                .any(|tuple| { tuple.values()[0].as_str() == Some("bob") }));
+            assert_eq!(
+                handler
+                    .get_kg_role_for_user("private", "bob", &Role::Viewer)
+                    .is_none(),
+                with_key
+            );
+            assert!(handler
+                .handle_user_create("bob", "password456", "viewer")
+                .is_err());
+
+            handler.handle_user_drop("bob").unwrap();
+            handler
+                .handle_user_create("bob", "password456", "viewer")
+                .unwrap();
+            assert!(handler
+                .get_kg_role_for_user("private", "bob", &Role::Viewer)
+                .is_none());
+            if let Some(key) = &key {
+                assert!(handler.authenticate_api_key(key).is_err());
+            }
+            handler.shutdown();
+            drop(handler);
+            let reopened = Handler::from_config(config).unwrap();
+            reopened.bootstrap_auth();
+            assert!(reopened.authenticate_user("bob", "password456").is_ok());
+            assert!(reopened
+                .get_kg_role_for_user("private", "bob", &Role::Viewer)
+                .is_none());
+            if let Some(key) = &key {
+                assert!(reopened.authenticate_api_key(key).is_err());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn kg_drop_keeps_applied_result_when_acl_cleanup_fails() {
+        use crate::storage::persist::wal::WalFault;
+
+        for (faults, typed) in [
+            (vec![WalFault::Sync], None),
+            (
+                vec![WalFault::Sync, WalFault::Restore, WalFault::SaveCut],
+                Some(ErrorCode::OutcomeUnknown),
+            ),
+        ] {
+            let (mut config, _temp) = make_test_config();
+            config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
+            config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+            let handler = Handler::from_config(config).unwrap();
+            handler.bootstrap_auth();
+            handler.storage.write().create_knowledge_graph("g").unwrap();
+            handler.handle_kg_acl_grant("g", "bob", "viewer").unwrap();
+            for fault in faults {
+                handler.storage.read().inject_wal_fault(fault);
+            }
+
+            let outcome = handler
+                .execute_program_status(
+                    None,
+                    None,
+                    ".kg drop g".to_string(),
+                    None,
+                    &handler.request_control(None),
+                )
+                .await;
+            assert!(handler.storage.read().get_snapshot_for("g").is_err());
+            match typed {
+                Some(code) => assert_eq!(outcome.unwrap_err().code, Some(code)),
+                None => {
+                    let result = outcome.unwrap();
+                    assert!(result.errors.is_empty());
+                    let messages: Vec<_> = result
+                        .rows
+                        .iter()
+                        .map(|row| format!("{:?}", row.values[0]))
+                        .collect();
+                    assert!(messages[0].contains("Knowledge graph 'g' dropped."));
+                    assert!(messages[1].contains("were not removed"), "{messages:?}");
+                    assert_eq!(result.total_count, 2);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn user_drop_cleanup_preserves_unknown_outcome() {
+        use crate::storage::persist::wal::WalFault;
+
+        let (mut config, _temp) = make_test_config();
+        config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
+        config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+        let handler = Handler::from_config(config).unwrap();
+        handler.bootstrap_auth();
+        handler
+            .handle_user_create("bob", "password123", "viewer")
+            .unwrap();
+        handler.create_api_key("old-key", "bob", None).unwrap();
+        handler
+            .handle_kg_acl_grant("default", "bob", "viewer")
+            .unwrap();
+        for fault in [WalFault::Sync, WalFault::Restore, WalFault::SaveCut] {
+            handler.storage.read().inject_wal_fault(fault);
+        }
+        assert_eq!(
+            handler.handle_user_drop("bob").unwrap_err().code,
+            Some(ErrorCode::OutcomeUnknown)
+        );
+        assert_eq!(
+            handler.handle_user_drop("bob").unwrap_err().code,
+            Some(ErrorCode::StoreReadOnly)
+        );
+    }
+
+    #[tokio::test]
+    async fn durability_admin_protocol_preserves_outcome_types() {
+        use crate::storage::persist::wal::WalFault;
+        for command in [
+            ".user create alice password123 viewer",
+            ".user drop bob",
+            ".user password bob password456",
+            ".user role bob editor",
+            ".apikey create new-key",
+            ".apikey revoke old-key",
+            ".kg acl grant default bob editor",
+            ".kg acl revoke default bob",
+        ] {
+            let (mut config, _temp) = make_test_config();
+            config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
+            config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+            let handler = Handler::from_config(config).unwrap();
+            handler.bootstrap_auth();
+            handler
+                .handle_user_create("bob", "password123", "viewer")
+                .unwrap();
+            handler.create_api_key("old-key", "bob", None).unwrap();
+            handler
+                .handle_kg_acl_grant("default", "bob", "viewer")
+                .unwrap();
+            for fault in [WalFault::Sync, WalFault::Restore, WalFault::SaveCut] {
+                handler.storage.read().inject_wal_fault(fault);
+            }
+            let error = handler
+                .execute_program_status(
+                    None,
+                    None,
+                    command.to_string(),
+                    None,
+                    &handler.request_control(None),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.code,
+                Some(ErrorCode::OutcomeUnknown),
+                "{command}: {error}"
+            );
+            let error = handler
+                .execute_program_status(
+                    None,
+                    None,
+                    command.to_string(),
+                    None,
+                    &handler.request_control(None),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.code,
+                Some(ErrorCode::StoreReadOnly),
+                "{command}: {error}"
+            );
+        }
     }
 
     #[tokio::test]

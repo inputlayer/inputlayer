@@ -693,13 +693,15 @@ components:
 
     ErrorCode:
       type: string
-      enum: [validation, not_found, conflict, unsupported, internal, invalid_request, rate_limited, deadline_exceeded, cancelled, outcome_unknown]
+      enum: [validation, not_found, conflict, unsupported, internal, invalid_request, rate_limited, deadline_exceeded, cancelled, outcome_unknown, store_read_only]
       description: |
         Why a statement or request failed. `invalid_request` (malformed frame or `id`)
         and `rate_limited` reject a whole request before anything runs.
         `deadline_exceeded` and `cancelled` stop it before it began committing, so
         nothing was applied. `outcome_unknown`: the commit failed in a way that may
         have left the changes applied; read the state back before retrying.
+        `store_read_only`: the write was refused because the store is read-only
+        until restart recovery.
 
     StatementError:
       type: object

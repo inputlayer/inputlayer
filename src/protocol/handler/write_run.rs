@@ -76,8 +76,6 @@ pub(super) struct WriteRun {
     vacant: Vec<usize>,
 }
 
-/// A program that did not commit: statement `index` failed and none of its
-/// writes took effect.
 pub(super) struct RunFailure {
     pub index: usize,
     pub code: ErrorCode,
@@ -124,8 +122,7 @@ impl QueryJob {
     ///
     /// A program whose staging read the KG is staged again, up to
     /// [`MAX_STAGE_ATTEMPTS`] times with a short random pause, if a concurrent
-    /// commit changed what it read first. On failure no statement of the run
-    /// took effect and their message rows stay vacant.
+    /// commit changed what it read first.
     pub(super) fn commit_write_run(
         &self,
         storage: &StorageEngine,
@@ -136,8 +133,11 @@ impl QueryJob {
         let commit = match self.commit_queued(storage, kg, &run.queued) {
             Ok(commit) => commit,
             Err(mut failure) => {
-                if let Some(note) = run.abandon(failure.index) {
-                    failure.message.push_str(&note);
+                let note = run.abandon(failure.index);
+                if failure.code != ErrorCode::OutcomeUnknown {
+                    if let Some(note) = note {
+                        failure.message.push_str(&note);
+                    }
                 }
                 return Err(failure);
             }
@@ -326,7 +326,12 @@ fn commit_failure(kg: &str, queued: &[Queued], error: CommitError) -> RunFailure
                 },
             }
         }
-        CommitError::Failed(error) => RunFailure {
+        CommitError::StoreReadOnly => RunFailure {
+            index: last,
+            code: ErrorCode::StoreReadOnly,
+            message: crate::storage::StorageError::StoreReadOnly.to_string(),
+        },
+        CommitError::Failed(error) | CommitError::OutcomeUnknown(error) => RunFailure {
             index: last,
             code: storage_error_code(&error, ErrorCode::Internal),
             message: error.to_string(),

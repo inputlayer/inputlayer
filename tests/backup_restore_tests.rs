@@ -319,5 +319,5 @@ async fn online_export_of_a_running_server_restores_what_it_served() {
         )
         .await
         .unwrap_err();
-    assert!(again.contains("already exists"), "{again}");
+    assert!(again.message.contains("already exists"), "{again}");
 }

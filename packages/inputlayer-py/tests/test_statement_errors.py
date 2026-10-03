@@ -12,7 +12,13 @@ from typing import Any
 
 import pytest
 
-from inputlayer import Relation, StatementError, StatementFailedError
+from inputlayer import (
+    OutcomeUnknownError,
+    Relation,
+    StatementError,
+    StatementFailedError,
+    StoreReadOnlyError,
+)
 from inputlayer.connection import Connection
 from inputlayer.exceptions import InternalError, QueryError
 from inputlayer.knowledge_graph import KnowledgeGraph
@@ -256,3 +262,31 @@ class TestMigrationRecorder:
 
         with pytest.raises(MigrationError, match="WAL append failed"):
             MigrationRecorder(FailingKG()).ensure_schema()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code,error_type", [
+    ("outcome_unknown", OutcomeUnknownError),
+    ("store_read_only", StoreReadOnlyError),
+])
+@pytest.mark.parametrize("shape", ["error", "result", "stream"])
+async def test_durability_outcomes_preserve_switch_and_drain(code, error_type, shape):
+    message = "write outcome unknown, store read-only until restart recovery"
+    errors = [{"index": 1, "code": code, "message": message}]
+    if shape == "error":
+        frames = [{"type": "error", "code": code, "message": message}]
+    elif shape == "result":
+        frames = [{**_messages(message, errors=errors), "switched_kg": "other"}]
+    else:
+        frames = TestChunkedResults()._stream(errors)
+        frames[0]["switched_kg"] = "other"
+    wire = ScriptedWire(*frames)
+    kg = _kg(wire)
+    with pytest.raises(error_type) as caught:
+        await kg.execute("+demo(1)\n+demo(2)")
+    assert caught.value.code == code
+    assert not isinstance(caught.value, StatementFailedError)
+    assert wire.drained
+    if shape != "error":
+        assert kg._conn.current_kg == "other"
+        assert caught.value.result is not None

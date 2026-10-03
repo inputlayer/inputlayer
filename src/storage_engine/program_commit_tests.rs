@@ -444,3 +444,129 @@ fn readers_never_observe_part_of_a_program() {
     reader.join().unwrap();
     assert_eq!(rows(&storage, "slot"), [t(200)]);
 }
+
+#[test]
+fn durability_unknown_commit_blocks_every_later_commit_until_restart() {
+    let temp = TempDir::new().unwrap();
+    let storage = open(&temp);
+    storage.insert_tuples_into(KG, "r", vec![t(1)]).unwrap();
+    for fault in [WalFault::Sync, WalFault::Restore, WalFault::SaveCut] {
+        storage.persist.inject_wal_fault(fault);
+    }
+    let result = storage.commit_program(KG, program(vec![vec![insert("r", vec![t(2)])]]), None);
+    assert!(matches!(result, Err(CommitError::OutcomeUnknown(_))));
+    assert_eq!(rows(&storage, "r"), [t(1)]);
+    for pending in [
+        WriteProgram::new(),
+        program(vec![vec![insert("r", vec![t(3)])]]),
+    ] {
+        assert!(matches!(
+            storage.commit_program(KG, pending, None),
+            Err(CommitError::StoreReadOnly)
+        ));
+    }
+    assert!(matches!(
+        storage.insert_tuples_into(KG, "r", vec![t(3)]),
+        Err(StorageError::StoreReadOnly)
+    ));
+    assert!(matches!(
+        storage.drop_relation_in(KG, "r"),
+        Err(StorageError::StoreReadOnly)
+    ));
+    std::mem::forget(Arc::clone(&storage.persist));
+    drop(storage);
+    let recovered = open(&temp);
+    assert_eq!(rows(&recovered, "r"), [t(1), t(2)]);
+    recovered.insert_tuples_into(KG, "r", vec![t(3)]).unwrap();
+}
+
+#[test]
+fn durability_deleted_relation_keeps_tombstone_after_unlink_sync_failure() {
+    let temp = TempDir::new().unwrap();
+    let storage = open(&temp);
+    storage.insert_tuples_into(KG, "r", vec![t(1)]).unwrap();
+    storage.persist.flush("default:r").unwrap();
+    let shards = temp.path().join("persist/shards");
+    let metas: Vec<_> = fs::read_dir(&shards)
+        .unwrap()
+        .map(|e| {
+            let path = e.unwrap().path();
+            let bytes = fs::read(&path).unwrap();
+            (path, bytes)
+        })
+        .collect();
+    crate::storage::persist::inject_sync_fault(shards);
+    storage.drop_relation_in(KG, "r").unwrap();
+    assert!(storage.persist.shard_info("default:r").is_err());
+    assert!(storage
+        .tombstones
+        .lock()
+        .relations
+        .contains(&RelationTombstone::new(KG, "r")));
+    std::mem::forget(Arc::clone(&storage.persist));
+    drop(storage);
+    for (path, bytes) in metas {
+        fs::write(path, bytes).unwrap();
+    }
+    let recovered = open(&temp);
+    assert!(rows(&recovered, "r").is_empty());
+    assert!(!recovered
+        .list_relations_in(KG)
+        .unwrap()
+        .contains(&"r".to_string()));
+}
+
+#[test]
+fn durability_wal_retirement_failure_keeps_deletion_committed() {
+    for keep_other in [false, true] {
+        for recovery in 0..3 {
+            let temp = TempDir::new().unwrap();
+            let storage = open(&temp);
+            storage.insert_tuples_into(KG, "r", vec![t(1)]).unwrap();
+            if keep_other {
+                storage.insert_tuples_into(KG, "other", vec![t(2)]).unwrap();
+            }
+            storage.persist.inject_wal_fault(WalFault::Rewrite);
+            assert!(storage.drop_relation_in(KG, "r").is_err());
+            assert_eq!(rows(&storage, "r"), [t(1)]);
+            assert!(!storage
+                .tombstones
+                .lock()
+                .relations
+                .contains(&RelationTombstone::new(KG, "r")));
+            let wal_dir = temp.path().join("persist/wal");
+            let wal_path = wal_dir.join("current.wal");
+            let before = fs::read(&wal_path).unwrap();
+            crate::storage::persist::inject_sync_fault(wal_dir.clone());
+            storage.drop_relation_in(KG, "r").unwrap();
+            assert!(storage.persist.shard_info("default:r").is_ok());
+            let tombstone = RelationTombstone::new(KG, "r");
+            assert!(storage.tombstones.lock().relations.contains(&tombstone));
+            assert!(rows(&storage, "r").is_empty());
+            if recovery == 2 {
+                crate::storage::persist::inject_sync_fault(wal_dir);
+                assert!(matches!(
+                    storage.insert_tuples_into(KG, "r", vec![t(3)]),
+                    Err(StorageError::WalDurabilityPending(_))
+                ));
+                assert!(storage.tombstones.lock().relations.contains(&tombstone));
+                storage.insert_tuples_into(KG, "r", vec![t(3)]).unwrap();
+                assert!(!storage.tombstones.lock().relations.contains(&tombstone));
+            }
+            std::mem::forget(Arc::clone(&storage.persist));
+            drop(storage);
+            if recovery == 1 {
+                fs::write(&wal_path, before).unwrap();
+            }
+            let recovered = open(&temp);
+            assert_eq!(
+                rows(&recovered, "r"),
+                if recovery == 2 { vec![t(3)] } else { vec![] }
+            );
+            assert_eq!(
+                rows(&recovered, "other"),
+                if keep_other { vec![t(2)] } else { vec![] }
+            );
+        }
+    }
+}

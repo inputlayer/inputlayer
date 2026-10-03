@@ -59,6 +59,7 @@ impl EngineHost {
             program.to_string(),
             None,
         ))
+        .map_err(|error| error.to_string())
     }
 
     /// Run a state-changing statement; engine errors are rejections.

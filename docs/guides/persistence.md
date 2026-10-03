@@ -21,7 +21,8 @@ Batch file (Parquet)
 On startup, InputLayer:
 1. Loads shard metadata from disk
 2. Reads batch files (Parquet)
-3. Replays the WAL's committed transactions
+3. Replays the WAL's committed transactions, skipping changes a shard's batch files
+   already hold
 4. Consolidates to get current state
 
 ---
@@ -138,8 +139,36 @@ one line, written with one append and, in `immediate` mode, one fsync:
 
 The trailing newline is the commit boundary. A record without it, or whose checksum
 does not match, holds no committed data. A transaction is therefore recovered
-completely or not at all, never in part. If a write or fsync fails, the record is cut
-back off the WAL before the error is returned, so a failed write is never recovered.
+completely or not at all, never in part.
+
+In `immediate` mode, a commit reported failed is never recovered after a crash,
+a committed write survives, and a deleted fact never comes back. The weaker
+crash guarantees of `batched` and `async` modes are described under
+[Durability Modes](#durability-modes). An unknown outcome is distinct from
+failure: recovery may include or discard that transaction.
+
+- If a write or fsync fails, the record is cut back off the WAL before the error is
+  returned. If even the cut fails, the length to cut back to is saved in
+  `wal/current.wal.cut` and the cut is made before the next write or at the next
+  start. If that cannot be saved either, the commit returns `OutcomeUnknown`:
+  "write outcome unknown, store read-only until restart recovery". The protocol
+  reports `outcome_unknown`, and both SDKs raise `OutcomeUnknownError`. Every later
+  write is refused with `StoreReadOnly` (`store_read_only` on the wire and
+  `StoreReadOnlyError` in the SDKs), across all knowledge graphs. Only restart
+  recovery clears this state; in-process repair cannot resume writes. Read the
+  recovered data before deciding whether to retry the uncertain transaction.
+- Once its record is in the WAL, a commit succeeds even if the flush it triggers
+  fails (for example on a full disk). The changes stay in the WAL and are flushed by
+  a later commit; the failure is logged as `persist_flush_failed`.
+- Each shard's metadata records an exclusive WAL frontier, `flushed_upper`.
+  Replay skips revisions strictly below it. The in-memory frontier advances only
+  after the batch and metadata renames and directory fsyncs succeed; on failure,
+  the buffer and WAL remain available for retry. Metadata whose rename succeeded
+  may already be visible on disk, so its batch is retained even if the following
+  directory fsync fails. Startup completes the directory durability barriers
+  before trusting the frontier, preventing duplicate replay after a crash or a
+  failed WAL retirement. Older metadata without this field defaults to zero and
+  skips no revisions.
 
 A program's rule and schema changes are in the same record as its facts. Each
 knowledge graph also keeps its rules (`rules/catalog.json`) and persistent schemas
@@ -156,7 +185,9 @@ WAL entries are compacted to Parquet when:
 - Manual flush is triggered
 - Server shutdown (clean)
 
-After compaction, the WAL is archived and cleared.
+After a flush, WAL retirement removes only changes already durable in batch or
+catalog files. Remaining changes stay in the WAL; the file is removed when none
+remain. A failed retirement can leave redundant records for recovery to skip.
 
 ---
 
@@ -196,22 +227,9 @@ Each relation is stored as a separate "shard" with its own:
 
 ### Shard Metadata
 
-```json
-{
-  "name": "default:edge",
-  "since": 0,
-  "upper": 100,
-  "batches": [
-    {
-      "id": "1",
-      "path": "batches/1.parquet",
-      "lower": 0,
-      "upper": 50,
-      "len": 100
-    }
-  ]
-}
-```
+The serialized fields are defined by
+[`ShardMeta`](https://github.com/inputlayer/inputlayer/blob/main/src/storage/persist/batch.rs).
+The frontiers and batch references have these roles:
 
 | Field | Description |
 |-------|-------------|
@@ -219,6 +237,7 @@ Each relation is stored as a separate "shard" with its own:
 | `since` | Lower bound frontier (history discarded before this) |
 | `upper` | Upper bound frontier (latest update time + 1) |
 | `batches` | List of batch file references |
+| `flushed_upper` | WAL replay frontier; see [Write-Ahead Log](#wal-record-format) |
 
 ---
 
@@ -352,21 +371,21 @@ Lists all relations with row counts.
 
 ### Normal Startup
 
-1. Load shard metadata
-2. Read Parquet batch files
-3. Replay the WAL's intact prefix of committed transactions
-4. Consolidate to current state
+See [Recovery Flow](#recovery-flow) and the replay rules under
+[Write-Ahead Log](#write-ahead-log-wal).
 
 ### Crash Recovery
 
-Same as normal startup. WAL ensures all committed writes are recovered.
+Same as normal startup, subject to the selected
+[durability mode](#durability-modes) and the
+[commit outcome rules](#wal-record-format).
 
 ### Corrupted Parquet
 
-If a batch file is corrupted:
-1. WAL entries for that batch may still be available
-2. Manually remove corrupted `.parquet` file
-3. Restart to trigger WAL replay
+Do not delete a corrupted batch to force WAL replay. Its shard's `flushed_upper`
+still excludes those revisions from replay, even if the WAL retains them. Stop
+the server and preserve the data directory for diagnosis; recover from a known
+good backup using [Backup and Restore](backup.md).
 
 ### Corrupted WAL
 

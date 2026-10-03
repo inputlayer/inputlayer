@@ -88,6 +88,7 @@ export interface TimingBreakdown {
  * leaves the changes possibly applied: read the state back before retrying.
  */
 export type ErrorCode =
+  | 'store_read_only'
   | 'validation'
   | 'not_found'
   | 'conflict'

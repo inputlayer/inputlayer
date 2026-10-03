@@ -94,6 +94,7 @@ class AuthErrorResponse:
 
 
 ErrorCode = Literal[
+    "store_read_only",
     "validation",
     "not_found",
     "conflict",

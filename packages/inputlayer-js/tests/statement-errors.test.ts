@@ -18,6 +18,8 @@ import {
   InternalError,
   QueryError,
   StatementFailedError,
+  OutcomeUnknownError,
+  StoreReadOnlyError,
   relation,
   type KnowledgeGraph,
 } from '../src/index';
@@ -395,4 +397,38 @@ describe('KG switch', () => {
     );
     expect(engine.sent).toEqual(['.kg use default']);
   });
+});
+
+
+describe('durability outcomes', () => {
+  for (const [code, errorType] of [
+    ['outcome_unknown', OutcomeUnknownError],
+    ['store_read_only', StoreReadOnlyError],
+  ] as const) {
+    for (const shape of ['error', 'result', 'stream']) {
+      it(`${code} from ${shape} preserves the session and drains replies`, async () => {
+        const message = 'write outcome unknown, store read-only until restart recovery';
+        const errors = [{ index: 1, code, message }];
+        const frames: Frame[] = shape === 'error'
+          ? [{ type: 'error', code, message }]
+          : shape === 'result'
+            ? [messages([message], errors, { switched_kg: 'elsewhere' })]
+            : [
+                { type: 'result_start', columns: ['x'], total_count: 1,
+                  truncated: false, execution_time_ms: 0, errors, switched_kg: 'elsewhere' },
+                { type: 'result_chunk', rows: [[1]], chunk_index: 0 },
+                { type: 'result_end', row_count: 1, chunk_count: 1 },
+              ];
+        const kg = await kgOn(frames, ...(shape === 'error' ? [] : [[ON_DEFAULT]]), [messages(['ok'])]);
+        const error = await kg.execute('+demo(1)\n+demo(2)').catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(errorType);
+        expect(error).not.toBeInstanceOf(StatementFailedError);
+        expect((error as QueryError).code).toBe(code);
+        await kg.execute('.status');
+        if (shape !== 'error') {
+          expect(engine?.sent.slice(-2)).toEqual(['.kg use default', '.status']);
+        }
+      });
+    }
+  }
 });

@@ -60,6 +60,8 @@ export {
   InternalError,
   QueryError,
   StatementFailedError,
+  OutcomeUnknownError,
+  StoreReadOnlyError,
 } from './errors.js';
 
 // Result

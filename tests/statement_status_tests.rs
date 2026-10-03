@@ -49,7 +49,7 @@ async fn oversized_string_insert_is_a_validation_error() {
         .execute_program(None, None, format!("+r(\"{}\")", too_long()), None)
         .await
         .expect_err("execute_program must fail too");
-    assert!(err.starts_with("String value too long"), "{err}");
+    assert!(err.message.starts_with("String value too long"), "{err}");
 }
 
 #[tokio::test]

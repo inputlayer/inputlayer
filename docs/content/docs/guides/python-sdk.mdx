@@ -716,8 +716,10 @@ from inputlayer import (
     AuthenticationError,       # bad credentials
     SchemaConflictError,       # schema mismatch on define()
     ValidationError,           # invalid data
-    QueryError,                # engine rejected a program (error frame)
+    QueryError,                # base class for program and commit errors
     StatementFailedError,      # some statements of a program failed
+    OutcomeUnknownError,       # commit outcome unknown; store may be read-only
+    StoreReadOnlyError,        # write refused until restart recovery
     QueryTimeoutError,         # query took too long
     PermissionError,           # insufficient permissions
     KnowledgeGraphNotFoundError,
@@ -733,21 +735,22 @@ try:
 except AuthenticationError:
     print("Check your credentials")
 except StatementFailedError as e:
-    # The engine ran every statement; the ones listed here failed and
-    # the others took effect.
+    # Inspect indexed errors; write-program atomicity is described in
+    # Programs Commit Together in the Core Concepts guide.
     for err in e.errors:
         print(f"statement {err.index} [{err.code}]: {err.message}")
 except QueryError as e:
-    # The engine rejected the program. e.code is "validation",
-    # "not_found", "conflict", "unsupported" or "internal" (None when
-    # there is no statement cause, e.g. an overloaded server), and
-    # e.validation_errors lists parse errors.
-    print(f"Rejected ({e.code}): {e.message}")
+    # e.code identifies the cause; e.validation_errors lists parse errors.
+    print(f"Program error ({e.code}): {e.message}")
 except InputLayerError as e:
     print(f"InputLayer error: {e}")
 ```
 
 Every SDK call that reaches the engine raises on failure: no failed statement is returned as a result row. `insert()` returns the number of facts the engine newly stored, so re-inserting an existing fact counts 0.
+
+For the typed commit-outcome exceptions and recovery before retrying a write,
+see [Persistence](persistence#wal-record-format). These exceptions inherit from
+`QueryError` and may carry the server's complete response in `result`.
 
 ## Migrations
 

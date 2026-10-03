@@ -299,3 +299,137 @@ fn intact_record_of_unknown_format_fails_open() {
     assert!(matches!(err, StorageError::WalUnreadable { .. }), "{err}");
     assert_eq!(fs::read(temp.path().join("current.wal")).unwrap(), bytes);
 }
+
+fn cut_marker(dir: &Path) -> PathBuf {
+    dir.join("current.wal.cut")
+}
+
+#[test]
+fn failed_cut_back_is_recorded_and_made_at_the_next_open() {
+    let temp = TempDir::new().unwrap();
+    let mut wal = open(temp.path());
+    wal.append(&txn(1, &["db:a"]), true).unwrap();
+    let valid_len = wal.file_size();
+    wal.inject_fault(WalFault::Sync);
+    wal.inject_fault(WalFault::Restore);
+    assert!(wal.append(&txn(2, &["db:a"]), true).is_err());
+    assert!(wal.file_size() > valid_len);
+    assert!(cut_marker(temp.path()).exists());
+    std::mem::forget(wal);
+
+    let (wal, txns) = PersistWal::open(temp.path().to_path_buf()).unwrap();
+    assert_eq!(txns, [txn(1, &["db:a"])]);
+    assert_eq!(wal.file_size(), valid_len);
+    assert!(!cut_marker(temp.path()).exists());
+}
+
+#[test]
+fn cut_marker_is_removed_before_the_next_record_is_appended() {
+    let temp = TempDir::new().unwrap();
+    let mut wal = open(temp.path());
+    wal.append(&txn(1, &["db:a"]), true).unwrap();
+    wal.inject_fault(WalFault::Sync);
+    wal.inject_fault(WalFault::Restore);
+    assert!(wal.append(&txn(2, &["db:a"]), true).is_err());
+
+    wal.append(&txn(3, &["db:a"]), true).unwrap();
+    assert!(!cut_marker(temp.path()).exists());
+    std::mem::forget(wal);
+    assert_eq!(
+        recovered(temp.path()),
+        [txn(1, &["db:a"]), txn(3, &["db:a"])]
+    );
+}
+
+#[test]
+fn unrecordable_cut_back_reports_an_unknown_outcome_and_blocks_writes() {
+    let temp = TempDir::new().unwrap();
+    let mut wal = open(temp.path());
+    wal.append(&txn(1, &["db:a"]), true).unwrap();
+    wal.inject_fault(WalFault::Sync);
+    wal.inject_fault(WalFault::Restore);
+    wal.inject_fault(WalFault::SaveCut);
+
+    let err = wal.append(&txn(2, &["db:a"]), true).unwrap_err();
+    assert!(matches!(err, StorageError::OutcomeUnknown { .. }), "{err}");
+    assert!(!cut_marker(temp.path()).exists());
+    assert_eq!(wal.repair, Some(Repair::ToLength(wal.len)));
+    assert!(matches!(
+        wal.append(&txn(3, &["db:a"]), true),
+        Err(StorageError::StoreReadOnly)
+    ));
+    assert!(matches!(wal.read_all(), Err(StorageError::StoreReadOnly)));
+    drop(wal);
+    assert_eq!(
+        recovered(temp.path()),
+        [txn(1, &["db:a"]), txn(2, &["db:a"])]
+    );
+}
+
+#[test]
+fn unreadable_cut_marker_fails_open_and_keeps_the_file() {
+    let temp = TempDir::new().unwrap();
+    let mut wal = open(temp.path());
+    wal.append(&txn(1, &["db:a"]), true).unwrap();
+    drop(wal);
+    fs::write(cut_marker(temp.path()), "not a length").unwrap();
+    let before = fs::read(temp.path().join("current.wal")).unwrap();
+
+    assert!(PersistWal::open(temp.path().to_path_buf()).is_err());
+    assert_eq!(fs::read(temp.path().join("current.wal")).unwrap(), before);
+}
+
+#[test]
+fn cut_never_extends_a_shorter_file() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("current.wal");
+    fs::write(&path, b"abc").unwrap();
+    cut_file(&path, 10).unwrap();
+    assert_eq!(fs::read(&path).unwrap(), b"abc");
+}
+
+#[test]
+fn durability_repair_retries_sync_even_when_length_matches() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("current.wal");
+    fs::write(&path, b"abcdef").unwrap();
+    for _ in 0..2 {
+        super::super::inject_sync_fault(path.clone());
+        assert!(cut_file(&path, 3).is_err());
+        assert_eq!(fs::metadata(&path).unwrap().len(), 3);
+    }
+    cut_file(&path, 3).unwrap();
+}
+
+#[test]
+fn durability_repair_retries_sync_absent_marker_live_and_on_open() {
+    for live in [false, true] {
+        let temp = TempDir::new().unwrap();
+        let mut wal = open(temp.path());
+        wal.append(&txn(1, &["db:a"]), true).unwrap();
+        wal.inject_fault(WalFault::Sync);
+        wal.inject_fault(WalFault::Restore);
+        assert!(wal.append(&txn(2, &["db:a"]), true).is_err());
+        if live {
+            for _ in 0..2 {
+                super::super::inject_sync_fault(temp.path().to_path_buf());
+                assert!(wal.append(&txn(3, &["db:a"]), true).is_err());
+                assert!(!cut_marker(temp.path()).exists());
+            }
+            wal.append(&txn(3, &["db:a"]), true).unwrap();
+            std::mem::forget(wal);
+            assert_eq!(
+                recovered(temp.path()),
+                [txn(1, &["db:a"]), txn(3, &["db:a"])]
+            );
+        } else {
+            std::mem::forget(wal);
+            for _ in 0..2 {
+                super::super::inject_sync_fault(temp.path().to_path_buf());
+                assert!(PersistWal::open(temp.path().to_path_buf()).is_err());
+                assert!(!cut_marker(temp.path()).exists());
+            }
+            assert_eq!(recovered(temp.path()), [txn(1, &["db:a"])]);
+        }
+    }
+}

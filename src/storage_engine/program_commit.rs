@@ -35,16 +35,19 @@ impl StorageEngine {
     /// a later stop cannot interrupt it.
     ///
     /// # Errors
-    /// See [`CommitError`]; on any error but [`CommitError::Unknown`] nothing
-    /// was written or published.
+    /// See [`CommitError`]. On any error but [`CommitError::Unknown`] and
+    /// [`CommitError::OutcomeUnknown`] nothing was written or published; an
+    /// unknown outcome requires restart recovery before the caller can
+    /// determine whether the transaction persisted.
     pub fn commit_program(
         &self,
         kg: &str,
         program: WriteProgram,
         control: Option<&RequestControl>,
     ) -> Result<ProgramCommit, CommitError> {
-        let handle = self.kg_handle(kg).map_err(CommitError::Failed)?;
-        let mut db = Self::lock_live(&handle, kg).map_err(CommitError::Failed)?;
+        self.persist.check_writable().map_err(CommitError::from)?;
+        let handle = self.kg_handle(kg).map_err(CommitError::from)?;
+        let mut db = Self::lock_live(&handle, kg).map_err(CommitError::from)?;
         if !program.read_holds_in(&db.snapshot.load()) {
             return Err(CommitError::Stale);
         }
@@ -59,7 +62,7 @@ impl StorageEngine {
         for name in written {
             if settled.insert(name) {
                 self.settle_relation_drop(&mut db, kg, name)
-                    .map_err(CommitError::Failed)?;
+                    .map_err(CommitError::from)?;
             }
         }
 
@@ -86,7 +89,7 @@ impl StorageEngine {
         let mut txn = transaction(kg, time, &facts);
         catalog.write_to(&mut txn, kg);
         let persist_start = Instant::now();
-        self.persist.commit(txn).map_err(CommitError::Failed)?;
+        self.persist.commit(txn).map_err(CommitError::from)?;
         info!(
             kg = %kg,
             relations = facts.len(),

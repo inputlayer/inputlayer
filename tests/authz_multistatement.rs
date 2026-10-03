@@ -65,16 +65,16 @@ async fn run(
     kg: &str,
     program: &str,
     who: &Principal,
-) -> Result<QueryResult, String> {
+) -> Result<QueryResult, inputlayer::protocol::ProgramError> {
     handler
         .execute_program(None, Some(kg.to_string()), program.to_string(), Some(who))
         .await
 }
 
-fn assert_denied(result: Result<QueryResult, String>) {
+fn assert_denied(result: Result<QueryResult, inputlayer::protocol::ProgramError>) {
     match result {
         Err(e) => assert!(
-            e.contains("Access denied") || e.contains("Permission denied"),
+            e.message.contains("Access denied") || e.message.contains("Permission denied"),
             "unexpected error: {e}"
         ),
         Ok(r) => panic!("expected denial, got {:?}", r.rows),
@@ -267,7 +267,7 @@ async fn run_in_session(
     sid: &String,
     program: &str,
     who: &Principal,
-) -> Result<QueryResult, String> {
+) -> Result<QueryResult, inputlayer::protocol::ProgramError> {
     handler
         .execute_program(Some(sid), None, program.to_string(), Some(who))
         .await

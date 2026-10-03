@@ -59,8 +59,8 @@ class QueryTimeoutError(InputLayerError):
 class QueryError(InputLayerError):
     """The engine rejected a program: it answered with an ``error`` frame.
 
-    ``code`` says why (``validation``, ``not_found``, ``conflict``,
-    ``unsupported`` or ``internal``). It is ``None`` when the failure has no
+    ``code`` says why (an ``ErrorCode`` such as ``validation`` or
+    ``not_found``). It is ``None`` when the failure has no
     statement cause, such as an overloaded or shutting-down server or a
     result too large to send. ``validation_errors`` lists parse errors.
     """
@@ -87,6 +87,31 @@ class QueryError(InputLayerError):
                 query = query[:_QUERY_PREVIEW_CHARS] + "..."
             return f"{base}\n  query: {query}"
         return base
+
+
+class OutcomeUnknownError(QueryError):
+    """Write outcome unknown; the store may be read-only until restart.
+
+    If so, a following write raises ``StoreReadOnlyError``.
+
+    The transaction may or may not survive restart; read the recovered data
+    before retrying it. ``result`` holds the server's response when it has one.
+    """
+
+    def __init__(self, message: str, result: ResultResponse | None = None) -> None:
+        super().__init__(message, code="outcome_unknown")
+        self.result = result
+
+
+class StoreReadOnlyError(QueryError):
+    """A write was refused because an earlier outcome is unknown.
+
+    Every write fails until the server restarts and runs recovery.
+    """
+
+    def __init__(self, message: str, result: ResultResponse | None = None) -> None:
+        super().__init__(message, code="store_read_only")
+        self.result = result
 
 
 class StatementFailedError(QueryError):

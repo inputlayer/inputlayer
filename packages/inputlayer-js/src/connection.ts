@@ -20,6 +20,8 @@ import {
   InternalError,
   QueryError,
   StatementFailedError,
+  OutcomeUnknownError,
+  StoreReadOnlyError,
 } from './errors.js';
 import { type NotificationEvent, NotificationDispatcher } from './notifications.js';
 
@@ -273,6 +275,10 @@ export class Connection {
     if (result.switched_kg) {
       this._currentKg = result.switched_kg;
     }
+    const unknown = result.errors?.find((e) => e.code === 'outcome_unknown');
+    if (unknown) throw new OutcomeUnknownError(unknown.message, result);
+    const readOnly = result.errors?.find((e) => e.code === 'store_read_only');
+    if (readOnly) throw new StoreReadOnlyError(readOnly.message, result);
     if (result.errors && result.errors.length > 0) {
       throw new StatementFailedError(result.errors, result);
     }
@@ -427,6 +433,8 @@ export class Connection {
 }
 
 function queryError(response: ErrorResponse): QueryError {
+  if (response.code === 'outcome_unknown') return new OutcomeUnknownError(response.message);
+  if (response.code === 'store_read_only') return new StoreReadOnlyError(response.message);
   return new QueryError(response.message, {
     code: response.code,
     validationErrors: response.validation_errors,

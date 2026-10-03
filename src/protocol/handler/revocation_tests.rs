@@ -58,6 +58,7 @@ async fn run_proof(
             Some(principal),
         )
         .await
+        .map_err(|e| e.message)
 }
 
 // Current-thread runtime: the hook is set on the thread that polls

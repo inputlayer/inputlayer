@@ -3,13 +3,17 @@
 //! The WAL makes each committed [`Transaction`] durable until its updates are flushed
 //! to batch files. Every transaction is one record (see the `wal_record` module), written
 //! with one append and, when durable, one fsync. A failed append is cut back off the
-//! file, so the WAL never holds a transaction whose commit returned an error.
+//! file before an ordinary failure is reported. When the cut fails it is recorded
+//! durably (see the `wal_cut` module) and made before
+//! the next write or at the next open; when even that record fails, the append
+//! reports [`StorageError::OutcomeUnknown`]: its outcome is unknown, not failed.
 //!
 //! Rule and schema changes stay in the WAL until their knowledge graph's catalog
 //! files are saved (see the `catalog_log` module).
 
 use super::sync_directory;
 use super::transaction::{Transaction, TxnOp};
+use super::wal_cut;
 use super::wal_record;
 use crate::storage::{StorageError, StorageResult};
 use std::fs::{self, File, OpenOptions};
@@ -35,6 +39,10 @@ pub(crate) enum WalFault {
     Sync,
     /// Cutting a failed record back off the file fails.
     Restore,
+    /// Saving the cut that could not be made fails.
+    SaveCut,
+    /// Rewriting the WAL to retire records fails.
+    Rewrite,
 }
 
 /// Write-Ahead Log writer
@@ -49,6 +57,7 @@ pub struct PersistWal {
     len: u64,
     /// A failed write left bytes that could not be cut off; repair before the next write
     repair: Option<Repair>,
+    read_only: bool,
     #[cfg(test)]
     faults: Vec<WalFault>,
 }
@@ -65,13 +74,14 @@ impl PersistWal {
     /// I/O failures, and [`StorageError::WalUnreadable`] for an intact record this
     /// server cannot decode.
     pub fn open(wal_dir: PathBuf) -> StorageResult<(Self, Vec<Transaction>)> {
-        fs::create_dir_all(&wal_dir)?;
+        super::create_directory(&wal_dir)?;
         let wal = PersistWal {
             current_file: wal_dir.join("current.wal"),
             wal_dir,
             writer: None,
             len: 0,
             repair: None,
+            read_only: false,
             #[cfg(test)]
             faults: Vec::new(),
         };
@@ -80,7 +90,17 @@ impl PersistWal {
     }
 
     /// Cut the file after its intact prefix and return that prefix's transactions.
+    /// A cut recorded by a failed append is made first.
     fn recover(&self) -> StorageResult<Vec<Transaction>> {
+        if let Some(len) = wal_cut::load(&self.wal_dir)? {
+            if self.current_file.exists() {
+                cut_file(&self.current_file, len)?;
+            }
+        }
+        if self.current_file.exists() {
+            File::open(&self.current_file)?.sync_all()?;
+        }
+        wal_cut::remove(&self.wal_dir)?;
         let Some(bytes) = self.read_file()? else {
             return Ok(Vec::new());
         };
@@ -124,7 +144,7 @@ impl PersistWal {
             .open(&path)?;
         file.write_all(bytes)?;
         file.sync_all()?;
-        sync_directory(&self.wal_dir);
+        sync_directory(&self.wal_dir)?;
         Ok(path)
     }
 
@@ -139,26 +159,27 @@ impl PersistWal {
     /// Restore the file to a committed state after a write failed to.
     fn apply_repair(&mut self, repair: Repair) -> StorageResult<()> {
         match repair {
-            Repair::ToLength(len) => cut_file(&self.current_file, len),
+            Repair::ToLength(len) => {
+                cut_file(&self.current_file, len)?;
+                Ok(wal_cut::remove(&self.wal_dir)?)
+            }
             Repair::ToIntactPrefix => self.recover().map(drop),
         }
     }
 
     /// Ensure writer is open
     fn ensure_writer(&mut self) -> StorageResult<&mut BufWriter<File>> {
+        self.check_writable()?;
         if self.writer.is_none() {
             if let Some(repair) = self.repair {
                 self.apply_repair(repair)?;
                 self.repair = None;
             }
-            let created = !self.current_file.exists();
             let file = OpenOptions::new()
                 .create(true)
                 .append(true)
                 .open(&self.current_file)?;
-            if created {
-                sync_directory(&self.wal_dir);
-            }
+            sync_directory(&self.wal_dir)?;
             self.len = file.metadata()?.len();
             self.writer = Some(BufWriter::new(file));
         }
@@ -171,17 +192,40 @@ impl PersistWal {
     /// Append one transaction as one record. With `durable`, flush and fsync it
     /// before returning; otherwise it may sit in the buffer until [`Self::sync`].
     ///
-    /// All-or-nothing: on error the file is cut back to its prior length, so the
-    /// transaction is never recovered and the next record never follows a torn one.
+    /// Before reporting an ordinary failure, cut the file back to its prior length
+    /// or durably record that cut. An unknown outcome instead closes the WAL to
+    /// further writes until restart recovery.
+    ///
+    /// # Errors
+    /// [`StorageError::OutcomeUnknown`] when the cut can be neither made nor
+    /// recorded, so a restart may recover the transaction.
     pub fn append(&mut self, txn: &Transaction, durable: bool) -> StorageResult<()> {
         let record = wal_record::encode(txn)?;
         self.ensure_writer()?;
         let len = self.len;
-        let result = self.write_record(&record, durable);
-        if result.is_err() {
-            self.discard_writer(Repair::ToLength(len));
+        let Err(write) = self.write_record(&record, durable) else {
+            return Ok(());
+        };
+        self.discard_writer(Repair::ToLength(len));
+        if self.repair.is_some() {
+            if let Err(undo) = self.save_cut(len) {
+                self.read_only = true;
+                return Err(StorageError::OutcomeUnknown {
+                    write: write.to_string(),
+                    undo: undo.to_string(),
+                });
+            }
         }
-        result
+        Err(write)
+    }
+
+    /// Record durably that the file must be cut back to `len`.
+    fn save_cut(&mut self, len: u64) -> std::io::Result<()> {
+        #[cfg(test)]
+        if self.take_fault(WalFault::SaveCut) {
+            return Err(std::io::Error::other("injected WAL fault: SaveCut"));
+        }
+        wal_cut::save(&self.wal_dir, len)
     }
 
     fn write_record(&mut self, record: &[u8], durable: bool) -> StorageResult<()> {
@@ -255,6 +299,7 @@ impl PersistWal {
     /// Close the writer with every buffered record in the file and any pending repair
     /// applied, so the file holds exactly the committed transactions.
     fn settle(&mut self) -> StorageResult<()> {
+        self.check_writable()?;
         self.flush_writer(false)?;
         self.writer = None;
         if let Some(repair) = self.repair {
@@ -287,20 +332,19 @@ impl PersistWal {
 
     /// Clear the WAL (after successful flush to batch files)
     pub fn clear(&mut self) -> StorageResult<()> {
-        self.writer = None;
-        self.repair = None;
+        self.settle()?;
 
         // The caller has already flushed all data to batch files, so the WAL
         // records are redundant.
         if self.current_file.exists() {
             fs::remove_file(&self.current_file)?;
-            sync_directory(&self.wal_dir);
         }
-        Ok(())
+        self.sync_retirement()
     }
 
     /// Sync WAL to disk (flushes buffer and calls fsync)
     pub fn sync(&mut self) -> StorageResult<()> {
+        self.check_writable()?;
         self.flush_writer(true)
     }
 
@@ -317,6 +361,10 @@ impl PersistWal {
     /// `current.wal.new`, synced, then renamed over `current.wal`. A crash at any
     /// point leaves either the old or the new WAL.
     pub fn retain_ops(&mut self, mut keep: impl FnMut(u64, &TxnOp) -> bool) -> StorageResult<()> {
+        #[cfg(test)]
+        if self.take_fault(WalFault::Rewrite) {
+            return Err(injected(WalFault::Rewrite));
+        }
         let mut txns = self.read_all()?;
         let mut changed = false;
         for txn in &mut txns {
@@ -324,7 +372,7 @@ impl PersistWal {
             changed |= txn.retain(|op| keep(revision, op));
         }
         if !changed {
-            return Ok(());
+            return self.sync_retirement();
         }
         txns.retain(|txn| !txn.is_empty());
 
@@ -349,8 +397,11 @@ impl PersistWal {
 
         // On POSIX, rename is atomic - either the old or new file is visible.
         fs::rename(&new_file, &self.current_file)?;
-        sync_directory(&self.wal_dir);
-        Ok(())
+        self.sync_retirement()
+    }
+
+    fn sync_retirement(&self) -> StorageResult<()> {
+        sync_directory(&self.wal_dir).map_err(StorageError::WalDurabilityPending)
     }
 
     /// Remove stale .archived WAL files left over from previous runs.
@@ -377,6 +428,14 @@ impl PersistWal {
             }
         }
         Ok(())
+    }
+
+    pub(crate) fn check_writable(&self) -> StorageResult<()> {
+        if self.read_only {
+            Err(StorageError::StoreReadOnly)
+        } else {
+            Ok(())
+        }
     }
 
     /// Get WAL file size
@@ -416,10 +475,15 @@ fn injected(fault: WalFault) -> StorageError {
     std::io::Error::other(format!("injected WAL fault: {fault:?}")).into()
 }
 
-/// Cut `path` to `len` bytes and make that durable.
+/// Cut `path` to at most `len` bytes and make that durable. A shorter file is
+/// left alone: extending it would write zeros that read as damage.
 fn cut_file(path: &Path, len: u64) -> StorageResult<()> {
     let file = OpenOptions::new().write(true).open(path)?;
-    file.set_len(len)?;
+    if file.metadata()?.len() > len {
+        file.set_len(len)?;
+    }
+    #[cfg(test)]
+    super::check_sync_fault(path)?;
     file.sync_all()?;
     Ok(())
 }

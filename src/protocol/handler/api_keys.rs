@@ -13,9 +13,10 @@ use std::time::Duration;
 
 use tracing::{info, warn};
 
-use super::{now_ms, Handler};
+use super::{now_ms, Handler, ProgramError};
 use crate::auth::{self, ApiKeyRecord, ApiKeyTimes, ExpireRejected, KeyUsage};
 use crate::protocol::wire::{ColumnDef, QueryResult, WireDataType, WireTuple, WireValue};
+use crate::storage::StorageError;
 use crate::storage_engine::{KnowledgeGraphSnapshot, StorageEngine};
 use crate::value::{Tuple, Value};
 
@@ -60,7 +61,10 @@ pub(super) fn read_api_keys(snapshot: &KnowledgeGraphSnapshot) -> Vec<ApiKeyReco
 
 /// Persist a new key: its times first, so a crash never leaves it without
 /// its expiry.
-pub(super) fn store_api_key(storage: &StorageEngine, record: &ApiKeyRecord) -> Result<(), String> {
+pub(super) fn store_api_key(
+    storage: &StorageEngine,
+    record: &ApiKeyRecord,
+) -> Result<(), StorageError> {
     let times: Vec<Tuple> = [
         (CREATED_AT, record.times.created_at),
         (EXPIRES_AT, record.times.expires_at),
@@ -68,30 +72,25 @@ pub(super) fn store_api_key(storage: &StorageEngine, record: &ApiKeyRecord) -> R
     .into_iter()
     .filter_map(|(field, at)| Some(time_row(&record.key_hash, field, at?)))
     .collect();
-    storage
-        .insert_tuples_into(auth::INTERNAL_KG, API_KEY_TIMES, times)
-        .map_err(|e| e.to_string())?;
+    storage.insert_tuples_into(auth::INTERNAL_KG, API_KEY_TIMES, times)?;
     storage
         .insert_tuples_into(auth::INTERNAL_KG, API_KEYS, vec![key_row(record)])
         .map(drop)
-        .map_err(|e| e.to_string())
 }
 
-/// Delete the stored keys `matches` selects, then their times. Returns how
-/// many keys were deleted.
+/// Delete the stored keys `matches` selects, then their times. Returns the
+/// labels of the deleted keys.
 pub(super) fn delete_api_keys(
     storage: &StorageEngine,
     snapshot: &KnowledgeGraphSnapshot,
     matches: impl Fn(&ApiKeyRecord) -> bool,
-) -> Result<usize, String> {
+) -> Result<Vec<String>, StorageError> {
     let doomed: Vec<ApiKeyRecord> = read_api_keys(snapshot)
         .into_iter()
         .filter(matches)
         .collect();
     let keys = doomed.iter().map(key_row).collect();
-    storage
-        .delete_tuples_from(auth::INTERNAL_KG, API_KEYS, keys)
-        .map_err(|e| e.to_string())?;
+    storage.delete_tuples_from(auth::INTERNAL_KG, API_KEYS, keys)?;
     let times = snapshot
         .input_tuples
         .get(API_KEY_TIMES)
@@ -103,11 +102,14 @@ pub(super) fn delete_api_keys(
         })
         .cloned()
         .collect();
-    // The keys are gone; their times are only clutter now.
-    if let Err(e) = storage.delete_tuples_from(auth::INTERNAL_KG, API_KEY_TIMES, times) {
-        warn!(error = %e, "apikey_times_cleanup_failed");
+    // The keys are gone; their times are only clutter now, unless the
+    // cleanup's outcome is unknown.
+    match storage.delete_tuples_from(auth::INTERNAL_KG, API_KEY_TIMES, times) {
+        Err(e @ StorageError::OutcomeUnknown { .. }) => return Err(e),
+        Err(e) => warn!(error = %e, "apikey_times_cleanup_failed"),
+        Ok(_) => {}
     }
-    Ok(doomed.len())
+    Ok(doomed.into_iter().map(|key| key.label).collect())
 }
 
 /// Set `field` of each key to its new time: insert the new rows, then delete
@@ -116,17 +118,13 @@ fn replace_times(
     storage: &StorageEngine,
     field: &str,
     updates: &[(&str, u64)],
-) -> Result<(), String> {
+) -> Result<(), StorageError> {
     let new: Vec<Tuple> = updates
         .iter()
         .map(|&(hash, at)| time_row(hash, field, at))
         .collect();
-    storage
-        .insert_tuples_into(auth::INTERNAL_KG, API_KEY_TIMES, new.clone())
-        .map_err(|e| e.to_string())?;
-    let snapshot = storage
-        .get_snapshot_for(auth::INTERNAL_KG)
-        .map_err(|e| e.to_string())?;
+    storage.insert_tuples_into(auth::INTERNAL_KG, API_KEY_TIMES, new.clone())?;
+    let snapshot = storage.get_snapshot_for(auth::INTERNAL_KG)?;
     let replaced: Vec<Tuple> = snapshot
         .input_tuples
         .get(API_KEY_TIMES)
@@ -145,7 +143,6 @@ fn replace_times(
     storage
         .delete_tuples_from(auth::INTERNAL_KG, API_KEY_TIMES, replaced)
         .map(drop)
-        .map_err(|e| e.to_string())
 }
 
 impl Handler {
@@ -155,7 +152,7 @@ impl Handler {
         label: &str,
         owner: &str,
         ttl: Option<Duration>,
-    ) -> Result<QueryResult, String> {
+    ) -> Result<QueryResult, ProgramError> {
         let (plaintext_key, times) = self.create_api_key_with_times(label, owner, ttl)?;
         let row = WireTuple {
             values: vec![
@@ -180,7 +177,7 @@ impl Handler {
         label: &str,
         owner: &str,
         ttl: Option<Duration>,
-    ) -> Result<String, String> {
+    ) -> Result<String, ProgramError> {
         self.create_api_key_with_times(label, owner, ttl)
             .map(|(key, _)| key)
     }
@@ -190,16 +187,14 @@ impl Handler {
         label: &str,
         owner: &str,
         ttl: Option<Duration>,
-    ) -> Result<(String, ApiKeyTimes), String> {
+    ) -> Result<(String, ApiKeyTimes), ProgramError> {
         let storage = self.storage.read();
-        let snapshot = storage
-            .get_snapshot_for(auth::INTERNAL_KG)
-            .map_err(|e| format!("Auth storage error: {e}"))?;
+        let snapshot = storage.get_snapshot_for(auth::INTERNAL_KG)?;
         if read_api_keys(&snapshot)
             .iter()
             .any(|key| key.label == label)
         {
-            return Err(format!("API key with label '{label}' already exists"));
+            return Err(format!("API key with label '{label}' already exists").into());
         }
 
         let plaintext_key = auth::generate_api_key();
@@ -215,7 +210,7 @@ impl Handler {
                 last_used_at: None,
             },
         };
-        store_api_key(&storage, &record).map_err(|e| format!("Failed to create API key: {e}"))?;
+        store_api_key(&storage, &record)?;
         let times = record.times;
         self.credentials.put_key(record);
 
@@ -255,7 +250,11 @@ impl Handler {
 
     /// `.apikey expire`: bring a key's expiry forward to `ttl` from now. Its
     /// sessions end when that passes; a zero `ttl` ends them now.
-    pub fn handle_apikey_expire(&self, label: &str, ttl: Duration) -> Result<QueryResult, String> {
+    pub fn handle_apikey_expire(
+        &self,
+        label: &str,
+        ttl: Duration,
+    ) -> Result<QueryResult, ProgramError> {
         let at = now_ms().saturating_add(u64::try_from(ttl.as_millis()).unwrap_or(u64::MAX));
         let key_hash = self
             .credentials
@@ -268,8 +267,7 @@ impl Handler {
                      an expiry can only be brought forward"
                 ),
             })?;
-        replace_times(&self.storage.read(), EXPIRES_AT, &[(&key_hash, at)])
-            .map_err(|e| format!("Failed to set API key expiry: {e}"))?;
+        replace_times(&self.storage.read(), EXPIRES_AT, &[(&key_hash, at)])?;
         self.credentials.expire_key(&key_hash, at);
 
         info!(label, expires_at = at, "audit_apikey_expiry_set");
@@ -281,15 +279,12 @@ impl Handler {
     }
 
     /// `.apikey revoke`: delete a key and end its sessions now.
-    pub fn handle_apikey_revoke(&self, label: &str) -> Result<QueryResult, String> {
+    pub fn handle_apikey_revoke(&self, label: &str) -> Result<QueryResult, ProgramError> {
         let storage = self.storage.read();
-        let snapshot = storage
-            .get_snapshot_for(auth::INTERNAL_KG)
-            .map_err(|e| format!("Auth storage error: {e}"))?;
-        let deleted = delete_api_keys(&storage, &snapshot, |key| key.label == label)
-            .map_err(|e| format!("Failed to revoke API key: {e}"))?;
-        if deleted == 0 {
-            return Err(format!("API key '{label}' not found"));
+        let snapshot = storage.get_snapshot_for(auth::INTERNAL_KG)?;
+        let deleted = delete_api_keys(&storage, &snapshot, |key| key.label == label)?;
+        if deleted.is_empty() {
+            return Err(format!("API key '{label}' not found").into());
         }
         self.credentials.revoke_key(label);
         info!(label, "audit_apikey_revoked");

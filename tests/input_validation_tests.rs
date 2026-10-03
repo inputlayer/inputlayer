@@ -196,7 +196,7 @@ async fn test_session_rule_double_underscore_prefix_rejected_in_execute_program(
     );
     let err = result.unwrap_err();
     assert!(
-        err.contains("reserved") || err.contains("__"),
+        err.message.contains("reserved") || err.message.contains("__"),
         "Error should mention reserved prefix, got: {err}"
     );
 }

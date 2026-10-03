@@ -294,8 +294,14 @@ impl StorageEngine {
     /// Maximum allowed byte length for a knowledge graph name.
     pub const MAX_KG_NAME_BYTES: usize = naming::MAX_KG_NAME_BYTES;
 
+    #[cfg(test)]
+    pub(crate) fn inject_wal_fault(&self, fault: crate::storage::persist::wal::WalFault) {
+        self.persist.inject_wal_fault(fault);
+    }
+
     /// Create a new knowledge graph
     pub fn create_knowledge_graph(&self, name: &str) -> StorageResult<()> {
+        self.persist.check_writable()?;
         let start = Instant::now();
         naming::validate_kg_name(name).map_err(StorageError::InvalidName)?;
 
@@ -358,6 +364,7 @@ impl StorageEngine {
     /// Returns a `KgDropCleanup` token for Phase 2.
     /// Uses interior mutability (DashMap + RwLock) so only needs `&self`.
     pub fn prepare_drop_knowledge_graph(&self, name: &str) -> StorageResult<KgDropCleanup> {
+        self.persist.check_writable()?;
         let start = Instant::now();
         // Cannot drop default knowledge graph
         if name == self.config.storage.default_knowledge_graph {
@@ -896,6 +903,7 @@ impl StorageEngine {
 
     /// Save a specific knowledge graph to disk (flush persist buffers)
     pub fn save_knowledge_graph(&self, name: &str) -> StorageResult<()> {
+        self.persist.check_writable()?;
         // Check knowledge graph exists
         if !self.knowledge_graphs.contains_key(name) {
             return Err(StorageError::KnowledgeGraphNotFound(name.to_string()));
@@ -1036,6 +1044,7 @@ impl StorageEngine {
     /// write brings the relation back. If the shard cannot be deleted and
     /// nothing changed, returns the error and the relation stays.
     pub fn drop_relation_in(&self, kg: &str, name: &str) -> StorageResult<()> {
+        self.persist.check_writable()?;
         let db = self.kg_handle(kg)?;
         let mut db = Self::lock_live(&db, kg)?;
         if !db.has_relation(name) {
@@ -1054,7 +1063,8 @@ impl StorageEngine {
                 t.relations.insert(tombstone.clone());
             })?;
             if let Err(e) = self.persist.delete_shard(&shard) {
-                let rolled_back = self.persist.shard_info(&shard).is_ok()
+                let rolled_back = !matches!(e, StorageError::WalDurabilityPending(_))
+                    && self.persist.shard_info(&shard).is_ok()
                     && self
                         .update_tombstones(|t| {
                             t.relations.remove(&tombstone);
@@ -1347,6 +1357,7 @@ impl StorageEngine {
     where
         F: FnOnce(&mut KnowledgeGraph) -> Result<T, String>,
     {
+        self.persist.check_writable()?;
         let db = self
             .knowledge_graphs
             .get(kg)
