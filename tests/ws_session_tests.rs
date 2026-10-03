@@ -2,6 +2,7 @@
 //! WI-03: Session cleanup tests.
 //! WI-10: Broadcast notification tests.
 
+use inputlayer::protocol::notification_log::Cursor;
 use inputlayer::protocol::Handler;
 use inputlayer::{Config, StorageEngine};
 use tempfile::TempDir;
@@ -193,24 +194,40 @@ async fn test_notification_seq_monotonic() {
     );
 }
 
+/// A cursor in `handler`'s current stream epoch.
+fn cursor(handler: &Handler, last_seq: u64) -> Cursor {
+    Cursor {
+        epoch: Some(handler.notifications().epoch().to_string()),
+        last_seq,
+    }
+}
+
 #[tokio::test]
-async fn test_get_notifications_since_returns_missed() {
+async fn test_resume_replays_notifications_after_the_cursor() {
     let (handler, _tmp) = create_test_handler();
     handler.notify_persistent_update("default", "a", "insert", 1);
     handler.notify_persistent_update("default", "b", "insert", 2);
     handler.notify_persistent_update("default", "c", "insert", 3);
 
-    let missed = handler.get_notifications_since(1);
+    let missed = handler
+        .notifications()
+        .resume(Some(&cursor(&handler, 1)))
+        .replay
+        .unwrap();
     assert_eq!(missed.len(), 2, "Should return 2 notifications after seq 1");
     assert_eq!(missed[0].seq(), 2);
     assert_eq!(missed[1].seq(), 3);
 }
 
 #[tokio::test]
-async fn test_get_notifications_since_empty_when_caught_up() {
+async fn test_resume_replays_nothing_when_caught_up() {
     let (handler, _tmp) = create_test_handler();
     handler.notify_persistent_update("default", "a", "insert", 1);
-    let missed = handler.get_notifications_since(1);
+    let missed = handler
+        .notifications()
+        .resume(Some(&cursor(&handler, 1)))
+        .replay
+        .unwrap();
     assert!(
         missed.is_empty(),
         "Should be empty when caught up to latest seq"

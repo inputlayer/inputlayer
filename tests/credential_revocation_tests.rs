@@ -382,12 +382,13 @@ async fn kg_and_internal_notices_reach_only_authorized_sessions() {
     assert_eq!(seen_by_admin[0]["knowledge_graph"], "private_kg");
 
     // Replay on reconnect applies the same visibility.
+    let epoch = server.handler.notifications().epoch().to_string();
     for (login, expected_kg_changes) in [
         (Login::Key(&key), 0),
         (Login::Password("admin", ADMIN_PASSWORD), 1),
     ] {
-        let (mut client, reply) =
-            Client::try_connect_at(&server, &format!("kg={KG}&last_seq=0"), login).await;
+        let cursor = format!("kg={KG}&last_seq=0&epoch={epoch}");
+        let (mut client, reply) = Client::try_connect_at(&server, &cursor, login).await;
         assert_eq!(reply["type"], "authenticated", "{reply}");
         let replayed = client.frames_before_update_of("marker").await;
         assert!(

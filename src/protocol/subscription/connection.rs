@@ -49,27 +49,50 @@ impl ConnectionSubscriptions {
         query: &str,
     ) -> Result<(Refresh, u64), String> {
         self.registry.check_can_add(id)?;
-        let mut view = ReevaluatingQuery::new(
+        let view = ReevaluatingQuery::new(
             Arc::clone(&self.handler),
             knowledge_graph,
             query,
             self.auth.clone(),
         )?;
+        self.register(knowledge_graph, id, Box::new(view)).await
+    }
+
+    /// Take `view`'s initial snapshot and register it as `id`.
+    ///
+    /// The snapshot is the query's answer at its revision. A commit published
+    /// after that revision but announced before the subscription existed would
+    /// reach no one, so registration compares the knowledge graph's current
+    /// revision and re-evaluates at once when it moved on.
+    async fn register(
+        &mut self,
+        knowledge_graph: &str,
+        id: &str,
+        mut view: Box<dyn StandingQuery>,
+    ) -> Result<(Refresh, u64), String> {
         self.handler.subscription_metrics().record_evaluation();
         let snapshot = view.refresh().await?;
-        let generation = self.registry.add(
-            id,
-            knowledge_graph,
-            Box::new(view),
-            snapshot.dependencies.clone(),
-        )?;
+        let generation =
+            self.registry
+                .add(id, knowledge_graph, view, snapshot.dependencies.clone())?;
         self.handler.subscription_metrics().add_active(1);
         debug!(
             subscription = id,
             kg = knowledge_graph,
             generation,
+            revision = snapshot.revision,
             "subscription_added"
         );
+        let moved_on = self
+            .handler
+            .get_storage()
+            .get_snapshot_for(knowledge_graph)
+            .map_or(true, |current| current.revision > snapshot.revision);
+        if moved_on {
+            if let Some(dispatch) = self.registry.invalidate(id) {
+                self.start(dispatch);
+            }
+        }
         Ok((snapshot, generation))
     }
 
@@ -162,3 +185,7 @@ impl Drop for ConnectionSubscriptions {
         self.clear();
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests;

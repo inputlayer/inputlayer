@@ -9,6 +9,11 @@ pub enum NoticeCode {
     /// Notifications were dropped because the client read too slowly. Standing
     /// queries re-evaluate; the connection stays open.
     NotificationsMissed,
+    /// The reconnect cursor (`last_seq` with `epoch`) cannot be honoured: it
+    /// belongs to another engine run, or notifications after it are no longer
+    /// retained. Nothing was replayed; re-read the state the client tracks.
+    /// The connection stays open and live notifications follow.
+    ReplayGap,
     /// Too many notifications were dropped; the server closes the connection.
     SlowConsumer,
     /// No request arrived within the idle timeout; the server closes the connection.
@@ -26,6 +31,6 @@ pub enum NoticeCode {
 impl NoticeCode {
     /// Whether the server closes the connection right after this notice.
     pub fn closes_connection(self) -> bool {
-        !matches!(self, Self::NotificationsMissed)
+        !matches!(self, Self::NotificationsMissed | Self::ReplayGap)
     }
 }

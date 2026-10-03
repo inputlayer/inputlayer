@@ -99,6 +99,7 @@ async fn send_subscription_command(
                     let subscribed = Subscribed {
                         subscription,
                         generation,
+                        revision: snapshot.revision,
                     };
                     (snapshot.columns, snapshot.inserted, Some(subscribed))
                 }),

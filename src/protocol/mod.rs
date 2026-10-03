@@ -24,10 +24,12 @@
 //! - `error` - Protocol error types
 //! - `handler` - Handler implementing business logic
 //! - `rest` - HTTP handlers and routing
+//! - `notification_log` - The ordered change-notification stream and its replay cursor
 //! - `subscription` - Standing queries (`.subscribe`) with derived deltas
 
 pub mod error;
 pub mod handler;
+pub mod notification_log;
 pub mod rest;
 pub mod subscription;
 pub mod wire;

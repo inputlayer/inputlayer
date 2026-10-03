@@ -26,6 +26,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
+use super::notification_log::NotificationLog;
 use super::wire::{
     ColumnDef, ErrorCode, QueryResult, StatementError, WireDataType, WireTuple, WireValue,
 };
@@ -131,17 +132,12 @@ pub struct Handler {
     insert_count: Arc<AtomicU64>,
     /// Session manager for ephemeral state
     sessions: SessionManager,
-    /// Broadcast channel for persistent data change notifications.
-    /// WebSocket connections subscribe to receive push updates.
-    notify_tx: tokio::sync::broadcast::Sender<Notification>,
+    /// The ordered stream of committed-change notifications.
+    notifications: Arc<NotificationLog>,
     /// Semaphore limiting concurrent DD computations.
     /// Prevents blocking-thread-pool explosion by capping CPU-bound parallelism
     /// at the hardware thread count. Tokio workers queue via async `acquire()`.
     query_semaphore: Arc<tokio::sync::Semaphore>,
-    /// Monotonic sequence counter for notification dedup (#39).
-    notification_seq: Arc<AtomicU64>,
-    /// Bounded ring buffer of recent notifications for replay on reconnect (#39).
-    notification_buffer: Arc<parking_lot::Mutex<std::collections::VecDeque<Notification>>>,
     /// Accumulated timing histogram buckets for Prometheus export.
     timing_histograms: Arc<crate::execution::timing::TimingHistograms>,
     /// Teaching agent for guided onboarding.
@@ -208,16 +204,6 @@ fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
-}
-
-/// Set the sequence number on a notification (all variants have a `seq` field).
-fn set_notification_seq(notif: &mut Notification, seq: u64) {
-    match notif {
-        Notification::PersistentUpdate { seq: s, .. }
-        | Notification::RuleChange { seq: s, .. }
-        | Notification::KgChange { seq: s, .. }
-        | Notification::SchemaChange { seq: s, .. } => *s = seq,
-    }
 }
 
 /// Reject a session rule that puts negation inside a recursive cycle,
@@ -330,13 +316,14 @@ mod guard_reentry_tests;
 struct QueryJob {
     storage: Arc<RwLock<StorageEngine>>,
     config: Arc<crate::Config>,
-    notify_tx: tokio::sync::broadcast::Sender<Notification>,
+    notifications: Arc<NotificationLog>,
     insert_count: Arc<AtomicU64>,
     query_count: Arc<AtomicU64>,
     start_time: Instant,
-    notification_seq: Arc<AtomicU64>,
-    notification_buffer: Arc<parking_lot::Mutex<std::collections::VecDeque<Notification>>>,
     timing_histograms: Arc<crate::execution::timing::TimingHistograms>,
+    /// When set, the query reads this snapshot of its knowledge graph instead
+    /// of the one current when it runs.
+    pinned: Option<Arc<KnowledgeGraphSnapshot>>,
 }
 
 impl QueryJob {
@@ -352,22 +339,8 @@ impl QueryJob {
         self.start_time.elapsed().as_secs()
     }
 
-    /// Assign a seq number, buffer, and broadcast a notification.
-    fn send_notification(&self, mut notif: Notification) {
-        let seq = self.notification_seq.fetch_add(1, Ordering::Relaxed) + 1;
-        set_notification_seq(&mut notif, seq);
-        {
-            let mut buf = self.notification_buffer.lock();
-            buf.push_back(notif.clone());
-            // Keep buffer bounded to broadcast channel capacity (notification_buffer_size)
-            let max_buf = self.config.http.rate_limit.notification_buffer_size;
-            while buf.len() > max_buf {
-                buf.pop_front();
-            }
-        }
-        if self.notify_tx.send(notif).is_err() {
-            tracing::debug!("send_notification: no active subscribers");
-        }
+    fn send_notification(&self, notification: Notification) {
+        self.notifications.publish(notification);
     }
 
     fn notify_persistent_update(&self, kg: &str, relation: &str, operation: &str, count: usize) {
@@ -662,8 +635,9 @@ fn proof_timing(
 impl Handler {
     /// Create a new handler with the given storage engine.
     pub fn new(storage: StorageEngine) -> Self {
-        let notify_buf = storage.config().http.rate_limit.notification_buffer_size;
-        let (notify_tx, _) = tokio::sync::broadcast::channel(notify_buf);
+        let notifications = Arc::new(NotificationLog::new(
+            storage.config().http.rate_limit.notification_buffer_size,
+        ));
         let config = Arc::new(storage.config().clone());
         let ncpu = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
         // Reserve ~25% of cores (min 2) for Tokio async I/O, health checks, WebSocket handling.
@@ -677,12 +651,8 @@ impl Handler {
             query_count: Arc::new(AtomicU64::new(0)),
             insert_count: Arc::new(AtomicU64::new(0)),
             sessions: SessionManager::default(),
-            notify_tx,
+            notifications,
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
-            notification_seq: Arc::new(AtomicU64::new(0)),
-            notification_buffer: Arc::new(parking_lot::Mutex::new(
-                std::collections::VecDeque::new(),
-            )),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             agent: Arc::new(crate::agent::AgentManager::new(
                 crate::agent::AgentConfig::default(),
@@ -705,8 +675,9 @@ impl Handler {
 
     /// Create a new handler with custom session configuration.
     pub fn with_session_config(storage: StorageEngine, session_config: SessionConfig) -> Self {
-        let notify_buf = storage.config().http.rate_limit.notification_buffer_size;
-        let (notify_tx, _) = tokio::sync::broadcast::channel(notify_buf);
+        let notifications = Arc::new(NotificationLog::new(
+            storage.config().http.rate_limit.notification_buffer_size,
+        ));
         let config = Arc::new(storage.config().clone());
         let ncpu = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
         // Reserve ~25% of cores (min 2) for Tokio async I/O, health checks, WebSocket handling.
@@ -719,12 +690,8 @@ impl Handler {
             query_count: Arc::new(AtomicU64::new(0)),
             insert_count: Arc::new(AtomicU64::new(0)),
             sessions: SessionManager::new(session_config),
-            notify_tx,
+            notifications,
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
-            notification_seq: Arc::new(AtomicU64::new(0)),
-            notification_buffer: Arc::new(parking_lot::Mutex::new(
-                std::collections::VecDeque::new(),
-            )),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             agent: Arc::new(crate::agent::AgentManager::new(
                 crate::agent::AgentConfig::default(),
@@ -742,13 +709,12 @@ impl Handler {
         QueryJob {
             storage: Arc::clone(&self.storage),
             config: Arc::clone(&self.config),
-            notify_tx: self.notify_tx.clone(),
+            notifications: Arc::clone(&self.notifications),
             insert_count: Arc::clone(&self.insert_count),
             query_count: Arc::clone(&self.query_count),
             start_time: self.start_time,
-            notification_seq: Arc::clone(&self.notification_seq),
-            notification_buffer: Arc::clone(&self.notification_buffer),
             timing_histograms: Arc::clone(&self.timing_histograms),
+            pinned: None,
         }
     }
 
@@ -762,27 +728,18 @@ impl Handler {
         &self.subscription_metrics
     }
 
-    /// Subscribe to persistent data change notifications.
-    /// Returns a broadcast receiver for push updates.
+    /// Live change notifications from now on.
     pub fn subscribe_notifications(&self) -> tokio::sync::broadcast::Receiver<Notification> {
-        self.notify_tx.subscribe()
+        self.notifications.subscribe()
     }
 
-    /// Assign a seq number, buffer, and broadcast a notification.
-    fn send_notification(&self, mut notif: Notification) {
-        let seq = self.notification_seq.fetch_add(1, Ordering::Relaxed) + 1;
-        set_notification_seq(&mut notif, seq);
-        {
-            let mut buf = self.notification_buffer.lock();
-            buf.push_back(notif.clone());
-            let max_buf = self.config.http.rate_limit.notification_buffer_size;
-            while buf.len() > max_buf {
-                buf.pop_front();
-            }
-        }
-        if self.notify_tx.send(notif).is_err() {
-            tracing::debug!("send_notification: no active subscribers");
-        }
+    /// The ordered change-notification stream of this engine run.
+    pub fn notifications(&self) -> &NotificationLog {
+        &self.notifications
+    }
+
+    fn send_notification(&self, notification: Notification) {
+        self.notifications.publish(notification);
     }
 
     /// Send a persistent data change notification.
@@ -835,16 +792,6 @@ impl Handler {
             timestamp_ms: now_ms(),
             seq: 0,
         });
-    }
-
-    /// Get buffered notifications with sequence number > `since_seq`.
-    /// Returns notifications in order. Used for replay on WS reconnect (#39).
-    pub fn get_notifications_since(&self, since_seq: u64) -> Vec<Notification> {
-        let buf = self.notification_buffer.lock();
-        buf.iter()
-            .filter(|n| n.seq() > since_seq)
-            .cloned()
-            .collect()
     }
 
     /// Get the session manager.
@@ -2175,6 +2122,19 @@ impl Handler {
             });
         }
 
+        self.run_job(self.make_query_job(), knowledge_graph, program, statements)
+            .await
+    }
+
+    /// Run `job` for `program` on the blocking pool under the query semaphore
+    /// and the query timeout.
+    async fn run_job(
+        &self,
+        job: QueryJob,
+        knowledge_graph: Option<String>,
+        program: String,
+        statements: Option<Vec<statement::Statement>>,
+    ) -> Result<QueryResult, String> {
         let program_len = program.len();
         let query_start = Instant::now();
 
@@ -2213,7 +2173,6 @@ impl Handler {
 
         // Offload CPU-bound DD computation to the blocking thread pool.
         // This keeps Tokio worker threads free for I/O and other async tasks.
-        let job = self.make_query_job();
         let timeout_ms = self.config.storage.performance.query_timeout_ms;
 
         // Cooperative cancellation flag: set on timeout so DD spin loops exit promptly.
@@ -3252,7 +3211,11 @@ impl QueryJob {
             .and_then(|rel| storage.get_schema_in(&kg_name, &rel).ok().flatten())
             .map(|s| s.columns.iter().map(|c| c.name.clone()).collect());
 
-        let snapshot = match storage.get_snapshot_for(&kg_name) {
+        let snapshot = match self
+            .pinned
+            .clone()
+            .map_or_else(|| storage.get_snapshot_for(&kg_name), Ok)
+        {
             Ok(snapshot) => snapshot,
             Err(e) => fail_query!(storage_error_code(&e, ErrorCode::Internal), e.to_string()),
         };
@@ -3835,18 +3798,46 @@ impl Handler {
         let result = self
             .run_execute_program(session_id, knowledge_graph, program, auth)
             .await?;
-        if let Some(principal) = auth {
-            principal
-                .identity()
-                .map_err(|revoked| ProgramError::from(String::from(revoked)))?;
+        settle_result(result, auth, single_statement)
+    }
+
+    /// Run the query `query` (`?body`) on `snapshot`, a snapshot of
+    /// `knowledge_graph`, as `auth` would run it with `execute_program`:
+    /// admitted and authorized the same way, but reading `snapshot` instead of
+    /// whatever is current when the query runs. The result is therefore the
+    /// query's exact answer at `snapshot.revision`.
+    pub async fn query_snapshot(
+        &self,
+        knowledge_graph: &str,
+        snapshot: Arc<KnowledgeGraphSnapshot>,
+        query: &str,
+        auth: Option<&crate::auth::Principal>,
+    ) -> Result<QueryResult, String> {
+        let identity = auth
+            .map(crate::auth::Principal::identity)
+            .transpose()
+            .map_err(String::from)?;
+        let statements = parse_program(query).map_err(|errors| {
+            let errors_json = serde_json::to_string(&errors).unwrap_or_default();
+            format!("{VALIDATION_ERROR_PREFIX}{errors_json}")
+        })?;
+        if !matches!(statements.as_slice(), [statement::Statement::Query(_)]) {
+            return Err("A snapshot query must be a single query".to_string());
         }
-        match result.errors.as_slice() {
-            [error] if single_statement => Err(ProgramError {
-                message: error.message.clone(),
-                code: Some(error.code),
-            }),
-            _ => Ok(result),
-        }
+        self.authorize_program(identity.as_ref(), Some(knowledge_graph), &statements)?;
+        let job = QueryJob {
+            pinned: Some(snapshot),
+            ..self.make_query_job()
+        };
+        let result = self
+            .run_job(
+                job,
+                Some(knowledge_graph.to_string()),
+                query.to_string(),
+                Some(statements),
+            )
+            .await?;
+        settle_result(result, auth, true).map_err(|e| e.message)
     }
 
     async fn run_execute_program(
@@ -5241,6 +5232,27 @@ fn format_term(term: &Term) -> String {
 }
 
 /// Statements in `program`, counted the way `parse_program` splits them.
+/// A program's final result: an error if `auth` was revoked meanwhile, or
+/// when the program was one failed statement.
+fn settle_result(
+    result: QueryResult,
+    auth: Option<&crate::auth::Principal>,
+    single_statement: bool,
+) -> Result<QueryResult, ProgramError> {
+    if let Some(principal) = auth {
+        principal
+            .identity()
+            .map_err(|revoked| ProgramError::from(String::from(revoked)))?;
+    }
+    match result.errors.as_slice() {
+        [error] if single_statement => Err(ProgramError {
+            message: error.message.clone(),
+            code: Some(error.code),
+        }),
+        _ => Ok(result),
+    }
+}
+
 fn program_statement_count(program: &str) -> usize {
     join_continuation_lines(&strip_comments(program))
         .lines()
@@ -5634,43 +5646,31 @@ mod tests {
     }
 
     #[test]
-    fn test_get_notifications_since() {
-        let (storage, _tmp) = make_test_storage();
-        let handler = Handler::new(storage);
-
-        handler.notify_persistent_update("kg", "a", "insert", 1);
-        handler.notify_persistent_update("kg", "b", "insert", 2);
-        handler.notify_kg_change("kg", "created");
-
-        // Get all since seq 0 (all notifications)
-        let all = handler.get_notifications_since(0);
-        assert_eq!(all.len(), 3);
-
-        // Get only since seq 2
-        let since2 = handler.get_notifications_since(2);
-        assert_eq!(since2.len(), 1);
-        assert_eq!(since2[0].seq(), 3);
-
-        // Get since last - should be empty
-        let none = handler.get_notifications_since(3);
-        assert!(none.is_empty());
-    }
-
-    #[test]
-    fn test_notification_buffer_bounded() {
+    fn test_notification_ring_retains_the_configured_buffer_size() {
+        use crate::protocol::notification_log::{Cursor, ReplayGap};
         let (storage, _tmp) = make_test_storage();
         let handler = Handler::new(storage);
         let buf_size = handler.config().http.rate_limit.notification_buffer_size;
 
-        // Send more notifications than buffer size
         for i in 0..(buf_size + 10) {
             handler.notify_persistent_update("kg", &format!("r{i}"), "insert", 1);
         }
 
-        let all = handler.get_notifications_since(0);
-        assert_eq!(all.len(), buf_size);
-        // First notification in buffer should be seq 11 (oldest 10 evicted)
-        assert_eq!(all[0].seq(), 11);
+        let log = handler.notifications();
+        let cursor = |last_seq| Cursor {
+            epoch: Some(log.epoch().to_string()),
+            last_seq,
+        };
+        // The oldest 10 were evicted: history after seq 10 is complete.
+        let retained = log.resume(Some(&cursor(10))).replay.unwrap();
+        assert_eq!(retained.len(), buf_size);
+        assert_eq!(retained[0].seq(), 11);
+        assert_eq!(
+            log.resume(Some(&cursor(9))).replay.unwrap_err(),
+            ReplayGap::Evicted {
+                oldest_retained: 11
+            }
+        );
     }
 
     // --- query_program tests ---

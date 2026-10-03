@@ -25,16 +25,23 @@ use std::sync::Arc;
 use std::time::Instant;
 use tracing::info;
 
-/// Counter for snapshot versioning
-static SNAPSHOT_VERSION: AtomicU64 = AtomicU64::new(0);
+/// Last revision handed to a snapshot, across all knowledge graphs.
+static LAST_REVISION: AtomicU64 = AtomicU64::new(0);
 
 /// Immutable point-in-time snapshot of knowledge graph data
 ///
 /// Cloning a snapshot is O(1) - just incrementing reference counts.
 #[derive(Clone)]
 pub struct KnowledgeGraphSnapshot {
-    /// Monotonically increasing version number
-    pub version: u64,
+    /// Revision of the knowledge graph state this snapshot holds: assigned
+    /// when the snapshot is built, from one counter shared by every knowledge
+    /// graph of this engine run, from 1. A knowledge graph publishes its
+    /// snapshots under its write lock, so each publish has a higher revision
+    /// than the one before, even across a drop and re-create of the same
+    /// name. Revisions restart with the engine; the stream epoch
+    /// ([`crate::protocol::notification_log::NotificationLog::epoch`]) tells
+    /// runs apart.
+    pub revision: u64,
 
     /// Timestamp when snapshot was created (microseconds since epoch)
     pub timestamp: u64,
@@ -116,7 +123,7 @@ impl KnowledgeGraphSnapshot {
         num_workers: usize,
         materialized_names: HashSet<String>,
     ) -> Self {
-        let version = SNAPSHOT_VERSION.fetch_add(1, Ordering::SeqCst);
+        let revision = LAST_REVISION.fetch_add(1, Ordering::SeqCst) + 1;
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_micros() as u64);
@@ -129,7 +136,7 @@ impl KnowledgeGraphSnapshot {
             .collect();
 
         Self {
-            version,
+            revision,
             timestamp,
             input_tuples: Arc::new(input_tuples),
             rules: Arc::new(rules),
@@ -436,7 +443,7 @@ impl KnowledgeGraphSnapshot {
 impl std::fmt::Debug for KnowledgeGraphSnapshot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("KnowledgeGraphSnapshot")
-            .field("version", &self.version)
+            .field("revision", &self.revision)
             .field("timestamp", &self.timestamp)
             .field("relations", &self.relation_count())
             .field("tuples", &self.tuple_count())
@@ -805,10 +812,11 @@ mod tests {
     }
 
     #[test]
-    fn test_snapshot_version_increases() {
+    fn test_snapshot_revision_increases() {
         let s1 = KnowledgeGraphSnapshot::empty();
         let s2 = KnowledgeGraphSnapshot::empty();
-        assert!(s2.version > s1.version);
+        assert!(s1.revision > 0);
+        assert!(s2.revision > s1.revision);
     }
 
     #[test]

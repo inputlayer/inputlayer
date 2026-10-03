@@ -17,6 +17,8 @@ pub struct Refresh {
     pub retracted: Vec<Row>,
     /// Relations the result depends on, as of this refresh.
     pub dependencies: Dependencies,
+    /// The knowledge graph revision the refreshed result is the exact answer at.
+    pub revision: u64,
 }
 
 impl Refresh {
@@ -29,10 +31,12 @@ impl Refresh {
 /// A query result kept current by some evaluation strategy.
 ///
 /// The first `refresh` reports the full result as `inserted`. Each later call
-/// reports the set difference against the previous successful refresh. A
-/// failed refresh leaves the previous result in place. A refresh that cannot
-/// see the complete result (e.g. one cut at `max_result_rows`) must fail
-/// rather than report a difference against the partial set.
+/// reports the set difference against the previous successful refresh. Each
+/// refresh evaluates one snapshot of the knowledge graph and reports its
+/// revision; revisions never go back. A failed refresh leaves the previous
+/// result in place. A refresh that cannot see the complete result (e.g. one
+/// cut at `max_result_rows`) must fail rather than report a difference against
+/// the partial set.
 pub trait StandingQuery: Send + 'static {
     /// Bring the result up to date with the knowledge graph.
     fn refresh(&mut self) -> BoxFuture<'_, Result<Refresh, String>>;

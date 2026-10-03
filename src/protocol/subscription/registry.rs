@@ -7,6 +7,10 @@
 //! accumulated and checked against the *new* dependency set on completion, so
 //! a burst of commits costs one follow-up evaluation and the final state is
 //! never dropped.
+//!
+//! Every delta names the knowledge graph revision its refresh evaluated, so a
+//! subscription's pushes carry strictly increasing revisions after the
+//! snapshot's.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -162,6 +166,25 @@ impl SubscriptionRegistry {
         Ok(self.next_token)
     }
 
+    /// Re-evaluate `id` whatever changed: its knowledge graph may have moved
+    /// past its last refresh without a notification reaching it. Returns the
+    /// evaluation to start when the subscription is idle; one in flight runs
+    /// again on completion.
+    pub fn invalidate(&mut self, id: &str) -> Option<Dispatch> {
+        let entry = self.entries.get_mut(id)?;
+        match entry.view.take() {
+            Some(view) => Some(Dispatch {
+                id: id.to_string(),
+                token: entry.token,
+                view,
+            }),
+            None => {
+                entry.pending = Some(ChangeSet::Everything);
+                None
+            }
+        }
+    }
+
     /// Remove a subscription. Returns false if it did not exist.
     pub fn remove(&mut self, id: &str) -> bool {
         self.entries.remove(id).is_some()
@@ -239,6 +262,7 @@ impl SubscriptionRegistry {
                         generation: token,
                         knowledge_graph: entry.knowledge_graph.clone(),
                         seq: entry.seq,
+                        revision: refresh.revision,
                         columns: refresh.columns,
                         inserted: refresh.inserted,
                         retracted: refresh.retracted,
@@ -293,6 +317,14 @@ mod tests {
             inserted: rows(inserted),
             retracted: rows(retracted),
             dependencies: deps_on(relation),
+            revision: 0,
+        }
+    }
+
+    fn at(revision: u64, refresh: Refresh) -> Refresh {
+        Refresh {
+            revision,
+            ..refresh
         }
     }
 
@@ -448,5 +480,45 @@ mod tests {
     fn test_registry_unknown_changes_dispatch_everything() {
         let mut registry = registry_with(vec![]);
         assert_eq!(registry.on_unknown_changes().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_registry_delta_names_the_revision_it_evaluated() {
+        let mut registry = registry_with(vec![Ok(at(42, refresh(&[1], &[], "a")))]);
+        let d = registry
+            .on_change("kg", &ChangeSet::relation("a"))
+            .remove(0);
+        let (push, _) = complete(&mut registry, d).await;
+        assert!(matches!(
+            push,
+            Some(SubscriptionPush::SubscriptionDelta {
+                seq: 1,
+                revision: 42,
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_registry_invalidate_dispatches_idle_and_reruns_in_flight() {
+        let mut registry = registry_with(vec![
+            Ok(refresh(&[], &[], "a")),
+            Ok(refresh(&[1], &[], "a")),
+            Ok(refresh(&[2], &[], "a")),
+        ]);
+        // Idle: evaluated now, although nothing it depends on was announced.
+        let idle = registry
+            .invalidate("s")
+            .expect("idle subscription dispatches");
+        assert!(registry.invalidate("s").is_none(), "in flight: rerun later");
+        let (push, follow_up) = complete(&mut registry, idle).await;
+        assert!(push.is_none());
+        let (push, follow_up) = complete(&mut registry, follow_up.expect("rerun")).await;
+        assert!(matches!(
+            push,
+            Some(SubscriptionPush::SubscriptionDelta { seq: 1, .. })
+        ));
+        assert!(follow_up.is_none());
+        assert!(registry.invalidate("missing").is_none());
     }
 }

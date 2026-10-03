@@ -36,11 +36,13 @@ use tracing::{debug, info, warn, Instrument};
 mod auth;
 mod execute;
 mod outbound;
+mod replay;
 
 use outbound::Outbound;
 
 use crate::auth::{Principal, Role, INTERNAL_KG};
 use crate::protocol::handler::Notification;
+use crate::protocol::notification_log::{Cursor, Resumed};
 use crate::protocol::rest::error::RestError;
 use crate::protocol::rest::{ClientIp, PreAuthSlots, WsSemaphore};
 use crate::protocol::subscription::ConnectionSubscriptions;
@@ -60,10 +62,14 @@ pub struct WsConnectParams {
     /// Knowledge graph to bind to (defaults to "default")
     #[serde(default = "default_kg")]
     pub kg: String,
-    /// Last notification sequence number seen by the client.
-    /// If provided, the server replays buffered notifications with seq > last_seq on connect (#39).
+    /// Last notification `seq` the client saw. With the matching `epoch`, the
+    /// server replays the retained notifications after it, or sends a
+    /// `replay_gap` notice when they are not the complete history since it.
     #[serde(default)]
     pub last_seq: Option<u64>,
+    /// The `stream_epoch` (from `authenticated`) that `last_seq` belongs to.
+    #[serde(default)]
+    pub epoch: Option<String>,
 }
 
 fn default_kg() -> String {
@@ -76,6 +82,11 @@ fn default_kg() -> String {
 /// server creates a session bound to that knowledge graph and closes it on
 /// disconnect. The full protocol is `docs/spec/asyncapi.yaml`; the frame
 /// types are [`inputlayer_ws_protocol`].
+///
+/// A reconnecting client may add `&last_seq=<seq>&epoch=<stream_epoch>`: the
+/// server replays the retained notifications after that cursor before live
+/// ones, or sends one `replay_gap` notice when it cannot (another engine run,
+/// or notifications evicted from the ring).
 ///
 /// ## Client → Server
 ///
@@ -90,7 +101,7 @@ fn default_kg() -> String {
 /// ## Server → Client
 ///
 /// **Replies**, each with the request's `id`: `authenticated` (with
-/// `protocol_version`), `auth_error`, `result`, the streamed
+/// `protocol_version` and `stream_epoch`), `auth_error`, `result`, the streamed
 /// `result_start` / `result_chunk` / `result_end`, `error` and `pong`:
 /// ```json
 /// {"type": "result", "id": "2", "columns": ["col0", "col1"], "rows": [[1, 2]],
@@ -106,11 +117,14 @@ fn default_kg() -> String {
 ///  "operation": "insert", "count": 5, "timestamp_ms": 1700000000000, "seq": 42}
 /// ```
 /// and standing-query results. `.subscribe <name> ?<query>` replies with a
-/// `result` holding the snapshot and `"subscribed": {"subscription", "generation"}`;
-/// afterwards the server pushes
+/// `result` holding the snapshot and
+/// `"subscribed": {"subscription", "generation", "revision"}`; afterwards the
+/// server pushes deltas numbered from 1, each naming the higher revision it
+/// brings the result to:
 /// ```json
 /// {"type": "subscription_delta", "subscription": "<name>", "generation": 1,
-///  "knowledge_graph": "default", "seq": 1, "columns": ["X"], "inserted": [[3]], "retracted": []}
+///  "knowledge_graph": "default", "seq": 1, "revision": 17, "columns": ["X"],
+///  "inserted": [[3]], "retracted": []}
 /// {"type": "subscription_error", "subscription": "<name>", "generation": 1, "message": "..."}
 /// ```
 /// `.unsubscribe <name>` removes one; disconnecting or switching KG removes all.
@@ -158,16 +172,13 @@ pub async fn global_websocket(
         .max_frame_size(MAX_MESSAGE_SIZE)
         .on_upgrade(move |socket| {
             let permit = ws_permit;
+            let cursor = params.last_seq.map(|last_seq| Cursor {
+                epoch: params.epoch,
+                last_seq,
+            });
             async move {
-                handle_global_ws_connection(
-                    socket,
-                    handler,
-                    params.kg,
-                    params.last_seq,
-                    peer,
-                    preauth_slot,
-                )
-                .await;
+                handle_global_ws_connection(socket, handler, params.kg, cursor, peer, preauth_slot)
+                    .await;
                 drop(permit);
             }
         }))
@@ -230,7 +241,7 @@ async fn handle_global_ws_connection(
     socket: WebSocket,
     handler: Arc<Handler>,
     kg: String,
-    last_seq: Option<u64>,
+    cursor: Option<Cursor>,
     peer: IpAddr,
     preauth_slot: crate::protocol::rest::PreAuthSlot,
 ) {
@@ -289,6 +300,7 @@ async fn handle_global_ws_connection(
         version: env!("CARGO_PKG_VERSION").to_string(),
         role: auth_identity.role.to_string(),
         protocol_version: PROTOCOL_VERSION,
+        stream_epoch: handler.notifications().epoch().to_string(),
     };
     if !sender.send_frame(&authenticated).await {
         if let Err(e) = handler.close_session(&session_id) {
@@ -298,32 +310,27 @@ async fn handle_global_ws_connection(
         return;
     }
 
-    let mut notify_rx = handler.subscribe_notifications();
     let mut request_seq: u64 = 0;
     let mut subscriptions =
         ConnectionSubscriptions::new(Arc::clone(&handler), Some(principal.clone()));
 
-    // Replay missed notifications on reconnect (#39)
-    if let Some(since_seq) = last_seq {
-        let missed = handler.get_notifications_since(since_seq);
-        if !missed.is_empty() {
-            let session_kg = handler
-                .session_manager()
-                .with_session(&session_id, |s| s.knowledge_graph.clone())
-                .unwrap_or_default();
-            debug!(session_id = %session_id, missed_count = missed.len(), since_seq, "ws_replaying_missed_notifications");
-            for notif in missed {
-                if !notification_visible(&notif, &session_kg, &principal) {
-                    continue;
-                }
-                if !sender.send_frame(&ServerFrame::Notification(notif)).await {
-                    if let Err(e) = handler.close_session(&session_id) {
-                        tracing::warn!(error = %e, "session_cleanup_failed");
-                    }
-                    notify_if_revoked(&mut sender, &principal).await;
-                    return;
-                }
+    // Missed notifications on reconnect, then live ones without overlap.
+    let Resumed {
+        replay,
+        live: mut notify_rx,
+    } = handler.notifications().resume(cursor.as_ref());
+    if let Some(cursor) = &cursor {
+        let session_kg = handler
+            .session_manager()
+            .with_session(&session_id, |s| s.knowledge_graph.clone())
+            .unwrap_or_default();
+        let visible = |n: &Notification| notification_visible(n, &session_kg, &principal);
+        if !replay::send_replay(&mut sender, cursor.last_seq, replay, visible).await {
+            if let Err(e) = handler.close_session(&session_id) {
+                tracing::warn!(error = %e, "session_cleanup_failed");
             }
+            notify_if_revoked(&mut sender, &principal).await;
+            return;
         }
     }
 
@@ -615,13 +622,15 @@ mod tests {
         let params: WsConnectParams = serde_json::from_str("{}").unwrap();
         assert_eq!(params.kg, "default");
         assert_eq!(params.last_seq, None);
+        assert_eq!(params.epoch, None);
     }
 
     #[test]
-    fn test_ws_connect_params_custom_kg_and_last_seq() {
+    fn test_ws_connect_params_custom_kg_and_cursor() {
         let params: WsConnectParams =
-            serde_json::from_str(r#"{"kg": "test", "last_seq": 42}"#).unwrap();
+            serde_json::from_str(r#"{"kg": "test", "last_seq": 42, "epoch": "00ff"}"#).unwrap();
         assert_eq!(params.kg, "test");
         assert_eq!(params.last_seq, Some(42));
+        assert_eq!(params.epoch.as_deref(), Some("00ff"));
     }
 }
