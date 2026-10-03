@@ -50,12 +50,14 @@ pub enum Frame {
         message: String,
     },
     SubscriptionDelta {
+        subscription: String,
         #[serde(default)]
         inserted: Vec<Vec<Value>>,
         #[serde(default)]
         retracted: Vec<Vec<Value>>,
     },
     SubscriptionError {
+        subscription: String,
         message: String,
     },
     /// Persistent-change notifications and anything newer than this client.
@@ -67,6 +69,31 @@ pub enum Frame {
 pub struct Stamped {
     pub at: Instant,
     pub frame: Frame,
+}
+
+/// Complete reply to an `execute`, rows included.
+///
+/// Unlike [`Client::execute`], statement errors and truncation are returned
+/// to the caller instead of failing, so a harness can record them.
+#[derive(Debug, Clone)]
+pub struct Answer {
+    /// When the final frame of the reply arrived.
+    pub at: Instant,
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<Value>>,
+    /// Failed statements of a multi-statement program, as sent by the server,
+    /// or the single `{"message"}` of a whole-program `error` frame.
+    pub errors: Vec<Value>,
+    pub truncated: bool,
+}
+
+/// The row payload of `result`, `result_start` and `result_chunk` frames.
+#[derive(Deserialize)]
+struct Payload {
+    #[serde(default)]
+    columns: Vec<String>,
+    #[serde(default)]
+    rows: Vec<Vec<Value>>,
 }
 
 /// Successful reply to an `execute`.
@@ -147,6 +174,63 @@ impl Client {
         }
     }
 
+    /// Send `program` and collect its complete reply, rows included. A
+    /// whole-program `error` frame becomes the answer's only error; only a
+    /// transport failure is an `Err`. See [`Answer`].
+    pub async fn query(&mut self, program: &str) -> Result<(Instant, Answer)> {
+        let start = self.send_execute(program).await?;
+        let mut answer = Answer {
+            at: start,
+            columns: Vec::new(),
+            rows: Vec::new(),
+            errors: Vec::new(),
+            truncated: false,
+        };
+        loop {
+            let (at, text) = self.next_text().await?;
+            let frame = parse(&text)?;
+            match frame {
+                Frame::Result {
+                    truncated, errors, ..
+                } => {
+                    let payload: Payload = serde_json::from_str(&text)?;
+                    answer.columns = payload.columns;
+                    answer.rows = payload.rows;
+                    answer.errors = errors;
+                    answer.truncated = truncated;
+                    answer.at = at;
+                    return Ok((start, answer));
+                }
+                Frame::ResultStart { truncated, errors } => {
+                    answer.columns = serde_json::from_str::<Payload>(&text)?.columns;
+                    answer.errors = errors;
+                    answer.truncated = truncated;
+                }
+                Frame::ResultChunk {} => {
+                    answer
+                        .rows
+                        .extend(serde_json::from_str::<Payload>(&text)?.rows);
+                }
+                Frame::ResultEnd { .. } => {
+                    answer.at = at;
+                    return Ok((start, answer));
+                }
+                Frame::Error { message } => {
+                    answer.errors = vec![json!({ "message": message })];
+                    answer.at = at;
+                    return Ok((start, answer));
+                }
+                frame @ (Frame::SubscriptionDelta { .. } | Frame::SubscriptionError { .. }) => {
+                    self.deferred.push(Stamped { at, frame });
+                }
+                Frame::Other => {}
+                frame @ (Frame::Authenticated {} | Frame::AuthError { .. }) => {
+                    bail!("unexpected frame while waiting for a reply: {frame:?}")
+                }
+            }
+        }
+    }
+
     /// Next subscription delta or error, including ones deferred by `reply`.
     pub async fn next_push(&mut self) -> Result<Stamped> {
         if !self.deferred.is_empty() {
@@ -172,6 +256,15 @@ impl Client {
     }
 
     async fn next(&mut self) -> Result<Stamped> {
+        let (at, text) = self.next_text().await?;
+        Ok(Stamped {
+            at,
+            frame: parse(&text)?,
+        })
+    }
+
+    /// Next text frame and the instant it was read, before any parsing.
+    async fn next_text(&mut self) -> Result<(Instant, String)> {
         loop {
             let message = tokio::time::timeout(REPLY_TIMEOUT, self.ws.next())
                 .await
@@ -180,12 +273,14 @@ impl Client {
                 .context("websocket receive")?;
             let at = Instant::now();
             if let Message::Text(text) = message {
-                let frame = serde_json::from_str(&text)
-                    .with_context(|| format!("unparseable frame: {}", preview(&text)))?;
-                return Ok(Stamped { at, frame });
+                return Ok((at, text));
             }
         }
     }
+}
+
+fn parse(text: &str) -> Result<Frame> {
+    serde_json::from_str(text).with_context(|| format!("unparseable frame: {}", preview(text)))
 }
 
 fn check_complete(truncated: bool, errors: &[Value]) -> Result<()> {

@@ -11,6 +11,7 @@ make test           # Unit + snapshot tests
 make e2e-test       # Snapshot tests only (parallel)
 make test-affected  # Run only snapshots affected by uncommitted changes
 make perf-gate      # Performance gate: this tree vs the approved baseline (same host)
+make bench-genbi    # Reactive agent benchmark on genbi-trust (needs GENBI_TRUST_DIR)
 ```
 
 ## Test Tiers
