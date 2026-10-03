@@ -29,7 +29,9 @@ use figment::{
     Figment, Metadata, Profile, Provider,
 };
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 /// Main configuration struct
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -395,6 +397,15 @@ pub struct HttpConfig {
     #[serde(default = "default_ws_idle_timeout_ms")]
     pub ws_idle_timeout_ms: u64,
 
+    /// Time a WebSocket client has to authenticate, in milliseconds.
+    #[serde(default = "default_ws_auth_timeout_ms")]
+    pub ws_auth_timeout_ms: u64,
+
+    /// Proxies (IPs or CIDR blocks) whose `X-Forwarded-For` / `X-Real-IP`
+    /// headers are trusted. Empty: the client IP is always the TCP peer.
+    #[serde(default)]
+    pub trusted_proxies: Vec<IpNet>,
+
     /// Graceful shutdown timeout in seconds. If the storage lock cannot be acquired
     /// within this time during shutdown, WAL flush is skipped (safe - replayed on restart).
     #[serde(default = "default_shutdown_timeout_secs")]
@@ -437,9 +448,8 @@ pub struct AuthConfig {
     pub session_timeout_secs: u64,
 
     /// Path to persist generated credentials (admin password + API key).
-    /// Default: `.inputlayer-credentials.toml` in the working directory.
-    /// Credentials are generated on first boot and reused across restarts,
-    /// even when the data directory is wiped.
+    /// Default: `credentials.toml` in `storage.data_dir`. Only generated
+    /// secrets are written; env- or config-supplied ones never are.
     #[serde(default)]
     pub credentials_file: Option<PathBuf>,
 }
@@ -475,6 +485,81 @@ pub struct RateLimitConfig {
     /// Maximum HTTP requests per second per IP address (0 = unlimited) (#27)
     #[serde(default = "default_per_ip_max_rps")]
     pub per_ip_max_rps: u32,
+
+    /// Maximum unauthenticated WebSocket connections per IP address (0 = unlimited)
+    #[serde(default = "default_ws_max_preauth_per_ip")]
+    pub ws_max_preauth_per_ip: usize,
+}
+
+/// An IP address or CIDR block, e.g. `10.0.0.1` or `10.0.0.0/8`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct IpNet {
+    addr: IpAddr,
+    prefix: u8,
+}
+
+impl IpNet {
+    /// Whether `ip` lies in this block.
+    pub fn contains(&self, ip: IpAddr) -> bool {
+        match (self.addr, ip.to_canonical()) {
+            (IpAddr::V4(net), IpAddr::V4(ip)) => {
+                let mask = u32::MAX
+                    .checked_shl(32 - u32::from(self.prefix))
+                    .unwrap_or(0);
+                u32::from(net) & mask == u32::from(ip) & mask
+            }
+            (IpAddr::V6(net), IpAddr::V6(ip)) => {
+                let mask = u128::MAX
+                    .checked_shl(128 - u32::from(self.prefix))
+                    .unwrap_or(0);
+                u128::from(net) & mask == u128::from(ip) & mask
+            }
+            _ => false,
+        }
+    }
+}
+
+impl FromStr for IpNet {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let invalid = || format!("invalid IP or CIDR block '{s}'");
+        let (addr, prefix) = match s.split_once('/') {
+            Some((addr, prefix)) => (addr, Some(prefix)),
+            None => (s, None),
+        };
+        let addr = addr
+            .trim()
+            .parse::<IpAddr>()
+            .map_err(|_| invalid())?
+            .to_canonical();
+        let max = if addr.is_ipv4() { 32 } else { 128 };
+        let prefix = match prefix {
+            Some(p) => p
+                .trim()
+                .parse::<u8>()
+                .ok()
+                .filter(|p| *p <= max)
+                .ok_or_else(invalid)?,
+            None => max,
+        };
+        Ok(Self { addr, prefix })
+    }
+}
+
+impl TryFrom<String> for IpNet {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+impl From<IpNet> for String {
+    fn from(net: IpNet) -> Self {
+        format!("{}/{}", net.addr, net.prefix)
+    }
 }
 
 // Default value functions
@@ -513,6 +598,9 @@ fn default_max_knowledge_graphs() -> usize {
 }
 fn default_ws_idle_timeout_ms() -> u64 {
     300_000 // 5 minutes
+}
+fn default_ws_auth_timeout_ms() -> u64 {
+    5_000
 }
 fn default_shutdown_timeout_secs() -> u64 {
     30
@@ -559,6 +647,9 @@ fn default_notification_buffer_size() -> usize {
 fn default_per_ip_max_rps() -> u32 {
     100
 }
+fn default_ws_max_preauth_per_ip() -> usize {
+    16
+}
 
 impl Default for RateLimitConfig {
     fn default() -> Self {
@@ -570,6 +661,7 @@ impl Default for RateLimitConfig {
             ws_max_subscriptions: default_ws_max_subscriptions(),
             notification_buffer_size: default_notification_buffer_size(),
             per_ip_max_rps: default_per_ip_max_rps(),
+            ws_max_preauth_per_ip: default_ws_max_preauth_per_ip(),
         }
     }
 }
@@ -709,6 +801,12 @@ impl Config {
                 "notification_buffer_size is very large, capping at 100000"
             );
             self.http.rate_limit.notification_buffer_size = 100_000;
+        }
+
+        // ws_auth_timeout_ms=0 would reject every WebSocket client
+        if self.http.ws_auth_timeout_ms == 0 {
+            tracing::warn!("ws_auth_timeout_ms = 0 is invalid, auto-correcting to 5000");
+            self.http.ws_auth_timeout_ms = default_ws_auth_timeout_ms();
         }
 
         // persist buffer_size=0 would cause infinite flush loops
@@ -861,6 +959,8 @@ impl Default for HttpConfig {
             gui: GuiConfig::default(),
             auth: AuthConfig::default(),
             ws_idle_timeout_ms: default_ws_idle_timeout_ms(),
+            ws_auth_timeout_ms: default_ws_auth_timeout_ms(),
+            trusted_proxies: Vec::new(),
             shutdown_timeout_secs: default_shutdown_timeout_secs(),
             stats_timeout_secs: default_stats_timeout_secs(),
             rate_limit: RateLimitConfig::default(),
@@ -1331,5 +1431,46 @@ mod tests {
         assert_eq!(parsed.http.rate_limit.max_ws_connections, 0);
         assert_eq!(parsed.http.rate_limit.ws_max_messages_per_sec, 0);
         assert_eq!(parsed.http.rate_limit.ws_max_lifetime_secs, 0);
+    }
+
+    #[test]
+    fn test_ip_net_contains() {
+        let net: IpNet = "10.0.0.0/8".parse().unwrap();
+        assert!(net.contains("10.1.2.3".parse().unwrap()));
+        assert!(net.contains("::ffff:10.1.2.3".parse().unwrap()));
+        assert!(!net.contains("11.0.0.1".parse().unwrap()));
+        let host: IpNet = "192.168.1.5".parse().unwrap();
+        assert!(host.contains("192.168.1.5".parse().unwrap()));
+        assert!(!host.contains("192.168.1.6".parse().unwrap()));
+        let v6: IpNet = "fd00::/8".parse().unwrap();
+        assert!(v6.contains("fd12::1".parse().unwrap()));
+        assert!(!v6.contains("10.0.0.1".parse().unwrap()));
+        let any: IpNet = "0.0.0.0/0".parse().unwrap();
+        assert!(any.contains("8.8.8.8".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_ip_net_rejects_invalid() {
+        for bad in ["", "10.0.0.0/33", "fd00::/129", "not-an-ip", "10.0.0.0/x"] {
+            assert!(bad.parse::<IpNet>().is_err(), "{bad}");
+        }
+        assert!(toml::from_str::<HttpConfig>(r#"trusted_proxies = ["10.0.0.0/8"]"#).is_ok());
+        assert!(toml::from_str::<HttpConfig>(r#"trusted_proxies = ["10.0.0.0/40"]"#).is_err());
+    }
+
+    #[test]
+    fn test_trusted_proxies_round_trip() {
+        let mut config = Config::default();
+        config.http.trusted_proxies = vec!["10.0.0.0/8".parse().unwrap()];
+        let parsed: Config = toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+        assert_eq!(parsed.http.trusted_proxies, config.http.trusted_proxies);
+    }
+
+    #[test]
+    fn test_validate_corrects_zero_ws_auth_timeout() {
+        let mut config = Config::default();
+        config.http.ws_auth_timeout_ms = 0;
+        config.validate().unwrap();
+        assert_eq!(config.http.ws_auth_timeout_ms, 5_000);
     }
 }
