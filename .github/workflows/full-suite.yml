@@ -1,14 +1,15 @@
 name: Full suite
 
-# Everything the fast gate (ci.yml) leaves out, run only on release commits:
+# Everything the fast gate (ci.yml) leaves out, run at release checkpoints:
 #   - pushes to a release/** branch
 #   - pull requests labeled `release` (when the label is added, then on
 #     every push while it stays). A PR from a release/** branch of this repo
 #     is already covered by the branch push, so its PR run is skipped.
-#   - manual workflow_dispatch
+#   - manual workflow_dispatch on main only
 #   - v* tag pushes, through the Release workflow (publish.yml), which calls
 #     this workflow and publishes only if it passes
-# docker.yml uses the same definition. CONTRIBUTING describes the policy.
+# docker.yml uses the release triggers without manual dispatch.
+# CONTRIBUTING describes the policy.
 
 on:
   push:
@@ -36,11 +37,12 @@ jobs:
   gate:
     name: Release commit
     if: >-
-      github.event_name != 'pull_request' ||
+      (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') &&
+      (github.event_name != 'pull_request' ||
       (contains(github.event.pull_request.labels.*.name, 'release') &&
        (github.event.action != 'labeled' || github.event.label.name == 'release') &&
        !(startsWith(github.head_ref, 'release/') &&
-         github.event.pull_request.head.repo.full_name == github.repository))
+         github.event.pull_request.head.repo.full_name == github.repository)))
     runs-on: ubuntu-latest
     steps:
       - run: echo "Release commit, running the full suite"
@@ -135,6 +137,14 @@ jobs:
       - name: Build website
         working-directory: front
         run: npm run build
+
+      - name: Upload website
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: website
+          path: front/dist
+          if-no-files-found: error
 
   coverage:
     name: Coverage

@@ -1,13 +1,11 @@
 name: CI
 
-# Fast gate: every pull request and every push to main. Format, clippy and
+# Fast gate: pull requests only. Format, clippy and
 # the unit + integration tests, skipped entirely when a change touches no
-# Rust inputs. The full suite runs only on release commits (full-suite.yml);
+# Rust inputs. The full suite runs on release commits or manually on main;
 # CONTRIBUTING describes the policy.
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
 
@@ -15,8 +13,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always

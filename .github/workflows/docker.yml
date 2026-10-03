@@ -1,8 +1,7 @@
 name: Docker
 
-# Builds on release commits only, the same definition as full-suite.yml.
-# Images are pushed only for v* tags and manual dispatch; other release
-# commits build without pushing.
+# Builds on release/** pushes, release-labeled PRs and v* tags.
+# Images are pushed only for v* tags; other release commits build without pushing.
 
 on:
   push:
@@ -11,7 +10,6 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, labeled]
-  workflow_dispatch:
 
 concurrency:
   group: docker-${{ github.event.pull_request.number || github.ref }}-${{ (github.event.action == 'labeled' && github.event.label.name != 'release') && github.run_id || 'run' }}
@@ -19,7 +17,7 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  PUBLISH: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
+  PUBLISH: ${{ startsWith(github.ref, 'refs/tags/v') }}
 
 jobs:
   build:
@@ -100,7 +98,7 @@ jobs:
   merge:
     name: Merge manifests (${{ matrix.component.name }})
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     permissions:
       contents: read
@@ -136,8 +134,6 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.component.name }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
