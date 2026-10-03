@@ -74,7 +74,7 @@ On failure:
 
 The server allows 30 seconds for authentication before closing the connection.
 
-The connection stays bound to the credential it authenticated with. If that credential is revoked (`.apikey revoke`, `.user password`, `.user drop`), the server sends nothing more for the connection except a final `{"type": "notice", "code": "credential_revoked", "message": "Credential revoked; reconnect with valid credentials"}` and closes it. See [Authentication](authentication#revocation).
+The connection stays bound to the credential it authenticated with. If that credential is revoked (`.apikey revoke`, `.user password`, `.user drop`) or its API key expires, the server sends nothing more for the connection except a final `{"type": "notice", "code": "credential_revoked", "message": "Credential revoked; reconnect with valid credentials"}` (`"code": "credential_expired"` and `Credential expired; ...` for an expired key) and closes it. See [Authentication](authentication#revocation).
 
 ## Executing Statements
 
@@ -491,6 +491,7 @@ The server announces connection events with a `notice`, never with an `error`:
 | `lifetime_exceeded` | The connection reached `http.rate_limit.ws_max_lifetime_secs`; it closes. |
 | `auth_timeout` | No authentication in time; the connection closes. |
 | `credential_revoked` | The connection's credential was revoked; it closes. |
+| `credential_expired` | The connection's API key expired; it closes. |
 | `server_shutdown` | The server is stopping; the connection closes. |
 
 ## Reconnection

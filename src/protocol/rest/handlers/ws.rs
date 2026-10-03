@@ -11,8 +11,8 @@
 //! subscription pushes, notices) never carry one.
 //!
 //! A connection is bound to the [`Principal`] it authenticated as. Revoking
-//! that credential closes the connection, and every outbound data frame is
-//! fenced by it (see the `outbound` module).
+//! that credential, or its expiry, closes the connection, and every outbound
+//! data frame is fenced by it (see the `outbound` module).
 //!
 //! Each connection is one loop that owns the socket's read half, the single
 //! writer, its subscriptions and its request `pipeline`. Requests run as
@@ -362,7 +362,7 @@ async fn handle_global_ws_connection(
             if let Err(e) = handler.close_session(&session_id) {
                 tracing::warn!(error = %e, "session_cleanup_failed");
             }
-            notify_if_revoked(&mut sender, &principal).await;
+            notify_if_ended(&mut sender, &principal).await;
             return;
         }
     }
@@ -397,8 +397,8 @@ async fn handle_global_ws_connection(
         None
     };
 
-    // Fires once the connection's credential is revoked.
-    let mut revocation = principal.revocation();
+    // Fires once the connection's credential is revoked or expires.
+    let mut credential_end = principal.end_signal();
 
     // Server-initiated heartbeat: send ping every 30s to detect dead connections
     let mut heartbeat_interval = tokio::time::interval(std::time::Duration::from_secs(30));
@@ -418,9 +418,9 @@ async fn handle_global_ws_connection(
         }
 
         tokio::select! {
-            // Credential revoked: stop everything this connection was doing
-            () = &mut revocation => {
-                info!(credential = %principal.credential(), "ws_credential_revoked");
+            // Credential revoked or expired: stop everything this connection was doing
+            () = &mut credential_end => {
+                info!(credential = %principal.credential(), "ws_credential_ended");
                 break;
             }
             // Idle timeout; a connection with requests in progress is not idle
@@ -547,7 +547,7 @@ async fn handle_global_ws_connection(
     in_flight.cancel_reads();
     requests.shutdown().await;
     drop(subscriptions);
-    notify_if_revoked(&mut sender, &principal).await;
+    notify_if_ended(&mut sender, &principal).await;
     // Send close frame before cleanup (prevents "connection reset without handshake" warnings)
     let _ = sender.send(Message::Close(None)).await;
 
@@ -562,10 +562,10 @@ async fn handle_global_ws_connection(
     }
 }
 
-/// Tell the client its credential was revoked, if it was.
-async fn notify_if_revoked(sender: &mut Outbound, principal: &Principal) {
-    if principal.is_revoked() {
-        sender.send_revocation_notice().await;
+/// Tell the client its credential was revoked or expired, if it was.
+async fn notify_if_ended(sender: &mut Outbound, principal: &Principal) {
+    if let Some(ended) = principal.ended() {
+        sender.send_credential_notice(ended).await;
     }
 }
 

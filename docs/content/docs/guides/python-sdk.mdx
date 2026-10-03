@@ -671,18 +671,24 @@ await il.drop_user("alice")
 ### API Keys
 
 ```python
-# Create an API key
-key = await il.create_api_key("my-service")
+# Create an API key that expires in 90 days (omit ttl for no expiry)
+key = await il.create_api_key("my-service", ttl="90d")
 print(f"Store this key securely: {key}")
 
-# List active keys
+# List keys; times are Unix milliseconds, None when unknown/never/unused
 keys = await il.list_api_keys()
 for k in keys:
-    print(f"{k.label} (created: {k.created_at})")
+    print(f"{k.label} owner={k.owner} {k.status} expires={k.expires_at} last_used={k.last_used_at}")
+
+# Rotate: create the replacement, give the old key a 24h grace period
+new_key = await il.create_api_key("my-service-2", ttl="90d")
+await il.expire_api_key("my-service", "24h")
 
 # Revoke a key
 await il.revoke_api_key("my-service")
 ```
+
+See [Authentication](authentication#rotate-api-key) for how expiry and rotation work.
 
 ### Per-Knowledge-Graph Access Control
 

@@ -138,8 +138,9 @@ fn intercepted_mutation(stmt: &statement::Statement, on_session: bool) -> bool {
                 | MetaCommand::UserDrop(_)
                 | MetaCommand::UserPassword { .. }
                 | MetaCommand::UserRole { .. }
-                | MetaCommand::ApiKeyCreate(_)
+                | MetaCommand::ApiKeyCreate { .. }
                 | MetaCommand::ApiKeyRevoke(_)
+                | MetaCommand::ApiKeyExpire { .. }
                 | MetaCommand::KgAclGrant { .. }
                 | MetaCommand::KgAclRevoke { .. }
                 | MetaCommand::AgentMessage(_)
@@ -372,6 +373,8 @@ mod meta_dispatch_hook {
         }
     }
 }
+
+mod api_keys;
 
 #[cfg(test)]
 mod guard_reentry_tests;
@@ -950,6 +953,7 @@ impl Handler {
 
     /// Graceful shutdown: flush WAL and save metadata for all knowledge graphs.
     pub fn shutdown(&self) {
+        self.persist_api_key_usage();
         info!("Flushing WAL and saving metadata...");
         if let Err(e) = self.storage.read().save_all() {
             warn!(error = %e, "Error during shutdown save");
@@ -1132,13 +1136,16 @@ impl Handler {
         if !create_api_key {
             return;
         }
-        let key_hash = auth::hash_api_key(&api_key);
-        let key_tuple = crate::value::Tuple::new(vec![
-            Value::string("bootstrap"), // label
-            Value::string(&key_hash),   // key_hash
-            Value::string("admin"),     // owner
-        ]);
-        if let Err(e) = storage.insert_tuples_into(auth::INTERNAL_KG, "api_keys", vec![key_tuple]) {
+        let bootstrap_key = auth::ApiKeyRecord {
+            label: "bootstrap".to_string(),
+            key_hash: auth::hash_api_key(&api_key),
+            username: "admin".to_string(),
+            times: auth::ApiKeyTimes {
+                created_at: Some(now_ms()),
+                ..auth::ApiKeyTimes::default()
+            },
+        };
+        if let Err(e) = api_keys::store_api_key(&storage, &bootstrap_key) {
             warn!(error = %e, "Failed to insert bootstrap API key");
         } else {
             info!("Auth bootstrap: API key 'bootstrap' created for admin");
@@ -1376,21 +1383,11 @@ impl Handler {
             .map_err(|e| format!("Failed to drop user: {e}"))?;
         self.credentials.remove_user(username);
 
-        // Also revoke all API keys owned by this user
-        if let Some(api_keys) = snapshot.input_tuples.get("api_keys") {
-            let to_delete: Vec<_> = api_keys
-                .iter()
-                .filter(|t| {
-                    t.values()
-                        .get(2)
-                        .and_then(|v| v.as_str())
-                        .is_some_and(|u| u == username)
-                })
-                .cloned()
-                .collect();
-            if !to_delete.is_empty() {
-                let _ = storage.delete_tuples_from(auth::INTERNAL_KG, "api_keys", to_delete);
-            }
+        // Also delete all API keys owned by this user
+        if let Err(e) =
+            api_keys::delete_api_keys(&storage, &snapshot, |key| key.username == username)
+        {
+            warn!(username, error = %e, "apikey_delete_failed");
         }
 
         // Also revoke all KG ACL entries for this user
@@ -1518,169 +1515,6 @@ impl Handler {
         self.credentials.set_role(username, role);
 
         Ok(self.message_result(&format!("Role updated to '{new_role}' for '{username}'.")))
-    }
-
-    // ── API Key CRUD ────────────────────────────────────────────────────────
-
-    /// `.apikey create`: the plaintext key as a result row (shown only once).
-    pub fn handle_apikey_create(&self, label: &str, owner: &str) -> Result<QueryResult, String> {
-        let plaintext_key = self.create_api_key(label, owner)?;
-        Ok(QueryResult {
-            rows: vec![WireTuple {
-                values: vec![
-                    WireValue::String(label.to_string()),
-                    WireValue::String(plaintext_key),
-                ],
-                provenance: None,
-            }],
-            schema: vec![
-                ColumnDef {
-                    name: "label".to_string(),
-                    data_type: WireDataType::String,
-                },
-                ColumnDef {
-                    name: "api_key".to_string(),
-                    data_type: WireDataType::String,
-                },
-            ],
-            total_count: 1,
-            truncated: false,
-            execution_time_ms: 0,
-            metadata: None,
-            switched_kg: None,
-            proof_trees: None,
-            timing_breakdown: None,
-            errors: Vec::new(),
-        })
-    }
-
-    /// Create an API key for `owner`; returns the plaintext key, which is
-    /// not stored and cannot be recovered.
-    pub fn create_api_key(&self, label: &str, owner: &str) -> Result<String, String> {
-        use crate::auth;
-        use crate::value::Value;
-
-        let storage = self.storage.read();
-        let snapshot = storage
-            .get_snapshot_for(auth::INTERNAL_KG)
-            .map_err(|e| format!("Auth storage error: {e}"))?;
-
-        // Check label uniqueness
-        if let Some(api_keys) = snapshot.input_tuples.get("api_keys") {
-            for tuple in api_keys {
-                if let Some(l) = tuple.values().first().and_then(|v| v.as_str()) {
-                    if l == label {
-                        return Err(format!("API key with label '{label}' already exists"));
-                    }
-                }
-            }
-        }
-
-        let plaintext_key = auth::generate_api_key();
-        let key_hash = auth::hash_api_key(&plaintext_key);
-
-        // api_keys: (label, key_hash, username)
-        let tuple = crate::value::Tuple::new(vec![
-            Value::string(label),
-            Value::string(&key_hash),
-            Value::string(owner),
-        ]);
-
-        storage
-            .insert_tuples_into(auth::INTERNAL_KG, "api_keys", vec![tuple])
-            .map_err(|e| format!("Failed to create API key: {e}"))?;
-        self.credentials.put_key(auth::ApiKeyRecord {
-            label: label.to_string(),
-            key_hash,
-            username: owner.to_string(),
-        });
-
-        tracing::info!(label, owner, "audit_apikey_created");
-        Ok(plaintext_key)
-    }
-
-    /// List all API keys (label and owner, never the hash).
-    pub fn handle_apikey_list(&self) -> Result<QueryResult, String> {
-        use crate::auth;
-
-        let storage = self.storage.read();
-        let snapshot = storage
-            .get_snapshot_for(auth::INTERNAL_KG)
-            .map_err(|e| format!("Auth storage error: {e}"))?;
-        drop(storage);
-
-        let empty_vec = crate::value::Relation::new();
-        let api_keys = snapshot.input_tuples.get("api_keys").unwrap_or(&empty_vec);
-
-        let mut rows = Vec::new();
-        for tuple in api_keys {
-            let vals = tuple.values();
-            if vals.len() >= 3 {
-                rows.push(WireTuple {
-                    values: vec![
-                        WireValue::from_value(&vals[0]), // label
-                        WireValue::from_value(&vals[2]), // username (owner)
-                    ],
-                    provenance: None,
-                });
-            }
-        }
-
-        let total_count = rows.len();
-        Ok(QueryResult {
-            rows,
-            schema: vec![
-                ColumnDef {
-                    name: "label".to_string(),
-                    data_type: WireDataType::String,
-                },
-                ColumnDef {
-                    name: "owner".to_string(),
-                    data_type: WireDataType::String,
-                },
-            ],
-            total_count,
-            truncated: false,
-            execution_time_ms: 0,
-            metadata: None,
-            switched_kg: None,
-            proof_trees: None,
-            timing_breakdown: None,
-            errors: Vec::new(),
-        })
-    }
-
-    /// Revoke an API key by label.
-    pub fn handle_apikey_revoke(&self, label: &str) -> Result<QueryResult, String> {
-        use crate::auth;
-
-        let storage = self.storage.read();
-        let snapshot = storage
-            .get_snapshot_for(auth::INTERNAL_KG)
-            .map_err(|e| format!("Auth storage error: {e}"))?;
-
-        let empty_vec = crate::value::Relation::new();
-        let api_keys = snapshot.input_tuples.get("api_keys").unwrap_or(&empty_vec);
-
-        let mut found = None;
-        for tuple in api_keys {
-            if let Some(l) = tuple.values().first().and_then(|v| v.as_str()) {
-                if l == label {
-                    found = Some(tuple.clone());
-                    break;
-                }
-            }
-        }
-
-        let tuple = found.ok_or_else(|| format!("API key '{label}' not found"))?;
-
-        storage
-            .delete_tuples_from(auth::INTERNAL_KG, "api_keys", vec![tuple])
-            .map_err(|e| format!("Failed to revoke API key: {e}"))?;
-        self.credentials.revoke_key(label);
-
-        tracing::info!(label, "audit_apikey_revoked");
-        Ok(self.message_result(&format!("API key '{label}' revoked.")))
     }
 
     // ── KG ACL management ─────────────────────────────────────────────────
@@ -3079,9 +2913,10 @@ impl QueryJob {
                                     | MetaCommand::UserDrop(_)
                                     | MetaCommand::UserPassword { .. }
                                     | MetaCommand::UserRole { .. }
-                                    | MetaCommand::ApiKeyCreate(_)
+                                    | MetaCommand::ApiKeyCreate { .. }
                                     | MetaCommand::ApiKeyList
-                                    | MetaCommand::ApiKeyRevoke(_) => {
+                                    | MetaCommand::ApiKeyRevoke(_)
+                                    | MetaCommand::ApiKeyExpire { .. } => {
                                         fail!(
                                             ErrorCode::Unsupported,
                                             "User/API key commands require a WebSocket connection with admin privileges."
@@ -4031,16 +3866,19 @@ impl Handler {
                     MetaCommand::UserRole { username, role } => {
                         return Ok(self.handle_user_role(username, role)?);
                     }
-                    MetaCommand::ApiKeyCreate(label) => {
+                    MetaCommand::ApiKeyCreate { label, ttl } => {
                         let owner = effective_auth
                             .map_or_else(|| "admin".to_string(), |a| a.username.clone());
-                        return Ok(self.handle_apikey_create(label, &owner)?);
+                        return Ok(self.handle_apikey_create(label, &owner, *ttl)?);
                     }
                     MetaCommand::ApiKeyList => {
-                        return Ok(self.handle_apikey_list()?);
+                        return Ok(self.handle_apikey_list());
                     }
                     MetaCommand::ApiKeyRevoke(label) => {
                         return Ok(self.handle_apikey_revoke(label)?);
+                    }
+                    MetaCommand::ApiKeyExpire { label, ttl } => {
+                        return Ok(self.handle_apikey_expire(label, *ttl)?);
                     }
 
                     // KG ACL management

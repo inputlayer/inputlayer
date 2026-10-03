@@ -39,7 +39,7 @@ fn open(dir: &Path) -> Handler {
 fn admin(handler: &Handler) -> Principal {
     static KEYS: AtomicU64 = AtomicU64::new(0);
     let label = format!("backup-test-{}", KEYS.fetch_add(1, Ordering::Relaxed));
-    let key = handler.create_api_key(&label, "admin").unwrap();
+    let key = handler.create_api_key(&label, "admin", None).unwrap();
     handler.authenticate_api_key(&key).unwrap()
 }
 

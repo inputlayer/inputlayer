@@ -63,9 +63,10 @@ Meta commands start with `.` and control the system:
 .user password <name> <password>       Change password
 .user role <name> <role>               Change role
 
-.apikey create <label>   Create API key
-.apikey list             List API keys
-.apikey revoke <label>   Revoke API key
+.apikey create <label> [<ttl>]   Create API key (ttl e.g. 90d)
+.apikey list                     List API keys
+.apikey expire <label> <ttl>     Expire API key after ttl
+.apikey revoke <label>           Revoke API key
 
 .kg acl list [<kg>]              List ACLs
 .kg acl grant <kg> <user> <role> Grant access

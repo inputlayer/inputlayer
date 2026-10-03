@@ -215,8 +215,9 @@ Authorization: Bearer <api-key>
 API keys are managed via meta commands in the WebSocket session:
 
 ```iql
-.apikey create my-service-key
+.apikey create my-service-key 90d
 .apikey list
+.apikey expire my-service-key 24h
 .apikey revoke my-service-key
 ```
 

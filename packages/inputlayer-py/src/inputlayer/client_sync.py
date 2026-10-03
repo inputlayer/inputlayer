@@ -250,11 +250,14 @@ class InputLayerSync:
     def list_users(self) -> list[UserInfo]:
         return run_sync(self._client.list_users())
 
-    def create_api_key(self, label: str) -> str:
-        return run_sync(self._client.create_api_key(label))
+    def create_api_key(self, label: str, ttl: str | None = None) -> str:
+        return run_sync(self._client.create_api_key(label, ttl))
 
     def list_api_keys(self) -> list[ApiKeyInfo]:
         return run_sync(self._client.list_api_keys())
+
+    def expire_api_key(self, label: str, ttl: str) -> None:
+        run_sync(self._client.expire_api_key(label, ttl))
 
     def revoke_api_key(self, label: str) -> None:
         run_sync(self._client.revoke_api_key(label))

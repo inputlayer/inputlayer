@@ -24,6 +24,8 @@ pub enum NoticeCode {
     AuthTimeout,
     /// The connection's credential was revoked; the server closes the connection.
     CredentialRevoked,
+    /// The connection's API key expired; the server closes the connection.
+    CredentialExpired,
     /// The server is shutting down and closes the connection.
     ServerShutdown,
 }

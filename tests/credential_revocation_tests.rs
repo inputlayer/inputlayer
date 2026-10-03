@@ -1,6 +1,7 @@
-//! Credential revocation over a real `/ws` connection: revoking an API key,
-//! changing a password or dropping a user ends exactly the sessions bound to
-//! that credential, and nothing computed for them leaves after the fence.
+//! Credential revocation and expiry over a real `/ws` connection: revoking an
+//! API key, its expiry passing, changing a password or dropping a user ends
+//! exactly the sessions bound to that credential, and nothing computed for
+//! them leaves after the fence.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -22,17 +23,21 @@ const ADMIN_PASSWORD: &str = "revocation-admin-pw";
 const BOB_PASSWORD: &str = "bob-password";
 const TIMEOUT: Duration = Duration::from_secs(20);
 const REVOKED: &str = "Credential revoked; reconnect with valid credentials";
+const EXPIRED: &str = "Credential expired; reconnect with valid credentials";
 
 struct Server {
     handler: Arc<Handler>,
     addr: std::net::SocketAddr,
     task: tokio::task::JoinHandle<()>,
+    /// Credential upkeep, as the server binary runs it.
+    upkeep: tokio::task::JoinHandle<()>,
     _tmp: TempDir,
 }
 
 impl Drop for Server {
     fn drop(&mut self) {
         self.task.abort();
+        self.upkeep.abort();
     }
 }
 
@@ -65,10 +70,12 @@ async fn start_server_with(configure: impl FnOnce(&mut Config)) -> Server {
     let task = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
+    let upkeep = tokio::spawn(Arc::clone(&handler).credential_upkeep());
     let server = Server {
         handler,
         addr,
         task,
+        upkeep,
         _tmp: tmp,
     };
     server.write("+d[(0,)]").await;
@@ -85,7 +92,7 @@ impl Server {
     }
 
     fn key(&self, label: &str, owner: &str) -> String {
-        self.handler.create_api_key(label, owner).unwrap()
+        self.handler.create_api_key(label, owner, None).unwrap()
     }
 
     async fn wait_for_active(&self, expected: u64) {
@@ -215,10 +222,20 @@ impl Client {
 
 /// The frames a revoked connection receives: only the notice, then close.
 fn assert_revoked(frames: &[Value]) {
+    assert_ended(frames, REVOKED);
+}
+
+/// The frames an ended connection receives: only `notice`, then close.
+fn assert_ended(frames: &[Value], notice: &str) {
     assert_eq!(frames.len(), 1, "{frames:?}");
     assert_eq!(frames[0]["type"], "notice");
-    assert_eq!(frames[0]["code"], "credential_revoked");
-    assert_eq!(frames[0]["message"], REVOKED);
+    let code = if notice == EXPIRED {
+        "credential_expired"
+    } else {
+        "credential_revoked"
+    };
+    assert_eq!(frames[0]["code"], code);
+    assert_eq!(frames[0]["message"], notice);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -502,4 +519,122 @@ async fn kg_access_revocation_stops_pushes_on_a_live_connection() {
         leaked.is_empty(),
         "pushed while access was revoked: {leaked:?}"
     );
+}
+
+/// Run `program` over an admin `/ws` session; its `result` frame.
+async fn admin_execute(server: &Server, program: &str) -> Value {
+    let mut admin = Client::connect(server, Login::Password("admin", ADMIN_PASSWORD)).await;
+    let reply = admin.execute(program).await;
+    assert_eq!(reply["type"], "result", "{program}: {reply}");
+    reply
+}
+
+/// The `.apikey list` row of `label`, by column name.
+async fn listed_key(server: &Server, label: &str) -> serde_json::Map<String, Value> {
+    let list = admin_execute(server, ".apikey list").await;
+    let columns = list["columns"].as_array().unwrap();
+    let row = list["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row[0] == label)
+        .unwrap_or_else(|| panic!("{label} not in {list}"));
+    columns
+        .iter()
+        .zip(row.as_array().unwrap())
+        .map(|(column, value)| (column.as_str().unwrap().to_string(), value.clone()))
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_expiring_key_ends_its_live_sessions_and_standing_queries() {
+    let server = start_server().await;
+    let key = server
+        .handler
+        .create_api_key("bob-ttl", "bob", Some(Duration::from_secs(3)))
+        .unwrap();
+    let mut unrelated = Client::connect(&server, Login::Password("bob", BOB_PASSWORD)).await;
+    let mut session = Client::connect(&server, Login::Key(&key)).await;
+    let reply = session.execute(".subscribe all ?d(X)").await;
+    assert_eq!(reply["type"], "result", "{reply}");
+    server.wait_for_active(1).await;
+
+    // No request and no write: the expiry alone ends the session.
+    assert_ended(&session.drain().await, EXPIRED);
+    server.wait_for_active(0).await;
+    unrelated.assert_live().await;
+    let (_, reply) = Client::try_connect(&server, KG, Login::Key(&key)).await;
+    assert_eq!(reply["type"], "auth_error", "{reply}");
+    assert_eq!(reply["message"], "API key expired", "{reply}");
+    assert_eq!(listed_key(&server, "bob-ttl").await["status"], "expired");
+}
+
+/// The fence is exact at the expiry instant, with or without the upkeep sweep:
+/// the first frame after it is withheld and closes the connection instead.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_fence_alone_closes_an_expired_session_at_its_next_frame() {
+    let server = start_server().await;
+    server.upkeep.abort();
+    let key = server
+        .handler
+        .create_api_key("bob-unswept", "bob", Some(Duration::from_millis(500)))
+        .unwrap();
+    let mut session = Client::connect(&server, Login::Key(&key)).await;
+    let reply = session.execute(".subscribe all ?d(X)").await;
+    assert_eq!(reply["type"], "result", "{reply}");
+    server.wait_for_active(1).await;
+
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    // The delta for this write is the first frame after the expiry.
+    server.write("+d[(7,)]").await;
+    assert_ended(&session.drain().await, EXPIRED);
+    server.wait_for_active(0).await;
+    assert_eq!(
+        listed_key(&server, "bob-unswept").await["status"],
+        "expired"
+    );
+}
+
+/// Rotation as documented: create the replacement, bring the old key's
+/// expiry forward to a grace period, and both work until it passes.
+#[tokio::test(flavor = "multi_thread")]
+async fn rotation_grace_period_overlaps_old_and_new_keys() {
+    let server = start_server().await;
+    let old = admin_execute(&server, ".apikey create svc-v1").await["rows"][0][1]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let mut on_old = Client::connect(&server, Login::Key(&old)).await;
+    let created = admin_execute(&server, ".apikey create svc-v2 30d").await;
+    assert_eq!(
+        created["columns"],
+        json!(["label", "api_key", "expires_at"])
+    );
+    assert!(created["rows"][0][2].is_i64(), "{created}");
+    let new = created["rows"][0][1].as_str().unwrap().to_string();
+
+    let reply = admin_execute(&server, ".apikey expire svc-v1 4s").await;
+    assert_eq!(reply["rows"][0][0], "API key 'svc-v1' expires in 4s.");
+
+    // Grace period: sessions on the old key continue, new sessions on either
+    // key are accepted.
+    let mut on_new = Client::connect(&server, Login::Key(&new)).await;
+    on_old.assert_live().await;
+    Client::connect(&server, Login::Key(&old))
+        .await
+        .assert_live()
+        .await;
+    on_new.assert_live().await;
+    let listed = listed_key(&server, "svc-v1").await;
+    assert_eq!(listed["status"], "active");
+    assert!(listed["expires_at"].is_i64(), "{listed:?}");
+    assert!(listed["last_used_at"].is_i64(), "{listed:?}");
+
+    // After it: only the new key works.
+    assert_ended(&on_old.drain().await, EXPIRED);
+    on_new.assert_live().await;
+    let (_, reply) = Client::try_connect(&server, KG, Login::Key(&old)).await;
+    assert_eq!(reply["message"], "API key expired", "{reply}");
+    assert_eq!(listed_key(&server, "svc-v1").await["status"], "expired");
+    assert_eq!(listed_key(&server, "svc-v2").await["status"], "active");
 }

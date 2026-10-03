@@ -429,8 +429,8 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
 /// Starts the HTTP server with graceful shutdown support.
 ///
 /// Listens for SIGINT (ctrl-c) and SIGTERM to trigger graceful shutdown.
-/// On shutdown: stops accepting connections, cancels the session reaper,
-/// and flushes WAL + metadata via `handler.shutdown()`.
+/// On shutdown: stops accepting connections, cancels the session reaper and
+/// credential upkeep, and flushes WAL + metadata via `handler.shutdown()`.
 pub async fn start_http_server(
     handler: Arc<Handler>,
     config: &HttpConfig,
@@ -459,6 +459,9 @@ pub async fn start_http_server(
             }
         }
     });
+
+    // Expire API keys on time and persist their last use
+    let upkeep = tokio::spawn(Arc::clone(&handler).credential_upkeep());
 
     // Spawn background auto-compaction task (if enabled)
     let compact_interval = handler.config().storage.persist.auto_compact_interval_secs;
@@ -530,6 +533,7 @@ pub async fn start_http_server(
 
     // Signal reaper to stop
     let _ = shutdown_tx.send(true);
+    upkeep.abort();
 
     // Flush WAL and save metadata with a timeout.
     // If a long-running query holds the storage lock, we don't want to hang indefinitely.
@@ -600,7 +604,9 @@ mod tests {
     /// Returns (handler, api_key, tmpdir).
     fn make_handler_with_api_key() -> (Arc<Handler>, String, tempfile::TempDir) {
         let (handler, tmp) = make_handler();
-        let result = handler.handle_apikey_create("test-key", "admin").unwrap();
+        let result = handler
+            .handle_apikey_create("test-key", "admin", None)
+            .unwrap();
         let api_key = result.rows[0].values[1].as_str().unwrap().to_string();
         (handler, api_key, tmp)
     }
@@ -751,7 +757,9 @@ mod tests {
     async fn test_auth_multiple_keys_any_valid() {
         let (handler, _key1, _tmp) = make_handler_with_api_key();
         // Create a second key
-        let result = handler.handle_apikey_create("key-2", "admin").unwrap();
+        let result = handler
+            .handle_apikey_create("key-2", "admin", None)
+            .unwrap();
         let key2 = result.rows[0].values[1].as_str().unwrap().to_string();
 
         let config = make_default_config();

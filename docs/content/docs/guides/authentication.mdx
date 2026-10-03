@@ -158,7 +158,10 @@ API keys provide machine-to-machine authentication without passwords.
 
 ```
 .apikey create my-service-key
+.apikey create ci-deploy 90d
 ```
+
+The reply holds the key itself. It is shown only once; the server stores only its hash. An optional TTL makes the key expire that long after creation: a number and a unit, `ms`, `s`, `m`, `h` or `d` (for example `30s`, `15m`, `24h`, `90d`). Without one the key never expires.
 
 ### List API Keys
 
@@ -166,13 +169,45 @@ API keys provide machine-to-machine authentication without passwords.
 .apikey list
 ```
 
+| Column | Meaning |
+|--------|---------|
+| `label` | the key's name |
+| `owner` | the user the key authenticates as |
+| `created_at` | when it was created; null for keys created before key timestamps were recorded |
+| `expires_at` | when it expires; null if it never does |
+| `last_used_at` | the last authentication with it; null if never used |
+| `status` | `active` or `expired` |
+
+Timestamps are Unix milliseconds. `last_used_at` is updated at most once per second per key, in memory, and persisted once a minute and at shutdown, so after a crash it can be up to a minute old. A REST request counts as a use; a WebSocket connection counts once, when it authenticates. Use it to find stale keys.
+
+### Expire API Key
+
+```
+.apikey expire my-service-key 24h
+```
+
+Brings the key's expiry forward to that long from now. An expiry can only be brought forward, never extended; to extend access, create a new key. `.apikey expire <label> 0s` expires the key immediately but keeps it listed, unlike `.apikey revoke`.
+
+When an expiry passes, the key stops authenticating (`API key expired`), and every session using it ends as described in [Revocation](#revocation). Expired keys stay listed with status `expired` until revoked.
+
 ### Revoke API Key
 
 ```
 .apikey revoke my-service-key
 ```
 
-Revoking a key ends every live session authenticated with that key. Other keys, including other keys of the same user, are unaffected.
+Revoking a key ends every live session authenticated with that key and deletes it. Other keys, including other keys of the same user, are unaffected.
+
+### Rotate API Key
+
+Rotation replaces a key without downtime: both keys work during a grace period, then the old one expires.
+
+1. Create the replacement: `.apikey create my-service-key-2 90d`
+2. Bring the old key's expiry forward to the grace period: `.apikey expire my-service-key 24h`
+3. Deploy the new key to every client within the grace period. Sessions on the old key keep working until it expires, and new sessions can use either key.
+4. After the grace period, the old key is rejected and its remaining sessions end. Remove it from the list with `.apikey revoke my-service-key`.
+
+`last_used_at` on the old key shows whether any client still uses it.
 
 ## Revocation
 
@@ -181,14 +216,17 @@ Each WebSocket session is bound to the credential it authenticated with: one API
 | Command | Ends sessions authenticated with |
 |---------|----------------------------------|
 | `.apikey revoke <label>` | that key |
+| `.apikey expire <label> <ttl>` | that key, once the TTL passes |
 | `.user password <name> <password>` | the user's previous password |
 | `.user drop <name>` | the user's password and all of the user's API keys |
 
-A revoked session receives no further results, notifications or subscription pushes. A request that was already running when the credential was revoked has its reply withheld; writes it committed before the revocation stay committed. The server stops the session's standing queries, sends one final message and closes the connection:
+A key's expiry passing ends its sessions the same way, from the expiry instant. A revoked or expired session receives no further results, notifications or subscription pushes. A request that was already running when the credential was revoked or expired has its reply withheld; writes it committed before then stay committed. The server stops the session's standing queries, sends one final message and closes the connection:
 
 ```json
 {"type": "error", "message": "Credential revoked; reconnect with valid credentials"}
 ```
+
+For an expired key the message is `Credential expired; reconnect with valid credentials`.
 
 `.user role` takes effect on the next request of every live session of that user without closing them. REST requests check the API key on every request.
 
@@ -221,4 +259,4 @@ async with InputLayer("ws://localhost:8080/ws", api_key="your-key") as il:
 4. **Use API keys** for automated services and CI/CD pipelines
 5. **Grant minimum required permissions** - use `viewer` access for dashboards, `editor` for ETL jobs
 6. **Bind to localhost** when using a reverse proxy: set `host = "127.0.0.1"` in config
-7. **Rotate API keys** periodically and revoke unused ones
+7. **Give API keys a TTL** and [rotate](#rotate-api-key) them before it passes; revoke keys whose `last_used_at` shows they are unused

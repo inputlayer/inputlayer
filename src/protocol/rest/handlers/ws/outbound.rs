@@ -5,7 +5,7 @@
 //! and before the frame is handed to it, with no await in between. A frame is
 //! therefore authorized at the instant it is committed to the socket, so no
 //! result, notification or subscription push leaves after the credential is
-//! revoked. The one exception is the closing revocation notice.
+//! revoked or expires. The one exception is the closing notice saying so.
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::stream::SplitSink;
@@ -13,7 +13,7 @@ use futures_util::{Sink, SinkExt};
 use inputlayer_ws_protocol::{ErrorCode, NoticeCode, ServerFrame};
 use tracing::warn;
 
-use crate::auth::Principal;
+use crate::auth::{CredentialEnded, Principal};
 use crate::protocol::MAX_MESSAGE_SIZE;
 
 /// Why a frame was not sent.
@@ -21,8 +21,8 @@ use crate::protocol::MAX_MESSAGE_SIZE;
 pub(super) enum SendError {
     /// The socket is closed or failed.
     Closed,
-    /// The connection's credential was revoked.
-    Revoked,
+    /// The connection's credential was revoked or expired.
+    CredentialEnded,
 }
 
 pub(super) struct Outbound<S = SplitSink<WebSocket, Message>> {
@@ -50,8 +50,8 @@ impl<S: Sink<Message> + Unpin> Outbound<S> {
         std::future::poll_fn(|cx| self.sink.poll_ready_unpin(cx))
             .await
             .map_err(|_| SendError::Closed)?;
-        if data && self.principal.as_ref().is_some_and(Principal::is_revoked) {
-            return Err(SendError::Revoked);
+        if data && self.principal.as_ref().and_then(Principal::ended).is_some() {
+            return Err(SendError::CredentialEnded);
         }
         self.sink
             .start_send_unpin(message)
@@ -72,12 +72,22 @@ impl<S: Sink<Message> + Unpin> Outbound<S> {
             .await
     }
 
-    /// Tell the client its credential was revoked: the one data frame sent
-    /// past the fence.
-    pub(super) async fn send_revocation_notice(&mut self) {
+    /// Tell the client its credential was revoked or expired: the one data
+    /// frame sent past the fence.
+    pub(super) async fn send_credential_notice(&mut self, ended: CredentialEnded) {
+        let (code, message) = match ended {
+            CredentialEnded::Revoked => (
+                NoticeCode::CredentialRevoked,
+                "Credential revoked; reconnect with valid credentials",
+            ),
+            CredentialEnded::Expired => (
+                NoticeCode::CredentialExpired,
+                "Credential expired; reconnect with valid credentials",
+            ),
+        };
         let notice = ServerFrame::Notice {
-            code: NoticeCode::CredentialRevoked,
-            message: "Credential revoked; reconnect with valid credentials".to_string(),
+            code,
+            message: message.to_string(),
         };
         let _ = self.sink.send(Message::Text(encode(&notice))).await;
     }
@@ -126,7 +136,7 @@ pub(super) fn encode(frame: &ServerFrame) -> String {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::auth::{ApiKeyRecord, CredentialRegistry, Role, UserRecord};
+    use crate::auth::{ApiKeyRecord, ApiKeyTimes, CredentialRegistry, Role, UserRecord};
     use inputlayer_ws_protocol::RequestId;
 
     fn principal(registry: &CredentialRegistry) -> Principal {
@@ -140,6 +150,7 @@ mod tests {
                 label: "k".to_string(),
                 key_hash: "h".to_string(),
                 username: "bob".to_string(),
+                times: ApiKeyTimes::default(),
             }],
         );
         registry.authenticate_key("h").unwrap()
@@ -155,15 +166,17 @@ mod tests {
         registry.revoke_key("k");
         assert_eq!(
             outbound.send(Message::Text("after".into())).await,
-            Err(SendError::Revoked)
+            Err(SendError::CredentialEnded)
         );
         assert_eq!(
             outbound.send(Message::Binary(vec![1])).await,
-            Err(SendError::Revoked)
+            Err(SendError::CredentialEnded)
         );
         outbound.send(Message::Ping(Vec::new())).await.unwrap();
         assert!(!outbound.send_frame(&ServerFrame::Pong { id: None }).await);
-        outbound.send_revocation_notice().await;
+        outbound
+            .send_credential_notice(CredentialEnded::Revoked)
+            .await;
         outbound.close().await;
 
         assert_eq!(outbound.sink.len(), 3, "{:?}", outbound.sink);

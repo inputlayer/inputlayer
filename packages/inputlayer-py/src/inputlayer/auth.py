@@ -11,6 +11,8 @@ from dataclasses import dataclass
 _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9_.-]+$")
 # Passwords allow more characters but no whitespace or control chars
 _SAFE_PASSWORD = re.compile(r"^\S+$")
+# A TTL as the engine accepts it: a number and a unit, e.g. "30s", "90d"
+_TTL = re.compile(r"^[0-9]+(ms|s|m|h|d)$")
 
 
 def _validate_identifier(value: str, name: str) -> str:
@@ -44,8 +46,16 @@ class UserInfo:
 
 @dataclass(frozen=True)
 class ApiKeyInfo:
+    """An API key as `.apikey list` reports it. Times are Unix milliseconds;
+    ``None`` is unknown (``created_at``), never (``expires_at``) or not yet
+    (``last_used_at``)."""
+
     label: str
-    created_at: str
+    owner: str
+    created_at: int | None
+    expires_at: int | None
+    last_used_at: int | None
+    status: str
 
 
 @dataclass(frozen=True)
@@ -85,9 +95,42 @@ def compile_list_users() -> str:
     return ".user list"
 
 
-def compile_create_api_key(label: str) -> str:
+def _validate_ttl(value: str) -> str:
+    if not _TTL.match(value):
+        raise ValueError(
+            f"ttl must be a number and a unit (ms, s, m, h or d), e.g. '90d': {value!r}"
+        )
+    return value
+
+
+def compile_create_api_key(label: str, ttl: str | None = None) -> str:
     _validate_identifier(label, "label")
-    return f".apikey create {label}"
+    if ttl is None:
+        return f".apikey create {label}"
+    return f".apikey create {label} {_validate_ttl(ttl)}"
+
+
+def compile_expire_api_key(label: str, ttl: str) -> str:
+    _validate_identifier(label, "label")
+    return f".apikey expire {label} {_validate_ttl(ttl)}"
+
+
+def parse_api_keys(columns: list[str], rows: list[list[object]]) -> list[ApiKeyInfo]:
+    """`.apikey list` rows as :class:`ApiKeyInfo`."""
+    keys = []
+    for row in rows:
+        named = dict(zip(columns, row))
+        keys.append(
+            ApiKeyInfo(
+                label=str(named["label"]),
+                owner=str(named["owner"]),
+                created_at=named.get("created_at"),  # type: ignore[arg-type]
+                expires_at=named.get("expires_at"),  # type: ignore[arg-type]
+                last_used_at=named.get("last_used_at"),  # type: ignore[arg-type]
+                status=str(named["status"]),
+            )
+        )
+    return keys
 
 
 def compile_list_api_keys() -> str:

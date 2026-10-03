@@ -672,19 +672,25 @@ await il.dropUser("alice");
 ### API Keys
 
 ```typescript
-// Create an API key
-const key = await il.createApiKey("my-service");
+// Create an API key that expires in 90 days (omit the TTL for no expiry)
+const key = await il.createApiKey("my-service", "90d");
 console.log(`Store this key securely: ${key}`);
 
-// List active keys
+// List keys; times are Unix milliseconds, null when unknown/never/unused
 const keys = await il.listApiKeys();
 for (const k of keys) {
-  console.log(`${k.label} (created: ${k.createdAt})`);
+  console.log(`${k.label} owner=${k.owner} ${k.status} expires=${k.expiresAt} lastUsed=${k.lastUsedAt}`);
 }
+
+// Rotate: create the replacement, give the old key a 24h grace period
+const newKey = await il.createApiKey("my-service-2", "90d");
+await il.expireApiKey("my-service", "24h");
 
 // Revoke a key
 await il.revokeApiKey("my-service");
 ```
+
+See [Authentication](authentication#rotate-api-key) for how expiry and rotation work.
 
 ### Per-Knowledge-Graph Access Control
 

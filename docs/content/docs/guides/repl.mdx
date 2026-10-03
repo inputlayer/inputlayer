@@ -152,8 +152,9 @@ Manage API keys for machine-to-machine auth:
 
 | Command | Description |
 |---------|-------------|
-| `.apikey create <label>` | Create a new API key |
-| `.apikey list` | List all API keys |
+| `.apikey create <label> [<ttl>]` | Create a new API key, optionally expiring after `<ttl>` (`30s`, `15m`, `24h`, `90d`) |
+| `.apikey list` | List all API keys with their owner, created, expiry and last-used times and status |
+| `.apikey expire <label> <ttl>` | Bring a key's expiry forward to `<ttl>` from now, e.g. a rotation grace period |
 | `.apikey revoke <label>` | Revoke an API key |
 
 ### Access Control Commands (`.kg acl`)

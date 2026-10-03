@@ -20,7 +20,7 @@ fn admin(handler: &Handler) -> Principal {
 fn user(handler: &Handler, name: &str) -> Principal {
     static KEYS: AtomicU64 = AtomicU64::new(0);
     let label = format!("test-{}", KEYS.fetch_add(1, Ordering::Relaxed));
-    let key = handler.create_api_key(&label, name).unwrap();
+    let key = handler.create_api_key(&label, name, None).unwrap();
     handler.authenticate_api_key(&key).unwrap()
 }
 
