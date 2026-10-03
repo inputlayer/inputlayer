@@ -17,7 +17,7 @@ use crate::session::{SessionConfig, SessionId, SessionManager};
 use crate::statement;
 use crate::statement::meta::{IndexCreateOptions, MetaCommand};
 use crate::statement::parser::SortDirection;
-use crate::storage_engine::StorageEngine;
+use crate::storage_engine::{KnowledgeGraphSnapshot, StorageEngine};
 use crate::value::{Tuple, Value};
 use crate::Config;
 use parking_lot::RwLock;
@@ -362,6 +362,30 @@ fn debug_query(
     Ok((trace.format_trace(), optimizations))
 }
 
+/// Test seam: runs once on the executing thread just before `QueryJob::execute`
+/// dispatches a meta command, while it holds its storage read guard.
+#[cfg(test)]
+mod meta_dispatch_hook {
+    use std::cell::RefCell;
+
+    thread_local! {
+        static HOOK: RefCell<Option<Box<dyn FnOnce()>>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn set(hook: impl FnOnce() + 'static) {
+        HOOK.with(|h| *h.borrow_mut() = Some(Box::new(hook)));
+    }
+
+    pub(super) fn run() {
+        if let Some(hook) = HOOK.with(|h| h.borrow_mut().take()) {
+            hook();
+        }
+    }
+}
+
+#[cfg(test)]
+mod guard_reentry_tests;
+
 /// Self-contained snapshot of Handler state for executing a single query on a blocking thread.
 /// All fields are `Arc`-wrapped (`Send + Sync`), allowing the job to be moved into
 /// `tokio::task::spawn_blocking` without holding any `!Send` lock guards across `.await` points.
@@ -460,58 +484,51 @@ impl QueryJob {
             seq: 0,
         });
     }
+}
 
-    fn create_index(&self, kg: &str, opts: &IndexCreateOptions) -> Result<String, String> {
-        index_commands::create(&self.storage.read(), kg, opts)
-    }
+/// The storage state a `.why` or `.why_not` proof reads, captured under the
+/// caller's storage guard.
+///
+/// Proof search runs on this snapshot alone, so the caller releases its guard
+/// before the costly evaluation instead of re-acquiring storage inside it.
+struct ProofSnapshot {
+    snapshot: Arc<KnowledgeGraphSnapshot>,
+    index_metrics: std::collections::HashMap<String, String>,
+}
 
-    fn drop_index(&self, kg: &str, name: &str) -> Result<String, String> {
-        index_commands::drop(&self.storage.read(), kg, name)
-    }
-
-    fn list_indexes(&self, kg: &str) -> Result<Vec<IndexStats>, String> {
-        index_commands::stats(&self.storage.read(), kg, None)
-    }
-
-    fn get_index_stats(&self, kg: &str, name: &str) -> Result<Vec<IndexStats>, String> {
-        index_commands::stats(&self.storage.read(), kg, Some(name))
-    }
-
-    fn rebuild_index(&self, kg: &str, name: &str) -> Result<String, String> {
-        index_commands::rebuild(&self.storage.read(), kg, name)
+impl ProofSnapshot {
+    fn capture(storage: &StorageEngine, kg: &str) -> Result<Self, String> {
+        storage
+            .ensure_knowledge_graph(kg)
+            .map_err(|e| format!("Knowledge graph not found: {e}"))?;
+        let (snapshot, index_metrics) = storage
+            .proof_snapshot_on(kg)
+            .map_err(|e| format!("Failed to access knowledge graph: {e}"))?;
+        Ok(Self {
+            snapshot,
+            index_metrics,
+        })
     }
 
     /// Build proof trees explaining why query results were derived.
     ///
     /// Returns a QueryResult with both the result rows AND proof trees
     /// in the `proof_trees` field, so clients get typed data not text.
-    fn why_query(
-        &self,
-        knowledge_graph: Option<String>,
-        query: String,
+    fn why(
+        self,
+        query: &str,
         full_mode: bool,
+        timing_mode: crate::execution::TimingMode,
     ) -> Result<QueryResult, String> {
         use crate::provenance::backward_chaining::{build_proof_tree, ProofContext};
         use crate::provenance::ProofConfig;
 
         let start = std::time::Instant::now();
-        let storage = self.storage.read();
-        let kg_name = if let Some(ref kg) = knowledge_graph {
-            storage
-                .ensure_knowledge_graph(kg)
-                .map_err(|e| format!("Knowledge graph not found: {e}"))?;
-            kg.clone()
-        } else {
-            storage
-                .current_knowledge_graph()
-                .ok_or("No knowledge graph selected")?
-                .to_string()
-        };
-
         let query_start = std::time::Instant::now();
-        let (mut result_tuples, rules, base_data, derived_data, index_metrics) = storage
-            .execute_and_get_context(&kg_name, &query)
-            .map_err(|e| format!("{e}"))?;
+        let (mut result_tuples, derived_data) = self
+            .snapshot
+            .execute_with_rules_tuples_and_derived(query)
+            .map_err(|e| format!("Query execution failed: {e}"))?;
         let row_capped = crate::last_result_truncated();
         let query_us = query_start.elapsed().as_micros() as u64;
 
@@ -520,8 +537,10 @@ impl QueryJob {
         }
 
         result_tuples.sort();
+        let (rules, base_data) = self.snapshot.proof_inputs();
+        let derived_data = crate::value::relation::to_vec_map(&derived_data);
 
-        let relation = extract_query_relation(&query)
+        let relation = extract_query_relation(query)
             .ok_or_else(|| "Could not determine query relation name".to_string())?;
         let config = ProofConfig {
             full_mode,
@@ -532,7 +551,8 @@ impl QueryJob {
         let index_info: std::collections::HashMap<
             String,
             crate::provenance::backward_chaining::IndexProofInfo,
-        > = index_metrics
+        > = self
+            .index_metrics
             .into_iter()
             .map(|(name, metric)| {
                 (
@@ -548,7 +568,7 @@ impl QueryJob {
             .with_derived_data(&derived_data);
 
         // Build wire rows and proof trees
-        let schema = extract_query_schema(&query, &result_tuples);
+        let schema = extract_query_schema(query, &result_tuples);
         let mut rows = Vec::new();
         let mut graphs = Vec::new();
 
@@ -589,42 +609,10 @@ impl QueryJob {
                     builder.finish(vec![id])
                 }
             };
-            graph.query = Some(query.clone());
+            graph.query = Some(query.to_string());
             graphs.push(graph);
         }
         let proof_us = proof_start.elapsed().as_micros() as u64;
-
-        let timing_breakdown =
-            if self.config.storage.performance.timing_mode == crate::execution::TimingMode::Off {
-                None
-            } else {
-                let total_us = start.elapsed().as_micros() as u64;
-                Some(crate::execution::TimingBreakdown {
-                    total_us,
-                    parse_us: 0,
-                    sip_us: 0,
-                    magic_sets_us: 0,
-                    ir_build_us: 0,
-                    optimize_us: 0,
-                    shared_views_us: 0,
-                    rules: vec![
-                        crate::execution::timing::RuleTiming {
-                            rule_head: "query_execution".into(),
-                            execution_us: query_us,
-                            is_recursive: false,
-                            workers: 1,
-                        },
-                        crate::execution::timing::RuleTiming {
-                            rule_head: "proof_tree_construction".into(),
-                            execution_us: proof_us,
-                            is_recursive: false,
-                            workers: 1,
-                        },
-                    ],
-                    optimizer_detail: None,
-                    ir_builder_detail: None,
-                })
-            };
 
         let total_count = rows.len();
         Ok(QueryResult {
@@ -636,7 +624,13 @@ impl QueryJob {
             metadata: None,
             switched_kg: None,
             proof_trees: Some(graphs),
-            timing_breakdown,
+            timing_breakdown: proof_timing(
+                timing_mode,
+                start,
+                query_us,
+                "proof_tree_construction",
+                proof_us,
+            ),
             errors: Vec::new(),
         })
     }
@@ -644,34 +638,19 @@ impl QueryJob {
     /// Explain why a specific tuple was NOT derived.
     ///
     /// Returns a QueryResult with the explanation as structured proof tree.
-    fn why_not_query(
-        &self,
-        knowledge_graph: Option<String>,
-        input: String,
+    fn why_not(
+        self,
+        input: &str,
+        timing_mode: crate::execution::TimingMode,
     ) -> Result<QueryResult, String> {
         use crate::provenance::backward_chaining::ProofContext;
         use crate::provenance::why_not::{explain_why_not, format_why_not_text};
         use crate::provenance::ProofConfig;
 
         let start = std::time::Instant::now();
-        let storage = self.storage.read();
-        let kg_name = if let Some(ref kg) = knowledge_graph {
-            storage
-                .ensure_knowledge_graph(kg)
-                .map_err(|e| format!("Knowledge graph not found: {e}"))?;
-            kg.clone()
-        } else {
-            storage
-                .current_knowledge_graph()
-                .ok_or("No knowledge graph selected")?
-                .to_string()
-        };
-
-        let (relation, tuple) = parse_why_not_target(&input)?;
+        let (relation, tuple) = parse_why_not_target(input)?;
         let query_start = std::time::Instant::now();
-        let (rules, base_data) = storage
-            .get_rules_and_data(&kg_name)
-            .map_err(|e| format!("Failed to access knowledge graph: {e}"))?;
+        let (rules, base_data) = self.snapshot.proof_inputs();
         let ctx = ProofContext::new(&rules, &base_data, ProofConfig::default());
         let query_us = query_start.elapsed().as_micros() as u64;
 
@@ -689,38 +668,6 @@ impl QueryJob {
             .collect();
         let total_count = rows.len();
 
-        let timing_breakdown =
-            if self.config.storage.performance.timing_mode == crate::execution::TimingMode::Off {
-                None
-            } else {
-                let total_us = start.elapsed().as_micros() as u64;
-                Some(crate::execution::TimingBreakdown {
-                    total_us,
-                    parse_us: 0,
-                    sip_us: 0,
-                    magic_sets_us: 0,
-                    ir_build_us: 0,
-                    optimize_us: 0,
-                    shared_views_us: 0,
-                    rules: vec![
-                        crate::execution::timing::RuleTiming {
-                            rule_head: "query_execution".into(),
-                            execution_us: query_us,
-                            is_recursive: false,
-                            workers: 1,
-                        },
-                        crate::execution::timing::RuleTiming {
-                            rule_head: "explanation".into(),
-                            execution_us: explain_us,
-                            is_recursive: false,
-                            workers: 1,
-                        },
-                    ],
-                    optimizer_detail: None,
-                    ir_builder_detail: None,
-                })
-            };
-
         Ok(QueryResult {
             rows,
             schema: vec![ColumnDef::string("explanation")],
@@ -730,10 +677,49 @@ impl QueryJob {
             metadata: None,
             switched_kg: None,
             proof_trees: Some(vec![graph]),
-            timing_breakdown,
+            timing_breakdown: proof_timing(timing_mode, start, query_us, "explanation", explain_us),
             errors: Vec::new(),
         })
     }
+}
+
+/// Timing for a proof command: query evaluation, then the named proof phase.
+fn proof_timing(
+    timing_mode: crate::execution::TimingMode,
+    start: Instant,
+    query_us: u64,
+    phase: &str,
+    phase_us: u64,
+) -> Option<crate::execution::TimingBreakdown> {
+    if timing_mode == crate::execution::TimingMode::Off {
+        return None;
+    }
+    let total_us = start.elapsed().as_micros() as u64;
+    Some(crate::execution::TimingBreakdown {
+        total_us,
+        parse_us: 0,
+        sip_us: 0,
+        magic_sets_us: 0,
+        ir_build_us: 0,
+        optimize_us: 0,
+        shared_views_us: 0,
+        rules: vec![
+            crate::execution::timing::RuleTiming {
+                rule_head: "query_execution".into(),
+                execution_us: query_us,
+                is_recursive: false,
+                workers: 1,
+            },
+            crate::execution::timing::RuleTiming {
+                rule_head: phase.into(),
+                execution_us: phase_us,
+                is_recursive: false,
+                workers: 1,
+            },
+        ],
+        optimizer_detail: None,
+        ir_builder_detail: None,
+    })
 }
 
 impl Handler {
@@ -2462,6 +2448,28 @@ impl QueryJob {
             }};
         }
 
+        // A proof reads only the snapshot captured under `storage`, so the
+        // guard is released before proof search; a failed proof re-acquires
+        // it for the statements that follow.
+        let timing_mode = self.config.storage.performance.timing_mode;
+        macro_rules! run_proof {
+            ($label:literal, $kg:expr, |$proof:ident| $eval:expr) => {{
+                match ProofSnapshot::capture(&storage, $kg) {
+                    Ok($proof) => {
+                        drop(storage);
+                        match $eval {
+                            Ok(qr) => return Ok(QueryResult { errors, ..qr }),
+                            Err(e) => {
+                                storage = self.storage.read();
+                                fail!(ErrorCode::Validation, format!("{}: {e}", $label));
+                            }
+                        }
+                    }
+                    Err(e) => fail!(ErrorCode::Validation, format!("{}: {e}", $label)),
+                }
+            }};
+        }
+
         let stmt_exec_start = Instant::now();
         'stmts: for line in program_text.lines() {
             let line = line.trim();
@@ -3085,6 +3093,8 @@ impl QueryJob {
                             }
                             statement::Statement::Meta(meta) => {
                                 let kg = kg_name.as_str();
+                                #[cfg(test)]
+                                meta_dispatch_hook::run();
                                 match meta {
                                     // === Knowledge Graph commands ===
                                     MetaCommand::KgShow => {
@@ -3478,7 +3488,7 @@ impl QueryJob {
                                             Err(_) => query,
                                         };
                                         let debug_result =
-                                            debug_query(&self.storage.read(), Some(kg), &debug_src);
+                                            debug_query(&storage, Some(kg), &debug_src);
                                         match debug_result {
                                             Ok((plan, optimizations)) => {
                                                 messages.push("Query Plan:".to_string());
@@ -3504,46 +3514,28 @@ impl QueryJob {
                                             Ok(t) => t.query,
                                             Err(_) => query,
                                         };
-                                        match self.why_query(Some(kg.to_string()), why_q, false) {
-                                            Ok(qr) => {
-                                                drop(storage);
-                                                return Ok(QueryResult { errors, ..qr });
-                                            }
-                                            Err(e) => fail!(
-                                                ErrorCode::Validation,
-                                                format!("Why error: {e}")
-                                            ),
-                                        }
+                                        run_proof!("Why error", kg, |proof| proof.why(
+                                            &why_q,
+                                            false,
+                                            timing_mode
+                                        ));
                                     }
                                     MetaCommand::WhyFull(query) => {
                                         let why_q = match transform_query_shorthand(&query) {
                                             Ok(t) => t.query,
                                             Err(_) => query,
                                         };
-                                        match self.why_query(Some(kg.to_string()), why_q, true) {
-                                            Ok(qr) => {
-                                                drop(storage);
-                                                return Ok(QueryResult { errors, ..qr });
-                                            }
-                                            Err(e) => fail!(
-                                                ErrorCode::Validation,
-                                                format!("Why error: {e}")
-                                            ),
-                                        }
+                                        run_proof!("Why error", kg, |proof| proof.why(
+                                            &why_q,
+                                            true,
+                                            timing_mode
+                                        ));
                                     }
 
                                     // === Why Not (negative explanation) command ===
                                     MetaCommand::WhyNot(input) => {
-                                        match self.why_not_query(Some(kg.to_string()), input) {
-                                            Ok(qr) => {
-                                                drop(storage);
-                                                return Ok(QueryResult { errors, ..qr });
-                                            }
-                                            Err(e) => fail!(
-                                                ErrorCode::Validation,
-                                                format!("Why-not error: {e}")
-                                            ),
-                                        }
+                                        run_proof!("Why-not error", kg, |proof| proof
+                                            .why_not(&input, timing_mode));
                                     }
 
                                     // === Agent commands ===
@@ -3595,7 +3587,7 @@ impl QueryJob {
                                     // === Index commands ===
                                     MetaCommand::IndexCreate(opts) => {
                                         info!(index = %opts.name, "meta_index_create_start");
-                                        match self.create_index(kg, &opts) {
+                                        match index_commands::create(&storage, kg, &opts) {
                                             Ok(msg) => {
                                                 info!(index = %opts.name, "meta_index_create_ok");
                                                 messages.push(msg);
@@ -3617,7 +3609,7 @@ impl QueryJob {
                                     }
                                     MetaCommand::IndexDrop(name) => {
                                         info!(index = %name, "meta_index_drop_start");
-                                        match self.drop_index(kg, &name) {
+                                        match index_commands::drop(&storage, kg, &name) {
                                             Ok(msg) => {
                                                 info!(index = %name, "meta_index_drop_ok");
                                                 messages.push(msg);
@@ -3637,30 +3629,35 @@ impl QueryJob {
                                             }
                                         }
                                     }
-                                    MetaCommand::IndexList => match self.list_indexes(kg) {
-                                        Ok(stats) => {
-                                            info!(count = stats.len(), "meta_index_list_ok");
-                                            if stats.is_empty() {
-                                                messages.push("No indexes.".to_string());
-                                            } else {
-                                                for s in &stats {
-                                                    messages.push(format!(
+                                    MetaCommand::IndexList => {
+                                        match index_commands::stats(&storage, kg, None) {
+                                            Ok(stats) => {
+                                                info!(count = stats.len(), "meta_index_list_ok");
+                                                if stats.is_empty() {
+                                                    messages.push("No indexes.".to_string());
+                                                } else {
+                                                    for s in &stats {
+                                                        messages.push(format!(
                                                             "Index '{}' on {}.{} (type: {}, metric: {}, vectors: {})",
                                                             s.name, s.relation, s.column,
                                                             s.index_type, s.metric,
                                                             s.tuple_count
                                                         ));
+                                                    }
                                                 }
                                             }
+                                            Err(e) => {
+                                                info!(error = %e, "meta_index_list_err");
+                                                fail!(
+                                                    ErrorCode::Internal,
+                                                    format!("Index error: {e}")
+                                                );
+                                            }
                                         }
-                                        Err(e) => {
-                                            info!(error = %e, "meta_index_list_err");
-                                            fail!(ErrorCode::Internal, format!("Index error: {e}"));
-                                        }
-                                    },
+                                    }
                                     MetaCommand::IndexStats(name) => {
                                         info!(index = %name, "meta_index_stats_start");
-                                        match self.get_index_stats(kg, &name) {
+                                        match index_commands::stats(&storage, kg, Some(&name)) {
                                             Ok(stats) => {
                                                 info!(index = %name, count = stats.len(), "meta_index_stats_ok");
                                                 for s in &stats {
@@ -3686,7 +3683,7 @@ impl QueryJob {
                                         }
                                     }
                                     MetaCommand::IndexRebuild(name) => {
-                                        match self.rebuild_index(kg, &name) {
+                                        match index_commands::rebuild(&storage, kg, &name) {
                                             Ok(msg) => messages.push(msg),
                                             Err(e) => fail!(
                                                 index_error_code(

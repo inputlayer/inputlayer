@@ -302,6 +302,14 @@ impl KnowledgeGraphSnapshot {
         .map(|(tuples, _, _)| tuples)
     }
 
+    /// Persistent rules and base relations, as the backward chainer reads them.
+    pub fn proof_inputs(&self) -> (Vec<Rule>, HashMap<String, Vec<Tuple>>) {
+        (
+            self.rules.as_ref().clone(),
+            crate::value::relation::to_vec_map(&self.input_tuples),
+        )
+    }
+
     /// Execute a query with rules, returning tuples AND all derived relation data.
     ///
     /// Used by the provenance system to pass materialized derived tuples
