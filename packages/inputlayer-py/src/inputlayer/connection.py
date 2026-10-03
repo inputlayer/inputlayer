@@ -30,6 +30,8 @@ from inputlayer.exceptions import (
     AuthenticationError,
     ConnectionError,
     InternalError,
+    QueryError,
+    StatementFailedError,
 )
 from inputlayer.notifications import NotificationDispatcher, NotificationEvent
 
@@ -213,9 +215,7 @@ class Connection:
 
         async with self._get_execute_lock():
             if preamble is not None:
-                result = await self._send_and_recv(preamble)
-                if result.switched_kg:
-                    self._current_kg = result.switched_kg
+                await self._send_and_recv(preamble)
             return await self._send_and_recv(program)
 
     async def execute_sequence(self, programs: list[str]) -> list[ResultResponse]:
@@ -223,18 +223,13 @@ class Connection:
 
         Used for compound operations (aggregate query setup/run/cleanup,
         OR-split queries, etc.) where interleaving would corrupt state.
+        Stops at the first failed program and raises its error.
         """
         if not self._connected or not self._ws:
             raise ConnectionError("Not connected")
 
         async with self._get_execute_lock():
-            results = []
-            for program in programs:
-                result = await self._send_and_recv(program)
-                if result.switched_kg:
-                    self._current_kg = result.switched_kg
-                results.append(result)
-            return results
+            return [await self._send_and_recv(program) for program in programs]
 
     async def _send_and_recv(self, program: str) -> ResultResponse:
         """Send a single program and read its result. Caller must hold the lock."""
@@ -244,7 +239,12 @@ class Connection:
         return await self._read_result()
 
     async def _read_result(self) -> ResultResponse:
-        """Read messages until we get a complete result, dispatching notifications."""
+        """Read messages until we get a complete result, dispatching notifications.
+
+        Raises ``QueryError`` for an ``error`` frame and
+        ``StatementFailedError`` for a result whose ``errors`` is not empty,
+        so no caller can read a failed program as data.
+        """
         assert self._ws is not None
         while True:
             raw = await self._ws.recv()
@@ -258,24 +258,23 @@ class Connection:
                 continue
 
             if isinstance(response, ResultResponse):
-                if response.switched_kg:
-                    self._current_kg = response.switched_kg
-                return response
+                return self._accept(response)
 
             if isinstance(response, ErrorResponse):
-                return ResultResponse(
-                    columns=["error"],
-                    rows=[[response.message]],
-                    row_count=1,
-                    total_count=1,
-                    truncated=False,
-                    execution_time_ms=0,
-                )
+                raise _query_error(response)
 
             if isinstance(response, ResultStartResponse):
-                return await self._assemble_stream(response)
+                return self._accept(await self._assemble_stream(response))
 
             raise InternalError(f"Unexpected message during result read: {response!r}")
+
+    def _accept(self, result: ResultResponse) -> ResultResponse:
+        """Track a KG switch, then raise if any statement failed."""
+        if result.switched_kg:
+            self._current_kg = result.switched_kg
+        if result.errors:
+            raise StatementFailedError(result.errors, result)
+        return result
 
     async def _assemble_stream(self, start: ResultStartResponse) -> ResultResponse:
         """Assemble a streamed result from chunks."""
@@ -298,8 +297,6 @@ class Connection:
                 continue
 
             if isinstance(response, ResultEndResponse):
-                if start.switched_kg:
-                    self._current_kg = start.switched_kg
                 return ResultResponse(
                     columns=start.columns,
                     rows=all_rows,
@@ -311,7 +308,12 @@ class Connection:
                     metadata=start.metadata,
                     switched_kg=start.switched_kg,
                     proof_trees=start.proof_trees,
+                    timing_breakdown=start.timing_breakdown,
+                    errors=start.errors,
                 )
+
+            if isinstance(response, ErrorResponse):
+                raise _query_error(response)
 
             raise InternalError(f"Unexpected message during streaming: {response!r}")
 
@@ -373,3 +375,11 @@ class Connection:
             raise ConnectionError("Not connected")
         async with self._get_execute_lock():
             await self._ws.send(PingMessage().to_json())
+
+
+def _query_error(response: ErrorResponse) -> QueryError:
+    return QueryError(
+        response.message,
+        code=response.code,
+        validation_errors=response.validation_errors,
+    )

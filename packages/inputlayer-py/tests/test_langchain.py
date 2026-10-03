@@ -39,6 +39,7 @@ pytest.importorskip(
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
+from inputlayer.exceptions import QueryError
 from inputlayer.integrations.langchain import (
     InputLayerIQLTool,
     InputLayerRetriever,
@@ -324,11 +325,12 @@ class TestRetrieverIQLMode:
         kg.execute.assert_awaited_once_with('?docs(c), s("hello")')
 
     def test_engine_error_raised(self) -> None:
-        kg = _mock_kg(columns=["error"], rows=[["bad parse"]])
+        kg = _mock_kg()
+        kg.execute = AsyncMock(side_effect=QueryError("bad parse", code="validation"))
         r = InputLayerRetriever(
             kg=kg, query="?bad", page_content_columns=["x"]
         )
-        with pytest.raises(RuntimeError, match="bad parse"):
+        with pytest.raises(QueryError, match="bad parse"):
             r.invoke("q")
 
     async def test_async(self) -> None:
@@ -828,7 +830,8 @@ class TestToolsFromRelationsExecution:
         assert kg.execute.await_count == 2
 
     async def test_engine_error_returned_as_json(self) -> None:
-        kg = _mock_kg(columns=["error"], rows=[["bad parse"]])
+        kg = _mock_kg()
+        kg.execute = AsyncMock(side_effect=QueryError("bad parse", query="?employee(...)"))
         tool = tools_from_relations(kg, [_Employee])[0]
         out = await tool.ainvoke({"department": "eng"})
         payload = json.loads(out)
@@ -1267,17 +1270,6 @@ class TestVectorStoreSimilaritySearchByVector:
         extra = call_kwargs.get("extra_iql_clauses")
         assert extra is not None
         assert any('Source = "a"' in c for c in extra)
-
-
-class TestRetrieverEngineErrorFallback:
-    def test_engine_error_unknown_fallback(self) -> None:
-        """Engine returns error column with empty rows."""
-        kg = _mock_kg(columns=["error"], rows=[])
-        r = InputLayerRetriever(
-            kg=kg, query="?bad", page_content_columns=["x"]
-        )
-        with pytest.raises(RuntimeError, match="unknown error"):
-            r.invoke("q")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1748,66 +1740,28 @@ class TestDebugResultDeprecation:
 # ═══════════════════════════════════════════════════════════════════════
 
 
-class TestErrorResponseHandling:
-    """Error responses from the server should be detected, not treated as data."""
+class TestEngineErrorHandling:
+    """Engine failures raise QueryError; an `error` column is ordinary data."""
 
-    async def test_retriever_raises_on_error_response(self) -> None:
-        kg = _mock_kg(columns=["error"], rows=[["Parse error at line 1"]])
+    async def test_retriever_raises_query_error(self) -> None:
+        kg = _mock_kg()
+        kg.execute = AsyncMock(side_effect=QueryError("Parse error at line 1", code="validation"))
         r = InputLayerRetriever(kg=kg, query="?bad(X)")
-        with pytest.raises(RuntimeError, match="InputLayer rejected query"):
+        with pytest.raises(QueryError, match="Parse error at line 1"):
             await r.ainvoke("test")
 
-    async def test_retriever_raises_on_empty_error_row(self) -> None:
-        """Error response with empty row should not crash."""
-        kg = _mock_kg(columns=["error"], rows=[[]])
-        r = InputLayerRetriever(kg=kg, query="?bad(X)")
-        with pytest.raises(RuntimeError, match="unknown error"):
-            await r.ainvoke("test")
-
-    async def test_retriever_raises_on_no_rows(self) -> None:
-        """Error response with no rows at all."""
-        kg = _mock_kg(columns=["error"], rows=[])
-        r = InputLayerRetriever(kg=kg, query="?bad(X)")
-        with pytest.raises(RuntimeError, match="unknown error"):
-            await r.ainvoke("test")
+    async def test_retriever_reads_error_column_as_data(self) -> None:
+        kg = _mock_kg(columns=["error"], rows=[["disk full"]])
+        r = InputLayerRetriever(kg=kg, query="?error(E)")
+        docs = await r.ainvoke("test")
+        assert [d.page_content for d in docs] == ["disk full"]
 
     async def test_iql_tool_returns_error_string(self) -> None:
-        kg = _mock_kg(columns=["error"], rows=[["Unknown relation 'foo'"]])
+        kg = _mock_kg()
+        kg.execute = AsyncMock(side_effect=QueryError("Unknown relation 'foo'", query="?foo(X)"))
         tool = InputLayerIQLTool(kg=kg)
         result = await tool.ainvoke("?foo(X)")
-        assert "Error:" in result
-        assert "Unknown relation" in result
-
-    async def test_iql_tool_handles_empty_error_row(self) -> None:
-        kg = _mock_kg(columns=["error"], rows=[[]])
-        tool = InputLayerIQLTool(kg=kg)
-        result = await tool.ainvoke("?bad(X)")
-        assert "Error:" in result
-        assert "unknown error" in result
-
-    async def test_iql_tool_handles_none_error_cell(self) -> None:
-        """An error envelope carrying a None cell should not crash."""
-        kg = _mock_kg(columns=["error"], rows=[[None]])
-        tool = InputLayerIQLTool(kg=kg)
-        result = await tool.ainvoke("?bad(X)")
-        assert "Error:" in result
-        assert "unknown error" in result
-
-    async def test_structured_tool_handles_empty_error_row(self) -> None:
-        """Structured tool path must guard the same edge as the IQL tool."""
-        kg = _mock_kg(columns=["error"], rows=[[]])
-        tool = tools_from_relations(kg, [_Employee])[0]
-        out = await tool.ainvoke({"department": "eng"})
-        payload = json.loads(out)
-        assert payload == {"error": "unknown error"}
-
-    async def test_structured_tool_handles_no_rows_error(self) -> None:
-        """Error response with an empty rows list must not crash."""
-        kg = _mock_kg(columns=["error"], rows=[])
-        tool = tools_from_relations(kg, [_Employee])[0]
-        out = await tool.ainvoke({"department": "eng"})
-        payload = json.loads(out)
-        assert payload == {"error": "unknown error"}
+        assert result == "Error: Unknown relation 'foo'"
 
 
 class TestNoneAndEdgeValues:

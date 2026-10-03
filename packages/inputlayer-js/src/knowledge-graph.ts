@@ -2,7 +2,9 @@
  * KnowledgeGraph - the primary workspace for data, queries, and rules.
  */
 
+import { readFile } from 'node:fs/promises';
 import type { Connection } from './connection.js';
+import type { ResultResponse } from './protocol.js';
 import type { Expr, BoolExpr, OrderedColumn } from './ast.js';
 import type { RelationDef } from './relation.js';
 import type { Fact } from './types.js';
@@ -19,6 +21,7 @@ import {
   type QueryOptions,
   type RuleClause,
 } from './compiler.js';
+import { InternalError, QueryError } from './errors.js';
 import { HnswIndex } from './index-def.js';
 import { ResultSet } from './result.js';
 import { Session } from './session.js';
@@ -63,6 +66,7 @@ export interface IndexStats {
 }
 
 export interface InsertResult {
+  /** Facts the engine newly stored; duplicates of stored facts do not count. */
   count: number;
 }
 
@@ -184,12 +188,17 @@ export class KnowledgeGraph {
     return this._session;
   }
 
-  /** Ensure the connection is using this knowledge graph. */
+  /** Ensure the connection is using this knowledge graph, creating it on first use. */
   private async ensureKg(): Promise<void> {
     if (this.conn.currentKg === this._name) return;
-    // .kg create is idempotent (no-ops if KG exists).
-    await this.conn.execute(`.kg create ${this._name}`);
-    await this.conn.execute(`.kg use ${this._name}`);
+    const use = `.kg use ${this._name}`;
+    try {
+      await this.conn.execute(use);
+    } catch (e) {
+      if (!(e instanceof QueryError) || e.code !== 'not_found') throw e;
+      await this.conn.execute(`.kg create ${this._name}`);
+      await this.conn.execute(use);
+    }
     // Force-update currentKg since the server may not set switched_kg
     // on .kg use responses.
     this.conn.setCurrentKg(this._name);
@@ -251,7 +260,7 @@ export class KnowledgeGraph {
     }
 
     const result = await this.conn.execute(iql);
-    return { count: result.rows.length };
+    return { count: insertedCount(result) };
   }
 
   // ── Delete ──────────────────────────────────────────────────────
@@ -398,6 +407,9 @@ export class KnowledgeGraph {
       }
     }
 
+    if (opts.k === undefined && opts.radius === undefined) {
+      throw new Error('Must specify either k or radius');
+    }
     const vecStr = `[${opts.queryVec.join(', ')}]`;
     const distFn: Record<string, string> = {
       cosine: 'cosine',
@@ -409,22 +421,20 @@ export class KnowledgeGraph {
 
     const colVars = cols.map((_, i) => `X${i}`).join(', ');
     const vecVar = `X${cols.indexOf(vecColumn)}`;
-    const distAssign = `Dist = ${fnName}(${vecVar}, ${vecStr})`;
+    const parts = [`?${relName}(${colVars})`, `Dist = ${fnName}(${vecVar}, ${vecStr})`];
+    // The radius filter runs server-side; ordering and k are applied here
+    // because IQL orders only inside aggregate rule heads.
+    if (opts.radius !== undefined) parts.push(`Dist <= ${opts.radius}`);
 
-    let query: string;
-    if (opts.k !== undefined) {
-      query = `?top_k<${opts.k}, ${colVars}, Dist:asc> <- ${relName}(${colVars}), ${distAssign}`;
-    } else if (opts.radius !== undefined) {
-      query = `?within_radius<${opts.radius}, ${colVars}, Dist:asc> <- ${relName}(${colVars}), ${distAssign}`;
-    } else {
-      throw new Error('Must specify either k or radius');
-    }
-
-    const result = await this.conn.execute(query);
+    const result = await this.conn.execute(parts.join(', '));
+    const distIdx = result.columns.indexOf('Dist');
+    let rows = result.rows;
+    if (distIdx >= 0) rows = [...rows].sort((a, b) => a[distIdx] - b[distIdx]);
+    if (opts.k !== undefined) rows = rows.slice(0, opts.k);
     return new ResultSet({
       columns: result.columns,
-      rows: result.rows,
-      rowCount: result.row_count,
+      rows,
+      rowCount: rows.length,
       totalCount: result.total_count,
       truncated: result.truncated,
       executionTimeMs: result.execution_time_ms,
@@ -650,12 +660,19 @@ export class KnowledgeGraph {
     };
   }
 
-  /** Load data from a file on the server. */
-  async load(path: string, mode?: string): Promise<void> {
+  /**
+   * Load a local IQL file into this knowledge graph.
+   *
+   * The file is read locally and sent as one multi-statement program. A
+   * parse error rejects the whole program before any statement runs.
+   * Otherwise the engine runs every statement, and a failed one rejects
+   * with `StatementFailedError` listing each failure; the statements it
+   * does not list took effect.
+   */
+  async load(path: string): Promise<void> {
+    const program = await readFile(path, 'utf-8');
     await this.ensureKg();
-    let cmd = `.load ${path}`;
-    if (mode) cmd += ` ${mode}`;
-    await this.conn.execute(cmd);
+    await this.conn.execute(program);
   }
 
   /** Clear all relations matching a prefix. */
@@ -688,3 +705,18 @@ export class KnowledgeGraph {
   }
 }
 
+/** The engine's reply to one insert statement. */
+const INSERTED = /^Inserted (\d+) fact\(s\) into '.*'\.$/;
+
+/** Facts stored, summed over the engine's per-statement insert replies. */
+function insertedCount(result: ResultResponse): number {
+  let count = 0;
+  for (const row of result.rows) {
+    const match = INSERTED.exec(String(row[0]));
+    if (!match) {
+      throw new InternalError(`Unexpected insert reply from the engine: ${JSON.stringify(row)}`);
+    }
+    count += Number(match[1]);
+  }
+  return count;
+}

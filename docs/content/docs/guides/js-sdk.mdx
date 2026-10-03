@@ -165,7 +165,7 @@ await kg.insert(Employee, [
 ]);
 ```
 
-The insert method returns an `InsertResult` with a `count` field.
+The insert method returns an `InsertResult` whose `count` is the number of facts the engine newly stored; re-inserting an existing fact counts 0.
 
 ## Deleting Data
 
@@ -709,6 +709,8 @@ The SDK uses a hierarchy of typed error classes so you can handle specific failu
 ```typescript
 import {
   InputLayerError,              // base class for all errors
+  QueryError,                   // engine rejected a program (error frame)
+  StatementFailedError,         // some statements of a program failed
   ConnectionError,              // network/connection issues
   AuthenticationError,          // bad credentials
   SchemaConflictError,          // schema mismatch on define()
@@ -724,17 +726,28 @@ import {
 } from "inputlayer";
 
 try {
-  await kg.define(Employee);
+  await kg.load("seed.iql");
 } catch (e) {
   if (e instanceof AuthenticationError) {
     console.log("Check your credentials");
-  } else if (e instanceof SchemaConflictError) {
-    console.log(`Schema conflict: ${e.conflicts}`);
+  } else if (e instanceof StatementFailedError) {
+    // The engine ran every statement; the ones listed here failed and
+    // the others took effect.
+    for (const err of e.errors) {
+      console.log(`statement ${err.index} [${err.code}]: ${err.message}`);
+    }
+  } else if (e instanceof QueryError) {
+    // e.code is "validation", "not_found", "conflict", "unsupported" or
+    // "internal" (undefined when there is no statement cause, e.g. an
+    // overloaded server); e.validationErrors lists parse errors.
+    console.log(`Rejected (${e.code}): ${e.message}`);
   } else if (e instanceof InputLayerError) {
     console.log(`InputLayer error: ${e.message}`);
   }
 }
 ```
+
+Every SDK call that reaches the engine rejects on failure: no failed statement is returned as a result row.
 
 ## Python SDK Comparison
 

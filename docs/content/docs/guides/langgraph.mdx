@@ -197,7 +197,7 @@ The magic happens in the rules. You define `ready_to_answer`, `missing_info`, an
 
 Now, when your graph reaches the routing node, the rules fire against whatever facts are in the KG. The branch that matches reflects the current state of reasoning, not a hardcoded Python condition. Adding a new route means adding a new rule, not changing your graph code.
 
-The router skips branches that raise `QueryError` (bad query, unknown relation) or return an error response. Systemic failures (`InputLayerConnectionError`, `AuthenticationError`, `QueryTimeoutError`, `ConnectionError`, `OSError`) are re-raised immediately so you see them instead of silently misrouting.
+The router skips branches that raise `QueryError` (bad query, unknown relation). Systemic failures (`InputLayerConnectionError`, `AuthenticationError`, `QueryTimeoutError`, `ConnectionError`, `OSError`) are re-raised immediately so you see them instead of silently misrouting.
 
 ### Putting it together
 
@@ -571,7 +571,7 @@ Examples marked `[LLM]` need an OpenAI-compatible server at `localhost:1234` (LM
 
 **`KeyError: thread_id`.** The checkpointer expects a config like `{"configurable": {"thread_id": "..."}}` on every call. Pass it to `app.ainvoke` and `app.aget_state`.
 
-**`RuntimeError: KG returned an error`.** The KG rejected a query. The error message includes the offending IQL. Common causes: a relation you reference doesn't exist yet (call `setup()` first), or a rule has a syntax error.
+**`QueryError`.** The KG rejected a query. The error message includes the offending IQL. Common causes: a relation you reference doesn't exist yet (call `setup()` first), or a rule has a syntax error.
 
 **Router always returns `default`.** The branch queries are running, but no branch matches. Check the rules that derive those relations are installed (`.rule list` in the REPL), and that the facts those rules depend on are present.
 
