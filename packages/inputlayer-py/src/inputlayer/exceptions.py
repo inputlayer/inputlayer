@@ -90,7 +90,9 @@ class QueryError(InputLayerError):
 
 
 class OutcomeUnknownError(QueryError):
-    """Write outcome unknown, store read-only until restart recovery.
+    """Write outcome unknown; the store may be read-only until restart.
+
+    If so, a following write raises ``StoreReadOnlyError``.
 
     The transaction may or may not survive restart; read the recovered data
     before retrying it. ``result`` holds the server's response when it has one.

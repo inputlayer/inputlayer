@@ -1172,9 +1172,15 @@ fn read_updates_parquet(path: &Path) -> StorageResult<Vec<Update>> {
 
 fn create_directory(path: &Path) -> std::io::Result<()> {
     let path = std::path::absolute(path)?;
+    let created: Vec<_> = path
+        .ancestors()
+        .take_while(|directory| !directory.exists())
+        .filter_map(Path::parent)
+        .map(Path::to_path_buf)
+        .collect();
     fs::create_dir_all(&path)?;
-    for directory in path.ancestors().skip(1) {
-        sync_directory(directory)?;
+    for parent in created {
+        sync_directory(&parent)?;
     }
     Ok(())
 }

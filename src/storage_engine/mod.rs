@@ -299,10 +299,6 @@ impl StorageEngine {
         self.persist.inject_wal_fault(fault);
     }
 
-    pub fn check_writable(&self) -> StorageResult<()> {
-        self.persist.check_writable()
-    }
-
     /// Create a new knowledge graph
     pub fn create_knowledge_graph(&self, name: &str) -> StorageResult<()> {
         self.persist.check_writable()?;

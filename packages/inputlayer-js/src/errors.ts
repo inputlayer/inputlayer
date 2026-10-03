@@ -49,7 +49,8 @@ export class QueryError extends InputLayerError {
 }
 
 /**
- * Write outcome unknown, store read-only until restart recovery.
+ * Write outcome unknown. The store may be read-only until restart recovery;
+ * if so, a following write raises `StoreReadOnlyError`.
  *
  * The transaction may or may not survive restart; read the recovered data
  * before retrying it. `result` holds the server's response when it has one.

@@ -243,8 +243,6 @@ describe('statement errors', () => {
     );
     await expect(kg.execute('.kg use elsewhere\n.rel drop x')).rejects.toBeInstanceOf(
       StatementFailedError,
-  OutcomeUnknownError,
-  StoreReadOnlyError,
     );
     // The session is on "elsewhere" now, so the next call switches back.
     await kg.execute('.status');

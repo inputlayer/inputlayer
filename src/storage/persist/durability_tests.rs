@@ -287,7 +287,8 @@ fn durability_directory_creation_retries_parent_barriers() {
             path: root.clone(),
             ..PersistConfig::default()
         };
-        for _ in 0..2 {
+        let attempts = if target == "ancestor" { 1 } else { 2 };
+        for _ in 0..attempts {
             inject_sync_fault(barrier.clone());
             assert!(FilePersist::new(config.clone()).is_err(), "{target}");
             assert!(root.is_dir());
@@ -300,14 +301,34 @@ fn durability_directory_creation_retries_parent_barriers() {
     let temp = TempDir::new().unwrap();
     let parent = temp.path().join("persist");
     let wal_dir = parent.join("wal");
-    for _ in 0..2 {
-        inject_sync_fault(parent.clone());
-        assert!(PersistWal::open(wal_dir.clone()).is_err());
-        assert!(wal_dir.is_dir());
-    }
+    inject_sync_fault(parent.clone());
+    assert!(PersistWal::open(wal_dir.clone()).is_err());
+    assert!(wal_dir.is_dir());
     let (mut wal, _) = PersistWal::open(wal_dir.clone()).unwrap();
     wal.append(&insert(1, 1), true).unwrap();
     std::mem::forget(wal);
     let (_, recovered) = PersistWal::open(wal_dir).unwrap();
     assert_eq!(recovered, [insert(1, 1)]);
+}
+
+/// Only the parents of directories created here are synced, so an existing
+/// root opens under an ancestor this process cannot read.
+#[cfg(unix)]
+#[test]
+fn durability_existing_root_opens_under_unreadable_ancestor() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = TempDir::new().unwrap();
+    let locked = temp.path().join("locked");
+    let root = locked.join("persist");
+    fs::create_dir_all(&root).unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o111)).unwrap();
+    let opened = FilePersist::new(PersistConfig {
+        path: root.clone(),
+        ..PersistConfig::default()
+    });
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    let persist = opened.unwrap();
+    persist.commit(insert(1, 1)).unwrap();
+    let recovered = crash_and_reopen(persist, &root);
+    assert_eq!(facts(&recovered), [(fact(1), 1)]);
 }

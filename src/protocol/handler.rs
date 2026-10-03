@@ -1345,7 +1345,6 @@ impl Handler {
         password: &str,
         role_str: &str,
     ) -> Result<QueryResult, ProgramError> {
-        self.storage.read().check_writable()?;
         use crate::auth;
         use crate::value::Value;
         use std::str::FromStr;
@@ -1393,7 +1392,6 @@ impl Handler {
 
     /// Drop a user.
     pub fn handle_user_drop(&self, username: &str) -> Result<QueryResult, ProgramError> {
-        self.storage.read().check_writable()?;
         use crate::auth;
 
         if username == "admin" {
@@ -1475,7 +1473,6 @@ impl Handler {
         username: &str,
         new_password: &str,
     ) -> Result<QueryResult, ProgramError> {
-        self.storage.read().check_writable()?;
         use crate::auth;
         use crate::value::Value;
 
@@ -1528,7 +1525,6 @@ impl Handler {
         username: &str,
         new_role: &str,
     ) -> Result<QueryResult, ProgramError> {
-        self.storage.read().check_writable()?;
         use crate::auth;
         use crate::value::Value;
         use std::str::FromStr;
@@ -1669,7 +1665,6 @@ impl Handler {
         username: &str,
         role: &str,
     ) -> Result<String, ProgramError> {
-        self.storage.read().check_writable()?;
         use crate::auth;
         use crate::Tuple;
         use crate::Value;
@@ -1745,7 +1740,6 @@ impl Handler {
         kg_name: &str,
         username: &str,
     ) -> Result<String, ProgramError> {
-        self.storage.read().check_writable()?;
         use crate::auth;
 
         let storage = self.storage.read();
@@ -1803,8 +1797,9 @@ impl Handler {
 
         if !to_remove.is_empty() {
             let count = to_remove.len();
-            storage.delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove)?;
+            let removed = storage.delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove);
             self.kg_acls_changed();
+            removed?;
             tracing::info!(kg = kg_name, count, "audit_kg_acls_cleaned_up");
         }
         Ok(())
@@ -4119,7 +4114,19 @@ impl Handler {
         if let Some(ref name) = kg_drop_name {
             if result.errors.is_empty() {
                 self.sessions.close_sessions_for_kg(name);
-                self.cleanup_kg_acls(name)?;
+                if let Err(error) = self.cleanup_kg_acls(name) {
+                    if matches!(
+                        error.code,
+                        Some(ErrorCode::OutcomeUnknown | ErrorCode::StoreReadOnly)
+                    ) {
+                        return Err(error);
+                    }
+                    result.errors.push(StatementError {
+                        index: 0,
+                        code: error.code.unwrap_or(ErrorCode::Internal),
+                        message: error.message,
+                    });
+                }
             }
         }
 
@@ -4420,7 +4427,6 @@ impl Handler {
         spec: &str,
         auth: Option<&crate::auth::Principal>,
     ) -> Result<QueryResult, ProgramError> {
-        self.storage.read().check_writable()?;
         use inputlayer_ontology_client::registry;
         let kg = self.resolve_ontology_kg(session_id, knowledge_graph.as_ref())?;
         let reg = Self::ontology_registry();
@@ -4674,7 +4680,6 @@ impl Handler {
         name: &str,
         auth: Option<&crate::auth::Principal>,
     ) -> Result<QueryResult, ProgramError> {
-        self.storage.read().check_writable()?;
         inputlayer_ontology_client::registry::validate_component("ontology name", name)
             .map_err(|e| e.to_string())?;
         let kg = self.resolve_ontology_kg(session_id, knowledge_graph.as_ref())?;
@@ -4811,7 +4816,6 @@ impl Handler {
         spec: &str,
         auth: Option<&crate::auth::Principal>,
     ) -> Result<QueryResult, ProgramError> {
-        self.storage.read().check_writable()?;
         let name = spec.split('@').next().unwrap_or(spec).to_string();
         inputlayer_ontology_client::registry::validate_component("ontology name", &name)
             .map_err(|e| e.to_string())?;
@@ -5554,7 +5558,7 @@ mod tests {
                 .execute_program_status(
                     None,
                     None,
-                    ".ontology install demo".to_string(),
+                    ".ontology remove demo".to_string(),
                     None,
                     &handler.request_control(None),
                 )
