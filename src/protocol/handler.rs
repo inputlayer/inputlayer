@@ -242,7 +242,6 @@ mod index_commands {
     }
 }
 
-/// Current epoch milliseconds.
 /// Label of the API key admin bootstrap issues.
 const BOOTSTRAP_KEY_LABEL: &str = "bootstrap";
 
@@ -279,6 +278,7 @@ fn store_bootstrap_key(storage: &StorageEngine, key: &str) -> Result<(), String>
     )
 }
 
+/// Current epoch milliseconds.
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

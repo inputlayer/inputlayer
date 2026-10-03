@@ -228,7 +228,9 @@ For an expired key the notice is `credential_expired`, with the message `Credent
 
 A password or role replacement commits the old user row's removal and its
 replacement as one write: if it fails, nothing changes, and the user's row, API
-keys and live sessions stay as they were. Creating a user removes any API keys
+keys and live sessions stay as they were. The exception is a write whose outcome
+is unknown (it reached the write-ahead log but was not applied): then the user's
+live credentials are revoked until restart. Creating a user removes any API keys
 or grants left under that username before publishing credentials, so a
 recreated user starts with no API keys and no grants. Admin bootstrap creates
 the admin the same way, so old keys cannot bind to it.
