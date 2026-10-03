@@ -78,15 +78,17 @@ fn concurrent_appends_and_flushes_lose_no_acked_write() {
         7,
         DurabilityMode::Immediate,
     ));
-    persist.ensure_shard("db:r").expect("ensure shard");
 
+    // One shard per writer: revisions must rise per shard past its flushed
+    // frontier, which concurrent writers to one shard could not guarantee.
+    let shard = |t: i32| format!("db:r{t}");
     let handles: Vec<_> = (0..THREADS)
         .map(|t| {
             let persist = Arc::clone(&persist);
             std::thread::spawn(move || {
                 for i in 0..PER_THREAD {
-                    let update = Update::insert(Tuple::from_pair(t, i), 1);
-                    commit(&persist, "db:r", &[update]).expect("append");
+                    let update = Update::insert(Tuple::from_pair(t, i), i as u64 + 1);
+                    commit(&persist, &shard(t), &[update]).expect("append");
                 }
             })
         })
@@ -99,10 +101,9 @@ fn concurrent_appends_and_flushes_lose_no_acked_write() {
     std::mem::forget(persist);
 
     let reopened = open(temp.path().to_path_buf(), 7, DurabilityMode::Immediate);
-    assert_eq!(
-        keys(&reopened, "db:r").len(),
-        (THREADS * PER_THREAD) as usize
-    );
+    for t in 0..THREADS {
+        assert_eq!(keys(&reopened, &shard(t)).len(), PER_THREAD as usize);
+    }
 }
 
 #[test]
@@ -120,7 +121,7 @@ fn concurrent_append_and_delete_recover_what_was_acked() {
         ));
         // Batch files give delete_shard work to do while a writer races it.
         for i in 0..BATCHES {
-            let update = Update::insert(Tuple::from_pair(-1, i), 1);
+            let update = Update::insert(Tuple::from_pair(-1, i), i as u64 + 1);
             commit(&persist, "db:r", &[update]).expect("append");
             persist.flush("db:r").expect("flush");
         }
@@ -128,7 +129,8 @@ fn concurrent_append_and_delete_recover_what_was_acked() {
             let persist = Arc::clone(&persist);
             std::thread::spawn(move || {
                 for i in 0..WRITES {
-                    let update = Update::insert(Tuple::from_pair(round, i), 1);
+                    let update =
+                        Update::insert(Tuple::from_pair(round, i), (BATCHES + i) as u64 + 1);
                     commit(&persist, "db:r", &[update]).expect("append");
                 }
             })
@@ -187,7 +189,7 @@ fn torn_tail_after_valid_records_is_truncated() {
     commit(
         &persist,
         "db:r",
-        &[Update::insert(Tuple::from_pair(2, 2), 1)],
+        &[Update::insert(Tuple::from_pair(2, 2), 2)],
     )
     .expect("append");
     std::mem::forget(persist);
