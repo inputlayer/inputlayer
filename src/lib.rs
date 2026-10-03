@@ -3276,7 +3276,7 @@ mod tests {
             .execute_tuples_with_derived("__query__(X, Y) <- e(X, Y)")
             .unwrap();
         assert!(last_result_truncated());
-        assert_eq!(derived["__query__"], rows);
+        assert_eq!(derived["__query__"].to_vec(), rows);
     }
 
     /// `without_result_cap` returns every row, unflagged, and restores the cap.
