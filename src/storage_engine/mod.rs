@@ -51,8 +51,8 @@ use crate::storage::persist::{
     PersistConfig, Update,
 };
 use crate::storage::{
-    DropTombstones, KnowledgeGraphMetadata, KnowledgeGraphsMetadata, RelationTombstone,
-    StorageError, StorageResult,
+    DataDirLock, DropTombstones, KnowledgeGraphMetadata, KnowledgeGraphsMetadata,
+    RelationTombstone, StorageError, StorageResult,
 };
 use crate::value::relation::to_vec_map;
 use crate::value::{Relation, Tuple};
@@ -168,6 +168,9 @@ pub struct StorageEngine {
     has_relation_tombstones: AtomicBool,
     /// KG names whose drop cleanup is running.
     kg_drops_in_flight: parking_lot::Mutex<HashSet<String>>,
+    /// Single-writer ownership of `data_dir` for this engine's lifetime.
+    /// Declared last so it is released only after every other field drops.
+    _data_dir_lock: DataDirLock,
 }
 
 /// Single knowledge graph instance
@@ -214,8 +217,14 @@ impl StorageEngine {
                 .build_global();
         }
 
-        // Create base data directory
-        fs::create_dir_all(&config.storage.data_dir)?;
+        // Claim the directory before anything else reads or writes it.
+        let lock_start = Instant::now();
+        let data_dir_lock = DataDirLock::acquire(&config.storage.data_dir)?;
+        info!(
+            data_dir = %config.storage.data_dir.display(),
+            elapsed_us = lock_start.elapsed().as_micros() as u64,
+            "data_dir_lock_acquired"
+        );
         fs::create_dir_all(config.storage.data_dir.join("metadata"))?;
 
         // Initialize DD-native persist backend
@@ -236,6 +245,7 @@ impl StorageEngine {
             tombstones: parking_lot::Mutex::new(DropTombstones::default()),
             has_relation_tombstones: AtomicBool::new(false),
             kg_drops_in_flight: parking_lot::Mutex::new(HashSet::new()),
+            _data_dir_lock: data_dir_lock,
         };
 
         // Load existing knowledge graphs from persist layer

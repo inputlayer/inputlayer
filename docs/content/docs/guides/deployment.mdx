@@ -391,6 +391,12 @@ No additional TLS configuration is needed. Caddy handles certificates, HTTPS red
 
 ## Kubernetes
 
+InputLayer is a single writer per data directory: a server refuses to start
+while another one holds the volume's `LOCK` (see
+[Persistence](persistence#single-writer)). During a rolling
+update the new pod therefore fails and restarts until the old pod exits;
+keep `replicas: 1` per volume.
+
 ### Deployment
 
 ```yaml

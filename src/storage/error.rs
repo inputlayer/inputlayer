@@ -1,6 +1,7 @@
 //! Storage Engine Error Types
 
 use std::io;
+use std::path::PathBuf;
 use thiserror::Error;
 
 /// Storage engine errors
@@ -9,6 +10,19 @@ pub enum StorageError {
     /// I/O error
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
+
+    /// Another engine holds the data directory lock
+    #[error(
+        "data directory {} is in use by another InputLayer process (pid {owner}); \
+         stop it or point storage.data_dir elsewhere",
+        dir.display()
+    )]
+    DataDirLocked {
+        /// The locked data directory
+        dir: PathBuf,
+        /// Pid recorded by the lock owner, or "unknown"
+        owner: String,
+    },
 
     /// Parquet error
     #[error("Parquet error: {0}")]
