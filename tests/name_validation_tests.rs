@@ -3,7 +3,7 @@
 // Test setup aborts on failure; `unwrap` is the intended behavior.
 #![allow(clippy::unwrap_used)]
 
-use inputlayer::protocol::Handler;
+use inputlayer::protocol::{ErrorCode, Handler};
 use inputlayer::storage::persist::{FilePersist, PersistBackend, PersistConfig, Update};
 use inputlayer::storage::{KnowledgeGraphInfo, KnowledgeGraphsMetadata, StorageError};
 use inputlayer::{Config, DurabilityMode, RelationSchema, StorageEngine, Tuple, Value};
@@ -135,13 +135,14 @@ async fn iql_rejects_invalid_names() {
     );
 
     for stmt in ["+__dunder[(\"a\",)]", "+Foo(1)"] {
-        let err = handler
-            .query_program(None, stmt.to_string())
-            .await
-            .unwrap_err();
+        let result = handler.query_program(None, stmt.to_string()).await.unwrap();
+        assert_eq!(result.errors.len(), 1, "{stmt}: {result:?}");
+        assert_eq!(result.errors[0].code, ErrorCode::Validation, "{stmt}");
         assert!(
-            err.contains("must start with a lowercase letter"),
-            "{stmt}: {err}"
+            result.errors[0]
+                .message
+                .contains("must start with a lowercase letter"),
+            "{stmt}: {result:?}"
         );
     }
     let storage = handler.get_storage();
