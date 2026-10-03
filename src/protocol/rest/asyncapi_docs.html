@@ -81,9 +81,9 @@
 <h2 id="lifecycle">Connection Lifecycle</h2>
 <ol class="steps">
   <li>Client connects to <code>/ws?kg=&lt;name&gt;</code></li>
-  <li>Client sends <code>login</code> or <code>authenticate</code>; the server creates a session and answers <code>authenticated</code> (with <code>protocol_version</code>, currently 2) or <code>auth_error</code></li>
+  <li>Client sends <code>login</code> or <code>authenticate</code>; the server creates a session and answers <code>authenticated</code> (with <code>protocol_version</code>, currently 3) or <code>auth_error</code></li>
   <li>Client sends <code>execute</code> messages, server responds with <code>result</code> or <code>error</code></li>
-  <li>Server may push change notifications (<code>persistent_update</code>, ...), <code>subscription_delta</code> messages and connection <code>notice</code>s</li>
+  <li>Server may push change notifications (<code>persistent_update</code>, ...), <code>subscription_delta</code> messages (streamed when large) and connection <code>notice</code>s</li>
   <li>Client disconnects &rarr; server auto-closes the session</li>
 </ol>
 
@@ -150,10 +150,10 @@
       <tr><td>knowledge_graph</td><td>string</td><td>Initial knowledge graph binding</td></tr>
       <tr><td>version</td><td>string</td><td>Engine version</td></tr>
       <tr><td>role</td><td>string</td><td>Role of the credential</td></tr>
-      <tr><td>protocol_version</td><td>integer</td><td>Version of this protocol (2)</td></tr>
+      <tr><td>protocol_version</td><td>integer</td><td>Version of this protocol (3)</td></tr>
     </table>
     <pre><code>{"type": "authenticated", "id": "1", "session_id": "42", "knowledge_graph": "default",
- "version": "0.1.0", "role": "admin", "protocol_version": 2}</code></pre>
+ "version": "0.1.0", "role": "admin", "protocol_version": 3}</code></pre>
   </div>
 </div>
 
@@ -272,11 +272,38 @@
 <div class="msg-card">
   <div class="msg-card-header">
     <span class="badge badge-recv">RECV</span>
+    <h4>subscription_delta_start / subscription_delta_chunk / subscription_delta_end</h4>
+  </div>
+  <div class="msg-card-body">
+    <p>A delta whose frame would exceed 1 MiB, streamed as one logical delta: the start frame carries what <code>subscription_delta</code> does but its rows; chunks of at most 500 rows and about 1 MiB follow from <code>chunk_index</code> 0; the end frame gives <code>chunk_count</code>, <code>inserted_count</code> and <code>retracted_count</code>. Apply the delta only at its end, once the chunks add up. Other frames may arrive in between.</p>
+    <pre><code>{"type": "subscription_delta_start", "subscription": "late", "generation": 1,
+ "knowledge_graph": "default", "seq": 2, "revision": 18, "columns": ["Order"]}
+{"type": "subscription_delta_chunk", "subscription": "late", "generation": 1, "seq": 2,
+ "chunk_index": 0, "inserted": [[1043]], "retracted": []}
+{"type": "subscription_delta_end", "subscription": "late", "generation": 1, "seq": 2,
+ "chunk_count": 1, "inserted_count": 1, "retracted_count": 0}</code></pre>
+  </div>
+</div>
+
+<div class="msg-card">
+  <div class="msg-card-header">
+    <span class="badge badge-recv">RECV</span>
     <h4>subscription_error</h4>
   </div>
   <div class="msg-card-body">
-    <p>Re-evaluation of a standing query failed. The subscription stays registered.</p>
+    <p>Re-evaluation of a standing query failed. The subscription stays registered with its last result.</p>
     <pre><code>{"type": "subscription_error", "subscription": "late", "generation": 1, "message": "Access denied"}</code></pre>
+  </div>
+</div>
+
+<div class="msg-card">
+  <div class="msg-card-header">
+    <span class="badge badge-recv">RECV</span>
+    <h4>subscription_reset</h4>
+  </div>
+  <div class="msg-card-body">
+    <p>The server could not deliver the subscription's next change whole (a row larger than any frame, or read access was revoked) and removed the subscription. Discard its rows, including a streamed delta in progress, and subscribe again.</p>
+    <pre><code>{"type": "subscription_reset", "subscription": "late", "generation": 1, "message": "..."}</code></pre>
   </div>
 </div>
 

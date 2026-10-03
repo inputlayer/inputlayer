@@ -320,7 +320,7 @@ e2e-test:
 
 # Reactive agent path E2E: real engine processes, agents subscribed over /ws,
 # independent writers; release build for representative latency. Known
-# defects (W05) run as expected failures. Raw writer->agent delta
+# defects, when any is tracked, run as expected failures. Raw writer->agent delta
 # latency samples (schema inputlayer.reactive.delta_latency.v1) land in
 # $(E2E_REACTIVE_SAMPLES)/<scenario>.jsonl.
 E2E_REACTIVE_SAMPLES ?= target/e2e-reactive

@@ -26,8 +26,12 @@ from inputlayer._protocol import (
     ResultResponse,
     ResultStartResponse,
     ServerMessage,
+    SubscriptionDeltaChunkResponse,
+    SubscriptionDeltaEndResponse,
     SubscriptionDeltaResponse,
+    SubscriptionDeltaStartResponse,
     SubscriptionErrorResponse,
+    SubscriptionResetResponse,
     deserialize_message,
 )
 from inputlayer.exceptions import (
@@ -40,6 +44,15 @@ from inputlayer.exceptions import (
 from inputlayer.notifications import NotificationDispatcher, NotificationEvent
 
 logger = logging.getLogger("inputlayer")
+
+_SUBSCRIPTION_PUSHES = (
+    SubscriptionDeltaResponse,
+    SubscriptionDeltaStartResponse,
+    SubscriptionDeltaChunkResponse,
+    SubscriptionDeltaEndResponse,
+    SubscriptionErrorResponse,
+    SubscriptionResetResponse,
+)
 
 
 class Connection:
@@ -284,6 +297,7 @@ class Connection:
         assert self._ws is not None
         all_rows: list[list[Any]] = []
         all_provenance: list[str] = []
+        chunks = 0
 
         while True:
             raw = await self._ws.recv()
@@ -293,12 +307,23 @@ class Connection:
                 continue
 
             if isinstance(response, ResultChunkResponse):
+                if response.chunk_index != chunks:
+                    raise InternalError(
+                        f"Streamed result chunk {response.chunk_index} arrived, expected {chunks}"
+                    )
+                chunks += 1
                 all_rows.extend(response.rows)
                 if response.row_provenance:
                     all_provenance.extend(response.row_provenance)
                 continue
 
             if isinstance(response, ResultEndResponse):
+                if (response.chunk_count, response.row_count) != (chunks, len(all_rows)):
+                    raise InternalError(
+                        f"Incomplete streamed result: {chunks} chunk(s) and {len(all_rows)} "
+                        f"row(s) arrived, end announces {response.chunk_count} and "
+                        f"{response.row_count}"
+                    )
                 return ResultResponse(
                     columns=start.columns,
                     rows=all_rows,
@@ -312,6 +337,7 @@ class Connection:
                     proof_trees=start.proof_trees,
                     timing_breakdown=start.timing_breakdown,
                     errors=start.errors,
+                    subscribed=start.subscribed,
                 )
 
             if isinstance(response, ErrorResponse):
@@ -335,7 +361,7 @@ class Connection:
             level = logging.WARNING if response.closes_connection else logging.INFO
             logger.log(level, "server notice (%s): %s", response.code, response.message)
             return True
-        return isinstance(response, (SubscriptionDeltaResponse, SubscriptionErrorResponse))
+        return isinstance(response, _SUBSCRIPTION_PUSHES)
 
     def _dispatch_notification(self, notif: NotificationResponse) -> None:
         event = NotificationEvent(

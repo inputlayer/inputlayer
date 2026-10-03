@@ -44,6 +44,17 @@
 //! committing it is not interrupted, and its reply reports the committed
 //! result, or [`ErrorCode::OutcomeUnknown`] if the commit itself failed in a
 //! way that leaves the outcome open.
+//!
+//! # Large payloads
+//!
+//! No frame exceeds the engine's message size limit. A result or a
+//! `.subscribe` snapshot too large for one frame is streamed as
+//! `result_start`, `result_chunk`s and `result_end`; a subscription delta as
+//! `subscription_delta_start`, `subscription_delta_chunk`s and
+//! `subscription_delta_end` (see [`SubscriptionPush`]). Each stream is one
+//! logical result or delta, complete only at its end frame, whose counts the
+//! chunks must add up to. What the server cannot deliver whole it reports
+//! instead: an `error` for a reply, a `subscription_reset` for a delta.
 
 mod client;
 mod error;
@@ -66,4 +77,4 @@ pub use timing::{IrBuilderTiming, OptimizerTiming, RuleTiming, TimingBreakdown};
 
 /// Version of this protocol, sent in `authenticated`. Bumped on any change a
 /// client must know about.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;

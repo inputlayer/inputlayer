@@ -10,7 +10,12 @@ from inputlayer._protocol import (
     ResultResponse,
 )
 from inputlayer.connection import Connection
-from inputlayer.exceptions import AuthenticationError, ConnectionError, QueryError
+from inputlayer.exceptions import (
+    AuthenticationError,
+    ConnectionError,
+    InternalError,
+    QueryError,
+)
 
 
 def _auth_response() -> str:
@@ -167,6 +172,64 @@ class TestConnectionStreaming:
         assert result.rows[0] == [1, "alice"]
         assert result.rows[2] == [3, "charlie"]
         assert result.row_count == 3
+
+    @staticmethod
+    def _streamed(start: dict, chunks: list[dict], end: dict) -> Connection:
+        conn = Connection("ws://localhost:8080/ws", username="admin", password="admin")
+        frames = [
+            {
+                "type": "result_start",
+                "columns": ["x"],
+                "total_count": 3,
+                "truncated": False,
+                "execution_time_ms": 1,
+                **start,
+            },
+            *({"type": "result_chunk", **chunk} for chunk in chunks),
+            {"type": "result_end", **end},
+        ]
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=[json.dumps(f) for f in frames])
+        conn._ws = mock_ws
+        conn._connected = True
+        return conn
+
+    @pytest.mark.asyncio
+    async def test_streamed_subscribe_keeps_its_subscription(self):
+        subscribed = {"subscription": "s", "generation": 2, "revision": 7}
+        conn = self._streamed(
+            {"subscribed": subscribed},
+            [{"rows": [[1], [2]], "chunk_index": 0}, {"rows": [[3]], "chunk_index": 1}],
+            {"row_count": 3, "chunk_count": 2},
+        )
+        result = await conn.execute(".subscribe s ?demo(X)")
+        assert result.rows == [[1], [2], [3]]
+        assert result.subscribed is not None
+        assert (
+            result.subscribed.subscription,
+            result.subscribed.generation,
+            result.subscribed.revision,
+        ) == ("s", 2, 7)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("chunks", "end"),
+        [
+            # A chunk is missing.
+            ([{"rows": [[1], [2]], "chunk_index": 0}], {"row_count": 3, "chunk_count": 2}),
+            # A chunk is repeated.
+            (
+                [{"rows": [[1]], "chunk_index": 0}, {"rows": [[1]], "chunk_index": 0}],
+                {"row_count": 2, "chunk_count": 2},
+            ),
+            # The rows do not add up.
+            ([{"rows": [[1]], "chunk_index": 0}], {"row_count": 3, "chunk_count": 1}),
+        ],
+    )
+    async def test_incomplete_stream_is_not_a_result(self, chunks, end):
+        conn = self._streamed({}, chunks, end)
+        with pytest.raises(InternalError):
+            await conn.execute("?demo(X)")
 
 
 class TestConnectionNotifications:

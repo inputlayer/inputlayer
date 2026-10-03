@@ -56,12 +56,12 @@ On success:
   "knowledge_graph": "default",
   "version": "0.1.0",
   "role": "admin",
-  "protocol_version": 2,
+  "protocol_version": 3,
   "stream_epoch": "3f9c2a7e01b4d865"
 }
 ```
 
-`protocol_version` is the version of this protocol the server speaks (currently 2). `stream_epoch` identifies this run of the engine: notification `seq` numbers and knowledge graph revisions belong to it, and a restarted engine has a new one (see [Reconnection](#reconnection)).
+`protocol_version` is the version of this protocol the server speaks (currently 3). `stream_epoch` identifies this run of the engine: notification `seq` numbers and knowledge graph revisions belong to it, and a restarted engine has a new one (see [Reconnection](#reconnection)).
 
 On failure:
 
@@ -235,7 +235,7 @@ For large result sets (> 1MB serialized), the server automatically streams resul
 }
 ```
 
-Each chunk contains up to 500 rows. Chunks are sent sequentially.
+Each chunk contains at most 500 rows and about 1 MiB; a row bigger than that gets a chunk of its own. Chunks are sent in order of `chunk_index`, from 0.
 
 ### Stream End
 
@@ -248,6 +248,10 @@ Each chunk contains up to 500 rows. Chunks are sent sequentially.
 ```
 
 Small results (< 1MB) use the single `result` message, maintaining backward compatibility.
+
+A streamed result is complete only at `result_end`: check that the chunks arrived in order and add up to its `row_count` and `chunk_count` before using it. If an `error` with the request's `id` arrives instead, the request failed: discard the rows received. A connection that closes mid-stream delivered no result.
+
+No frame exceeds the 16 MiB message limit. A result with a single row larger than that cannot be delivered; the server answers with an `error` before sending any part of it.
 
 ## Session Rules
 
@@ -297,7 +301,7 @@ Session rules are automatically included when querying:
 
 ## Notifications
 
-The server pushes notifications when persistent data changes in the session's knowledge graph. `kg_change` notifications for other knowledge graphs go to admin sessions only, and changes to the internal `_internal` knowledge graph are never sent. Replay on reconnect (`last_seq` with `epoch`) applies the same rules. Revoking a user's access to the knowledge graph (`.kg acl revoke`) stops its notifications and subscription deltas on live connections at once; a delta withheld this way is replaced by a `subscription_error`, and its `seq` is skipped, so resubscribe once access is restored.
+The server pushes notifications when persistent data changes in the session's knowledge graph. `kg_change` notifications for other knowledge graphs go to admin sessions only, and changes to the internal `_internal` knowledge graph are never sent. Replay on reconnect (`last_seq` with `epoch`) applies the same rules. Revoking a user's access to the knowledge graph (`.kg acl revoke`) stops its notifications and subscription deltas on live connections at once; a delta withheld this way ends its subscription with a [`subscription_reset`](#reset), so resubscribe once access is restored.
 
 ### Persistent Update
 
@@ -385,6 +389,8 @@ The subscription is bound to the connection and to its current knowledge graph. 
 
 `<id>` is client-chosen: 1-128 characters from `[A-Za-z0-9_.:-]`, unique per connection.
 
+A large snapshot is [streamed](#streaming-results) like any result, with `subscribed` on its `result_start`; it counts only once its `result_end` arrives. A snapshot that cannot be delivered whole (a row larger than the 16 MiB message limit) fails the `.subscribe` with an `error`, and nothing is registered.
+
 ### Delta
 
 ```json
@@ -408,6 +414,23 @@ The subscription is bound to the connection and to its current knowledge graph. 
 - Coalescing: at most one evaluation runs per subscription. Commits that land meanwhile trigger one follow-up evaluation, so a burst produces few deltas and the last one always reflects the final state.
 - Evaluation runs off the connection's read loop and off the write path.
 
+### Streamed Deltas
+
+A delta whose frame would exceed 1 MiB arrives as one logical delta in several frames: a `subscription_delta_start` with everything but the rows, `subscription_delta_chunk`s of at most 500 rows and about 1 MiB, and a `subscription_delta_end` with the counts the chunks must add up to:
+
+```json
+{"type": "subscription_delta_start", "subscription": "late_orders", "generation": 3,
+ "knowledge_graph": "default", "seq": 2, "revision": 18, "columns": ["Order", "Customer"]}
+{"type": "subscription_delta_chunk", "subscription": "late_orders", "generation": 3, "seq": 2,
+ "chunk_index": 0, "inserted": [[1043, "initech"]], "retracted": []}
+{"type": "subscription_delta_end", "subscription": "late_orders", "generation": 3, "seq": 2,
+ "chunk_count": 1, "inserted_count": 1, "retracted_count": 0}
+```
+
+- Buffer the chunks and apply the delta only at its end, after checking that `chunk_index` ran from 0 without gaps or repeats and that the rows match `inserted_count` and `retracted_count`. Until then the result stays at its previous revision.
+- The stream's frames arrive in order; replies, notifications and other subscriptions' pushes may arrive between them.
+- A stream that breaks those rules leaves the result unknown: unsubscribe and subscribe again. If the connection closes mid-stream, nothing of that delta applied.
+
 ### Errors
 
 If re-evaluation fails (for example read access was revoked), the server pushes:
@@ -422,6 +445,17 @@ A result cut at `storage.performance.max_result_rows` is incomplete, so it is ne
 
 `.subscribe` replies with an `error` when the id is taken, the per-connection limit is reached, the query uses `limit`/`offset`, the result exceeds `max_result_rows`, or the user lacks read access to the knowledge graph (the same check as a query).
 
+### Reset
+
+When the server cannot deliver a subscription's next change whole (a row larger than the 16 MiB message limit, or read access to the knowledge graph was revoked), it removes the subscription and pushes:
+
+```json
+{"type": "subscription_reset", "subscription": "late_orders", "generation": 3,
+ "message": "Delta 4 has a row of 17000000 bytes, over the 16777216-byte message limit. The subscription was removed; subscribe again."}
+```
+
+The rows you hold for that subscription are no longer kept current; discard them, including a streamed delta in progress, and `.subscribe` again for a fresh snapshot. Nothing more is pushed for that generation, and the id is free.
+
 ### Unsubscribe
 
 ```json
@@ -434,7 +468,8 @@ Subscriptions are also removed when the connection closes and when it switches k
 
 - Subscriptions see **persistent data only**: session facts and session rules are excluded, as with `.why`.
 - At most `http.rate_limit.ws_max_subscriptions` per connection (default 64, 0 = unlimited).
-- A delta larger than the maximum message size is replaced by a `subscription_error`.
+- No frame exceeds the 16 MiB message limit: large snapshots and deltas are streamed, and a change that still cannot be delivered (a single row over the limit) resets the subscription.
+- The server writes one frame at a time. A client that leaves a frame unread for `http.ws_send_timeout_ms` (default 30 seconds) is disconnected, so a client that stops reading holds no server resources and never delays other connections.
 
 ## Keep-Alive
 

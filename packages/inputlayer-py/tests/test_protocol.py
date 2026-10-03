@@ -19,8 +19,12 @@ from inputlayer._protocol import (
     ResultEndResponse,
     ResultResponse,
     ResultStartResponse,
+    SubscriptionDeltaChunkResponse,
+    SubscriptionDeltaEndResponse,
     SubscriptionDeltaResponse,
+    SubscriptionDeltaStartResponse,
     SubscriptionErrorResponse,
+    SubscriptionResetResponse,
     deserialize_message,
     serialize_message,
 )
@@ -360,4 +364,40 @@ class TestDeserializePushes:
             "message": "boom",
         }))
         assert isinstance(error, SubscriptionErrorResponse)
+
+    def test_streamed_delta_and_reset_frames(self):
+        start = deserialize_message(json.dumps({
+            "type": "subscription_delta_start", "subscription": "live", "generation": 3,
+            "knowledge_graph": "default", "seq": 2, "revision": 13, "columns": ["x"],
+        }))
+        assert isinstance(start, SubscriptionDeltaStartResponse)
+        assert (start.seq, start.revision) == (2, 13)
+        chunk = deserialize_message(json.dumps({
+            "type": "subscription_delta_chunk", "subscription": "live", "generation": 3,
+            "seq": 2, "chunk_index": 0, "inserted": [[2]], "retracted": [[1]],
+        }))
+        assert isinstance(chunk, SubscriptionDeltaChunkResponse)
+        assert (chunk.chunk_index, chunk.inserted, chunk.retracted) == (0, [[2]], [[1]])
+        end = deserialize_message(json.dumps({
+            "type": "subscription_delta_end", "subscription": "live", "generation": 3,
+            "seq": 2, "chunk_count": 1, "inserted_count": 1, "retracted_count": 1,
+        }))
+        assert isinstance(end, SubscriptionDeltaEndResponse)
+        assert (end.chunk_count, end.inserted_count, end.retracted_count) == (1, 1, 1)
+        reset = deserialize_message(json.dumps({
+            "type": "subscription_reset", "subscription": "live", "generation": 3,
+            "message": "gone",
+        }))
+        assert isinstance(reset, SubscriptionResetResponse)
+        assert reset.message == "gone"
+
+    def test_streamed_subscribe_reply_names_the_subscription(self):
+        start = deserialize_message(json.dumps({
+            "type": "result_start", "id": "1", "columns": ["x"], "total_count": 2,
+            "truncated": False, "execution_time_ms": 1,
+            "subscribed": {"subscription": "live", "generation": 4, "revision": 9},
+        }))
+        assert isinstance(start, ResultStartResponse)
+        assert start.subscribed is not None
+        assert (start.subscribed.subscription, start.subscribed.generation) == ("live", 4)
 

@@ -1,4 +1,5 @@
-//! The write half of a `/ws` connection, fenced by its credential.
+//! The write half of a `/ws` connection, fenced by its credential and bounded
+//! in time.
 //!
 //! Once a connection is authenticated, every data frame passes the credential
 //! fence: the principal is checked after the socket is ready for the frame
@@ -6,11 +7,23 @@
 //! therefore authorized at the instant it is committed to the socket, so no
 //! result, notification or subscription push leaves after the credential is
 //! revoked or expires. The one exception is the closing notice saying so.
+//!
+//! Each frame is written and flushed before the next, so a connection holds
+//! at most one outbound frame. A client that stops reading cannot hold the
+//! connection forever: a frame the socket does not take within the send
+//! timeout (`http.ws_send_timeout_ms`) fails the connection, and nothing is
+//! written to it after that.
+
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::stream::SplitSink;
 use futures_util::{Sink, SinkExt};
 use inputlayer_ws_protocol::{ErrorCode, NoticeCode, ServerFrame};
+use tokio::time::Sleep;
 use tracing::warn;
 
 use crate::auth::{CredentialEnded, Principal};
@@ -23,12 +36,18 @@ pub(super) enum SendError {
     Closed,
     /// The connection's credential was revoked or expired.
     CredentialEnded,
+    /// The client stopped reading: a frame waited past the send timeout.
+    TimedOut,
 }
 
 pub(super) struct Outbound<S = SplitSink<WebSocket, Message>> {
     sink: S,
     /// Unset during the auth phase.
     principal: Option<Principal>,
+    /// Longest wait for the socket to take one frame; `None` waits forever.
+    send_timeout: Option<Duration>,
+    /// Set once the socket failed or stalled: nothing more is written.
+    failed: Option<SendError>,
 }
 
 impl<S: Sink<Message> + Unpin> Outbound<S> {
@@ -36,7 +55,15 @@ impl<S: Sink<Message> + Unpin> Outbound<S> {
         Self {
             sink,
             principal: None,
+            send_timeout: None,
+            failed: None,
         }
+    }
+
+    /// Fail a frame the socket has not taken within `timeout` (zero: never).
+    pub(super) fn with_send_timeout(mut self, timeout: Duration) -> Self {
+        self.send_timeout = (!timeout.is_zero()).then_some(timeout);
+        self
     }
 
     /// Fence every later data frame with `principal`.
@@ -46,17 +73,44 @@ impl<S: Sink<Message> + Unpin> Outbound<S> {
 
     /// Send `message`; data frames only while the credential is live.
     pub(super) async fn send(&mut self, message: Message) -> Result<(), SendError> {
-        let data = matches!(message, Message::Text(_) | Message::Binary(_));
-        std::future::poll_fn(|cx| self.sink.poll_ready_unpin(cx))
-            .await
-            .map_err(|_| SendError::Closed)?;
-        if data && self.principal.as_ref().and_then(Principal::ended).is_some() {
-            return Err(SendError::CredentialEnded);
+        self.transmit(message, true).await
+    }
+
+    async fn transmit(&mut self, message: Message, fenced: bool) -> Result<(), SendError> {
+        if let Some(error) = self.failed {
+            return Err(error);
         }
-        self.sink
-            .start_send_unpin(message)
-            .map_err(|_| SendError::Closed)?;
-        self.sink.flush().await.map_err(|_| SendError::Closed)
+        let data = matches!(message, Message::Text(_) | Message::Binary(_));
+        let mut deadline = Deadline::new(self.send_timeout);
+        let result = async {
+            std::future::poll_fn(|cx| {
+                let step = self.sink.poll_ready_unpin(cx);
+                deadline.poll(cx, step)
+            })
+            .await?;
+            if fenced && data && self.principal.as_ref().and_then(Principal::ended).is_some() {
+                return Err(SendError::CredentialEnded);
+            }
+            self.sink
+                .start_send_unpin(message)
+                .map_err(|_| SendError::Closed)?;
+            std::future::poll_fn(|cx| {
+                let step = self.sink.poll_flush_unpin(cx);
+                deadline.poll(cx, step)
+            })
+            .await
+        }
+        .await;
+        match result {
+            Err(error @ (SendError::Closed | SendError::TimedOut)) => {
+                if error == SendError::TimedOut {
+                    warn!(timeout = ?self.send_timeout, "ws_send_timeout");
+                }
+                self.failed = Some(error);
+                Err(error)
+            }
+            other => other,
+        }
     }
 
     /// Serialize and send `frame`; `false` if the connection is dead. A frame
@@ -89,16 +143,58 @@ impl<S: Sink<Message> + Unpin> Outbound<S> {
             code,
             message: message.to_string(),
         };
-        let _ = self.sink.send(Message::Text(encode(&notice))).await;
+        let _ = self.transmit(Message::Text(encode(&notice)), false).await;
     }
 
     pub(super) async fn close(&mut self) {
-        let _ = self.sink.close().await;
+        if self.failed.is_some() {
+            return;
+        }
+        let mut deadline = Deadline::new(self.send_timeout);
+        let _ = std::future::poll_fn(|cx| {
+            let step = self.sink.poll_close_unpin(cx);
+            deadline.poll(cx, step)
+        })
+        .await;
     }
 
     #[cfg(test)]
     pub(super) fn sink(&self) -> &S {
         &self.sink
+    }
+}
+
+/// The time limit for the socket to take one frame. The timer is armed only
+/// once the socket makes the frame wait, so a writable socket costs nothing.
+struct Deadline {
+    limit: Option<Duration>,
+    timer: Option<Pin<Box<Sleep>>>,
+}
+
+impl Deadline {
+    fn new(limit: Option<Duration>) -> Self {
+        Self { limit, timer: None }
+    }
+
+    /// `step`'s outcome, or [`SendError::TimedOut`] once the frame has waited
+    /// past the limit.
+    fn poll<E>(
+        &mut self,
+        cx: &mut Context<'_>,
+        step: Poll<Result<(), E>>,
+    ) -> Poll<Result<(), SendError>> {
+        match step {
+            Poll::Ready(result) => Poll::Ready(result.map_err(|_| SendError::Closed)),
+            Poll::Pending => {
+                let Some(limit) = self.limit else {
+                    return Poll::Pending;
+                };
+                let timer = self
+                    .timer
+                    .get_or_insert_with(|| Box::pin(tokio::time::sleep(limit)));
+                timer.as_mut().poll(cx).map(|()| Err(SendError::TimedOut))
+            }
+        }
     }
 }
 
@@ -138,6 +234,8 @@ mod tests {
     use super::*;
     use crate::auth::{ApiKeyRecord, ApiKeyTimes, CredentialRegistry, Role, UserRecord};
     use inputlayer_ws_protocol::RequestId;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
 
     fn principal(registry: &CredentialRegistry) -> Principal {
         registry.load(
@@ -205,6 +303,66 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outbound.sink, vec![Message::Text("auth_error".into())]);
+    }
+
+    /// A socket whose client never reads: it never takes another frame.
+    struct Stalled;
+
+    impl Sink<Message> for Stalled {
+        type Error = ();
+
+        fn poll_ready(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), ()>> {
+            Poll::Pending
+        }
+
+        fn start_send(self: Pin<&mut Self>, _: Message) -> Result<(), ()> {
+            unreachable!("never ready")
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), ()>> {
+            Poll::Pending
+        }
+
+        fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), ()>> {
+            Poll::Pending
+        }
+    }
+
+    #[tokio::test]
+    async fn a_stalled_reader_fails_the_connection_after_the_send_timeout() {
+        let timeout = Duration::from_millis(50);
+        let mut outbound = Outbound::new(Stalled).with_send_timeout(timeout);
+        let started = std::time::Instant::now();
+        assert_eq!(
+            outbound.send(Message::Text("x".into())).await,
+            Err(SendError::TimedOut)
+        );
+        let waited = started.elapsed();
+        assert!(waited >= timeout, "{waited:?}");
+
+        // Nothing more is written, and nothing waits again.
+        let again = std::time::Instant::now();
+        assert_eq!(
+            outbound.send(Message::Ping(Vec::new())).await,
+            Err(SendError::TimedOut)
+        );
+        outbound
+            .send_credential_notice(CredentialEnded::Revoked)
+            .await;
+        outbound.close().await;
+        assert!(again.elapsed() < timeout, "{:?}", again.elapsed());
+    }
+
+    #[tokio::test]
+    async fn without_a_send_timeout_a_stalled_reader_is_waited_for() {
+        let mut outbound = Outbound::new(Stalled).with_send_timeout(Duration::ZERO);
+        let send = outbound.send(Message::Text("x".into()));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), send)
+                .await
+                .is_err(),
+            "zero disables the timeout"
+        );
     }
 
     #[test]

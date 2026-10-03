@@ -15,6 +15,7 @@ use serde_json::Value;
 use crate::client::{Frame, QueryResult, WsClient, FRAME_TIMEOUT};
 use crate::contract::{Checked, Violation};
 use crate::engine::Engine;
+use crate::streamed::StreamedDelta;
 
 /// A result row in canonical form (its compact JSON), for set comparisons.
 pub type RowKey = String;
@@ -211,11 +212,29 @@ impl Agent {
         &self.client
     }
 
-    /// Wait for the next delta of `id` and apply it to its view.
+    /// Wait for the next delta of `id`, whole, and apply it to its view. A
+    /// streamed delta applies only once its end frame confirms it complete.
     pub async fn next_delta(&mut self, id: &str) -> Checked<Delta> {
+        let frame = self.next_frame_of(id).await?;
+        if frame.kind() != "subscription_delta_start" {
+            return self.apply(id, &frame);
+        }
+        let mut stream = StreamedDelta::start(&frame.value)?;
+        loop {
+            let frame = self.next_frame_of(id).await?;
+            if frame.kind() == "subscription_reset" {
+                return self.apply(id, &frame);
+            }
+            if let Some(delta) = stream.next(&frame.value, frame.at)? {
+                self.apply_delta(id, &frame, &delta)?;
+                return Ok(delta);
+            }
+        }
+    }
+
+    async fn next_frame_of(&mut self, id: &str) -> Checked<Frame> {
         let frame = self.next_push_for(id, FRAME_TIMEOUT).await?;
-        let frame = frame.ok_or_else(|| Violation::Timeout(format!("a delta for '{id}'")))?;
-        self.apply(id, &frame)
+        frame.ok_or_else(|| Violation::Timeout(format!("a delta for '{id}'")))
     }
 
     /// Apply deltas of `id` until its view holds exactly `expected` (coalescing
@@ -273,22 +292,44 @@ impl Agent {
     }
 
     fn apply(&mut self, id: &str, frame: &Frame) -> Checked<Delta> {
-        if frame.kind() == "subscription_error" {
-            return Err(Violation::SubscriptionError {
+        let message = || {
+            frame.value["message"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        };
+        match frame.kind() {
+            "subscription_delta" => {
+                let delta = Delta::from_frame(frame)?;
+                self.apply_delta(id, frame, &delta)?;
+                Ok(delta)
+            }
+            "subscription_error" => Err(Violation::SubscriptionError {
                 subscription: id.to_string(),
-                message: frame.value["message"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string(),
-            });
+                message: message(),
+            }),
+            // The engine dropped the subscription: its rows are no longer
+            // maintained, so the view goes too.
+            "subscription_reset" => {
+                self.views.remove(id);
+                Err(Violation::SubscriptionReset {
+                    subscription: id.to_string(),
+                    message: message(),
+                })
+            }
+            other => Err(Violation::BrokenStream {
+                subscription: id.to_string(),
+                detail: format!("{other} outside a streamed delta: {}", frame.value),
+            }),
         }
-        let delta = Delta::from_frame(frame)?;
+    }
+
+    fn apply_delta(&mut self, id: &str, frame: &Frame, delta: &Delta) -> Checked<()> {
         let view = self
             .views
             .get_mut(id)
             .ok_or_else(|| Violation::UnexpectedPush(frame.value.to_string()))?;
-        view.apply(&delta)?;
-        Ok(delta)
+        view.apply(delta)
     }
 
     /// Next subscription push for `id` within `within`, or `None`.

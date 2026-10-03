@@ -52,7 +52,7 @@ info:
 
     ## Protocol version and request IDs
 
-    This is protocol version 2, reported as `protocol_version` in `authenticated`.
+    This is protocol version 3, reported as `protocol_version` in `authenticated`.
     The frame types are defined once in the `inputlayer-ws-protocol` crate
     (`ws-protocol/`); the Python and JS SDKs mirror them.
 
@@ -68,8 +68,10 @@ info:
     they can never be mistaken for a reply:
 
     - pushes: change notifications (`persistent_update`, `rule_change`, `kg_change`,
-      `schema_change`) and standing-query results (`subscription_delta`,
-      `subscription_error`), addressed by subscription name and generation;
+      `schema_change`) and standing-query results (`subscription_delta`, its streamed
+      form `subscription_delta_start` / `subscription_delta_chunk` /
+      `subscription_delta_end`, `subscription_error` and `subscription_reset`), addressed
+      by subscription name and generation;
     - `notice`: connection events such as an idle timeout, typed by `code`. Every code
       except `notifications_missed` and `replay_gap` is followed by the server closing
       the connection.
@@ -80,6 +82,27 @@ info:
     request over the per-connection message rate gets code `rate_limited`. Neither runs,
     and the connection stays usable.
 
+    ## Large payloads
+
+    No frame exceeds the 16 MiB message limit. A result, or a `.subscribe` snapshot,
+    whose single frame would exceed 1 MiB is streamed as `result_start`, `result_chunk`s
+    and `result_end`; a subscription delta as `subscription_delta_start`,
+    `subscription_delta_chunk`s and `subscription_delta_end`. A chunk holds at most 500
+    rows and about 1 MiB. Each stream is one logical result or delta: apply it only at
+    its end frame, after checking that the chunks arrived in order from `chunk_index` 0
+    and add up to the end frame's counts. Until then the previous state stands. Frames
+    of one stream arrive in order; other frames may arrive between them.
+
+    What the server cannot deliver whole (a row larger than any frame) it reports
+    instead, before sending any part: an `error` answering the request, or a
+    `subscription_reset` that ends the subscription. An `error` with the request's `id`
+    after `result_start` also ends that stream: discard its rows. A connection that
+    closes mid-stream delivered nothing of that stream.
+
+    The server writes one frame at a time. A client that leaves a frame unread for
+    `http.ws_send_timeout_ms` (default 30 s) is disconnected, so a stalled reader holds
+    no server resources and never delays other connections.
+
     ## Message Flow
 
     1. Client connects → must authenticate first
@@ -87,7 +110,7 @@ info:
     3. If `last_seq` and `epoch` were provided, the server replays missed notifications or sends a `replay_gap` notice
     4. Client sends `execute` messages → Server responds with `result` or `error`, echoing the request `id`
     5. For large results (>1 MB), the server streams: `result_start` → `result_chunk` (×N) → `result_end`
-    6. Server may push change notifications (`persistent_update`, `rule_change`, ...), for `.subscribe`d queries `subscription_delta` / `subscription_error`, and connection `notice`s
+    6. Server may push change notifications (`persistent_update`, `rule_change`, ...), for `.subscribe`d queries `subscription_delta` (streamed when large) / `subscription_error` / `subscription_reset`, and connection `notice`s
     7. Client disconnects → Server auto-closes session
 
     ## Pipelining
@@ -203,8 +226,16 @@ channels:
         $ref: '#/components/messages/Notification'
       subscription_delta:
         $ref: '#/components/messages/SubscriptionDelta'
+      subscription_delta_start:
+        $ref: '#/components/messages/SubscriptionDeltaStart'
+      subscription_delta_chunk:
+        $ref: '#/components/messages/SubscriptionDeltaChunk'
+      subscription_delta_end:
+        $ref: '#/components/messages/SubscriptionDeltaEnd'
       subscription_error:
         $ref: '#/components/messages/SubscriptionError'
+      subscription_reset:
+        $ref: '#/components/messages/SubscriptionReset'
       notice:
         $ref: '#/components/messages/Notice'
 
@@ -335,9 +366,11 @@ operations:
       $ref: '#/channels/ws'
     summary: Start of a streamed result
     description: |
-      Sent instead of `result` when the serialized result exceeds 1 MB.
-      Contains metadata and column names. Followed by one or more `result_chunk`
-      messages, then a `result_end` message.
+      Sent instead of `result` when the serialized result exceeds 1 MiB, including
+      the reply to `.subscribe` (then with `subscribed`). Contains metadata and column
+      names. Followed by `result_chunk` messages, then a `result_end` message; the
+      result is complete only at `result_end`. An `error` with the same `id` instead
+      ends the stream as failed: discard the rows received.
     messages:
       - $ref: '#/channels/ws/messages/result_start'
 
@@ -347,7 +380,7 @@ operations:
       $ref: '#/channels/ws'
     summary: Chunk of streamed result rows
     description: |
-      Contains up to 500 rows per chunk. Chunks are numbered sequentially
+      Contains at most 500 rows and about 1 MiB. Chunks are numbered sequentially
       starting from 0 via `chunk_index`.
     messages:
       - $ref: '#/channels/ws/messages/result_chunk'
@@ -357,7 +390,9 @@ operations:
     channel:
       $ref: '#/channels/ws'
     summary: End of a streamed result
-    description: Signals that all chunks have been sent. Contains final row and chunk counts.
+    description: |
+      Signals that all chunks have been sent. Its row and chunk counts are what the
+      chunks must add up to; only now is the result complete.
     messages:
       - $ref: '#/channels/ws/messages/result_end'
 
@@ -389,9 +424,60 @@ operations:
       Pushed after a committed persistent change to a relation the subscribed
       query depends on (directly or through persistent rules) altered its result.
       Set semantics; `seq` starts at 1 per subscription and has no gaps; `revision`
-      increases with every delta. Persistent data only.
+      increases with every delta. Persistent data only. A delta whose frame would
+      exceed 1 MiB is streamed instead (`subscription_delta_start`).
     messages:
       - $ref: '#/channels/ws/messages/subscription_delta'
+
+  onSubscriptionDeltaStart:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: Start of a delta streamed in chunks
+    description: |
+      Everything a `subscription_delta` carries but its rows. Followed by
+      `subscription_delta_chunk`s and a `subscription_delta_end` for the same
+      subscription, generation and `seq`; together they are that one delta. Other
+      frames may arrive in between. Apply the delta only at its end.
+    messages:
+      - $ref: '#/channels/ws/messages/subscription_delta_start'
+
+  onSubscriptionDeltaChunk:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: Rows of a streamed delta
+    description: |
+      At most 500 rows and about 1 MiB, numbered from `chunk_index` 0 without gaps.
+      A missing, repeated or out-of-order chunk means the stream is broken: drop the
+      subscription's rows and resubscribe.
+    messages:
+      - $ref: '#/channels/ws/messages/subscription_delta_chunk'
+
+  onSubscriptionDeltaEnd:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: End of a streamed delta
+    description: |
+      The chunk and row counts the chunks must add up to. Only now does the delta
+      apply, advancing the subscription to the start frame's `seq` and `revision`.
+    messages:
+      - $ref: '#/channels/ws/messages/subscription_delta_end'
+
+  onSubscriptionReset:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: The server ended a subscription it could not keep current
+    description: |
+      The subscription's next change could not be delivered whole (a row larger than
+      any frame, or read access to its knowledge graph was revoked), so the server
+      removed the subscription. Discard its rows, including a streamed delta in
+      progress, and subscribe again for a fresh snapshot. Nothing more is pushed for
+      this generation.
+    messages:
+      - $ref: '#/channels/ws/messages/subscription_reset'
 
   onNotice:
     action: receive
@@ -564,6 +650,38 @@ components:
       payload:
         $ref: '#/components/schemas/SubscriptionErrorResponse'
 
+    SubscriptionDeltaStart:
+      name: subscription_delta_start
+      title: Subscription Delta Start
+      summary: Header of a delta streamed in chunks
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SubscriptionDeltaStartResponse'
+
+    SubscriptionDeltaChunk:
+      name: subscription_delta_chunk
+      title: Subscription Delta Chunk
+      summary: Rows of a streamed delta
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SubscriptionDeltaChunkResponse'
+
+    SubscriptionDeltaEnd:
+      name: subscription_delta_end
+      title: Subscription Delta End
+      summary: End of a streamed delta, with its counts
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SubscriptionDeltaEndResponse'
+
+    SubscriptionReset:
+      name: subscription_reset
+      title: Subscription Reset
+      summary: The server ended a subscription it could not keep current
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SubscriptionResetResponse'
+
   schemas:
     RequestId:
       type: string
@@ -724,6 +842,135 @@ components:
           subscription: late_orders
           generation: 1
           message: Access denied
+
+    SubscriptionDeltaStartResponse:
+      type: object
+      required: [type, subscription, generation, knowledge_graph, seq, revision, columns]
+      properties:
+        type:
+          type: string
+          const: subscription_delta_start
+        subscription:
+          type: string
+        generation:
+          type: integer
+          format: int64
+        knowledge_graph:
+          type: string
+        seq:
+          type: integer
+          format: int64
+          description: The delta's number, as for `subscription_delta`
+        revision:
+          type: integer
+          format: int64
+          description: The revision the result reaches once the delta applies
+        columns:
+          type: array
+          items:
+            type: string
+      examples:
+        - type: subscription_delta_start
+          subscription: late_orders
+          generation: 1
+          knowledge_graph: default
+          seq: 2
+          revision: 18
+          columns: [Order, Customer]
+
+    SubscriptionDeltaChunkResponse:
+      type: object
+      required: [type, subscription, generation, seq, chunk_index, inserted, retracted]
+      properties:
+        type:
+          type: string
+          const: subscription_delta_chunk
+        subscription:
+          type: string
+        generation:
+          type: integer
+          format: int64
+        seq:
+          type: integer
+          format: int64
+          description: The streamed delta this chunk belongs to
+        chunk_index:
+          type: integer
+          description: 0-based, without gaps
+        inserted:
+          type: array
+          description: Rows entering the result
+          items:
+            type: array
+        retracted:
+          type: array
+          description: Rows leaving the result
+          items:
+            type: array
+      examples:
+        - type: subscription_delta_chunk
+          subscription: late_orders
+          generation: 1
+          seq: 2
+          chunk_index: 0
+          inserted: [[1043, initech]]
+          retracted: []
+
+    SubscriptionDeltaEndResponse:
+      type: object
+      required: [type, subscription, generation, seq, chunk_count, inserted_count, retracted_count]
+      properties:
+        type:
+          type: string
+          const: subscription_delta_end
+        subscription:
+          type: string
+        generation:
+          type: integer
+          format: int64
+        seq:
+          type: integer
+          format: int64
+        chunk_count:
+          type: integer
+          description: Number of chunks sent
+        inserted_count:
+          type: integer
+          description: Inserted rows across all chunks
+        retracted_count:
+          type: integer
+          description: Retracted rows across all chunks
+      examples:
+        - type: subscription_delta_end
+          subscription: late_orders
+          generation: 1
+          seq: 2
+          chunk_count: 40
+          inserted_count: 20000
+          retracted_count: 0
+
+    SubscriptionResetResponse:
+      type: object
+      required: [type, subscription, generation, message]
+      properties:
+        type:
+          type: string
+          const: subscription_reset
+        subscription:
+          type: string
+        generation:
+          type: integer
+          format: int64
+        message:
+          type: string
+          description: Why the change could not be delivered
+      examples:
+        - type: subscription_reset
+          subscription: late_orders
+          generation: 1
+          message: >-
+            Delta 2 has a row of 17000000 bytes, over the 16777216-byte message limit.
+            The subscription was removed; subscribe again.
 
     ExecuteRequest:
       type: object
@@ -1063,6 +1310,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/StatementError'
+        subscribed:
+          $ref: '#/components/schemas/Subscribed'
       examples:
         - type: result_start
           columns: ["id", "name", "score"]
@@ -1087,7 +1336,7 @@ components:
           items:
             type: array
             items: {}
-          description: Result rows in this chunk (up to 500 rows per chunk)
+          description: Result rows in this chunk (at most 500 rows and about 1 MiB)
         row_provenance:
           type: array
           items:

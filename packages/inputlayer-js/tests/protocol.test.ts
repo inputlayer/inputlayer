@@ -167,6 +167,10 @@ describe('request ids and pushes', () => {
       '{"type":"notice","code":"replay_gap","message":"re-read state"}',
       '{"type":"subscription_delta","subscription":"s","generation":2,"knowledge_graph":"kg","seq":1,"revision":5,"columns":["x"],"inserted":[[1]],"retracted":[]}',
       '{"type":"subscription_error","subscription":"s","generation":2,"message":"boom"}',
+      '{"type":"subscription_delta_start","subscription":"s","generation":2,"knowledge_graph":"kg","seq":2,"revision":6,"columns":["x"]}',
+      '{"type":"subscription_delta_chunk","subscription":"s","generation":2,"seq":2,"chunk_index":0,"inserted":[[2]],"retracted":[]}',
+      '{"type":"subscription_delta_end","subscription":"s","generation":2,"seq":2,"chunk_count":1,"inserted_count":1,"retracted_count":0}',
+      '{"type":"subscription_reset","subscription":"s","generation":2,"message":"gone"}',
       '{"type":"kg_change","knowledge_graph":"kg","operation":"created","timestamp_ms":1,"seq":1}',
     ];
     for (const frame of frames) {

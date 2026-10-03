@@ -137,12 +137,18 @@ Results over `storage.performance.max_result_rows` are required to fail
 closed: the subscription is refused, or a refresh pushes `subscription_error`
 and the next delta is relative to the last complete result.
 
-Defects tracked by the reactive plan run as **expected failures**
-(`tests/e2e_reactive/known_defects.rs`): an oversized delta that advances the
-subscription without delivery (W05). Each asserts the correct contract; its
-own violation passes as `XFAIL`, any other violation fails, and a holding
-contract fails as `XPASS` so the marker is removed and the scenario becomes
-required when the plan item lands.
+`tests/e2e_reactive/delivery.rs` requires payloads over one frame to arrive
+whole: a delta past the 16 MiB frame limit streams as one logical delta that
+the agent applies only at its end and converges from, and a large snapshot
+streams as a `.subscribe` reply naming its subscription. The testkit agent
+rejects a streamed delta whose chunks are missing, duplicated, out of order or
+short of its end frame's counts (`Violation::BrokenStream`).
+
+Defects tracked by the reactive plan run as **expected failures** in a
+`tests/e2e_reactive/known_defects.rs` module (none is open today). Each
+asserts the correct contract; its own violation passes as `XFAIL`, any other
+violation fails, and a holding contract fails as `XPASS` so the marker is
+removed and the scenario becomes required when the plan item lands.
 
 Not yet covered by this pipeline (each is added when the work that enables it
 lands):

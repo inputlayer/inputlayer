@@ -1,4 +1,4 @@
-// WebSocket protocol types (/ws protocol version 2), mirroring the
+// WebSocket protocol types (/ws protocol version 3), mirroring the
 // `inputlayer-ws-protocol` crate and docs/spec/asyncapi.yaml. Any request may
 // carry an `id`, echoed on every reply to it; `notice` and push frames never
 // carry one.
@@ -259,8 +259,49 @@ export interface WsSubscriptionDeltaMessage {
   retracted: (string | number | boolean | null)[][]
 }
 
+/** Header of a delta streamed in chunks; the delta applies only at its end. */
+export interface WsSubscriptionDeltaStartMessage {
+  type: "subscription_delta_start"
+  subscription: string
+  generation: number
+  knowledge_graph: string
+  seq: number
+  revision: number
+  columns: string[]
+}
+
+/** Rows of a streamed delta, in order from `chunk_index` 0. */
+export interface WsSubscriptionDeltaChunkMessage {
+  type: "subscription_delta_chunk"
+  subscription: string
+  generation: number
+  seq: number
+  chunk_index: number
+  inserted: (string | number | boolean | null)[][]
+  retracted: (string | number | boolean | null)[][]
+}
+
+/** End of a streamed delta: the counts its chunks must add up to. */
+export interface WsSubscriptionDeltaEndMessage {
+  type: "subscription_delta_end"
+  subscription: string
+  generation: number
+  seq: number
+  chunk_count: number
+  inserted_count: number
+  retracted_count: number
+}
+
 export interface WsSubscriptionErrorMessage {
   type: "subscription_error"
+  subscription: string
+  generation: number
+  message: string
+}
+
+/** The server ended a subscription it could not keep current; subscribe again. */
+export interface WsSubscriptionResetMessage {
+  type: "subscription_reset"
   subscription: string
   generation: number
   message: string
@@ -279,7 +320,11 @@ export type WsServerMessage =
   | WsResultEndMessage
   | WsNoticeMessage
   | WsSubscriptionDeltaMessage
+  | WsSubscriptionDeltaStartMessage
+  | WsSubscriptionDeltaChunkMessage
+  | WsSubscriptionDeltaEndMessage
   | WsSubscriptionErrorMessage
+  | WsSubscriptionResetMessage
 
 // ── Connection state ────────────────────────────────────────────────────────
 

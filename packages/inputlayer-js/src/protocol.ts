@@ -1,6 +1,6 @@
 /**
  * WebSocket wire protocol: message serialization and deserialization.
- * Matches the AsyncAPI spec at docs/spec/asyncapi.yaml (protocol version 2,
+ * Matches the AsyncAPI spec at docs/spec/asyncapi.yaml (protocol version 3,
  * defined by the `inputlayer-ws-protocol` crate).
  *
  * Any request may carry an `id`; every reply to it echoes it. Pushes
@@ -9,7 +9,7 @@
  */
 
 /** The `/ws` protocol version this SDK speaks (`authenticated.protocol_version`). */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 // ── Client -> Server messages ───────────────────────────────────────
 
@@ -158,6 +158,8 @@ export interface ResultStartResponse {
   proof_trees?: any[];
   timing_breakdown?: TimingBreakdown;
   errors?: StatementError[];
+  /** Set on a streamed reply to `.subscribe`: the chunks hold the snapshot. */
+  subscribed?: Subscribed;
 }
 
 export interface ResultChunkResponse {
@@ -216,6 +218,55 @@ export interface SubscriptionDeltaResponse {
   retracted: any[][];
 }
 
+/**
+ * Header of a delta streamed in chunks: a `subscription_delta` without its
+ * rows. The delta applies only at its `subscription_delta_end`.
+ */
+export interface SubscriptionDeltaStartResponse {
+  type: 'subscription_delta_start';
+  subscription: string;
+  generation: number;
+  knowledge_graph: string;
+  seq: number;
+  revision: number;
+  columns: string[];
+}
+
+/** Rows of a streamed delta, in order from `chunk_index` 0. */
+export interface SubscriptionDeltaChunkResponse {
+  type: 'subscription_delta_chunk';
+  subscription: string;
+  generation: number;
+  seq: number;
+  chunk_index: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  inserted: any[][];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  retracted: any[][];
+}
+
+/** End of a streamed delta: the counts its chunks must add up to. */
+export interface SubscriptionDeltaEndResponse {
+  type: 'subscription_delta_end';
+  subscription: string;
+  generation: number;
+  seq: number;
+  chunk_count: number;
+  inserted_count: number;
+  retracted_count: number;
+}
+
+/**
+ * The server ended a subscription whose next change it could not deliver
+ * whole: discard its rows and subscribe again.
+ */
+export interface SubscriptionResetResponse {
+  type: 'subscription_reset';
+  subscription: string;
+  generation: number;
+  message: string;
+}
+
 /** A standing query failed to re-evaluate; it stays registered. */
 export interface SubscriptionErrorResponse {
   type: 'subscription_error';
@@ -252,14 +303,22 @@ export type ServerMessage =
   | NoticeResponse
   | NotificationResponse
   | SubscriptionDeltaResponse
-  | SubscriptionErrorResponse;
+  | SubscriptionDeltaStartResponse
+  | SubscriptionDeltaChunkResponse
+  | SubscriptionDeltaEndResponse
+  | SubscriptionErrorResponse
+  | SubscriptionResetResponse;
 
 /** Frames the server sends unprompted: never the reply to a request. */
 export type PushMessage =
   | NoticeResponse
   | NotificationResponse
   | SubscriptionDeltaResponse
-  | SubscriptionErrorResponse;
+  | SubscriptionDeltaStartResponse
+  | SubscriptionDeltaChunkResponse
+  | SubscriptionDeltaEndResponse
+  | SubscriptionErrorResponse
+  | SubscriptionResetResponse;
 
 const PUSH_TYPES: ReadonlySet<string> = new Set([
   'notice',
@@ -268,7 +327,11 @@ const PUSH_TYPES: ReadonlySet<string> = new Set([
   'kg_change',
   'schema_change',
   'subscription_delta',
+  'subscription_delta_start',
+  'subscription_delta_chunk',
+  'subscription_delta_end',
   'subscription_error',
+  'subscription_reset',
 ]);
 
 /** Whether `msg` was sent unprompted rather than in reply to a request. */
@@ -316,8 +379,20 @@ export function deserializeMessage(data: string): ServerMessage {
   if (type === 'subscription_delta') {
     return obj as SubscriptionDeltaResponse;
   }
+  if (type === 'subscription_delta_start') {
+    return obj as SubscriptionDeltaStartResponse;
+  }
+  if (type === 'subscription_delta_chunk') {
+    return obj as SubscriptionDeltaChunkResponse;
+  }
+  if (type === 'subscription_delta_end') {
+    return obj as SubscriptionDeltaEndResponse;
+  }
   if (type === 'subscription_error') {
     return obj as SubscriptionErrorResponse;
+  }
+  if (type === 'subscription_reset') {
+    return obj as SubscriptionResetResponse;
   }
   if (
     type === 'persistent_update' ||

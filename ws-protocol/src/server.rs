@@ -47,7 +47,10 @@ pub enum ServerFrame {
     },
     /// A complete result in one frame.
     Result(ResultFrame),
-    /// Header of a result streamed as `result_chunk` frames.
+    /// Header of a result streamed as `result_chunk` frames. A streamed
+    /// result is complete only at its `result_end`; if an `error` answering
+    /// the same request comes first, the result failed and the rows received
+    /// so far must be discarded.
     ResultStart(ResultStartFrame),
     /// Rows of a streamed result, in order from `chunk_index` 0.
     ResultChunk {
@@ -58,7 +61,7 @@ pub enum ServerFrame {
         row_provenance: Vec<String>,
         chunk_index: usize,
     },
-    /// End of a streamed result.
+    /// End of a streamed result: the counts its chunks must add up to.
     ResultEnd {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         id: Option<RequestId>,
@@ -207,6 +210,9 @@ pub struct ResultStartFrame {
     pub timing_breakdown: Option<TimingBreakdown>,
     #[serde(default)]
     pub errors: Vec<StatementError>,
+    /// Set on the reply to `.subscribe`: the chunks hold the snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subscribed: Option<Subscribed>,
 }
 
 /// Session (ephemeral) data that took part in a result.
