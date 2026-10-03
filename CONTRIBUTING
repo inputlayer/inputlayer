@@ -55,6 +55,13 @@ cargo test                          # Unit tests
 ./scripts/run_snapshot_tests.sh     # Snapshot tests
 ```
 
+Before calling an implementation PR done, run the performance gate and attach
+its report (`target/perf-gate/latest/report.md`) to the PR:
+
+```bash
+make perf-gate                      # must PASS; see perf-gate/README.md
+```
+
 ---
 
 ## Key Principles (Must Read)

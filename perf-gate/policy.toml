@@ -1,0 +1,52 @@
+# Performance gate acceptance policy.
+#
+# Every implementation PR records a `make perf-gate` verdict against the
+# approved baseline (perf-gate/baselines/approved.toml). Only PASS is
+# acceptable; FAIL, INCONCLUSIVE and INVALID all block "done".
+#
+# Changing a budget or the required set is a policy change: it needs an
+# explicit reason and review, like a baseline update.
+
+status = "provisional"
+note = "Budgets are the plan's proposed ceilings, pending captain decision D1; tightening is always allowed."
+
+# Rounds are the unit of replication. At 95%, 6 rounds is the least that
+# gives a median interval at all ([min, max]); the default 10 tolerates one
+# outlier round on each side.
+min_rounds = 6
+min_samples_p50 = 20
+min_samples_p99 = 100
+confidence = 0.95
+
+# The core matrix. Q = query, W = committed write, D = writer-to-agent delta.
+required = [
+    # Q: protocol overhead and warm bound recursion.
+    "cheap_query.latency_us.p50",
+    "cheap_query.latency_us.p99",
+    "cheap_query.queries_per_sec",
+    "bound_query.latency_us.p50",
+    "bound_query.latency_us.p99",
+    "bound_query.concurrent_latency_us.p99",
+    "bound_query.queries_per_sec",
+    # W: durable single and batch inserts.
+    "insert_single.ack_us.p50",
+    "insert_single.ack_us.p99",
+    "insert_single.facts_per_sec",
+    "insert_single.concurrent_facts_per_sec",
+    "insert_batch.ack_us.p50",
+    "insert_batch.facts_per_sec",
+    # D: insert-start to delta at the agent.
+    "delta_single.delta_us.p50",
+    "delta_single.delta_us.p99",
+    "delta_fanout.delta_us.p50",
+    "delta_fanout.delta_us.p99",
+    "delta_fanout.last_agent_us.p99",
+    "interference.delta_us.p50",
+    "interference.delta_us.p99",
+]
+
+# Largest allowed cost increase of the candidate over the baseline.
+[tolerance]
+p50 = 0.05
+p99 = 0.10
+rate = 0.05
