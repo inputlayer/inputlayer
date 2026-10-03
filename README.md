@@ -170,15 +170,11 @@ See [Python SDK docs](https://inputlayer.ai/docs/guides/python-sdk/) and [TypeSc
 
 ---
 
-## Use Cases
+## Flagship Guide
 
-Built for agents that act on a world that keeps changing. Keep your LLM, your vector store for documents and your systems of record; InputLayer is the live knowledge graph between your data and your agent's decisions.
+**[How to build a voice agent that knows](https://inputlayer.ai/blog/building-a-voice-agent-that-knows/)** - a voice pipeline with InputLayer at its heart: facts and rules in a live knowledge graph, known questions answered without a model, and an agent that corrects itself mid-sentence when the world changes.
 
-- **[Financial Risk](https://inputlayer.ai/use-cases/financial-risk/)** - Sanctions and ownership flags that update the moment an ownership link changes. A flag is withdrawn only when every path supporting it is gone.
-- **[Conversational Commerce](https://inputlayer.ai/use-cases/commerce/)** - Compatibility rules + vector similarity in one query, with recommendations withdrawn the moment stock runs out.
-- **[Manufacturing](https://inputlayer.ai/use-cases/manufacturing/)** - Production line availability recomputed per event, not per sweep, from training records to equipment status.
-- **[Supply Chain](https://inputlayer.ai/use-cases/supply-chain/)** - A port closes and every affected supplier, order, and SLA penalty is identified across the graph as it happens.
-- **[Agentic AI](https://inputlayer.ai/use-cases/agentic-ai/)** - Agent conclusions that stay current as observations change, with `.why` proof trees for every conclusion.
+Keep your LLM, your vector store for documents and your systems of record; InputLayer is the live knowledge graph between your data and your agent's decisions.
 
 ---
 

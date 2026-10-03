@@ -10,6 +10,7 @@ import { highlightGeneric } from "@/lib/generic-highlight"
 
 const QUICKSTART_URL = "/docs/guides/quickstart/"
 const WEBSOCKET_DOCS_URL = "/docs/guides/websocket-api/"
+const ARTICLE_URL = "/blog/building-a-voice-agent-that-knows/"
 const CONTACT_URL = "mailto:sam@inputlayer.ai?subject=Design-partner%20evaluation"
 
 // ── Code samples ────────────────────────────────────────────────────────
@@ -289,7 +290,11 @@ export default function LandingPage() {
           </div>
           <p className="mt-6 text-xs text-muted-foreground max-w-3xl">
             The voice agent is our flagship demo and is being built on today&apos;s standing queries. On the fast path a
-            wrong answer can only come from a wrong fact or a wrong route, and both are inspectable.
+            wrong answer can only come from a wrong fact or a wrong route, and both are inspectable.{" "}
+            <Link href={ARTICLE_URL} className="text-primary hover:underline">
+              Read how to build it
+            </Link>
+            .
           </p>
         </Section>
 
@@ -364,50 +369,24 @@ export default function LandingPage() {
           </p>
         </Section>
 
-        {/* ── Who it is for ──────────────────────────────────────────── */}
-        <Section eyebrow="Who it is for" title="Built for agents that act on a world that keeps changing">
-          <ComparisonTable
-            rowHeader="Agent"
-            align="left"
-            columns={["What changes under it", "What InputLayer knows for it"]}
-            rows={[
-              {
-                capability: "Support & customer service",
-                values: {
-                  "What changes under it": "Order status, ETAs, refunds, eligibility",
-                  "What InputLayer knows for it": "Which promises still hold while the ticket is open",
-                },
-              },
-              {
-                capability: "Fulfilment & logistics",
-                values: {
-                  "What changes under it": "Carrier events, stock, capacity",
-                  "What InputLayer knows for it": "Which shipments slipped and what they affect",
-                },
-              },
-              {
-                capability: "Risk, fraud & compliance",
-                values: {
-                  "What changes under it": "Transactions, sanctions, approvals",
-                  "What InputLayer knows for it": "Which flags hold now, and which were withdrawn",
-                },
-              },
-              {
-                capability: "Operations & monitoring",
-                values: {
-                  "What changes under it": "Metrics, incidents, dependencies",
-                  "What InputLayer knows for it": "Root cause and impact, updated per event, not per sweep",
-                },
-              },
-              {
-                capability: "Voice & live assistants",
-                values: {
-                  "What changes under it": "What the user just said, what the world just did",
-                  "What InputLayer knows for it": "The current answer, so the agent can correct itself mid-sentence",
-                },
-              },
-            ]}
-          />
+        {/* ── Flagship guide ─────────────────────────────────────────── */}
+        <Section eyebrow="Flagship guide" title="How to build a voice agent that knows">
+          <Link
+            href={ARTICLE_URL}
+            className="group block rounded-xl border border-border bg-card p-8 space-y-3 transition-colors hover:border-primary/30 hover:bg-card/80 max-w-3xl"
+          >
+            <h3 className="text-xl font-semibold group-hover:text-primary transition-colors">
+              Building a Voice Agent That Knows: A Voice Pipeline with InputLayer at Its Heart
+            </h3>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Turn-based voice agents put a language model on every hop and go stale mid-sentence. Here is how to build
+              a voice pipeline where facts and rules live in a live knowledge graph, known questions are answered
+              without a model, and the agent corrects itself the moment the world changes.
+            </p>
+            <span className="inline-flex items-center gap-1 text-sm text-primary font-medium pt-1">
+              Read the article <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </span>
+          </Link>
           <p className="mt-6 text-sm text-muted-foreground max-w-3xl">
             A good fit when the agent acts on structured facts that change, the answer is derived through a chain of facts
             or rules, a stale answer has a real cost, and the agent lives long enough for the world to change under it.

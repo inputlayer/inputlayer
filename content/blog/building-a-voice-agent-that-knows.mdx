@@ -1,0 +1,182 @@
+---
+title: "Building a Voice Agent That Knows: A Voice Pipeline with InputLayer at Its Heart"
+excerpt: "Turn-based voice agents put a language model on every hop and go stale mid-sentence. Here is how to build a voice pipeline where facts and rules live in a live knowledge graph, known questions are answered without a model, and the agent corrects itself the moment the world changes."
+date: "2026-10-03"
+category: "Architecture"
+author: "InputLayer"
+---
+
+# Building a Voice Agent That Knows
+
+Most voice agents are built like a batch job with a microphone attached. The user stops talking, the transcript goes to a language model, the model calls a few tools, writes an answer, and a text-to-speech engine reads it out. Then everything waits for the next turn.
+
+That design has three costs every voice engineer feels:
+
+1. **A model on every hop.** Even "where's my order?" pays for a full generation. In the turn traces we recorded on our own voice stack, the language-model path took **2.3 s at the median** to produce a reply.
+2. **The answer is frozen at the moment it was generated.** If the carrier updates the delivery date while the agent is speaking, the agent keeps saying the old date. It only finds out on the next turn, if ever.
+3. **Parallel work has nowhere to live.** "Check the carrier and look for a pickup point" becomes a tangle of task IDs, callbacks and state the model has to remember inside its context window.
+
+This article shows a different architecture: **models think, InputLayer knows.** Facts and the rules that derive answers from them live in a live knowledge graph outside the prompt. Known questions are answered exactly, without a model. When a fact changes, every answer that depends on it changes with it, and the voice pipeline reacts while it is still speaking.
+
+## The architecture: three lanes, one source of truth
+
+```
+              ┌────────────── SPEECH LANE ──────────────┐
+ mic ─▶ VAD ─▶ STT ─▶ intent model ─▶ facts ─┐           │
+                                             ▼           │
+ carrier, orders,    ─facts─▶  [ InputLayer: facts ─▶ rules ─▶ live answers ]
+ inventory, CRM                     │                 │
+                                    │ speech_intent   │ work_intent
+                                    ▼                 ▼
+                          agenda ─▶ template / LLM ─▶ TTS ─▶ speaker
+                                                 executor ─▶ tools ─▶ observations ─▶ facts
+              └──────────────────────────────────────────┘
+```
+
+There is no "turn" in the middle of this picture. There are three lanes, and InputLayer is the only place where truth lives:
+
+- **The speech lane** turns audio into validated facts about what the user wants, and turns derived "things worth saying" into audio.
+- **The knowing lane** is InputLayer. It holds world facts (orders, carrier events, stock), session facts (what this user asked, what has already been said) and the rules that connect them.
+- **The work lane** runs tools in parallel and writes what it learns back as facts.
+
+The language model is still there. It just stops being the database, the rules engine and the scheduler.
+
+## Separate knowing from thinking
+
+Start with the facts and rules for one question a support agent answers hundreds of times a day: *can this order still arrive by the date the customer needs?*
+
+```iql
+// World facts arrive from your systems (CDC, webhooks, app writes)
++shipment[("ORD-4821", "S-77")]
++eta[("S-77", "2026-10-08")]
++promised[("ORD-4821", "2026-10-09")]
+
+// Session facts arrive from the intent model
++asked[("s-42", "delivery_status", "ORD-4821")]
+
+// Rules: written once, reviewed like code
++on_time(O) <- shipment(O, S), eta(S, T), promised(O, P), T <= P
++late(O)    <- shipment(O, S), eta(S, T), promised(O, P), T > P
+
++speech_intent(Sess, "eta", O, T) <- asked(Sess, "delivery_status", O),
+                                    shipment(O, S), eta(S, T)
++work_intent(Sess, "carrier_check", O) <- asked(Sess, "delivery_status", O), late(O)
+```
+
+Two things happened here that a prompt cannot do for you.
+
+First, the answer is **derived, not generated**. `speech_intent("s-42", "eta", "ORD-4821", "2026-10-08")` is a fact the engine computed from other facts. You can ask why:
+
+```iql
+.why ?speech_intent("s-42", "eta", "ORD-4821", T)
+```
+
+and get the exact facts and rule that produced it. Every sentence your agent speaks can carry its proof.
+
+Second, the facts never enter the model's context window. A support catalogue with a million orders and ten thousand carrier events does not have to fit in a prompt, be chunked, or be lost in the middle. The engine reasons over all of it and hands the speech lane a few rows.
+
+## The fast path: known questions without a model
+
+Most of what a voice agent is asked is not open-ended. "Where's my order?", "Can it make Friday?", "Is it in stock?" are a small set of named questions with slots.
+
+So put a small, fast **intent model** in front: a fine-tuned classifier or a decision model that maps an utterance to one of the pack's named questions and fills its slots. It never writes rules or queries; it only writes validated facts:
+
+```
+"Where's order 4821, can it still make Friday?"
+   └─ intent model ─▶ asked("s-42", "delivery_status", "ORD-4821"), needed_by("s-42", "2026-10-09")
+```
+
+From there the path is deterministic:
+
+1. The `asked` fact is committed to InputLayer.
+2. The engine derives `speech_intent("s-42", "eta", "ORD-4821", "2026-10-08")`.
+3. The agenda picks it and a template renders "It's due Thursday."
+4. TTS speaks.
+
+**No generative model on that path.** The answer is exact, explainable and fast. The language model is reserved for questions that need thinking: "why is it late, and what would you do?" goes to the LLM with the current derived answers in its context, not the raw world.
+
+This is the engineering reason to separate the two: a deterministic layer for what the system knows, a probabilistic layer for what it has to think about. Each is tested, measured and scaled on its own terms.
+
+## When the world changes mid-sentence
+
+Here is the scene a turn-based agent cannot handle. The agent has started saying "It's due Thursday" and the carrier pushes a new ETA.
+
+```iql
+-eta[("S-77", "2026-10-08")]
++eta[("S-77", "2026-10-10")]
+```
+
+Both changes commit atomically at one revision. InputLayer updates only what depends on them, which is the core of how it works: one fact change in a graph with 400,000 derived relationships updates in **6.83 ms**, against **11.3 s** for a full recompute, **1,652x faster**. The speech lane's standing query receives a single delta:
+
+```json
+{ "type": "subscription_delta",
+  "retracted": [["s-42", "eta", "ORD-4821", "2026-10-08"]],
+  "inserted":  [["s-42", "eta", "ORD-4821", "2026-10-10"]] }
+```
+
+The ingress stage applies it to the agenda:
+
+```rust
+// Speech-lane ingress: apply live answer changes, never wait for a turn
+for row in delta.retracted {
+    agenda.retract(&row);          // stale claim leaves the agenda
+    playout.invalidate(&row);      // unplayed audio for it is dropped
+}
+for row in delta.inserted {
+    agenda.upsert(row, Priority::Correction);
+}
+```
+
+The unplayed half of "Thursday" is discarded, and the agent says "Correction: it's now due Saturday." Because `late("ORD-4821")` became true, `work_intent("s-42", "carrier_check", "ORD-4821")` appeared in the same delta, and the work lane has already started checking the carrier, without anyone writing a task ID.
+
+The voicestack's ingress is built for exactly this: it races external events against the audio lanes with `select_biased!` and keeps listening across interruptions, so a world update and a user barge-in are handled by the same loop, in priority order.
+
+## Parallel work without task IDs
+
+The work lane needs no orchestration code of its own. It subscribes to `work_intent` the same way the speech lane subscribes to `speech_intent`:
+
+- A new `work_intent` row appears: the executor claims it once, calls the tool, and writes the result back as a fact (`carrier_reason("S-77", "weather_delay")`).
+- The new fact satisfies a rule that removes the `work_intent` row and may create a new `speech_intent` ("The carrier says it's a weather delay").
+- If the user changes their mind ("never mind, I'll pick it up"), the `asked` fact is retracted, the `work_intent` disappears, and the executor sees the cancellation as a retraction, not as a message it has to parse.
+
+The coordination logic is the rules. You can read them, test them and ask `.why` about any piece of work that started.
+
+## Latency, hop by hop
+
+Each number below says what it measures. They are not added together into a single figure, because they are not the same kind of thing.
+
+| Hop | Number | What it is |
+|---|---|---|
+| Fact change to updated derived answer | **6.83 ms** | Incremental update in a graph with 400,000 derived relationships (vs 11.3 s full recompute, 1,652x) |
+| Committed change to a watching client | **5.3 ms** typical | Engine to subscribed client over WebSocket, warm subscription |
+| Turn reply through the language model | **2.3 s** median | Recorded on our voice stack's turn traces today |
+| Fast path to first audio | **0.35 to 0.6 s** target | Budget for VAD end, intent model, engine, template and TTS first chunk |
+
+The point of the fast path is visible in the table: the engine hops are milliseconds, so the latency that is left is the speech hardware and models at the edges, not the reasoning in the middle.
+
+## Correctness you can test
+
+A voice agent that corrects itself is only useful if the corrections are right. Because the knowing lane is deterministic, it can be tested like any other system:
+
+- **Every live answer equals a fresh query.** Our benchmark checks, after every change in 96 real-data scenarios, that the answer the agent holds is exactly what a full re-query would return, including every withdrawal.
+- **A differential oracle** replays random change histories and compares the incremental answers against a from-scratch reference.
+- **End-to-end checks** drive a real engine over its WebSocket protocol with an independent writer and assert that the agent receives exactly the added and removed rows.
+
+None of that is possible when the "logic" lives inside a model's generation.
+
+## What ships today and what you build
+
+Today, InputLayer gives you the engine half of this architecture: facts, recursive rules, atomic multi-fact commits, standing queries that push added and removed rows over WebSocket, `.why` proofs, Python and JS SDKs, and LangChain and LangGraph integrations. The voicestack gives you the audio half: VAD, barge-in, streaming STT, LLM and TTS stages, and an active ingress that keeps listening while it speaks.
+
+The pieces in between are application code you own and keep small: the intent model for your named questions, the agenda that decides what to say next, and the executor for your tools. The rules that connect them live in InputLayer, where everyone on the team can read them.
+
+## Try it
+
+1. Write the two or three rules for the question your agent answers most often.
+2. Feed the facts from the systems you already run.
+3. Subscribe the speech lane to `speech_intent` and the work lane to `work_intent`.
+4. Put a small intent model in front of the language model for the known questions.
+
+Then measure one thing: the next time the world changes while your agent is talking, does it notice?
+
+**Models think. InputLayer knows.**

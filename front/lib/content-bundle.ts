@@ -17,16 +17,6 @@ export interface BlogPost {
   toc: TocEntry[]
 }
 
-export interface UseCase {
-  slug: string
-  title: string
-  icon: string
-  subtitle: string
-  order: number
-  content: string
-  toc: TocEntry[]
-}
-
 export interface ComparisonPage {
   slug: string
   title: string
@@ -45,6 +35,62 @@ export interface CustomerStory {
 }
 
 export const blogPosts: BlogPost[] = [
+  {
+    "slug": "building-a-voice-agent-that-knows",
+    "title": "Building a Voice Agent That Knows: A Voice Pipeline with InputLayer at Its Heart",
+    "date": "2026-10-03",
+    "author": "InputLayer",
+    "category": "Architecture",
+    "excerpt": "Turn-based voice agents put a language model on every hop and go stale mid-sentence. Here is how to build a voice pipeline where facts and rules live in a live knowledge graph, known questions are answered without a model, and the agent corrects itself the moment the world changes.",
+    "content": "\n# Building a Voice Agent That Knows\n\nMost voice agents are built like a batch job with a microphone attached. The user stops talking, the transcript goes to a language model, the model calls a few tools, writes an answer, and a text-to-speech engine reads it out. Then everything waits for the next turn.\n\nThat design has three costs every voice engineer feels:\n\n1. **A model on every hop.** Even \"where's my order?\" pays for a full generation. In the turn traces we recorded on our own voice stack, the language-model path took **2.3 s at the median** to produce a reply.\n2. **The answer is frozen at the moment it was generated.** If the carrier updates the delivery date while the agent is speaking, the agent keeps saying the old date. It only finds out on the next turn, if ever.\n3. **Parallel work has nowhere to live.** \"Check the carrier and look for a pickup point\" becomes a tangle of task IDs, callbacks and state the model has to remember inside its context window.\n\nThis article shows a different architecture: **models think, InputLayer knows.** Facts and the rules that derive answers from them live in a live knowledge graph outside the prompt. Known questions are answered exactly, without a model. When a fact changes, every answer that depends on it changes with it, and the voice pipeline reacts while it is still speaking.\n\n## The architecture: three lanes, one source of truth\n\n```\n              ┌────────────── SPEECH LANE ──────────────┐\n mic ─▶ VAD ─▶ STT ─▶ intent model ─▶ facts ─┐           │\n                                             ▼           │\n carrier, orders,    ─facts─▶  [ InputLayer: facts ─▶ rules ─▶ live answers ]\n inventory, CRM                     │                 │\n                                    │ speech_intent   │ work_intent\n                                    ▼                 ▼\n                          agenda ─▶ template / LLM ─▶ TTS ─▶ speaker\n                                                 executor ─▶ tools ─▶ observations ─▶ facts\n              └──────────────────────────────────────────┘\n```\n\nThere is no \"turn\" in the middle of this picture. There are three lanes, and InputLayer is the only place where truth lives:\n\n- **The speech lane** turns audio into validated facts about what the user wants, and turns derived \"things worth saying\" into audio.\n- **The knowing lane** is InputLayer. It holds world facts (orders, carrier events, stock), session facts (what this user asked, what has already been said) and the rules that connect them.\n- **The work lane** runs tools in parallel and writes what it learns back as facts.\n\nThe language model is still there. It just stops being the database, the rules engine and the scheduler.\n\n## Separate knowing from thinking\n\nStart with the facts and rules for one question a support agent answers hundreds of times a day: *can this order still arrive by the date the customer needs?*\n\n```iql\n// World facts arrive from your systems (CDC, webhooks, app writes)\n+shipment[(\"ORD-4821\", \"S-77\")]\n+eta[(\"S-77\", \"2026-10-08\")]\n+promised[(\"ORD-4821\", \"2026-10-09\")]\n\n// Session facts arrive from the intent model\n+asked[(\"s-42\", \"delivery_status\", \"ORD-4821\")]\n\n// Rules: written once, reviewed like code\n+on_time(O) <- shipment(O, S), eta(S, T), promised(O, P), T <= P\n+late(O)    <- shipment(O, S), eta(S, T), promised(O, P), T > P\n\n+speech_intent(Sess, \"eta\", O, T) <- asked(Sess, \"delivery_status\", O),\n                                    shipment(O, S), eta(S, T)\n+work_intent(Sess, \"carrier_check\", O) <- asked(Sess, \"delivery_status\", O), late(O)\n```\n\nTwo things happened here that a prompt cannot do for you.\n\nFirst, the answer is **derived, not generated**. `speech_intent(\"s-42\", \"eta\", \"ORD-4821\", \"2026-10-08\")` is a fact the engine computed from other facts. You can ask why:\n\n```iql\n.why ?speech_intent(\"s-42\", \"eta\", \"ORD-4821\", T)\n```\n\nand get the exact facts and rule that produced it. Every sentence your agent speaks can carry its proof.\n\nSecond, the facts never enter the model's context window. A support catalogue with a million orders and ten thousand carrier events does not have to fit in a prompt, be chunked, or be lost in the middle. The engine reasons over all of it and hands the speech lane a few rows.\n\n## The fast path: known questions without a model\n\nMost of what a voice agent is asked is not open-ended. \"Where's my order?\", \"Can it make Friday?\", \"Is it in stock?\" are a small set of named questions with slots.\n\nSo put a small, fast **intent model** in front: a fine-tuned classifier or a decision model that maps an utterance to one of the pack's named questions and fills its slots. It never writes rules or queries; it only writes validated facts:\n\n```\n\"Where's order 4821, can it still make Friday?\"\n   └─ intent model ─▶ asked(\"s-42\", \"delivery_status\", \"ORD-4821\"), needed_by(\"s-42\", \"2026-10-09\")\n```\n\nFrom there the path is deterministic:\n\n1. The `asked` fact is committed to InputLayer.\n2. The engine derives `speech_intent(\"s-42\", \"eta\", \"ORD-4821\", \"2026-10-08\")`.\n3. The agenda picks it and a template renders \"It's due Thursday.\"\n4. TTS speaks.\n\n**No generative model on that path.** The answer is exact, explainable and fast. The language model is reserved for questions that need thinking: \"why is it late, and what would you do?\" goes to the LLM with the current derived answers in its context, not the raw world.\n\nThis is the engineering reason to separate the two: a deterministic layer for what the system knows, a probabilistic layer for what it has to think about. Each is tested, measured and scaled on its own terms.\n\n## When the world changes mid-sentence\n\nHere is the scene a turn-based agent cannot handle. The agent has started saying \"It's due Thursday\" and the carrier pushes a new ETA.\n\n```iql\n-eta[(\"S-77\", \"2026-10-08\")]\n+eta[(\"S-77\", \"2026-10-10\")]\n```\n\nBoth changes commit atomically at one revision. InputLayer updates only what depends on them, which is the core of how it works: one fact change in a graph with 400,000 derived relationships updates in **6.83 ms**, against **11.3 s** for a full recompute, **1,652x faster**. The speech lane's standing query receives a single delta:\n\n```json\n{ \"type\": \"subscription_delta\",\n  \"retracted\": [[\"s-42\", \"eta\", \"ORD-4821\", \"2026-10-08\"]],\n  \"inserted\":  [[\"s-42\", \"eta\", \"ORD-4821\", \"2026-10-10\"]] }\n```\n\nThe ingress stage applies it to the agenda:\n\n```rust\n// Speech-lane ingress: apply live answer changes, never wait for a turn\nfor row in delta.retracted {\n    agenda.retract(&row);          // stale claim leaves the agenda\n    playout.invalidate(&row);      // unplayed audio for it is dropped\n}\nfor row in delta.inserted {\n    agenda.upsert(row, Priority::Correction);\n}\n```\n\nThe unplayed half of \"Thursday\" is discarded, and the agent says \"Correction: it's now due Saturday.\" Because `late(\"ORD-4821\")` became true, `work_intent(\"s-42\", \"carrier_check\", \"ORD-4821\")` appeared in the same delta, and the work lane has already started checking the carrier, without anyone writing a task ID.\n\nThe voicestack's ingress is built for exactly this: it races external events against the audio lanes with `select_biased!` and keeps listening across interruptions, so a world update and a user barge-in are handled by the same loop, in priority order.\n\n## Parallel work without task IDs\n\nThe work lane needs no orchestration code of its own. It subscribes to `work_intent` the same way the speech lane subscribes to `speech_intent`:\n\n- A new `work_intent` row appears: the executor claims it once, calls the tool, and writes the result back as a fact (`carrier_reason(\"S-77\", \"weather_delay\")`).\n- The new fact satisfies a rule that removes the `work_intent` row and may create a new `speech_intent` (\"The carrier says it's a weather delay\").\n- If the user changes their mind (\"never mind, I'll pick it up\"), the `asked` fact is retracted, the `work_intent` disappears, and the executor sees the cancellation as a retraction, not as a message it has to parse.\n\nThe coordination logic is the rules. You can read them, test them and ask `.why` about any piece of work that started.\n\n## Latency, hop by hop\n\nEach number below says what it measures. They are not added together into a single figure, because they are not the same kind of thing.\n\n| Hop | Number | What it is |\n|---|---|---|\n| Fact change to updated derived answer | **6.83 ms** | Incremental update in a graph with 400,000 derived relationships (vs 11.3 s full recompute, 1,652x) |\n| Committed change to a watching client | **5.3 ms** typical | Engine to subscribed client over WebSocket, warm subscription |\n| Turn reply through the language model | **2.3 s** median | Recorded on our voice stack's turn traces today |\n| Fast path to first audio | **0.35 to 0.6 s** target | Budget for VAD end, intent model, engine, template and TTS first chunk |\n\nThe point of the fast path is visible in the table: the engine hops are milliseconds, so the latency that is left is the speech hardware and models at the edges, not the reasoning in the middle.\n\n## Correctness you can test\n\nA voice agent that corrects itself is only useful if the corrections are right. Because the knowing lane is deterministic, it can be tested like any other system:\n\n- **Every live answer equals a fresh query.** Our benchmark checks, after every change in 96 real-data scenarios, that the answer the agent holds is exactly what a full re-query would return, including every withdrawal.\n- **A differential oracle** replays random change histories and compares the incremental answers against a from-scratch reference.\n- **End-to-end checks** drive a real engine over its WebSocket protocol with an independent writer and assert that the agent receives exactly the added and removed rows.\n\nNone of that is possible when the \"logic\" lives inside a model's generation.\n\n## What ships today and what you build\n\nToday, InputLayer gives you the engine half of this architecture: facts, recursive rules, atomic multi-fact commits, standing queries that push added and removed rows over WebSocket, `.why` proofs, Python and JS SDKs, and LangChain and LangGraph integrations. The voicestack gives you the audio half: VAD, barge-in, streaming STT, LLM and TTS stages, and an active ingress that keeps listening while it speaks.\n\nThe pieces in between are application code you own and keep small: the intent model for your named questions, the agenda that decides what to say next, and the executor for your tools. The rules that connect them live in InputLayer, where everyone on the team can read them.\n\n## Try it\n\n1. Write the two or three rules for the question your agent answers most often.\n2. Feed the facts from the systems you already run.\n3. Subscribe the speech lane to `speech_intent` and the work lane to `work_intent`.\n4. Put a small intent model in front of the language model for the known questions.\n\nThen measure one thing: the next time the world changes while your agent is talking, does it notice?\n\n**Models think. InputLayer knows.**",
+    "toc": [
+      {
+        "level": 2,
+        "text": "The architecture: three lanes, one source of truth",
+        "id": "the-architecture-three-lanes-one-source-of-truth"
+      },
+      {
+        "level": 2,
+        "text": "Separate knowing from thinking",
+        "id": "separate-knowing-from-thinking"
+      },
+      {
+        "level": 2,
+        "text": "The fast path: known questions without a model",
+        "id": "the-fast-path-known-questions-without-a-model"
+      },
+      {
+        "level": 2,
+        "text": "When the world changes mid-sentence",
+        "id": "when-the-world-changes-mid-sentence"
+      },
+      {
+        "level": 2,
+        "text": "Parallel work without task IDs",
+        "id": "parallel-work-without-task-ids"
+      },
+      {
+        "level": 2,
+        "text": "Latency, hop by hop",
+        "id": "latency-hop-by-hop"
+      },
+      {
+        "level": 2,
+        "text": "Correctness you can test",
+        "id": "correctness-you-can-test"
+      },
+      {
+        "level": 2,
+        "text": "What ships today and what you build",
+        "id": "what-ships-today-and-what-you-build"
+      },
+      {
+        "level": 2,
+        "text": "Try it",
+        "id": "try-it"
+      }
+    ]
+  },
   {
     "slug": "migrations-as-data",
     "title": "Migrations as Data: Schema Versioning Where Rules Are Schema Too",
@@ -569,214 +615,6 @@ export const blogPosts: BlogPost[] = [
         "level": 2,
         "text": "Getting started",
         "id": "getting-started"
-      }
-    ]
-  }
-]
-
-export const useCases: UseCase[] = [
-  {
-    "slug": "financial-risk",
-    "title": "Financial Risk and Compliance",
-    "icon": "Shield",
-    "subtitle": "Sanctions, ownership and policy flags that update the moment an ownership link or list entry changes, with the facts behind each flag.",
-    "order": 1,
-    "content": "\n# Sanctions screening through ownership chains\n\nIn 2014, a major European bank paid $8.9 billion for processing transactions with sanctioned entities. The transactions themselves looked clean. The exposure was buried multiple levels deep in ownership chains that nobody traced in time.\n\nThis is the core challenge of sanctions compliance: the entity you're transacting with might be perfectly legitimate, but if you follow the ownership chain upward - through holding companies, subsidiaries, and partial stakes - you might find a sanctioned person or organization at the top. Miss that chain, and you're liable. Finding it requires recursive reasoning through corporate structures that can be dozens of layers deep, with multiple paths to the same entity.\n\nThere's a subtlety that makes this genuinely hard. When an entity gets cleared from a sanctions list, every flag that was derived through that entity needs to retract. But only the flags that depended exclusively on that entity - if there's a second, independent ownership path that still connects to a sanctioned entity, the flag needs to stay. This is called the diamond problem, and getting it wrong means either phantom flags that waste your compliance team's time, or missed exposures that create regulatory risk.\n\n---\n\n## The setup\n\nAlpha owns two subsidiaries: Beta and Delta. Both Beta and Delta own stakes in Gamma. Gamma is on a sanctions list.\n\n```graph\nAlpha --owns-> Beta\nAlpha --owns-> Delta\nBeta --owns-> Gamma [highlight]\nDelta --owns-> Gamma [highlight]\n```\n\nTwo independent paths from Alpha to the sanctioned entity. Let's trace what happens.\n\n---\n\n## Loading facts and defining the rule\n\n```iql\n// The ownership structure\n+owns[(\"alpha\", \"beta\"), (\"alpha\", \"delta\"), (\"beta\", \"gamma\"), (\"delta\", \"gamma\")]\n\n// Gamma is sanctioned\n+sanctions_list[(\"gamma\")]\n```\n\nThe rule says: an entity is exposed if it owns a sanctioned entity, or if it owns something that is itself exposed. That second clause is recursive - it follows the chain to any depth, whether it's 2 hops or 20.\n\n```iql\n+exposed(E, S) <- owns(E, S), sanctions_list(S)\n+exposed(E, S) <- owns(E, Mid), exposed(Mid, S)\n```\n\n---\n\n## Query: is Alpha exposed?\n\n```iql\n?exposed(\"alpha\", Who)\n```\n\n```\n┌─────────┬─────────┐\n│ alpha   │ Who     │\n├─────────┼─────────┤\n│ \"alpha\" │ \"gamma\" │\n└─────────┴─────────┘\n1 rows\n```\n\nYes. Alpha is exposed to Gamma through two independent ownership paths.\n\n---\n\n## The diamond problem in action\n\nBeta divests its stake in Gamma.\n\n```iql\n-owns(\"beta\", \"gamma\")\n```\n\n```iql\n?exposed(\"alpha\", Who)\n```\n\n```\n┌─────────┬─────────┐\n│ alpha   │ Who     │\n├─────────┼─────────┤\n│ \"alpha\" │ \"gamma\" │\n└─────────┴─────────┘\n1 rows\n```\n\nAlpha is still exposed. The path through Delta still supports the flag. If this retracted prematurely, a compliance team would look at Alpha, see no flag, and approve a transaction that should have been held. InputLayer tracks both paths independently - the conclusion only retracts when every supporting path is gone.\n\nNow Delta also divests.\n\n```iql\n-owns(\"delta\", \"gamma\")\n```\n\n```iql\n?exposed(\"alpha\", Who)\n```\n\n```\nNo results.\n```\n\nBoth paths are gone. The exposure retracts cleanly. No phantom flag lingering in a queue for someone to investigate. No manual cleanup.\n\n---\n\n## Showing the work\n\nWhen a flag is active, `.why` returns the exact chain of ownership and rules that produced it:\n\n```iql\n.why ?exposed(\"alpha\", Who)\n```\n\nThe proof tree shows: Alpha is exposed to Gamma because Alpha owns Delta, Delta owns Gamma, and Gamma is on the sanctions list. Each link in the chain traces to a specific fact and a specific rule. This is what goes in the case file. This is what the regulator sees.\n\nWhen a flag is missing and shouldn't be, `.why_not` identifies exactly which condition failed:\n\n```iql\n.why_not exposed(\"delta\", \"gamma\")\n```\n\n```\nexposed(\"delta\", \"gamma\") was NOT derived:\n\n  Rule: exposed (clause 0)\n    exposed(E, S) <- owns(E, S), sanctions_list(S)\n    Blocker: owns(\"delta\", \"gamma\") - No matching tuples\n\n  Rule: exposed (clause 1)\n    exposed(E, S) <- owns(E, Mid), exposed(Mid, S)\n    Blocker: owns(\"delta\", _) - No matching tuples\n```\n\nDelta is not exposed because it no longer owns anything. The blocker is specific and auditable.\n\n---\n\n## Try it\n\nEvery code block on this page runs against a local InputLayer instance. Start one with the [quickstart](/docs/guides/quickstart/) and paste the blocks into the REPL to see the results yourself.",
-    "toc": [
-      {
-        "level": 2,
-        "text": "The setup",
-        "id": "the-setup"
-      },
-      {
-        "level": 2,
-        "text": "Loading facts and defining the rule",
-        "id": "loading-facts-and-defining-the-rule"
-      },
-      {
-        "level": 2,
-        "text": "Query: is Alpha exposed?",
-        "id": "query-is-alpha-exposed"
-      },
-      {
-        "level": 2,
-        "text": "The diamond problem in action",
-        "id": "the-diamond-problem-in-action"
-      },
-      {
-        "level": 2,
-        "text": "Showing the work",
-        "id": "showing-the-work"
-      },
-      {
-        "level": 2,
-        "text": "Try it",
-        "id": "try-it"
-      }
-    ]
-  },
-  {
-    "slug": "commerce",
-    "title": "Conversational Commerce",
-    "icon": "ShoppingBag",
-    "subtitle": "Compatible product recommendations from purchase history and live inventory, withdrawn the moment stock runs out.",
-    "order": 2,
-    "content": "\n# Product recommendations that understand compatibility\n\nA shopper types \"I need ink for my printer.\" There are hundreds of ink cartridges in the catalog. In embedding space, a Canon PG-245 and an Epson 202 are nearly identical - they're both black ink cartridges with similar descriptions, similar prices, similar use cases. A vector search returns both with almost the same score.\n\nBut the shopper owns a Canon printer. The Epson doesn't fit. That's not a similarity problem - no amount of embedding refinement will fix it. The connection between a specific printer and its compatible cartridges is a structured fact in a compatibility table, not a distance in vector space.\n\nThis matters because recommending an incompatible product isn't just irrelevant - it's a return, a support ticket, and a customer who trusts your suggestions less next time. And the fix isn't post-filtering (checking compatibility after retrieval) because you'd need to stitch together purchase history, compatibility data, inventory status, and similarity ranking across multiple systems for every single query.\n\n---\n\n## The setup\n\nThree cartridges, one printer, one shopper. Two cartridges are compatible with Canon printers. One is not. All three have very similar embeddings.\n\n```iql\n// Products with embedding vectors\n+product[\n    (\"pg245\", \"Canon PG-245 Black Ink\", 14.99, [0.82, 0.15, 0.91, 0.44]),\n    (\"cl246\", \"Canon CL-246 Color Ink\", 16.99, [0.79, 0.18, 0.88, 0.41]),\n    (\"ep202\", \"Epson 202 Black Ink\", 12.99, [0.83, 0.14, 0.90, 0.43])\n]\n\n// Compatibility: which cartridges fit which printers\n+compatible[(\"canon_mg3620\", \"pg245\"), (\"canon_mg3620\", \"cl246\")]\n\n// Shopper 42 owns a Canon printer. All three are in stock.\n+owns[(\"shopper_42\", \"canon_mg3620\")]\n+in_stock[(\"pg245\"), (\"cl246\"), (\"ep202\")]\n```\n\nLook at the embeddings. PG-245 is `[0.82, 0.15, 0.91, 0.44]`. Epson 202 is `[0.83, 0.14, 0.90, 0.43]`. Almost identical. A vector search alone can't distinguish them.\n\n---\n\n## The rule\n\nA product is recommendable to a shopper if they own a compatible device and the product is in stock. One line.\n\n```iql\n+recommendable(S, P) <- owns(S, Dev), compatible(Dev, P), in_stock(P)\n```\n\nThis connects three separate facts - purchase history, compatibility matrix, and inventory - into one derivation chain. The engine evaluates it every time any of those facts change.\n\n---\n\n## Rules filter first\n\n```iql\n?recommendable(\"shopper_42\", Pid)\n```\n\n```\n┌──────────────┬─────────┐\n│ shopper_42   │ Pid     │\n├──────────────┼─────────┤\n│ \"shopper_42\" │ \"cl246\" │\n│ \"shopper_42\" │ \"pg245\" │\n└──────────────┴─────────┘\n2 rows\n```\n\nTwo results. The Epson 202 is excluded - not because of its embedding, but because it's not compatible with a Canon printer. The rule did the filtering before similarity ever ran.\n\n---\n\n## Then vectors rank\n\nNow add cosine distance to rank the compatible results by relevance. Lower distance means more similar.\n\n```iql\n?recommendable(\"shopper_42\", Pid),\n product(Pid, Desc, Price, Emb),\n Dist = cosine(Emb, [0.81, 0.16, 0.89, 0.42]),\n Dist < 0.05\n```\n\n```\n┌──────────────┬─────────┬──────────────────────────┬───────┬────────────────────────┐\n│ shopper_42   │ Pid     │ Desc                     │ Price │ Dist                   │\n├──────────────┼─────────┼──────────────────────────┼───────┼────────────────────────┤\n│ \"shopper_42\" │ \"pg245\" │ \"Canon PG-245 Black Ink\" │ 14.99 │ 0.0001                 │\n│ \"shopper_42\" │ \"cl246\" │ \"Canon CL-246 Color Ink\" │ 16.99 │ 0.0002                 │\n└──────────────┴─────────┴──────────────────────────┴───────┴────────────────────────┘\n2 rows\n```\n\nOne query. Rules filtered to what's compatible, vectors ranked by relevance. The Epson - which would have scored nearly identically on cosine distance - was never considered.\n\n---\n\n## When stock changes\n\nThe PG-245 sells out.\n\n```iql\n-in_stock(\"pg245\")\n```\n\n```iql\n?recommendable(\"shopper_42\", Pid)\n```\n\n```\n┌──────────────┬─────────┐\n│ shopper_42   │ Pid     │\n├──────────────┼─────────┤\n│ \"shopper_42\" │ \"cl246\" │\n└──────────────┴─────────┘\n1 rows\n```\n\nGone immediately. The shopper never sees a product they can't buy. When it's restocked, the recommendation comes back. No reindex, no cache invalidation - the rule re-evaluates against the current facts.\n\n---\n\n## The pattern\n\nThis applies anywhere the connection between \"what I have\" and \"what fits it\" is a structured fact: replacement parts for appliances, cables for electronics, lenses for cameras, blades for power tools. In every case, similarity search finds things that look right but might not fit. The compatibility rule is what makes the recommendation trustworthy.\n\nEvery code block on this page runs against a local InputLayer instance. Start one with the [quickstart](/docs/guides/quickstart/) and paste the blocks into the REPL to see the results yourself.",
-    "toc": [
-      {
-        "level": 2,
-        "text": "The setup",
-        "id": "the-setup"
-      },
-      {
-        "level": 2,
-        "text": "The rule",
-        "id": "the-rule"
-      },
-      {
-        "level": 2,
-        "text": "Rules filter first",
-        "id": "rules-filter-first"
-      },
-      {
-        "level": 2,
-        "text": "Then vectors rank",
-        "id": "then-vectors-rank"
-      },
-      {
-        "level": 2,
-        "text": "When stock changes",
-        "id": "when-stock-changes"
-      },
-      {
-        "level": 2,
-        "text": "The pattern",
-        "id": "the-pattern"
-      }
-    ]
-  },
-  {
-    "slug": "manufacturing",
-    "title": "Manufacturing Operations",
-    "icon": "Factory",
-    "subtitle": "Production-line availability recomputed per event, not per sweep, as training records, equipment and job specs change.",
-    "order": 3,
-    "content": "\n# Production planning through dependency chains\n\nA planning agent says Line 4 can run the night shift. It checked the equipment status, the parts inventory, the maintenance schedule. Everything looked good at 6:00am. But at 6:03am, an operator's safety certification expired because her training lapsed. Nobody told the planning agent. The shift runs. An auditor finds the uncertified operator three weeks later.\n\nThe problem isn't the data - it was there. The problem is that the answer to \"can this line run?\" depends on a chain of facts that goes several levels deep: a production line depends on a qualified operator, the operator's qualification depends on a current certification, and the certification depends on completed training. When any link in that chain breaks, every conclusion built on it should update immediately. Not at the next refresh. Not when someone checks manually. Immediately.\n\n---\n\n## The setup\n\nLine 4 needs Operator Kim. Line 5 needs Operator Lee. Both are qualified through a shared safety certification. That certification is backed by training Kim completed in January.\n\n```iql\n// Which lines need which operators\n+requires[(\"line_4\", \"operator_kim\"), (\"line_5\", \"operator_lee\")]\n\n// Which operators hold which certifications\n+qualified_by[(\"operator_kim\", \"cert_safety\"), (\"operator_lee\", \"cert_safety\")]\n\n// Which training backs the certification\n+valid_certification[(\"cert_safety\", \"training_jan_2026\")]\n\n// The training record\n+training_completed[(\"training_jan_2026\")]\n```\n\nA four-level dependency chain: line depends on operator, operator depends on certification, certification depends on training.\n\n---\n\n## The rules\n\nSomething is available if everything it depends on is also available. This is recursive - it follows the chain from training up to production line, at any depth.\n\n```iql\n+available(X) <- training_completed(X)\n+available(X) <- valid_certification(X, Dep), available(Dep)\n+available(X) <- qualified_by(X, Dep), available(Dep)\n+available(X) <- requires(X, Dep), available(Dep)\n```\n\nTraining completion is the base case. Everything else is available if its dependency is available. The engine chains these together automatically.\n\n---\n\n## Everything is available\n\n```iql\n?available(X)\n```\n\n```\n┌─────────────────────┐\n│ X                   │\n├─────────────────────┤\n│ \"cert_safety\"       │\n│ \"line_4\"            │\n│ \"line_5\"            │\n│ \"operator_kim\"      │\n│ \"operator_lee\"      │\n│ \"training_jan_2026\" │\n└─────────────────────┘\n6 rows\n```\n\nSix things are available. The engine traced the full chain: training exists, so the certification is valid, so the operators are qualified, so the lines can run.\n\n---\n\n## Training expires\n\nOne fact removed. Kim's January training expires.\n\n```iql\n-training_completed(\"training_jan_2026\")\n```\n\n```iql\n?available(X)\n```\n\n```\nNo results.\n```\n\nEverything collapsed. Training gone, certification invalid, both operators unqualified, both lines unavailable. Four levels of retraction from a single fact change, propagated in milliseconds. This is the moment - in architectures where each system maintains its own derived state independently, that expired training would sit in one database while the planning system in another database still shows Kim as qualified. The planning agent builds a shift plan on stale state. With InputLayer, the planning agent's next query sees current reality.\n\n---\n\n## Recovery\n\nKim completes new safety training in March.\n\n```iql\n+training_completed[(\"training_mar_2026\")]\n+valid_certification[(\"cert_safety\", \"training_mar_2026\")]\n```\n\n```iql\n?available(X)\n```\n\n```\n┌─────────────────────┐\n│ X                   │\n├─────────────────────┤\n│ \"cert_safety\"       │\n│ \"line_4\"            │\n│ \"line_5\"            │\n│ \"operator_kim\"      │\n│ \"operator_lee\"      │\n│ \"training_mar_2026\" │\n└─────────────────────┘\n6 rows\n```\n\nBoth lines are back. The new training fact propagated up through the entire dependency chain. No manual reconciliation between systems.\n\n---\n\n## The proof trail\n\n```iql\n.why ?available(\"line_4\")\n```\n\nThe proof tree shows: line_4 is available because it requires operator_kim, and operator_kim is available because she's qualified by cert_safety, and cert_safety is available because training_mar_2026 is completed. When an auditor asks why Line 4 was allowed to run, the answer traces through four levels of dependencies to the specific training record.\n\nEvery code block on this page runs against a local InputLayer instance. Start one with the [quickstart](/docs/guides/quickstart/) and paste the blocks into the REPL to see the results yourself.",
-    "toc": [
-      {
-        "level": 2,
-        "text": "The setup",
-        "id": "the-setup"
-      },
-      {
-        "level": 2,
-        "text": "The rules",
-        "id": "the-rules"
-      },
-      {
-        "level": 2,
-        "text": "Everything is available",
-        "id": "everything-is-available"
-      },
-      {
-        "level": 2,
-        "text": "Training expires",
-        "id": "training-expires"
-      },
-      {
-        "level": 2,
-        "text": "Recovery",
-        "id": "recovery"
-      },
-      {
-        "level": 2,
-        "text": "The proof trail",
-        "id": "the-proof-trail"
-      }
-    ]
-  },
-  {
-    "slug": "supply-chain",
-    "title": "Supply Chain",
-    "icon": "Truck",
-    "subtitle": "Supplier risk and order impact that update the moment a port closes or a supplier status changes.",
-    "order": 4,
-    "content": "\n# Disruption cascades across supply chains\n\nIn March 2021, a container ship blocked the Suez Canal for six days. The disruption cascaded through global supply chains for months - but many companies didn't know which of their orders were affected until days after the blockage began. The information was there (which suppliers used which shipping routes, which orders depended on which suppliers), but connecting the dots across systems took time. By then, the window to reroute had passed.\n\nThe challenge isn't knowing that a port is closed. It's knowing, within milliseconds, which of your suppliers ship through that port, which orders depend on those suppliers, which of those orders have SLA penalty clauses, and which customers are about to be impacted. That's a chain of reasoning across your entire supply graph, and it needs to update every time a fact changes - a port closes, a supplier reroutes, a new order is placed.\n\n---\n\n## The setup\n\nThree suppliers. Supplier A and B ship through Shanghai. Supplier C ships through Busan. They feed four orders. Two of those orders have SLA penalty clauses.\n\n```iql\n// Suppliers and their shipping ports\n+ships_via[(\"supplier_a\", \"shanghai\"), (\"supplier_b\", \"shanghai\"), (\"supplier_c\", \"busan\")]\n\n// Which suppliers feed which orders\n+supplies[\n    (\"supplier_a\", \"order_101\"), (\"supplier_a\", \"order_102\"),\n    (\"supplier_b\", \"order_103\"), (\"supplier_c\", \"order_104\")\n]\n\n// SLA penalty clauses\n+has_sla[(\"order_101\", \"globex_corp\", \"penalty_5pct\"), (\"order_103\", \"initech\", \"penalty_10pct\")]\n\n// Port status\n+port_status[(\"shanghai\", \"open\"), (\"busan\", \"open\")]\n```\n\n---\n\n## The rules\n\nThree rules, each one step in the cascade. A supplier is disrupted if its port is closed. An order is at risk if its supplier is disrupted. An SLA is triggered if an at-risk order has a penalty clause.\n\n```iql\n+supplier_disrupted(Sup) <- ships_via(Sup, Port), port_status(Port, \"closed\")\n+order_at_risk(Order) <- supplies(Sup, Order), supplier_disrupted(Sup)\n+sla_triggered(Order, Customer, Penalty) <- order_at_risk(Order), has_sla(Order, Customer, Penalty)\n```\n\n---\n\n## Everything is fine\n\n```iql\n?supplier_disrupted(X)\n```\n\n```\nNo results.\n```\n\nNo disruptions. All ports are open. All orders are on track.\n\n---\n\n## Shanghai closes\n\nOne fact changes.\n\n```iql\n-port_status(\"shanghai\", \"open\")\n+port_status[(\"shanghai\", \"closed\")]\n```\n\nThe cascade propagates through the entire graph:\n\n```iql\n?supplier_disrupted(X)\n```\n\n```\n┌──────────────┐\n│ X            │\n├──────────────┤\n│ \"supplier_a\" │\n│ \"supplier_b\" │\n└──────────────┘\n2 rows\n```\n\n```iql\n?order_at_risk(X)\n```\n\n```\n┌─────────────┐\n│ X           │\n├─────────────┤\n│ \"order_101\" │\n│ \"order_102\" │\n│ \"order_103\" │\n└─────────────┘\n3 rows\n```\n\n```iql\n?sla_triggered(Order, Customer, Penalty)\n```\n\n```\n┌─────────────┬───────────────┬─────────────────┐\n│ Order       │ Customer      │ Penalty         │\n├─────────────┼───────────────┼─────────────────┤\n│ \"order_101\" │ \"globex_corp\" │ \"penalty_5pct\"  │\n│ \"order_103\" │ \"initech\"     │ \"penalty_10pct\" │\n└─────────────┴───────────────┴─────────────────┘\n2 rows\n```\n\nOne fact change. Two suppliers disrupted, three orders at risk, two SLA penalties triggered - identified across three levels of the supply graph. Supplier C and order 104 are unaffected (Busan is still open). This is the kind of fan-out that takes hours to trace manually and seconds in a dashboard query - but with InputLayer, the derived state is already current by the time you ask.\n\n---\n\n## Partial recovery\n\nSupplier A reroutes to Busan.\n\n```iql\n-ships_via(\"supplier_a\", \"shanghai\")\n+ships_via[(\"supplier_a\", \"busan\")]\n```\n\n```iql\n?sla_triggered(Order, Customer, Penalty)\n```\n\n```\n┌─────────────┬───────────┬─────────────────┐\n│ Order       │ Customer  │ Penalty         │\n├─────────────┼───────────┼─────────────────┤\n│ \"order_103\" │ \"initech\" │ \"penalty_10pct\" │\n└─────────────┴───────────┴─────────────────┘\n1 rows\n```\n\nSupplier A recovered. Orders 101 and 102 are no longer at risk. Globex's SLA penalty retracted. But Supplier B is still disrupted (still shipping through Shanghai), so order 103 and Initech's penalty remain. Partial recovery, correctly tracked - each path is independent.\n\n---\n\n## The proof trail\n\n```iql\n.why ?order_at_risk(\"order_103\")\n```\n\nThe proof shows: order_103 is at risk because it's supplied by supplier_b, and supplier_b is disrupted because it ships via Shanghai, and Shanghai is closed. Three facts, three rules, one chain. When a procurement team needs to explain to Initech why their order is delayed, the answer is a structured trace, not a phone call to someone who might know.\n\nEvery code block on this page runs against a local InputLayer instance. Start one with the [quickstart](/docs/guides/quickstart/) and paste the blocks into the REPL to see the results yourself.",
-    "toc": [
-      {
-        "level": 2,
-        "text": "The setup",
-        "id": "the-setup"
-      },
-      {
-        "level": 2,
-        "text": "The rules",
-        "id": "the-rules"
-      },
-      {
-        "level": 2,
-        "text": "Everything is fine",
-        "id": "everything-is-fine"
-      },
-      {
-        "level": 2,
-        "text": "Shanghai closes",
-        "id": "shanghai-closes"
-      },
-      {
-        "level": 2,
-        "text": "Partial recovery",
-        "id": "partial-recovery"
-      },
-      {
-        "level": 2,
-        "text": "The proof trail",
-        "id": "the-proof-trail"
-      }
-    ]
-  },
-  {
-    "slug": "agentic-ai",
-    "title": "Agentic AI",
-    "icon": "Brain",
-    "subtitle": "Agent conclusions that stay current as observations change, are withdrawn when their reasons go away, and show the facts and rules behind them.",
-    "order": 5,
-    "content": "\n# Agent memory that can explain itself\n\nA customer success agent flags Acme Corp as a churn risk. The VP of Customer Success asks: \"Why?\" The agent says \"based on the available data.\" That's not an answer. Which data? Which logic? What would need to change for Acme to not be at risk? If the agent can't show its work, the VP can't trust the flag, can't prioritize it, and can't act on it.\n\nThis is the fundamental problem with agent memory stored as text chunks in a vector database. The agent retrieves relevant passages, generates a conclusion, and the reasoning is whatever happened inside the model. There's no trace to inspect, no rule to audit, no way to ask \"what would need to change for this conclusion to be different?\"\n\nWhen agents store observations as structured facts and derive conclusions through explicit rules, every conclusion has a proof tree. You can ask why. You can ask why not. And when the underlying facts change, the conclusions update automatically - no stale beliefs lingering in a context window.\n\n---\n\n## The setup\n\nA customer success agent monitors two accounts. It has stored three observations about each.\n\n```iql\n// Acme: enterprise customer, $150K contract, declining usage, renewal in April\n+customer[(\"acme\", \"enterprise\", 150000)]\n+usage_trend[(\"acme\", \"declining\")]\n+renewal[(\"acme\", \"2026-04-15\")]\n\n// Globex: startup, $25K contract, growing usage, renewal in September\n+customer[(\"globex\", \"startup\", 25000)]\n+usage_trend[(\"globex\", \"growing\")]\n+renewal[(\"globex\", \"2026-09-01\")]\n```\n\nSix facts. Each one is a specific, testable observation - not a text passage that might or might not be retrieved in the right context window.\n\n---\n\n## The rules\n\nChurn risk requires three conditions: the customer is high-value, their usage is dropping, and their renewal is imminent. Each condition is its own rule with clear criteria.\n\n```iql\n// High-value: enterprise tier with contract over $100K\n+high_value(C) <- customer(C, \"enterprise\", Amt), Amt > 100000\n\n// Engagement dropping\n+engagement_drop(C) <- usage_trend(C, \"declining\")\n\n// Renewal within the next few months\n+renewal_soon(C) <- renewal(C, Date), Date < \"2026-06-01\"\n\n// Churn risk requires all three\n+churn_risk(C) <- high_value(C), engagement_drop(C), renewal_soon(C)\n```\n\nThese rules are readable, auditable, and versionable. When the definition of \"high-value\" changes (say the threshold moves from $100K to $75K), you change one rule and every derivation updates.\n\n---\n\n## Who is at risk?\n\n```iql\n?churn_risk(C)\n```\n\n```\n┌────────┐\n│ C      │\n├────────┤\n│ \"acme\" │\n└────────┘\n1 rows\n```\n\nAcme is flagged. Globex is not.\n\n---\n\n## Why is Acme flagged?\n\nThis is the point of the entire page. The `.why` command returns the proof tree - the exact chain of facts and rules that produced the conclusion.\n\n```iql\n.why ?churn_risk(\"acme\")\n```\n\nThe proof tree shows three branches: Acme is high-value because it's an enterprise customer with a $150K contract (which exceeds the $100K threshold). Acme has an engagement drop because its usage trend is \"declining.\" Acme's renewal is soon because April 15th is before June 1st. All three conditions met, so the churn_risk rule fired.\n\nThis isn't a model's interpretation. It's a deterministic chain you can inspect, challenge, and reproduce. The VP sees exactly which conditions triggered the flag, and can decide which intervention addresses which condition.\n\n---\n\n## Why is Globex NOT flagged?\n\nEqually important: understanding why a conclusion was not reached.\n\n```iql\n.why_not churn_risk(\"globex\")\n```\n\n```\nchurn_risk(\"globex\") was NOT derived:\n\n  Rule: churn_risk (clause 0)\n    churn_risk(C) <- high_value(C), engagement_drop(C), renewal_soon(C)\n    Blocker: high_value(\"globex\") - No matching tuples\n```\n\nGlobex is not at churn risk because it's not high-value. It's a startup with a $25K contract, which doesn't meet the enterprise + >$100K threshold. The blocker is specific: the first condition in the rule failed, and here's why. No ambiguity.\n\n---\n\n## The situation changes\n\nThe customer success team runs an intervention. Acme's usage stabilizes.\n\n```iql\n-usage_trend(\"acme\", \"declining\")\n+usage_trend[(\"acme\", \"stable\")]\n```\n\n```iql\n?churn_risk(C)\n```\n\n```\nNo results.\n```\n\nThe churn risk retracted. The engagement_drop condition no longer holds, so the conclusion disappeared automatically. No cleanup logic, no manual flag removal, no stale belief sitting in the agent's memory. The agent's next answer reflects the current state of the world.\n\n---\n\n## Why this matters\n\nThree properties work together here. The rules guarantee that every conclusion follows from specific, inspectable conditions - not from whatever a model generates in a particular context window. The proof tree (`.why` and `.why_not`) makes the reasoning transparent and auditable. And correct retraction means that when facts change, conclusions update - the agent never acts on a belief that's no longer supported by the evidence.\n\nEvery code block on this page runs against a local InputLayer instance. Start one with the [quickstart](/docs/guides/quickstart/) and paste the blocks into the REPL to see the results yourself.",
-    "toc": [
-      {
-        "level": 2,
-        "text": "The setup",
-        "id": "the-setup"
-      },
-      {
-        "level": 2,
-        "text": "The rules",
-        "id": "the-rules"
-      },
-      {
-        "level": 2,
-        "text": "Who is at risk?",
-        "id": "who-is-at-risk"
-      },
-      {
-        "level": 2,
-        "text": "Why is Acme flagged?",
-        "id": "why-is-acme-flagged"
-      },
-      {
-        "level": 2,
-        "text": "Why is Globex NOT flagged?",
-        "id": "why-is-globex-not-flagged"
-      },
-      {
-        "level": 2,
-        "text": "The situation changes",
-        "id": "the-situation-changes"
-      },
-      {
-        "level": 2,
-        "text": "Why this matters",
-        "id": "why-this-matters"
       }
     ]
   }

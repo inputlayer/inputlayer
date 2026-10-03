@@ -12,7 +12,6 @@ const footerLinks: Record<string, FooterLink[]> = {
   Product: [
     { label: "How it works", href: "/#how" },
     { label: "Get started", href: "/#start" },
-    { label: "Use cases", href: "/use-cases/" },
     { label: "Compare", href: "/compare/" },
   ],
   Resources: [
