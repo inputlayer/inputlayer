@@ -118,6 +118,15 @@ export interface WsTimingBreakdown {
   }>
 }
 
+export type WsErrorCode = "validation" | "not_found" | "conflict" | "unsupported" | "internal"
+
+/** A failed statement of a multi-statement program (0-based `index`). */
+export interface WsStatementError {
+  index: number
+  code: WsErrorCode
+  message: string
+}
+
 export interface WsResultMessage {
   type: "result"
   columns: string[]
@@ -131,6 +140,7 @@ export interface WsResultMessage {
   switched_kg?: string
   proof_trees?: WsProofTree[]
   timing_breakdown?: WsTimingBreakdown
+  errors?: WsStatementError[]
 }
 
 export interface WsResultMetadata {
@@ -149,6 +159,7 @@ export interface WsErrorMessage {
   type: "error"
   message: string
   validation_errors?: WsValidationError[]
+  code?: WsErrorCode
 }
 
 export interface WsPongMessage {
@@ -176,6 +187,7 @@ export interface WsResultStartMessage {
   switched_kg?: string
   proof_trees?: WsProofTree[]
   timing_breakdown?: WsTimingBreakdown
+  errors?: WsStatementError[]
 }
 
 export interface WsResultChunkMessage {

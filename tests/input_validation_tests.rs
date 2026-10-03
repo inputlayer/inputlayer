@@ -168,12 +168,10 @@ async fn test_session_rule_double_underscore_prefix_rejected_in_query_program() 
     // Try to add a session rule with __ prefix
     let result = handler
         .query_program(None, "~__hidden(X) <- data(X)".to_string())
-        .await;
-    assert!(
-        result.is_err(),
-        "Session rule with __ prefix should be rejected, got: {result:?}"
-    );
-    let err = result.unwrap_err();
+        .await
+        .expect("statement status");
+    assert_eq!(result.errors.len(), 1, "{result:?}");
+    let err = &result.errors[0].message;
     assert!(
         err.contains("reserved") || err.contains("__"),
         "Error should mention reserved prefix, got: {err}"

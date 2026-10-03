@@ -22,6 +22,19 @@ async fn run(handler: &Handler, program: &str) -> Result<QueryResult, String> {
     handler.query_program(None, program.to_string()).await
 }
 
+/// The message of the program's failed statement.
+async fn failure(handler: &Handler, program: &str) -> String {
+    match run(handler, program).await {
+        Err(e) => e,
+        Ok(result) => result
+            .errors
+            .first()
+            .unwrap_or_else(|| panic!("'{program}' succeeded"))
+            .message
+            .clone(),
+    }
+}
+
 async fn exec(handler: &Handler, program: &str) -> QueryResult {
     run(handler, program)
         .await
@@ -223,31 +236,27 @@ async fn test_error_messages() {
     let handler = handler_at(temp.path());
     setup(&handler).await;
 
-    let err = run(
+    let err = failure(
         &handler,
         r#"?hnsw_nearest("nope", [1.0, 0.0, 0.0], 1, Id, D)"#,
     )
-    .await
-    .unwrap_err();
+    .await;
     assert!(
         err.contains("index 'nope' does not exist") && err.contains("doc_idx"),
         "{err}"
     );
 
-    let err = run(
+    let err = failure(
         &handler,
         r#"?hnsw_nearest("doc_idx", [1.0, 0.0], 1, Id, D)"#,
     )
-    .await
-    .unwrap_err();
+    .await;
     assert!(
         err.contains("dimension 2") && err.contains("dimension 3"),
         "{err}"
     );
 
-    let err = run(&handler, r#"?hnsw_nearest("doc_idx", QV, 1, Id, D)"#)
-        .await
-        .unwrap_err();
+    let err = failure(&handler, r#"?hnsw_nearest("doc_idx", QV, 1, Id, D)"#).await;
     assert!(
         err.contains("QV") && err.contains("positive body atoms"),
         "{err}"
@@ -269,8 +278,7 @@ async fn test_error_messages() {
     );
 
     // Rows the index cannot hold are rejected before they are stored.
-    let err = run(&handler, r#"+docs[(9, "bad", [1.0, 0.0])]"#).await;
-    let err = err.map_or_else(|e| e, |r| text(&r));
+    let err = failure(&handler, r#"+docs[(9, "bad", [1.0, 0.0])]"#).await;
     assert!(
         err.contains("dimension 2") && err.contains("row id=9"),
         "{err}"
@@ -283,9 +291,7 @@ async fn test_error_messages() {
 async fn test_no_index_query_error() {
     let temp = TempDir::new().unwrap();
     let handler = handler_at(temp.path());
-    let err = run(&handler, r#"?hnsw_nearest("doc_idx", [1.0], 1, Id, D)"#)
-        .await
-        .unwrap_err();
+    let err = failure(&handler, r#"?hnsw_nearest("doc_idx", [1.0], 1, Id, D)"#).await;
     assert!(
         err.contains("no vector index") && err.contains(".index create"),
         "{err}"

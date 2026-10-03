@@ -64,6 +64,15 @@ export interface TimingBreakdown {
   rules?: RuleTiming[];
 }
 
+export type ErrorCode = 'validation' | 'not_found' | 'conflict' | 'unsupported' | 'internal';
+
+/** A failed statement of a multi-statement program (0-based `index`). */
+export interface StatementError {
+  index: number;
+  code: ErrorCode;
+  message: string;
+}
+
 export interface ResultResponse {
   type: 'result';
   columns: string[];
@@ -80,6 +89,7 @@ export interface ResultResponse {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   proof_trees?: any[];
   timing_breakdown?: TimingBreakdown;
+  errors?: StatementError[];
 }
 
 export interface ErrorResponse {
@@ -87,6 +97,7 @@ export interface ErrorResponse {
   message: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   validation_errors?: Array<Record<string, any>>;
+  code?: ErrorCode;
 }
 
 export interface ResultStartResponse {
@@ -101,6 +112,7 @@ export interface ResultStartResponse {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   proof_trees?: any[];
   timing_breakdown?: TimingBreakdown;
+  errors?: StatementError[];
 }
 
 export interface ResultChunkResponse {
