@@ -2,9 +2,9 @@
 //!
 //! [`Job::from_text`] classifies a client message by the state it touches
 //! ([`Access`]); the connection loop starts the job once the pipeline's
-//! barriers allow and writes its [`Reply`] when released. Building the reply
-//! frames happens in the request task, so serializing a large result never
-//! holds up the loop's pushes.
+//! barriers allow and writes its [`Reply`] when released. Request futures are
+//! polled by the connection loop, so nothing here may block it: computation
+//! runs on the blocking pool, and so does serializing a large result.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -25,6 +25,9 @@ use crate::protocol::wire::{ErrorCode, QueryResult};
 use crate::protocol::Handler;
 use crate::protocol::MAX_MESSAGE_SIZE;
 use crate::statement::{MetaCommand, Statement};
+
+/// Results with more rows than this are serialized on the blocking pool.
+const INLINE_FRAME_ROWS: usize = 256;
 
 /// One client request.
 pub(super) enum Job {
@@ -172,7 +175,15 @@ pub(super) async fn execute(
         "ws_execute_end"
     );
     match result {
-        Ok(response) => result_frames(response),
+        Ok(response) if response.rows.len() <= INLINE_FRAME_ROWS => result_frames(response),
+        Ok(response) => tokio::task::spawn_blocking(move || result_frames(response))
+            .await
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "ws_result_serialization_failed");
+                vec![response_frame(&error_response(
+                    "Internal server error".to_string(),
+                ))]
+            }),
         Err(e) => vec![response_frame(&program_error_response(e))],
     }
 }

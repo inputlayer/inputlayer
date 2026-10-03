@@ -508,3 +508,27 @@ async fn saturated_mixed_traffic_converges() {
     };
     assert_eq!(fresh.len() as i64, 1 + CLIENTS * ROUNDS);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn idle_timeout_spares_a_connection_waiting_on_its_request() {
+    const IDLE: Duration = Duration::from_millis(300);
+    let server = start_server(|config| config.http.ws_idle_timeout_ms = 300).await;
+    server.install_bipartite_graph().await;
+
+    let mut busy = Client::connect(&server).await;
+    let sent = Instant::now();
+    busy.send_execute(TRIANGLES).await;
+    let reply = busy.recv().await;
+    assert!(answers_triangles(&reply.value), "{}", reply.value);
+    assert!(
+        reply.at - sent > IDLE,
+        "fixture too fast: {:?}",
+        reply.at - sent
+    );
+
+    // Idle from here on: the next frame is the timeout.
+    let idle = busy.recv().await;
+    assert_eq!(idle.value["message"], "Idle timeout", "{}", idle.value);
+    // Not fired at once from the time spent waiting on the request.
+    assert!(idle.at - reply.at >= IDLE.saturating_sub(Duration::from_millis(50)));
+}

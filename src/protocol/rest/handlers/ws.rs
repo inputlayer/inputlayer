@@ -565,7 +565,15 @@ async fn handle_global_ws_connection(
     } else {
         None
     };
-    let mut last_activity = std::time::Instant::now();
+    // One timer, moved on activity: re-arming it every loop turn would cost a
+    // timer registration per request.
+    let idle_timer = tokio::time::sleep(idle_duration.unwrap_or_default());
+    tokio::pin!(idle_timer);
+    let touch = |timer: std::pin::Pin<&mut tokio::time::Sleep>| {
+        if let Some(duration) = idle_duration {
+            timer.reset(tokio::time::Instant::now() + duration);
+        }
+    };
 
     // Connection lifetime limit
     let connection_start = std::time::Instant::now();
@@ -584,22 +592,6 @@ async fn handle_global_ws_connection(
     heartbeat_interval.tick().await; // consume the immediate first tick
 
     loop {
-        // Compute remaining idle time for this iteration; a connection with
-        // requests in progress is not idle.
-        let idle_sleep: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> =
-            match idle_duration.filter(|_| requests.is_idle()) {
-                Some(dur) => {
-                    let elapsed = last_activity.elapsed();
-                    if elapsed >= dur {
-                        // Already exceeded idle timeout
-                        Box::pin(std::future::ready(()))
-                    } else {
-                        Box::pin(tokio::time::sleep(dur.saturating_sub(elapsed)))
-                    }
-                }
-                None => Box::pin(std::future::pending()),
-            };
-
         // Check connection lifetime
         if let Some(max_lt) = max_lifetime {
             if connection_start.elapsed() >= max_lt {
@@ -622,26 +614,24 @@ async fn handle_global_ws_connection(
                 info!(credential = %principal.credential(), "ws_credential_revoked");
                 break;
             }
-            // Idle timeout
-            () = idle_sleep => {
-                if idle_duration.is_some() {
-                    info!(idle_ms, "ws_idle_timeout");
-                    let err_msg = GlobalWsResponse::Error {
-                        message: "Idle timeout".to_string(),
-                        validation_errors: None,
-                        code: None,
-                    };
-                    if let Ok(json) = serde_json::to_string(&err_msg) {
-                        let _ = sender.send(Message::Text(json)).await;
-                    }
-                    break;
+            // Idle timeout; a connection with requests in progress is not idle
+            () = &mut idle_timer, if idle_duration.is_some() && requests.is_idle() => {
+                info!(idle_ms, "ws_idle_timeout");
+                let err_msg = GlobalWsResponse::Error {
+                    message: "Idle timeout".to_string(),
+                    validation_errors: None,
+                    code: None,
+                };
+                if let Ok(json) = serde_json::to_string(&err_msg) {
+                    let _ = sender.send(Message::Text(json)).await;
                 }
+                break;
             }
             // Client message, read only while the pipeline has room
             msg = receiver.next(), if requests.has_capacity() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        last_activity = std::time::Instant::now();
+                        touch(idle_timer.as_mut());
                         request_seq = request_seq.saturating_add(1);
                         let (access, job) = if rate.allow() {
                             Job::from_text(&text)
@@ -680,7 +670,7 @@ async fn handle_global_ws_connection(
             }
             // A request's reply, in request order
             released = requests.next_reply() => {
-                last_activity = std::time::Instant::now();
+                touch(idle_timer.as_mut());
                 let frames = release_reply(&handler, &session_id, released, &mut subscriptions);
                 if !send_frames(&mut sender, frames).await {
                     break;
@@ -836,7 +826,7 @@ fn response_frame(response: &GlobalWsResponse) -> String {
 type Requests = RequestPipeline<(Job, tracing::Span), Reply>;
 
 /// Start every request the pipeline's ordering barriers now allow. Work that
-/// computes runs as a pipeline task; connection-state changes happen here, on
+/// computes runs as a pipeline future; connection-state changes happen here, on
 /// the loop that owns that state.
 fn start_requests(
     requests: &mut Requests,
@@ -862,7 +852,7 @@ fn start_requests(
                     program,
                     principal.clone(),
                 );
-                requests.spawn(ticket, work.map(Reply::Frames).in_current_span());
+                requests.run(ticket, work.map(Reply::Frames).in_current_span());
             }
             Job::Subscribe { id, query } => {
                 let started = std::time::Instant::now();
@@ -875,7 +865,7 @@ fn start_requests(
                         let work = opening
                             .run()
                             .map(move |opened| Reply::Subscribed { opened, started });
-                        requests.spawn(ticket, work.in_current_span());
+                        requests.run(ticket, work.in_current_span());
                     }
                     Err(message) => {
                         let frame = response_frame(&request::error_response(message));

@@ -1,8 +1,10 @@
 //! Per-connection request pipeline: bounded, overlapping, in-order.
 //!
 //! The connection loop admits each request with its [`Access`]. Requests run
-//! as tasks owned by the pipeline, so the loop keeps reading, pushing and
-//! heart-beating while they compute. Three rules make that safe:
+//! as futures owned by the pipeline and polled by the loop itself (no task
+//! per request, so no cross-thread hand-off on the hot path); the loop keeps
+//! reading, pushing and heart-beating while they wait on computation. Three
+//! rules make that safe:
 //!
 //! - **Bounded.** At most `capacity` requests are admitted and not yet
 //!   released; the loop stops reading the socket while the pipeline is full.
@@ -19,11 +21,15 @@
 //!   barrier-crossing request start.
 //!
 //! The pipeline owns no socket and no lock; the loop is its only driver.
+//! Request futures must not block: computation belongs on the blocking pool.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::future::Future;
+use std::panic::AssertUnwindSafe;
 
-use tokio::task::{self, JoinSet};
+use futures_util::future::BoxFuture;
+use futures_util::stream::FuturesUnordered;
+use futures_util::{FutureExt, StreamExt};
 use tracing::warn;
 
 /// How a request interacts with the connection's KG and session state.
@@ -40,7 +46,7 @@ pub(super) enum Access {
 pub(super) struct Ticket(u64);
 
 /// A request the barrier now allows to run; the loop starts it with
-/// [`RequestPipeline::spawn`] or [`RequestPipeline::complete`].
+/// [`RequestPipeline::run`] or [`RequestPipeline::complete`].
 pub(super) struct Startable<J> {
     pub ticket: Ticket,
     pub job: J,
@@ -49,7 +55,7 @@ pub(super) struct Startable<J> {
 /// A request's reply, released in admission order.
 pub(super) struct Released<R> {
     pub access: Access,
-    /// `None` when the request's task panicked.
+    /// `None` when the request panicked.
     pub reply: Option<R>,
 }
 
@@ -68,9 +74,8 @@ pub(super) struct RequestPipeline<J, R> {
     queued: VecDeque<Queued<J>>,
     /// Started and not yet released.
     started: BTreeMap<Ticket, Access>,
-    running: JoinSet<(Ticket, R)>,
-    /// Ticket of each running task, to release a panicked one.
-    tasks: HashMap<task::Id, Ticket>,
+    /// Started and not finished; a panic yields `None`.
+    running: FuturesUnordered<BoxFuture<'static, (Ticket, Option<R>)>>,
     /// Finished, waiting for every earlier reply.
     finished: BTreeMap<Ticket, Option<R>>,
 }
@@ -84,8 +89,7 @@ impl<J, R: Send + 'static> RequestPipeline<J, R> {
             next_release: 0,
             queued: VecDeque::new(),
             started: BTreeMap::new(),
-            running: JoinSet::new(),
-            tasks: HashMap::new(),
+            running: FuturesUnordered::new(),
             finished: BTreeMap::new(),
         }
     }
@@ -139,16 +143,22 @@ impl<J, R: Send + 'static> RequestPipeline<J, R> {
         Some(Startable { ticket, job })
     }
 
-    /// Run a started request's work as a task.
-    pub(super) fn spawn<F>(&mut self, ticket: Ticket, work: F)
+    /// Run a started request's work; it progresses while the loop awaits
+    /// [`Self::next_reply`].
+    pub(super) fn run<F>(&mut self, ticket: Ticket, work: F)
     where
         F: Future<Output = R> + Send + 'static,
     {
-        let handle = self.running.spawn(async move { (ticket, work.await) });
-        self.tasks.insert(handle.id(), ticket);
+        self.running.push(Box::pin(async move {
+            let reply = AssertUnwindSafe(work).catch_unwind().await;
+            if reply.is_err() {
+                warn!("ws_request_panicked");
+            }
+            (ticket, reply.ok())
+        }));
     }
 
-    /// Finish a started request without a task.
+    /// Finish a started request without running anything.
     pub(super) fn complete(&mut self, ticket: Ticket, reply: R) {
         self.finished.insert(ticket, Some(reply));
     }
@@ -162,16 +172,9 @@ impl<J, R: Send + 'static> RequestPipeline<J, R> {
                 let access = self.started.remove(&head).unwrap_or(Access::Exclusive);
                 return Released { access, reply };
             }
-            match self.running.join_next_with_id().await {
-                Some(Ok((id, (ticket, reply)))) => {
-                    self.tasks.remove(&id);
-                    self.finished.insert(ticket, Some(reply));
-                }
-                Some(Err(e)) => {
-                    warn!(error = %e, "ws_request_task_failed");
-                    if let Some(ticket) = self.tasks.remove(&e.id()) {
-                        self.finished.insert(ticket, None);
-                    }
+            match self.running.next().await {
+                Some((ticket, reply)) => {
+                    self.finished.insert(ticket, reply);
                 }
                 None => std::future::pending::<()>().await,
             }
@@ -182,10 +185,9 @@ impl<J, R: Send + 'static> RequestPipeline<J, R> {
     /// started exclusive request finish, so a write and its bookkeeping are
     /// never cut in half. Replies are discarded.
     pub(super) async fn shutdown(mut self) {
-        if !self.exclusive_started() {
-            self.running.abort_all();
+        if self.exclusive_started() {
+            while self.running.next().await.is_some() {}
         }
-        while self.running.join_next().await.is_some() {}
     }
 }
 
@@ -221,11 +223,11 @@ mod tests {
         assert_eq!(jobs(&started), ["slow", "fast"]);
 
         let (release_slow, slow_done) = oneshot::channel::<()>();
-        pipeline.spawn(started[0].0, async move {
+        pipeline.run(started[0].0, async move {
             slow_done.await.unwrap();
             "slow"
         });
-        pipeline.spawn(started[1].0, async { "fast" });
+        pipeline.run(started[1].0, async { "fast" });
 
         // "fast" finished first but waits for "slow".
         let first = tokio::time::timeout(Duration::from_millis(50), pipeline.next_reply()).await;
@@ -279,7 +281,7 @@ mod tests {
         pipeline.admit(Access::Exclusive, "panics");
         pipeline.admit(Access::Shared, "after");
         let started = start_all(&mut pipeline);
-        pipeline.spawn(started[0].0, async { panic!("request bug") });
+        pipeline.run(started[0].0, async { panic!("request bug") });
         let released = pipeline.next_reply().await;
         assert_eq!(released.access, Access::Exclusive);
         assert!(released.reply.is_none());
@@ -314,7 +316,7 @@ mod tests {
         let started = start_all(&mut pipeline);
         let finished = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&finished);
-        pipeline.spawn(started[0].0, async move {
+        pipeline.run(started[0].0, async move {
             tokio::time::sleep(Duration::from_secs(30)).await;
             flag.store(true, Ordering::SeqCst);
             "long query"
@@ -332,7 +334,7 @@ mod tests {
         let started = start_all(&mut pipeline);
         let finished = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&finished);
-        pipeline.spawn(started[0].0, async move {
+        pipeline.run(started[0].0, async move {
             tokio::time::sleep(Duration::from_millis(50)).await;
             flag.store(true, Ordering::SeqCst);
             "write"
