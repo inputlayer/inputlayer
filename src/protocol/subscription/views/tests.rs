@@ -251,6 +251,49 @@ async fn subscribers_waiting_for_the_first_result_share_it() {
 }
 
 #[tokio::test]
+async fn a_subscriber_joining_mid_refresh_gets_a_result_that_saw_every_earlier_change() {
+    let mut registry = ViewRegistry::new(Duration::ZERO);
+    let steps = vec![ok(&[1], "a"), ok(&[1, 2], "a"), ok(&[1, 2, 3], "a")];
+    let (_, _m1) = live(&mut registry, "?a(X)", 1, steps).await;
+    let in_flight = registry.on_change(KG, &change("a"), now()).remove(0);
+    let (Attach::Waiting(None), _m2) = attach(&mut registry, "?a(X)", 2, vec![]) else {
+        panic!("waits for the refresh in flight");
+    };
+    assert!(registry.on_change(KG, &change("a"), now()).is_empty());
+    let (Attach::Waiting(None), _m3) = attach(&mut registry, "?a(X)", 3, vec![]) else {
+        panic!("waits for the refresh after the one in flight");
+    };
+
+    let completed = complete(&mut registry, in_flight).await;
+    let [(2, Ok(second))] = &completed.replies[..] else {
+        panic!("only subscriber 2 is answered");
+    };
+    assert_eq!(second.publication.result.sorted_rows(), rows(&[1, 2]));
+    let completed = complete(&mut registry, completed.follow_up.unwrap()).await;
+    let [(3, Ok(third))] = &completed.replies[..] else {
+        panic!("subscriber 3 is answered by the follow-up");
+    };
+    assert_eq!(third.publication.result.sorted_rows(), rows(&[1, 2, 3]));
+}
+
+#[tokio::test]
+async fn a_subscriber_starts_a_due_refresh_at_once() {
+    let mut registry = ViewRegistry::new(Duration::from_secs(60));
+    let steps = vec![ok(&[1], "a"), ok(&[1, 2], "a")];
+    let (_, _m1) = live(&mut registry, "?a(X)", 1, steps).await;
+    assert!(registry.on_change(KG, &change("a"), now()).is_empty());
+    let (Attach::Waiting(Some(refresh)), _m2) = attach(&mut registry, "?a(X)", 2, vec![]) else {
+        panic!("a due refresh starts for the new subscriber");
+    };
+    assert!(registry.next_due().is_none());
+    let completed = complete(&mut registry, refresh).await;
+    let [(2, Ok(joined))] = &completed.replies[..] else {
+        panic!("subscriber 2 is answered");
+    };
+    assert_eq!(joined.publication.result.sorted_rows(), rows(&[1, 2]));
+}
+
+#[tokio::test]
 async fn a_rule_change_retires_the_views_it_affects() {
     let mut registry = ViewRegistry::new(Duration::ZERO);
     let (_, _m1) = live(&mut registry, "?a(X)", 1, vec![ok(&[1], "a")]).await;

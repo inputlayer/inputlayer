@@ -83,8 +83,14 @@ async fn a_retry_failing_the_same_way_answers_only_its_waiters() {
     let (Attach::Waiting(Some(retry)), _m2) = attach(&mut registry, "?a(X)", 2, vec![]) else {
         panic!("reevaluates");
     };
+    let (Attach::Waiting(None), _m3) = attach(&mut registry, "?a(X)", 3, vec![]) else {
+        panic!("shares the retry in flight");
+    };
     let completed = complete(&mut registry, retry).await;
-    assert!(matches!(&completed.replies[..], [(2, Err(m))] if m == "capped"));
+    assert!(matches!(
+        &completed.replies[..],
+        [(2, Err(a)), (3, Err(b))] if a == "capped" && b == "capped"
+    ));
     assert!(!rang(&mut mailbox), "no duplicate error for subscriber 1");
     assert!(Arc::ptr_eq(&latest(&attachment), &failed));
 }

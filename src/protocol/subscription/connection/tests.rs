@@ -284,6 +284,20 @@ async fn unsubscribing_the_last_subscriber_drops_the_view_and_a_reused_name_star
     assert_eq!(handler.subscription_metrics().active(), 0);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_snapshot_includes_a_write_acknowledged_before_subscribing() {
+    let (handler, _tmp) = handler();
+    write(&handler, "+order(1)").await;
+    let mut agent_a = ConnectionSubscriptions::new(Arc::clone(&handler), None);
+    let mut agent_b = ConnectionSubscriptions::new(Arc::clone(&handler), None);
+    agent_a.subscribe(KG, "s", "?order(X)").await.unwrap();
+
+    write(&handler, "+order(42)").await;
+    let (snapshot, _) = agent_b.subscribe(KG, "s", "?order(X)").await.unwrap();
+    assert_eq!(snapshot.rows, [vec![json!(1)], vec![json!(42)]]);
+    assert_eq!(inserted(next_push(&mut agent_a).await), [vec![json!(42)]]);
+}
+
 /// Wait until every view is gone, failing after [`WAIT`].
 async fn no_views_left(handler: &Handler) {
     let deadline = tokio::time::Instant::now() + WAIT;

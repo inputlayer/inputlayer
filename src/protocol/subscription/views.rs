@@ -12,9 +12,11 @@
 //! most one window (plus an evaluation in flight) after it is seen.
 //!
 //! A completed refresh that changed, failed or recovered the result is the view's next
-//! [`Publication`], and every subscriber's doorbell rings. A subscriber joining a view without
-//! a current result (first evaluation, or a failed refresh) waits for the next evaluation,
-//! started at once if idle; such a retry failing as before is no news to the others.
+//! [`Publication`], and every subscriber's doorbell rings. A subscriber joins at once only a
+//! clean view: one with a current result and no refresh in flight or due. Otherwise it waits
+//! for an evaluation that has seen every change seen before it joined, started at once if
+//! idle, so its snapshot includes every write acknowledged before it subscribed. A retry of a
+//! failed view failing as before is no news to the others.
 
 use std::collections::hash_map::RandomState;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -23,11 +25,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use super::publication::{Doorbell, Outcome, Publication, SubscriberId, ViewCell};
-use super::{ChangeSet, Dependencies, Refresh, Row, StandingQuery};
+use super::{ChangeSet, Dependencies, Row, StandingQuery};
 
 mod evaluation;
+mod publish;
 
 pub use evaluation::{Completion, Dispatch};
+use publish::{publish, start};
 
 /// Identity of a shared view: what its result is a function of.
 ///
@@ -108,14 +112,16 @@ struct View {
     retry: bool,
     /// `None` until the first result.
     live: Option<Live>,
-    /// Waiting for the next result, as there is no current one.
+    /// Waiting for the result of the evaluation in flight, or of the next one if idle.
     waiting: Vec<Arc<Doorbell>>,
+    /// Waiting for the evaluation after the one in flight, which predates changes they must see.
+    waiting_next: Vec<Arc<Doorbell>>,
     subscribers: BTreeMap<SubscriberId, Arc<Doorbell>>,
 }
 
 impl View {
     fn is_unused(&self) -> bool {
-        self.waiting.is_empty() && self.subscribers.is_empty()
+        self.waiting.is_empty() && self.waiting_next.is_empty() && self.subscribers.is_empty()
     }
 
     /// Answer every waiting subscriber: the latest publication, or the evaluation's error.
@@ -196,15 +202,22 @@ impl<S: BuildHasher + Default> ViewRegistry<S> {
         if let Some(id) = self.keys.get(&key).copied() {
             if let Some(view) = self.views.get_mut(&id) {
                 self.subscribers.insert(subscriber, id);
+                let clean = view.query.is_some() && view.due.is_none();
                 return match &view.live {
-                    Some(live) if !matches!(live.latest.outcome, Outcome::Failed(_)) => {
+                    Some(live) if clean && !matches!(live.latest.outcome, Outcome::Failed(_)) => {
                         let attachment = live.attachment(None);
                         view.subscribers.insert(subscriber, doorbell);
                         Attach::Attached(attachment)
                     }
+                    _ if view.query.is_none() && view.pending.is_some() => {
+                        view.waiting_next.push(doorbell);
+                        Attach::Waiting(None)
+                    }
                     _ => {
                         view.waiting.push(doorbell);
-                        view.retry = view.due.is_none() && view.query.is_some();
+                        if view.query.is_some() {
+                            view.retry = view.due.is_none();
+                        }
                         if let Some(due) = view.due.take() {
                             self.schedule.remove(&(due, id));
                         }
@@ -231,6 +244,7 @@ impl<S: BuildHasher + Default> ViewRegistry<S> {
                 retry: false,
                 live: None,
                 waiting: vec![doorbell],
+                waiting_next: Vec::new(),
                 subscribers: BTreeMap::new(),
             },
         );
@@ -248,6 +262,8 @@ impl<S: BuildHasher + Default> ViewRegistry<S> {
         let view = self.views.get_mut(&id)?;
         view.subscribers.remove(&subscriber);
         view.waiting.retain(|doorbell| doorbell.id() != subscriber);
+        view.waiting_next
+            .retain(|doorbell| doorbell.id() != subscriber);
         if !view.is_unused() {
             return None;
         }
@@ -272,7 +288,7 @@ impl<S: BuildHasher + Default> ViewRegistry<S> {
             for subscriber in view.subscribers.keys() {
                 self.subscribers.remove(subscriber);
             }
-            for doorbell in &view.waiting {
+            for doorbell in view.waiting.iter().chain(&view.waiting_next) {
                 self.subscribers.remove(&doorbell.id());
             }
         }
@@ -390,7 +406,12 @@ impl<S: BuildHasher + Default> ViewRegistry<S> {
             }
             result => publish(view, result, retry),
         };
+        let pending = view.pending.as_ref();
+        if !pending.is_some_and(|pending| view.dependencies.is_affected_by(&pending.change)) {
+            view.waiting.append(&mut view.waiting_next);
+        }
         let replies = view.release_waiting(failure, initial_rows);
+        view.waiting = std::mem::take(&mut view.waiting_next);
         for (subscriber, reply) in &replies {
             if reply.is_err() {
                 self.subscribers.remove(subscriber);
@@ -427,71 +448,6 @@ impl<S: BuildHasher + Default> ViewRegistry<S> {
 
 fn take_dispatch(id: ViewId, view: &mut View) -> Option<Dispatch> {
     view.query.take().map(|query| Dispatch { view: id, query })
-}
-
-/// Make `refresh` the view's first publication; returns its rows, sorted.
-fn start(view: &mut View, refresh: Refresh) -> Arc<Vec<Row>> {
-    view.dependencies = refresh.dependencies;
-    let publication = Arc::new(Publication {
-        number: 1,
-        revision: refresh.revision,
-        result_number: 1,
-        columns: refresh.columns,
-        result: refresh.result,
-        outcome: Outcome::Snapshot,
-    });
-    view.live = Some(Live {
-        cell: Arc::new(ViewCell::new(Arc::clone(&publication))),
-        latest: publication,
-    });
-    Arc::new(refresh.inserted)
-}
-
-/// Publish a refresh's news and ring every subscriber; returns those whose connection is gone.
-fn publish(view: &mut View, result: Result<Refresh, String>, retry: bool) -> Vec<SubscriberId> {
-    let Some(live) = &mut view.live else {
-        return Vec::new();
-    };
-    let last = &live.latest;
-    let number = last.number + 1;
-    let publication = match result {
-        Ok(refresh) => {
-            let unchanged = refresh.is_unchanged();
-            view.dependencies = refresh.dependencies;
-            if unchanged && !matches!(last.outcome, Outcome::Failed(_)) {
-                return Vec::new();
-            }
-            Publication {
-                number,
-                revision: refresh.revision,
-                result_number: number,
-                columns: refresh.columns,
-                result: refresh.result,
-                outcome: Outcome::Delta {
-                    base: last.result_number,
-                    inserted: refresh.inserted,
-                    retracted: refresh.retracted,
-                },
-            }
-        }
-        Err(e) if retry && matches!(&last.outcome, Outcome::Failed(f) if *f == e) => return vec![],
-        Err(message) => Publication {
-            number,
-            revision: last.revision,
-            result_number: last.result_number,
-            columns: last.columns.clone(),
-            result: Arc::clone(&last.result),
-            outcome: Outcome::Failed(message),
-        },
-    };
-    let publication = Arc::new(publication);
-    live.cell.publish(Arc::clone(&publication));
-    live.latest = publication;
-    view.subscribers
-        .values()
-        .filter(|doorbell| !doorbell.ring())
-        .map(|doorbell| doorbell.id())
-        .collect()
 }
 
 #[cfg(test)]
