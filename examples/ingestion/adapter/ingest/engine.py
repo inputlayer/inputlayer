@@ -42,7 +42,7 @@ class EngineError(RuntimeError):
 
 
 class EngineUnavailable(ConnectionError):
-    """The engine could not be reached, or the connection broke mid-request.
+    """The connection failed or an engine request exceeded its deadline.
 
     A write that hit this may or may not have committed; retrying it is safe
     because applied revisions are skipped.

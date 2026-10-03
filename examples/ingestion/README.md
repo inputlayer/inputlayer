@@ -16,7 +16,7 @@ receives every change. Full walkthrough, guarantees and production notes:
 | `postgres/init.sql` | the demo source table |
 | `adapter/ingest/mappings.py` | which tables and webhook events feed which relations: edit this |
 | `adapter/ingest/` | the adapter (`server.py`), the watching client (`watch.py`), the demo (`demo.py`) |
-| `adapter/tests/` | unit tests: `cd adapter && pip install -e '.[dev]' && pytest` |
+| `adapter/tests/` | adapter tests: `cd adapter && pip install -e '.[dev]' && pytest` |
 
 The script generates fresh credentials on every run and stores them in the ignored,
 owner-readable `.env` file. Published ports bind only to `127.0.0.1`.

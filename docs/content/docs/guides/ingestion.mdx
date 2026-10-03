@@ -70,7 +70,7 @@ Each adapter-fed relation has **key columns**, like a primary key. Every source 
 | Webhook type mapped as a retraction (`payment.succeeded`) | retract the fact for the key |
 | Webhook type with no mapping | ignored (200, nothing applied) |
 
-The adapter sends each change to the engine as a single program. The program initializes a missing watermark to `-1`, then replaces data and advances the watermark only if the incoming revision is newer:
+For each request, the adapter keeps the highest revision per key, filters out changes already covered by the stored watermarks, and sends the remaining changes to the engine as a single program. For each key, the program initializes a missing watermark to `-1`, then replaces data and advances the watermark only if the incoming revision is newer:
 
 ```iql
 +ingest_revision("customer", "[2]", -1)
@@ -95,13 +95,13 @@ The revision comparison runs inside the transaction and is validated at commit. 
 
 ## Failure behavior
 
-The adapter replies 2xx only after every change in the request is committed or was already applied.
+The adapter replies 2xx only after the mapped changes are committed or skipped under the revision rules above. Lower revisions coalesced within a batch are superseded without being applied individually; unmapped webhook event types are ignored.
 
 `applied` counts watermark advances reported by the engine's committed conditional updates; `skipped` counts the remaining input changes, including duplicates coalesced within a batch. The preliminary revision read only filters candidates and does not determine these counters.
 
 | Reply | Meaning | Sender |
 |---|---|---|
-| `200 {"applied": n, "skipped": m}` | committed, or already applied | moves on |
+| `200 {"applied": n, "skipped": m}` | committed or skipped under the revision rules; unmapped webhook types return zero counts | moves on |
 | `401` | missing, stale or wrong signature | fix the secret |
 | `422` | the event cannot be mapped (unknown table, null value, wrong type) or the engine rejected the facts; nothing was applied | retries; fix the mapping or data |
 | `503` | engine unreachable, request timed out, or adapter still starting | retries |

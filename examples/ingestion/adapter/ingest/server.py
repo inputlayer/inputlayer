@@ -4,11 +4,9 @@ POST /cdc                 Debezium change event(s)
 POST /webhooks/<source>   one signed webhook event
 GET  /healthz             200 once the adapter's schemas are declared
 
-A 2xx reply means every change in the request is committed (or was already
-applied). Senders retry on anything else, which is safe: see applier.py.
-Every write is signed per Standard Webhooks (signing.py); 401 is a missing,
-stale or bad signature, 422 a mapping or engine rejection of the data itself,
-503 an unreachable or not yet ready engine.
+For acknowledgment, skip and error semantics, see the Failure behavior section
+of docs/content/docs/guides/ingestion.mdx. Retry safety is enforced by applier.py;
+every write is signed per Standard Webhooks (signing.py).
 """
 
 from __future__ import annotations
