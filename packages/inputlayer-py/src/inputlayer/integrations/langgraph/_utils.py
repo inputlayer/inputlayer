@@ -12,9 +12,7 @@ __all__ = [
     "DEFAULT_KG_TIMEOUT",
     "b64d",
     "b64e",
-    "check_error_response",
     "escape_iql",
-    "is_error_response",
     "validate_row_length",
     "validate_thread_id",
 ]
@@ -42,37 +40,6 @@ def b64d(s: str) -> str:
         return base64.b64decode(padded.encode("ascii")).decode("utf-8")
     except (binascii.Error, UnicodeDecodeError) as exc:
         raise ValueError(f"Failed to decode base64 memory data: {s[:40]!r}") from exc
-
-
-def is_error_response(result: Any) -> bool:
-    """True if the KG returned a single-row error envelope.
-
-    The engine emits ``columns=["error"]`` with exactly one row when a
-    query fails at the protocol level. Requiring ``row_count == 1``
-    guards the unlikely case of a user relation literally named
-    ``error`` that returns multiple rows.
-    """
-    if not hasattr(result, "columns") or result.columns != ["error"]:
-        return False
-    if not result.rows:
-        return False
-    row_count = getattr(result, "row_count", len(result.rows))
-    return row_count == 1 and len(result.rows) == 1
-
-
-def check_error_response(result: Any, context: str, iql: str) -> None:
-    """Raise RuntimeError if the KG returned an error-envelope row.
-
-    Calls ``is_error_response`` and raises with a descriptive message
-    that includes the failing query (truncated).
-    """
-    if not is_error_response(result):
-        return
-    msg = str(result.rows[0][0]) if result.rows[0] else "unknown error"
-    raise RuntimeError(
-        f"{context}: KG returned an error: {msg}. "
-        f"Query: {iql[:100]}{'...' if len(iql) > 100 else ''}"
-    )
 
 
 # Match ASCII control characters not already handled explicitly

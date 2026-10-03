@@ -22,20 +22,6 @@ from inputlayer.integrations.langchain.params import bind_params
 logger = logging.getLogger(__name__)
 
 
-def _extract_error_message(result: Any) -> str:
-    """Extract the error text from an ``columns == ["error"]`` result.
-
-    Guards against missing rows and empty rows so the retriever never
-    crashes with IndexError when the engine sends a malformed error
-    envelope.
-    """
-    rows = getattr(result, "rows", None) or []
-    if not rows or not rows[0]:
-        return "unknown error"
-    msg = rows[0][0]
-    return str(msg) if msg is not None else "unknown error"
-
-
 class InputLayerRetriever(BaseRetriever):
     """Retrieve documents from an InputLayer KnowledgeGraph.
 
@@ -76,7 +62,7 @@ class InputLayerRetriever(BaseRetriever):
     Both sync and async paths are supported natively.
 
     When the engine rejects a query (parse error, unknown relation,
-    etc.) the retriever raises ``RuntimeError`` with the engine message
+    etc.) the retriever raises ``QueryError`` with the engine message
     rather than returning empty results, so a misconfigured chain fails
     loudly instead of silently producing zero documents.
     """
@@ -164,10 +150,6 @@ class InputLayerRetriever(BaseRetriever):
         compiled = bind_params(self.query, params)
         logger.debug("IQL retriever query: %s", compiled)
         result = await self.kg.execute(compiled)
-        if result.columns == ["error"]:
-            raise RuntimeError(
-                f"InputLayer rejected query: {_extract_error_message(result)}"
-            )
         return self._to_documents(result.columns, result.rows, hidden_columns=set())
 
     def _resolve_params(self, user_query: str) -> dict[str, Any]:

@@ -31,7 +31,6 @@ from inputlayer.integrations.langgraph._memory_helpers import (
 from inputlayer.integrations.langgraph._memory_mixin import _MemorySyncAndMaintenanceMixin
 from inputlayer.integrations.langgraph._utils import (
     DEFAULT_KG_TIMEOUT,
-    check_error_response,
     validate_row_length,
     validate_thread_id,
 )
@@ -164,7 +163,6 @@ class InputLayerMemory(_MemorySyncAndMaintenanceMixin):
                 f"KG operation timed out after {self._kg_timeout}s. "
                 f"Query: {iql[:100]}{'...' if len(iql) > 100 else ''}"
             ) from None
-        check_error_response(result, "InputLayerMemory", iql)
         return result
 
     # ── Setup ────────────────────────────────────────────────────────

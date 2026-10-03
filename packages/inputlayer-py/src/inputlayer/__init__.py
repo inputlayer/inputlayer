@@ -2,6 +2,7 @@
 
 # Functions (re-export all)
 from inputlayer import functions
+from inputlayer._protocol import StatementError
 
 # Aggregations
 from inputlayer.aggregations import (
@@ -42,6 +43,7 @@ from inputlayer.exceptions import (
     RelationNotFoundError,
     RuleNotFoundError,
     SchemaConflictError,
+    StatementFailedError,
     ValidationError,
 )
 
@@ -67,7 +69,6 @@ from inputlayer.knowledge_graph import (
     WhyNotResult,
     WhyResult,
 )
-
 
 # Notifications
 from inputlayer.notifications import NotificationEvent
@@ -135,6 +136,8 @@ __all__ = [
     "ServerStatus",
     # Session
     "Session",
+    "StatementError",
+    "StatementFailedError",
     "Timestamp",
     # Auth
     "UserInfo",
