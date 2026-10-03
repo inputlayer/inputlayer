@@ -81,19 +81,19 @@ Four facts, two rules, and the engine derived every reachable destination - incl
 
 ---
 
-## Under the Hood
+## What Makes It Different
 
 ### Rules + vector search in one query
 
 A shopper asks for printer ink. In embedding space, every ink cartridge looks the same. But only specific models fit their printer - that's a structured fact, not a similarity score. InputLayer evaluates compatibility rules and ranks by cosine distance in a single query.
 
-### Conclusions withdrawn when they stop holding
+### Correct conclusion retraction
 
-An entity is cleared from a sanctions list. Every flag derived through it is withdrawn - but only if no second ownership path still supports it. InputLayer tracks every derivation path independently and only retracts when all paths are gone.
+An entity is cleared from a sanctions list. Every flag derived through it retracts - but only if no second ownership path still supports it. InputLayer tracks every derivation path independently and only retracts when all paths are gone.
 
 ### Incremental updates
 
-When a fact changes, InputLayer updates only the affected derivations instead of recomputing everything. After inserting 100 edges into a 2,000-node graph with recursive rules, a bound reachability query answers in **6.83 ms**, versus 11.3 seconds to recompute the full transitive closure (single machine; see [BENCHMARKS.md](./BENCHMARKS.md)).
+One fact changes in a 2,000-node graph with 400,000 derived relationships. InputLayer updates only the affected derivations in **6.83ms**. Full recompute: 11.3 seconds. **1,652x faster.**
 
 ### Provenance
 

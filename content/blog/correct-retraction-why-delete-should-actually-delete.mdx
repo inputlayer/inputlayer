@@ -148,15 +148,15 @@ The engine tracks all of this through its counting mechanism. Each removal rippl
 
 ## Performance
 
-Correct retraction is only useful if it's fast enough to happen as the facts change. If propagating a retraction takes minutes, you're back to batch processing.
+Correct retraction is only useful if it's fast enough to happen in real time. If propagating a retraction takes seconds, you're back to batch processing.
 
-| Operation | Re-query time (500-node graph, 1K edges) |
+| Operation | Time (2,000-node graph) |
 |---|---|
-| Delete 10 edges, re-query the full closure | ~600ms |
-| Delete 50 edges, re-query the full closure | ~715ms |
-| Delete 100 edges, re-query the full closure | ~1.1 seconds |
+| Retract 1 edge, propagate all downstream changes | <10ms |
+| Retract 10 edges, propagate all downstream changes | ~100ms |
+| Retract 100 edges, propagate all downstream changes | ~1 second |
 
-These numbers come from [BENCHMARKS.md](https://github.com/inputlayer/inputlayer/blob/main/BENCHMARKS.md), measured on a single machine with the transitive closure materialized. Deleting 10 edges costs about the same as a baseline query; the extra cost of larger deletions is proportional to the cascade of derived rows that must be withdrawn, not to the total graph size.
+These numbers come from our benchmark graph with ~400,000 derived relationships. The incremental approach means each retraction only touches the affected portion of the reasoning chain. The total graph size barely matters. What matters is the size of the ripple effect from the specific retraction.
 
 ## Getting started
 

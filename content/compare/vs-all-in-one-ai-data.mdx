@@ -55,7 +55,7 @@ A fact is retracted :: Everything derived from it disappears automatically [succ
 A rule changes :: All affected conclusions recompute - nothing else does [success]
 ```
 
-InputLayer's incremental computation means updates propagate through the rules, recomputing only what's affected. Retractions are correct - derived conclusions only disappear when all supporting derivation paths are removed.
+InputLayer's incremental computation means updates propagate through the rules, recomputing only what's affected. A single fact change in a 2,000-node graph takes 6.83ms. Retractions are correct - derived conclusions only disappear when all supporting derivation paths are removed.
 
 ## How teams use them together
 

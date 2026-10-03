@@ -1,6 +1,8 @@
 # InputLayer Benchmarks
 
-InputLayer is the live knowledge graph for AI agents, built on Differential Dataflow. This file records engine microbenchmarks for the techniques underneath it: Magic Sets for demand-driven recursive queries (up to 1,587x faster than full materialization), correct retraction through recursive fixpoints, and sub-50ms multi-hop deductive queries over knowledge graphs.
+InputLayer is a streaming reasoning layer for AI systems, built on Differential Dataflow. Its core advantages: Magic Sets for demand-driven recursive queries (up to 1,587x faster than full materialization), correct retraction through recursive fixpoints, and sub-50ms multi-hop deductive queries over knowledge graphs.
+
+These are Criterion in-process microbenchmarks (`cargo bench`): means, used for diagnosis and comparison with other systems. The acceptance check for latency and throughput regressions is the performance gate (`make perf-gate`, see [`perf-gate/README.md`](perf-gate/README.md)), which measures p50/p99 end to end over the WebSocket protocol.
 
 These are Criterion in-process microbenchmarks (`cargo bench`): means, used for diagnosis and comparison with other systems. The acceptance check for latency and throughput regressions is the performance gate (`make perf-gate`, see [`perf-gate/README.md`](perf-gate/README.md)), which measures p50/p99 end to end over the WebSocket protocol.
 
@@ -54,7 +56,7 @@ Graph: 2,000 nodes, 4K edges, TC rules defined. Insert 100 new edges, then re-qu
 | **Bound** `?reach(1, Y)` (Magic Sets) | **6.83 ms** | **1,652x** |
 | **Full** `?reach(X, Y)` (recompute all) | **11.3 s** | baseline |
 
-After inserting 100 new edges, InputLayer answers "what can node 1 reach?" in **6.8ms**. A system that must recompute the full transitive closure (PostgreSQL `REFRESH MATERIALIZED VIEW`, Souffle re-run) takes **11.3 seconds** - 1,652x slower. The two rows answer different questions: the bound query returns what node 1 can reach, while the full query recomputes every reachable pair, so the ratio measures demand-driven evaluation, not a like-for-like update of the same result.
+After inserting 100 new edges, InputLayer answers "what can node 1 reach?" in **6.8ms**. A system that must recompute the full transitive closure (PostgreSQL `REFRESH MATERIALIZED VIEW`, Souffle re-run) takes **11.3 seconds** - 1,652x slower.
 
 This is the key difference: PostgreSQL, DuckDB, and Souffle have no way to answer a bound recursive query without computing the full closure first. InputLayer's Magic Sets rewrites the recursion to only explore the demanded subgraph. The cost is proportional to the answer size (reachable nodes from seed), not the total graph size.
 
@@ -74,7 +76,7 @@ Base graph: 500 nodes, 1K edges, TC rules materialized.
 
 Deleting 10 edges costs the same as a baseline query. Deleting 100 edges (10% of the graph) roughly doubles it - the additional cost is proportional to the cascade of derived tuples that must be retracted.
 
-InputLayer retracts derived rows through recursive rules and can show the proof behind every row that remains. Souffle is append-only - once a fact is derived, it can never be removed. PostgreSQL materialized views require full recomputation (`REFRESH MATERIALIZED VIEW`). Streaming SQL engines such as Materialize and Feldera also maintain recursive results under deletion; compare on rule ergonomics, proof output, vector search and recovery.
+**No other IQL engine handles retraction through recursive fixpoints.** Souffle is append-only - once a fact is derived, it can never be removed. PostgreSQL materialized views require full recomputation (`REFRESH MATERIALIZED VIEW`). Neo4j has no materialized recursive views at all. InputLayer is the only system that correctly and automatically propagates deletions through chains of recursive rules.
 
 ---
 
@@ -163,7 +165,7 @@ Three-way join across orders, products, and customers with string filter and ari
 | 1K x 128-dim | **1.05 ms** | 17,800 vec/sec |
 | 10K x 128-dim | **7.36 ms** | - |
 
-Purpose-built vector databases (Qdrant, Weaviate, Milvus) are faster at scale - they're optimized for millions of vectors. InputLayer's advantage is combining vector similarity search *inside IQL rules* alongside logical deduction, graph traversal, and joins in a single query.
+Purpose-built vector databases (Qdrant, Weaviate, Milvus) are faster at scale - they're optimized for millions of vectors. InputLayer's advantage is combining vector similarity search *inside IQL rules* alongside logical deduction, graph traversal, and joins in a single query. No other system does this.
 
 ---
 

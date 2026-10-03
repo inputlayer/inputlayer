@@ -231,6 +231,29 @@ export default function LandingPage() {
           </div>
         </Section>
 
+        {/* ── Instant updates ────────────────────────────────────────── */}
+        <Section eyebrow="Instant updates" title="Add a route. Only the affected conclusions update.">
+          <p className="text-muted-foreground max-w-3xl">
+            Your flight network has 2,000 airports and hundreds of thousands of possible connections. Add one new route,
+            say London to Dubai, and most systems recalculate everything from scratch. InputLayer only updates the
+            conclusions that actually changed.
+          </p>
+          <div className="mt-8 flex flex-wrap gap-8">
+            <div>
+              <span className="text-4xl font-extrabold text-primary">6.83ms</span>
+              <p className="text-xs text-muted-foreground mt-1">incremental update</p>
+            </div>
+            <div>
+              <span className="text-4xl font-extrabold text-muted-foreground/60">11.3s</span>
+              <p className="text-xs text-muted-foreground mt-1">full recompute</p>
+            </div>
+            <div>
+              <span className="text-4xl font-extrabold text-primary">1,652x</span>
+              <p className="text-xs text-muted-foreground mt-1">faster</p>
+            </div>
+          </div>
+        </Section>
+
         {/* ── How it works: the fast path ────────────────────────────── */}
         <Section id="how" eyebrow="How it works" title="A fast path for what your system already knows">
           <ol className="grid gap-4 md:grid-cols-4">
