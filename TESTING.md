@@ -119,10 +119,26 @@ and the next delta is relative to the last complete result.
 Defects tracked by the reactive plan run as **expected failures**
 (`tests/e2e_reactive/known_defects.rs`): out-of-order and restart-cursor
 notification delivery (W04), and an oversized delta that advances the
-subscription without delivery (W05). Each
-asserts the correct contract; its own violation passes as `XFAIL`, any other
-violation fails, and a holding contract fails as `XPASS` so the marker is
-removed and the scenario becomes required when the plan item lands.
+subscription without delivery (W05). Each asserts the correct contract; its
+own violation passes as `XFAIL`, any other violation fails, and a holding
+contract fails as `XPASS` so the marker is removed and the scenario becomes
+required when the plan item lands.
+
+Not yet covered by this pipeline (each is added when the work that enables it
+lands):
+
+- Public Python and JavaScript SDK agents. Agents use the testkit's raw `/ws`
+  client until the SDKs have a subscribe API; cross-SDK conformance comes with
+  R3.
+- Pending calls interleaved with pushes on one connection, snapshot/write
+  races, and slow consumers. The perf gate's `interference` fixture measures
+  slow-consumer latency, not correctness.
+- Credential revocation. It is covered over a real `/ws` connection by
+  `tests/credential_revocation_tests.rs`, not here.
+- Gateway finding additions, resolutions and authoritative reset.
+- Running the same histories against recompute and persistent-dataflow modes
+  (R4). Until then, the differential oracle (`make oracle-test`) compares
+  recompute and subscription maintenance against a naive reference.
 
 Every writer->agent delivery is recorded as a raw sample (write sent, write
 acknowledged, delta arrived) in `target/e2e-reactive/<scenario>.jsonl`, schema
