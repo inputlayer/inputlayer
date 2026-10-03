@@ -71,10 +71,11 @@ Hooks never run tests. Before each commit, run the tests that cover your
 change: `make test-fast` (or the touched crate's `cargo test -p ...`) and the
 affected snapshot specs (`make test-affected`).
 
-Before opening a PR, `make pre-pr` must pass. It runs formatting, clippy and
-the tests that apply (workspace tests plus the snapshot categories affected
-since your branch left `main`) in parallel, then the performance gate. Attach
-the gate's report (`target/perf-gate/latest/report.md`) to the PR:
+Before every push to a PR, `make pre-pr` must pass. It runs formatting,
+clippy and the tests that apply to your changes since the branch left `main`
+in parallel: the workspace tests when a Rust input changed, plus the affected
+snapshot categories. Then it runs the performance gate. Attach the gate's
+report (`target/perf-gate/latest/report.md`) to the PR:
 
 ```bash
 make pre-pr                         # fast checks in parallel, then make perf-gate

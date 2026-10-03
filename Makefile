@@ -521,17 +521,23 @@ lint:
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
 	cargo clippy --all-features --test e2e_reactive -- -D warnings
 
-# Pre-PR gate: must pass before opening a PR. Runs the fast checks in
-# parallel - formatting, clippy, and the tests that apply (workspace unit and
-# integration tests plus the snapshot categories affected since PRE_PR_BASE) -
-# then the performance gate against the approved baseline.
+# Pre-PR gate: must pass before every push to a PR. Runs the fast checks in
+# parallel - formatting, clippy, and the tests that apply to the changes since
+# PRE_PR_BASE (workspace unit and integration tests when a Rust input changed,
+# the same inputs the CI fast gate filters on, plus the affected snapshot
+# categories) - then the performance gate against the approved baseline.
 PRE_PR_BASE ?= $(shell git merge-base HEAD origin/main 2>/dev/null || echo HEAD)
+PRE_PR_RUST_INPUTS := src tests benches examples gateway ontology-client testkit docs/spec Cargo.toml '*/Cargo.toml' config.toml clippy.toml Makefile
 pre-pr:
 	$(MAKE) --no-print-directory -j3 --output-sync=target fmt-check lint pre-pr-tests
 	$(MAKE) --no-print-directory perf-gate
 
 pre-pr-tests:
-	cargo test --workspace --all-features
+	@if git diff --quiet $(PRE_PR_BASE) -- $(PRE_PR_RUST_INPUTS); then \
+		echo "No Rust inputs changed since $(PRE_PR_BASE): skipping workspace tests."; \
+	else \
+		cargo test --workspace --all-features; \
+	fi
 	./scripts/test-affected.sh $(PRE_PR_BASE)
 
 # Performance gate: this tree's server vs the approved baseline, same host.

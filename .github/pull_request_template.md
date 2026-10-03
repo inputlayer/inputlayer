@@ -8,7 +8,7 @@
 
 ## Pre-PR gate
 
-<!-- `make pre-pr` must pass before opening the PR (CONTRIBUTING). It runs the
+<!-- `make pre-pr` must pass before every push to this PR (CONTRIBUTING). It runs the
      fast checks in parallel, then the performance gate (perf-gate/README.md). -->
 
 - `make pre-pr`: <!-- pass / which step failed -->
