@@ -5,10 +5,12 @@
 //! schema - never open-domain) and `Completer` produces chat completions.
 //! Provider clients are named for their provider - `AnthropicClient` speaks
 //! the Anthropic Messages API (structured outputs for extraction, plain
-//! messages for completion). A future provider (OpenAI, Qwen, ...)
-//! implements the same traits and gets selected by configuration; tracked
-//! in #87. Note extraction requires provider support for schema-forced
-//! JSON output - completion and extraction support may not come as a pair.
+//! messages for completion); `OpenAiCompatibleClient`
+//! ([`crate::openai_compatible`]) speaks the OpenAI chat completions shape
+//! that local model servers expose. Which one serves the gateway is chosen
+//! once at startup by [`crate::provider`]. Note extraction requires
+//! provider support for schema-forced JSON output - completion and
+//! extraction support may not come as a pair.
 //!
 //! Everything is behind traits so the pipeline is testable without a model
 //! key.
@@ -31,6 +33,7 @@ impl std::error::Error for UpstreamStatus {}
 
 /// A structured extraction plus the provider's token accounting (cache
 /// hits show up here: `cache_read_input_tokens`).
+#[derive(Debug)]
 pub struct Extraction {
     pub output: Value,
     pub usage: Value,
@@ -61,6 +64,7 @@ pub struct ChatParams {
     pub stop: Vec<String>,
 }
 
+#[derive(Debug)]
 pub struct ChatCompletion {
     pub text: String,
     /// OpenAI-style finish reason ("stop" or "length").
@@ -82,16 +86,21 @@ pub struct AnthropicClient {
     base_url: String,
 }
 
+/// The HTTP client every provider uses: model calls are slow, but a wedged
+/// upstream must still fail the request rather than hang it.
+pub(crate) fn provider_http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
 impl AnthropicClient {
-    pub fn new(api_key: String) -> Self {
-        let base_url = std::env::var("ANTHROPIC_BASE_URL")
-            .unwrap_or_else(|_| "https://api.anthropic.com".to_string());
-        let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+    /// `base_url` is the API root without `/v1` (validated by
+    /// [`crate::provider`]).
+    pub fn new(api_key: String, base_url: String) -> Self {
         Self {
-            http,
+            http: provider_http_client(),
             api_key,
             base_url,
         }

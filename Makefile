@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint perf-gate perf-gate-check bench-genbi test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test python-test-live python-test-examples vc-gate js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint perf-gate perf-gate-check secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test python-test-live python-test-examples vc-gate js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -11,7 +11,7 @@ all: ci
 test-fast: check unit-test
 	@echo "Fast tests complete."
 
-# Pre-commit gate - unit + integration + snapshot E2E (~60-90s)
+# Broad local gate - unit + integration + snapshot E2E (~60-90s)
 test: check unit-test e2e-test
 	@echo "All tests complete."
 
@@ -541,6 +541,36 @@ perf-gate-check:
 # Check compilation + formatting + lints (quality gate)
 check: fmt-check lint
 	cargo check --workspace --all-features
+
+# Secret scan of every commit reachable from HEAD (CI runs this too).
+secret-check:
+	./scripts/secret-scan.sh
+
+# Pinned gitleaks into target/tools/ (what secret-check and CI use)
+install-gitleaks:
+	./scripts/install-gitleaks.sh
+
+# Optional git hooks: fmt + secret scan on commit, clippy on push.
+# Refuses to replace a core.hooksPath you already use.
+install-hooks:
+	@CURRENT=$$(git config --get core.hooksPath || true); \
+	if [ -n "$$CURRENT" ] && [ "$$CURRENT" != .githooks ]; then \
+		echo "core.hooksPath is already '$$CURRENT'; call .githooks/pre-commit and .githooks/pre-push from your hooks instead" >&2; \
+		exit 1; \
+	fi
+	git config core.hooksPath .githooks
+	@if [ ! -x target/tools/gitleaks ] && ! command -v gitleaks >/dev/null 2>&1; then \
+		echo "Hooks installed. The secret scan needs gitleaks: run 'make install-gitleaks'"; \
+	else \
+		echo "Hooks installed."; \
+	fi
+
+uninstall-hooks:
+	git config --unset core.hooksPath
+
+# Prove the hooks reject misformatted Rust and staged credentials
+hooks-test:
+	./scripts/hooks-selftest.sh
 
 # Fix formatting and lint issues automatically where possible
 fix: fmt

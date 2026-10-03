@@ -204,7 +204,7 @@ Source-to-category mapping:
 | Target | Description | When to Use |
 |--------|-------------|-------------|
 | `make test-fast` | Unit tests only | Quick feedback during coding |
-| `make test` | Unit + snapshot | Pre-commit check |
+| `make test` | Unit + snapshot | Broad local check before a PR |
 | `make test-all` | Build + unit + snapshot + check | Full verification before merge |
 | `make test-affected` | Snapshot tests for changed files only | Fast E2E feedback |
 | `make perf-gate` | Paired latency/throughput gate over `/ws` vs the approved baseline | Every implementation PR (see `perf-gate/README.md`) |
@@ -219,6 +219,9 @@ Source-to-category mapping:
 | `make check` | Formatting + clippy + doc-check + cargo check |
 | `make fmt` | Auto-format code |
 | `make lint` | Run clippy lints |
+| `make secret-check` | gitleaks over every commit reachable from HEAD (`.gitleaks.toml`) |
+| `make install-hooks` | Optional hooks: fmt + staged secret scan on commit, clippy on push |
+| `make hooks-test` | Prove the hooks reject misformatted Rust and staged credentials |
 | `make fix` | Auto-fix formatting and lint issues |
 
 ### Build

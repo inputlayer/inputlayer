@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Optional pre-commit hook (`make install-hooks`): formatting and secret
+# scanning only, so a commit stays a few seconds. Clippy runs in the
+# pre-push hook; tests stay a deliberate step (see CONTRIBUTING).
+# Bypass once with `git commit --no-verify`.
+set -euo pipefail
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+if git diff --cached --name-only --diff-filter=ACMR | grep -q '\.rs$'; then
+    echo "pre-commit: make fmt-check"
+    make --no-print-directory fmt-check || {
+        echo "pre-commit: formatting failed; run 'make fmt' and stage the result" >&2
+        exit 1
+    }
+fi
+
+echo "pre-commit: scripts/secret-scan.sh --staged"
+scripts/secret-scan.sh --staged

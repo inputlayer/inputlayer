@@ -373,6 +373,7 @@ async fn incremental_turns_ledger_retraction_and_restart() {
     let first = run_turn(
         &pool,
         &extractor,
+        &loaded.extraction_model,
         &loaded,
         kg,
         conv,
@@ -396,6 +397,7 @@ async fn incremental_turns_ledger_retraction_and_restart() {
     let second = run_turn(
         &pool,
         &extractor,
+        &loaded.extraction_model,
         &loaded,
         kg,
         conv,
@@ -426,6 +428,7 @@ async fn incremental_turns_ledger_retraction_and_restart() {
     let third = run_turn(
         &pool,
         &extractor,
+        &loaded.extraction_model,
         &loaded,
         kg,
         conv,
@@ -517,6 +520,7 @@ async fn unstorable_text_drops_only_its_row() {
     let turn = run_turn(
         &pool,
         &extractor,
+        &loaded.extraction_model,
         &loaded,
         kg,
         conv,
@@ -551,6 +555,7 @@ async fn unstorable_text_drops_only_its_row() {
     run_turn(
         &pool,
         &extractor,
+        &loaded.extraction_model,
         &loaded,
         kg,
         conv,

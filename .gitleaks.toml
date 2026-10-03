@@ -1,0 +1,18 @@
+# Secret scanning rules for scripts/secret-scan.sh (pre-commit hook, CI).
+# gitleaks' default rules apply; the allowlist below names only the
+# placeholder credentials our docs and examples print verbatim. Add an
+# exact placeholder here rather than allowlisting a path or a rule.
+title = "InputLayer secret scan"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Documentation placeholders, not credentials"
+regexTarget = "secret"
+regexes = [
+    '''^il_key_abc123(\.\.\.)?$''',
+    '''^your-api-key$''',
+    '''^gw-secret$''',
+    '''^epson-202-black$''',
+]

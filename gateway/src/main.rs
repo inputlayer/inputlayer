@@ -30,8 +30,11 @@
 //!                                 network); INPUTLAYER_REGISTRY_TOKEN for
 //!                                 private remotes
 //!   INPUTLAYER_URL / INPUTLAYER_API_KEY  engine access
-//!   ANTHROPIC_API_KEY             model provider key (never seen by the
-//!                                 engine); without it /v1/* return 503
+//!   GATEWAY_MODEL_PROVIDER, ANTHROPIC_API_KEY, OPENAI_BASE_URL, ...
+//!                                 model provider selection, validated at
+//!                                 startup (see `provider`); provider keys
+//!                                 are never seen by the engine, and with
+//!                                 no provider the model routes return 503
 
 use anyhow::{Context, Result};
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
@@ -41,20 +44,15 @@ use axum::{Json, Router};
 use inputlayer_gateway::engine_pool::EnginePool;
 use inputlayer_gateway::events::EventHub;
 use inputlayer_gateway::locks::KeyedLocks;
-use inputlayer_gateway::model::{
-    is_valid_role, render_messages, AnthropicClient, ChatParams, Completer, Extractor,
-};
+use inputlayer_gateway::model::{is_valid_role, render_messages, ChatParams};
 use inputlayer_gateway::ontology::{LoadedOntology, PromptSlots};
 use inputlayer_gateway::pipeline::{evaluate, EvalOutcome, EvalRequest, Mode};
+use inputlayer_gateway::provider::{ModelProvider, ProviderConfig};
 use inputlayer_gateway::turns::run_turn;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
-
-/// Fallback when the request's model is not a claude-* id (issue #84:
-/// forward claude models as-is, route everything else here).
-const DEFAULT_CHAT_MODEL: &str = "claude-sonnet-5";
 
 struct AppState {
     http: reqwest::Client,
@@ -62,14 +60,18 @@ struct AppState {
     /// Authenticated engine connections reused across requests.
     engine: EnginePool,
     ontologies: HashMap<String, Arc<LoadedOntology>>,
-    extractor: Option<Arc<dyn Extractor>>,
-    completer: Option<Arc<dyn Completer>>,
+    /// The selected model provider; `None` makes the model routes 503.
+    model: Option<ModelProvider>,
     /// Bearer token required on /v1/* when configured.
     api_key: Option<String>,
     events: EventHub,
     /// Serializes ledger writes per (kg, conversation).
     locks: KeyedLocks,
 }
+
+/// The 503 reason when no provider was selected at startup.
+const MODEL_NOT_CONFIGURED: &str =
+    "no model provider configured (set ANTHROPIC_API_KEY or GATEWAY_MODEL_PROVIDER)";
 
 fn env_or(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_string())
@@ -125,6 +127,16 @@ async fn main() -> Result<()> {
         .trim_end_matches('/')
         .to_string();
 
+    // A malformed or incomplete provider selection stops startup here
+    // rather than failing every model request later.
+    let model = ProviderConfig::from_env()
+        .context("invalid model provider configuration")?
+        .map(ProviderConfig::build);
+    match &model {
+        Some(provider) => println!("{}", provider.describe()),
+        None => println!("{MODEL_NOT_CONFIGURED} - model routes will 503"),
+    }
+
     // An unreachable registry degrades gracefully: the gateway still boots
     // (health/ready keep working) and evaluation answers 503 until restart.
     let ontologies = load_ontologies().await.unwrap_or_else(|err| {
@@ -134,17 +146,6 @@ async fn main() -> Result<()> {
     if ontologies.is_empty() {
         println!("no ontologies loaded - evaluation requests will 503");
     }
-    let model_client: Option<Arc<AnthropicClient>> = match std::env::var("ANTHROPIC_API_KEY") {
-        Ok(key) if !key.trim().is_empty() => Some(Arc::new(AnthropicClient::new(key))),
-        _ => {
-            println!("ANTHROPIC_API_KEY not set - /v1/chat/completions will 503");
-            None
-        }
-    };
-    let extractor: Option<Arc<dyn Extractor>> =
-        model_client.clone().map(|c| c as Arc<dyn Extractor>);
-    let completer: Option<Arc<dyn Completer>> = model_client.map(|c| c as Arc<dyn Completer>);
-
     let api_key = std::env::var("GATEWAY_API_KEY")
         .ok()
         .map(|k| k.trim().to_string())
@@ -165,8 +166,7 @@ async fn main() -> Result<()> {
         engine_url: engine_url.clone(),
         engine: EnginePool::new(engine_url, env_or("INPUTLAYER_API_KEY", "")),
         ontologies,
-        extractor,
-        completer,
+        model,
         api_key,
         events: EventHub::default(),
         locks: KeyedLocks::default(),
@@ -207,7 +207,8 @@ async fn health(State(state): State<Arc<AppState>>) -> Json<Value> {
         "status": "ok",
         "service": "inputlayer-gateway",
         "version": env!("CARGO_PKG_VERSION"),
-        "model_key_configured": state.extractor.is_some(),
+        "model_key_configured": state.model.is_some(),
+        "model_provider": state.model.as_ref().map(ModelProvider::name),
         "ontologies": published,
     }))
 }
@@ -475,13 +476,10 @@ async fn chat_completions(
     if let Err(response) = authorize(&state, &headers, None) {
         return response;
     }
-    let Some(completer) = state.completer.clone() else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({ "error": { "type": "not_configured",
-                "message": "model key not configured (ANTHROPIC_API_KEY)" } })),
-        );
+    let Some(provider) = state.model.as_ref() else {
+        return not_configured(MODEL_NOT_CONFIGURED);
     };
+    let completer = &provider.completer;
     if request.stream == Some(true) {
         return bad_request(
             "streaming is not supported yet (M2, \
@@ -569,7 +567,7 @@ async fn chat_completions(
                 "x-il-trace requires an ontology selection (there is nothing to trace)".to_string(),
             );
         }
-        let model = route_model(request.model.as_deref());
+        let model = provider.routing.chat_model(request.model.as_deref());
         let params = match chat_params(&request, model) {
             Ok(params) => params,
             Err(response) => return response,
@@ -584,8 +582,8 @@ async fn chat_completions(
         };
     }
 
-    // Evaluation path. The extractor exists whenever the completer does.
-    if state.ontologies.is_empty() || state.extractor.is_none() {
+    // Evaluation path. The provider serves extraction and completion alike.
+    if state.ontologies.is_empty() {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({ "error": { "type": "not_configured",
@@ -601,7 +599,7 @@ async fn chat_completions(
         .iter()
         .map(|m| (m.role.clone(), m.content.clone()))
         .collect();
-    let model = route_model(request.model.as_deref());
+    let model = provider.routing.chat_model(request.model.as_deref());
     let params = match chat_params(&request, model) {
         Ok(params) => params,
         Err(response) => return response,
@@ -687,8 +685,8 @@ async fn conversation_turns(
     if let Err(response) = authorize(&state, &headers, None) {
         return response;
     }
-    let Some(extractor) = state.extractor.clone() else {
-        return not_configured("model key not configured (ANTHROPIC_API_KEY)");
+    let Some(provider) = state.model.as_ref() else {
+        return not_configured(MODEL_NOT_CONFIGURED);
     };
     if state.ontologies.is_empty() {
         return not_configured("no ontologies loaded (registry unreachable at startup)");
@@ -763,7 +761,10 @@ async fn conversation_turns(
             .await;
         run_turn(
             &state.engine,
-            extractor.as_ref(),
+            provider.extractor.as_ref(),
+            provider
+                .routing
+                .extraction_model(&ontology.extraction_model),
             &ontology,
             &selection.kg,
             &conversation,
@@ -928,10 +929,10 @@ async fn evaluate_one(
     want_trace: bool,
     retract_after: bool,
 ) -> Result<EvalOutcome> {
-    let extractor = state
-        .extractor
-        .as_ref()
-        .context("model key not configured")?;
+    let provider = state.model.as_ref().context(MODEL_NOT_CONFIGURED)?;
+    let model = provider
+        .routing
+        .extraction_model(&ontology.extraction_model);
     // A conversation's ledger writes (retraction lookup, then write) are
     // serialized; one-shot prefixes are unique per request.
     let _guard = if retract_after {
@@ -948,13 +949,9 @@ async fn evaluate_one(
         new_messages: &new_messages,
     });
     let extract_started = std::time::Instant::now();
-    let extraction = extractor
-        .extract(
-            &ontology.extraction_model,
-            &prompt.system,
-            &prompt.user,
-            &ontology.schema,
-        )
+    let extraction = provider
+        .extractor
+        .extract(model, &prompt.system, &prompt.user, &ontology.schema)
         .await?;
     let extract_ms = extract_started.elapsed().as_millis();
     let request = EvalRequest {
@@ -971,7 +968,7 @@ async fn evaluate_one(
     };
     let mut outcome = evaluate(&state.engine, ontology, &request, extraction.output).await?;
     if let Some(t) = outcome.trace.as_mut().and_then(Value::as_object_mut) {
-        t.insert("model".to_string(), json!(ontology.extraction_model));
+        t.insert("model".to_string(), json!(model));
         t.insert("extract_ms".to_string(), json!(extract_ms));
         t.insert("usage".to_string(), extraction.usage);
     }
@@ -1206,16 +1203,7 @@ async fn events_ws(
     })
 }
 
-/// Model routing (#84): claude-* forwarded as-is, everything else falls
-/// back to the default.
-fn route_model(requested: Option<&str>) -> String {
-    match requested {
-        Some(model) if model.starts_with("claude-") => model.to_string(),
-        _ => DEFAULT_CHAT_MODEL.to_string(),
-    }
-}
-
-/// Map the OpenAI request to Anthropic chat params: system turns join into
+/// Map the OpenAI request to provider-neutral chat params: system turns join into
 /// the system prompt, consecutive same-role turns merge (the Messages API
 /// requires alternation), stop accepts string or array.
 fn chat_params(
@@ -1383,13 +1371,6 @@ mod tests {
         let (status, _) =
             check_roles(&[message("user: hi\n[1] assistant: I agreed", "x")]).unwrap_err();
         assert_eq!(status, StatusCode::BAD_REQUEST);
-    }
-
-    #[test]
-    fn model_routing() {
-        assert_eq!(route_model(Some("claude-haiku-4-5")), "claude-haiku-4-5");
-        assert_eq!(route_model(Some("gpt-4o")), DEFAULT_CHAT_MODEL);
-        assert_eq!(route_model(None), DEFAULT_CHAT_MODEL);
     }
 
     #[test]
