@@ -226,17 +226,20 @@ For an expired key the notice is `credential_expired`, with the message `Credent
 
 `.user role` takes effect on the next request of every live session of that user without closing them. REST requests check the API key on every request.
 
-If a password or role replacement deletes the old user but fails to insert its
-replacement, all of that user's live credentials are revoked and the user's
-stored API keys and per-KG grants are deleted. Creating a user also removes any
-API keys or grants left under that username before publishing credentials, so
-a recreated user starts with no API keys and no grants. This also applies to
-admin bootstrap after a restart: old keys cannot bind to the recreated account.
-Bootstrap issues its API key only once per data directory: it records each key
-it issues in the internal auth graph and does not issue another once one is
-recorded, even after that key is revoked. A key is generated, saved to
-`credentials.toml` or printed only when bootstrap will issue it. For recovery,
-log in with the bootstrap password and create a new key instead.
+A password or role replacement commits the old user row's removal and its
+replacement as one write: if it fails, nothing changes, and the user's row, API
+keys and live sessions stay as they were. Creating a user removes any API keys
+or grants left under that username before publishing credentials, so a
+recreated user starts with no API keys and no grants. Admin bootstrap creates
+the admin the same way, so old keys cannot bind to it.
+
+Bootstrap issues its API key only once per data directory. It records the
+issue in the internal auth graph and never issues another key once that record
+exists, even after the key is revoked. A data directory that already has users
+or a bootstrap key when the server starts gets the record then, so upgrading
+never re-issues a key. The key is printed only after it is stored, and is
+removed from `credentials.toml` if storing it fails. For recovery, log in with
+the bootstrap password and create a new key instead.
 
 You can also set an API key for the CLI client via environment variable:
 

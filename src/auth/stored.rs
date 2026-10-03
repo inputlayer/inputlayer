@@ -23,8 +23,10 @@ pub(crate) const API_KEY_TIMES: &str = "api_key_times";
 pub(crate) const CREATED_AT: &str = "created_at";
 pub(crate) const EXPIRES_AT: &str = "expires_at";
 pub(crate) const LAST_USED_AT: &str = "last_used_at";
-/// `bootstrap_keys(key_hash)`: one row per API key admin bootstrap issued.
-/// It outlives the key, so bootstrap never issues a key a second time.
+/// `bootstrap_keys(label)`: a row once admin bootstrap has issued its API
+/// key, recorded at startup for a data directory that has users or a
+/// bootstrap key but predates this record. It outlives the key, so bootstrap
+/// never issues a key a second time.
 pub(crate) const BOOTSTRAP_KEYS: &str = "bootstrap_keys";
 
 /// Every user and API key in `_internal`'s relations.

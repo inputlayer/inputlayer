@@ -109,25 +109,22 @@ enum Login<'a> {
     Password(&'a str, &'a str),
 }
 
-/// A failed replacement must not let a persisted key attach to a newly
-/// published identity, including the sole admin recreated by bootstrap.
+/// A failed password or role replacement commits nothing: the user's row,
+/// keys and live sessions are unchanged, including across a restart.
 #[tokio::test]
-async fn failed_replacement_keys_stay_revoked_over_ws_after_restart() {
+async fn failed_replacement_leaves_credentials_intact_over_ws() {
     use inputlayer::schema::SchemaType;
     use inputlayer::{ColumnSchema, RelationSchema};
 
     for username in ["bob", "admin"] {
         for operation in ["password", "role"] {
             let mut server = start_server().await;
-            if username == "admin" {
-                server.handler.handle_user_drop("bob").unwrap();
-            }
             let key = server.key("old-key", username);
             let mut victim = Client::connect(&server, Login::Key(&key)).await;
             let mut admin =
                 Client::connect(&server, Login::Password("admin", ADMIN_PASSWORD)).await;
-            // Fault setup uses the real storage schema validator: deletion
-            // succeeds, but the replacement's three-column insert fails.
+            // Fault setup uses the real storage schema validator: the
+            // replacement's three-column insert fails.
             server
                 .handler
                 .get_storage()
@@ -142,25 +139,15 @@ async fn failed_replacement_keys_stay_revoked_over_ws_after_restart() {
             } else {
                 "admin"
             };
-            admin
-                .send(json!({
-                    "type": "execute",
-                    "program": format!(".user {operation} {username} {argument}")
-                }))
+            let response = admin
+                .execute(&format!(".user {operation} {username} {argument}"))
                 .await;
-            if username == "admin" {
-                assert_revoked(&admin.drain().await);
-            } else {
-                let response = admin.recv().await.unwrap();
-                assert_eq!(response["type"], "error", "{response}");
-                assert!(response["message"]
-                    .as_str()
-                    .unwrap()
-                    .contains("Insert rejected"));
-            }
-            let frames = victim.drain().await;
-            assert_revoked(&frames);
-            println!("{username} {operation}: active key session received {frames:?}");
+            assert_eq!(response["type"], "error", "{response}");
+            assert!(response["message"]
+                .as_str()
+                .unwrap()
+                .contains("Insert rejected"));
+            assert_eq!(victim.execute("?d(X)").await["type"], "result");
             drop(victim);
             drop(admin);
             server
@@ -202,22 +189,9 @@ async fn failed_replacement_keys_stay_revoked_over_ws_after_restart() {
                 upkeep,
                 tmp: temp,
             };
-            let mut admin =
-                Client::connect(&restarted, Login::Password("admin", ADMIN_PASSWORD)).await;
-            if username == "bob" {
-                let result = admin.execute(".user create bob new-pw editor").await;
-                assert_eq!(result["type"], "result", "{result}");
-                let grant = admin
-                    .execute(&format!(".kg acl grant {KG} bob viewer"))
-                    .await;
-                assert_eq!(grant["type"], "result", "{grant}");
-            }
-            let (_, response) = Client::try_connect(&restarted, KG, Login::Key(&key)).await;
-            assert_eq!(response["type"], "auth_error", "{response}");
-            println!("{username} {operation}: old key after restart and recreation: {response}");
-            let new_key = restarted.key("old-key", username);
-            let mut fresh = Client::connect(&restarted, Login::Key(&new_key)).await;
-            assert_eq!(fresh.execute("?d(X)").await["type"], "result");
+            let mut old = Client::connect(&restarted, Login::Key(&key)).await;
+            assert_eq!(old.execute("?d(X)").await["type"], "result");
+            Client::connect(&restarted, Login::Password("admin", ADMIN_PASSWORD)).await;
         }
     }
 }
