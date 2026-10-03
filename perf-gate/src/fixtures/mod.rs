@@ -2,6 +2,7 @@
 //! raw samples, and verifies every result it times.
 
 mod delta;
+mod first_delta;
 mod insert;
 mod interference;
 mod query;
@@ -34,18 +35,21 @@ pub enum Fixture {
     DeltaSingle,
     /// External writer to many agents subscribed to the same query.
     DeltaFanout,
+    /// First write after subscribing against a warm one, per fresh agent.
+    DeltaFirst,
     /// Writer to a probe agent, beside a long request and a slow consumer.
     Interference,
 }
 
 impl Fixture {
-    pub const ALL: [Fixture; 7] = [
+    pub const ALL: [Fixture; 8] = [
         Fixture::CheapQuery,
         Fixture::BoundQuery,
         Fixture::InsertSingle,
         Fixture::InsertBatch,
         Fixture::DeltaSingle,
         Fixture::DeltaFanout,
+        Fixture::DeltaFirst,
         Fixture::Interference,
     ];
 
@@ -57,6 +61,7 @@ impl Fixture {
             Fixture::InsertBatch => "insert_batch",
             Fixture::DeltaSingle => "delta_single",
             Fixture::DeltaFanout => "delta_fanout",
+            Fixture::DeltaFirst => "delta_first",
             Fixture::Interference => "interference",
         }
     }
@@ -77,6 +82,7 @@ impl Fixture {
             Fixture::InsertBatch => insert::batch(server, &profile.insert).await,
             Fixture::DeltaSingle => delta::run(server, &profile.delta_single).await,
             Fixture::DeltaFanout => delta::run(server, &profile.delta_fanout).await,
+            Fixture::DeltaFirst => first_delta::run(server, &profile.delta_first).await,
             Fixture::Interference => interference::run(server, &profile.interference).await,
         }?;
         if let Some(rss) = server.peak_rss_kb() {

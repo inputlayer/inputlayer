@@ -51,7 +51,8 @@ impl Probes {
         }
     }
 
-    fn mid(self, probe: usize) -> u64 {
+    /// The middle node of probe `probe`: `edge(1, mid)` adds `two_hop(1, mid + 1)`.
+    pub fn mid(self, probe: usize) -> u64 {
         self.first + 2 * probe as u64
     }
 
@@ -92,14 +93,20 @@ pub struct DeltaKg {
     snapshot_rows: usize,
 }
 
-/// Create and load the delta KG.
-pub async fn prepare(server: &RunningServer, params: &DeltaParams) -> Result<DeltaKg> {
-    let mut graph = Graph::random(params.nodes, params.edges, SEED);
+/// Create and load the delta KG: a random graph of `nodes` and `edges`, plus
+/// one probe edge pair for each of `probe_count` writes.
+pub async fn prepare(
+    server: &RunningServer,
+    nodes: u64,
+    edges: usize,
+    probe_count: usize,
+) -> Result<DeltaKg> {
+    let mut graph = Graph::random(nodes, edges, SEED);
     let probes = Probes {
-        first: params.nodes + 1,
-        writes: params.writes,
+        first: nodes + 1,
+        writes: probe_count,
     };
-    for probe in 0..params.writes {
+    for probe in 0..probe_count {
         graph.add(probes.mid(probe), probes.mid(probe) + 1);
     }
     let mut writer = create_kg(server).await?;
@@ -235,7 +242,7 @@ pub fn delivery_latencies(sent: &[Instant], agents: &[Vec<Instant>]) -> (Vec<u64
 
 /// `params.subscribers` agents on one query, one external writer.
 pub async fn run(server: &RunningServer, params: &DeltaParams) -> Result<Measurement> {
-    let mut kg = prepare(server, params).await?;
+    let mut kg = prepare(server, params.nodes, params.edges, params.writes).await?;
     let mut subscribe_us = Vec::with_capacity(params.subscribers);
     let mut agents = Vec::with_capacity(params.subscribers);
     for index in 0..params.subscribers {
