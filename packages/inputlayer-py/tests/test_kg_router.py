@@ -283,47 +283,32 @@ class TestKgRouterConnectionErrors:
         assert result == "good"
 
 
-class TestKgRouterErrorResponse:
-    async def test_error_response_is_skipped_not_matched(self) -> None:
-        """KG error responses (columns=['error']) must be skipped, not matched."""
+class TestKgRouterErrorColumn:
+    async def test_error_column_is_data(self) -> None:
+        """Engine failures raise QueryError; a relation named `error` is data."""
         kg = MagicMock()
         kg.execute = AsyncMock(
-            side_effect=[
-                # First branch returns an error response
-                ResultSet(columns=["error"], rows=[["unknown relation: broken"]]),
-                # Second branch returns real data
-                ResultSet(columns=["x"], rows=[["found"]]),
-            ]
+            return_value=ResultSet(columns=["error"], rows=[["disk full"]])
         )
 
-        router = kg_router(
-            branches={
-                "bad": "?broken(X)",
-                "good": "?works(X)",
-            },
-            default="fallback",
-        )
+        router = kg_router(branches={"alerts": "?error(E)"}, default="fallback")
 
-        result = await router({"kg": kg})
+        assert await router({"kg": kg}) == "alerts"
 
-        assert result == "good"
-        assert kg.execute.await_count == 2
+    async def test_all_query_errors_return_default(self) -> None:
+        """When every branch raises QueryError, default must be returned."""
+        from inputlayer.exceptions import QueryError
 
-    async def test_all_error_responses_return_default(self) -> None:
-        """When all branches return error responses, default must be returned."""
         kg = MagicMock()
-        kg.execute = AsyncMock(
-            return_value=ResultSet(columns=["error"], rows=[["some error"]])
-        )
+        kg.execute = AsyncMock(side_effect=QueryError("some error", code="not_found"))
 
         router = kg_router(
             branches={"a": "?x(X)", "b": "?y(X)"},
             default="safe",
         )
 
-        result = await router({"kg": kg})
-
-        assert result == "safe"
+        assert await router({"kg": kg}) == "safe"
+        assert kg.execute.await_count == 2
 
 
 class TestKgRouterEmptyQuery:

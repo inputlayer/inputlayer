@@ -2,6 +2,8 @@
  * Exception hierarchy for the InputLayer SDK.
  */
 
+import type { ErrorCode, ResultResponse, StatementError } from './protocol.js';
+
 export class InputLayerError extends Error {
   constructor(message: string) {
     super(message);
@@ -20,6 +22,52 @@ export class AuthenticationError extends InputLayerError {
   constructor(message: string) {
     super(message);
     this.name = 'AuthenticationError';
+  }
+}
+
+/**
+ * The engine rejected a program: it answered with an `error` frame.
+ *
+ * `code` says why (`validation`, `not_found`, `conflict`, `unsupported` or
+ * `internal`). It is undefined when the failure has no statement cause, such
+ * as an overloaded or shutting-down server or a result too large to send.
+ * `validationErrors` lists parse errors.
+ */
+export class QueryError extends InputLayerError {
+  readonly code?: ErrorCode;
+  readonly validationErrors: Array<Record<string, unknown>>;
+
+  constructor(
+    message: string,
+    opts?: { code?: ErrorCode; validationErrors?: Array<Record<string, unknown>> },
+  ) {
+    super(message);
+    this.name = 'QueryError';
+    this.code = opts?.code;
+    this.validationErrors = opts?.validationErrors ?? [];
+  }
+}
+
+/**
+ * Statements of a multi-statement program failed.
+ *
+ * The engine runs every statement of a program, so the statements not in
+ * `errors` took effect. `result` is the whole program's result. `code` is
+ * the first failure's code.
+ */
+export class StatementFailedError extends QueryError {
+  readonly errors: StatementError[];
+  readonly result: ResultResponse;
+
+  constructor(errors: StatementError[], result: ResultResponse) {
+    const first = errors[0];
+    super(
+      `${errors.length} statement(s) failed; statement ${first.index}: ${first.message}`,
+      { code: first.code },
+    );
+    this.name = 'StatementFailedError';
+    this.errors = errors;
+    this.result = result;
   }
 }
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from inputlayer.migrations.errors import MigrationError, check_engine_result
+from inputlayer.migrations.errors import MigrationError, execute_checked
 from inputlayer.migrations.loader import MigrationInfo
 from inputlayer.migrations.recorder import KGExecutor, MigrationRecorder
 
@@ -19,18 +19,14 @@ def apply_migration(kg: KGExecutor, migration: MigrationInfo) -> None:
     """
     for op in migration.operations:
         for cmd in op.forward_commands():
-            check_engine_result(
-                kg.execute(cmd), f"applying {migration.name} ({op.describe()})"
-            )
+            execute_checked(kg, cmd, f"applying {migration.name} ({op.describe()})")
 
 
 def revert_migration(kg: KGExecutor, migration: MigrationInfo) -> None:
     """Revert a single migration's operations in reverse order."""
     for op in reversed(migration.operations):
         for cmd in op.backward_commands():
-            check_engine_result(
-                kg.execute(cmd), f"reverting {migration.name} ({op.describe()})"
-            )
+            execute_checked(kg, cmd, f"reverting {migration.name} ({op.describe()})")
 
 
 def migrate(

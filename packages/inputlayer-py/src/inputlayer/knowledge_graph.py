@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
+import re
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -20,13 +21,14 @@ from inputlayer.compiler import (
     compile_rule,
     compile_schema,
 )
-from inputlayer.exceptions import QueryError
+from inputlayer.exceptions import InternalError, QueryError
 from inputlayer.index import HnswIndex
 from inputlayer.relation import Relation
 from inputlayer.result import ResultSet
 from inputlayer.session import Session
 
 if TYPE_CHECKING:
+    from inputlayer._protocol import ResultResponse
     from inputlayer.connection import Connection
     from inputlayer.derived import Derived
 
@@ -134,6 +136,8 @@ class IndexStats:
 
 @dataclass(frozen=True)
 class InsertResult:
+    """Facts the engine newly stored; duplicates of stored facts do not count."""
+
     count: int
 
 
@@ -262,64 +266,35 @@ class KnowledgeGraph:
         self._conn = connection
         self._session = Session(connection)
 
-    def _kg_preamble(self) -> str | None:
-        """Return a KG-switch command if the connection isn't on this KG, else None."""
-        if self._conn.current_kg == self._name:
-            return None
-        return f".kg use {self._name}"
-
-    async def _ensure_current(self) -> None:
-        """Make sure the connection is bound to this KG.
-
-        Used by operations that need the KG to exist but don't go through
-        ``_execute`` (rare). Most callers should use ``_execute`` which
-        handles KG switching atomically via ``execute_with_preamble``.
-        """
-        if self._conn.current_kg == self._name:
-            return
-        result = await self._conn.execute(f".kg use {self._name}")
-        if result.columns == ["error"]:
-            msg = result.rows[0][0] if result.rows else ""
-            if "not found" in msg.lower():
-                await self._conn.execute(f".kg create {self._name}")
-            else:
-                raise QueryError(msg, query=f".kg use {self._name}")
-
-    async def _execute(self, iql: str) -> Any:
+    async def _execute(self, iql: str) -> ResultResponse:
         """Execute a statement, switching to this KG first if needed.
 
         The KG switch and the statement are sent under a single lock hold
         on the Connection so that no other coroutine can interleave and
         change the active KG between the switch and the command.
 
-        If the KG doesn't exist yet, it is auto-created (the full
-        create+use+execute sequence runs under one lock hold).
+        Engine failures raise ``QueryError`` naming *iql*.
         """
-        preamble = self._kg_preamble()
-        if preamble is None:
-            # Already on the right KG - single command, no preamble needed.
-            return await self._conn.execute(iql)
-
-        # Need to switch KG. Use execute_sequence for atomicity so that
-        # auto-create can be handled within the same lock hold.
+        if self._conn.current_kg == self._name:
+            return await _naming_query(iql, self._conn.execute(iql))
         async with self._conn._get_execute_lock():
-            # Step 1: try to switch to this KG.
-            use_result = await self._conn._send_and_recv(preamble)
-            if use_result.switched_kg:
-                self._conn._current_kg = use_result.switched_kg
-            elif use_result.columns == ["error"]:
-                msg = use_result.rows[0][0] if use_result.rows else ""
-                if "not found" in msg.lower():
-                    # Auto-create the KG and retry the switch.
-                    await self._conn._send_and_recv(f".kg create {self._name}")
-                    use_result = await self._conn._send_and_recv(preamble)
-                    if use_result.switched_kg:
-                        self._conn._current_kg = use_result.switched_kg
-                else:
-                    raise QueryError(msg, query=preamble)
+            await self._switch_to_kg()
+            return await _naming_query(iql, self._conn._send_and_recv(iql))
 
-            # Step 2: execute the actual command.
-            return await self._conn._send_and_recv(iql)
+    async def _switch_to_kg(self) -> None:
+        """Bind the connection to this KG, creating it on first use.
+
+        Caller must hold the connection's execute lock.
+        """
+        use = f".kg use {self._name}"
+        try:
+            await _naming_query(use, self._conn._send_and_recv(use))
+        except QueryError as err:
+            if err.code != "not_found":
+                raise
+            create = f".kg create {self._name}"
+            await _naming_query(create, self._conn._send_and_recv(create))
+            await _naming_query(use, self._conn._send_and_recv(use))
 
     @property
     def name(self) -> str:
@@ -351,7 +326,6 @@ class KnowledgeGraph:
         return an empty list when no relations exist instead of mistakenly
         treating the header as a relation name.
         """
-        import re
 
         result = await self._execute(".rel")
         out: list[RelationInfo] = []
@@ -418,7 +392,7 @@ class KnowledgeGraph:
             raise TypeError(f"Unsupported facts type: {type(facts).__name__}")
 
         result = await self._execute(iql)
-        return InsertResult(count=len(result.rows) if result.rows else 0)
+        return InsertResult(count=_inserted_count(result))
 
     # ── Delete ────────────────────────────────────────────────────────
 
@@ -557,19 +531,9 @@ class KnowledgeGraph:
             # Aggregate query: register a temporary session rule, query
             # it, and best-effort drop it. The rule lives in the session
             # so a leak only persists for the lifetime of the connection.
-            setup_result = await self._execute(compiled.setup)
-            if setup_result.columns == ["error"]:
-                raise QueryError(
-                    setup_result.rows[0][0] if setup_result.rows else "unknown error",
-                    query=compiled.setup,
-                )
+            await self._execute(compiled.setup)
             try:
                 result = await self._execute(compiled.query)
-                if result.columns == ["error"]:
-                    raise QueryError(
-                        result.rows[0][0] if result.rows else "unknown error",
-                        query=compiled.query,
-                    )
                 rs = ResultSet(
                     columns=result.columns,
                     rows=result.rows,
@@ -589,22 +553,12 @@ class KnowledgeGraph:
             columns: list[str] = []
             for q in compiled:
                 result = await self._execute(q)
-                if result.columns == ["error"]:
-                    raise QueryError(
-                        result.rows[0][0] if result.rows else "unknown error",
-                        query=q,
-                    )
                 if not columns:
                     columns = result.columns
                 all_rows.extend(result.rows)
             rs = ResultSet(columns=columns, rows=all_rows)
         else:
             result = await self._execute(compiled)
-            if result.columns == ["error"]:
-                raise QueryError(
-                    result.rows[0][0] if result.rows else "unknown error",
-                    query=compiled,
-                )
             rs = ResultSet(
                 columns=result.columns,
                 rows=result.rows,
@@ -725,10 +679,6 @@ class KnowledgeGraph:
 
         iql = ", ".join(iql_parts)
         result = await self._execute(iql)
-
-        if result.columns == ["error"]:
-            msg = result.rows[0][0] if result.rows else "unknown error"
-            raise QueryError(msg, query=iql)
 
         # Sort by distance ascending (closer = better) and apply k limit.
         rows = result.rows
@@ -966,9 +916,10 @@ class KnowledgeGraph:
         """Load an IQL file into this knowledge graph.
 
         The file is read locally and sent to the server as a single
-        multi-statement program, so the load is atomic: the server parses
-        every statement before executing any, and rejects the whole
-        program on the first error.
+        multi-statement program. A parse error rejects the whole program
+        before any statement runs. Otherwise the engine runs every
+        statement, and a failed one raises ``StatementFailedError``
+        listing each failure; the statements it does not list took effect.
 
         (Sending ``.load`` over the wire does not work: the server treats
         it as a client-only REPL command and silently ignores it.)
@@ -1001,3 +952,27 @@ class KnowledgeGraph:
             execution_time_ms=result.execution_time_ms,
             timing_breakdown=result.timing_breakdown,
         )
+
+
+# The engine's reply to one insert statement.
+_INSERTED = re.compile(r"Inserted (\d+) fact\(s\) into '.*'\.")
+
+
+def _inserted_count(result: ResultResponse) -> int:
+    """Facts stored, summed over the engine's per-statement insert replies."""
+    count = 0
+    for row in result.rows:
+        match = _INSERTED.fullmatch(str(row[0])) if row else None
+        if match is None:
+            raise InternalError(f"Unexpected insert reply from the engine: {row!r}")
+        count += int(match.group(1))
+    return count
+
+
+async def _naming_query(query: str, pending: Awaitable[ResultResponse]) -> ResultResponse:
+    """Await *pending*, naming *query* in the engine error it raises."""
+    try:
+        return await pending
+    except QueryError as err:
+        err.query = query
+        raise

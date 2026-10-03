@@ -12,7 +12,8 @@ import json
 
 import pytest
 
-from inputlayer.migrations.errors import MigrationError, check_engine_result
+from inputlayer.exceptions import QueryError
+from inputlayer.migrations.errors import MigrationError, execute_checked
 from inputlayer.migrations.executor import apply_migration, migrate
 from inputlayer.migrations.loader import MigrationInfo, load_migrations
 from inputlayer.migrations.operations import CreateRelation
@@ -78,9 +79,8 @@ class TestJsonValidation:
             load_migrations(tmp_path)
 
 
-class _ErrorResult:
-    columns = ["error"]
-    rows = [["Parse error: nope"]]
+def _engine_error() -> QueryError:
+    return QueryError("Parse error: nope", code="validation")
 
 
 class _OkResult:
@@ -89,10 +89,20 @@ class _OkResult:
 
 
 class TestEngineErrorVisibility:
-    def test_check_engine_result_raises_on_error_frame(self):
-        with pytest.raises(MigrationError, match="Parse error: nope"):
-            check_engine_result(_ErrorResult(), "testing")
-        assert check_engine_result(_OkResult(), "testing") is not None
+    def test_execute_checked_raises_on_engine_error(self):
+        class KG:
+            def __init__(self, outcome):
+                self.outcome = outcome
+
+            def execute(self, iql):
+                if isinstance(self.outcome, Exception):
+                    raise self.outcome
+                return self.outcome
+
+        with pytest.raises(MigrationError, match="Parse error: nope") as caught:
+            execute_checked(KG(_engine_error()), "?t(X)", "testing")
+        assert isinstance(caught.value.__cause__, QueryError)
+        assert execute_checked(KG(_OkResult()), "?t(X)", "testing") is not None
 
     def test_failed_operation_is_not_recorded_as_applied(self):
         class FailingKG:
@@ -102,7 +112,7 @@ class TestEngineErrorVisibility:
             def execute(self, iql):
                 self.commands.append(iql)
                 if iql.startswith("+t("):
-                    return _ErrorResult()
+                    raise _engine_error()
                 return _OkResult()
 
         kg = FailingKG()
@@ -120,7 +130,7 @@ class TestEngineErrorVisibility:
     def test_get_applied_raises_on_error_frame(self):
         class ErrorKG:
             def execute(self, iql):
-                return _ErrorResult()
+                raise _engine_error()
 
         with pytest.raises(MigrationError):
             MigrationRecorder(ErrorKG()).get_applied()

@@ -58,6 +58,8 @@ export {
   RuleNotFoundError,
   IndexNotFoundError,
   InternalError,
+  QueryError,
+  StatementFailedError,
 } from './errors.js';
 
 // Result
@@ -135,6 +137,8 @@ export type {
   NotificationResponse,
   TimingBreakdown,
   RuleTiming,
+  ErrorCode,
+  StatementError,
 } from './protocol.js';
 export { serializeMessage, deserializeMessage } from './protocol.js';
 

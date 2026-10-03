@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from inputlayer._protocol import ErrorCode, ResultResponse, StatementError
+
+# Longest program text an error message repeats.
+_QUERY_PREVIEW_CHARS = 200
+
 
 class InputLayerError(Exception):
     """Base exception for all InputLayer errors."""
@@ -49,17 +57,62 @@ class QueryTimeoutError(InputLayerError):
 
 
 class QueryError(InputLayerError):
-    """Engine rejected a query (parse error, type error, unsafe rule, etc.)."""
+    """The engine rejected a program: it answered with an ``error`` frame.
 
-    def __init__(self, message: str, *, query: str | None = None) -> None:
+    ``code`` says why (``validation``, ``not_found``, ``conflict``,
+    ``unsupported`` or ``internal``). It is ``None`` when the failure has no
+    statement cause, such as an overloaded or shutting-down server or a
+    result too large to send. ``validation_errors`` lists parse errors.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        query: str | None = None,
+        code: ErrorCode | None = None,
+        validation_errors: list[dict[str, Any]] | None = None,
+    ) -> None:
         super().__init__(message)
+        self.message = message
         self.query = query
+        self.code = code
+        self.validation_errors = validation_errors or []
 
     def __str__(self) -> str:
         base = super().__str__()
         if self.query:
-            return f"{base}\n  query: {self.query}"
+            query = self.query
+            if len(query) > _QUERY_PREVIEW_CHARS:
+                query = query[:_QUERY_PREVIEW_CHARS] + "..."
+            return f"{base}\n  query: {query}"
         return base
+
+
+class StatementFailedError(QueryError):
+    """Statements of a multi-statement program failed.
+
+    The engine runs every statement of a program, so the statements not in
+    ``errors`` took effect. ``result`` is the whole program's result. ``code``
+    is the first failure's code.
+    """
+
+    def __init__(
+        self,
+        errors: list[StatementError],
+        result: ResultResponse,
+        *,
+        query: str | None = None,
+    ) -> None:
+        first = errors[0]
+        super().__init__(
+            f"{len(errors)} statement(s) failed; "
+            f"statement {first.index}: {first.message}",
+            query=query,
+            code=first.code,
+        )
+        self.errors = errors
+        self.result = result
 
 
 class InputLayerPermissionError(InputLayerError):

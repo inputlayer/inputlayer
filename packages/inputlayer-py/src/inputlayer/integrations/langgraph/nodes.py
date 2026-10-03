@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable, Coroutine
 from typing import Any, Literal
 
-from inputlayer.integrations.langgraph._utils import check_error_response
 from inputlayer.relation import Relation
 
 
@@ -109,7 +108,6 @@ def kg_node(
                     "for all reachable states."
                 )
             result = await kg.execute(q)
-            check_error_response(result, "kg_node", q)
             return {
                 state_key: {
                     "columns": result.columns,

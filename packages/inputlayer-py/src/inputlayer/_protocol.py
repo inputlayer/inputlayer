@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 # ── Client → Server messages ──────────────────────────────────────────
 
@@ -67,6 +67,19 @@ class AuthErrorResponse:
     message: str
 
 
+ErrorCode = Literal["validation", "not_found", "conflict", "unsupported", "internal"]
+"""Why the engine rejected a statement (``code`` on ``error`` and ``errors[]``)."""
+
+
+@dataclass(frozen=True)
+class StatementError:
+    """A failed statement of a multi-statement program (0-based ``index``)."""
+
+    index: int
+    code: ErrorCode
+    message: str
+
+
 @dataclass(frozen=True)
 class ResultResponse:
     columns: list[str]
@@ -80,14 +93,14 @@ class ResultResponse:
     switched_kg: str | None = None
     proof_trees: list[dict[str, Any]] | None = None
     timing_breakdown: dict[str, Any] | None = None
-    errors: list[dict[str, Any]] | None = None
+    errors: list[StatementError] | None = None
 
 
 @dataclass(frozen=True)
 class ErrorResponse:
     message: str
     validation_errors: list[dict[str, Any]] | None = None
-    code: str | None = None
+    code: ErrorCode | None = None
 
 
 @dataclass(frozen=True)
@@ -100,7 +113,7 @@ class ResultStartResponse:
     switched_kg: str | None = None
     proof_trees: list[dict[str, Any]] | None = None
     timing_breakdown: dict[str, Any] | None = None
-    errors: list[dict[str, Any]] | None = None
+    errors: list[StatementError] | None = None
 
 
 @dataclass(frozen=True)
@@ -162,6 +175,15 @@ def serialize_message(
     return msg.to_json()
 
 
+def _statement_errors(raw: list[dict[str, Any]] | None) -> list[StatementError] | None:
+    if raw is None:
+        return None
+    return [
+        StatementError(index=e["index"], code=e["code"], message=e["message"])
+        for e in raw
+    ]
+
+
 def deserialize_message(data: str | bytes) -> ServerMessage:
     """Deserialize a server JSON message into a typed response object."""
     if isinstance(data, bytes):
@@ -191,7 +213,7 @@ def deserialize_message(data: str | bytes) -> ServerMessage:
             switched_kg=obj.get("switched_kg"),
             proof_trees=obj.get("proof_trees"),
             timing_breakdown=obj.get("timing_breakdown"),
-            errors=obj.get("errors"),
+            errors=_statement_errors(obj.get("errors")),
         )
     if msg_type == "error":
         return ErrorResponse(
@@ -209,7 +231,7 @@ def deserialize_message(data: str | bytes) -> ServerMessage:
             switched_kg=obj.get("switched_kg"),
             proof_trees=obj.get("proof_trees"),
             timing_breakdown=obj.get("timing_breakdown"),
-            errors=obj.get("errors"),
+            errors=_statement_errors(obj.get("errors")),
         )
     if msg_type == "result_chunk":
         return ResultChunkResponse(
