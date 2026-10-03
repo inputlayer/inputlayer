@@ -966,12 +966,19 @@ class KnowledgeGraph:
         """Load an IQL file into this knowledge graph.
 
         The file is read locally and sent to the server as a single
-        multi-statement program, so the load is atomic: the server parses
-        every statement before executing any, and rejects the whole
-        program on the first error.
+        multi-statement program. The server parses every statement before
+        running any, and commits the program's facts, schemas, rules and
+        rule removals as one transaction: if any statement fails, none of
+        them is applied and the error names the failed statement.
+
+        The file must not contain commands that cannot join that
+        transaction (``.kg``, ``.rel drop``, ``.clear``, ``.index``,
+        ``.compact``, inspection commands and the like): the server rejects
+        such a file before applying anything. Send those commands
+        separately.
 
         (Sending ``.load`` over the wire does not work: the server treats
-        it as a client-only REPL command and silently ignores it.)
+        it as a client-only REPL command and rejects it.)
         """
         if mode is not None:
             msg = "load(mode=...) is not supported; --replace/--merge are unimplemented server-side"

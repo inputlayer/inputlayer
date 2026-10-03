@@ -47,7 +47,7 @@ async fn oversized_string_insert_is_a_validation_error() {
 }
 
 #[tokio::test]
-async fn second_statement_failure_is_reported_by_index() {
+async fn second_statement_failure_is_reported_by_index_and_rolls_back_the_program() {
     let (handler, _tmp) = handler();
     let program = format!("+a(1)\n+b(\"{}\")\n+c(3)", too_long());
     let result = run(&handler, &program).await.expect("program result");
@@ -59,8 +59,20 @@ async fn second_statement_failure_is_reported_by_index() {
     } = &result.errors[0];
     assert_eq!((*index, *code), (1, ErrorCode::Validation));
     assert!(message.starts_with("String value too long"), "{message}");
-    assert_eq!(count(&handler, "?a(X)").await, 1);
-    assert_eq!(count(&handler, "?c(X)").await, 1);
+    assert!(
+        message
+            .ends_with("(rolled back: none of the program's 3 write statements 0-2 was applied)"),
+        "{message}"
+    );
+    // The program's writes are one transaction: none of them took effect,
+    // and none reports success.
+    assert_eq!(
+        result.rows.len(),
+        1,
+        "only the failure is reported: {result:?}"
+    );
+    assert_eq!(count(&handler, "?a(X)").await, 0);
+    assert_eq!(count(&handler, "?c(X)").await, 0);
 }
 
 #[tokio::test]
@@ -103,9 +115,9 @@ async fn dropping_the_current_kg_is_a_conflict() {
 }
 
 #[tokio::test]
-async fn multi_statement_failures_are_all_listed() {
+async fn statements_of_a_program_without_writes_fail_independently() {
     let (handler, _tmp) = handler();
-    let result = run(&handler, "+a(1)\n.rule drop missing\n.rel drop missing")
+    let result = run(&handler, "?a(X)\n.rel drop missing\n.index drop missing")
         .await
         .expect("program result");
     let errors: Vec<(usize, ErrorCode)> = result.errors.iter().map(|e| (e.index, e.code)).collect();
@@ -113,6 +125,46 @@ async fn multi_statement_failures_are_all_listed() {
         errors,
         vec![(1, ErrorCode::NotFound), (2, ErrorCode::NotFound)]
     );
+}
+
+#[tokio::test]
+async fn first_failure_of_a_writing_program_rolls_back_all_its_writes() {
+    let (handler, _tmp) = handler();
+    let result = run(&handler, "+a(1)\n.rule drop missing\n+b(2)")
+        .await
+        .expect("program result");
+    let errors: Vec<(usize, ErrorCode)> = result.errors.iter().map(|e| (e.index, e.code)).collect();
+    assert_eq!(errors, vec![(1, ErrorCode::NotFound)]);
+    assert!(
+        result.errors[0]
+            .message
+            .ends_with("(rolled back: none of the program's 3 write statements 0-2 was applied)"),
+        "{:?}",
+        result.errors
+    );
+    assert_eq!(count(&handler, "?a(X)").await, 0);
+    assert_eq!(count(&handler, "?b(X)").await, 0);
+}
+
+#[tokio::test]
+async fn command_outside_the_transaction_fails_a_writing_program_before_any_write() {
+    let (handler, _tmp) = handler();
+    run(&handler, "+keep(1)").await.expect("insert");
+    let result = run(&handler, "-keep(1)\n+a(1)\n.rel drop keep\n+b(2)")
+        .await
+        .expect("program result");
+    let errors: Vec<(usize, ErrorCode)> = result.errors.iter().map(|e| (e.index, e.code)).collect();
+    assert_eq!(errors, vec![(2, ErrorCode::Unsupported)]);
+    assert!(
+        result.errors[0]
+            .message
+            .starts_with("'.rel drop keep' cannot run"),
+        "{:?}",
+        result.errors
+    );
+    assert_eq!(count(&handler, "?keep(X)").await, 1);
+    assert_eq!(count(&handler, "?a(X)").await, 0);
+    assert_eq!(count(&handler, "?b(X)").await, 0);
 }
 
 #[tokio::test]
@@ -127,15 +179,15 @@ async fn successful_statements_report_no_errors() {
 }
 
 #[tokio::test]
-async fn invalid_rule_mid_program_is_listed_and_later_statements_run() {
+async fn invalid_rule_mid_program_rolls_back_the_whole_program() {
     let (handler, _tmp) = handler();
     let result = run(&handler, "+a(1)\n+p(X) <- q(Y)\n+c(3)")
         .await
         .expect("program result");
     let errors: Vec<(usize, ErrorCode)> = result.errors.iter().map(|e| (e.index, e.code)).collect();
     assert_eq!(errors, vec![(1, ErrorCode::Validation)]);
-    assert_eq!(count(&handler, "?a(X)").await, 1);
-    assert_eq!(count(&handler, "?c(X)").await, 1);
+    assert_eq!(count(&handler, "?a(X)").await, 0);
+    assert_eq!(count(&handler, "?c(X)").await, 0);
 }
 
 #[tokio::test]

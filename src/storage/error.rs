@@ -1,6 +1,7 @@
 //! Storage Engine Error Types
 
 use std::io;
+use std::path::PathBuf;
 use thiserror::Error;
 
 /// Storage engine errors
@@ -9,6 +10,35 @@ pub enum StorageError {
     /// I/O error
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
+
+    /// Another engine holds the data directory lock
+    #[error(
+        "data directory {} is in use by another InputLayer process (pid {owner}); \
+         stop it or point storage.data_dir elsewhere",
+        dir.display()
+    )]
+    DataDirLocked {
+        /// The locked data directory
+        dir: PathBuf,
+        /// Pid recorded by the lock owner, or "unknown"
+        owner: String,
+    },
+
+    /// A WAL record is intact but not in a format this server reads
+    #[error(
+        "WAL record at byte {offset} of {} has a valid checksum but cannot be read ({reason}); \
+         it was written by an incompatible server version. Start the version that wrote it \
+         once to drain the WAL into batch files, then start this version",
+        file.display()
+    )]
+    WalUnreadable {
+        /// The WAL file
+        file: PathBuf,
+        /// Byte offset of the record
+        offset: usize,
+        /// Why decoding failed
+        reason: String,
+    },
 
     /// Parquet error
     #[error("Parquet error: {0}")]
@@ -58,6 +88,11 @@ pub enum StorageError {
     /// Parse error
     #[error("Parse error: {0}")]
     ParseError(String),
+
+    /// A fact write the knowledge graph's current state does not allow:
+    /// arity, schema, vector index, or insert into a derived relation.
+    #[error("{0}")]
+    WriteRejected(String),
 
     /// Generic error
     #[error("{0}")]

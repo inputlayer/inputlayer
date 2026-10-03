@@ -34,6 +34,9 @@ pub enum SchemaError {
 
 /// Catalog for storing and looking up relation schemas.
 /// Supports both persistent schemas (saved to disk) and session schemas (memory only).
+///
+/// The saved file records the revision of the newest committed schema change it
+/// reflects; startup replays newer changes from the WAL over it.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SchemaCatalog {
     /// Persistent schemas (saved to disk)
@@ -41,6 +44,10 @@ pub struct SchemaCatalog {
     /// Session schemas (memory only, cleared on disconnect)
     #[serde(skip)]
     session: HashMap<String, RelationSchema>,
+    /// Revision of the newest committed schema change the persistent schemas
+    /// reflect (0 in files written before revisions were recorded).
+    #[serde(default)]
+    revision: u64,
 }
 
 impl SchemaCatalog {
@@ -49,7 +56,33 @@ impl SchemaCatalog {
         SchemaCatalog {
             persistent: HashMap::new(),
             session: HashMap::new(),
+            revision: 0,
         }
+    }
+
+    /// Revision of the newest committed schema change the persistent schemas reflect.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Record that the persistent schemas reflect every committed change up
+    /// to `revision`.
+    pub fn advance_revision(&mut self, revision: u64) {
+        self.revision = self.revision.max(revision);
+    }
+
+    /// The persistent schema of `relation`, ignoring session schemas.
+    pub fn persistent_schema(&self, relation: &str) -> Option<&RelationSchema> {
+        self.persistent.get(relation)
+    }
+
+    /// Make the persistent schema of `relation` exactly `schema` (remove it
+    /// when `None`), without validating. For installing committed changes.
+    pub fn set_persistent(&mut self, relation: &str, schema: Option<RelationSchema>) {
+        match schema {
+            Some(schema) => self.persistent.insert(relation.to_string(), schema),
+            None => self.persistent.remove(relation),
+        };
     }
 
     /// Register a persistent schema
@@ -294,23 +327,11 @@ impl SchemaCatalog {
         Ok(catalog)
     }
 
-    /// Save the persistent schemas to a JSON file
+    /// Save the persistent schemas to a JSON file, atomically.
     /// Session schemas are not saved.
     pub fn save(&self, path: &Path) -> Result<(), SchemaError> {
-        // Ensure parent directory exists
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| {
-                SchemaError::IoError(format!("Failed to create schema directory: {e}"))
-            })?;
-        }
-
-        let content = serde_json::to_string_pretty(self)
-            .map_err(|e| SchemaError::IoError(format!("Failed to serialize schemas: {e}")))?;
-
-        fs::write(path, content)
-            .map_err(|e| SchemaError::IoError(format!("Failed to write schema catalog: {e}")))?;
-
-        Ok(())
+        crate::storage::metadata::save_json_atomic(self, path)
+            .map_err(|e| SchemaError::IoError(format!("Failed to write schema catalog: {e}")))
     }
 
     /// Merge another catalog's persistent schemas into this one

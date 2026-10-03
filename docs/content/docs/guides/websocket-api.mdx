@@ -112,14 +112,27 @@ A program of one statement that fails gets an `error`. `code` says why: `validat
 
 ### Statement Failures
 
-A multi-statement program keeps running past a failed statement and replies with a `result` (or `result_start`) whose `errors` lists each failure by 0-based statement index:
+A multi-statement program replies with a `result` (or `result_start`) whose `errors` lists each failure by 0-based statement index.
+
+A program that changes facts, schemas or rules commits all of those changes as one transaction (see [Programs Commit Together](core-concepts#programs-commit-together)). If a statement fails, none of the program's changes is applied: the program stops at that statement, `errors` names it, its message ends with `(rolled back: none of the program's N write statements A-B was applied)` when the program had other writes, no statement reports success, and the program's query does not run:
 
 ```json
 {
   "type": "result",
   "columns": ["message"],
-  "rows": [["Inserted 1 fact(s) into 'a'."], ["Relation 'x' not found."]],
-  "errors": [{"index": 1, "code": "not_found", "message": "Relation 'x' not found."}]
+  "rows": [["Rule 'missing' not found: Failed to drop rule: Rule 'missing' does not exist (rolled back: none of the program's 2 write statements 0-1 was applied)"]],
+  "errors": [{"index": 1, "code": "not_found", "message": "Rule 'missing' not found: Failed to drop rule: Rule 'missing' does not exist (rolled back: none of the program's 2 write statements 0-1 was applied)"}]
+}
+```
+
+A command that cannot join the transaction (`.kg use`, `.rel drop`, `.index`, `.compact`, inspection commands and the like) in a program that writes fails the program with code `unsupported` before any statement runs. A program without writes runs every statement and keeps going past a failure:
+
+```json
+{
+  "type": "result",
+  "columns": ["message"],
+  "rows": [["Error: Failed to drop relation: Relation 'x' not found."], ["Relation 'y' dropped."]],
+  "errors": [{"index": 0, "code": "not_found", "message": "Error: Failed to drop relation: Relation 'x' not found."}]
 }
 ```
 
@@ -230,7 +243,7 @@ The server pushes notifications when persistent data changes in the session's kn
 
 ### Persistent Update
 
-Sent when base facts in a relation change:
+Sent when base facts in a relation change, once per changed relation for each committed transaction, after the change is visible to queries. `operation` is `insert` or `delete` when the transaction only added or only removed facts of the relation, and `update` when it did both; `count` is the number of facts added plus removed. A transaction that changes nothing (only duplicates, or changes that cancel out) and a failed one send nothing.
 
 ```json
 {

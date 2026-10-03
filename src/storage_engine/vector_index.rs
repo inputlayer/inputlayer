@@ -15,7 +15,7 @@ use crate::index_manager::{
 use crate::schema::SchemaType;
 use crate::statement::IndexCreateOptions;
 use crate::value::Tuple;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 /// Tombstone fraction that triggers an automatic rebuild.
@@ -221,23 +221,32 @@ impl KnowledgeGraph {
 
     /// Reject rows that an index on `relation` could not hold, before they
     /// reach persistence.
+    ///
+    /// `staged` carries each index's dimension across the batches of one
+    /// commit: an empty index takes the dimension of the first staged row,
+    /// as it would had the earlier batch already been applied.
     pub(super) fn validate_index_rows(
         &self,
         relation: &str,
         tuples: &[Tuple],
+        staged: &mut HashMap<String, usize>,
     ) -> Result<(), String> {
         for name in self.indexes.names_for_relation(relation) {
             let Some(managed) = self.indexes.get(&name) else {
                 continue;
             };
             let config = managed.definition.index_type.hnsw_config();
-            let mut dimension = managed.index.dimension();
+            let mut dimension = staged
+                .get(&name)
+                .copied()
+                .unwrap_or_else(|| managed.index.dimension());
             for tuple in tuples {
                 let (id, _, vector) = index_row(&managed.definition, tuple)?;
                 validate_vector(config, dimension, vector)
                     .map_err(|e| format!("index '{name}': row id={id}: {e}"))?;
                 dimension = vector.len();
             }
+            staged.insert(name, dimension);
         }
         Ok(())
     }

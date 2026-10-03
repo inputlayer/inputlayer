@@ -123,35 +123,12 @@ impl RelationStore {
         (added, duplicates)
     }
 
-    /// Distinct tuples from `tuples` not in `relation`, in input order.
-    pub fn absent(&self, relation: &str, tuples: Vec<Tuple>) -> Vec<Tuple> {
-        let existing = self.relations.get(relation).zip(self.indexes.get(relation));
-        let mut seen = HashSet::new();
-        tuples
-            .into_iter()
-            .filter(|tuple| {
-                let present = existing.is_some_and(|(data, index)| {
-                    index.find(index.hasher.hash_one(tuple), tuple, data)
-                });
-                !present && seen.insert(tuple.clone())
-            })
-            .collect()
-    }
-
-    /// Distinct tuples from `tuples` present in `relation`, in input order.
-    pub fn present(&self, relation: &str, tuples: &[Tuple]) -> Vec<Tuple> {
-        let (Some(data), Some(index)) = (self.relations.get(relation), self.indexes.get(relation))
-        else {
-            return Vec::new();
-        };
-        let mut seen = HashSet::new();
-        tuples
-            .iter()
-            .filter(|tuple| {
-                index.find(index.hasher.hash_one(*tuple), tuple, data) && seen.insert(*tuple)
-            })
-            .cloned()
-            .collect()
+    /// Whether `relation` holds `tuple`, in O(1).
+    pub fn contains(&self, relation: &str, tuple: &Tuple) -> bool {
+        self.relations
+            .get(relation)
+            .zip(self.indexes.get(relation))
+            .is_some_and(|(data, index)| index.find(index.hasher.hash_one(tuple), tuple, data))
     }
 
     /// Remove every tuple in `tuples`. Returns the distinct tuples actually removed.
@@ -223,19 +200,16 @@ mod tests {
     }
 
     #[test]
-    fn test_relation_store_absent_and_present_are_distinct_effective_deltas() {
+    fn test_relation_store_contains_follows_inserts_and_deletes() {
         let mut store = RelationStore::new();
-        assert_eq!(store.absent("e", vec![t(1, 1), t(1, 1)]), vec![t(1, 1)]);
-        assert!(store.present("e", &[t(1, 1)]).is_empty());
+        assert!(!store.contains("e", &t(1, 1)));
         store.insert("e", vec![t(1, 1), t(2, 2)]);
-        assert_eq!(
-            store.absent("e", vec![t(2, 2), t(3, 3), t(3, 3), t(1, 1)]),
-            vec![t(3, 3)]
-        );
-        assert_eq!(
-            store.present("e", &[t(2, 2), t(9, 9), t(2, 2), t(1, 1)]),
-            vec![t(2, 2), t(1, 1)]
-        );
+        assert!(store.contains("e", &t(1, 1)));
+        assert!(!store.contains("e", &t(3, 3)));
+        assert!(!store.contains("other", &t(1, 1)));
+        store.delete("e", &[t(1, 1)]);
+        assert!(!store.contains("e", &t(1, 1)));
+        assert!(store.contains("e", &t(2, 2)));
     }
 
     #[test]

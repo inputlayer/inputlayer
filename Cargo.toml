@@ -35,6 +35,8 @@ toml = "0.8"
 # Storage formats
 parquet = "53.0"
 arrow = "53.0"
+# WAL records carry tuples in the lossless batch codec, base64 within JSON
+base64 = "0.22"
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
@@ -93,6 +95,9 @@ futures-util = "0.3"
 tokio-tungstenite = "0.24"
 clap = { version = "4.5.60", features = ["derive", "env"] }
 crc32fast = "1.5.0"
+
+# Exclusive data_dir lock (flock / LockFileEx)
+fs4 = { version = "1.1", features = ["sync"] }
 
 # Shared registry + WS client (il CLI, gateway)
 inputlayer-ontology-client = { path = "ontology-client", version = "0.1.0" }

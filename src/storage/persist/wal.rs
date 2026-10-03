@@ -1,23 +1,40 @@
 //! Write-Ahead Log for persist layer
 //!
-//! The WAL provides durability for updates that haven't been flushed to batch files yet.
-//! Each entry contains the shard name and the update data.
+//! The WAL makes each committed [`Transaction`] durable until its updates are flushed
+//! to batch files. Every transaction is one record (see the `wal_record` module), written
+//! with one append and, when durable, one fsync. A failed append is cut back off the
+//! file, so the WAL never holds a transaction whose commit returned an error.
+//!
+//! Rule and schema changes stay in the WAL until their knowledge graph's catalog
+//! files are saved (see the `catalog_log` module).
 
-use super::batch::Update;
 use super::sync_directory;
+use super::transaction::{Transaction, TxnOp};
+use super::wal_record;
 use crate::storage::{StorageError, StorageResult};
-use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-/// A WAL entry containing shard and update information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WalEntry {
-    /// Shard name (format: "{db}:{relation}")
-    pub shard: String,
-    /// The update
-    pub update: Update,
+/// How to bring the file back to a committed state after a failed write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Repair {
+    /// Cut the file to exactly this length: the end of the last committed record.
+    ToLength(u64),
+    /// The committed length is unknown: cut after the last intact record.
+    ToIntactPrefix,
+}
+
+/// A write failure injected by tests, consumed by the first write that reaches it.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WalFault {
+    /// Half the record reaches the file, then the write fails.
+    Write,
+    /// The whole record reaches the file, then fsync fails.
+    Sync,
+    /// Cutting a failed record back off the file fails.
+    Restore,
 }
 
 /// Write-Ahead Log writer
@@ -28,84 +45,117 @@ pub struct PersistWal {
     writer: Option<BufWriter<File>>,
     /// Current WAL file path
     current_file: PathBuf,
-    /// Number of entries written
-    entries_written: usize,
     /// Bytes in the file plus bytes buffered in `writer`
     len: u64,
     /// A failed write left bytes that could not be cut off; repair before the next write
-    needs_repair: bool,
+    repair: Option<Repair>,
+    #[cfg(test)]
+    faults: Vec<WalFault>,
 }
 
 impl PersistWal {
-    /// Open the WAL, truncating any bytes after the last valid record.
-    pub fn new(wal_dir: PathBuf) -> StorageResult<Self> {
+    /// Open the WAL and recover its committed transactions, in commit order.
+    ///
+    /// The file is cut after its longest intact prefix of records. An unterminated
+    /// last line is a write torn by a crash and is dropped. Any other damage may hide
+    /// committed data, so the cut-off bytes are first saved to a `.corrupt` file in
+    /// the WAL directory.
+    ///
+    /// # Errors
+    /// I/O failures, and [`StorageError::WalUnreadable`] for an intact record this
+    /// server cannot decode.
+    pub fn open(wal_dir: PathBuf) -> StorageResult<(Self, Vec<Transaction>)> {
         fs::create_dir_all(&wal_dir)?;
-
         let wal = PersistWal {
             current_file: wal_dir.join("current.wal"),
             wal_dir,
             writer: None,
-            entries_written: 0,
             len: 0,
-            needs_repair: false,
+            repair: None,
+            #[cfg(test)]
+            faults: Vec::new(),
         };
-        wal.truncate_torn_tail()?;
-        Ok(wal)
+        let txns = wal.recover()?;
+        Ok((wal, txns))
     }
 
-    /// Cut the file after its last valid record, so new appends never follow a torn line.
-    fn truncate_torn_tail(&self) -> StorageResult<()> {
-        let bytes = match fs::read(&self.current_file) {
-            Ok(b) => b,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(e) => return Err(e.into()),
+    /// Cut the file after its intact prefix and return that prefix's transactions.
+    fn recover(&self) -> StorageResult<Vec<Transaction>> {
+        let Some(bytes) = self.read_file()? else {
+            return Ok(Vec::new());
         };
-        let valid_end = records(&bytes)
-            .filter(|(_, rec)| parse_record(rec).is_ok())
-            .map(|(end, _)| end)
-            .last()
-            .unwrap_or(0);
-        if valid_end < bytes.len() {
-            tracing::warn!(
-                file = %self.current_file.display(),
-                kept = valid_end,
-                dropped = bytes.len() - valid_end,
-                "Truncating torn WAL tail"
-            );
-            let file = OpenOptions::new().write(true).open(&self.current_file)?;
-            file.set_len(valid_end as u64)?;
-            file.sync_all()?;
-        } else if bytes.last().is_some_and(|&b| b != b'\n') {
-            let mut file = OpenOptions::new().append(true).open(&self.current_file)?;
-            file.write_all(b"\n")?;
-            file.sync_all()?;
+        let scan = wal_record::scan(&self.current_file, &bytes)?;
+        if let Some(damage) = &scan.damage {
+            let dropped = &bytes[scan.valid_end..];
+            if !scan.torn_tail {
+                let saved = self.quarantine(dropped)?;
+                tracing::error!(
+                    file = %self.current_file.display(),
+                    offset = scan.valid_end,
+                    %damage,
+                    intact_records_dropped = scan.stranded,
+                    saved_to = %saved.display(),
+                    "WAL damaged: recovering to the last intact record; \
+                     the bytes from the damage on are not replayed"
+                );
+            } else {
+                tracing::warn!(
+                    file = %self.current_file.display(),
+                    kept = scan.valid_end,
+                    dropped = dropped.len(),
+                    %damage,
+                    "Truncating torn WAL tail"
+                );
+            }
+            cut_file(&self.current_file, scan.valid_end as u64)?;
         }
-        Ok(())
+        Ok(scan.txns)
+    }
+
+    /// Save bytes cut off the WAL to `<unix-ms>.corrupt` beside it, durably.
+    fn quarantine(&self, bytes: &[u8]) -> StorageResult<PathBuf> {
+        let millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis());
+        let path = self.wal_dir.join(format!("current.wal.{millis}.corrupt"));
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&path)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        sync_directory(&self.wal_dir);
+        Ok(path)
+    }
+
+    fn read_file(&self) -> StorageResult<Option<Vec<u8>>> {
+        match fs::read(&self.current_file) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Restore the file to a committed state after a write failed to.
+    fn apply_repair(&mut self, repair: Repair) -> StorageResult<()> {
+        match repair {
+            Repair::ToLength(len) => cut_file(&self.current_file, len),
+            Repair::ToIntactPrefix => self.recover().map(drop),
+        }
     }
 
     /// Ensure writer is open
     fn ensure_writer(&mut self) -> StorageResult<&mut BufWriter<File>> {
         if self.writer.is_none() {
-            if self.needs_repair {
-                self.truncate_torn_tail()?;
-                self.needs_repair = false;
+            if let Some(repair) = self.repair {
+                self.apply_repair(repair)?;
+                self.repair = None;
             }
             let created = !self.current_file.exists();
             let file = OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(&self.current_file)
-                .map_err(|e| {
-                    eprintln!(
-                        "[wal] ERROR ensure_writer: path={}, parent_exists={}, error={}",
-                        self.current_file.display(),
-                        self.current_file
-                            .parent()
-                            .is_some_and(std::path::Path::exists),
-                        e
-                    );
-                    e
-                })?;
+                .open(&self.current_file)?;
             if created {
                 sync_directory(&self.wal_dir);
             }
@@ -118,106 +168,69 @@ impl PersistWal {
             .expect("writer is guaranteed Some: set on the line above when None"))
     }
 
-    /// Append an entry to the WAL with immediate flush (durable)
-    pub fn append(&mut self, shard: &str, update: &Update) -> StorageResult<()> {
-        self.append_records(shard, std::slice::from_ref(update), true)
-    }
-
-    /// Append an entry to the WAL without immediate flush (buffered)
-    pub fn append_buffered(&mut self, shard: &str, update: &Update) -> StorageResult<()> {
-        self.append_records(shard, std::slice::from_ref(update), false)
-    }
-
-    /// Append multiple entries for a shard with immediate flush (durable)
-    pub fn append_batch(&mut self, shard: &str, updates: &[Update]) -> StorageResult<()> {
-        self.append_records(shard, updates, true)
-    }
-
-    /// Append multiple entries for a shard without immediate flush (buffered)
-    pub fn append_batch_buffered(&mut self, shard: &str, updates: &[Update]) -> StorageResult<()> {
-        self.append_records(shard, updates, false)
-    }
-
-    /// Compute CRC32 checksum of a byte slice and return as 8-char hex string.
-    fn crc32_hex(data: &[u8]) -> String {
-        format!("{:08x}", crc32fast::hash(data))
-    }
-
-    /// Append records all-or-nothing: on error the WAL is cut back to its prior length,
-    /// so a failed record is never recovered and the next one never follows a torn line.
-    fn append_records(
-        &mut self,
-        shard: &str,
-        updates: &[Update],
-        durable: bool,
-    ) -> StorageResult<()> {
+    /// Append one transaction as one record. With `durable`, flush and fsync it
+    /// before returning; otherwise it may sit in the buffer until [`Self::sync`].
+    ///
+    /// All-or-nothing: on error the file is cut back to its prior length, so the
+    /// transaction is never recovered and the next record never follows a torn one.
+    pub fn append(&mut self, txn: &Transaction, durable: bool) -> StorageResult<()> {
+        let record = wal_record::encode(txn)?;
         self.ensure_writer()?;
-        let (len, entries_written) = (self.len, self.entries_written);
-        let result = self.write_records(shard, updates, durable);
+        let len = self.len;
+        let result = self.write_record(&record, durable);
         if result.is_err() {
-            self.discard_writer(Some(len));
-            self.entries_written = entries_written;
+            self.discard_writer(Repair::ToLength(len));
         }
         result
     }
 
-    fn write_records(
-        &mut self,
-        shard: &str,
-        updates: &[Update],
-        durable: bool,
-    ) -> StorageResult<()> {
-        let writer = self.ensure_writer()?;
-        let mut written = 0u64;
-        for update in updates {
-            let entry = WalEntry {
-                shard: shard.to_string(),
-                update: update.clone(),
-            };
-            let json = serde_json::to_string(&entry)
-                .map_err(|e| StorageError::Other(format!("WAL serialization failed: {e}")))?;
-            // Write format: "<crc32hex>:<json>"
-            let line = format!("{}:{json}\n", Self::crc32_hex(json.as_bytes()));
-            writer.write_all(line.as_bytes())?;
-            written += line.len() as u64;
+    fn write_record(&mut self, record: &[u8], durable: bool) -> StorageResult<()> {
+        #[cfg(test)]
+        if self.take_fault(WalFault::Write) {
+            let writer = self.ensure_writer()?;
+            writer.write_all(&record[..record.len() / 2])?;
+            writer.flush()?;
+            return Err(injected(WalFault::Write));
         }
+        #[cfg(test)]
+        let fail_sync = self.take_fault(WalFault::Sync);
+
+        let writer = self.ensure_writer()?;
+        writer.write_all(record)?;
         if durable {
             writer.flush()?;
+            #[cfg(test)]
+            if fail_sync {
+                return Err(injected(WalFault::Sync));
+            }
             // sync_all() forces data to disk, not just the OS page cache.
             writer.get_ref().sync_all()?;
         }
-        self.len += written;
-        self.entries_written += updates.len();
+        self.len += record.len() as u64;
         Ok(())
     }
 
-    /// Drop the writer and restore the file to exactly `len` bytes: cut off what a failed
-    /// write left, and keep earlier buffered records. With no `len`, or if the restore
-    /// fails, the next write repairs the torn tail first.
-    fn discard_writer(&mut self, len: Option<u64>) {
+    /// Drop the writer and bring the file back to a committed state. With
+    /// [`Repair::ToLength`] earlier buffered records are kept: bytes past `len` are
+    /// cut off, missing ones written from the buffer. If that fails, the repair
+    /// runs before the next write instead.
+    fn discard_writer(&mut self, repair: Repair) {
         let Some(writer) = self.writer.take() else {
             return;
         };
         let (mut file, unflushed) = writer.into_parts();
         let unflushed = unflushed.unwrap_or_default();
-        let restored = len.is_some_and(|len| {
-            let restore = |file: &mut File| -> std::io::Result<()> {
-                let on_disk = file.metadata()?.len();
-                if on_disk >= len {
-                    file.set_len(len)?;
-                } else {
-                    let missing = usize::try_from(len - on_disk).unwrap_or(usize::MAX);
-                    file.write_all(
-                        unflushed
-                            .get(..missing)
-                            .ok_or(std::io::ErrorKind::UnexpectedEof)?,
-                    )?;
-                }
-                file.sync_all()
-            };
-            restore(&mut file).is_ok()
-        });
-        self.needs_repair = !restored;
+        #[cfg(test)]
+        let fail_restore = self.take_fault(WalFault::Restore);
+        #[cfg(not(test))]
+        let fail_restore = false;
+        let restored = match repair {
+            Repair::ToLength(len) if !fail_restore => {
+                restore_length(&mut file, len, &unflushed).is_ok()
+            }
+            _ => false,
+        };
+        self.repair = (!restored).then_some(repair);
     }
 
     /// Flush buffered bytes to the file, optionally fsyncing. On error the writer is
@@ -234,75 +247,55 @@ impl PersistWal {
             }
         });
         if result.is_err() {
-            self.discard_writer(None);
+            self.discard_writer(Repair::ToIntactPrefix);
         }
         Ok(result?)
     }
 
-    /// Read all entries from the WAL.
-    ///
-    /// Tolerates corrupt or truncated lines by logging a warning and skipping
-    /// them. This makes WAL recovery resilient to partial writes (crash mid-write)
-    /// AND bit-rot or other corruption - the system recovers as many valid
-    /// entries as possible rather than refusing to start.
-    pub fn read_all(&self) -> StorageResult<Vec<WalEntry>> {
-        if !self.current_file.exists() {
-            return Ok(Vec::new());
+    /// Close the writer with every buffered record in the file and any pending repair
+    /// applied, so the file holds exactly the committed transactions.
+    fn settle(&mut self) -> StorageResult<()> {
+        self.flush_writer(false)?;
+        self.writer = None;
+        if let Some(repair) = self.repair {
+            self.apply_repair(repair)?;
+            self.repair = None;
         }
-
-        let bytes = fs::read(&self.current_file)?;
-        let mut entries = Vec::new();
-        let mut skipped = 0usize;
-        for (i, (_, rec)) in records(&bytes).enumerate() {
-            match parse_record(rec) {
-                Ok(entry) => entries.push(entry),
-                Err(reason) => {
-                    tracing::warn!(
-                        line = i + 1,
-                        file = %self.current_file.display(),
-                        %reason,
-                        "Skipping corrupt WAL entry"
-                    );
-                    skipped += 1;
-                }
-            }
-        }
-
-        if skipped > 0 {
-            tracing::warn!(
-                skipped,
-                recovered = entries.len(),
-                file = %self.current_file.display(),
-                "WAL recovery: skipped corrupt entries - possible data loss"
-            );
-        }
-
-        Ok(entries)
+        Ok(())
     }
 
-    /// Read entries for a specific shard
-    pub fn read_shard(&self, shard: &str) -> StorageResult<Vec<Update>> {
-        let entries = self.read_all()?;
-        Ok(entries
-            .into_iter()
-            .filter(|e| e.shard == shard)
-            .map(|e| e.update)
-            .collect())
+    /// Read every committed transaction, in commit order.
+    ///
+    /// # Errors
+    /// Fails if the file holds a damaged record. Damage found at open is cut off
+    /// there, so this means the file changed underneath the running server.
+    pub fn read_all(&mut self) -> StorageResult<Vec<Transaction>> {
+        self.settle()?;
+        let Some(bytes) = self.read_file()? else {
+            return Ok(Vec::new());
+        };
+        let scan = wal_record::scan(&self.current_file, &bytes)?;
+        match scan.damage {
+            None => Ok(scan.txns),
+            Some(damage) => Err(StorageError::Other(format!(
+                "WAL {} damaged at byte {} while the server is running: {damage}",
+                self.current_file.display(),
+                scan.valid_end
+            ))),
+        }
     }
 
     /// Clear the WAL (after successful flush to batch files)
     pub fn clear(&mut self) -> StorageResult<()> {
-        // Close writer
         self.writer = None;
+        self.repair = None;
 
-        // Simply remove the old WAL file. The caller has already flushed
-        // all data to batch files, so the WAL entries are redundant.
+        // The caller has already flushed all data to batch files, so the WAL
+        // records are redundant.
         if self.current_file.exists() {
             fs::remove_file(&self.current_file)?;
             sync_directory(&self.wal_dir);
         }
-
-        self.entries_written = 0;
         Ok(())
     }
 
@@ -311,37 +304,34 @@ impl PersistWal {
         self.flush_writer(true)
     }
 
-    /// Get number of entries written since last clear
-    pub fn entries_written(&self) -> usize {
-        self.entries_written
+    /// Remove every change to `shard` from the WAL, dropping transactions left empty.
+    /// Other shards' changes, and their transactions' boundaries, are preserved.
+    pub fn remove_shard_entries(&mut self, shard_name: &str) -> StorageResult<()> {
+        self.retain_ops(|_, op| !matches!(op, TxnOp::Facts { shard, .. } if shard == shard_name))
     }
 
-    /// Remove all WAL entries for a specific shard.
-    /// Rewrites the WAL excluding those entries. Other shards' data is preserved.
+    /// Keep only the changes `keep(revision, op)` accepts, dropping transactions
+    /// left empty. Surviving changes keep their transactions' boundaries.
     ///
-    /// Uses atomic write-to-new+rename: surviving entries are written to
-    /// `current.wal.new`, synced to disk, then atomically renamed to `current.wal`.
-    /// This guarantees that either the old or new WAL exists at all times -
-    /// a crash at any point cannot lose other shards' data.
-    pub fn remove_shard_entries(&mut self, shard_name: &str) -> StorageResult<()> {
-        // Buffered appends must reach the file before it is read and replaced.
-        self.flush_writer(false)?;
-        self.writer = None;
-        let entries = self.read_all()?;
-
-        let surviving: Vec<&WalEntry> = entries.iter().filter(|e| e.shard != shard_name).collect();
-
-        if surviving.is_empty() {
-            // No surviving entries: just remove the WAL file
-            if self.current_file.exists() {
-                fs::remove_file(&self.current_file)?;
-                sync_directory(&self.wal_dir);
-            }
-            self.entries_written = 0;
+    /// Uses atomic write-to-new+rename: the surviving records are written to
+    /// `current.wal.new`, synced, then renamed over `current.wal`. A crash at any
+    /// point leaves either the old or the new WAL.
+    pub fn retain_ops(&mut self, mut keep: impl FnMut(u64, &TxnOp) -> bool) -> StorageResult<()> {
+        let mut txns = self.read_all()?;
+        let mut changed = false;
+        for txn in &mut txns {
+            let revision = txn.revision();
+            changed |= txn.retain(|op| keep(revision, op));
+        }
+        if !changed {
             return Ok(());
         }
+        txns.retain(|txn| !txn.is_empty());
 
-        // Write surviving entries to a temp file
+        if txns.is_empty() {
+            return self.clear();
+        }
+
         let new_file = self.wal_dir.join("current.wal.new");
         {
             let file = OpenOptions::new()
@@ -350,28 +340,23 @@ impl PersistWal {
                 .truncate(true)
                 .open(&new_file)?;
             let mut writer = BufWriter::new(file);
-            for entry in &surviving {
-                let json = serde_json::to_string(entry)
-                    .map_err(|e| StorageError::Other(format!("WAL serialization failed: {e}")))?;
-                let checksum = Self::crc32_hex(json.as_bytes());
-                writeln!(writer, "{checksum}:{json}")?;
+            for txn in &txns {
+                writer.write_all(&wal_record::encode(txn)?)?;
             }
             writer.flush()?;
             writer.get_ref().sync_all()?;
         }
 
-        // Atomic rename: replaces old WAL with the new one.
         // On POSIX, rename is atomic - either the old or new file is visible.
         fs::rename(&new_file, &self.current_file)?;
         sync_directory(&self.wal_dir);
-
-        self.entries_written = surviving.len();
         Ok(())
     }
 
     /// Remove stale .archived WAL files left over from previous runs.
     /// Called during startup - if we reached this point, recovery succeeded
-    /// and archived files are no longer needed.
+    /// and archived files are no longer needed. `.corrupt` files are kept for
+    /// the operator.
     pub fn cleanup_archives(&self) -> StorageResult<()> {
         if !self.wal_dir.exists() {
             return Ok(());
@@ -398,695 +383,64 @@ impl PersistWal {
     pub fn file_size(&self) -> u64 {
         fs::metadata(&self.current_file).map_or(0, |m| m.len())
     }
+
+    /// Make a later write fail at `fault`.
+    #[cfg(test)]
+    pub(crate) fn inject_fault(&mut self, fault: WalFault) {
+        self.faults.push(fault);
+    }
+
+    #[cfg(test)]
+    fn take_fault(&mut self, fault: WalFault) -> bool {
+        let found = self.faults.iter().position(|f| *f == fault);
+        found.map(|i| self.faults.remove(i)).is_some()
+    }
 }
 
-/// Split WAL bytes into non-blank records, yielding each with the offset just past it.
-/// The offset counts the trailing newline, so a final unterminated record ends at `bytes.len()`.
-fn records(bytes: &[u8]) -> impl Iterator<Item = (usize, &[u8])> {
-    let mut start = 0;
-    std::iter::from_fn(move || {
-        while start < bytes.len() {
-            let (rec, end) = match bytes[start..].iter().position(|&b| b == b'\n') {
-                Some(n) => (&bytes[start..start + n], start + n + 1),
-                None => (&bytes[start..], bytes.len()),
-            };
-            start = end;
-            let rec = rec.strip_suffix(b"\r").unwrap_or(rec);
-            if !rec.trim_ascii().is_empty() {
-                return Some((end, rec));
-            }
-        }
-        None
-    })
-}
-
-/// Parse one record: `<crc32hex>:<json>`, or legacy plain `<json>`.
-fn parse_record(rec: &[u8]) -> Result<WalEntry, String> {
-    let line = std::str::from_utf8(rec).map_err(|e| format!("invalid UTF-8: {e}"))?;
-    let (json, expected_crc) = match line.split_at_checked(8) {
-        Some((hex, rest))
-            if rest.len() > 1
-                && rest.as_bytes()[0] == b':'
-                && hex.chars().all(|c| c.is_ascii_hexdigit()) =>
-        {
-            (&rest[1..], Some(hex))
-        }
-        _ => (line, None),
-    };
-    if let Some(expected) = expected_crc {
-        let actual = PersistWal::crc32_hex(json.as_bytes());
-        if actual != expected {
-            return Err(format!("CRC32 mismatch: expected {expected}, got {actual}"));
+impl Drop for PersistWal {
+    /// A failed write whose bytes could not be cut off is repaired on clean shutdown,
+    /// so the next start does not replay it.
+    fn drop(&mut self) {
+        if let Err(e) = self.settle() {
+            tracing::error!(
+                file = %self.current_file.display(),
+                error = %e,
+                "WAL repair at shutdown failed; a failed write may be replayed"
+            );
         }
     }
-    serde_json::from_str(json).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-    use crate::value::Tuple;
-    use tempfile::TempDir;
-
-    #[test]
-    fn test_wal_append_read() {
-        let temp = TempDir::new().unwrap();
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-
-        let update1 = Update::insert(Tuple::from_pair(1, 2), 10);
-        let update2 = Update::delete(Tuple::from_pair(3, 4), 20);
-
-        wal.append("db:edge", &update1).unwrap();
-        wal.append("db:edge", &update2).unwrap();
-        wal.append("db:node", &update1).unwrap();
-
-        let entries = wal.read_all().unwrap();
-        assert_eq!(entries.len(), 3);
-
-        let edge_updates = wal.read_shard("db:edge").unwrap();
-        assert_eq!(edge_updates.len(), 2);
-
-        let node_updates = wal.read_shard("db:node").unwrap();
-        assert_eq!(node_updates.len(), 1);
-    }
-
-    #[test]
-    fn test_wal_clear() {
-        let temp = TempDir::new().unwrap();
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
-            .unwrap();
-        assert_eq!(wal.entries_written(), 1);
-
-        wal.clear().unwrap();
-        assert_eq!(wal.entries_written(), 0);
-
-        // New writes should work
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(3, 4), 20))
-            .unwrap();
-        let entries = wal.read_all().unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].update.data, Tuple::from_pair(3, 4));
-    }
-
-    #[test]
-    fn test_wal_empty_read() {
-        let temp = TempDir::new().unwrap();
-        let wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-        let entries = wal.read_all().unwrap();
-        assert!(entries.is_empty());
-    }
-
-    #[test]
-    fn test_wal_read_shard_empty() {
-        let temp = TempDir::new().unwrap();
-        let wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-        let updates = wal.read_shard("nonexistent").unwrap();
-        assert!(updates.is_empty());
-    }
-
-    #[test]
-    fn test_wal_file_size() {
-        let temp = TempDir::new().unwrap();
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-        assert_eq!(wal.file_size(), 0);
-
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
-            .unwrap();
-        assert!(wal.file_size() > 0);
-    }
-
-    #[test]
-    fn test_wal_entries_written() {
-        let temp = TempDir::new().unwrap();
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-        assert_eq!(wal.entries_written(), 0);
-
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
-            .unwrap();
-        assert_eq!(wal.entries_written(), 1);
-
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(3, 4), 20))
-            .unwrap();
-        assert_eq!(wal.entries_written(), 2);
-    }
-
-    #[test]
-    fn test_wal_append_batch() {
-        let temp = TempDir::new().unwrap();
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-
-        let updates = vec![
-            Update::insert(Tuple::from_pair(1, 2), 10),
-            Update::insert(Tuple::from_pair(3, 4), 10),
-            Update::delete(Tuple::from_pair(5, 6), 10),
-        ];
-
-        wal.append_batch("db:edge", &updates).unwrap();
-        assert_eq!(wal.entries_written(), 3);
-
-        let entries = wal.read_all().unwrap();
-        assert_eq!(entries.len(), 3);
-    }
-
-    #[test]
-    fn test_wal_append_buffered() {
-        let temp = TempDir::new().unwrap();
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-
-        wal.append_buffered("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
-            .unwrap();
-        wal.sync().unwrap();
-
-        let entries = wal.read_all().unwrap();
-        assert_eq!(entries.len(), 1);
-    }
-
-    #[test]
-    fn test_wal_sync_no_writer() {
-        let temp = TempDir::new().unwrap();
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-        // Sync with no writer should not error
-        wal.sync().unwrap();
-    }
-
-    #[test]
-    fn test_wal_entry_serde() {
-        let entry = WalEntry {
-            shard: "db:edge".to_string(),
-            update: Update::insert(Tuple::from_pair(1, 2), 10),
-        };
-        let json = serde_json::to_string(&entry).unwrap();
-        let back: WalEntry = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.shard, "db:edge");
-    }
-
-    #[test]
-    fn test_wal_remove_shard_entries() {
-        let temp = TempDir::new().unwrap();
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
-            .unwrap();
-        wal.append("db:node", &Update::insert(Tuple::from_pair(3, 4), 20))
-            .unwrap();
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(5, 6), 30))
-            .unwrap();
-        wal.append("other:rel", &Update::insert(Tuple::from_pair(7, 8), 40))
-            .unwrap();
-        assert_eq!(wal.entries_written(), 4);
-
-        // Remove only db:edge entries
-        wal.remove_shard_entries("db:edge").unwrap();
-
-        let entries = wal.read_all().unwrap();
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].shard, "db:node");
-        assert_eq!(entries[1].shard, "other:rel");
-
-        // entries_written should reflect the rewritten count
-        assert_eq!(wal.entries_written(), 2);
-    }
-
-    #[test]
-    fn test_wal_remove_shard_entries_all() {
-        let temp = TempDir::new().unwrap();
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
-            .unwrap();
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(3, 4), 20))
-            .unwrap();
-
-        // Remove all entries (only shard)
-        wal.remove_shard_entries("db:edge").unwrap();
-
-        let entries = wal.read_all().unwrap();
-        assert!(entries.is_empty());
-        assert_eq!(wal.entries_written(), 0);
-    }
-
-    #[test]
-    fn test_wal_remove_shard_entries_nonexistent() {
-        let temp = TempDir::new().unwrap();
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
-            .unwrap();
-
-        // Remove entries for a shard that doesn't exist - should be a no-op
-        wal.remove_shard_entries("nonexistent").unwrap();
-
-        let entries = wal.read_all().unwrap();
-        assert_eq!(entries.len(), 1);
-    }
-
-    #[test]
-    fn test_wal_remove_shard_entries_then_append() {
-        let temp = TempDir::new().unwrap();
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
-            .unwrap();
-        wal.append("db:node", &Update::insert(Tuple::from_pair(3, 4), 20))
-            .unwrap();
-
-        wal.remove_shard_entries("db:edge").unwrap();
-
-        // New appends should work after removal
-        wal.append("db:new", &Update::insert(Tuple::from_pair(5, 6), 30))
-            .unwrap();
-
-        let entries = wal.read_all().unwrap();
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].shard, "db:node");
-        assert_eq!(entries[1].shard, "db:new");
-    }
-
-    // === Regression tests for production readiness fixes ===
-
-    /// P0-1: Verify that immediate-mode append actually syncs to disk.
-    /// After append(), data must be readable from a FRESH WAL instance
-    /// (proving it reached disk, not just OS page cache).
-    #[test]
-    fn test_wal_fsync_immediate_mode_durable() {
-        let temp = TempDir::new().unwrap();
-        let path = temp.path().to_path_buf();
-
-        // Write data with immediate flush
-        {
-            let mut wal = PersistWal::new(path.clone()).unwrap();
-            wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
-                .unwrap();
-            // Drop without explicit sync - append() should have already synced
-        }
-
-        // Read from a fresh WAL instance - data must be there
-        {
-            let wal = PersistWal::new(path).unwrap();
-            let entries = wal.read_all().unwrap();
-            assert_eq!(entries.len(), 1, "Data should be durable after append()");
-            assert_eq!(entries[0].shard, "db:edge");
-        }
-    }
-
-    /// P0-1: Verify batch append syncs to disk.
-    #[test]
-    fn test_wal_fsync_batch_durable() {
-        let temp = TempDir::new().unwrap();
-        let path = temp.path().to_path_buf();
-
-        {
-            let mut wal = PersistWal::new(path.clone()).unwrap();
-            let updates = vec![
-                Update::insert(Tuple::from_pair(1, 2), 10),
-                Update::insert(Tuple::from_pair(3, 4), 20),
-            ];
-            wal.append_batch("db:edge", &updates).unwrap();
-        }
-
-        {
-            let wal = PersistWal::new(path).unwrap();
-            let entries = wal.read_all().unwrap();
-            assert_eq!(entries.len(), 2, "Batch data should be durable");
-        }
-    }
-
-    /// P0-4: Verify that remove_shard_entries uses atomic rename (no .archived files).
-    /// The old archive-based approach could lose data on crash between archive and rewrite.
-    #[test]
-    fn test_wal_remove_shard_no_archived_files() {
-        let temp = TempDir::new().unwrap();
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
-            .unwrap();
-        wal.append("db:node", &Update::insert(Tuple::from_pair(3, 4), 20))
-            .unwrap();
-
-        wal.remove_shard_entries("db:edge").unwrap();
-
-        // No .archived files should exist - we use atomic rename now
-        let archived_files: Vec<_> = fs::read_dir(temp.path())
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path()
-                    .extension()
-                    .and_then(|s| s.to_str())
-                    .is_some_and(|ext| ext == "archived")
-            })
-            .collect();
-        assert!(
-            archived_files.is_empty(),
-            "No .archived files should be created; found {archived_files:?}"
-        );
-    }
-
-    /// P0-4: Verify remove_shard_entries is crash-safe by checking
-    /// that no .new temp file is left behind after successful operation.
-    #[test]
-    fn test_wal_remove_shard_no_temp_files() {
-        let temp = TempDir::new().unwrap();
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
-            .unwrap();
-        wal.append("db:node", &Update::insert(Tuple::from_pair(3, 4), 20))
-            .unwrap();
-
-        wal.remove_shard_entries("db:edge").unwrap();
-
-        // No .new temp file should remain
-        let temp_file = temp.path().join("current.wal.new");
-        assert!(
-            !temp_file.exists(),
-            "Temp file current.wal.new should be cleaned up"
-        );
-    }
-
-    /// P0-5: Verify that a truncated last line is tolerated during recovery.
-    #[test]
-    fn test_wal_recovery_truncated_last_line() {
-        let temp = TempDir::new().unwrap();
-        let wal_dir = temp.path().to_path_buf();
-        let wal_file = wal_dir.join("current.wal");
-
-        // Write valid entries + a truncated last line
-        {
-            let mut wal = PersistWal::new(wal_dir.clone()).unwrap();
-            wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
-                .unwrap();
-            wal.append("db:node", &Update::insert(Tuple::from_pair(3, 4), 20))
-                .unwrap();
-        }
-
-        // Append a truncated (invalid JSON) line to simulate crash mid-write
-        {
-            use std::io::Write;
-            let mut file = OpenOptions::new().append(true).open(&wal_file).unwrap();
-            writeln!(file, r#"{{"shard":"db:edge","upd"#).unwrap();
-        }
-
-        // Recovery should succeed - truncated last line is skipped
-        let wal = PersistWal::new(wal_dir).unwrap();
-        let entries = wal.read_all().unwrap();
-        assert_eq!(entries.len(), 2, "Should recover 2 valid entries");
-        assert_eq!(entries[0].shard, "db:edge");
-        assert_eq!(entries[1].shard, "db:node");
-    }
-
-    /// P0-5: Verify that corruption on a NON-last line is skipped (resilient recovery).
-    /// The WAL recovers as many valid entries as possible, skipping corrupt ones.
-    #[test]
-    fn test_wal_recovery_corrupted_middle_line_is_skipped() {
-        let temp = TempDir::new().unwrap();
-        let wal_dir = temp.path().to_path_buf();
-        let wal_file = wal_dir.join("current.wal");
-
-        // Create WAL dir
-        fs::create_dir_all(&wal_dir).unwrap();
-
-        // Write: valid line, corrupt line, valid line
-        {
-            use std::io::Write;
-            let mut file = OpenOptions::new()
-                .create(true)
-                .truncate(false)
-                .write(true)
-                .open(&wal_file)
-                .unwrap();
-
-            let valid_entry = WalEntry {
-                shard: "db:edge".to_string(),
-                update: Update::insert(Tuple::from_pair(1, 2), 10),
-            };
-            let json = serde_json::to_string(&valid_entry).unwrap();
-            writeln!(file, "{json}").unwrap();
-            writeln!(file, "THIS IS CORRUPT DATA").unwrap();
-            writeln!(file, "{json}").unwrap();
-        }
-
-        let wal = PersistWal::new(wal_dir).unwrap();
-        let entries = wal.read_all().unwrap();
-        assert_eq!(
-            entries.len(),
-            2,
-            "Should recover 2 valid entries, skipping the corrupt middle line"
-        );
-        assert_eq!(entries[0].shard, "db:edge");
-        assert_eq!(entries[1].shard, "db:edge");
-    }
-
-    /// P1-7: Verify cleanup_archives removes stale .archived and .new files.
-    #[test]
-    fn test_wal_cleanup_archives() {
-        let temp = TempDir::new().unwrap();
-        let wal_dir = temp.path().to_path_buf();
-        let wal = PersistWal::new(wal_dir.clone()).unwrap();
-
-        // Create fake stale files
-        fs::write(wal_dir.join("wal_12345.archived"), "stale").unwrap();
-        fs::write(wal_dir.join("wal_67890.archived"), "stale").unwrap();
-        fs::write(wal_dir.join("current.wal.new"), "incomplete").unwrap();
-
-        wal.cleanup_archives().unwrap();
-
-        // All stale files should be removed
-        assert!(!wal_dir.join("wal_12345.archived").exists());
-        assert!(!wal_dir.join("wal_67890.archived").exists());
-        assert!(!wal_dir.join("current.wal.new").exists());
-    }
-
-    /// P1-7: Verify clear() no longer creates .archived files.
-    #[test]
-    fn test_wal_clear_no_archived_files() {
-        let temp = TempDir::new().unwrap();
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
-            .unwrap();
-        wal.clear().unwrap();
-
-        let archived: Vec<_> = fs::read_dir(temp.path())
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path()
-                    .extension()
-                    .and_then(|s| s.to_str())
-                    .is_some_and(|ext| ext == "archived")
-            })
-            .collect();
-        assert!(
-            archived.is_empty(),
-            "clear() should not create .archived files"
-        );
-    }
-
-    /// Verify CRC32 checksum validation: bit-flipped entry should be skipped.
-    #[test]
-    fn test_wal_crc32_detects_bitrot() {
-        let temp = TempDir::new().unwrap();
-        let wal_dir = temp.path().to_path_buf();
-        let wal_file = wal_dir.join("current.wal");
-
-        // Write valid entries with checksums
-        {
-            let mut wal = PersistWal::new(wal_dir.clone()).unwrap();
-            wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
-                .unwrap();
-            wal.append("db:node", &Update::insert(Tuple::from_pair(3, 4), 20))
-                .unwrap();
-        }
-
-        // Corrupt the JSON part of the first line (flip a character) while keeping the CRC intact
-        {
-            let content = fs::read_to_string(&wal_file).unwrap();
-            let mut line_vec: Vec<&str> = content.lines().collect();
-            assert!(line_vec.len() >= 2);
-            // Replace the first line with same CRC but corrupted JSON
-            let first_line = line_vec[0].to_string();
-            let corrupted = first_line.replacen("edge", "XXXX", 1);
-            line_vec[0] = &corrupted;
-            fs::write(&wal_file, line_vec.join("\n") + "\n").unwrap();
-        }
-
-        // Recovery should detect CRC mismatch and skip the corrupted entry
-        let wal = PersistWal::new(wal_dir).unwrap();
-        let entries = wal.read_all().unwrap();
-        assert_eq!(
-            entries.len(),
-            1,
-            "Corrupted entry should be skipped, only 1 valid entry remains"
-        );
-        assert_eq!(entries[0].shard, "db:node");
-    }
-
-    /// Verify backward compatibility: legacy lines without CRC prefix are accepted.
-    #[test]
-    fn test_wal_legacy_lines_without_crc() {
-        let temp = TempDir::new().unwrap();
-        let wal_dir = temp.path().to_path_buf();
-        let wal_file = wal_dir.join("current.wal");
-        fs::create_dir_all(&wal_dir).unwrap();
-
-        // Write a legacy-format line (plain JSON, no CRC prefix)
-        {
-            use std::io::Write;
-            let entry = WalEntry {
-                shard: "db:legacy".to_string(),
-                update: Update::insert(Tuple::from_pair(1, 2), 10),
-            };
-            let json = serde_json::to_string(&entry).unwrap();
-            let mut file = OpenOptions::new()
-                .create(true)
-                .truncate(false)
-                .write(true)
-                .open(&wal_file)
-                .unwrap();
-            writeln!(file, "{json}").unwrap();
-        }
-
-        let wal = PersistWal::new(wal_dir).unwrap();
-        let entries = wal.read_all().unwrap();
-        assert_eq!(
-            entries.len(),
-            1,
-            "Legacy line without CRC should be accepted"
-        );
-        assert_eq!(entries[0].shard, "db:legacy");
-    }
-
-    /// P0-1: Verify sync() calls fsync (data readable from new instance).
-    #[test]
-    fn test_wal_sync_actually_syncs() {
-        let temp = TempDir::new().unwrap();
-        let path = temp.path().to_path_buf();
-
-        {
-            let mut wal = PersistWal::new(path.clone()).unwrap();
-            wal.append_buffered("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
-                .unwrap();
-            wal.sync().unwrap();
-        }
-
-        {
-            let wal = PersistWal::new(path).unwrap();
-            let entries = wal.read_all().unwrap();
-            assert_eq!(entries.len(), 1, "sync() should ensure data is durable");
-        }
-    }
-
-    #[test]
-    fn test_wal_open_truncates_invalid_tail() {
-        let temp = TempDir::new().unwrap();
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
-            .unwrap();
-        let valid_len = wal.file_size();
-        drop(wal);
-
-        let path = temp.path().join("current.wal");
-        let mut f = OpenOptions::new().append(true).open(&path).unwrap();
-        f.write_all(b"00000000:{\"bad\":1}\n\xE2\x82").unwrap();
-        drop(f);
-
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-        assert_eq!(wal.file_size(), valid_len);
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(3, 4), 20))
-            .unwrap();
-        assert_eq!(wal.read_all().unwrap().len(), 2);
-    }
-
-    #[test]
-    fn test_wal_open_terminates_valid_unterminated_tail() {
-        let temp = TempDir::new().unwrap();
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
-            .unwrap();
-        drop(wal);
-
-        let path = temp.path().join("current.wal");
-        let mut bytes = fs::read(&path).unwrap();
-        assert_eq!(bytes.pop(), Some(b'\n'));
-        fs::write(&path, &bytes).unwrap();
-
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(3, 4), 20))
-            .unwrap();
-        assert_eq!(wal.read_all().unwrap().len(), 2);
-    }
-
-    #[test]
-    fn test_wal_failed_append_is_cut_back() {
-        let temp = TempDir::new().unwrap();
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
-            .unwrap();
-        let valid_len = wal.file_size();
-
-        // Simulate a write that failed partway: some bytes reached the file, more are buffered.
-        let writer = wal.writer.as_mut().unwrap();
-        writer.write_all(b"deadbeef:{\"sha").unwrap();
-        writer.flush().unwrap();
-        writer.write_all(b"rd\":\"db").unwrap();
-        wal.discard_writer(Some(valid_len));
-        assert_eq!(wal.file_size(), valid_len);
-
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(3, 4), 20))
-            .unwrap();
-        assert_eq!(wal.read_all().unwrap().len(), 2);
-    }
-
-    #[test]
-    fn test_wal_failed_append_keeps_earlier_buffered_records() {
-        let temp = TempDir::new().unwrap();
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-        wal.append_buffered("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
-            .unwrap();
-        let len = wal.len;
-
-        // A failed write appended partial bytes to the still-unflushed buffer.
-        wal.writer
-            .as_mut()
-            .unwrap()
-            .write_all(b"deadbeef:{")
-            .unwrap();
-        wal.discard_writer(Some(len));
-        assert!(!wal.needs_repair);
-        assert_eq!(wal.file_size(), len);
-        assert_eq!(wal.read_all().unwrap().len(), 1);
-    }
-
-    #[test]
-    fn test_wal_failed_flush_repairs_before_next_write() {
-        let temp = TempDir::new().unwrap();
-        let mut wal = PersistWal::new(temp.path().to_path_buf()).unwrap();
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(1, 2), 10))
-            .unwrap();
-        let valid_len = wal.file_size();
-
-        let writer = wal.writer.as_mut().unwrap();
-        writer.write_all(b"deadbeef:{\"sha").unwrap();
-        writer.flush().unwrap();
-        wal.discard_writer(None);
-        assert!(wal.file_size() > valid_len);
-
-        wal.append("db:edge", &Update::insert(Tuple::from_pair(3, 4), 20))
-            .unwrap();
-        let entries = wal.read_all().unwrap();
-        assert_eq!(entries.len(), 2);
-        drop(wal);
-        assert_eq!(
-            PersistWal::new(temp.path().to_path_buf())
-                .unwrap()
-                .read_all()
-                .unwrap()
-                .len(),
-            2
-        );
-    }
+fn injected(fault: WalFault) -> StorageError {
+    std::io::Error::other(format!("injected WAL fault: {fault:?}")).into()
 }
+
+/// Cut `path` to `len` bytes and make that durable.
+fn cut_file(path: &Path, len: u64) -> StorageResult<()> {
+    let file = OpenOptions::new().write(true).open(path)?;
+    file.set_len(len)?;
+    file.sync_all()?;
+    Ok(())
+}
+
+/// Bring `file` to exactly `len` bytes: cut off what a failed write left, or append
+/// earlier buffered bytes the failure kept from reaching it.
+fn restore_length(file: &mut File, len: u64, unflushed: &[u8]) -> std::io::Result<()> {
+    let on_disk = file.metadata()?.len();
+    if on_disk >= len {
+        file.set_len(len)?;
+    } else {
+        let missing = usize::try_from(len - on_disk).unwrap_or(usize::MAX);
+        file.write_all(
+            unflushed
+                .get(..missing)
+                .ok_or(std::io::ErrorKind::UnexpectedEof)?,
+        )?;
+    }
+    file.sync_all()
+}
+
+#[cfg(test)]
+#[path = "wal_tests.rs"]
+mod tests;
