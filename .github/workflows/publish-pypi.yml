@@ -2,11 +2,7 @@ name: Publish Python SDK to PyPI
 
 on:
   push:
-    branches:
-      - main
-    paths:
-      - 'packages/inputlayer-py/**'
-
+    tags: ['v*']
   workflow_dispatch:
 
 defaults:

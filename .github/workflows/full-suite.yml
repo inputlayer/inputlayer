@@ -1,0 +1,253 @@
+name: Full suite
+
+# Everything the fast gate (ci.yml) leaves out, run only on release commits:
+#   - pushes to a release/** branch
+#   - pull requests labeled `release` (when the label is added, then on
+#     every push while it stays). A PR from a release/** branch of this repo
+#     is already covered by the branch push, so its PR run is skipped.
+#   - manual workflow_dispatch
+#   - v* tag pushes, through the Release workflow (publish.yml), which calls
+#     this workflow and publishes only if it passes
+# docker.yml uses the same definition. CONTRIBUTING describes the policy.
+
+on:
+  push:
+    branches: ['release/**']
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+# Adding an unrelated label gets a run of its own, so it cannot cancel an
+# in-progress full suite on the same PR.
+concurrency:
+  group: full-suite-${{ github.event.pull_request.number || github.ref }}-${{ (github.event.action == 'labeled' && github.event.label.name != 'release') && github.run_id || 'run' }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  gate:
+    name: Release commit
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'release') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'release') &&
+       !(startsWith(github.head_ref, 'release/') &&
+         github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Release commit, running the full suite"
+
+  test:
+    name: Tests (full)
+    needs: gate
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: useblacksmith/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/release
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-
+
+      - name: Clean stale debug artifacts
+        run: rm -rf target/debug 2>/dev/null || true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install Python SDK dependencies
+        run: pip install -e "packages/inputlayer-py[dev]"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run all tests (CI mode)
+        run: make ci-test-all
+
+  docs:
+    name: Documentation
+    needs: gate
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-docs-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-docs-
+
+      - name: Check documentation
+        run: make doc-check
+
+  website:
+    name: Website
+    needs: gate
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: front/package-lock.json
+
+      - name: Install dependencies
+        working-directory: front
+        run: npm ci
+
+      - name: Build website
+        working-directory: front
+        run: npm run build
+
+  coverage:
+    name: Coverage
+    needs: gate
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin --locked
+
+      # Registry only: Cargo.lock is not committed, so the key never changes
+      # and a cached target/ grew until the runner ran out of disk.
+      - name: Cache cargo
+        uses: useblacksmith/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-coverage-v2-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-coverage-v2-
+
+      - name: Generate coverage report
+        run: make coverage
+
+      - name: Coverage summary
+        run: make view-coverage
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: target/coverage/
+          retention-days: 14
+
+  python-langchain-live:
+    name: Python langchain integration (live server)
+    needs: gate
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: useblacksmith/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/release
+          key: ${{ runner.os }}-cargo-py-live-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-py-live-
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Sync Python dev dependencies
+        working-directory: packages/inputlayer-py
+        run: uv sync --extra dev
+
+      - name: Run langchain integration tests against a live server
+        run: make python-test-live
+
+      - name: Run langchain examples against a live server
+        run: make python-test-examples
+
+      - name: Upload server log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inputlayer-server-log
+          path: /tmp/il_python_*_server.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  msrv:
+    name: Minimum Supported Rust Version
+    needs: gate
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.88"
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-msrv-
+
+      - name: Check MSRV
+        run: cargo check --all-features

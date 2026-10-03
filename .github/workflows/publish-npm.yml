@@ -2,11 +2,7 @@ name: Publish JS/TS SDK to npm
 
 on:
   push:
-    branches:
-      - main
-    paths:
-      - 'packages/inputlayer-js/**'
-
+    tags: ['v*']
   workflow_dispatch:
 
 defaults:

@@ -12,58 +12,15 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Gate: all tests must pass before publishing
-  test:
-    name: Unit Tests
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Run unit tests
-        run: make test
-
-  snapshot-test:
-    name: Snapshot Tests
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: test
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-release-
-
-      - name: Run snapshot tests
-        run: make snapshot-test
+  # Gate: the full suite must pass before publishing
+  full-suite:
+    name: Full suite
+    uses: ./.github/workflows/full-suite.yml
 
   # Publish to crates.io
   publish:
     name: Publish to crates.io
-    needs: [test, snapshot-test]
+    needs: full-suite
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4

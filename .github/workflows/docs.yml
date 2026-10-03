@@ -2,11 +2,7 @@ name: Deploy Website
 
 on:
   push:
-    branches: [main]
-    paths:
-      - 'front/**'
-      - 'docs/content/**'
-      - 'content/**'
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
