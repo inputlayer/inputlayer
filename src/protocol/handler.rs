@@ -29,6 +29,11 @@ use tracing::{debug, info, warn};
 use super::wire::{
     ColumnDef, ErrorCode, QueryResult, StatementError, WireDataType, WireTuple, WireValue,
 };
+use fact_run::FactRun;
+use fact_staging::FactStatement;
+
+mod fact_run;
+mod fact_staging;
 
 /// Result of transforming a `?shorthand` query, including sort and pagination annotations.
 pub(crate) struct QueryTransform {
@@ -2462,8 +2467,22 @@ impl QueryJob {
             }};
         }
 
+        // Fact statements queue here and commit as one transaction at the
+        // next statement with other persistent effects, or after the last one.
+        let mut fact_run = FactRun::default();
+        macro_rules! commit_facts {
+            () => {{
+                if let Err(failure) =
+                    self.commit_fact_run(&storage, &kg_name, &mut fact_run, &mut messages)
+                {
+                    stmt_index = failure.index;
+                    fail!(failure.code, failure.message);
+                }
+            }};
+        }
+
         let stmt_exec_start = Instant::now();
-        'stmts: for line in program_text.lines() {
+        for line in program_text.lines() {
             let line = line.trim();
             if line.is_empty() {
                 continue;
@@ -2475,6 +2494,9 @@ impl QueryJob {
                 let stmt_text = current_stmt.trim();
                 if !stmt_text.is_empty() {
                     if let Some((index, stmt)) = statements.next() {
+                        if !fact_run.is_empty() && !FactRun::joins(&stmt) {
+                            commit_facts!();
+                        }
                         stmt_index = index;
                         match stmt {
                             statement::Statement::SchemaDecl(decl) => {
@@ -2523,106 +2545,11 @@ impl QueryJob {
                                 }
                             }
                             statement::Statement::Insert(op) => {
-                                // Convert all terms to Values and create Tuples
-                                let mut tuples: Vec<Tuple> = Vec::new();
-                                let mut conversion_error = None;
-                                let max_str_bytes =
-                                    self.config.storage.performance.max_string_value_bytes;
-
-                                for tuple_terms in &op.tuples {
-                                    if tuple_terms.is_empty() {
-                                        continue;
-                                    }
-                                    let mut values: Vec<Value> = Vec::new();
-                                    for term in tuple_terms {
-                                        match term_to_value(term) {
-                                            Ok(Value::String(ref s))
-                                                if max_str_bytes > 0 && s.len() > max_str_bytes =>
-                                            {
-                                                conversion_error = Some(format!(
-                                                    "String value too long: {} bytes (max {})",
-                                                    s.len(),
-                                                    max_str_bytes
-                                                ));
-                                                break;
-                                            }
-                                            Ok(v) => values.push(v),
-                                            Err(e) => {
-                                                conversion_error = Some(e);
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    if conversion_error.is_some() {
-                                        break;
-                                    }
-                                    tuples.push(Tuple::new(values));
-                                }
-
-                                if let Some(err) = conversion_error {
-                                    fail!(ErrorCode::Validation, err);
-                                    current_stmt.clear();
-                                    continue;
-                                }
-
-                                // Validate tuple count limit (WI-07)
-                                let max_tuples = self.config.storage.performance.max_insert_tuples;
-                                if max_tuples > 0 && tuples.len() > max_tuples {
-                                    fail!(
-                                        ErrorCode::Validation,
-                                        format!(
-                                            "Insert rejected for '{}': {} tuples exceeds max {}",
-                                            op.relation,
-                                            tuples.len(),
-                                            max_tuples
-                                        )
-                                    );
-                                    current_stmt.clear();
-                                    continue;
-                                }
-
-                                // Validate against schema if one exists (per-KG isolation)
-                                if let Err(e) =
-                                    storage.validate_tuples_in(&kg_name, &op.relation, &tuples)
-                                {
-                                    fail!(
-                                        ErrorCode::Validation,
-                                        format!("Insert rejected for '{}': {}", op.relation, e)
-                                    );
-                                    current_stmt.clear();
-                                    continue;
-                                }
-
-                                let inserted = match storage.insert_tuples_into(
-                                    &kg_name,
-                                    &op.relation,
-                                    tuples,
-                                ) {
-                                    Ok((inserted, _duplicates)) => inserted,
-                                    Err(e) => {
-                                        fail!(
-                                            storage_error_code(&e, ErrorCode::Internal),
-                                            e.to_string()
-                                        );
-                                        current_stmt.clear();
-                                        continue;
-                                    }
-                                };
-                                self.insert_count
-                                    .fetch_add(inserted as u64, Ordering::Relaxed);
-                                // Notify WebSocket subscribers of persistent data change
-                                if inserted > 0 {
-                                    self.notify_persistent_update(
-                                        &kg_name,
-                                        &op.relation,
-                                        "insert",
-                                        inserted,
-                                    );
-                                }
-                                messages.push(format!(
-                                    "Inserted {} fact(s) into '{}'.",
-                                    inserted, op.relation
-                                ));
+                                fact_run.queue(
+                                    stmt_index,
+                                    FactStatement::Insert(op),
+                                    &mut messages,
+                                );
                             }
                             statement::Statement::Fact(rule) => {
                                 // Session facts are NOT persisted - they are only available for
@@ -2642,238 +2569,11 @@ impl QueryJob {
                                 ));
                             }
                             statement::Statement::Delete(op) => {
-                                use statement::DeletePattern;
-                                match op.pattern {
-                                    DeletePattern::SingleTuple(terms) => {
-                                        if !terms.is_empty() {
-                                            let values: Result<Vec<Value>, String> =
-                                                terms.iter().map(term_to_value).collect();
-                                            let values = match values {
-                                                Ok(v) => v,
-                                                Err(e) => {
-                                                    fail!(
-                                                        ErrorCode::Validation,
-                                                        format!("Delete error: {e}")
-                                                    );
-                                                    current_stmt.clear();
-                                                    continue;
-                                                }
-                                            };
-                                            let tuple = Tuple::new(values);
-                                            let deleted_count = match storage.delete_tuples_from(
-                                                &kg_name,
-                                                &op.relation,
-                                                vec![tuple],
-                                            ) {
-                                                Ok(count) => count,
-                                                Err(e) => {
-                                                    fail!(
-                                                        storage_error_code(&e, ErrorCode::Internal),
-                                                        format!("Delete failed: {e}")
-                                                    );
-                                                    current_stmt.clear();
-                                                    continue;
-                                                }
-                                            };
-                                            if deleted_count > 0 {
-                                                self.notify_persistent_update(
-                                                    &kg_name,
-                                                    &op.relation,
-                                                    "delete",
-                                                    deleted_count,
-                                                );
-                                            }
-                                            messages.push(format!(
-                                                "Deleted {} facts from '{}'.",
-                                                deleted_count, op.relation
-                                            ));
-                                        }
-                                    }
-                                    DeletePattern::BulkTuples(tuples) => {
-                                        let mut total_deleted = 0;
-                                        for tuple_terms in tuples {
-                                            // Convert terms to values
-                                            let converted: Result<
-                                                Vec<crate::value::Value>,
-                                                String,
-                                            > = tuple_terms.iter().map(term_to_value).collect();
-                                            if let Ok(values) = converted {
-                                                let tuple = crate::value::Tuple::new(values);
-                                                match storage.delete_tuples_from(
-                                                    &kg_name,
-                                                    &op.relation,
-                                                    vec![tuple],
-                                                ) {
-                                                    Ok(count) => total_deleted += count,
-                                                    Err(e) => {
-                                                        fail!(
-                                                            storage_error_code(
-                                                                &e,
-                                                                ErrorCode::Internal
-                                                            ),
-                                                            format!("Delete failed: {e}")
-                                                        );
-                                                        current_stmt.clear();
-                                                        continue 'stmts;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        if total_deleted > 0 {
-                                            self.notify_persistent_update(
-                                                &kg_name,
-                                                &op.relation,
-                                                "delete",
-                                                total_deleted,
-                                            );
-                                        }
-                                        messages.push(format!(
-                                            "Deleted {} fact(s) from '{}'.",
-                                            total_deleted, op.relation
-                                        ));
-                                    }
-                                    DeletePattern::Conditional { head_args, body } => {
-                                        // Build query to find matching tuples
-                                        // Collect variables from head_args
-                                        let mut all_vars: Vec<String> = Vec::new();
-                                        for arg in &head_args {
-                                            if let Term::Variable(v) = arg {
-                                                if !all_vars.contains(v) {
-                                                    all_vars.push(v.clone());
-                                                }
-                                            }
-                                        }
-
-                                        // Format head arguments for the target relation
-                                        let head_args_str: String = head_args
-                                            .iter()
-                                            .map(format_term)
-                                            .collect::<Vec<_>>()
-                                            .join(", ");
-
-                                        // Build body string from predicates
-                                        // IMPORTANT: Include the target relation to bind all head variables
-                                        let mut body_parts: Vec<String> =
-                                            vec![format!("{}({})", op.relation, head_args_str)];
-                                        for pred in &body {
-                                            body_parts.push(format_body_pred(pred));
-                                        }
-                                        let body_str = body_parts.join(", ");
-
-                                        // Build query rule
-                                        let query_rule = format!(
-                                            "__cond_del_query__({}) <- {}",
-                                            all_vars.join(", "),
-                                            body_str
-                                        );
-
-                                        // Execute query to find matching variable bindings
-                                        let results = match crate::without_result_cap(|| {
-                                            storage.execute_query_with_rules_tuples_on(
-                                                &kg_name,
-                                                &query_rule,
-                                            )
-                                        }) {
-                                            Ok(results) => results,
-                                            Err(e) => {
-                                                fail!(
-                                                    storage_error_code(&e, ErrorCode::Validation),
-                                                    format!("Delete failed: {e}")
-                                                );
-                                                current_stmt.clear();
-                                                continue;
-                                            }
-                                        };
-
-                                        let mut deleted = 0;
-
-                                        for result_tuple in results {
-                                            // Build bindings from result
-                                            let mut bindings: std::collections::HashMap<
-                                                String,
-                                                crate::value::Value,
-                                            > = std::collections::HashMap::new();
-                                            for (i, var) in all_vars.iter().enumerate() {
-                                                if let Some(val) = result_tuple.get(i) {
-                                                    bindings.insert(var.clone(), val.clone());
-                                                }
-                                            }
-
-                                            // Build tuple to delete from head_args with bindings
-                                            let mut tuple_values: Vec<crate::value::Value> =
-                                                Vec::new();
-                                            let mut valid = true;
-                                            for arg in &head_args {
-                                                match arg {
-                                                    Term::Variable(v) => {
-                                                        if let Some(val) = bindings.get(v) {
-                                                            tuple_values.push(val.clone());
-                                                        } else {
-                                                            valid = false;
-                                                            break;
-                                                        }
-                                                    }
-                                                    Term::Constant(c) => {
-                                                        tuple_values
-                                                            .push(crate::value::Value::Int64(*c));
-                                                    }
-                                                    Term::StringConstant(s) => {
-                                                        tuple_values
-                                                            .push(crate::value::Value::string(s));
-                                                    }
-                                                    Term::FloatConstant(f) => {
-                                                        tuple_values
-                                                            .push(crate::value::Value::Float64(*f));
-                                                    }
-                                                    Term::BoolConstant(b) => {
-                                                        tuple_values
-                                                            .push(crate::value::Value::Bool(*b));
-                                                    }
-                                                    _ => {
-                                                        valid = false;
-                                                        break;
-                                                    }
-                                                }
-                                            }
-
-                                            if valid && !tuple_values.is_empty() {
-                                                let tuple_to_delete =
-                                                    crate::value::Tuple::new(tuple_values);
-                                                match storage.delete_tuples_from(
-                                                    &kg_name,
-                                                    &op.relation,
-                                                    vec![tuple_to_delete],
-                                                ) {
-                                                    Ok(count) => deleted += count,
-                                                    Err(e) => {
-                                                        fail!(
-                                                            storage_error_code(
-                                                                &e,
-                                                                ErrorCode::Internal
-                                                            ),
-                                                            format!("Delete failed: {e}")
-                                                        );
-                                                        current_stmt.clear();
-                                                        continue 'stmts;
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        if deleted > 0 {
-                                            self.notify_persistent_update(
-                                                &kg_name,
-                                                &op.relation,
-                                                "delete",
-                                                deleted,
-                                            );
-                                        }
-                                        messages.push(format!(
-                                            "Conditional delete: {} fact(s) deleted from '{}'.",
-                                            deleted, op.relation
-                                        ));
-                                    }
-                                }
+                                fact_run.queue(
+                                    stmt_index,
+                                    FactStatement::Delete(op),
+                                    &mut messages,
+                                );
                             }
                             statement::Statement::PersistentRule(rule) => {
                                 let rule_text = format_rule_text(&rule);
@@ -2942,143 +2642,11 @@ impl QueryJob {
                                 }
                             }
                             statement::Statement::Update(op) => {
-                                // Build query to find matching tuples
-                                let mut all_vars: Vec<String> = Vec::new();
-                                for target in &op.deletes {
-                                    for arg in &target.args {
-                                        if let Term::Variable(v) = arg {
-                                            if !all_vars.contains(v) {
-                                                all_vars.push(v.clone());
-                                            }
-                                        }
-                                    }
-                                }
-                                for target in &op.inserts {
-                                    for arg in &target.args {
-                                        if let Term::Variable(v) = arg {
-                                            if !all_vars.contains(v) {
-                                                all_vars.push(v.clone());
-                                            }
-                                        }
-                                    }
-                                }
-
-                                let body_str: String = op
-                                    .body
-                                    .iter()
-                                    .map(format_body_pred)
-                                    .collect::<Vec<_>>()
-                                    .join(", ");
-
-                                let query_rule = format!(
-                                    "__upd_query__({}) <- {}",
-                                    all_vars.join(", "),
-                                    body_str
+                                fact_run.queue(
+                                    stmt_index,
+                                    FactStatement::Update(op),
+                                    &mut messages,
                                 );
-
-                                let results = match crate::without_result_cap(|| {
-                                    storage
-                                        .execute_query_with_rules_tuples_on(&kg_name, &query_rule)
-                                }) {
-                                    Ok(results) => results,
-                                    Err(e) => {
-                                        fail!(
-                                            storage_error_code(&e, ErrorCode::Validation),
-                                            format!("Update failed: {e}")
-                                        );
-                                        current_stmt.clear();
-                                        continue;
-                                    }
-                                };
-
-                                let mut deleted = 0;
-                                let mut inserted = 0;
-
-                                for result_tuple in results {
-                                    // Build bindings from query result: var_name → Value
-                                    let bindings: std::collections::HashMap<String, Value> =
-                                        all_vars
-                                            .iter()
-                                            .enumerate()
-                                            .filter_map(|(idx, var)| {
-                                                result_tuple
-                                                    .get(idx)
-                                                    .map(|v| (var.clone(), v.clone()))
-                                            })
-                                            .collect();
-
-                                    for target in &op.deletes {
-                                        let tuple_vals: Option<Vec<Value>> = target
-                                            .args
-                                            .iter()
-                                            .map(|arg| match arg {
-                                                Term::Variable(v) => bindings.get(v).cloned(),
-                                                other => term_to_value(other).ok(),
-                                            })
-                                            .collect();
-                                        if let Some(vals) = tuple_vals {
-                                            match storage.delete_tuples_from(
-                                                &kg_name,
-                                                &target.relation,
-                                                vec![Tuple::new(vals)],
-                                            ) {
-                                                Ok(count) => deleted += count,
-                                                Err(e) => {
-                                                    fail!(
-                                                        storage_error_code(&e, ErrorCode::Internal),
-                                                        format!("Update failed: {e}")
-                                                    );
-                                                    current_stmt.clear();
-                                                    continue 'stmts;
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    for target in &op.inserts {
-                                        let tuple_vals: Option<Vec<Value>> = target
-                                            .args
-                                            .iter()
-                                            .map(|arg| match arg {
-                                                Term::Variable(v) => bindings.get(v).cloned(),
-                                                other => term_to_value(other).ok(),
-                                            })
-                                            .collect();
-                                        if let Some(vals) = tuple_vals {
-                                            match storage.insert_tuples_into(
-                                                &kg_name,
-                                                &target.relation,
-                                                vec![Tuple::new(vals)],
-                                            ) {
-                                                Ok((new_count, _)) => inserted += new_count,
-                                                Err(e) => {
-                                                    fail!(
-                                                        storage_error_code(&e, ErrorCode::Internal),
-                                                        format!("Update failed: {e}")
-                                                    );
-                                                    current_stmt.clear();
-                                                    continue 'stmts;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Track insert count for metrics
-                                self.insert_count
-                                    .fetch_add(inserted as u64, Ordering::Relaxed);
-
-                                if deleted > 0 || inserted > 0 {
-                                    self.notify_persistent_update(
-                                        &kg_name,
-                                        "multiple",
-                                        "update",
-                                        deleted + inserted,
-                                    );
-                                }
-                                messages.push(format!(
-                                    "Update: {deleted} deleted, {inserted} inserted."
-                                ));
                             }
                             statement::Statement::TypeDecl(decl) => {
                                 messages.push(format!("Type '{}' declared.", decl.name));
@@ -3783,6 +3351,10 @@ impl QueryJob {
                 current_stmt.clear();
             }
         }
+        if !fact_run.is_empty() {
+            commit_facts!();
+        }
+        fact_run.remove_vacant(&mut messages);
         let stmt_exec_ms = stmt_exec_start.elapsed().as_millis() as u64;
         if stmt_exec_ms > 0 {
             info!(
@@ -5801,7 +5373,9 @@ fn storage_error_code(error: &crate::storage::StorageError, default: ErrorCode) 
         StorageError::KnowledgeGraphExists(_)
         | StorageError::CannotDropDefault
         | StorageError::CannotDropCurrentKnowledgeGraph => ErrorCode::Conflict,
-        StorageError::InvalidName(_) | StorageError::ParseError(_) => ErrorCode::Validation,
+        StorageError::InvalidName(_)
+        | StorageError::ParseError(_)
+        | StorageError::WriteRejected(_) => ErrorCode::Validation,
         _ => default,
     }
 }

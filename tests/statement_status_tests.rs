@@ -47,7 +47,7 @@ async fn oversized_string_insert_is_a_validation_error() {
 }
 
 #[tokio::test]
-async fn second_statement_failure_is_reported_by_index() {
+async fn second_statement_failure_is_reported_by_index_and_rolls_back_its_run() {
     let (handler, _tmp) = handler();
     let program = format!("+a(1)\n+b(\"{}\")\n+c(3)", too_long());
     let result = run(&handler, &program).await.expect("program result");
@@ -59,8 +59,19 @@ async fn second_statement_failure_is_reported_by_index() {
     } = &result.errors[0];
     assert_eq!((*index, *code), (1, ErrorCode::Validation));
     assert!(message.starts_with("String value too long"), "{message}");
-    assert_eq!(count(&handler, "?a(X)").await, 1);
-    assert_eq!(count(&handler, "?c(X)").await, 1);
+    assert!(
+        message.ends_with("(rolled back: none of the 3 fact statements 0-2 was applied)"),
+        "{message}"
+    );
+    // The fact statements are one transaction: none of them took effect, and
+    // none reports success.
+    assert_eq!(
+        result.rows.len(),
+        1,
+        "only the failure is reported: {result:?}"
+    );
+    assert_eq!(count(&handler, "?a(X)").await, 0);
+    assert_eq!(count(&handler, "?c(X)").await, 0);
 }
 
 #[tokio::test]

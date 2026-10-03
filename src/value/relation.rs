@@ -55,6 +55,19 @@ impl Relation {
         self.chunks.iter().flat_map(|chunk| chunk.iter())
     }
 
+    /// Whether both share every chunk, and so hold the same tuples. A write
+    /// to a relation that a snapshot shares copies the chunks it changes, so
+    /// this is `false` after any write since `other` was cloned from `self`.
+    pub fn shares_tuples_with(&self, other: &Relation) -> bool {
+        self.len == other.len
+            && self.chunks.len() == other.chunks.len()
+            && self
+                .chunks
+                .iter()
+                .zip(&other.chunks)
+                .all(|(a, b)| Arc::ptr_eq(a, b))
+    }
+
     /// Linear membership test. Writers that need fast dedup keep a hash index.
     pub fn contains(&self, tuple: &Tuple) -> bool {
         self.iter().any(|t| t == tuple)
@@ -273,6 +286,30 @@ mod tests {
         assert_eq!(reader.len(), CHUNK_SIZE + 3);
         assert_eq!(writer.len(), CHUNK_SIZE + 4);
         assert!(!reader.contains(&t(-1)));
+    }
+
+    #[test]
+    fn test_relation_shares_tuples_until_either_side_writes() {
+        let writer: Relation = (0..(CHUNK_SIZE as i64 + 3)).map(t).collect();
+        let reader = writer.clone();
+        assert!(writer.shares_tuples_with(&reader));
+
+        let mut pushed = writer.clone();
+        pushed.push(t(-1));
+        assert!(!pushed.shares_tuples_with(&reader));
+
+        let mut retained = writer.clone();
+        retained.retain(|_| true);
+        assert!(
+            retained.shares_tuples_with(&reader),
+            "a no-op retain keeps sharing"
+        );
+        retained.retain(|v| *v != t(CHUNK_SIZE as i64));
+        assert!(!retained.shares_tuples_with(&reader));
+
+        // Equal contents built separately are not shared.
+        let rebuilt: Relation = (0..(CHUNK_SIZE as i64 + 3)).map(t).collect();
+        assert!(!rebuilt.shares_tuples_with(&reader));
     }
 
     #[test]

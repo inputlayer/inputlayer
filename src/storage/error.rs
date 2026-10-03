@@ -89,6 +89,11 @@ pub enum StorageError {
     #[error("Parse error: {0}")]
     ParseError(String),
 
+    /// A fact write the knowledge graph's current state does not allow:
+    /// arity, schema, vector index, or insert into a derived relation.
+    #[error("{0}")]
+    WriteRejected(String),
+
     /// Generic error
     #[error("{0}")]
     Other(String),

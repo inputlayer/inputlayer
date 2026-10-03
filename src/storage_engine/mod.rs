@@ -32,11 +32,19 @@
 
 #[cfg(test)]
 mod commit_tests;
+mod fact_commit;
+#[cfg(test)]
+mod fact_commit_tests;
+mod fact_program;
 #[cfg(test)]
 mod materialize_tests;
 mod relation_store;
 mod snapshot;
 mod vector_index;
+pub use fact_program::{
+    FactChange, FactCommit, FactCommitError, FactProgram, RelationChange, StagedStatement,
+    StatementCount,
+};
 pub use relation_store::RelationStore;
 pub use snapshot::KnowledgeGraphSnapshot;
 
@@ -550,81 +558,15 @@ impl StorageEngine {
         relation: &str,
         tuples: Vec<Tuple>,
     ) -> StorageResult<(usize, usize)> {
-        validate_names(kg, relation)?;
-        if tuples.is_empty() {
-            return Ok((0, 0));
-        }
-
-        // Check if relation is a view (derived relation) - cannot insert into views
-        {
-            let db = self
-                .knowledge_graphs
-                .get(kg)
-                .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
-            let db = db.read();
-            if db.rule_exists(relation) {
-                return Err(StorageError::Other(format!(
-                    "Cannot insert into '{relation}': it is a derived relation (view). \
-                     Use a base relation or drop the rule first with '.rule drop {relation}'."
-                )));
-            }
-            db.validate_index_rows(relation, &tuples)
-                .map_err(StorageError::Other)?;
-        }
-
-        // Check arity consistency
-        let new_arity = tuples.first().map_or(0, super::value::Tuple::arity);
-
-        // Verify all tuples in this batch have the same arity
-        for tuple in &tuples {
-            if tuple.arity() != new_arity {
-                return Err(StorageError::Other(format!(
-                    "Arity mismatch in insert batch: expected {}, got {}",
-                    new_arity,
-                    tuple.arity()
-                )));
-            }
-        }
-
-        // Check if relation already exists with a different arity
-        if let Some((existing_schema, _)) = self.get_relation_metadata_in(kg, relation)? {
-            let existing_arity = existing_schema.len();
-            if existing_arity != new_arity {
-                return Err(StorageError::Other(format!(
-                    "Arity mismatch for relation '{relation}': existing arity is {existing_arity}, but trying to insert tuples with arity {new_arity}"
-                )));
-            }
-        }
-
-        // Under the KG write lock: compute the effective delta, assign time,
-        // persist, apply. Disk and memory see writes in the same order.
-        let db = self.kg_handle(kg)?;
-        let mut db = Self::lock_live(&db, kg)?;
         let total = tuples.len();
-        let new_tuples = db.absent_tuples(relation, tuples);
-        if new_tuples.is_empty() {
-            return Ok((0, total));
-        }
-
-        self.settle_relation_drop(&mut db, kg, relation)?;
-        let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
-        let mut txn = Transaction::new(time);
-        txn.insert(format!("{kg}:{relation}"), new_tuples.iter().cloned());
-
-        let persist_start = Instant::now();
-        self.persist.commit(txn)?;
-        let persist_ms = persist_start.elapsed().as_millis() as u64;
-        let new_count = new_tuples.len();
-        info!(
-            kg = %kg,
-            relation = %relation,
-            tuples = new_count,
-            persist_ms,
-            "persist_append_complete"
-        );
-
-        db.insert_in_memory(relation, new_tuples, time)?;
-        Ok((new_count, total - new_count))
+        let inserted = self.commit_single(
+            kg,
+            FactChange::Insert {
+                relation: relation.to_string(),
+                tuples,
+            },
+        )?;
+        Ok((inserted.inserted, total - inserted.inserted))
     }
 
     /// Delete binary tuples from a relation in the current knowledge graph
@@ -692,25 +634,22 @@ impl StorageEngine {
         relation: &str,
         tuples: Vec<Tuple>,
     ) -> StorageResult<usize> {
-        validate_names(kg, relation)?;
-        if tuples.is_empty() {
-            return Ok(0);
-        }
+        let deleted = self.commit_single(
+            kg,
+            FactChange::Delete {
+                relation: relation.to_string(),
+                tuples,
+            },
+        )?;
+        Ok(deleted.deleted)
+    }
 
-        let db = self.kg_handle(kg)?;
-        let mut db = Self::lock_live(&db, kg)?;
-        let present = db.present_tuples(relation, &tuples);
-        if present.is_empty() {
-            return Ok(0);
-        }
-
-        self.settle_relation_drop(&mut db, kg, relation)?;
-        let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
-        let mut txn = Transaction::new(time);
-        txn.delete(format!("{kg}:{relation}"), present.iter().cloned());
-        self.persist.commit(txn)?;
-
-        db.delete_in_memory(relation, present, time)
+    /// Commit one change as a one-statement [`FactProgram`].
+    fn commit_single(&self, kg: &str, change: FactChange) -> StorageResult<StatementCount> {
+        let commit = self
+            .commit_facts(kg, FactProgram::single(vec![change]), None)
+            .map_err(FactCommitError::into_storage_error)?;
+        Ok(commit.statements[0])
     }
 
     /// Clone a KG handle without holding the `DashMap` shard lock.
@@ -2524,115 +2463,6 @@ impl KnowledgeGraph {
         }
     }
 
-    /// Distinct tuples from `tuples` not yet in `relation`, in input order.
-    fn absent_tuples(&self, relation: &str, tuples: Vec<Tuple>) -> Vec<Tuple> {
-        self.store.absent(relation, tuples)
-    }
-
-    /// Distinct tuples from `tuples` currently in `relation`.
-    fn present_tuples(&self, relation: &str, tuples: &[Tuple]) -> Vec<Tuple> {
-        self.store.present(relation, tuples)
-    }
-
-    /// Insert tuples into in-memory state only
-    ///
-    /// `tuples` should be the effective delta (see `absent_tuples`); the store
-    /// still dedups. Persistence is handled by `StorageEngine`.
-    ///
-    /// # Errors
-    /// Returns error if DD shadow write fails.
-    fn insert_in_memory(
-        &mut self,
-        relation: &str,
-        tuples: Vec<Tuple>,
-        time: u64,
-    ) -> StorageResult<()> {
-        // Infer schema from first tuple if available
-        let schema = if let Some(first) = tuples.first() {
-            (0..first.arity())
-                .map(|i| format!("col{i}"))
-                .collect::<Vec<_>>()
-        } else {
-            vec!["col0".to_string(), "col1".to_string()]
-        };
-
-        let (added, _) = self.store.insert(relation, tuples);
-        let new_count = added.len();
-        let tuple_count = self.store.get(relation).map_or(0, Relation::len);
-
-        // Update metadata
-        self.metadata
-            .add_relation(relation.to_string(), schema, tuple_count);
-
-        // Shadow write to IncrementalEngine (if enabled).
-        if new_count > 0 {
-            self.index_inserted(relation, &added);
-            if let Some(dd) = &self.incremental {
-                dd.insert(relation, added, time)
-                    .map_err(StorageError::IncrementalEngineError)?;
-                // Invalidate derived relations that depend on this base
-                dd.notify_base_update(relation)
-                    .map_err(StorageError::IncrementalEngineError)?;
-            }
-            // Publish new snapshot for lock-free reads
-            self.publish_snapshot();
-        }
-
-        info!(
-            relation = %relation,
-            new_count,
-            time,
-            "insert_in_memory_complete"
-        );
-
-        Ok(())
-    }
-
-    /// Delete tuples from in-memory state only
-    ///
-    /// `tuples` should be the effective delta (see `present_tuples`).
-    /// Persistence is handled by `StorageEngine`. Returns the count of
-    /// deleted tuples.
-    ///
-    /// # Errors
-    /// Returns error if DD shadow write fails.
-    fn delete_in_memory(
-        &mut self,
-        relation: &str,
-        tuples: Vec<Tuple>,
-        time: u64,
-    ) -> StorageResult<usize> {
-        let removed = self.store.delete(relation, &tuples);
-        if removed.is_empty() {
-            return Ok(0);
-        }
-        let final_count = self.store.get(relation).map_or(0, Relation::len);
-
-        // Get schema from metadata (which has the correct arity from insert time)
-        // Avoid using catalog which may not have the schema for base facts
-        let schema = self.metadata.relations.get(relation).map_or_else(
-            || vec!["col0".to_string(), "col1".to_string()],
-            |r| r.schema.clone(),
-        );
-        self.metadata
-            .add_relation(relation.to_string(), schema, final_count);
-
-        let deleted_count = removed.len();
-        self.index_deleted(relation, &removed);
-        if let Some(dd) = &self.incremental {
-            dd.delete(relation, removed, time)
-                .map_err(StorageError::IncrementalEngineError)?;
-            // Invalidate derived relations that depend on this base
-            dd.notify_base_update(relation)
-                .map_err(StorageError::IncrementalEngineError)?;
-        }
-
-        // Publish new snapshot for lock-free reads
-        self.publish_snapshot();
-
-        Ok(deleted_count)
-    }
-
     /// Get knowledge graph name
     pub fn name(&self) -> &str {
         &self.name
@@ -3136,9 +2966,12 @@ mod tests {
         .unwrap();
         let mut kg = KnowledgeGraph::new_with_workers("kg".into(), temp.path().join("kg"), 1);
         for rel in ["p_a", "p_b"] {
-            kg.insert_in_memory(rel, vec![Tuple::from_pair(1, 2), Tuple::from_pair(3, 4)], 1)
-                .unwrap();
+            kg.store
+                .insert(rel, vec![Tuple::from_pair(1, 2), Tuple::from_pair(3, 4)]);
+            kg.metadata
+                .add_relation(rel.to_string(), vec!["col0".into(), "col1".into()], 2);
         }
+        kg.publish_snapshot();
         // p_a's shard exists; creating p_b's fails because shards/ is a file.
         persist.ensure_shard("kg:p_a").unwrap();
         let shards = temp.path().join("persist").join("shards");

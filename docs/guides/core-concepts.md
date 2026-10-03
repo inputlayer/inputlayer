@@ -71,6 +71,22 @@ Combine delete and insert in one atomic operation:
 
 This executes at the same logical timestamp, ensuring atomicity.
 
+### Programs Commit Their Facts Together
+
+Consecutive fact statements in one program (`+`, `-` and updates, as in
+Patterns 1 and 2) are one transaction. They commit at one logical timestamp
+with one write-ahead-log record, and subscribers see the result as one change.
+A conditional delete or update sees the statements before it. If any of them
+fails, for example with an arity or type error, none of them is applied:
+
+```iql
+-person("alice", 30)
++person("alice", "thirty")   // type error: alice keeps age 30
+```
+
+A statement with other persistent effects (a schema, a rule, or a `.` command)
+ends the transaction: the facts before it commit first, then it runs.
+
 ## Deletion Patterns
 
 ### Delete Specific Tuple

@@ -112,7 +112,9 @@ A program of one statement that fails gets an `error`. `code` says why: `validat
 
 ### Statement Failures
 
-A multi-statement program keeps running past a failed statement and replies with a `result` (or `result_start`) whose `errors` lists each failure by 0-based statement index:
+A multi-statement program replies with a `result` (or `result_start`) whose `errors` lists each failure by 0-based statement index.
+
+Consecutive fact statements (`+`, `-`, updates) are one transaction, committed when the program reaches a statement with other persistent effects (schema, rule, `.` command) or its end. If one of them fails, none of them is applied: `errors` names the failed statement, its message ends with `(rolled back: none of the N fact statements A-B was applied)`, and no statement of the transaction reports success. The program then continues with its next statement. Other statements keep running past a failure:
 
 ```json
 {
@@ -230,7 +232,7 @@ The server pushes notifications when persistent data changes in the session's kn
 
 ### Persistent Update
 
-Sent when base facts in a relation change:
+Sent when base facts in a relation change, once per changed relation for each committed transaction, after the change is visible to queries. `operation` is `insert` or `delete` when the transaction only added or only removed facts of the relation, and `update` when it did both; `count` is the number of facts added plus removed. A transaction that changes nothing (only duplicates, or changes that cancel out) and a failed one send nothing.
 
 ```json
 {

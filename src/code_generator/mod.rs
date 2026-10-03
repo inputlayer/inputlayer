@@ -60,7 +60,7 @@ pub fn set_query_cancel_flag(flag: Option<Arc<AtomicBool>>) {
 }
 
 /// The current thread's query cancellation flag.
-fn current_query_cancel_flag() -> Option<Arc<AtomicBool>> {
+pub(crate) fn current_query_cancel_flag() -> Option<Arc<AtomicBool>> {
     QUERY_CANCEL.with(|cell| cell.borrow().clone())
 }
 
