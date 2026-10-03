@@ -1,28 +1,33 @@
-//! Staged fact programs: the fact statements of one program, committed as one
+//! Staged write programs: the writes of one program, committed as one
 //! transaction at one revision.
 //!
-//! A caller *stages* a program's fact statements (`+`, `-`, update) by
-//! resolving each one to concrete tuple changes, in statement order, without
-//! touching the knowledge graph. [`StorageEngine::commit_facts`] then takes the
-//! KG's existing commit ownership (its write lock) once, validates every
-//! change against the current state, computes the effective delta, writes it
-//! as one WAL transaction and publishes one snapshot. Every statement takes
+//! A caller *stages* a program's writes in statement order, without touching
+//! the knowledge graph: fact statements (`+`, `-`, update) resolve to concrete
+//! tuple changes, and rule and schema statements to [`CatalogChange`]s.
+//! [`StorageEngine::commit_program`] then takes the KG's existing commit
+//! ownership (its write lock) once, applies the catalog changes to copies of
+//! the KG's catalogs, validates every fact change against those copies and the
+//! current data, writes everything as one WAL transaction and publishes one
+//! snapshot, with the new rules and data together. Every statement takes
 //! effect, or none does.
 //!
 //! Inserts and deletes of literal tuples are *blind*: their effect is decided
 //! under the lock, so they never go stale. A statement that reads the KG while
 //! staging (conditional delete, update) evaluates its query on
-//! [`FactProgram::view`], the snapshot plus the changes staged before it, and
-//! records the read with [`FactProgram::read`]: the snapshot and the relations
+//! [`WriteProgram::view`], the snapshot plus the changes staged before it, and
+//! records the read with [`WriteProgram::read`]: the snapshot and the relations
 //! its query reads through persistent rules. The commit refuses with
-//! [`FactCommitError::Stale`] if any of those relations or any rule changed
+//! [`CommitError::Stale`] if any of those relations or any rule changed
 //! since, and the caller stages again against the new state. Writes to other
 //! relations do not conflict.
 //!
-//! [`StorageEngine::commit_facts`]: super::StorageEngine::commit_facts
+//! [`StorageEngine::commit_program`]: super::StorageEngine::commit_program
 
+use super::catalog_change::{CatalogChange, CatalogOutcome};
 use super::KnowledgeGraphSnapshot;
 use crate::ast::dependencies::DependencyClosure;
+use crate::ast::Rule;
+use crate::rule_catalog::RuleCatalog;
 use crate::storage::StorageError;
 use crate::value::{RelationMap, Tuple};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -52,17 +57,26 @@ impl FactChange {
     }
 }
 
-/// The changes of one program statement, applied in order.
+/// What one staged statement changes.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StagedChanges {
+    /// Fact changes, applied in order.
+    Facts(Vec<FactChange>),
+    /// One change to the rule or schema catalog.
+    Catalog(CatalogChange),
+}
+
+/// The changes of one program statement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StagedStatement {
     /// The statement's 0-based index in its program.
     pub index: usize,
-    pub changes: Vec<FactChange>,
+    pub changes: StagedChanges,
 }
 
-/// A program's fact statements, staged for one commit.
+/// A program's writes, staged for one commit.
 #[derive(Debug, Clone, Default)]
-pub struct FactProgram {
+pub struct WriteProgram {
     statements: Vec<StagedStatement>,
     /// What state-reading statements read, if any.
     read: Option<StagedRead>,
@@ -86,7 +100,7 @@ enum ReadSet {
 
 impl ReadSet {
     /// Relations `query` reads, directly or through `rules`.
-    fn of(query: &str, rules: &[crate::ast::Rule]) -> Self {
+    fn of(query: &str, rules: &[Rule]) -> Self {
         let Ok(program) = crate::parser::parse_program(query) else {
             return Self::Everything;
         };
@@ -134,33 +148,34 @@ impl StagedRead {
     }
 }
 
-impl FactProgram {
+impl WriteProgram {
     /// An empty program.
     pub fn new() -> Self {
         Self::default()
     }
 
     /// A program of one statement (index 0) making `changes`.
-    pub fn single(changes: Vec<FactChange>) -> Self {
+    pub fn single(changes: StagedChanges) -> Self {
         let mut program = Self::new();
         program.push(0, changes);
         program
     }
 
-    /// Append statement `index`, which makes `changes` in order.
-    pub fn push(&mut self, index: usize, changes: Vec<FactChange>) {
+    /// Append statement `index`, which makes `changes`.
+    pub fn push(&mut self, index: usize, changes: StagedChanges) {
         self.statements.push(StagedStatement { index, changes });
     }
 
-    /// Record that a staged statement evaluates `query` on `snapshot` (or on
-    /// a [`view`](Self::view) of it): the commit then requires every relation
-    /// the query reads, and every rule, to be unchanged since `snapshot`.
+    /// Record that a staged statement evaluates `query` on a
+    /// [`view`](Self::view) of `snapshot` whose rules are `rules`: the commit
+    /// then requires every relation the query reads through `rules`, and every
+    /// rule, to be unchanged since `snapshot`.
     ///
     /// # Panics
     /// In debug builds, if the program already read a different snapshot;
     /// every statement of a program must stage against the same one.
-    pub fn read(&mut self, snapshot: &Arc<KnowledgeGraphSnapshot>, query: &str) {
-        let relations = ReadSet::of(query, &snapshot.rules);
+    pub fn read(&mut self, snapshot: &Arc<KnowledgeGraphSnapshot>, rules: &[Rule], query: &str) {
+        let relations = ReadSet::of(query, rules);
         match &mut self.read {
             Some(read) => {
                 debug_assert!(
@@ -189,19 +204,41 @@ impl FactProgram {
         &self.statements
     }
 
+    /// The staged fact changes, in program order.
+    pub fn fact_changes(&self) -> impl Iterator<Item = &FactChange> {
+        self.statements.iter().flat_map(|s| match &s.changes {
+            StagedChanges::Facts(changes) => changes.as_slice(),
+            StagedChanges::Catalog(_) => &[],
+        })
+    }
+
+    /// The staged catalog changes, in program order.
+    pub fn catalog_changes(&self) -> impl Iterator<Item = &CatalogChange> {
+        self.statements.iter().filter_map(|s| match &s.changes {
+            StagedChanges::Catalog(change) => Some(change),
+            StagedChanges::Facts(_) => None,
+        })
+    }
+
     pub(super) fn into_statements(self) -> Vec<StagedStatement> {
         self.statements
     }
 
     /// `snapshot` as it reads after the changes staged so far, for evaluating
-    /// the next state-reading statement.
+    /// the next state-reading statement. `rules`, when given, are the
+    /// snapshot's rules with the program's staged rule changes applied (see
+    /// [`CatalogChange::apply_to_rules`]); the view evaluates with them.
     ///
     /// Only relations the program touches are rebuilt; the others are shared
     /// with `snapshot`. Materialized derived relations are dropped once any
     /// change is staged, since they may be stale; their rules run instead.
-    pub fn view(&self, snapshot: &Arc<KnowledgeGraphSnapshot>) -> Arc<KnowledgeGraphSnapshot> {
+    pub fn view(
+        &self,
+        snapshot: &Arc<KnowledgeGraphSnapshot>,
+        rules: Option<&RuleCatalog>,
+    ) -> Arc<KnowledgeGraphSnapshot> {
         let overlay = self.overlay();
-        if overlay.is_empty() {
+        if overlay.is_empty() && rules.is_none() {
             return Arc::clone(snapshot);
         }
         let mut inputs: RelationMap = (*snapshot.input_tuples).clone();
@@ -214,12 +251,14 @@ impl FactProgram {
             tuples.extend(membership.added);
         }
 
-        let mut view = if snapshot.materialized_relations.is_empty() {
+        let mut view = if snapshot.materialized_relations.is_empty() && rules.is_none() {
             (**snapshot).clone()
         } else {
+            let rules =
+                rules.map_or_else(|| snapshot.rules.as_ref().clone(), RuleCatalog::all_rules);
             let mut view = KnowledgeGraphSnapshot::new_with_workers(
                 HashMap::<String, Vec<Tuple>>::new(),
-                snapshot.rules.as_ref().clone(),
+                rules,
                 snapshot.num_workers,
             );
             view.max_result_rows = snapshot.max_result_rows;
@@ -235,7 +274,7 @@ impl FactProgram {
     /// Final membership of every touched tuple: the last change to a tuple wins.
     fn overlay(&self) -> HashMap<String, Membership> {
         let mut overlay: HashMap<String, Membership> = HashMap::new();
-        for change in self.statements.iter().flat_map(|s| &s.changes) {
+        for change in self.fact_changes() {
             match change {
                 FactChange::Insert { relation, tuples } => {
                     let membership = overlay.entry(relation.clone()).or_default();
@@ -264,15 +303,28 @@ struct Membership {
     removed: HashSet<Tuple>,
 }
 
-/// Effective changes made by one committed statement.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StatementCount {
-    /// The statement's index in its program.
-    pub index: usize,
+/// Effective fact changes made by one committed statement.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FactCount {
     /// Tuples that were absent before this statement and present after it.
     pub inserted: usize,
     /// Tuples that were present before this statement and absent after it.
     pub deleted: usize,
+}
+
+/// What one committed statement did.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StatementEffect {
+    Facts(FactCount),
+    Catalog(CatalogOutcome),
+}
+
+/// The effect of one committed statement.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatementOutcome {
+    /// The statement's index in its program.
+    pub index: usize,
+    pub effect: StatementEffect,
 }
 
 /// Net change of one relation in a commit.
@@ -283,20 +335,19 @@ pub struct RelationChange {
     pub deleted: usize,
 }
 
-/// A committed fact program.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FactCommit {
+/// A committed write program.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProgramCommit {
     /// Per staged statement, in program order.
-    pub statements: Vec<StatementCount>,
-    /// Relations whose contents changed, in first-touch order. Empty when the
-    /// program changed nothing: then nothing was written or published.
+    pub statements: Vec<StatementOutcome>,
+    /// Relations whose contents changed, in first-touch order.
     pub relations: Vec<RelationChange>,
 }
 
-/// Why a fact program was not committed. In every case nothing was written,
+/// Why a write program was not committed. In every case nothing was written,
 /// published or applied.
 #[derive(Debug)]
-pub enum FactCommitError {
+pub enum CommitError {
     /// The KG published a new snapshot after the program read it. Stage the
     /// program again against the current snapshot.
     Stale,
@@ -311,7 +362,7 @@ pub enum FactCommitError {
     Failed(StorageError),
 }
 
-impl FactCommitError {
+impl CommitError {
     /// This failure as a plain storage error, for single-write APIs.
     pub fn into_storage_error(self) -> StorageError {
         match self {
@@ -350,6 +401,10 @@ mod tests {
         }
     }
 
+    fn facts(changes: Vec<FactChange>) -> StagedChanges {
+        StagedChanges::Facts(changes)
+    }
+
     fn snapshot(edges: Vec<Tuple>) -> Arc<KnowledgeGraphSnapshot> {
         let mut inputs = HashMap::new();
         inputs.insert("e".to_string(), edges);
@@ -369,25 +424,25 @@ mod tests {
     #[test]
     fn empty_program_views_the_snapshot_itself() {
         let base = snapshot(vec![t(1, 1)]);
-        assert!(Arc::ptr_eq(&FactProgram::new().view(&base), &base));
+        assert!(Arc::ptr_eq(&WriteProgram::new().view(&base, None), &base));
     }
 
     #[test]
     fn view_applies_staged_changes_in_order_without_touching_the_snapshot() {
         let base = snapshot(vec![t(1, 1), t(2, 2)]);
-        let mut program = FactProgram::new();
+        let mut program = WriteProgram::new();
         program.push(
             0,
-            vec![delete("e", vec![t(1, 1)]), insert("e", vec![t(3, 3)])],
+            facts(vec![delete("e", vec![t(1, 1)]), insert("e", vec![t(3, 3)])]),
         );
         // Re-insert of a present tuple stays single; delete of a staged insert wins.
         program.push(
             1,
-            vec![insert("e", vec![t(2, 2)]), delete("e", vec![t(3, 3)])],
+            facts(vec![insert("e", vec![t(2, 2)]), delete("e", vec![t(3, 3)])]),
         );
-        program.push(2, vec![insert("f", vec![t(9, 9)])]);
+        program.push(2, facts(vec![insert("f", vec![t(9, 9)])]));
 
-        let view = program.view(&base);
+        let view = program.view(&base, None);
         assert_eq!(sorted(&view, "e"), vec![t(2, 2)]);
         assert_eq!(sorted(&view, "f"), vec![t(9, 9)]);
         assert_eq!(sorted(&base, "e"), vec![t(1, 1), t(2, 2)]);
@@ -397,14 +452,29 @@ mod tests {
     #[test]
     fn view_query_sees_staged_changes() {
         let base = snapshot(vec![t(1, 1)]);
-        let mut program = FactProgram::new();
-        program.push(0, vec![insert("e", vec![t(2, 2)])]);
+        let mut program = WriteProgram::new();
+        program.push(0, facts(vec![insert("e", vec![t(2, 2)])]));
         let mut rows = program
-            .view(&base)
+            .view(&base, None)
             .execute_with_rules_tuples("q(X, Y) <- e(X, Y)")
             .unwrap();
         rows.sort();
         assert_eq!(rows, vec![t(1, 1), t(2, 2)]);
+    }
+
+    #[test]
+    fn view_evaluates_with_staged_rules() {
+        let base = snapshot(vec![t(1, 2)]);
+        let mut rules = RuleCatalog::empty();
+        let change = CatalogChange::RegisterRule(
+            crate::statement::parse_rule_definition("swap(Y, X) <- e(X, Y)").unwrap(),
+        );
+        change.apply_to_rules(&mut rules).unwrap();
+        let rows = WriteProgram::new()
+            .view(&base, Some(&rules))
+            .execute_with_rules_tuples("q(X, Y) <- swap(X, Y)")
+            .unwrap();
+        assert_eq!(rows, vec![t(2, 1)]);
     }
 
     #[test]
@@ -416,9 +486,9 @@ mod tests {
         inputs.insert("e".to_string(), vec![t(1, 1)]);
         inputs.insert("other".to_string(), vec![t(5, 5)]);
         let base = Arc::new(KnowledgeGraphSnapshot::new(inputs, rules));
-        let mut program = FactProgram::new();
+        let mut program = WriteProgram::new();
         assert!(program.read_holds_in(&base));
-        program.read(&base, "q(X) <- p(X)");
+        program.read(&base, &base.rules, "q(X) <- p(X)");
 
         let republished = |edit: &dyn Fn(&mut RelationMap)| {
             let mut next = (*base).clone();

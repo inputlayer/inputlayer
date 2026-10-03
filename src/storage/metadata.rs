@@ -61,7 +61,7 @@ impl DropTombstones {
 
 /// Write `value` as JSON to `path` durably: unique temp file, `sync_all()`,
 /// atomic rename, then sync the parent directory.
-fn save_json_atomic<T: Serialize>(value: &T, path: &Path) -> StorageResult<()> {
+pub(crate) fn save_json_atomic<T: Serialize>(value: &T, path: &Path) -> StorageResult<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }

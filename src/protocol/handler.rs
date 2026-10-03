@@ -12,7 +12,7 @@
 use crate::ast::Term;
 use crate::index_manager::IndexStats;
 use crate::rule_catalog::validate_rule;
-use crate::schema::{ColumnSchema, RelationSchema};
+
 use crate::session::{SessionConfig, SessionId, SessionManager};
 use crate::statement;
 use crate::statement::meta::{IndexCreateOptions, MetaCommand};
@@ -29,11 +29,14 @@ use tracing::{debug, info, warn};
 use super::wire::{
     ColumnDef, ErrorCode, QueryResult, StatementError, WireDataType, WireTuple, WireValue,
 };
-use fact_run::FactRun;
+use catalog_staging::CatalogStatement;
 use fact_staging::FactStatement;
+use write_run::{WriteRun, WriteStatement};
 
-mod fact_run;
+mod catalog_staging;
 mod fact_staging;
+mod program_boundary;
+mod write_run;
 
 /// Result of transforming a `?shorthand` query, including sort and pagination annotations.
 pub(crate) struct QueryTransform {
@@ -2435,6 +2438,27 @@ impl QueryJob {
         if kg_name == crate::auth::INTERNAL_KG || statements.iter().any(targets_internal_kg) {
             return Err(internal_kg_denied());
         }
+        // A program that writes commits all its writes as one transaction;
+        // a statement that cannot join it fails the program before anything runs.
+        let transactional = program_boundary::is_transactional(&statements);
+        if let Err(violation) = program_boundary::check(&statements) {
+            let text = program_text
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .nth(violation.index)
+                .unwrap_or_default();
+            let message = violation.message(text);
+            return Ok(QueryResult {
+                errors: vec![StatementError {
+                    index: violation.index,
+                    code: ErrorCode::Unsupported,
+                    message: message.clone(),
+                }],
+                execution_time_ms: start.elapsed().as_millis() as u64,
+                ..Handler::messages_result(vec![message])
+            });
+        }
         let mut statements = statements.into_iter().enumerate();
 
         // Phase 2: Execute statements (all guaranteed to parse successfully)
@@ -2467,22 +2491,21 @@ impl QueryJob {
             }};
         }
 
-        // Fact statements queue here and commit as one transaction at the
-        // next statement with other persistent effects, or after the last one.
-        let mut fact_run = FactRun::default();
-        macro_rules! commit_facts {
-            () => {{
-                if let Err(failure) =
-                    self.commit_fact_run(&storage, &kg_name, &mut fact_run, &mut messages)
-                {
-                    stmt_index = failure.index;
-                    fail!(failure.code, failure.message);
-                }
-            }};
+        // Writes queue here and commit as one transaction after the last
+        // statement.
+        let mut write_run = WriteRun::default();
+        macro_rules! queue {
+            ($statement:expr) => {
+                write_run.queue(stmt_index, $statement, &mut messages)
+            };
         }
 
         let stmt_exec_start = Instant::now();
         for line in program_text.lines() {
+            // A failed statement fails a transactional program: stop there.
+            if transactional && !errors.is_empty() {
+                break;
+            }
             let line = line.trim();
             if line.is_empty() {
                 continue;
@@ -2494,62 +2517,13 @@ impl QueryJob {
                 let stmt_text = current_stmt.trim();
                 if !stmt_text.is_empty() {
                     if let Some((index, stmt)) = statements.next() {
-                        if !fact_run.is_empty() && !FactRun::joins(&stmt) {
-                            commit_facts!();
-                        }
                         stmt_index = index;
                         match stmt {
                             statement::Statement::SchemaDecl(decl) => {
-                                // Build RelationSchema from SchemaDecl
-                                let mut relation_schema = RelationSchema::new(&decl.name);
-                                for col in &decl.columns {
-                                    let schema_type = col.col_type.to_schema_type();
-                                    relation_schema = relation_schema
-                                        .with_column(ColumnSchema::new(&col.name, schema_type));
-                                }
-
-                                // Register schema in the target knowledge graph (per-KG isolation)
-                                // Note: For schema-first workflow, register before inserting data.
-                                // For data-first workflow, ensure existing data is compatible.
-                                let result = if decl.persistent {
-                                    storage.register_or_update_schema_in(&kg_name, relation_schema)
-                                } else {
-                                    storage.register_or_update_session_schema_in(
-                                        &kg_name,
-                                        relation_schema,
-                                    )
-                                };
-
-                                match result {
-                                    Ok(()) => {
-                                        messages.push(format!(
-                                            "Schema for '{}' registered with {} columns{}",
-                                            decl.name,
-                                            decl.columns.len(),
-                                            if decl.persistent {
-                                                " (persistent)"
-                                            } else {
-                                                " (session)"
-                                            }
-                                        ));
-                                    }
-                                    Err(e) => {
-                                        fail!(
-                                            storage_error_code(&e, ErrorCode::Validation),
-                                            format!(
-                                                "Failed to register schema for '{}': {}",
-                                                decl.name, e
-                                            )
-                                        );
-                                    }
-                                }
+                                queue!(WriteStatement::Catalog(CatalogStatement::Schema(decl)));
                             }
                             statement::Statement::Insert(op) => {
-                                fact_run.queue(
-                                    stmt_index,
-                                    FactStatement::Insert(op),
-                                    &mut messages,
-                                );
+                                queue!(WriteStatement::Facts(FactStatement::Insert(op)));
                             }
                             statement::Statement::Fact(rule) => {
                                 // Session facts are NOT persisted - they are only available for
@@ -2569,40 +2543,10 @@ impl QueryJob {
                                 ));
                             }
                             statement::Statement::Delete(op) => {
-                                fact_run.queue(
-                                    stmt_index,
-                                    FactStatement::Delete(op),
-                                    &mut messages,
-                                );
+                                queue!(WriteStatement::Facts(FactStatement::Delete(op)));
                             }
                             statement::Statement::PersistentRule(rule) => {
-                                let rule_text = format_rule_text(&rule);
-                                let registered = statement::parse_rule_definition(&rule_text)
-                                    .map_err(|e| {
-                                        (
-                                            ErrorCode::Validation,
-                                            format!("Failed to parse rule: {e}"),
-                                        )
-                                    })
-                                    .and_then(|rule_def| {
-                                        storage.register_rule_in(&kg_name, &rule_def).map_err(|e| {
-                                            (
-                                                storage_error_code(&e, ErrorCode::Validation),
-                                                e.to_string(),
-                                            )
-                                        })
-                                    });
-                                if let Err((code, message)) = registered {
-                                    fail!(code, message);
-                                    current_stmt.clear();
-                                    continue;
-                                }
-                                self.notify_rule_change(
-                                    &kg_name,
-                                    &rule.head.relation,
-                                    "registered",
-                                );
-                                messages.push(format!("Rule '{}' registered.", rule.head.relation));
+                                queue!(WriteStatement::Catalog(CatalogStatement::Rule(rule)));
                             }
                             statement::Statement::SessionRule(rule) => {
                                 if let Err(err) = check_session_rule(
@@ -2628,25 +2572,10 @@ impl QueryJob {
                                 query_to_execute = Some((stmt_index, stmt_text.to_string()));
                             }
                             statement::Statement::DeleteRelationOrRule(name) => {
-                                match storage.drop_rule_in(&kg_name, &name) {
-                                    Ok(()) => {
-                                        self.notify_rule_change(&kg_name, &name, "dropped");
-                                        messages.push(format!("Rule '{name}' dropped."));
-                                    }
-                                    Err(_) => {
-                                        fail!(
-                                            ErrorCode::NotFound,
-                                            format!("'{name}' not found as rule.")
-                                        );
-                                    }
-                                }
+                                queue!(WriteStatement::Catalog(CatalogStatement::DropRule(name)));
                             }
                             statement::Statement::Update(op) => {
-                                fact_run.queue(
-                                    stmt_index,
-                                    FactStatement::Update(op),
-                                    &mut messages,
-                                );
+                                queue!(WriteStatement::Facts(FactStatement::Update(op)));
                             }
                             statement::Statement::TypeDecl(decl) => {
                                 messages.push(format!("Type '{}' declared.", decl.name));
@@ -2866,42 +2795,14 @@ impl QueryJob {
                                         ),
                                     },
                                     MetaCommand::RuleDrop(name) => {
-                                        match storage.drop_rule_in(kg, &name) {
-                                            Ok(()) => {
-                                                self.notify_rule_change(kg, &name, "dropped");
-                                                messages.push(format!("Rule '{name}' dropped."));
-                                            }
-                                            Err(e) => fail!(
-                                                storage_error_code(&e, ErrorCode::NotFound),
-                                                format!("Rule '{name}' not found: {e}")
-                                            ),
-                                        }
+                                        queue!(WriteStatement::Catalog(
+                                            CatalogStatement::RuleDrop(name)
+                                        ));
                                     }
                                     MetaCommand::RuleDropPrefix(prefix) => {
-                                        match storage.drop_rules_by_prefix_in(kg, &prefix) {
-                                            Ok(dropped) => {
-                                                if dropped.is_empty() {
-                                                    messages.push(format!(
-                                                        "No rules matching prefix '{prefix}'."
-                                                    ));
-                                                } else {
-                                                    for name in &dropped {
-                                                        self.notify_rule_change(
-                                                            kg, name, "dropped",
-                                                        );
-                                                    }
-                                                    messages.push(format!(
-                                                        "Dropped {} rule(s) with prefix '{prefix}': {}",
-                                                        dropped.len(),
-                                                        dropped.join(", ")
-                                                    ));
-                                                }
-                                            }
-                                            Err(e) => fail!(
-                                                storage_error_code(&e, ErrorCode::Internal),
-                                                format!("Error: {e}")
-                                            ),
-                                        }
+                                        queue!(WriteStatement::Catalog(
+                                            CatalogStatement::RuleDropPrefix(prefix)
+                                        ));
                                     }
                                     MetaCommand::RuleQuery(name) => {
                                         // Execute as a query - delegate to query path
@@ -2924,35 +2825,14 @@ impl QueryJob {
                                         }
                                     }
                                     MetaCommand::RuleRemove { name, index } => {
-                                        match storage.remove_rule_clause_in(kg, &name, index) {
-                                            Ok(rule_deleted) => {
-                                                self.notify_rule_change(kg, &name, "removed");
-                                                if rule_deleted {
-                                                    messages.push(format!("Rule '{name}' deleted (last clause removed)."));
-                                                } else {
-                                                    messages.push(format!(
-                                                        "Clause {} removed from rule '{name}'.",
-                                                        index + 1
-                                                    ));
-                                                }
-                                            }
-                                            Err(e) => fail!(
-                                                storage_error_code(&e, ErrorCode::NotFound),
-                                                format!("Error: {e}")
-                                            ),
-                                        }
+                                        queue!(WriteStatement::Catalog(
+                                            CatalogStatement::RuleRemove { name, index }
+                                        ));
                                     }
                                     MetaCommand::RuleClear(name) => {
-                                        match storage.clear_rule_in(kg, &name) {
-                                            Ok(()) => {
-                                                self.notify_rule_change(kg, &name, "removed");
-                                                messages.push(format!("Rule '{name}' cleared."));
-                                            }
-                                            Err(e) => fail!(
-                                                storage_error_code(&e, ErrorCode::NotFound),
-                                                format!("Error: {e}")
-                                            ),
-                                        }
+                                        queue!(WriteStatement::Catalog(
+                                            CatalogStatement::RuleClear(name)
+                                        ));
                                     }
                                     MetaCommand::RuleEdit { .. } => {
                                         fail!(
@@ -3351,10 +3231,23 @@ impl QueryJob {
                 current_stmt.clear();
             }
         }
-        if !fact_run.is_empty() {
-            commit_facts!();
+        if !write_run.is_empty() {
+            if errors.is_empty() {
+                if let Err(failure) =
+                    self.commit_write_run(&storage, &kg_name, &mut write_run, &mut messages)
+                {
+                    stmt_index = failure.index;
+                    fail!(failure.code, failure.message);
+                }
+            } else if let Some(note) = write_run.abandon(errors[0].index) {
+                // The loop stopped at the first failure, so it is the last row.
+                errors[0].message.push_str(&note);
+                if let Some(row) = messages.last_mut() {
+                    row.push_str(&note);
+                }
+            }
         }
-        fact_run.remove_vacant(&mut messages);
+        write_run.remove_vacant(&mut messages);
         let stmt_exec_ms = stmt_exec_start.elapsed().as_millis() as u64;
         if stmt_exec_ms > 0 {
             info!(
@@ -3366,8 +3259,11 @@ impl QueryJob {
             );
         }
 
-        // Return messages if no query
-        if !messages.is_empty() && query_to_execute.is_none() {
+        // Return messages if no query, or if a transactional program failed:
+        // its query does not run.
+        if (!messages.is_empty() && query_to_execute.is_none())
+            || (transactional && !errors.is_empty())
+        {
             drop(storage); // Release storage lock - we no longer need it
             info!(
                 program_len,
@@ -4781,10 +4677,9 @@ impl Handler {
             Box::pin(self.run_execute_program(session_id, Some(kg.clone()), program, auth)).await?;
         let problems = Self::result_problem_rows(&deploy);
         if !problems.is_empty() {
+            // The deploy program is one transaction: none of it was applied.
             return Err(format!(
-                "pack deployment reported {} failed statement(s); earlier statements may \
-                 remain applied - inspect the KG: {}",
-                problems.len(),
+                "pack deployment failed; nothing was applied: {}",
                 problems.join("; ")
             ));
         }
@@ -4912,29 +4807,47 @@ impl Handler {
                  nothing to remove safely"
             ));
         }
-        let mut program = String::new();
-        // Rules first (they depend on the relations), then relations (this
-        // deletes the data they hold - removal is destructive by design).
-        for (kind, item) in items.iter().filter(|(k, _)| k == "rule") {
-            let _ = kind;
-            program.push_str(&format!(".rule drop {item}\n"));
+        // Rules first (they depend on the relations), as one transaction of
+        // the rules still present; then each relation on its own, since
+        // `.rel drop` cannot join a transaction (this deletes the data they
+        // hold - removal is destructive by design).
+        let live_rules = self
+            .storage
+            .read()
+            .list_rules_in(&kg)
+            .map_err(|e| e.to_string())?;
+        let mut programs: Vec<String> = Vec::new();
+        let rule_drops = items
+            .iter()
+            .filter(|(kind, item)| kind == "rule" && live_rules.contains(item))
+            .map(|(_, item)| format!(".rule drop {item}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !rule_drops.is_empty() {
+            programs.push(rule_drops);
         }
-        for (_, item) in items.iter().filter(|(k, _)| k == "relation") {
-            program.push_str(&format!(".rel drop {item}\n"));
-        }
-        // Failed drops are caught by the read-back below.
-        let result =
-            Box::pin(self.run_execute_program(session_id, Some(kg.clone()), program, auth)).await?;
+        programs.extend(
+            items
+                .iter()
+                .filter(|(kind, _)| kind == "relation")
+                .map(|(_, item)| format!(".rel drop {item}")),
+        );
         let mut messages = vec![format!(
             "removed {name} from {kg} ({} rule(s), {} relation(s))",
             items.iter().filter(|(k, _)| k == "rule").count(),
             items.iter().filter(|(k, _)| k == "relation").count()
         )];
-        // Surface every sub-result row: drops that fail phrase their errors
-        // in many ways, and silence here would misreport a partial removal.
-        for row in &result.rows {
-            if let Some(WireValue::String(s)) = row.values.first() {
-                messages.push(format!("  {s}"));
+        // Failed drops are caught by the read-back below. Surface every
+        // sub-result row: drops that fail phrase their errors in many ways,
+        // and silence here would misreport a partial removal.
+        for program in programs {
+            let result =
+                Box::pin(self.run_execute_program(session_id, Some(kg.clone()), program, auth))
+                    .await?;
+            for row in &result.rows {
+                if let Some(WireValue::String(s)) = row.values.first() {
+                    messages.push(format!("  {s}"));
+                }
             }
         }
         // Trust the read-back, not the drop messages: verify the pack's
@@ -5011,6 +4924,13 @@ impl Handler {
         }
         let rule_items: Vec<&(String, String)> =
             items.iter().filter(|(k, _)| k == "rule").collect();
+        // A rule that is already gone needs no dropping; dropping it would
+        // fail the whole program.
+        let live_rules = self
+            .storage
+            .read()
+            .list_rules_in(&kg)
+            .map_err(|e| e.to_string())?;
         let mut program = String::new();
         // The pin goes FIRST: between dropping the old rules and deploying
         // the new ones this KG runs no rule set, and a stale pin would tell
@@ -5019,7 +4939,10 @@ impl Handler {
         program.push_str(&format!(
             "-pack_meta(N, V, D) <- pack_meta(N, V, D), N = \"{name}\"\n"
         ));
-        for (_, item) in &rule_items {
+        for (_, item) in rule_items
+            .iter()
+            .filter(|(_, item)| live_rules.contains(item))
+        {
             program.push_str(&format!(".rule drop {item}\n"));
         }
         // Drop only the RULE inventory rows; relation rows stay attributed.
@@ -5030,13 +4953,7 @@ impl Handler {
             let result =
                 Box::pin(self.run_execute_program(session_id, Some(kg.clone()), program, auth))
                     .await?;
-            // A rule that is already gone needs no dropping.
-            let problems: Vec<String> = result
-                .errors
-                .iter()
-                .filter(|e| e.code != ErrorCode::NotFound)
-                .map(|e| e.message.clone())
-                .collect();
+            let problems = Self::result_problem_rows(&result);
             if !problems.is_empty() {
                 return Err(format!(
                     "upgrade aborted while dropping old rules: {}",

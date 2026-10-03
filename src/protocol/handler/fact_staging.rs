@@ -4,7 +4,7 @@
 //! Literal inserts and deletes resolve from their own terms. Conditional
 //! deletes and updates evaluate their query on a view of the KG that already
 //! includes the changes staged before them (see
-//! [`crate::storage_engine::FactProgram::view`]).
+//! [`crate::storage_engine::WriteProgram::view`]).
 
 use super::{format_body_pred, format_term, term_to_value};
 use crate::ast::Term;

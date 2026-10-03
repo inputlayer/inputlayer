@@ -1,6 +1,7 @@
-//! A staged fact program commits as one transaction: one WAL record at one
-//! revision and one snapshot publish, or (on any failure) nothing at all, now
-//! and after a restart.
+//! A staged program's fact changes commit as one transaction: one WAL record
+//! at one revision and one snapshot publish, or (on any failure) nothing at
+//! all, now and after a restart. Rule and schema changes in the same program:
+//! see `catalog_commit_tests`.
 
 #![allow(clippy::unwrap_used)]
 
@@ -60,19 +61,22 @@ fn delete(relation: &str, tuples: Vec<Tuple>) -> FactChange {
     }
 }
 
-fn program(statements: Vec<Vec<FactChange>>) -> FactProgram {
-    let mut program = FactProgram::new();
+fn program(statements: Vec<Vec<FactChange>>) -> WriteProgram {
+    let mut program = WriteProgram::new();
     for (index, changes) in statements.into_iter().enumerate() {
-        program.push(index, changes);
+        program.push(index, StagedChanges::Facts(changes));
     }
     program
 }
 
-fn counts(commit: &FactCommit) -> Vec<(usize, usize)> {
+fn counts(commit: &ProgramCommit) -> Vec<(usize, usize)> {
     commit
         .statements
         .iter()
-        .map(|c| (c.inserted, c.deleted))
+        .map(|outcome| match outcome.effect {
+            StatementEffect::Facts(count) => (count.inserted, count.deleted),
+            StatementEffect::Catalog(_) => panic!("not a fact statement"),
+        })
         .collect()
 }
 
@@ -85,7 +89,7 @@ fn program_commits_one_record_across_relations() {
     let version = storage.get_snapshot_for(KG).unwrap().version;
 
     let commit = storage
-        .commit_facts(
+        .commit_program(
             KG,
             program(vec![
                 vec![delete("r", vec![t(1)])],
@@ -136,7 +140,7 @@ fn late_arity_error_rejects_the_whole_program() {
         let version = storage.get_snapshot_for(KG).unwrap().version;
 
         let err = storage
-            .commit_facts(
+            .commit_program(
                 KG,
                 program(vec![
                     vec![delete("r", vec![t(1)])],
@@ -147,7 +151,7 @@ fn late_arity_error_rejects_the_whole_program() {
                 None,
             )
             .unwrap_err();
-        let FactCommitError::Rejected { statement, error } = err else {
+        let CommitError::Rejected { statement, error } = err else {
             panic!("expected a rejection, got {err:?}");
         };
         assert_eq!(statement, 3);
@@ -170,7 +174,7 @@ fn arity_of_a_new_relation_is_set_by_its_first_staged_insert() {
     let temp = TempDir::new().unwrap();
     let storage = open(&temp);
     let err = storage
-        .commit_facts(
+        .commit_program(
             KG,
             program(vec![
                 vec![insert("fresh", vec![t(1)])],
@@ -179,10 +183,7 @@ fn arity_of_a_new_relation_is_set_by_its_first_staged_insert() {
             None,
         )
         .unwrap_err();
-    assert!(matches!(
-        err,
-        FactCommitError::Rejected { statement: 1, .. }
-    ));
+    assert!(matches!(err, CommitError::Rejected { statement: 1, .. }));
     assert!(rows(&storage, "fresh").is_empty());
 }
 
@@ -201,7 +202,7 @@ fn delete_with_invalid_replacement_keeps_the_old_fact() {
 
         let replacement = Tuple::new(vec![Value::Int32(1), Value::string("thirty")]);
         let err = storage
-            .commit_facts(
+            .commit_program(
                 KG,
                 program(vec![
                     vec![delete("person", vec![Tuple::from_pair(1, 30)])],
@@ -210,7 +211,7 @@ fn delete_with_invalid_replacement_keeps_the_old_fact() {
                 None,
             )
             .unwrap_err();
-        let FactCommitError::Rejected { statement, error } = err else {
+        let CommitError::Rejected { statement, error } = err else {
             panic!("expected a rejection, got {err:?}");
         };
         assert_eq!(statement, 1);
@@ -232,7 +233,7 @@ fn duplicates_and_changes_that_cancel_out_write_nothing() {
     let version = storage.get_snapshot_for(KG).unwrap().version;
 
     let commit = storage
-        .commit_facts(
+        .commit_program(
             KG,
             program(vec![
                 vec![insert("r", vec![t(1)])],
@@ -255,9 +256,9 @@ fn duplicates_and_changes_that_cancel_out_write_nothing() {
 
 /// A program that deletes `r(1)` after reading `r` (as a conditional delete
 /// over `r` would), staged on `snapshot`.
-fn reads_r(snapshot: &Arc<KnowledgeGraphSnapshot>) -> FactProgram {
+fn reads_r(snapshot: &Arc<KnowledgeGraphSnapshot>) -> WriteProgram {
     let mut staged = program(vec![vec![delete("r", vec![t(1)])]]);
-    staged.read(snapshot, "q(X, Y) <- r(X, Y)");
+    staged.read(snapshot, &snapshot.rules, "q(X, Y) <- r(X, Y)");
     staged
 }
 
@@ -274,14 +275,14 @@ fn stale_read_is_refused_and_a_fresh_one_commits() {
     storage.delete_tuples_from(KG, "r", vec![t(2)]).unwrap();
     let before = wal_records(&temp);
     assert!(matches!(
-        storage.commit_facts(KG, stale, None),
-        Err(FactCommitError::Stale)
+        storage.commit_program(KG, stale, None),
+        Err(CommitError::Stale)
     ));
     assert_eq!(wal_records(&temp), before);
     assert_eq!(rows(&storage, "r"), [t(1)]);
 
     let fresh = reads_r(&storage.get_snapshot_for(KG).unwrap());
-    let commit = storage.commit_facts(KG, fresh, None).unwrap();
+    let commit = storage.commit_program(KG, fresh, None).unwrap();
     assert_eq!(counts(&commit), [(0, 1)]);
     assert!(rows(&storage, "r").is_empty());
 }
@@ -293,7 +294,7 @@ fn writes_to_unread_relations_do_not_conflict() {
     storage.insert_tuples_into(KG, "r", vec![t(1)]).unwrap();
     let staged = reads_r(&storage.get_snapshot_for(KG).unwrap());
     storage.insert_tuples_into(KG, "other", vec![t(5)]).unwrap();
-    let commit = storage.commit_facts(KG, staged, None).unwrap();
+    let commit = storage.commit_program(KG, staged, None).unwrap();
     assert_eq!(counts(&commit), [(0, 1)]);
 }
 
@@ -306,8 +307,8 @@ fn rule_change_makes_a_read_stale() {
     let rule = crate::statement::parse_rule_definition("+v(X) <- r(X, Y)").unwrap();
     storage.register_rule_in(KG, &rule).unwrap();
     assert!(matches!(
-        storage.commit_facts(KG, staged, None),
-        Err(FactCommitError::Stale)
+        storage.commit_program(KG, staged, None),
+        Err(CommitError::Stale)
     ));
 }
 
@@ -318,7 +319,7 @@ fn blind_programs_never_go_stale() {
     let staged = program(vec![vec![insert("r", vec![t(1)])]]);
     storage.insert_tuples_into(KG, "r", vec![t(1)]).unwrap();
     // Decided under the lock: the tuple is already there.
-    let commit = storage.commit_facts(KG, staged, None).unwrap();
+    let commit = storage.commit_program(KG, staged, None).unwrap();
     assert_eq!(counts(&commit), [(0, 0)]);
 }
 
@@ -329,12 +330,12 @@ fn cancelled_program_writes_nothing() {
     let before = wal_records(&temp);
     let cancel = AtomicBool::new(true);
     assert!(matches!(
-        storage.commit_facts(
+        storage.commit_program(
             KG,
             program(vec![vec![insert("r", vec![t(1)])]]),
             Some(&cancel)
         ),
-        Err(FactCommitError::Cancelled)
+        Err(CommitError::Cancelled)
     ));
     assert_eq!(wal_records(&temp), before);
     assert!(rows(&storage, "r").is_empty());
@@ -349,7 +350,7 @@ fn persistence_failure_rejects_the_whole_program_now_and_after_restart() {
             storage.insert_tuples_into(KG, "r", vec![t(1)]).unwrap();
             storage.persist.inject_wal_fault(fault);
             let err = storage
-                .commit_facts(
+                .commit_program(
                     KG,
                     program(vec![
                         vec![delete("r", vec![t(1)])],
@@ -358,10 +359,7 @@ fn persistence_failure_rejects_the_whole_program_now_and_after_restart() {
                     None,
                 )
                 .unwrap_err();
-            assert!(
-                matches!(err, FactCommitError::Failed(_)),
-                "{fault:?}: {err:?}"
-            );
+            assert!(matches!(err, CommitError::Failed(_)), "{fault:?}: {err:?}");
             assert_eq!(rows(&storage, "r"), [t(1)], "{fault:?}");
             assert!(rows(&storage, "s").is_empty(), "{fault:?}");
         }
@@ -395,7 +393,7 @@ fn readers_never_observe_part_of_a_program() {
     };
     for i in 1..=200 {
         storage
-            .commit_facts(
+            .commit_program(
                 KG,
                 program(vec![
                     vec![delete("slot", vec![t(i - 1)])],

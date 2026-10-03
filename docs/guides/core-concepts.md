@@ -71,21 +71,37 @@ Combine delete and insert in one atomic operation:
 
 This executes at the same logical timestamp, ensuring atomicity.
 
-### Programs Commit Their Facts Together
+### Programs Commit Together
 
-Consecutive fact statements in one program (`+`, `-` and updates, as in
-Patterns 1 and 2) are one transaction. They commit at one logical timestamp
-with one write-ahead-log record, and subscribers see the result as one change.
-A conditional delete or update sees the statements before it. If any of them
-fails, for example with an arity or type error, none of them is applied:
+A program that changes persistent state commits all of its changes as one
+transaction on its knowledge graph: facts (`+`, `-` and updates, as in Patterns
+1 and 2), schema declarations, persistent rules, and rule removals (`-name`,
+`.rule drop`, `.rule drop prefix`, `.rule remove`, `.rule clear`). They commit at
+one logical timestamp with one write-ahead-log record, and queries and
+subscribers see the new rules and data together, never a mix of old and new.
+Statements apply in order: a fact is checked against a schema declared earlier
+in the program, and a conditional delete or update sees the statements before
+it, including rules registered or dropped earlier.
+
+If any statement fails, for example with an arity or type error, none of the
+program's changes is applied, the program stops there, and its query does not
+run:
 
 ```iql
--person("alice", 30)
-+person("alice", "thirty")   // type error: alice keeps age 30
++person(name: string, age: int)
++adult(N) <- person(N, A), A >= 18
++person("alice", "thirty")   // type error: no schema, rule or fact is applied
 ```
 
-A statement with other persistent effects (a schema, a rule, or a `.` command)
-ends the transaction: the facts before it commit first, then it runs.
+A program that writes may also hold statements that affect only the request
+(session facts and rules, type declarations, a query; the query runs after the
+commit). Any other command cannot join the transaction: switching, creating or
+dropping knowledge graphs, `.rel drop`, `.clear prefix`, index, user, access,
+ontology and subscription commands, `.compact`, and commands that inspect state
+(`.kg`, `.rel`, `.rule list`, `.status`, `.why` and the like). A program that
+mixes one of them with writes is rejected with code `unsupported` before any
+statement runs; send the command as a separate request. A program without writes
+runs its statements in order, each on its own.
 
 ## Deletion Patterns
 
