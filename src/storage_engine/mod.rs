@@ -30,13 +30,12 @@
 //! storage.save_knowledge_graph("analytics").unwrap();
 //! ```
 
+#[cfg(test)]
+mod materialize_tests;
 mod relation_store;
 mod snapshot;
 mod vector_index;
 pub use relation_store::RelationStore;
-
-#[cfg(test)]
-mod materialize_tests;
 pub use snapshot::KnowledgeGraphSnapshot;
 
 use crate::config::Config;
