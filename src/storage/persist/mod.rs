@@ -17,25 +17,32 @@
 //! Batch file (Parquet)
 //! ```
 //!
+//! Writes arrive as [`Transaction`]s: every change of one commit, across any number
+//! of shards, at one revision. Each is one WAL record, so it is durable and recovered
+//! as a whole or not at all.
+//!
 //! ## Recovery
 //!
 //! On startup:
 //! 1. Migrate v1 data (see `migrate`) and load shard metadata
 //! 2. Read batch files
-//! 3. Replay WAL (uncommitted updates)
+//! 3. Replay the WAL's intact prefix of committed transactions
 //! 4. Consolidate to get current state
 
 pub mod batch;
 pub mod codec;
 pub mod consolidate;
 mod migrate;
+pub mod transaction;
 pub mod wal;
+mod wal_record;
 
 pub use batch::{Batch, BatchRef, ShardInfo, ShardMeta, Update};
 pub use consolidate::{
     consolidate, consolidate_to_current, filter_since, set_semantics_corrections, to_tuples,
     to_tuples_with_multiplicity,
 };
+pub use transaction::{Transaction, TxnOp};
 pub use wal::PersistWal;
 
 use crate::storage::{StorageError, StorageResult};
@@ -85,8 +92,9 @@ impl Default for PersistConfig {
 
 /// Trait for persist backends
 pub trait PersistBackend: Send + Sync {
-    /// Append updates to a shard
-    fn append(&self, shard: &str, updates: &[Update]) -> StorageResult<()>;
+    /// Commit a transaction: make it durable per the durability mode, then visible
+    /// to reads. All of it is committed, or on error none of it.
+    fn commit(&self, txn: Transaction) -> StorageResult<()>;
 
     /// Read all updates for a shard since a frontier
     fn read(&self, shard: &str, since: u64) -> StorageResult<Vec<Update>>;
@@ -135,7 +143,7 @@ impl FilePersist {
         fs::create_dir_all(config.path.join("shards"))?;
         fs::create_dir_all(config.path.join("batches"))?;
 
-        let wal = PersistWal::new(config.path.join("wal"))?;
+        let (wal, recovered) = PersistWal::open(config.path.join("wal"))?;
         migrate::migrate_v1(&config.path)?;
 
         let mut persist = FilePersist {
@@ -148,7 +156,7 @@ impl FilePersist {
         // Load existing shards, clean up orphans, and replay WAL
         persist.load_shards()?;
         persist.cleanup_orphaned_batches();
-        let replayed = persist.replay_wal()?;
+        let replayed = persist.replay(recovered);
 
         // Crash-safe WAL drain: if we replayed any entries, flush them to batch
         // files and clear the WAL immediately. This makes replay idempotent -
@@ -308,25 +316,16 @@ impl FilePersist {
         }
     }
 
-    /// Replay WAL entries into shard buffers. Returns the number of entries replayed.
-    fn replay_wal(&self) -> StorageResult<usize> {
-        let wal = self.wal.lock();
-        let entries = wal.read_all()?;
-        let count = entries.len();
-
+    /// Replay recovered transactions into shard buffers. Returns how many there were.
+    fn replay(&self, txns: Vec<Transaction>) -> usize {
+        let count = txns.len();
         let mut shards = self.shards.write();
-
-        for entry in entries {
-            let state = shards
-                .entry(entry.shard.clone())
-                .or_insert_with(|| ShardState {
-                    meta: ShardMeta::new(entry.shard.clone()),
-                    buffer: Vec::new(),
-                });
-            state.buffer.push(entry.update);
+        for txn in txns {
+            for (shard, updates) in txn.into_updates() {
+                buffer_updates(&mut shards, shard, updates);
+            }
         }
-
-        Ok(count)
+        count
     }
 
     /// Save shard metadata to disk; see [`write_shard_meta`].
@@ -418,49 +417,49 @@ impl FilePersist {
 
         Ok(())
     }
+
+    /// Make a later WAL write fail at `fault`.
+    #[cfg(test)]
+    pub(crate) fn inject_wal_fault(&self, fault: wal::WalFault) {
+        self.wal.lock().inject_fault(fault);
+    }
 }
 
 impl PersistBackend for FilePersist {
-    fn append(&self, shard: &str, updates: &[Update]) -> StorageResult<()> {
-        if updates.is_empty() {
+    fn commit(&self, txn: Transaction) -> StorageResult<()> {
+        if txn.is_empty() {
             return Ok(());
+        }
+        for shard in txn.shards() {
+            self.ensure_shard(shard)?;
         }
 
         // WAL write and buffer push share one critical section, so a concurrent flush
-        // never drops a WAL entry whose update is not yet in its batch.
+        // never drops a WAL record whose updates are not yet in its batch.
         // Lock order everywhere: WAL, then shards.
-        let should_flush = {
+        let full: Vec<String> = {
             let mut wal = self.wal.lock();
             match self.config.durability_mode {
-                DurabilityMode::Immediate => wal.append_batch(shard, updates)?,
-                DurabilityMode::Batched => wal.append_batch_buffered(shard, updates)?,
+                DurabilityMode::Immediate => wal.append(&txn, true)?,
+                DurabilityMode::Batched => wal.append(&txn, false)?,
                 // No WAL: data is lost on crash. Only for ephemeral/reproducible data.
                 DurabilityMode::Async => {}
             }
 
             let mut shards = self.shards.write();
-            let state = shards
-                .entry(shard.to_string())
-                .or_insert_with(|| ShardState {
-                    meta: ShardMeta::new(shard.to_string()),
-                    buffer: Vec::new(),
-                });
-
-            state.buffer.extend_from_slice(updates);
-
-            // Update upper frontier
-            for update in updates {
-                if update.time >= state.meta.upper {
-                    state.meta.upper = update.time + 1;
-                }
-            }
-
-            state.buffer.len() >= self.config.buffer_size
+            txn.into_updates()
+                .filter_map(|(shard, updates)| {
+                    let len = buffer_updates(&mut shards, shard.clone(), updates);
+                    (len >= self.config.buffer_size).then_some(shard)
+                })
+                .collect()
         };
 
-        // Flush if buffer is full; a concurrent delete_shard may have removed the shard.
-        if should_flush {
-            self.flush_existing(shard)?;
+        // Flush full buffers; a concurrent delete_shard may have removed the shard.
+        if !full.is_empty() {
+            for shard in &full {
+                self.flush_existing(shard)?;
+            }
         } else if self.config.max_wal_size_bytes > 0 {
             // Check WAL size - force flush all dirty shards if WAL is too large
             let wal_size = self.wal.lock().file_size();
@@ -640,6 +639,24 @@ impl PersistBackend for FilePersist {
 
         Ok(())
     }
+}
+
+/// Append committed updates to a shard's buffer, creating the shard if needed, and
+/// advance its upper frontier. Returns the buffer's new length.
+fn buffer_updates(
+    shards: &mut HashMap<String, ShardState>,
+    shard: String,
+    updates: Vec<Update>,
+) -> usize {
+    let state = shards.entry(shard).or_insert_with_key(|name| ShardState {
+        meta: ShardMeta::new(name.clone()),
+        buffer: Vec::new(),
+    });
+    if let Some(max) = updates.iter().map(|u| u.time).max() {
+        state.meta.upper = state.meta.upper.max(max + 1);
+    }
+    state.buffer.extend(updates);
+    state.buffer.len()
 }
 
 // Shard metadata files
@@ -951,6 +968,9 @@ fn sync_directory(dir: &std::path::Path) {
     }
 }
 
+#[cfg(test)]
+mod commit_tests;
+
 // Tests
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -958,6 +978,19 @@ mod tests {
     use super::*;
     use crate::{Tuple, Value};
     use tempfile::TempDir;
+
+    /// Commit `updates` to `shard`, one transaction per run of equal times.
+    fn commit(persist: &FilePersist, shard: &str, updates: &[Update]) -> StorageResult<()> {
+        for run in updates.chunk_by(|a, b| a.time == b.time) {
+            let mut txn = Transaction::new(run[0].time);
+            txn.facts(
+                shard,
+                run.iter().map(|u| (u.data.clone(), u.diff)).collect(),
+            );
+            persist.commit(txn)?;
+        }
+        Ok(())
+    }
 
     fn create_test_persist() -> (TempDir, FilePersist) {
         let temp = TempDir::new().unwrap();
@@ -982,7 +1015,7 @@ mod tests {
         ];
 
         persist.ensure_shard("db:edge").unwrap();
-        persist.append("db:edge", &updates).unwrap();
+        commit(&persist, "db:edge", &updates).unwrap();
 
         let read = persist.read("db:edge", 0).unwrap();
         assert_eq!(read.len(), 2);
@@ -998,7 +1031,7 @@ mod tests {
         ];
 
         persist.ensure_shard("db:edge").unwrap();
-        persist.append("db:edge", &updates).unwrap();
+        commit(&persist, "db:edge", &updates).unwrap();
         persist.flush("db:edge").unwrap();
 
         // After flush, data should be in batch file
@@ -1017,12 +1050,12 @@ mod tests {
 
         // Add 6 updates (exceeds buffer of 5)
         for i in 0..6 {
-            persist
-                .append(
-                    "db:edge",
-                    &[Update::insert(Tuple::from_pair(i, i), i as u64)],
-                )
-                .unwrap();
+            commit(
+                &persist,
+                "db:edge",
+                &[Update::insert(Tuple::from_pair(i, i), i as u64)],
+            )
+            .unwrap();
         }
 
         // Should have flushed
@@ -1037,15 +1070,24 @@ mod tests {
         persist.ensure_shard("db:edge").unwrap();
 
         // Insert and delete the same tuple
-        persist
-            .append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)])
-            .unwrap();
-        persist
-            .append("db:edge", &[Update::delete(Tuple::from_pair(1, 2), 10)])
-            .unwrap();
-        persist
-            .append("db:edge", &[Update::insert(Tuple::from_pair(3, 4), 20)])
-            .unwrap();
+        commit(
+            &persist,
+            "db:edge",
+            &[Update::insert(Tuple::from_pair(1, 2), 10)],
+        )
+        .unwrap();
+        commit(
+            &persist,
+            "db:edge",
+            &[Update::delete(Tuple::from_pair(1, 2), 10)],
+        )
+        .unwrap();
+        commit(
+            &persist,
+            "db:edge",
+            &[Update::insert(Tuple::from_pair(3, 4), 20)],
+        )
+        .unwrap();
 
         let mut updates = persist.read("db:edge", 0).unwrap();
         consolidate(&mut updates);
@@ -1063,15 +1105,24 @@ mod tests {
         persist.ensure_shard("db:edge").unwrap();
 
         // Add updates at different times
-        persist
-            .append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)])
-            .unwrap();
-        persist
-            .append("db:edge", &[Update::insert(Tuple::from_pair(3, 4), 20)])
-            .unwrap();
-        persist
-            .append("db:edge", &[Update::insert(Tuple::from_pair(5, 6), 30)])
-            .unwrap();
+        commit(
+            &persist,
+            "db:edge",
+            &[Update::insert(Tuple::from_pair(1, 2), 10)],
+        )
+        .unwrap();
+        commit(
+            &persist,
+            "db:edge",
+            &[Update::insert(Tuple::from_pair(3, 4), 20)],
+        )
+        .unwrap();
+        commit(
+            &persist,
+            "db:edge",
+            &[Update::insert(Tuple::from_pair(5, 6), 30)],
+        )
+        .unwrap();
         persist.flush("db:edge").unwrap();
 
         // Compact to time 15 (should discard time 10)
@@ -1117,15 +1168,15 @@ mod tests {
             let persist = FilePersist::new(config).unwrap();
 
             persist.ensure_shard("db:edge").unwrap();
-            persist
-                .append(
-                    "db:edge",
-                    &[
-                        Update::insert(Tuple::from_pair(1, 2), 10),
-                        Update::insert(Tuple::from_pair(3, 4), 20),
-                    ],
-                )
-                .unwrap();
+            commit(
+                &persist,
+                "db:edge",
+                &[
+                    Update::insert(Tuple::from_pair(1, 2), 10),
+                    Update::insert(Tuple::from_pair(3, 4), 20),
+                ],
+            )
+            .unwrap();
             persist.flush("db:edge").unwrap();
         }
 
@@ -1165,7 +1216,7 @@ mod tests {
         ];
 
         persist.ensure_shard("db:triple").unwrap();
-        persist.append("db:triple", &updates).unwrap();
+        commit(&persist, "db:triple", &updates).unwrap();
         persist.flush("db:triple").unwrap();
 
         let read = persist.read("db:triple", 0).unwrap();
@@ -1200,7 +1251,7 @@ mod tests {
         ];
 
         persist.ensure_shard("db:mixed").unwrap();
-        persist.append("db:mixed", &updates).unwrap();
+        commit(&persist, "db:mixed", &updates).unwrap();
         persist.flush("db:mixed").unwrap();
 
         let read = persist.read("db:mixed", 0).unwrap();
@@ -1221,7 +1272,7 @@ mod tests {
         ];
 
         persist.ensure_shard("db:test").unwrap();
-        persist.append("db:test", &updates).unwrap();
+        commit(&persist, "db:test", &updates).unwrap();
         persist.flush("db:test").unwrap();
 
         let read = persist.read("db:test", 0).unwrap();
@@ -1372,7 +1423,7 @@ mod tests {
         let (_temp, persist) = create_test_persist();
 
         persist.ensure_shard("db:empty_append").unwrap();
-        persist.append("db:empty_append", &[]).unwrap();
+        commit(&persist, "db:empty_append", &[]).unwrap();
 
         let read = persist.read("db:empty_append", 0).unwrap();
         assert!(read.is_empty());
@@ -1383,12 +1434,12 @@ mod tests {
         let (_temp, persist) = create_test_persist();
 
         persist.ensure_shard("db:sync_test").unwrap();
-        persist
-            .append(
-                "db:sync_test",
-                &[Update::insert(Tuple::from_pair(1, 2), 10)],
-            )
-            .unwrap();
+        commit(
+            &persist,
+            "db:sync_test",
+            &[Update::insert(Tuple::from_pair(1, 2), 10)],
+        )
+        .unwrap();
 
         // Sync should not error
         persist.sync().unwrap();
@@ -1399,16 +1450,16 @@ mod tests {
         let (_temp, persist) = create_test_persist();
 
         persist.ensure_shard("db:since_test").unwrap();
-        persist
-            .append(
-                "db:since_test",
-                &[
-                    Update::insert(Tuple::from_pair(1, 2), 10),
-                    Update::insert(Tuple::from_pair(3, 4), 20),
-                    Update::insert(Tuple::from_pair(5, 6), 30),
-                ],
-            )
-            .unwrap();
+        commit(
+            &persist,
+            "db:since_test",
+            &[
+                Update::insert(Tuple::from_pair(1, 2), 10),
+                Update::insert(Tuple::from_pair(3, 4), 20),
+                Update::insert(Tuple::from_pair(5, 6), 30),
+            ],
+        )
+        .unwrap();
 
         // Read only updates since time 15
         let read = persist.read("db:since_test", 15).unwrap();
@@ -1423,12 +1474,18 @@ mod tests {
         persist.ensure_shard("db:a").unwrap();
         persist.ensure_shard("db:b").unwrap();
 
-        persist
-            .append("db:a", &[Update::insert(Tuple::from_pair(1, 2), 10)])
-            .unwrap();
-        persist
-            .append("db:b", &[Update::insert(Tuple::from_pair(3, 4), 20)])
-            .unwrap();
+        commit(
+            &persist,
+            "db:a",
+            &[Update::insert(Tuple::from_pair(1, 2), 10)],
+        )
+        .unwrap();
+        commit(
+            &persist,
+            "db:b",
+            &[Update::insert(Tuple::from_pair(3, 4), 20)],
+        )
+        .unwrap();
 
         let read_a = persist.read("db:a", 0).unwrap();
         let read_b = persist.read("db:b", 0).unwrap();
@@ -1451,15 +1508,15 @@ mod tests {
 
         // Create shard and add data
         persist.ensure_shard("db:edge").unwrap();
-        persist
-            .append(
-                "db:edge",
-                &[
-                    Update::insert(Tuple::from_pair(1, 2), 10),
-                    Update::insert(Tuple::from_pair(3, 4), 20),
-                ],
-            )
-            .unwrap();
+        commit(
+            &persist,
+            "db:edge",
+            &[
+                Update::insert(Tuple::from_pair(1, 2), 10),
+                Update::insert(Tuple::from_pair(3, 4), 20),
+            ],
+        )
+        .unwrap();
         persist.flush("db:edge").unwrap();
 
         // Verify shard exists
@@ -1484,12 +1541,18 @@ mod tests {
         let persist = FilePersist::new(config.clone()).unwrap();
         persist.ensure_shard("db:a").unwrap();
         persist.ensure_shard("db:b").unwrap();
-        persist
-            .append("db:a", &[Update::insert(Tuple::from_pair(1, 2), 1)])
-            .unwrap();
-        persist
-            .append("db:b", &[Update::insert(Tuple::from_pair(3, 4), 2)])
-            .unwrap();
+        commit(
+            &persist,
+            "db:a",
+            &[Update::insert(Tuple::from_pair(1, 2), 1)],
+        )
+        .unwrap();
+        commit(
+            &persist,
+            "db:b",
+            &[Update::insert(Tuple::from_pair(3, 4), 2)],
+        )
+        .unwrap();
         // The WAL rewrite fails: its temp path is a directory.
         fs::create_dir_all(temp.path().join("wal/current.wal.new")).unwrap();
 
@@ -1525,9 +1588,12 @@ mod tests {
             let persist = FilePersist::new(config).unwrap();
 
             persist.ensure_shard("db:edge").unwrap();
-            persist
-                .append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)])
-                .unwrap();
+            commit(
+                &persist,
+                "db:edge",
+                &[Update::insert(Tuple::from_pair(1, 2), 10)],
+            )
+            .unwrap();
             persist.flush("db:edge").unwrap();
             persist.delete_shard("db:edge").unwrap();
         }
@@ -1570,16 +1636,16 @@ mod tests {
             let persist = FilePersist::new(config).unwrap();
 
             persist.ensure_shard("db:edge").unwrap();
-            persist
-                .append(
-                    "db:edge",
-                    &[
-                        Update::insert(Tuple::from_pair(1, 2), 10),
-                        Update::insert(Tuple::from_pair(3, 4), 20),
-                        Update::insert(Tuple::from_pair(5, 6), 30),
-                    ],
-                )
-                .unwrap();
+            commit(
+                &persist,
+                "db:edge",
+                &[
+                    Update::insert(Tuple::from_pair(1, 2), 10),
+                    Update::insert(Tuple::from_pair(3, 4), 20),
+                    Update::insert(Tuple::from_pair(5, 6), 30),
+                ],
+            )
+            .unwrap();
             persist.flush("db:edge").unwrap();
 
             // Compact to time 15 (keeps times >= 15)
@@ -1610,9 +1676,12 @@ mod tests {
         let (temp, persist) = create_test_persist();
 
         persist.ensure_shard("db:test").unwrap();
-        persist
-            .append("db:test", &[Update::insert(Tuple::from_pair(1, 2), 10)])
-            .unwrap();
+        commit(
+            &persist,
+            "db:test",
+            &[Update::insert(Tuple::from_pair(1, 2), 10)],
+        )
+        .unwrap();
         persist.flush("db:test").unwrap();
 
         // Check no .json.tmp files exist in shards directory
@@ -1644,12 +1713,12 @@ mod tests {
             };
             let persist = FilePersist::new(config).unwrap();
             persist.ensure_shard("db:meta_test").unwrap();
-            persist
-                .append(
-                    "db:meta_test",
-                    &[Update::insert(Tuple::from_pair(42, 99), 10)],
-                )
-                .unwrap();
+            commit(
+                &persist,
+                "db:meta_test",
+                &[Update::insert(Tuple::from_pair(42, 99), 10)],
+            )
+            .unwrap();
             persist.flush("db:meta_test").unwrap();
         }
 
@@ -1710,9 +1779,12 @@ mod tests {
         let (temp, persist) = create_test_persist();
 
         persist.ensure_shard("db:edge").unwrap();
-        persist
-            .append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)])
-            .unwrap();
+        commit(
+            &persist,
+            "db:edge",
+            &[Update::insert(Tuple::from_pair(1, 2), 10)],
+        )
+        .unwrap();
         persist.flush("db:edge").unwrap();
 
         // Verify shard metadata file exists
@@ -1738,12 +1810,12 @@ mod tests {
 
         persist.ensure_shard("db:edge").unwrap();
         for i in 0..3 {
-            persist
-                .append(
-                    "db:edge",
-                    &[Update::insert(Tuple::from_pair(i, i + 1), i as u64)],
-                )
-                .unwrap();
+            commit(
+                &persist,
+                "db:edge",
+                &[Update::insert(Tuple::from_pair(i, i + 1), i as u64)],
+            )
+            .unwrap();
         }
         persist.flush("db:edge").unwrap();
 
@@ -1781,14 +1853,20 @@ mod tests {
         persist.ensure_shard("db:edge").unwrap();
 
         // Create multiple flushes to generate multiple batch files
-        persist
-            .append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)])
-            .unwrap();
+        commit(
+            &persist,
+            "db:edge",
+            &[Update::insert(Tuple::from_pair(1, 2), 10)],
+        )
+        .unwrap();
         persist.flush("db:edge").unwrap();
 
-        persist
-            .append("db:edge", &[Update::insert(Tuple::from_pair(3, 4), 20)])
-            .unwrap();
+        commit(
+            &persist,
+            "db:edge",
+            &[Update::insert(Tuple::from_pair(3, 4), 20)],
+        )
+        .unwrap();
         persist.flush("db:edge").unwrap();
 
         let batches_dir = temp.path().join("batches");
@@ -1827,12 +1905,12 @@ mod tests {
         let (temp, persist) = create_test_persist();
 
         persist.ensure_shard("db:atomic_test").unwrap();
-        persist
-            .append(
-                "db:atomic_test",
-                &[Update::insert(Tuple::from_pair(1, 2), 10)],
-            )
-            .unwrap();
+        commit(
+            &persist,
+            "db:atomic_test",
+            &[Update::insert(Tuple::from_pair(1, 2), 10)],
+        )
+        .unwrap();
         persist.flush("db:atomic_test").unwrap();
 
         // Verify no .tmp files in shards dir
@@ -1870,12 +1948,12 @@ mod tests {
 
         // Insert enough data to exceed 100-byte WAL limit
         for i in 0..20i32 {
-            persist
-                .append(
-                    "db:wal_test",
-                    &[Update::insert(Tuple::from_pair(i, i * 10), i as u64)],
-                )
-                .unwrap();
+            commit(
+                &persist,
+                "db:wal_test",
+                &[Update::insert(Tuple::from_pair(i, i * 10), i as u64)],
+            )
+            .unwrap();
         }
 
         // After the WAL size limit is hit, data should have been flushed to batch files.
@@ -1917,12 +1995,12 @@ mod tests {
         persist.ensure_shard("db:unlimited").unwrap();
 
         for i in 0..20i32 {
-            persist
-                .append(
-                    "db:unlimited",
-                    &[Update::insert(Tuple::from_pair(i, i), i as u64)],
-                )
-                .unwrap();
+            commit(
+                &persist,
+                "db:unlimited",
+                &[Update::insert(Tuple::from_pair(i, i), i as u64)],
+            )
+            .unwrap();
         }
 
         // With unlimited WAL and high buffer_size, no batch files should be created

@@ -4,7 +4,7 @@
 #![allow(clippy::unwrap_used)]
 
 use inputlayer::protocol::{ErrorCode, Handler};
-use inputlayer::storage::persist::{FilePersist, PersistBackend, PersistConfig, Update};
+use inputlayer::storage::persist::{FilePersist, PersistBackend, PersistConfig, Transaction};
 use inputlayer::storage::{KnowledgeGraphInfo, KnowledgeGraphsMetadata, StorageError};
 use inputlayer::{Config, DurabilityMode, RelationSchema, StorageEngine, Tuple, Value};
 use std::path::Path;
@@ -34,12 +34,9 @@ fn seed_legacy(dir: &Path, kgs: Option<&[&str]>, shards: &[(&str, &[i64])]) {
     })
     .unwrap();
     for (i, (shard, rows)) in shards.iter().enumerate() {
-        let updates: Vec<Update> = rows
-            .iter()
-            .map(|v| Update::insert(tuple(*v), i as u64 + 1))
-            .collect();
-        persist.ensure_shard(shard).unwrap();
-        persist.append(shard, &updates).unwrap();
+        let mut txn = Transaction::new(i as u64 + 1);
+        txn.insert(*shard, rows.iter().map(|v| tuple(*v)));
+        persist.commit(txn).unwrap();
         persist.flush(shard).unwrap();
     }
     if let Some(kgs) = kgs {

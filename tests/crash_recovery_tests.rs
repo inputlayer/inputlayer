@@ -3,13 +3,27 @@
 use inputlayer::config::DurabilityMode;
 use inputlayer::storage::persist::batch::Update;
 use inputlayer::storage::persist::{
-    consolidate, to_tuples, FilePersist, PersistBackend, PersistConfig,
+    consolidate, to_tuples, FilePersist, PersistBackend, PersistConfig, Transaction,
 };
+use inputlayer::storage::StorageResult;
 use inputlayer::value::Tuple;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use tempfile::TempDir;
+
+/// Commit `updates` to `shard`, one transaction per run of equal times.
+fn commit(persist: &FilePersist, shard: &str, updates: &[Update]) -> StorageResult<()> {
+    for run in updates.chunk_by(|a, b| a.time == b.time) {
+        let mut txn = Transaction::new(run[0].time);
+        txn.facts(
+            shard,
+            run.iter().map(|u| (u.data.clone(), u.diff)).collect(),
+        );
+        persist.commit(txn)?;
+    }
+    Ok(())
+}
 
 // Helper Functions
 fn _create_test_persist(temp: &TempDir) -> FilePersist {
@@ -42,15 +56,15 @@ fn test_wal_recovery_after_crash() {
     {
         let persist = create_test_persist_with_config(path.clone(), 100);
         persist.ensure_shard("db:edge").unwrap();
-        persist
-            .append(
-                "db:edge",
-                &[
-                    Update::insert(Tuple::from_pair(1, 2), 10),
-                    Update::insert(Tuple::from_pair(3, 4), 20),
-                ],
-            )
-            .unwrap();
+        commit(
+            &persist,
+            "db:edge",
+            &[
+                Update::insert(Tuple::from_pair(1, 2), 10),
+                Update::insert(Tuple::from_pair(3, 4), 20),
+            ],
+        )
+        .unwrap();
         // No flush - data only in WAL, simulates crash
     }
 
@@ -75,15 +89,15 @@ fn test_wal_with_partial_entry_truncation() {
     {
         let persist = create_test_persist_with_config(path.clone(), 100);
         persist.ensure_shard("db:edge").unwrap();
-        persist
-            .append(
-                "db:edge",
-                &[
-                    Update::insert(Tuple::from_pair(1, 2), 10),
-                    Update::insert(Tuple::from_pair(3, 4), 20),
-                ],
-            )
-            .unwrap();
+        commit(
+            &persist,
+            "db:edge",
+            &[
+                Update::insert(Tuple::from_pair(1, 2), 10),
+                Update::insert(Tuple::from_pair(3, 4), 20),
+            ],
+        )
+        .unwrap();
     }
 
     // Manually truncate the WAL file to simulate crash mid-write
@@ -122,9 +136,12 @@ fn test_wal_double_replay_idempotency() {
     {
         let persist = create_test_persist_with_config(path.clone(), 100);
         persist.ensure_shard("db:edge").unwrap();
-        persist
-            .append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)])
-            .unwrap();
+        commit(
+            &persist,
+            "db:edge",
+            &[Update::insert(Tuple::from_pair(1, 2), 10)],
+        )
+        .unwrap();
     }
 
     // Note: The WAL file exists at path.join("wal/current.wal")
@@ -188,9 +205,12 @@ fn test_recovery_with_mixed_valid_invalid_wal_entries() {
     {
         let persist = create_test_persist_with_config(path.clone(), 100);
         persist.ensure_shard("db:edge").unwrap();
-        persist
-            .append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)])
-            .unwrap();
+        commit(
+            &persist,
+            "db:edge",
+            &[Update::insert(Tuple::from_pair(1, 2), 10)],
+        )
+        .unwrap();
     }
 
     // Append garbage as last line of WAL (simulates crash mid-write)
@@ -321,12 +341,12 @@ fn test_read_with_corrupted_parquet_file() {
 
         // Add enough data to trigger flush
         for i in 0..6 {
-            persist
-                .append(
-                    "db:edge",
-                    &[Update::insert(Tuple::from_pair(i, i), i as u64)],
-                )
-                .unwrap();
+            commit(
+                &persist,
+                "db:edge",
+                &[Update::insert(Tuple::from_pair(i, i), i as u64)],
+            )
+            .unwrap();
         }
         persist.flush("db:edge").unwrap();
     }
@@ -360,12 +380,12 @@ fn test_read_with_truncated_parquet_file() {
         persist.ensure_shard("db:edge").unwrap();
 
         for i in 0..6 {
-            persist
-                .append(
-                    "db:edge",
-                    &[Update::insert(Tuple::from_pair(i, i), i as u64)],
-                )
-                .unwrap();
+            commit(
+                &persist,
+                "db:edge",
+                &[Update::insert(Tuple::from_pair(i, i), i as u64)],
+            )
+            .unwrap();
         }
         persist.flush("db:edge").unwrap();
     }
@@ -402,12 +422,12 @@ fn test_read_with_missing_batch_file() {
         persist.ensure_shard("db:edge").unwrap();
 
         for i in 0..6 {
-            persist
-                .append(
-                    "db:edge",
-                    &[Update::insert(Tuple::from_pair(i, i), i as u64)],
-                )
-                .unwrap();
+            commit(
+                &persist,
+                "db:edge",
+                &[Update::insert(Tuple::from_pair(i, i), i as u64)],
+            )
+            .unwrap();
         }
         persist.flush("db:edge").unwrap();
     }
@@ -448,15 +468,15 @@ fn test_recovery_after_failed_flush() {
     // Create data in buffer (not flushed)
     let persist = create_test_persist_with_config(path.clone(), 100);
     persist.ensure_shard("db:edge").unwrap();
-    persist
-        .append(
-            "db:edge",
-            &[
-                Update::insert(Tuple::from_pair(1, 2), 10),
-                Update::insert(Tuple::from_pair(3, 4), 20),
-            ],
-        )
-        .unwrap();
+    commit(
+        &persist,
+        "db:edge",
+        &[
+            Update::insert(Tuple::from_pair(1, 2), 10),
+            Update::insert(Tuple::from_pair(3, 4), 20),
+        ],
+    )
+    .unwrap();
 
     // Verify data is in buffer
     let updates = persist.read("db:edge", 0).unwrap();
@@ -504,12 +524,12 @@ fn test_recovery_with_orphaned_wal_archives() {
         persist.ensure_shard("db:edge").unwrap();
 
         for i in 0..6 {
-            persist
-                .append(
-                    "db:edge",
-                    &[Update::insert(Tuple::from_pair(i, i), i as u64)],
-                )
-                .unwrap();
+            commit(
+                &persist,
+                "db:edge",
+                &[Update::insert(Tuple::from_pair(i, i), i as u64)],
+            )
+            .unwrap();
         }
         persist.flush("db:edge").unwrap();
     }
@@ -543,12 +563,12 @@ fn test_compaction_atomicity() {
 
         // Add data at different times
         for i in 0..20i32 {
-            persist
-                .append(
-                    "db:edge",
-                    &[Update::insert(Tuple::from_pair(i, i), i as u64)],
-                )
-                .unwrap();
+            commit(
+                &persist,
+                "db:edge",
+                &[Update::insert(Tuple::from_pair(i, i), i as u64)],
+            )
+            .unwrap();
         }
         persist.flush("db:edge").unwrap();
 
@@ -584,9 +604,12 @@ fn test_data_integrity_after_multiple_restarts() {
         let persist = create_test_persist_with_config(path.clone(), 100);
         persist.ensure_shard("db:edge").unwrap();
         for (a, b) in &expected_data {
-            persist
-                .append("db:edge", &[Update::insert(Tuple::from_pair(*a, *b), 10)])
-                .unwrap();
+            commit(
+                &persist,
+                "db:edge",
+                &[Update::insert(Tuple::from_pair(*a, *b), 10)],
+            )
+            .unwrap();
         }
         persist.flush("db:edge").unwrap();
     }
@@ -624,9 +647,12 @@ fn test_concurrent_crash_recovery() {
     {
         let persist = create_test_persist_with_config(path.as_ref().clone(), 100);
         persist.ensure_shard("db:edge").unwrap();
-        persist
-            .append("db:edge", &[Update::insert(Tuple::from_pair(1, 2), 10)])
-            .unwrap();
+        commit(
+            &persist,
+            "db:edge",
+            &[Update::insert(Tuple::from_pair(1, 2), 10)],
+        )
+        .unwrap();
         persist.flush("db:edge").unwrap();
     }
 
@@ -661,9 +687,12 @@ fn test_recovery_with_unicode_shard_names() {
     {
         let persist = create_test_persist_with_config(path.clone(), 100);
         persist.ensure_shard("数据库:表").unwrap();
-        persist
-            .append("数据库:表", &[Update::insert(Tuple::from_pair(1, 2), 10)])
-            .unwrap();
+        commit(
+            &persist,
+            "数据库:表",
+            &[Update::insert(Tuple::from_pair(1, 2), 10)],
+        )
+        .unwrap();
         persist.flush("数据库:表").unwrap();
     }
 
@@ -687,9 +716,12 @@ fn test_recovery_with_very_long_shard_name() {
     {
         let persist = create_test_persist_with_config(path.clone(), 100);
         persist.ensure_shard(&long_name).unwrap();
-        persist
-            .append(&long_name, &[Update::insert(Tuple::from_pair(1, 2), 10)])
-            .unwrap();
+        commit(
+            &persist,
+            &long_name,
+            &[Update::insert(Tuple::from_pair(1, 2), 10)],
+        )
+        .unwrap();
         persist.flush(&long_name).unwrap();
     }
 
@@ -710,9 +742,12 @@ fn test_recovery_with_special_chars_in_shard_name() {
     {
         let persist = create_test_persist_with_config(path.clone(), 100);
         persist.ensure_shard(shard_name).unwrap();
-        persist
-            .append(shard_name, &[Update::insert(Tuple::from_pair(1, 2), 10)])
-            .unwrap();
+        commit(
+            &persist,
+            shard_name,
+            &[Update::insert(Tuple::from_pair(1, 2), 10)],
+        )
+        .unwrap();
         persist.flush(shard_name).unwrap();
     }
 
@@ -733,19 +768,19 @@ fn test_recovery_preserves_tuple_types() {
     {
         let persist = create_test_persist_with_config(path.clone(), 100);
         persist.ensure_shard("db:mixed").unwrap();
-        persist
-            .append(
-                "db:mixed",
-                &[Update::insert(
-                    Tuple::new(vec![
-                        Value::Int32(42),
-                        Value::string("hello"),
-                        Value::Float64(3.14),
-                    ]),
-                    10,
-                )],
-            )
-            .unwrap();
+        commit(
+            &persist,
+            "db:mixed",
+            &[Update::insert(
+                Tuple::new(vec![
+                    Value::Int32(42),
+                    Value::string("hello"),
+                    Value::Float64(3.14),
+                ]),
+                10,
+            )],
+        )
+        .unwrap();
         persist.flush("db:mixed").unwrap();
     }
 
@@ -769,15 +804,15 @@ fn test_wal_replay_after_clean_shutdown() {
     {
         let persist = create_test_persist_with_config(path.clone(), 100);
         persist.ensure_shard("db:edge").unwrap();
-        persist
-            .append(
-                "db:edge",
-                &[
-                    Update::insert(Tuple::from_pair(1, 2), 10),
-                    Update::insert(Tuple::from_pair(3, 4), 20),
-                ],
-            )
-            .unwrap();
+        commit(
+            &persist,
+            "db:edge",
+            &[
+                Update::insert(Tuple::from_pair(1, 2), 10),
+                Update::insert(Tuple::from_pair(3, 4), 20),
+            ],
+        )
+        .unwrap();
         persist.flush("db:edge").unwrap();
         // Clean shutdown - data flushed to parquet
     }
@@ -807,12 +842,12 @@ fn test_compaction_preserves_all_data() {
 
         // Insert data at various times
         for i in 0..100i32 {
-            persist
-                .append(
-                    "db:edge",
-                    &[Update::insert(Tuple::from_pair(i, i * 2), i as u64)],
-                )
-                .unwrap();
+            commit(
+                &persist,
+                "db:edge",
+                &[Update::insert(Tuple::from_pair(i, i * 2), i as u64)],
+            )
+            .unwrap();
         }
         persist.flush("db:edge").unwrap();
 
@@ -861,21 +896,24 @@ fn test_compaction_with_deletions() {
         persist.ensure_shard("db:edge").unwrap();
 
         // Insert then delete some tuples
-        persist
-            .append(
-                "db:edge",
-                &[
-                    Update::insert(Tuple::from_pair(1, 2), 10),
-                    Update::insert(Tuple::from_pair(3, 4), 20),
-                    Update::insert(Tuple::from_pair(5, 6), 30),
-                ],
-            )
-            .unwrap();
+        commit(
+            &persist,
+            "db:edge",
+            &[
+                Update::insert(Tuple::from_pair(1, 2), 10),
+                Update::insert(Tuple::from_pair(3, 4), 20),
+                Update::insert(Tuple::from_pair(5, 6), 30),
+            ],
+        )
+        .unwrap();
 
         // Delete the middle tuple
-        persist
-            .append("db:edge", &[Update::delete(Tuple::from_pair(3, 4), 40)])
-            .unwrap();
+        commit(
+            &persist,
+            "db:edge",
+            &[Update::delete(Tuple::from_pair(3, 4), 40)],
+        )
+        .unwrap();
 
         persist.flush("db:edge").unwrap();
 
@@ -916,12 +954,12 @@ fn test_concurrent_read_during_compaction() {
     persist.ensure_shard("db:edge").unwrap();
 
     for i in 0..50i32 {
-        persist
-            .append(
-                "db:edge",
-                &[Update::insert(Tuple::from_pair(i, i), i as u64)],
-            )
-            .unwrap();
+        commit(
+            &persist,
+            "db:edge",
+            &[Update::insert(Tuple::from_pair(i, i), i as u64)],
+        )
+        .unwrap();
     }
     persist.flush("db:edge").unwrap();
 
@@ -976,12 +1014,12 @@ fn test_many_restarts_with_incremental_data() {
         persist.ensure_shard("db:edge").unwrap();
 
         // Add new data each cycle
-        persist
-            .append(
-                "db:edge",
-                &[Update::insert(Tuple::from_pair(cycle, cycle), cycle as u64)],
-            )
-            .unwrap();
+        commit(
+            &persist,
+            "db:edge",
+            &[Update::insert(Tuple::from_pair(cycle, cycle), cycle as u64)],
+        )
+        .unwrap();
         persist.flush("db:edge").unwrap();
 
         // Verify cumulative data
@@ -1009,9 +1047,12 @@ fn test_recovery_with_many_shards() {
         for i in 0..num_shards {
             let shard = format!("db:shard_{i}");
             persist.ensure_shard(&shard).unwrap();
-            persist
-                .append(&shard, &[Update::insert(Tuple::from_pair(i, i), 10)])
-                .unwrap();
+            commit(
+                &persist,
+                &shard,
+                &[Update::insert(Tuple::from_pair(i, i), 10)],
+            )
+            .unwrap();
             persist.flush(&shard).unwrap();
         }
     }

@@ -13,6 +13,7 @@
 //! `InputLayer` uses Differential Dataflow-native persistence:
 //! - Updates are stored as `(data, time, diff)` triples
 //! - Consolidation sums diffs to compute current state
+//! - Each write commits one `Transaction`, made durable as one WAL record
 //! - WAL provides immediate durability, batches provide efficient reads
 //!
 //! ## Format Selection
@@ -26,7 +27,6 @@ pub mod error;
 pub mod metadata;
 pub mod parquet;
 pub mod persist;
-pub mod wal;
 
 // Re-export commonly used types
 pub use csv::{
@@ -39,10 +39,9 @@ pub use metadata::{
     RelationMetadata, RelationTombstone,
 };
 pub use parquet::{load_from_parquet, save_to_parquet};
-pub use wal::{replay_wal, Wal, WalEntry, WalOp};
 
 // Re-export persist types
 pub use persist::{
     consolidate, consolidate_to_current, to_tuples, Batch, BatchRef, FilePersist, PersistBackend,
-    PersistConfig, PersistWal, ShardInfo, ShardMeta, Update,
+    PersistConfig, PersistWal, ShardInfo, ShardMeta, Transaction, TxnOp, Update,
 };

@@ -38,6 +38,8 @@ toml = "0.8"
 # Storage formats
 parquet = "53.0"
 arrow = "53.0"
+# WAL records carry tuples in the lossless batch codec, base64 within JSON
+base64 = "0.22"
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }

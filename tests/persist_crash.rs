@@ -3,7 +3,8 @@
 
 use inputlayer::config::DurabilityMode;
 use inputlayer::storage::persist::batch::Update;
-use inputlayer::storage::persist::{FilePersist, PersistBackend, PersistConfig};
+use inputlayer::storage::persist::{FilePersist, PersistBackend, PersistConfig, Transaction};
+use inputlayer::storage::StorageResult;
 use inputlayer::value::Tuple;
 use std::collections::BTreeSet;
 use std::fs;
@@ -11,6 +12,19 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tempfile::TempDir;
+
+/// Commit `updates` to `shard`, one transaction per run of equal times.
+fn commit(persist: &FilePersist, shard: &str, updates: &[Update]) -> StorageResult<()> {
+    for run in updates.chunk_by(|a, b| a.time == b.time) {
+        let mut txn = Transaction::new(run[0].time);
+        txn.facts(
+            shard,
+            run.iter().map(|u| (u.data.clone(), u.diff)).collect(),
+        );
+        persist.commit(txn)?;
+    }
+    Ok(())
+}
 
 fn open(path: PathBuf, buffer_size: usize, durability_mode: DurabilityMode) -> FilePersist {
     FilePersist::new(PersistConfig {
@@ -72,7 +86,7 @@ fn concurrent_appends_and_flushes_lose_no_acked_write() {
             std::thread::spawn(move || {
                 for i in 0..PER_THREAD {
                     let update = Update::insert(Tuple::from_pair(t, i), 1);
-                    persist.append("db:r", &[update]).expect("append");
+                    commit(&persist, "db:r", &[update]).expect("append");
                 }
             })
         })
@@ -107,7 +121,7 @@ fn concurrent_append_and_delete_recover_what_was_acked() {
         // Batch files give delete_shard work to do while a writer races it.
         for i in 0..BATCHES {
             let update = Update::insert(Tuple::from_pair(-1, i), 1);
-            persist.append("db:r", &[update]).expect("append");
+            commit(&persist, "db:r", &[update]).expect("append");
             persist.flush("db:r").expect("flush");
         }
         let writer = {
@@ -115,7 +129,7 @@ fn concurrent_append_and_delete_recover_what_was_acked() {
             std::thread::spawn(move || {
                 for i in 0..WRITES {
                     let update = Update::insert(Tuple::from_pair(round, i), 1);
-                    persist.append("db:r", &[update]).expect("append");
+                    commit(&persist, "db:r", &[update]).expect("append");
                 }
             })
         };
@@ -143,9 +157,12 @@ fn append_after_torn_tail_survives_restart() {
     );
 
     let persist = open(temp.path().to_path_buf(), 1000, DurabilityMode::Immediate);
-    persist
-        .append("db:r", &[Update::insert(Tuple::from_pair(1, 2), 1)])
-        .expect("append");
+    commit(
+        &persist,
+        "db:r",
+        &[Update::insert(Tuple::from_pair(1, 2), 1)],
+    )
+    .expect("append");
     std::mem::forget(persist);
 
     let reopened = open(temp.path().to_path_buf(), 1000, DurabilityMode::Immediate);
@@ -156,17 +173,23 @@ fn append_after_torn_tail_survives_restart() {
 fn torn_tail_after_valid_records_is_truncated() {
     let temp = TempDir::new().expect("tempdir");
     let persist = open(temp.path().to_path_buf(), 1000, DurabilityMode::Immediate);
-    persist
-        .append("db:r", &[Update::insert(Tuple::from_pair(1, 1), 1)])
-        .expect("append");
+    commit(
+        &persist,
+        "db:r",
+        &[Update::insert(Tuple::from_pair(1, 1), 1)],
+    )
+    .expect("append");
     std::mem::forget(persist);
 
     append_raw(&wal_file(temp.path()), b"deadbeef:{\"sha");
 
     let persist = open(temp.path().to_path_buf(), 1000, DurabilityMode::Immediate);
-    persist
-        .append("db:r", &[Update::insert(Tuple::from_pair(2, 2), 1)])
-        .expect("append");
+    commit(
+        &persist,
+        "db:r",
+        &[Update::insert(Tuple::from_pair(2, 2), 1)],
+    )
+    .expect("append");
     std::mem::forget(persist);
 
     let reopened = open(temp.path().to_path_buf(), 1000, DurabilityMode::Immediate);
@@ -177,9 +200,12 @@ fn torn_tail_after_valid_records_is_truncated() {
 fn invalid_utf8_tail_does_not_block_startup() {
     let temp = TempDir::new().expect("tempdir");
     let persist = open(temp.path().to_path_buf(), 1000, DurabilityMode::Batched);
-    persist
-        .append("db:r", &[Update::insert(Tuple::from_pair(1, 1), 1)])
-        .expect("append");
+    commit(
+        &persist,
+        "db:r",
+        &[Update::insert(Tuple::from_pair(1, 1), 1)],
+    )
+    .expect("append");
     persist.sync().expect("sync");
     std::mem::forget(persist);
 
@@ -196,9 +222,12 @@ fn invalid_utf8_middle_record_is_skipped() {
     let wal = wal_file(temp.path());
     append_raw(&wal, b"\xFF\xFE garbage\n");
     let persist = open(temp.path().to_path_buf(), 1000, DurabilityMode::Immediate);
-    persist
-        .append("db:r", &[Update::insert(Tuple::from_pair(3, 3), 1)])
-        .expect("append");
+    commit(
+        &persist,
+        "db:r",
+        &[Update::insert(Tuple::from_pair(3, 3), 1)],
+    )
+    .expect("append");
     std::mem::forget(persist);
 
     let reopened = open(temp.path().to_path_buf(), 1000, DurabilityMode::Immediate);
@@ -209,12 +238,18 @@ fn invalid_utf8_middle_record_is_skipped() {
 fn batched_flush_keeps_other_shards_buffered_wal_entries() {
     let temp = TempDir::new().expect("tempdir");
     let persist = open(temp.path().to_path_buf(), 1000, DurabilityMode::Batched);
-    persist
-        .append("db:a", &[Update::insert(Tuple::from_pair(1, 1), 1)])
-        .expect("append a");
-    persist
-        .append("db:b", &[Update::insert(Tuple::from_pair(2, 2), 1)])
-        .expect("append b");
+    commit(
+        &persist,
+        "db:a",
+        &[Update::insert(Tuple::from_pair(1, 1), 1)],
+    )
+    .expect("append a");
+    commit(
+        &persist,
+        "db:b",
+        &[Update::insert(Tuple::from_pair(2, 2), 1)],
+    )
+    .expect("append b");
     persist.flush("db:b").expect("flush b");
     std::mem::forget(persist);
 
