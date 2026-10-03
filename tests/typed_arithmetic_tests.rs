@@ -21,6 +21,9 @@ async fn exec(program: &[&str], query: &str) -> Result<Vec<Vec<WireValue>>, Stri
             .unwrap_or_else(|e| panic!("'{stmt}': {e}"));
     }
     let result = h.query_program(None, query.to_string()).await?;
+    if let Some(error) = result.errors.first() {
+        return Err(error.message.clone());
+    }
     let mut rows: Vec<Vec<WireValue>> = result.rows.into_iter().map(|r| r.values).collect();
     rows.sort_by_key(|r| format!("{r:?}"));
     Ok(rows)
@@ -130,11 +133,15 @@ async fn expression_argument_in_body_atom_is_rejected() {
         .await
         .expect_err("function call argument");
     let (h, _t) = handler();
-    let err = h
+    let result = h
         .query_program(None, "+r(X) <- v(Y), e(X, Y + 1)".to_string())
         .await
-        .expect_err("persistent rule");
-    assert!(err.contains("not supported"), "{err}");
+        .expect("statement status");
+    assert_eq!(result.errors.len(), 1, "persistent rule: {result:?}");
+    assert!(
+        result.errors[0].message.contains("not supported"),
+        "{result:?}"
+    );
 }
 
 #[tokio::test]
