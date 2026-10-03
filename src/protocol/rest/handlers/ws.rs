@@ -5,6 +5,10 @@
 //! push notifications for its knowledge graph. Standing queries
 //! (`.subscribe` / `.unsubscribe`) push `subscription_delta` and
 //! `subscription_error`; see [`crate::protocol::subscription`].
+//!
+//! A connection is bound to the [`Principal`] it authenticated as. Revoking
+//! that credential closes the connection, and every outbound data frame is
+//! fenced by it (see [`outbound`]).
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
@@ -17,11 +21,16 @@ use axum::{
     response::IntoResponse,
     Extension,
 };
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn, Instrument};
 
+mod outbound;
+
+use outbound::Outbound;
+
 use super::wire_value_to_json;
+use crate::auth::{Principal, Role, INTERNAL_KG};
 use crate::protocol::handler::{
     PersistentNotification, ProgramError, ValidationError, VALIDATION_ERROR_PREFIX,
 };
@@ -304,11 +313,41 @@ impl MessageRate {
 }
 
 /// Send `auth_error` with `message`; `false` if the connection is dead.
-async fn send_auth_error(
-    sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    message: String,
-) -> bool {
+async fn send_auth_error(sender: &mut Outbound, message: String) -> bool {
     send_global_response(sender, &GlobalWsResponse::AuthError { message }).await
+}
+
+/// Tell the client its credential was revoked, if it was. The only data frame
+/// sent past the credential fence.
+async fn notify_if_revoked(sender: &mut Outbound, principal: &Principal) {
+    if !principal.is_revoked() {
+        return;
+    }
+    let notice = GlobalWsResponse::Error {
+        message: "Credential revoked; reconnect with valid credentials".to_string(),
+        validation_errors: None,
+        code: None,
+    };
+    if let Ok(json) = serde_json::to_string(&notice) {
+        sender.send_revocation_notice(json).await;
+    }
+}
+
+/// Whether a connection bound to `session_kg` may see `notification`: changes
+/// to its own KG, plus KG creation and drop for admins. Changes to the
+/// internal KG are never visible.
+fn notification_visible(
+    notification: &PersistentNotification,
+    session_kg: &str,
+    principal: &Principal,
+) -> bool {
+    let kg = notification.knowledge_graph();
+    if kg == INTERNAL_KG {
+        return false;
+    }
+    kg == session_kg
+        || (matches!(notification, PersistentNotification::KgChange { .. })
+            && principal.role() == Ok(Role::Admin))
 }
 
 /// Handle a global WebSocket connection with auth loop + message loop.
@@ -320,9 +359,8 @@ async fn handle_global_ws_connection(
     peer: IpAddr,
     preauth_slot: crate::protocol::rest::PreAuthSlot,
 ) {
-    use crate::auth::AuthIdentity;
-
-    let (mut sender, mut receiver) = socket.split();
+    let (sink, mut receiver) = socket.split();
+    let mut sender = Outbound::new(sink);
 
     info!(kg = %kg, "ws_connection_start");
 
@@ -335,7 +373,7 @@ async fn handle_global_ws_connection(
     let auth_deadline = tokio::time::Instant::now() + auth_timeout;
     let timeout_message = format!("Authentication timeout ({}s)", auth_timeout.as_secs_f32());
     let mut auth_failures = 0;
-    let auth_identity: AuthIdentity;
+    let principal: Principal;
 
     loop {
         let msg = tokio::select! {
@@ -405,8 +443,8 @@ async fn handle_global_ws_connection(
         };
 
         match outcome {
-            Ok(identity) => {
-                auth_identity = identity;
+            Ok(authenticated) => {
+                principal = authenticated;
                 break;
             }
             Err(message) => {
@@ -421,16 +459,23 @@ async fn handle_global_ws_connection(
         }
     }
     drop(preauth_slot);
+    sender.bind(principal.clone());
 
     // ── Authenticated: create session ────────────────────────────────────
+    let Ok(auth_identity) = principal.identity() else {
+        send_auth_error(&mut sender, "Invalid credentials".to_string()).await;
+        sender.close().await;
+        return;
+    };
     info!(
         kg = %kg,
         username = %auth_identity.username,
         role = %auth_identity.role,
+        credential = %principal.credential(),
         "ws_authenticated"
     );
 
-    let session_id = match handler.create_session_with_auth(&kg, &auth_identity) {
+    let session_id = match handler.create_session_with_auth(&kg, &principal) {
         Ok(id) => {
             let stats = handler.session_stats();
             info!(kg = %kg, active_sessions = stats.total_sessions, "ws_session_created");
@@ -447,7 +492,7 @@ async fn handle_global_ws_connection(
             if let Ok(json) = serde_json::to_string(&err_msg) {
                 let _ = sender.send(Message::Text(json)).await;
             }
-            let _ = sender.close().await;
+            sender.close().await;
             return;
         }
     };
@@ -472,7 +517,7 @@ async fn handle_global_ws_connection(
     let mut notify_rx = handler.subscribe_notifications();
     let mut request_seq: u64 = 0;
     let mut subscriptions =
-        ConnectionSubscriptions::new(Arc::clone(&handler), Some(auth_identity.clone()));
+        ConnectionSubscriptions::new(Arc::clone(&handler), Some(principal.clone()));
 
     // Replay missed notifications on reconnect (#39)
     if let Some(since_seq) = last_seq {
@@ -484,30 +529,16 @@ async fn handle_global_ws_connection(
                 .unwrap_or_default();
             debug!(session_id = %session_id, missed_count = missed.len(), since_seq, "ws_replaying_missed_notifications");
             for notif in &missed {
-                // Apply same KG filtering as live notifications
-                let notif_kg = match notif {
-                    PersistentNotification::PersistentUpdate {
-                        knowledge_graph, ..
-                    } => knowledge_graph,
-                    PersistentNotification::RuleChange {
-                        knowledge_graph, ..
-                    } => knowledge_graph,
-                    PersistentNotification::KgChange {
-                        knowledge_graph, ..
-                    } => knowledge_graph,
-                    PersistentNotification::SchemaChange {
-                        knowledge_graph, ..
-                    } => knowledge_graph,
-                };
-                let is_kg_change = matches!(notif, PersistentNotification::KgChange { .. });
-                if *notif_kg == session_kg || is_kg_change {
-                    if let Ok(json) = serde_json::to_string(notif) {
-                        if sender.send(Message::Text(json)).await.is_err() {
-                            if let Err(e) = handler.close_session(&session_id) {
-                                tracing::warn!(error = %e, "session_cleanup_failed");
-                            }
-                            return;
+                if !notification_visible(notif, &session_kg, &principal) {
+                    continue;
+                }
+                if let Ok(json) = serde_json::to_string(notif) {
+                    if sender.send(Message::Text(json)).await.is_err() {
+                        if let Err(e) = handler.close_session(&session_id) {
+                            tracing::warn!(error = %e, "session_cleanup_failed");
                         }
+                        notify_if_revoked(&mut sender, &principal).await;
+                        return;
                     }
                 }
             }
@@ -535,6 +566,9 @@ async fn handle_global_ws_connection(
     } else {
         None
     };
+
+    // Fires once the connection's credential is revoked.
+    let mut revocation = principal.revocation();
 
     // Server-initiated heartbeat: send ping every 30s to detect dead connections
     let mut heartbeat_interval = tokio::time::interval(std::time::Duration::from_secs(30));
@@ -573,6 +607,11 @@ async fn handle_global_ws_connection(
         }
 
         tokio::select! {
+            // Credential revoked: stop everything this connection was doing
+            () = &mut revocation => {
+                info!(credential = %principal.credential(), "ws_credential_revoked");
+                break;
+            }
             // Idle timeout
             () = idle_sleep => {
                 if idle_duration.is_some() {
@@ -612,7 +651,7 @@ async fn handle_global_ws_connection(
                             msg_bytes = text.len()
                         );
                         let send_ok = process_and_send_global_ws_message(
-                            &handler, &session_id, &text, &auth_identity, &mut sender,
+                            &handler, &session_id, &text, &principal, &mut sender,
                             &mut subscriptions,
                         )
                         .instrument(span)
@@ -661,14 +700,7 @@ async fn handle_global_ws_connection(
                             Ok(kg) => kg,
                             Err(_) => break,
                         };
-                        let notif_kg = match notif {
-                            PersistentNotification::PersistentUpdate { knowledge_graph, .. } => knowledge_graph,
-                            PersistentNotification::RuleChange { knowledge_graph, .. } => knowledge_graph,
-                            PersistentNotification::KgChange { knowledge_graph, .. } => knowledge_graph,
-                            PersistentNotification::SchemaChange { knowledge_graph, .. } => knowledge_graph,
-                        };
-                        let is_kg_change = matches!(notif, PersistentNotification::KgChange { .. });
-                        if *notif_kg == session_kg || is_kg_change {
+                        if notification_visible(notif, &session_kg, &principal) {
                             if let Ok(json) = serde_json::to_string(&notif) {
                                 if sender.send(Message::Text(json)).await.is_err() {
                                     break;
@@ -720,6 +752,9 @@ async fn handle_global_ws_connection(
         }
     }
 
+    // Stop standing queries before anything else is sent.
+    drop(subscriptions);
+    notify_if_revoked(&mut sender, &principal).await;
     // Send close frame before cleanup (prevents "connection reset without handshake" warnings)
     let _ = sender.send(Message::Close(None)).await;
 
@@ -736,10 +771,7 @@ async fn handle_global_ws_connection(
 
 /// Helper: serialize a `GlobalWsResponse` and send it. Returns `false` if the
 /// send fails (connection dead).
-async fn send_global_response(
-    sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    response: &GlobalWsResponse,
-) -> bool {
+async fn send_global_response(sender: &mut Outbound, response: &GlobalWsResponse) -> bool {
     let json = match serde_json::to_string(response) {
         Ok(j) => j,
         Err(e) => {
@@ -789,8 +821,8 @@ async fn process_and_send_global_ws_message(
     handler: &Arc<Handler>,
     session_id: &str,
     text: &str,
-    auth: &crate::auth::AuthIdentity,
-    sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    auth: &Principal,
+    sender: &mut Outbound,
     subscriptions: &mut ConnectionSubscriptions,
 ) -> bool {
     let request: GlobalWsRequest = match serde_json::from_str(text) {
@@ -873,7 +905,7 @@ async fn send_subscription_command(
     session_id: &str,
     command: MetaCommand,
     subscriptions: &mut ConnectionSubscriptions,
-    sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    sender: &mut Outbound,
 ) -> bool {
     let start = std::time::Instant::now();
     let outcome = match command {
@@ -924,10 +956,7 @@ async fn send_subscription_command(
 
 /// Send a subscription push; an oversized delta becomes a `subscription_error`.
 /// Returns `false` if the connection is dead.
-async fn send_subscription_push(
-    sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    push: &Push,
-) -> bool {
+async fn send_subscription_push(sender: &mut Outbound, push: &Push) -> bool {
     let json = match serde_json::to_string(push) {
         Ok(json) if json.len() <= MAX_MESSAGE_SIZE => json,
         result => {
@@ -1004,8 +1033,8 @@ async fn send_global_execute(
     handler: &Arc<Handler>,
     session_id: &str,
     program: String,
-    auth: &crate::auth::AuthIdentity,
-    sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    auth: &Principal,
+    sender: &mut Outbound,
 ) -> bool {
     let start = std::time::Instant::now();
     let program_len = program.len();
