@@ -21,7 +21,7 @@ Batch file (Parquet)
 On startup, InputLayer:
 1. Loads shard metadata from disk
 2. Reads batch files (Parquet)
-3. Replays WAL (uncommitted updates)
+3. Replays the WAL's committed transactions
 4. Consolidates to get current state
 
 ---
@@ -117,23 +117,27 @@ durability_mode = "async"
 
 The WAL provides O(1) append-only persistence with immediate durability.
 
-### WAL Entry Format
+### WAL Record Format
 
-Each entry is a JSON line (for debuggability):
+Every write commits a **transaction**: all of its changes, across any number of
+relations, at one logical time (its revision). Each transaction is one WAL record on
+one line, written with one append and, in `immediate` mode, one fsync:
 
-```json
-{"op":"insert","relation":"edge","tuples":[[1,2],[3,4]],"ts":1234567890}
-{"op":"delete","relation":"edge","tuples":[[1,2]],"ts":1234567891}
+```text
+<crc32 of json, 8 hex digits>:{"rev":7,"ops":[{"facts":{"shard":"default:edge","changes":[["AgAAAAEBAAAAAAAAAAECAAAAAAAAAA==",1]]}}]}
 ```
-
-### WAL Operations
 
 | Field | Description |
 |-------|-------------|
-| `op` | Operation type: `insert` or `delete` |
-| `relation` | Target relation name |
-| `tuples` | Array of tuples being modified |
-| `ts` | Timestamp (Unix milliseconds) |
+| `rev` | Revision: the logical time every change in the transaction happens at |
+| `ops` | The changes, in commit order; each kind of change has its own typed operation |
+| `facts.shard` | Shard name in `"kg:relation"` format |
+| `facts.changes` | `[tuple, diff]` pairs: `+1` inserts, `-1` deletes. The tuple is base64 of the same lossless binary encoding batch files use, so every value (including NaN and infinities) survives replay exactly |
+
+The trailing newline is the commit boundary. A record without it, or whose checksum
+does not match, holds no committed data. A transaction is therefore recovered
+completely or not at all, never in part. If a write or fsync fails, the record is cut
+back off the WAL before the error is returned, so a failed write is never recovered.
 
 ### Automatic Compaction
 
@@ -340,7 +344,7 @@ Lists all relations with row counts.
 
 1. Load shard metadata
 2. Read Parquet batch files
-3. Replay WAL entries
+3. Replay the WAL's intact prefix of committed transactions
 4. Consolidate to current state
 
 ### Crash Recovery
@@ -356,11 +360,16 @@ If a batch file is corrupted:
 
 ### Corrupted WAL
 
-If WAL is corrupted:
-1. Data in Parquet files is safe
-2. Uncommitted writes since last flush are lost
-3. Rename/remove corrupted WAL file
-4. Restart
+Recovery replays the WAL up to its first damaged record and cuts the file there, so
+the state is always the one after an exact number of committed transactions. A
+damaged last record is a write torn by a crash and is simply dropped. If intact
+records follow the damage, they are committed data that is **not** replayed: startup
+logs an error and saves the cut-off bytes to `wal/current.wal.<unix-ms>.corrupt`
+for inspection.
+
+A record with a valid checksum that this server cannot decode was written by an
+incompatible server version. Startup then fails without changing the WAL: start the
+version that wrote it once, so it drains the WAL into batch files, then upgrade.
 
 ---
 

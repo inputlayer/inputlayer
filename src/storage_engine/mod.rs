@@ -31,6 +31,8 @@
 //! ```
 
 #[cfg(test)]
+mod commit_tests;
+#[cfg(test)]
 mod materialize_tests;
 mod relation_store;
 mod snapshot;
@@ -48,7 +50,7 @@ use crate::schema::{RelationSchema, SchemaCatalog, ValidationEngine};
 use crate::statement::{RuleDef, SerializableBodyPred};
 use crate::storage::persist::{
     consolidate_to_current, set_semantics_corrections, to_tuples, FilePersist, PersistBackend,
-    PersistConfig, Update,
+    PersistConfig, Transaction, Update,
 };
 use crate::storage::{
     DataDirLock, DropTombstones, KnowledgeGraphMetadata, KnowledgeGraphsMetadata,
@@ -605,26 +607,22 @@ impl StorageEngine {
         }
 
         self.settle_relation_drop(&mut db, kg, relation)?;
-        let shard = format!("{kg}:{relation}");
         let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
-        let updates: Vec<Update> = new_tuples
-            .iter()
-            .map(|data| Update::insert(data.clone(), time))
-            .collect();
+        let mut txn = Transaction::new(time);
+        txn.insert(format!("{kg}:{relation}"), new_tuples.iter().cloned());
 
         let persist_start = Instant::now();
-        self.persist.ensure_shard(&shard)?;
-        self.persist.append(&shard, &updates)?;
+        self.persist.commit(txn)?;
         let persist_ms = persist_start.elapsed().as_millis() as u64;
+        let new_count = new_tuples.len();
         info!(
             kg = %kg,
             relation = %relation,
-            tuples = updates.len(),
+            tuples = new_count,
             persist_ms,
             "persist_append_complete"
         );
 
-        let new_count = new_tuples.len();
         db.insert_in_memory(relation, new_tuples, time)?;
         Ok((new_count, total - new_count))
     }
@@ -707,15 +705,10 @@ impl StorageEngine {
         }
 
         self.settle_relation_drop(&mut db, kg, relation)?;
-        let shard = format!("{kg}:{relation}");
         let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
-        let updates: Vec<Update> = present
-            .iter()
-            .map(|data| Update::delete(data.clone(), time))
-            .collect();
-
-        self.persist.ensure_shard(&shard)?;
-        self.persist.append(&shard, &updates)?;
+        let mut txn = Transaction::new(time);
+        txn.delete(format!("{kg}:{relation}"), present.iter().cloned());
+        self.persist.commit(txn)?;
 
         db.delete_in_memory(relation, present, time)
     }
@@ -1159,7 +1152,8 @@ impl StorageEngine {
     /// Clear all facts from relations matching a prefix in a knowledge graph.
     ///
     /// Returns list of (relation_name, count_deleted) for each affected relation.
-    /// See [`KnowledgeGraph::clear_relations_by_prefix`] for partial failure.
+    /// All of them are cleared, or on error none; see
+    /// [`KnowledgeGraph::clear_relations_by_prefix`].
     pub fn clear_relations_by_prefix_in(
         &self,
         kg: &str,
@@ -1945,12 +1939,12 @@ impl StorageEngine {
 
         // Clamp shards whose multiplicities drifted from set membership
         if !corrections.is_empty() {
-            let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
-            for (shard, mut fixes) in corrections {
-                fixes.iter_mut().for_each(|u| u.time = time);
+            let mut txn = Transaction::new(self.logical_time.fetch_add(1, Ordering::SeqCst));
+            for (shard, fixes) in corrections {
                 tracing::warn!(shard = %shard, tuples = fixes.len(), "persist_multiplicity_clamped");
-                self.persist.append(&shard, &fixes)?;
+                txn.facts(shard, fixes.into_iter().map(|u| (u.data, u.diff)).collect());
             }
+            self.persist.commit(txn)?;
         }
 
         // A drop may have crashed before its schema and rule removal was
@@ -2856,13 +2850,12 @@ impl KnowledgeGraph {
 
     /// Clear all facts from relations whose name starts with the given prefix.
     ///
-    /// Returns a list of (relation_name, deleted_count) for each affected relation.
-    /// Does NOT remove the relations themselves or their schemas - only clears data.
+    /// Returns (relation_name, deleted_count) for each relation that had facts, in
+    /// name order. Does NOT remove the relations themselves or their schemas.
     ///
     /// # Errors
-    /// Relations are cleared in name order, each persisted before memory is
-    /// touched. A persist failure returns the error; relations before the
-    /// failing one stay cleared, it and later ones stay intact.
+    /// Every relation is cleared in one transaction, persisted before memory is
+    /// touched: if persisting fails, all of them stay intact.
     pub fn clear_relations_by_prefix(
         &mut self,
         prefix: &str,
@@ -2870,63 +2863,50 @@ impl KnowledgeGraph {
         persist: &FilePersist,
         kg_name: &str,
     ) -> StorageResult<Vec<(String, usize)>> {
-        // Find all relations matching the prefix (sorted for deterministic output)
         let mut matching: Vec<String> = self
             .store
             .names()
             .filter(|name| name.starts_with(prefix))
+            .filter(|name| self.store.get(name).is_some_and(|t| !t.is_empty()))
             .cloned()
             .collect();
         matching.sort();
 
-        if matching.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let mut results = Vec::new();
-
+        let mut txn = Transaction::new(time);
         for relation in &matching {
             if let Some(tuples) = self.store.get(relation) {
-                let count = tuples.len();
-                if count == 0 {
-                    continue;
-                }
-
-                // Persist before touching memory so a failed write leaves both intact
-                let shard = format!("{kg_name}:{relation}");
-                let updates: Vec<Update> = tuples
-                    .iter()
-                    .map(|t| Update::delete(t.clone(), time))
-                    .collect();
-                if let Err(e) = persist
-                    .ensure_shard(&shard)
-                    .and_then(|()| persist.append(&shard, &updates))
-                {
-                    if !results.is_empty() {
-                        self.publish_snapshot();
-                    }
-                    return Err(e);
-                }
-
-                if let Some(ref dd) = self.incremental {
-                    let _ = dd.delete(relation, tuples.to_vec(), time);
-                    let _ = dd.notify_base_update(relation);
-                }
-
-                self.store.clear(relation);
-                self.rebuild_indexes_for(relation);
-
-                // Update metadata
-                let schema = self
-                    .metadata
-                    .relations
-                    .get(relation)
-                    .map(|m| m.schema.clone())
-                    .unwrap_or_default();
-                self.metadata.add_relation(relation.clone(), schema, 0);
-
-                results.push((relation.clone(), count));
+                txn.delete(format!("{kg_name}:{relation}"), tuples.iter().cloned());
             }
+        }
+        persist.commit(txn)?;
+
+        let mut results = Vec::with_capacity(matching.len());
+        for relation in matching {
+            let tuples = self
+                .store
+                .get(&relation)
+                .map(Relation::to_vec)
+                .unwrap_or_default();
+            let count = tuples.len();
+
+            if let Some(ref dd) = self.incremental {
+                let _ = dd.delete(&relation, tuples, time);
+                let _ = dd.notify_base_update(&relation);
+            }
+
+            self.store.clear(&relation);
+            self.rebuild_indexes_for(&relation);
+
+            // Update metadata
+            let schema = self
+                .metadata
+                .relations
+                .get(&relation)
+                .map(|m| m.schema.clone())
+                .unwrap_or_default();
+            self.metadata.add_relation(relation.clone(), schema, 0);
+
+            results.push((relation, count));
         }
 
         if !results.is_empty() {
@@ -3154,11 +3134,10 @@ mod tests {
         assert!(kg
             .clear_relations_by_prefix("p_", 2, &persist, "kg")
             .is_err());
-        assert!(kg.store.get("p_a").unwrap().is_empty());
-        assert_eq!(kg.store.get("p_b").unwrap().len(), 2);
-        let snapshot = kg.snapshot.load();
-        assert!(snapshot.input_tuples["p_a"].is_empty());
-        assert_eq!(snapshot.input_tuples["p_b"].len(), 2);
+        for rel in ["p_a", "p_b"] {
+            assert_eq!(kg.store.get(rel).unwrap().len(), 2);
+            assert_eq!(kg.snapshot.load().input_tuples[rel].len(), 2);
+        }
     }
 
     #[test]
