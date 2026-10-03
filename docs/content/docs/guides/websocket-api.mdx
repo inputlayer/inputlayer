@@ -336,7 +336,9 @@ If re-evaluation fails (for example read access was revoked), the server pushes:
 
 The subscription stays registered; the next successful evaluation's delta is relative to the last good result.
 
-`.subscribe` replies with an `error` when the id is taken, the per-connection limit is reached, the query uses `limit`/`offset`, or the user lacks read access to the knowledge graph (the same check as a query).
+A result cut at `storage.performance.max_result_rows` is incomplete, so it is never delivered as a snapshot or diffed into a delta. When a re-evaluation's result grows past the cap, the server pushes a `subscription_error` naming the cap and keeps the last complete result. Once the result fits again, the next delta is relative to that last complete result, so applying it restores the current set.
+
+`.subscribe` replies with an `error` when the id is taken, the per-connection limit is reached, the query uses `limit`/`offset`, the result exceeds `max_result_rows`, or the user lacks read access to the knowledge graph (the same check as a query).
 
 ### Unsubscribe
 

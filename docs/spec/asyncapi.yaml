@@ -280,7 +280,10 @@ operations:
     channel:
       $ref: '#/channels/ws'
     summary: Standing query re-evaluation failed
-    description: The subscription stays registered.
+    description: |
+      The subscription stays registered and keeps its last complete result;
+      the next delta is relative to it. A result cut at `max_result_rows` is
+      reported this way instead of being delivered.
     messages:
       - $ref: '#/channels/ws/messages/subscription_error'
 

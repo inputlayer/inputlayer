@@ -936,6 +936,8 @@ async fn send_subscription_command(
             row_count: rows.len(),
             total_count: rows.len(),
             rows,
+            // A subscription snapshot is complete by construction: a capped
+            // result fails the `.subscribe` instead.
             truncated: false,
             execution_time_ms: start.elapsed().as_millis() as u64,
             row_provenance: Vec::new(),
