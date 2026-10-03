@@ -80,12 +80,14 @@ class ResultResponse:
     switched_kg: str | None = None
     proof_trees: list[dict[str, Any]] | None = None
     timing_breakdown: dict[str, Any] | None = None
+    errors: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
 class ErrorResponse:
     message: str
     validation_errors: list[dict[str, Any]] | None = None
+    code: str | None = None
 
 
 @dataclass(frozen=True)
@@ -98,6 +100,7 @@ class ResultStartResponse:
     switched_kg: str | None = None
     proof_trees: list[dict[str, Any]] | None = None
     timing_breakdown: dict[str, Any] | None = None
+    errors: list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -188,11 +191,13 @@ def deserialize_message(data: str | bytes) -> ServerMessage:
             switched_kg=obj.get("switched_kg"),
             proof_trees=obj.get("proof_trees"),
             timing_breakdown=obj.get("timing_breakdown"),
+            errors=obj.get("errors"),
         )
     if msg_type == "error":
         return ErrorResponse(
             message=obj["message"],
             validation_errors=obj.get("validation_errors"),
+            code=obj.get("code"),
         )
     if msg_type == "result_start":
         return ResultStartResponse(
@@ -204,6 +209,7 @@ def deserialize_message(data: str | bytes) -> ServerMessage:
             switched_kg=obj.get("switched_kg"),
             proof_trees=obj.get("proof_trees"),
             timing_breakdown=obj.get("timing_breakdown"),
+            errors=obj.get("errors"),
         )
     if msg_type == "result_chunk":
         return ResultChunkResponse(

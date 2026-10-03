@@ -21,11 +21,14 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn, Instrument};
 
 use super::wire_value_to_json;
-use crate::protocol::handler::{PersistentNotification, ValidationError, VALIDATION_ERROR_PREFIX};
+use crate::protocol::handler::{
+    PersistentNotification, ProgramError, ValidationError, VALIDATION_ERROR_PREFIX,
+};
 use crate::protocol::rest::dto::SessionQueryMetadataDto;
 use crate::protocol::rest::error::RestError;
 use crate::protocol::rest::WsSemaphore;
 use crate::protocol::subscription::{ConnectionSubscriptions, Push};
+use crate::protocol::wire::{ErrorCode, StatementError};
 use crate::protocol::Handler;
 use crate::protocol::MAX_MESSAGE_SIZE;
 use crate::statement::{MetaCommand, Statement};
@@ -106,6 +109,8 @@ enum GlobalWsResponse {
         proof_trees: Option<Vec<crate::provenance::proof_tree::ProofTree>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         timing_breakdown: Option<crate::execution::TimingBreakdown>,
+        /// Failed statements, empty when every statement succeeded.
+        errors: Vec<StatementError>,
     },
     /// Streaming: header sent before row chunks (large results)
     ResultStart {
@@ -121,6 +126,7 @@ enum GlobalWsResponse {
         proof_trees: Option<Vec<crate::provenance::proof_tree::ProofTree>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         timing_breakdown: Option<crate::execution::TimingBreakdown>,
+        errors: Vec<StatementError>,
     },
     /// Streaming: a batch of rows
     ResultChunk {
@@ -139,6 +145,9 @@ enum GlobalWsResponse {
         message: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         validation_errors: Option<Vec<ValidationError>>,
+        /// Why the statement failed, when known.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<ErrorCode>,
     },
     /// Pong response to keep-alive ping
     Pong,
@@ -176,12 +185,14 @@ enum GlobalWsResponse {
 /// **Result** - Command/query results:
 /// ```json
 /// {"type": "result", "columns": ["col0", "col1"], "rows": [[1, 2]], "row_count": 1,
-///  "total_count": 1, "truncated": false, "execution_time_ms": 5}
+///  "total_count": 1, "truncated": false, "execution_time_ms": 5, "errors": []}
 /// ```
+/// `errors` lists the failed statements of a multi-statement program
+/// (`{"index", "code", "message"}`).
 ///
-/// **Error** - Error:
+/// **Error** - Error, with `code` when a one-statement program failed:
 /// ```json
-/// {"type": "error", "message": "..."}
+/// {"type": "error", "message": "...", "code": "not_found"}
 /// ```
 ///
 /// **Pong** - Response to ping:
@@ -362,6 +373,7 @@ async fn handle_global_ws_connection(
             let err_msg = GlobalWsResponse::Error {
                 message: e.clone(),
                 validation_errors: None,
+                code: None,
             };
             if let Ok(json) = serde_json::to_string(&err_msg) {
                 let _ = sender.send(Message::Text(json)).await;
@@ -487,6 +499,7 @@ async fn handle_global_ws_connection(
                 let err_msg = GlobalWsResponse::Error {
                     message: format!("Connection lifetime exceeded ({max_lifetime_secs}s)"),
                     validation_errors: None,
+                    code: None,
                 };
                 if let Ok(json) = serde_json::to_string(&err_msg) {
                     let _ = sender.send(Message::Text(json)).await;
@@ -503,6 +516,7 @@ async fn handle_global_ws_connection(
                     let err_msg = GlobalWsResponse::Error {
                         message: "Idle timeout".to_string(),
                         validation_errors: None,
+                        code: None,
                     };
                     if let Ok(json) = serde_json::to_string(&err_msg) {
                         let _ = sender.send(Message::Text(json)).await;
@@ -529,6 +543,7 @@ async fn handle_global_ws_connection(
                                 let err_msg = GlobalWsResponse::Error {
                                     message: format!("Rate limit exceeded ({max_msgs_per_sec} msgs/sec)"),
                                     validation_errors: None,
+                                    code: None,
                                 };
                                 if let Ok(json) = serde_json::to_string(&err_msg) {
                                     let _ = sender.send(Message::Text(json)).await;
@@ -615,6 +630,7 @@ async fn handle_global_ws_connection(
                             let err = GlobalWsResponse::Error {
                                 message: format!("Disconnected: missed {total_lagged} total notification(s)"),
                                 validation_errors: None,
+                                code: None,
                             };
                             if let Ok(json) = serde_json::to_string(&err) {
                                 let _ = sender.send(Message::Text(json)).await;
@@ -624,6 +640,7 @@ async fn handle_global_ws_connection(
                         let warn = GlobalWsResponse::Error {
                             message: format!("Missed {count} notification(s) due to backpressure"),
                             validation_errors: None,
+                            code: None,
                         };
                         if let Ok(json) = serde_json::to_string(&warn) {
                             if sender.send(Message::Text(json)).await.is_err() {
@@ -636,6 +653,7 @@ async fn handle_global_ws_connection(
                         let shutdown_msg = GlobalWsResponse::Error {
                             message: "Server shutting down".to_string(),
                             validation_errors: None,
+                            code: None,
                         };
                         if let Ok(json) = serde_json::to_string(&shutdown_msg) {
                             let _ = sender.send(Message::Text(json)).await;
@@ -674,6 +692,7 @@ async fn send_global_response(
             let err = GlobalWsResponse::Error {
                 message: "Internal server error".to_string(),
                 validation_errors: None,
+                code: None,
             };
             serde_json::to_string(&err).unwrap_or_else(|_| {
                 r#"{"type":"error","message":"Internal serialization error"}"#.to_string()
@@ -695,6 +714,7 @@ async fn send_global_response(
                 MAX_MESSAGE_SIZE
             ),
             validation_errors: None,
+            code: None,
         };
         serde_json::to_string(&err)
             .unwrap_or_else(|_| r#"{"type":"error","message":"Result too large"}"#.to_string())
@@ -727,6 +747,7 @@ async fn process_and_send_global_ws_message(
                 &GlobalWsResponse::Error {
                     message: "Invalid message format".to_string(),
                     validation_errors: None,
+                    code: None,
                 },
             )
             .await;
@@ -769,6 +790,7 @@ async fn process_and_send_global_ws_message(
                 &GlobalWsResponse::Error {
                     message: "Already authenticated".to_string(),
                     validation_errors: None,
+                    code: None,
                 },
             )
             .await
@@ -834,10 +856,12 @@ async fn send_subscription_command(
             switched_kg: None,
             proof_trees: None,
             timing_breakdown: None,
+            errors: Vec::new(),
         },
         Err(message) => GlobalWsResponse::Error {
             message,
             validation_errors: None,
+            code: None,
         },
     };
     send_global_response(sender, &response).await
@@ -938,7 +962,7 @@ async fn send_global_execute(
     );
     let sid = session_id.to_string();
     let result = handler
-        .execute_program(Some(&sid), None, program.clone(), Some(auth))
+        .execute_program_status(Some(&sid), None, program.clone(), Some(auth))
         .await;
     let elapsed = start.elapsed();
     let slow_query_ms = handler.config().storage.performance.slow_query_log_ms;
@@ -997,6 +1021,7 @@ async fn send_global_execute(
                 switched_kg: response.switched_kg.clone(),
                 proof_trees: response.proof_trees.clone(),
                 timing_breakdown: response.timing_breakdown.clone(),
+                errors: response.errors.clone(),
             };
 
             // Check serialized size to decide: single message vs streaming
@@ -1009,6 +1034,7 @@ async fn send_global_execute(
                         &GlobalWsResponse::Error {
                             message: "Internal server error".to_string(),
                             validation_errors: None,
+                            code: None,
                         },
                     )
                     .await;
@@ -1032,6 +1058,7 @@ async fn send_global_execute(
                                 MAX_MESSAGE_SIZE
                             ),
                             validation_errors: None,
+                            code: None,
                         },
                     )
                     .await;
@@ -1056,6 +1083,7 @@ async fn send_global_execute(
                     switched_kg: response.switched_kg,
                     proof_trees: response.proof_trees,
                     timing_breakdown: response.timing_breakdown,
+                    errors: response.errors,
                 };
                 if !send_global_response(sender, &start_msg).await {
                     return false;
@@ -1093,28 +1121,27 @@ async fn send_global_execute(
             }
         }
         Err(e) => {
-            // Check for structured validation errors
-            let response = if let Some(json_str) = e.strip_prefix(VALIDATION_ERROR_PREFIX) {
-                if let Ok(errors) = serde_json::from_str::<Vec<ValidationError>>(json_str) {
-                    let count = errors.len();
-                    GlobalWsResponse::Error {
-                        message: format!("Program has {count} parse error(s)"),
-                        validation_errors: Some(errors),
-                    }
-                } else {
-                    GlobalWsResponse::Error {
-                        message: e,
-                        validation_errors: None,
-                    }
-                }
-            } else {
-                GlobalWsResponse::Error {
-                    message: e,
-                    validation_errors: None,
-                }
-            };
+            let response = program_error_response(e);
             send_global_response(sender, &response).await
         }
+    }
+}
+
+/// The `error` frame for a failed program, unpacking parse errors.
+fn program_error_response(error: ProgramError) -> GlobalWsResponse {
+    if let Some(json_str) = error.message.strip_prefix(VALIDATION_ERROR_PREFIX) {
+        if let Ok(errors) = serde_json::from_str::<Vec<ValidationError>>(json_str) {
+            return GlobalWsResponse::Error {
+                message: format!("Program has {} parse error(s)", errors.len()),
+                validation_errors: Some(errors),
+                code: Some(ErrorCode::Validation),
+            };
+        }
+    }
+    GlobalWsResponse::Error {
+        message: error.message,
+        validation_errors: None,
+        code: error.code,
     }
 }
 
@@ -1230,6 +1257,7 @@ mod tests {
             switched_kg: None,
             proof_trees: None,
             timing_breakdown: None,
+            errors: Vec::new(),
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"type\":\"result\""));
@@ -1253,6 +1281,7 @@ mod tests {
             switched_kg: Some("new_kg".to_string()),
             proof_trees: None,
             timing_breakdown: None,
+            errors: Vec::new(),
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"switched_kg\":\"new_kg\""));
@@ -1263,6 +1292,7 @@ mod tests {
         let resp = GlobalWsResponse::Error {
             message: "test error".to_string(),
             validation_errors: None,
+            code: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"type\":\"error\""));
@@ -1311,6 +1341,7 @@ mod tests {
                 statement_index: 1,
                 error: "Expected relation name".to_string(),
             }]),
+            code: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"type\":\"error\""));
@@ -1324,10 +1355,42 @@ mod tests {
         let resp = GlobalWsResponse::Error {
             message: "some error".to_string(),
             validation_errors: None,
+            code: None,
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"type\":\"error\""));
         assert!(!json.contains("validation_errors"));
+    }
+
+    #[test]
+    fn test_program_error_response_keeps_code() {
+        let resp = program_error_response(ProgramError {
+            message: "Rule 'x' not found.".to_string(),
+            code: Some(ErrorCode::NotFound),
+        });
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"code\":\"not_found\""), "{json}");
+
+        let resp = program_error_response(ProgramError::from("Access denied".to_string()));
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(!json.contains("\"code\""), "{json}");
+    }
+
+    #[test]
+    fn test_program_error_response_parse_errors_are_validation() {
+        let errors = vec![ValidationError {
+            line: 1,
+            statement_index: 0,
+            error: "bad".to_string(),
+        }];
+        let message = format!(
+            "{VALIDATION_ERROR_PREFIX}{}",
+            serde_json::to_string(&errors).unwrap()
+        );
+        let resp = program_error_response(ProgramError::from(message));
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"code\":\"validation\""), "{json}");
+        assert!(json.contains("\"validation_errors\""), "{json}");
     }
 
     // === Streaming result protocol tests ===
@@ -1343,6 +1406,7 @@ mod tests {
             switched_kg: None,
             proof_trees: None,
             timing_breakdown: None,
+            errors: Vec::new(),
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"type\":\"result_start\""));
@@ -1423,6 +1487,7 @@ mod tests {
             switched_kg: Some("new_kg".to_string()),
             proof_trees: None,
             timing_breakdown: None,
+            errors: Vec::new(),
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"type\":\"result_start\""));
@@ -1463,6 +1528,7 @@ mod tests {
             switched_kg: None,
             proof_trees: Some(vec![graph]),
             timing_breakdown: None,
+            errors: Vec::new(),
         };
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"proof_trees\""));
