@@ -59,7 +59,9 @@ fn execute_with_queued_writer(handler: &Handler, program: &str) -> QueryResult {
     let program = program.to_string();
     let (done_tx, done_rx) = mpsc::channel();
     std::thread::spawn(move || {
-        meta_dispatch_hook::set(move || queue_writer(storage));
+        test_hook::set(test_hook::Point::MetaDispatch, move || {
+            queue_writer(storage);
+        });
         let _ = done_tx.send(job.execute(Some(KG.to_string()), program, None));
     });
     done_rx

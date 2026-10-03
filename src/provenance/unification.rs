@@ -4,6 +4,7 @@
 //! bindings, then substitutes bindings into body atoms for evaluation.
 
 use crate::ast::{Atom, ComparisonOp, Term};
+use crate::provenance::proof_relations::ProofRelations;
 use crate::value::{Tuple, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -68,75 +69,61 @@ pub fn substitute_atom(atom: &Atom, bindings: &Bindings) -> Vec<BoundTerm> {
 /// Find all tuples in a relation that match a partially-bound pattern.
 ///
 /// For each matching tuple, extends the bindings with newly discovered
-/// variable values and returns the tuple + extended bindings.
+/// variable values and returns the tuple + extended bindings, in insertion
+/// order.
 pub fn find_matching_tuples(
     relation: &str,
     bound_terms: &[BoundTerm],
-    base_data: &HashMap<String, Vec<Tuple>>,
+    relations: &ProofRelations<'_>,
 ) -> Vec<(Tuple, Bindings)> {
-    let tuples = match base_data.get(relation) {
-        Some(t) => t,
-        None => return Vec::new(),
-    };
+    let (columns, key): (Vec<usize>, Vec<&Value>) = bound_terms
+        .iter()
+        .enumerate()
+        .filter_map(|(column, term)| match term {
+            BoundTerm::Concrete(value) => Some((column, value)),
+            BoundTerm::Unbound(_) => None,
+        })
+        .unzip();
 
     let mut results = Vec::new();
-    let mut arity_mismatches = 0usize;
-    let mut value_mismatches = 0usize;
-    for tuple in tuples {
-        if tuple.arity() != bound_terms.len() {
-            arity_mismatches += 1;
-            continue;
-        }
-        let mut new_bindings = Bindings::new();
-        let mut matches = true;
-        for (i, bt) in bound_terms.iter().enumerate() {
-            let value = match tuple.get(i) {
-                Some(v) => v,
-                None => {
-                    matches = false;
-                    break;
-                }
-            };
-            match bt {
-                BoundTerm::Concrete(expected) => {
-                    if !values_equal(expected, value) {
-                        if value_mismatches == 0 {
-                            tracing::debug!(
-                                relation, i, expected = ?expected, actual = ?value,
-                                "find_matching_tuples: value mismatch on first failure"
-                            );
-                        }
-                        value_mismatches += 1;
-                        matches = false;
-                        break;
-                    }
-                }
-                BoundTerm::Unbound(var_name) => {
-                    if let Some(existing) = new_bindings.get(var_name) {
-                        if !values_equal(existing, value) {
-                            matches = false;
-                            break;
-                        }
-                    } else {
-                        new_bindings.insert(var_name.clone(), value.clone());
-                    }
-                }
-            }
-        }
-        if matches {
+    let mut checked = 0usize;
+    for tuple in relations.candidates(relation, &columns, &key) {
+        checked += 1;
+        if let Some(new_bindings) = match_tuple(tuple, bound_terms) {
             results.push((tuple.clone(), new_bindings));
         }
     }
-    if results.is_empty() && !tuples.is_empty() {
-        tracing::debug!(
-            relation,
-            total = tuples.len(),
-            arity_mismatches,
-            value_mismatches,
-            "find_matching_tuples: no results"
-        );
+    if results.is_empty() && checked > 0 {
+        tracing::debug!(relation, checked, "find_matching_tuples: no results");
     }
     results
+}
+
+/// Bindings for the unbound terms if `tuple` matches the pattern.
+fn match_tuple(tuple: &Tuple, bound_terms: &[BoundTerm]) -> Option<Bindings> {
+    if tuple.arity() != bound_terms.len() {
+        return None;
+    }
+    let mut new_bindings = Bindings::new();
+    for (value, bt) in tuple.values().iter().zip(bound_terms) {
+        match bt {
+            BoundTerm::Concrete(expected) => {
+                if !values_equal(expected, value) {
+                    return None;
+                }
+            }
+            BoundTerm::Unbound(var_name) => {
+                if let Some(existing) = new_bindings.get(var_name) {
+                    if !values_equal(existing, value) {
+                        return None;
+                    }
+                } else {
+                    new_bindings.insert(var_name.clone(), value.clone());
+                }
+            }
+        }
+    }
+    Some(new_bindings)
 }
 
 /// Evaluate a comparison predicate with the given bindings.
@@ -265,6 +252,7 @@ pub fn format_bound_terms(terms: &[BoundTerm]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::RelationMap;
 
     fn make_tuple(vals: Vec<Value>) -> Tuple {
         Tuple::new(vals)
@@ -274,7 +262,7 @@ mod tests {
         Value::Int32(v)
     }
 
-    fn base_data_with(entries: Vec<(&str, Vec<Vec<Value>>)>) -> HashMap<String, Vec<Tuple>> {
+    fn base_data_with(entries: Vec<(&str, Vec<Vec<Value>>)>) -> RelationMap {
         entries
             .into_iter()
             .map(|(name, rows)| (name.to_string(), rows.into_iter().map(Tuple::new).collect()))
@@ -518,7 +506,7 @@ mod tests {
             BoundTerm::Concrete(int_val(1)),
             BoundTerm::Concrete(int_val(2)),
         ];
-        let results = find_matching_tuples("edge", &pattern, &data);
+        let results = find_matching_tuples("edge", &pattern, &ProofRelations::new(&data));
         assert_eq!(results.len(), 1);
     }
 
@@ -537,7 +525,7 @@ mod tests {
             BoundTerm::Concrete(int_val(1)),
             BoundTerm::Unbound("Y".to_string()),
         ];
-        let results = find_matching_tuples("edge", &pattern, &data);
+        let results = find_matching_tuples("edge", &pattern, &ProofRelations::new(&data));
         assert_eq!(results.len(), 2);
         // Both (1,2) and (1,3) should match
         let y_values: Vec<&Value> = results.iter().map(|(_, b)| b.get("Y").unwrap()).collect();
@@ -547,9 +535,9 @@ mod tests {
 
     #[test]
     fn test_find_matching_empty_relation() {
-        let data = HashMap::new();
+        let data = RelationMap::new();
         let pattern = vec![BoundTerm::Concrete(int_val(1))];
-        let results = find_matching_tuples("nonexistent", &pattern, &data);
+        let results = find_matching_tuples("nonexistent", &pattern, &ProofRelations::new(&data));
         assert!(results.is_empty());
     }
 
@@ -564,7 +552,7 @@ mod tests {
             BoundTerm::Unbound("X".to_string()),
             BoundTerm::Unbound("Y".to_string()),
         ];
-        let results = find_matching_tuples("edge", &pattern, &data);
+        let results = find_matching_tuples("edge", &pattern, &ProofRelations::new(&data));
         assert_eq!(results.len(), 2);
     }
 

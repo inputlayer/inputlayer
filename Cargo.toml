@@ -193,6 +193,11 @@ name = "startup_benchmarks"
 path = "benches/startup_benchmarks.rs"
 harness = false
 
+[[bench]]
+name = "proof_benchmarks"
+path = "benches/proof_benchmarks.rs"
+harness = false
+
 [features]
 default = []
 # Enable vector similarity search operations

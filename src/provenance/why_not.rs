@@ -104,12 +104,13 @@ pub fn explain_why_not(relation: &str, target: &Tuple, ctx: &ProofContext<'_>) -
                 match pred {
                     BodyPredicate::Positive(ref atom) => {
                         let bound = substitute_atom(atom, &current_bindings);
-                        let matches = find_matching_tuples(&atom.relation, &bound, ctx.base_data);
+                        let matches = find_matching_tuples(&atom.relation, &bound, &ctx.base_data);
 
                         if matches.is_empty() {
                             // Also check derived_data
                             let derived_matches = ctx
                                 .derived_data
+                                .as_ref()
                                 .map(|d| find_matching_tuples(&atom.relation, &bound, d))
                                 .unwrap_or_default();
 
@@ -209,7 +210,7 @@ pub fn explain_why_not(relation: &str, target: &Tuple, ctx: &ProofContext<'_>) -
                     }
                     BodyPredicate::Negated(ref atom) => {
                         let bound = substitute_atom(atom, &current_bindings);
-                        let matches = find_matching_tuples(&atom.relation, &bound, ctx.base_data);
+                        let matches = find_matching_tuples(&atom.relation, &bound, &ctx.base_data);
 
                         if !matches.is_empty() {
                             // Negation FAILED (tuple exists that shouldn't)
@@ -479,7 +480,7 @@ mod tests {
     use crate::ast::{Atom, ComparisonOp, Term};
     use crate::provenance::proof_tree::NodeKind;
     use crate::provenance::ProofConfig;
-    use std::collections::HashMap;
+    use crate::value::RelationMap;
 
     fn int(v: i32) -> Value {
         Value::Int32(v)
@@ -489,7 +490,7 @@ mod tests {
         Tuple::new(vals)
     }
 
-    fn base_data(entries: Vec<(&str, Vec<Vec<Value>>)>) -> HashMap<String, Vec<Tuple>> {
+    fn base_data(entries: Vec<(&str, Vec<Vec<Value>>)>) -> RelationMap {
         entries
             .into_iter()
             .map(|(name, rows)| (name.to_string(), rows.into_iter().map(Tuple::new).collect()))
@@ -673,7 +674,7 @@ mod tests {
 
     #[test]
     fn test_why_not_nonexistent_relation() {
-        let data = HashMap::new();
+        let data = RelationMap::new();
         let ctx = ProofContext::new(&[], &data, ProofConfig::default());
         let graph = explain_why_not("nonexistent", &tuple(vec![int(1)]), &ctx);
         assert_eq!(graph.roots.len(), 1);

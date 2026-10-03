@@ -5,10 +5,14 @@
 //! derivations in the IQL engine.
 
 pub mod backward_chaining;
+pub mod proof_relations;
 pub mod proof_tree;
 pub mod prove_body;
 pub mod unification;
 pub mod why_not;
+
+#[cfg(test)]
+mod indexed_proof_tests;
 
 use crate::value::Value;
 use serde::{Deserialize, Serialize};

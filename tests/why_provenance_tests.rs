@@ -3,8 +3,7 @@
 use inputlayer::provenance::backward_chaining::{build_proof_tree, ProofContext};
 use inputlayer::provenance::proof_tree::NodeKind;
 use inputlayer::provenance::ProofConfig;
-use inputlayer::value::{Tuple, Value};
-use std::collections::HashMap;
+use inputlayer::value::{RelationMap, Tuple, Value};
 
 fn int(v: i32) -> Value {
     Value::Int32(v)
@@ -18,7 +17,7 @@ fn tuple(vals: Vec<Value>) -> Tuple {
     Tuple::new(vals)
 }
 
-fn base_data(entries: Vec<(&str, Vec<Vec<Value>>)>) -> HashMap<String, Vec<Tuple>> {
+fn base_data(entries: Vec<(&str, Vec<Vec<Value>>)>) -> RelationMap {
     entries
         .into_iter()
         .map(|(name, rows)| (name.to_string(), rows.into_iter().map(Tuple::new).collect()))
@@ -298,14 +297,21 @@ fn test_proof_tree_flights_no_truncation() {
         .expect("rule2");
 
     let query = r"can_reach(A, B) <- can_reach(A, B)";
-    let (result_tuples, rules, base_data, derived_data, _metrics) = storage
-        .execute_and_get_context("flights_test", query)
-        .expect("execute_and_get_context failed");
+    let (snapshot, _metrics) = storage
+        .proof_snapshot_on("flights_test")
+        .expect("proof snapshot failed");
+    let (result_tuples, derived_data) = snapshot
+        .execute_with_rules_tuples_and_derived(query)
+        .expect("query failed");
 
     assert!(!result_tuples.is_empty());
 
-    let ctx = ProofContext::new(&rules, &base_data, ProofConfig::default())
-        .with_derived_data(&derived_data);
+    let ctx = ProofContext::new(
+        &snapshot.rules,
+        &snapshot.input_tuples,
+        ProofConfig::default(),
+    )
+    .with_derived_data(&derived_data);
 
     let mut truncated_count = 0;
     let mut total_graphs = 0;
@@ -445,14 +451,21 @@ fn test_proof_tree_aggregation() {
         .expect("agg rule");
 
     let query = "reachable_count(City, N) <- reachable_count(City, N)";
-    let (result_tuples, rules, base_data, derived_data, _metrics) = storage
-        .execute_and_get_context("agg_test", query)
-        .expect("execute_and_get_context failed");
+    let (snapshot, _metrics) = storage
+        .proof_snapshot_on("agg_test")
+        .expect("proof snapshot failed");
+    let (result_tuples, derived_data) = snapshot
+        .execute_with_rules_tuples_and_derived(query)
+        .expect("query failed");
 
     assert!(!result_tuples.is_empty());
 
-    let ctx = ProofContext::new(&rules, &base_data, ProofConfig::default())
-        .with_derived_data(&derived_data);
+    let ctx = ProofContext::new(
+        &snapshot.rules,
+        &snapshot.input_tuples,
+        ProofConfig::default(),
+    )
+    .with_derived_data(&derived_data);
 
     let mut truncated_count = 0;
     let mut aggregate_count = 0;
@@ -735,9 +748,12 @@ fn test_proof_tree_node_correctness() {
         .expect("rule2");
 
     let query = r"can_reach(A, B) <- can_reach(A, B)";
-    let (result_tuples, rules, base_data, derived_data, _) = storage
-        .execute_and_get_context("verify_test", query)
-        .expect("execute failed");
+    let (snapshot, _metrics) = storage
+        .proof_snapshot_on("verify_test")
+        .expect("proof snapshot failed");
+    let (result_tuples, derived_data) = snapshot
+        .execute_with_rules_tuples_and_derived(query)
+        .expect("query failed");
 
     // First: verify all result tuples are 2-arity
     for t in &result_tuples {
@@ -750,8 +766,12 @@ fn test_proof_tree_node_correctness() {
         );
     }
 
-    let ctx = ProofContext::new(&rules, &base_data, ProofConfig::default())
-        .with_derived_data(&derived_data);
+    let ctx = ProofContext::new(
+        &snapshot.rules,
+        &snapshot.input_tuples,
+        ProofConfig::default(),
+    )
+    .with_derived_data(&derived_data);
 
     let mut errors: Vec<String> = Vec::new();
 

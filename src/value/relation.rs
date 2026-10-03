@@ -135,13 +135,6 @@ impl Relation {
     }
 }
 
-/// Copy every relation into plain vectors (for consumers that need owned data).
-pub fn to_vec_map(map: &RelationMap) -> HashMap<String, Vec<Tuple>> {
-    map.iter()
-        .map(|(name, relation)| (name.clone(), relation.to_vec()))
-        .collect()
-}
-
 impl Extend<Tuple> for Relation {
     fn extend<I: IntoIterator<Item = Tuple>>(&mut self, iter: I) {
         for tuple in iter {

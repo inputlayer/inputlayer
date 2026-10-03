@@ -78,7 +78,7 @@ async fn revocation_during_a_proof_withholds_it() {
     {
         let handler = Arc::clone(&handler);
         let revoked = Arc::clone(&revoked);
-        meta_dispatch_hook::set(move || {
+        test_hook::set(test_hook::Point::MetaDispatch, move || {
             handler
                 .handle_apikey_revoke(KEY_LABEL)
                 .expect("revocation failed");
