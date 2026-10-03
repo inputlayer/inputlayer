@@ -24,6 +24,22 @@ pub enum StorageError {
         owner: String,
     },
 
+    /// A WAL record is intact but not in a format this server reads
+    #[error(
+        "WAL record at byte {offset} of {} has a valid checksum but cannot be read ({reason}); \
+         it was written by an incompatible server version. Start the version that wrote it \
+         once to drain the WAL into batch files, then start this version",
+        file.display()
+    )]
+    WalUnreadable {
+        /// The WAL file
+        file: PathBuf,
+        /// Byte offset of the record
+        offset: usize,
+        /// Why decoding failed
+        reason: String,
+    },
+
     /// Parquet error
     #[error("Parquet error: {0}")]
     Parquet(#[from] parquet::errors::ParquetError),
