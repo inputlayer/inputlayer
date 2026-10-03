@@ -50,7 +50,15 @@ def compile_value(value: Any) -> str:
     if isinstance(value, float):
         return repr(value)
     if isinstance(value, str):
-        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        escaped = (
+            value
+            .replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t")
+            .replace("\x00", "\\0")
+        )
         return f'"{escaped}"'
     if isinstance(value, (list, tuple)):
         # Vector literal: [1.0, 2.0, 3.0]

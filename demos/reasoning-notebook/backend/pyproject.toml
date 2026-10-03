@@ -1,0 +1,25 @@
+[project]
+name = "reasoning-notebook"
+version = "0.1.0"
+description = "Reasoning Notebook demo — Obsidian-like notes with InputLayer, LangChain, and LangGraph"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "inputlayer-client-dev[langchain,langgraph]",
+    "langchain-openai>=0.3",
+    "python-multipart>=0.0.26",
+    "jupyter>=1.1.1",
+    "ipykernel>=7.2.0",
+    "langchain-anthropic>=1.4.2",
+]
+
+[tool.uv.sources]
+inputlayer-client-dev = { path = "../../../packages/inputlayer-py", editable = true }
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
