@@ -70,6 +70,28 @@ jobs:
       - name: Check formatting
         run: make fmt-check
 
+  secrets:
+    name: Secret scan and hooks
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # scan every commit, not just the tip
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Install pinned gitleaks
+        run: make install-gitleaks
+
+      - name: Scan history for secrets
+        run: make secret-check
+
+      - name: Hooks reject misformatted Rust and credentials
+        run: make hooks-test
+
   # clippy --all-targets type-checks every target, so it is the cargo check.
   lint:
     name: Clippy
