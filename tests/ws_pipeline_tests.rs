@@ -27,7 +27,9 @@ const TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Complete bipartite graph, both directions: no odd cycle, so [`TRIANGLES`]
 /// returns nothing, yet the cyclic join runs for seconds.
-const SIDE: i64 = 10;
+/// The join grows with `SIDE^3`; a release build runs it many times faster,
+/// so it needs a larger graph to still run well past the timing budgets.
+const SIDE: i64 = if cfg!(debug_assertions) { 10 } else { 20 };
 const TRIANGLES: &str = "?edge(X, Y), edge(Y, Z), edge(Z, X)";
 /// Below this, [`TRIANGLES`] proves nothing about blocking.
 const LONG_QUERY: Duration = Duration::from_millis(500);

@@ -240,7 +240,7 @@ L = lower(S)                // To lowercase
 T = trim(S)                 // Trim whitespace
 Sub = substr(S, Start, Len) // Substring
 R = replace(S, Find, Repl)  // Replace all
-R = concat(S1, S2)          // Concatenate
+R = concat(S1, S2, S3)      // Concatenate (exactly 3 args)
 ```
 
 ### Temporal Functions

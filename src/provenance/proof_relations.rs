@@ -3,7 +3,7 @@
 //! [`ProofRelations`] borrows the relations of a knowledge graph snapshot, or
 //! of one evaluation, without copying any tuple. Proof search looks tuples up
 //! by the columns a subgoal has bound. A (relation, bound columns) pattern is
-//! answered by a linear scan until it has been scanned [`SCANS_BEFORE_INDEX`]
+//! answered by a linear scan until it has been scanned `SCANS_BEFORE_INDEX`
 //! times in this proof call; it is then indexed once and every later lookup
 //! visits only the tuples that can match. A small proof over a large knowledge
 //! graph scans exactly as often as before and builds nothing; a call that

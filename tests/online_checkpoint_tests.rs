@@ -351,11 +351,15 @@ fn percentile(samples: &mut [Duration], p: f64) -> Duration {
 }
 
 /// Measurement, not a gate: capture cost, and commit and query latency on a
-/// hot KG with and without exports running back to back. Run with
-/// `cargo test --release --test online_checkpoint_tests -- --ignored --nocapture`.
+/// hot KG with and without exports running back to back. Skipped unless
+/// `INPUTLAYER_MEASURE` is set; run with
+/// `INPUTLAYER_MEASURE=1 cargo test --release --test online_checkpoint_tests -- --nocapture`.
 #[test]
-#[ignore = "measurement; run in release with --nocapture"]
 fn measure_capture_cost_and_hot_path_latency_during_exports() {
+    if std::env::var_os("INPUTLAYER_MEASURE").is_none() {
+        eprintln!("skipping measurement: set INPUTLAYER_MEASURE=1 to run");
+        return;
+    }
     let temp = TempDir::new().unwrap();
     let mut config = config(temp.path());
     config.storage.persist.buffer_size = 10_000;

@@ -187,7 +187,7 @@ pub enum BuiltinFunc {
     Substr,
     /// Replace: `replace(s, find, replacement)` -> String
     Replace,
-    /// Concatenate strings: `concat(s1, s2, ...)` -> String
+    /// Concatenate strings: `concat(s1, s2, s3)` -> String
     Concat,
 
     // Scalar min/max functions
@@ -325,7 +325,7 @@ impl BuiltinFunc {
             BuiltinFunc::Pow => 2,
             // String functions
             BuiltinFunc::Len | BuiltinFunc::Upper | BuiltinFunc::Lower | BuiltinFunc::Trim => 1,
-            BuiltinFunc::Substr | BuiltinFunc::Replace | BuiltinFunc::Concat => 3, // Concat takes 2-3 args, we report 3 but allow variable
+            BuiltinFunc::Substr | BuiltinFunc::Replace | BuiltinFunc::Concat => 3,
             BuiltinFunc::MinVal | BuiltinFunc::MaxVal => 2,
         }
     }

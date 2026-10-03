@@ -8,7 +8,7 @@
 //!                             otherwise no provider (model routes 503)
 //!   ANTHROPIC_API_KEY         anthropic: required
 //!   ANTHROPIC_BASE_URL        anthropic: API root without `/v1`
-//!                             (default https://api.anthropic.com)
+//!                             (default <https://api.anthropic.com>)
 //!   OPENAI_BASE_URL           openai-compatible: required, API root with
 //!                             its version segment, e.g.
 //!                             http://127.0.0.1:11434/v1 for Ollama

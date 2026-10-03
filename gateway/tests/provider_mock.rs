@@ -250,11 +250,15 @@ async fn anthropic_base_url_comes_from_the_validated_config() {
 
 /// Adapter overhead: per-call wall time of each provider client against
 /// an instant loopback upstream, i.e. request mapping + HTTP + response
-/// mapping with zero model time. Run explicitly:
-/// `cargo test -p inputlayer-gateway --test provider_mock -- --ignored --nocapture`
+/// mapping with zero model time. Measurement, not a correctness check:
+/// skipped unless `INPUTLAYER_MEASURE` is set. Run explicitly:
+/// `INPUTLAYER_MEASURE=1 cargo test -p inputlayer-gateway --test provider_mock -- --nocapture`
 #[tokio::test]
-#[ignore = "measurement, not a correctness check"]
 async fn adapter_overhead() {
+    if std::env::var_os("INPUTLAYER_MEASURE").is_none() {
+        eprintln!("skipping measurement: set INPUTLAYER_MEASURE=1 to run");
+        return;
+    }
     const CALLS: usize = 2000;
     let anthropic_reply = json!({
         "content": [{ "type": "text", "text": "{\"claims\": []}" }],
