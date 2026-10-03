@@ -238,6 +238,26 @@ fn failed_cut_back_is_repaired_to_the_exact_length_before_the_next_write() {
     assert_eq!(recovered(temp.path()), expected);
 }
 
+/// Known limit of the rollback: the pending repair lives in memory only. A crash
+/// after a failed commit whose cut-back also failed, before the next write or a
+/// clean shutdown repairs the file, recovers that failed transaction.
+#[test]
+fn crash_before_a_failed_cut_back_is_repaired_recovers_the_failed_record() {
+    let temp = TempDir::new().unwrap();
+    let mut wal = open(temp.path());
+    wal.append(&txn(1, &["db:a"]), true).unwrap();
+    wal.inject_fault(WalFault::Sync);
+    wal.inject_fault(WalFault::Restore);
+    assert!(wal.append(&txn(2, &["db:a"]), true).is_err());
+
+    // Crash: no further write and no drop, so the repair never runs.
+    std::mem::forget(wal);
+    assert_eq!(
+        recovered(temp.path()),
+        [txn(1, &["db:a"]), txn(2, &["db:a"])]
+    );
+}
+
 #[test]
 fn failed_cut_back_is_repaired_before_a_rewrite_reads_the_file() {
     let temp = TempDir::new().unwrap();

@@ -172,7 +172,10 @@ impl PersistWal {
     /// before returning; otherwise it may sit in the buffer until [`Self::sync`].
     ///
     /// All-or-nothing: on error the file is cut back to its prior length, so the
-    /// transaction is never recovered and the next record never follows a torn one.
+    /// transaction is not recovered and the next record never follows a torn one.
+    /// If the cut-back itself fails, the repair is kept in memory and runs before
+    /// the next write, rewrite or clean shutdown; a crash before then recovers the
+    /// failed transaction.
     pub fn append(&mut self, txn: &Transaction, durable: bool) -> StorageResult<()> {
         let record = wal_record::encode(txn)?;
         self.ensure_writer()?;
