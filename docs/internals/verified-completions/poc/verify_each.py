@@ -10,8 +10,9 @@ For EACH of the corpus scenarios this verifies, individually:
   labels_ok      labels are present, categories in vocabulary, tier and
                  placement set, sub named
   engine_ok      the engine fired EXACTLY the expected finding kinds for
-                 this scenario's facts - nothing missing, nothing extra
-                 (controls: skipped, no facts)
+                 this scenario's facts - nothing missing, nothing extra;
+                 controls included: no hard finding, corrections retract
+                 the superseded fact (see engine_replay.py / evaluator.py)
   llm_ok         benchmark results exist for this scenario: regime A
                  verdicts present, all three regime B arms generated,
                  graded, with vote counts and non-empty replies
@@ -35,7 +36,7 @@ REPO = POC_DIR.parent.parent.parent.parent
 
 sys.path.insert(0, str(POC_DIR))
 from corpus import CATEGORY_VOCABULARY  # noqa: E402
-from full_bench import engine_pass  # noqa: E402
+from engine_replay import engine_pass  # noqa: E402
 
 
 def check_scenario(sc, results_row, engine_row):
@@ -60,10 +61,7 @@ def check_scenario(sc, results_row, engine_row):
                            and lab.get("placement") in ("adjacent", "distant")
                            and lab.get("tier") in ("smoke", "standard", "full")
                            and "sub" in lab)
-    if sc["control"]:
-        checks["engine_ok"] = True  # no facts; nothing may fire
-    else:
-        checks["engine_ok"] = bool(engine_row and engine_row.get("ok"))
+    checks["engine_ok"] = bool(engine_row and engine_row.get("ok"))
     if results_row is None or "error" in (results_row or {}):
         checks["llm_ok"] = False
     else:
