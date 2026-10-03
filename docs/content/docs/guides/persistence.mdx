@@ -30,6 +30,7 @@ On startup, InputLayer:
 
 ```
 data/
+├── LOCK                  # Single-writer lock (holds the owner's pid)
 ├── persist/
 │   ├── shards/           # Shard metadata (JSON)
 │   │   ├── default_edge.json
@@ -40,6 +41,23 @@ data/
 │   └── wal/              # Write-ahead log
 │       └── current.wal
 ```
+
+
+### Single Writer
+
+One server owns a data directory at a time. At startup, before reading or
+writing anything else, the server takes an exclusive OS lock (`flock` on
+Unix) on `data/LOCK`. A second server pointed at the same directory exits
+immediately with:
+
+```
+data directory ./data is in use by another InputLayer process (pid 4242); stop it or point storage.data_dir elsewhere
+```
+
+and leaves the directory untouched. The OS releases the lock when the owner
+exits, including on a crash or `kill -9`, so a leftover `LOCK` file never
+blocks a restart; never delete it to "unlock" a directory. Separate
+directories lock independently.
 
 ---
 

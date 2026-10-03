@@ -5,6 +5,7 @@
 //! - Parquet serialization (columnar, compressed, efficient for analytics)
 //! - CSV serialization (human-readable, interoperable)
 //! - Metadata management
+//! - Exclusive data directory ownership
 //! - Error handling
 //!
 //! ## Persistence Model
@@ -20,6 +21,7 @@
 //! - CSV: Best for data exchange, debugging, and human inspection
 
 pub mod csv;
+pub mod data_dir_lock;
 pub mod error;
 pub mod metadata;
 pub mod parquet;
@@ -30,6 +32,7 @@ pub mod wal;
 pub use csv::{
     load_from_csv, load_from_csv_with_options, save_to_csv, save_to_csv_with_options, CsvOptions,
 };
+pub use data_dir_lock::DataDirLock;
 pub use error::{StorageError, StorageResult};
 pub use metadata::{
     DropTombstones, KnowledgeGraphInfo, KnowledgeGraphMetadata, KnowledgeGraphsMetadata,

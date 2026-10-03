@@ -250,6 +250,16 @@ mkdir -p ~/.inputlayer/data
 chmod 755 ~/.inputlayer/data
 ```
 
+### "data directory ... is in use by another InputLayer process"
+
+**Cause**: Another server (possibly an old pod or service instance still
+shutting down) holds the data directory lock. Two servers on one directory
+would corrupt the WAL and shards, so the second one refuses to start.
+
+**Solution**: Stop the process with the pid shown in the message, or point
+`storage.data_dir` at a different directory. Do not delete the `LOCK` file:
+the lock is released automatically when its owner exits, even on a crash.
+
 ### "Disk full"
 
 **Cause**: No space for data files.
@@ -350,6 +360,7 @@ tail -f ~/.inputlayer/logs/inputlayer.log
 | "Non-stratifiable" | Negation cycle | Restructure rules |
 | "Knowledge graph not found" | Wrong name | `.kg list` to check |
 | "Permission denied" | File permissions | Check data dir |
+| "data directory ... is in use" | Second server on same data dir | Stop the other server |
 
 ## Still Stuck?
 
