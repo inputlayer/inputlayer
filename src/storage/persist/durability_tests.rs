@@ -275,11 +275,11 @@ fn durability_compaction_failure_leaves_memory_readable() {
 
 #[test]
 fn durability_directory_creation_retries_parent_barriers() {
-    for target in ["ancestor", "root", "shards", "batches"] {
+    for target in ["parent", "root", "shards", "batches"] {
         let temp = TempDir::new().unwrap();
         let root = temp.path().join("nested/persist");
         let barrier = match target {
-            "ancestor" => temp.path().to_path_buf(),
+            "parent" => temp.path().join("nested"),
             "root" => root.clone(),
             child => root.join(child),
         };
@@ -287,8 +287,7 @@ fn durability_directory_creation_retries_parent_barriers() {
             path: root.clone(),
             ..PersistConfig::default()
         };
-        let attempts = if target == "ancestor" { 1 } else { 2 };
-        for _ in 0..attempts {
+        for _ in 0..2 {
             inject_sync_fault(barrier.clone());
             assert!(FilePersist::new(config.clone()).is_err(), "{target}");
             assert!(root.is_dir());
@@ -301,9 +300,11 @@ fn durability_directory_creation_retries_parent_barriers() {
     let temp = TempDir::new().unwrap();
     let parent = temp.path().join("persist");
     let wal_dir = parent.join("wal");
-    inject_sync_fault(parent.clone());
-    assert!(PersistWal::open(wal_dir.clone()).is_err());
-    assert!(wal_dir.is_dir());
+    for _ in 0..2 {
+        inject_sync_fault(parent.clone());
+        assert!(PersistWal::open(wal_dir.clone()).is_err());
+        assert!(wal_dir.is_dir());
+    }
     let (mut wal, _) = PersistWal::open(wal_dir.clone()).unwrap();
     wal.append(&insert(1, 1), true).unwrap();
     std::mem::forget(wal);
@@ -311,15 +312,38 @@ fn durability_directory_creation_retries_parent_barriers() {
     assert_eq!(recovered, [insert(1, 1)]);
 }
 
-/// Only the parents of directories created here are synced, so an existing
-/// root opens under an ancestor this process cannot read.
+/// A start that failed at the root parent's fsync left the root behind; the
+/// restart must still make that entry durable before accepting a commit.
+#[test]
+fn durability_restart_after_failed_parent_sync_syncs_it_again() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path().join("persist");
+    let config = PersistConfig {
+        path: root.clone(),
+        ..PersistConfig::default()
+    };
+    inject_sync_fault(temp.path().to_path_buf());
+    assert!(FilePersist::new(config.clone()).is_err());
+    assert!(root.is_dir());
+
+    inject_sync_fault(temp.path().to_path_buf());
+    assert!(FilePersist::new(config.clone()).is_err());
+
+    let persist = FilePersist::new(config).unwrap();
+    persist.commit(insert(1, 1)).unwrap();
+    let recovered = crash_and_reopen(persist, &root);
+    assert_eq!(facts(&recovered), [(fact(1), 1)]);
+}
+
+/// Only the root, its subdirectories and its parent are synced, so a root
+/// opens under a higher ancestor this process cannot read.
 #[cfg(unix)]
 #[test]
 fn durability_existing_root_opens_under_unreadable_ancestor() {
     use std::os::unix::fs::PermissionsExt;
     let temp = TempDir::new().unwrap();
     let locked = temp.path().join("locked");
-    let root = locked.join("persist");
+    let root = locked.join("data/persist");
     fs::create_dir_all(&root).unwrap();
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o111)).unwrap();
     let opened = FilePersist::new(PersistConfig {

@@ -4121,11 +4121,14 @@ impl Handler {
                     ) {
                         return Err(error);
                     }
-                    result.errors.push(StatementError {
-                        index: 0,
-                        code: error.code.unwrap_or(ErrorCode::Internal),
-                        message: error.message,
+                    warn!(kg = %name, error = %error, "kg_drop_acl_cleanup_failed");
+                    result.rows.push(WireTuple {
+                        values: vec![WireValue::String(format!(
+                            "Access entries for '{name}' were not removed: {error}"
+                        ))],
+                        provenance: None,
                     });
+                    result.total_count = result.rows.len();
                 }
             }
         }
@@ -5634,6 +5637,56 @@ mod tests {
                 .is_none());
             if let Some(key) = &key {
                 assert!(reopened.authenticate_api_key(key).is_err());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn kg_drop_keeps_applied_result_when_acl_cleanup_fails() {
+        use crate::storage::persist::wal::WalFault;
+
+        for (faults, typed) in [
+            (vec![WalFault::Sync], None),
+            (
+                vec![WalFault::Sync, WalFault::Restore, WalFault::SaveCut],
+                Some(ErrorCode::OutcomeUnknown),
+            ),
+        ] {
+            let (mut config, _temp) = make_test_config();
+            config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
+            config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+            let handler = Handler::from_config(config).unwrap();
+            handler.bootstrap_auth();
+            handler.storage.write().create_knowledge_graph("g").unwrap();
+            handler.handle_kg_acl_grant("g", "bob", "viewer").unwrap();
+            for fault in faults {
+                handler.storage.read().inject_wal_fault(fault);
+            }
+
+            let outcome = handler
+                .execute_program_status(
+                    None,
+                    None,
+                    ".kg drop g".to_string(),
+                    None,
+                    &handler.request_control(None),
+                )
+                .await;
+            assert!(handler.storage.read().get_snapshot_for("g").is_err());
+            match typed {
+                Some(code) => assert_eq!(outcome.unwrap_err().code, Some(code)),
+                None => {
+                    let result = outcome.unwrap();
+                    assert!(result.errors.is_empty());
+                    let messages: Vec<_> = result
+                        .rows
+                        .iter()
+                        .map(|row| format!("{:?}", row.values[0]))
+                        .collect();
+                    assert!(messages[0].contains("Knowledge graph 'g' dropped."));
+                    assert!(messages[1].contains("were not removed"), "{messages:?}");
+                    assert_eq!(result.total_count, 2);
+                }
             }
         }
     }
