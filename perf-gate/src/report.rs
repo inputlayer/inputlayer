@@ -4,7 +4,7 @@ use std::fmt::Write;
 
 use crate::compare::{MetricVerdict, Status, Verdict};
 use crate::policy::Policy;
-use crate::schema::RunRecord;
+use crate::schema::{Environment, RunRecord};
 
 pub fn markdown(record: &RunRecord, policy: &Policy, verdict: &Verdict) -> String {
     let mut out = String::new();
@@ -54,6 +54,13 @@ pub fn markdown(record: &RunRecord, policy: &Policy, verdict: &Verdict) -> Strin
         "- load average: start `{}`, end `{}`",
         env.loadavg_start, env.loadavg_end
     );
+    if let Some(load) = busiest_load(env).filter(|l| *l > env.logical_cpus as f64 / 2.0) {
+        let _ = writeln!(
+            out,
+            "- **busy host**: 1-minute load {load:.0} on {} CPUs; results carry other work's noise",
+            env.logical_cpus
+        );
+    }
     if !env.build.is_empty() {
         let _ = writeln!(out, "- build: {}", env.build);
     }
@@ -68,6 +75,14 @@ pub fn markdown(record: &RunRecord, policy: &Policy, verdict: &Verdict) -> Strin
     let _ = writeln!(out, "\n### Diagnostic metrics (not gated)\n");
     table(&mut out, verdict.metrics.iter().filter(|m| !m.required));
     out
+}
+
+/// Highest 1-minute load average recorded at the start or end of the run.
+fn busiest_load(env: &Environment) -> Option<f64> {
+    [&env.loadavg_start, &env.loadavg_end]
+        .iter()
+        .filter_map(|l| l.split_whitespace().next()?.parse::<f64>().ok())
+        .reduce(f64::max)
 }
 
 fn table<'a>(out: &mut String, metrics: impl Iterator<Item = &'a MetricVerdict>) {
