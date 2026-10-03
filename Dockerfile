@@ -47,9 +47,9 @@ COPY gateway/ gateway/
 COPY ontology-client/ ontology-client/
 COPY docs/ docs/
 RUN find src gateway/src ontology-client/src -type f -exec touch {} + && \
-    cargo build --all-features --release -p inputlayer --bin inputlayer-server && \
+    cargo build --all-features --release -p inputlayer --bin inputlayer-server --bin inputlayer-backup && \
     cargo build --release -p inputlayer-gateway --bin inputlayer-gateway && \
-    strip target/release/inputlayer-server target/release/inputlayer-gateway
+    strip target/release/inputlayer-server target/release/inputlayer-backup target/release/inputlayer-gateway
 
 # ---- Gateway Runtime (build with: docker build --target gateway) ----
 FROM debian:bookworm-slim AS gateway
@@ -89,6 +89,8 @@ RUN apt-get update && \
 RUN useradd -r -s /bin/false -m -d /var/lib/inputlayer inputlayer
 
 COPY --from=builder /build/target/release/inputlayer-server /usr/local/bin/
+# Offline backup/restore of the data volume (docs/guides/backup.md)
+COPY --from=builder /build/target/release/inputlayer-backup /usr/local/bin/
 COPY --chown=inputlayer:inputlayer --from=gui-builder /build/gui/dist/ /var/lib/inputlayer/gui/dist/
 
 RUN mkdir -p /var/lib/inputlayer/data && \

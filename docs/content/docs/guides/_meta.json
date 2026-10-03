@@ -13,6 +13,7 @@
   "indexing": "Indexing",
   "temporal": "Temporal Reasoning",
   "persistence": "Persistence",
+  "backup": "Backup and Restore",
   "configuration": "Configuration",
   "rest-api": "REST API",
   "python-sdk": "Python SDK",

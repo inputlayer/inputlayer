@@ -30,6 +30,7 @@ Guides from basics to advanced features.
 | Guide | Description | Time |
 |-------|-------------|------|
 | [Recursion](recursion.md) | Recursive rules and transitive closure | 20 min |
+| [Backup and Restore](backup.md) | Offline backup and restore of the data directory | Reference |
 | [Troubleshooting](troubleshooting.md) | Common errors and solutions | Reference |
 
 ---
