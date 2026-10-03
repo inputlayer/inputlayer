@@ -5,14 +5,22 @@
 import WebSocket from 'ws';
 import {
   type ClientMessage,
+  type ErrorResponse,
   type ResultResponse,
   type ServerMessage,
   type NotificationResponse,
   type ResultStartResponse,
   serializeMessage,
   deserializeMessage,
+  isPush,
 } from './protocol.js';
-import { AuthenticationError, ConnectionError, InternalError } from './errors.js';
+import {
+  AuthenticationError,
+  ConnectionError,
+  InternalError,
+  QueryError,
+  StatementFailedError,
+} from './errors.js';
 import { type NotificationEvent, NotificationDispatcher } from './notifications.js';
 
 export interface ConnectionOptions {
@@ -50,8 +58,12 @@ export class Connection {
 
   private readonly _dispatcher = new NotificationDispatcher();
 
-  // Queue for message routing during execute()
-  private pendingResolve?: (msg: ServerMessage) => void;
+  // Reply frames of the call in flight, in arrival order, and the reader
+  // waiting for the next one. A reply can arrive in one burst (result_start,
+  // chunks, result_end), so frames queue until the reader takes them.
+  private inFlight = false;
+  private readonly replyFrames: ServerMessage[] = [];
+  private nextFrame?: (msg: ServerMessage) => void;
 
   constructor(opts: ConnectionOptions) {
     this.url = opts.url;
@@ -125,18 +137,26 @@ export class Connection {
     await this.authenticate();
     this._connected = true;
 
-    // Set up message handler for notifications when idle
+    // Notifications dispatch at once; other frames belong to the call in flight.
     this.ws.on('message', (data: WebSocket.Data) => {
+      let msg: ServerMessage;
       try {
-        const msg = deserializeMessage(String(data));
-        if (this.pendingResolve) {
-          this.pendingResolve(msg);
-          this.pendingResolve = undefined;
-        } else if (this.isNotification(msg)) {
+        msg = deserializeMessage(String(data));
+      } catch {
+        return; // Ignore parse errors in background
+      }
+      if (isPush(msg)) {
+        // Subscription pushes have no consumer in this SDK yet; a closing
+        // notice is followed by `close`, which fails the call in flight.
+        if (this.isNotification(msg)) {
           this.dispatchNotification(msg as NotificationResponse);
         }
-      } catch {
-        // Ignore parse errors in background
+      } else if (this.nextFrame) {
+        const deliver = this.nextFrame;
+        this.nextFrame = undefined;
+        deliver(msg);
+      } else if (this.inFlight) {
+        this.replyFrames.push(msg);
       }
     });
 
@@ -182,7 +202,7 @@ export class Connection {
     this.ws.send(serializeMessage(msg));
     const response = await this.receiveOne();
 
-    if (response.type === 'auth_error') {
+    if (response.type === 'auth_error' || response.type === 'notice') {
       throw new AuthenticationError(response.message);
     }
     if (response.type === 'authenticated') {
@@ -201,6 +221,10 @@ export class Connection {
   /**
    * Send a program/command and wait for the result.
    * Transparently assembles streamed results (result_start -> chunks -> result_end).
+   *
+   * Rejects with `QueryError` for an `error` frame and `StatementFailedError`
+   * for a result whose `errors` is not empty, so no caller can read a failed
+   * program as data.
    */
   async execute(program: string): Promise<ResultResponse> {
     if (!this._connected || !this.ws) {
@@ -208,51 +232,51 @@ export class Connection {
     }
 
     const msg: ClientMessage = { type: 'execute', program };
-    this.ws.send(serializeMessage(msg));
-
-    return this.readResult();
+    this.inFlight = true;
+    try {
+      this.ws.send(serializeMessage(msg));
+      return await this.readResult();
+    } finally {
+      this.inFlight = false;
+      this.replyFrames.length = 0;
+    }
   }
 
   private async readResult(): Promise<ResultResponse> {
     while (true) {
       const response = await this.receiveMessage();
 
-      if (this.isNotification(response)) {
-        this.dispatchNotification(response as NotificationResponse);
-        continue;
-      }
-
       if (response.type === 'pong') {
         continue;
       }
 
       if (response.type === 'result') {
-        if (response.switched_kg) {
-          this._currentKg = response.switched_kg;
-        }
-        return response;
+        return this.accept(response);
       }
 
       if (response.type === 'error') {
-        return {
-          type: 'result',
-          columns: ['error'],
-          rows: [[response.message]],
-          row_count: 1,
-          total_count: 1,
-          truncated: false,
-          execution_time_ms: 0,
-        };
+        throw queryError(response);
       }
 
       if (response.type === 'result_start') {
-        return this.assembleStream(response);
+        return this.accept(await this.assembleStream(response));
       }
 
       throw new InternalError(
         `Unexpected message during result read: ${JSON.stringify(response)}`,
       );
     }
+  }
+
+  /** Track a KG switch, then throw if any statement failed. */
+  private accept(result: ResultResponse): ResultResponse {
+    if (result.switched_kg) {
+      this._currentKg = result.switched_kg;
+    }
+    if (result.errors && result.errors.length > 0) {
+      throw new StatementFailedError(result.errors, result);
+    }
+    return result;
   }
 
   private async assembleStream(start: ResultStartResponse): Promise<ResultResponse> {
@@ -263,11 +287,6 @@ export class Connection {
     while (true) {
       const response = await this.receiveMessage();
 
-      if (this.isNotification(response)) {
-        this.dispatchNotification(response as NotificationResponse);
-        continue;
-      }
-
       if (response.type === 'result_chunk') {
         allRows.push(...response.rows);
         if (response.row_provenance) {
@@ -277,9 +296,6 @@ export class Connection {
       }
 
       if (response.type === 'result_end') {
-        if (start.switched_kg) {
-          this._currentKg = start.switched_kg;
-        }
         return {
           type: 'result',
           columns: start.columns,
@@ -292,7 +308,13 @@ export class Connection {
           metadata: start.metadata,
           switched_kg: start.switched_kg,
           proof_trees: start.proof_trees,
+          timing_breakdown: start.timing_breakdown,
+          errors: start.errors,
         };
+      }
+
+      if (response.type === 'error') {
+        throw queryError(response);
       }
 
       throw new InternalError(
@@ -380,12 +402,21 @@ export class Connection {
     });
   }
 
-  /** Receive the next message via the pendingResolve mechanism. */
+  /** The next reply frame of the call in flight. */
   private receiveMessage(): Promise<ServerMessage> {
+    const queued = this.replyFrames.shift();
+    if (queued) return Promise.resolve(queued);
     return new Promise<ServerMessage>((resolve) => {
-      this.pendingResolve = resolve;
+      this.nextFrame = resolve;
     });
   }
+}
+
+function queryError(response: ErrorResponse): QueryError {
+  return new QueryError(response.message, {
+    code: response.code,
+    validationErrors: response.validation_errors,
+  });
 }
 
 function sleep(ms: number): Promise<void> {

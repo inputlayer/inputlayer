@@ -8,15 +8,16 @@
 //!
 //! - [`registry`] - per-connection state machine: dependency filtering,
 //!   coalescing (at most one evaluation in flight per subscription), `seq`
-//!   numbering, and the pushed messages. Knows nothing about how results are
-//!   computed.
+//!   numbering, and the pushed messages, each naming the knowledge graph
+//!   revision it reflects. Knows nothing about how results are computed.
 //! - [`standing_query`] - the [`StandingQuery`] trait: "bring this view up to
 //!   date and report the change". The registry only talks to this trait.
 //! - [`reevaluate`] - today's strategy: re-run the query against a snapshot and
 //!   diff with the previous result. A differential-dataflow strategy can
 //!   replace it behind the same trait and protocol.
 //! - [`dependencies`] - which relations a query reads, through persistent rules.
-//! - [`connection`] - glue that drives the registry from the WS loop.
+//! - [`connection`] - glue that drives the registry from the WS loop,
+//!   including the snapshot/live handoff at registration.
 //!
 //! Subscriptions read persistent data only: session facts and session rules
 //! are excluded, as with `.why`.
@@ -29,10 +30,10 @@ pub mod standing_query;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-pub use connection::ConnectionSubscriptions;
+pub use connection::{change_of, ConnectionSubscriptions};
 pub use dependencies::Dependencies;
 pub use reevaluate::ReevaluatingQuery;
-pub use registry::{ChangeSet, Completion, Dispatch, Push, SubscriptionRegistry};
+pub use registry::{ChangeSet, Completion, Dispatch, SubscriptionRegistry};
 pub use standing_query::{Refresh, Row, StandingQuery};
 
 /// Server-wide subscription counters.

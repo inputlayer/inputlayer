@@ -162563,11 +162563,31 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_000__c1",
+     "entity": "ctrl_000__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-12",
+     "modality": "asserted",
+     "num": 20260812
+    },
+    {
+     "id": "ctrl_000__c2",
+     "entity": "ctrl_000__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-14",
+     "modality": "asserted",
+     "num": 20260814
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_000__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -162590,7 +162610,7 @@
     {
      "idx": 0,
      "role": "user",
-     "content": "Budget's $1k."
+     "content": "Budget's $1.5k."
     },
     {
      "idx": 1,
@@ -162606,7 +162626,24 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_001__c1",
+     "entity": "ctrl_001__trip",
+     "attribute": "total_price",
+     "value": "1500 USD",
+     "modality": "asserted",
+     "num": 1500
+    },
+    {
+     "id": "ctrl_001__c2",
+     "entity": "ctrl_001__trip",
+     "attribute": "total_price",
+     "value": "1500 USD",
+     "modality": "asserted",
+     "num": 1500
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -162649,11 +162686,29 @@
    "clean_fix": {},
    "task": "Draft the departure-morning plan for the group.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_002__c1",
+     "entity": "ctrl_002__trip",
+     "attribute": "departure_city",
+     "value": "oslo",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_002__c2",
+     "entity": "ctrl_002__trip",
+     "attribute": "departure_city",
+     "value": "bergen",
+     "modality": "hedged"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "expect_soft": [
+    "hedge_vs_assert"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -162692,11 +162747,35 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_003__c1",
+     "entity": "ctrl_003__event",
+     "attribute": "venue_city",
+     "value": "prague",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_003__c2",
+     "entity": "ctrl_003__event",
+     "attribute": "venue_city",
+     "value": "madrid",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
+   "retractions": [
+    "ctrl_003__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -162735,7 +162814,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_004__c1",
+     "entity": "ctrl_004__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-25",
+     "modality": "asserted",
+     "num": 20260825
+    },
+    {
+     "id": "ctrl_004__c2",
+     "entity": "ctrl_004__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-25",
+     "modality": "asserted",
+     "num": 20260825
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -162778,7 +162874,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_005__c1",
+     "entity": "ctrl_005__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-11",
+     "modality": "asserted",
+     "num": 20260811
+    },
+    {
+     "id": "ctrl_005__c2",
+     "entity": "ctrl_005__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-08",
+     "modality": "question",
+     "num": 20260808
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -162821,11 +162934,31 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_006__c1",
+     "entity": "ctrl_006__trip",
+     "attribute": "total_price",
+     "value": "2500 USD",
+     "modality": "asserted",
+     "num": 2500
+    },
+    {
+     "id": "ctrl_006__c2",
+     "entity": "ctrl_006__trip",
+     "attribute": "total_price",
+     "value": "3300 USD",
+     "modality": "asserted",
+     "num": 3300
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_006__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -162864,11 +162997,32 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_007__c1",
+     "entity": "ctrl_007__event",
+     "attribute": "venue_city",
+     "value": "madrid",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_007__c2",
+     "entity": "ctrl_007__event",
+     "attribute": "venue_city",
+     "value": "madrid",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
    "labels": {
     "categories": [
      "control"
@@ -162907,8 +163061,22 @@
    "clean_fix": {},
    "task": "Draft the event schedule as a timeline.",
    "conflict": null,
-   "facts": [],
-   "before": [],
+   "facts": [
+    {
+     "id": "ctrl_008__c2",
+     "entity": "ctrl_008__keynote",
+     "attribute": "before",
+     "value": "ctrl_008__demo",
+     "modality": "conditional"
+    }
+   ],
+   "before": [
+    [
+     "ctrl_008__b1",
+     "ctrl_008__demo",
+     "ctrl_008__keynote"
+    ]
+   ],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
@@ -162950,11 +163118,31 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_009__c1",
+     "entity": "ctrl_009__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-20",
+     "modality": "asserted",
+     "num": 20260820
+    },
+    {
+     "id": "ctrl_009__c2",
+     "entity": "ctrl_009__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-23",
+     "modality": "asserted",
+     "num": 20260823
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_009__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -162977,7 +163165,7 @@
     {
      "idx": 0,
      "role": "user",
-     "content": "Budget's $2k."
+     "content": "Budget's $2.5k."
     },
     {
      "idx": 1,
@@ -162993,7 +163181,24 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_010__c1",
+     "entity": "ctrl_010__trip",
+     "attribute": "total_price",
+     "value": "2500 USD",
+     "modality": "asserted",
+     "num": 2500
+    },
+    {
+     "id": "ctrl_010__c2",
+     "entity": "ctrl_010__trip",
+     "attribute": "total_price",
+     "value": "2500 USD",
+     "modality": "asserted",
+     "num": 2500
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -163036,11 +163241,29 @@
    "clean_fix": {},
    "task": "Draft the departure-morning plan for the group.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_011__c1",
+     "entity": "ctrl_011__trip",
+     "attribute": "departure_city",
+     "value": "tartu",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_011__c2",
+     "entity": "ctrl_011__trip",
+     "attribute": "departure_city",
+     "value": "parnu",
+     "modality": "hedged"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "expect_soft": [
+    "hedge_vs_assert"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -163079,11 +163302,35 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_012__c1",
+     "entity": "ctrl_012__event",
+     "attribute": "venue_city",
+     "value": "basel",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_012__c2",
+     "entity": "ctrl_012__event",
+     "attribute": "venue_city",
+     "value": "aarhus",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
+   "retractions": [
+    "ctrl_012__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -163122,7 +163369,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_013__c1",
+     "entity": "ctrl_013__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-19",
+     "modality": "asserted",
+     "num": 20260819
+    },
+    {
+     "id": "ctrl_013__c2",
+     "entity": "ctrl_013__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-19",
+     "modality": "asserted",
+     "num": 20260819
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -163165,7 +163429,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_014__c1",
+     "entity": "ctrl_014__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-30",
+     "modality": "asserted",
+     "num": 20260830
+    },
+    {
+     "id": "ctrl_014__c2",
+     "entity": "ctrl_014__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-29",
+     "modality": "question",
+     "num": 20260829
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -163208,11 +163489,31 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_015__c1",
+     "entity": "ctrl_015__trip",
+     "attribute": "total_price",
+     "value": "2750 USD",
+     "modality": "asserted",
+     "num": 2750
+    },
+    {
+     "id": "ctrl_015__c2",
+     "entity": "ctrl_015__trip",
+     "attribute": "total_price",
+     "value": "3600 USD",
+     "modality": "asserted",
+     "num": 3600
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_015__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -163251,11 +163552,32 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_016__c1",
+     "entity": "ctrl_016__event",
+     "attribute": "venue_city",
+     "value": "aarhus",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_016__c2",
+     "entity": "ctrl_016__event",
+     "attribute": "venue_city",
+     "value": "aarhus",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
    "labels": {
     "categories": [
      "control"
@@ -163294,8 +163616,22 @@
    "clean_fix": {},
    "task": "Draft the event schedule as a timeline.",
    "conflict": null,
-   "facts": [],
-   "before": [],
+   "facts": [
+    {
+     "id": "ctrl_017__c2",
+     "entity": "ctrl_017__keynote",
+     "attribute": "before",
+     "value": "ctrl_017__demo",
+     "modality": "conditional"
+    }
+   ],
+   "before": [
+    [
+     "ctrl_017__b1",
+     "ctrl_017__demo",
+     "ctrl_017__keynote"
+    ]
+   ],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
@@ -163337,11 +163673,31 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_018__c1",
+     "entity": "ctrl_018__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-23",
+     "modality": "asserted",
+     "num": 20260823
+    },
+    {
+     "id": "ctrl_018__c2",
+     "entity": "ctrl_018__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-26",
+     "modality": "asserted",
+     "num": 20260826
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_018__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -163364,7 +163720,7 @@
     {
      "idx": 0,
      "role": "user",
-     "content": "Budget's $3k."
+     "content": "Budget's $3.5k."
     },
     {
      "idx": 1,
@@ -163380,7 +163736,24 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_019__c1",
+     "entity": "ctrl_019__trip",
+     "attribute": "total_price",
+     "value": "3500 USD",
+     "modality": "asserted",
+     "num": 3500
+    },
+    {
+     "id": "ctrl_019__c2",
+     "entity": "ctrl_019__trip",
+     "attribute": "total_price",
+     "value": "3500 USD",
+     "modality": "asserted",
+     "num": 3500
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -163423,11 +163796,29 @@
    "clean_fix": {},
    "task": "Draft the departure-morning plan for the group.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_020__c1",
+     "entity": "ctrl_020__trip",
+     "attribute": "departure_city",
+     "value": "oslo",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_020__c2",
+     "entity": "ctrl_020__trip",
+     "attribute": "departure_city",
+     "value": "bergen",
+     "modality": "hedged"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "expect_soft": [
+    "hedge_vs_assert"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -163466,11 +163857,35 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_021__c1",
+     "entity": "ctrl_021__event",
+     "attribute": "venue_city",
+     "value": "lisbon",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_021__c2",
+     "entity": "ctrl_021__event",
+     "attribute": "venue_city",
+     "value": "riga",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
+   "retractions": [
+    "ctrl_021__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -163509,7 +163924,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_022__c1",
+     "entity": "ctrl_022__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-09",
+     "modality": "asserted",
+     "num": 20260809
+    },
+    {
+     "id": "ctrl_022__c2",
+     "entity": "ctrl_022__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-09",
+     "modality": "asserted",
+     "num": 20260809
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -163552,7 +163984,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_023__c1",
+     "entity": "ctrl_023__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-18",
+     "modality": "asserted",
+     "num": 20260818
+    },
+    {
+     "id": "ctrl_023__c2",
+     "entity": "ctrl_023__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-15",
+     "modality": "question",
+     "num": 20260815
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -163595,11 +164044,31 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_024__c1",
+     "entity": "ctrl_024__trip",
+     "attribute": "total_price",
+     "value": "1000 USD",
+     "modality": "asserted",
+     "num": 1000
+    },
+    {
+     "id": "ctrl_024__c2",
+     "entity": "ctrl_024__trip",
+     "attribute": "total_price",
+     "value": "1500 USD",
+     "modality": "asserted",
+     "num": 1500
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_024__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -163638,11 +164107,32 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_025__c1",
+     "entity": "ctrl_025__event",
+     "attribute": "venue_city",
+     "value": "riga",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_025__c2",
+     "entity": "ctrl_025__event",
+     "attribute": "venue_city",
+     "value": "riga",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
    "labels": {
     "categories": [
      "control"
@@ -163681,8 +164171,22 @@
    "clean_fix": {},
    "task": "Draft the event schedule as a timeline.",
    "conflict": null,
-   "facts": [],
-   "before": [],
+   "facts": [
+    {
+     "id": "ctrl_026__c2",
+     "entity": "ctrl_026__keynote",
+     "attribute": "before",
+     "value": "ctrl_026__demo",
+     "modality": "conditional"
+    }
+   ],
+   "before": [
+    [
+     "ctrl_026__b1",
+     "ctrl_026__demo",
+     "ctrl_026__keynote"
+    ]
+   ],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
@@ -163724,11 +164228,31 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_027__c1",
+     "entity": "ctrl_027__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-26",
+     "modality": "asserted",
+     "num": 20260826
+    },
+    {
+     "id": "ctrl_027__c2",
+     "entity": "ctrl_027__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-28",
+     "modality": "asserted",
+     "num": 20260828
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_027__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -163767,7 +164291,24 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_028__c1",
+     "entity": "ctrl_028__trip",
+     "attribute": "total_price",
+     "value": "1000 USD",
+     "modality": "asserted",
+     "num": 1000
+    },
+    {
+     "id": "ctrl_028__c2",
+     "entity": "ctrl_028__trip",
+     "attribute": "total_price",
+     "value": "1000 USD",
+     "modality": "asserted",
+     "num": 1000
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -163810,11 +164351,29 @@
    "clean_fix": {},
    "task": "Draft the departure-morning plan for the group.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_029__c1",
+     "entity": "ctrl_029__trip",
+     "attribute": "departure_city",
+     "value": "tartu",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_029__c2",
+     "entity": "ctrl_029__trip",
+     "attribute": "departure_city",
+     "value": "parnu",
+     "modality": "hedged"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "expect_soft": [
+    "hedge_vs_assert"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -163853,11 +164412,35 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_030__c1",
+     "entity": "ctrl_030__event",
+     "attribute": "venue_city",
+     "value": "malmo",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_030__c2",
+     "entity": "ctrl_030__event",
+     "attribute": "venue_city",
+     "value": "leiden",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
+   "retractions": [
+    "ctrl_030__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -163896,7 +164479,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_031__c1",
+     "entity": "ctrl_031__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-27",
+     "modality": "asserted",
+     "num": 20260827
+    },
+    {
+     "id": "ctrl_031__c2",
+     "entity": "ctrl_031__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-27",
+     "modality": "asserted",
+     "num": 20260827
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -163939,7 +164539,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_032__c1",
+     "entity": "ctrl_032__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-10",
+     "modality": "asserted",
+     "num": 20260810
+    },
+    {
+     "id": "ctrl_032__c2",
+     "entity": "ctrl_032__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-04",
+     "modality": "question",
+     "num": 20260804
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -163982,11 +164599,31 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_033__c1",
+     "entity": "ctrl_033__trip",
+     "attribute": "total_price",
+     "value": "1250 USD",
+     "modality": "asserted",
+     "num": 1250
+    },
+    {
+     "id": "ctrl_033__c2",
+     "entity": "ctrl_033__trip",
+     "attribute": "total_price",
+     "value": "1800 USD",
+     "modality": "asserted",
+     "num": 1800
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_033__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -164025,11 +164662,32 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_034__c1",
+     "entity": "ctrl_034__event",
+     "attribute": "venue_city",
+     "value": "leiden",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_034__c2",
+     "entity": "ctrl_034__event",
+     "attribute": "venue_city",
+     "value": "leiden",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
    "labels": {
     "categories": [
      "control"
@@ -164068,8 +164726,22 @@
    "clean_fix": {},
    "task": "Draft the event schedule as a timeline.",
    "conflict": null,
-   "facts": [],
-   "before": [],
+   "facts": [
+    {
+     "id": "ctrl_035__c2",
+     "entity": "ctrl_035__keynote",
+     "attribute": "before",
+     "value": "ctrl_035__demo",
+     "modality": "conditional"
+    }
+   ],
+   "before": [
+    [
+     "ctrl_035__b1",
+     "ctrl_035__demo",
+     "ctrl_035__keynote"
+    ]
+   ],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
@@ -164111,11 +164783,31 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_036__c1",
+     "entity": "ctrl_036__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-21",
+     "modality": "asserted",
+     "num": 20260821
+    },
+    {
+     "id": "ctrl_036__c2",
+     "entity": "ctrl_036__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-24",
+     "modality": "asserted",
+     "num": 20260824
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_036__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -164154,7 +164846,24 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_037__c1",
+     "entity": "ctrl_037__trip",
+     "attribute": "total_price",
+     "value": "2000 USD",
+     "modality": "asserted",
+     "num": 2000
+    },
+    {
+     "id": "ctrl_037__c2",
+     "entity": "ctrl_037__trip",
+     "attribute": "total_price",
+     "value": "2000 USD",
+     "modality": "asserted",
+     "num": 2000
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -164197,11 +164906,29 @@
    "clean_fix": {},
    "task": "Draft the departure-morning plan for the group.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_038__c1",
+     "entity": "ctrl_038__trip",
+     "attribute": "departure_city",
+     "value": "oslo",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_038__c2",
+     "entity": "ctrl_038__trip",
+     "attribute": "departure_city",
+     "value": "bergen",
+     "modality": "hedged"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "expect_soft": [
+    "hedge_vs_assert"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -164240,11 +164967,35 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_039__c1",
+     "entity": "ctrl_039__event",
+     "attribute": "venue_city",
+     "value": "graz",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_039__c2",
+     "entity": "ctrl_039__event",
+     "attribute": "venue_city",
+     "value": "prague",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
+   "retractions": [
+    "ctrl_039__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -164283,7 +165034,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_040__c1",
+     "entity": "ctrl_040__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-14",
+     "modality": "asserted",
+     "num": 20260814
+    },
+    {
+     "id": "ctrl_040__c2",
+     "entity": "ctrl_040__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-14",
+     "modality": "asserted",
+     "num": 20260814
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -164326,7 +165094,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_041__c1",
+     "entity": "ctrl_041__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-21",
+     "modality": "asserted",
+     "num": 20260821
+    },
+    {
+     "id": "ctrl_041__c2",
+     "entity": "ctrl_041__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-19",
+     "modality": "question",
+     "num": 20260819
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -164369,11 +165154,31 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_042__c1",
+     "entity": "ctrl_042__trip",
+     "attribute": "total_price",
+     "value": "1500 USD",
+     "modality": "asserted",
+     "num": 1500
+    },
+    {
+     "id": "ctrl_042__c2",
+     "entity": "ctrl_042__trip",
+     "attribute": "total_price",
+     "value": "2100 USD",
+     "modality": "asserted",
+     "num": 2100
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_042__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -164412,11 +165217,32 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_043__c1",
+     "entity": "ctrl_043__event",
+     "attribute": "venue_city",
+     "value": "prague",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_043__c2",
+     "entity": "ctrl_043__event",
+     "attribute": "venue_city",
+     "value": "prague",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
    "labels": {
     "categories": [
      "control"
@@ -164455,8 +165281,22 @@
    "clean_fix": {},
    "task": "Draft the event schedule as a timeline.",
    "conflict": null,
-   "facts": [],
-   "before": [],
+   "facts": [
+    {
+     "id": "ctrl_044__c2",
+     "entity": "ctrl_044__keynote",
+     "attribute": "before",
+     "value": "ctrl_044__demo",
+     "modality": "conditional"
+    }
+   ],
+   "before": [
+    [
+     "ctrl_044__b1",
+     "ctrl_044__demo",
+     "ctrl_044__keynote"
+    ]
+   ],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
@@ -164498,11 +165338,31 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_045__c1",
+     "entity": "ctrl_045__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-08",
+     "modality": "asserted",
+     "num": 20260808
+    },
+    {
+     "id": "ctrl_045__c2",
+     "entity": "ctrl_045__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-11",
+     "modality": "asserted",
+     "num": 20260811
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_045__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -164541,7 +165401,24 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_046__c1",
+     "entity": "ctrl_046__trip",
+     "attribute": "total_price",
+     "value": "3000 USD",
+     "modality": "asserted",
+     "num": 3000
+    },
+    {
+     "id": "ctrl_046__c2",
+     "entity": "ctrl_046__trip",
+     "attribute": "total_price",
+     "value": "3000 USD",
+     "modality": "asserted",
+     "num": 3000
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -164584,11 +165461,29 @@
    "clean_fix": {},
    "task": "Draft the departure-morning plan for the group.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_047__c1",
+     "entity": "ctrl_047__trip",
+     "attribute": "departure_city",
+     "value": "tartu",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_047__c2",
+     "entity": "ctrl_047__trip",
+     "attribute": "departure_city",
+     "value": "parnu",
+     "modality": "hedged"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "expect_soft": [
+    "hedge_vs_assert"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -164627,11 +165522,35 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_048__c1",
+     "entity": "ctrl_048__event",
+     "attribute": "venue_city",
+     "value": "milan",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_048__c2",
+     "entity": "ctrl_048__event",
+     "attribute": "venue_city",
+     "value": "basel",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
+   "retractions": [
+    "ctrl_048__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -164670,7 +165589,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_049__c1",
+     "entity": "ctrl_049__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-23",
+     "modality": "asserted",
+     "num": 20260823
+    },
+    {
+     "id": "ctrl_049__c2",
+     "entity": "ctrl_049__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-23",
+     "modality": "asserted",
+     "num": 20260823
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -164713,7 +165649,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_050__c1",
+     "entity": "ctrl_050__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-05",
+     "modality": "asserted",
+     "num": 20260805
+    },
+    {
+     "id": "ctrl_050__c2",
+     "entity": "ctrl_050__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-02",
+     "modality": "question",
+     "num": 20260802
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -164756,11 +165709,31 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_051__c1",
+     "entity": "ctrl_051__trip",
+     "attribute": "total_price",
+     "value": "1750 USD",
+     "modality": "asserted",
+     "num": 1750
+    },
+    {
+     "id": "ctrl_051__c2",
+     "entity": "ctrl_051__trip",
+     "attribute": "total_price",
+     "value": "2400 USD",
+     "modality": "asserted",
+     "num": 2400
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_051__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -164799,11 +165772,32 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_052__c1",
+     "entity": "ctrl_052__event",
+     "attribute": "venue_city",
+     "value": "basel",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_052__c2",
+     "entity": "ctrl_052__event",
+     "attribute": "venue_city",
+     "value": "basel",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
    "labels": {
     "categories": [
      "control"
@@ -164842,8 +165836,22 @@
    "clean_fix": {},
    "task": "Draft the event schedule as a timeline.",
    "conflict": null,
-   "facts": [],
-   "before": [],
+   "facts": [
+    {
+     "id": "ctrl_053__c2",
+     "entity": "ctrl_053__keynote",
+     "attribute": "before",
+     "value": "ctrl_053__demo",
+     "modality": "conditional"
+    }
+   ],
+   "before": [
+    [
+     "ctrl_053__b1",
+     "ctrl_053__demo",
+     "ctrl_053__keynote"
+    ]
+   ],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
@@ -164885,11 +165893,31 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_054__c1",
+     "entity": "ctrl_054__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-29",
+     "modality": "asserted",
+     "num": 20260829
+    },
+    {
+     "id": "ctrl_054__c2",
+     "entity": "ctrl_054__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-30",
+     "modality": "asserted",
+     "num": 20260830
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_054__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -164928,7 +165956,24 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_055__c1",
+     "entity": "ctrl_055__trip",
+     "attribute": "total_price",
+     "value": "4000 USD",
+     "modality": "asserted",
+     "num": 4000
+    },
+    {
+     "id": "ctrl_055__c2",
+     "entity": "ctrl_055__trip",
+     "attribute": "total_price",
+     "value": "4000 USD",
+     "modality": "asserted",
+     "num": 4000
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -164971,11 +166016,29 @@
    "clean_fix": {},
    "task": "Draft the departure-morning plan for the group.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_056__c1",
+     "entity": "ctrl_056__trip",
+     "attribute": "departure_city",
+     "value": "oslo",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_056__c2",
+     "entity": "ctrl_056__trip",
+     "attribute": "departure_city",
+     "value": "bergen",
+     "modality": "hedged"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "expect_soft": [
+    "hedge_vs_assert"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -165014,11 +166077,35 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_057__c1",
+     "entity": "ctrl_057__event",
+     "attribute": "venue_city",
+     "value": "sevilla",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_057__c2",
+     "entity": "ctrl_057__event",
+     "attribute": "venue_city",
+     "value": "lisbon",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
+   "retractions": [
+    "ctrl_057__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -165057,7 +166144,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_058__c1",
+     "entity": "ctrl_058__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-26",
+     "modality": "asserted",
+     "num": 20260826
+    },
+    {
+     "id": "ctrl_058__c2",
+     "entity": "ctrl_058__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-26",
+     "modality": "asserted",
+     "num": 20260826
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -165100,7 +166204,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_059__c1",
+     "entity": "ctrl_059__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-17",
+     "modality": "asserted",
+     "num": 20260817
+    },
+    {
+     "id": "ctrl_059__c2",
+     "entity": "ctrl_059__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-14",
+     "modality": "question",
+     "num": 20260814
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -165143,11 +166264,31 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_060__c1",
+     "entity": "ctrl_060__trip",
+     "attribute": "total_price",
+     "value": "2000 USD",
+     "modality": "asserted",
+     "num": 2000
+    },
+    {
+     "id": "ctrl_060__c2",
+     "entity": "ctrl_060__trip",
+     "attribute": "total_price",
+     "value": "2700 USD",
+     "modality": "asserted",
+     "num": 2700
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_060__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -165186,11 +166327,32 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_061__c1",
+     "entity": "ctrl_061__event",
+     "attribute": "venue_city",
+     "value": "lisbon",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_061__c2",
+     "entity": "ctrl_061__event",
+     "attribute": "venue_city",
+     "value": "lisbon",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
    "labels": {
     "categories": [
      "control"
@@ -165229,8 +166391,22 @@
    "clean_fix": {},
    "task": "Draft the event schedule as a timeline.",
    "conflict": null,
-   "facts": [],
-   "before": [],
+   "facts": [
+    {
+     "id": "ctrl_062__c2",
+     "entity": "ctrl_062__keynote",
+     "attribute": "before",
+     "value": "ctrl_062__demo",
+     "modality": "conditional"
+    }
+   ],
+   "before": [
+    [
+     "ctrl_062__b1",
+     "ctrl_062__demo",
+     "ctrl_062__keynote"
+    ]
+   ],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
@@ -165272,11 +166448,31 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_063__c1",
+     "entity": "ctrl_063__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-15",
+     "modality": "asserted",
+     "num": 20260815
+    },
+    {
+     "id": "ctrl_063__c2",
+     "entity": "ctrl_063__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-18",
+     "modality": "asserted",
+     "num": 20260818
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_063__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -165299,7 +166495,7 @@
     {
      "idx": 0,
      "role": "user",
-     "content": "Budget's $1k."
+     "content": "Budget's $1.5k."
     },
     {
      "idx": 1,
@@ -165315,7 +166511,24 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_064__c1",
+     "entity": "ctrl_064__trip",
+     "attribute": "total_price",
+     "value": "1500 USD",
+     "modality": "asserted",
+     "num": 1500
+    },
+    {
+     "id": "ctrl_064__c2",
+     "entity": "ctrl_064__trip",
+     "attribute": "total_price",
+     "value": "1500 USD",
+     "modality": "asserted",
+     "num": 1500
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -165358,11 +166571,29 @@
    "clean_fix": {},
    "task": "Draft the departure-morning plan for the group.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_065__c1",
+     "entity": "ctrl_065__trip",
+     "attribute": "departure_city",
+     "value": "tartu",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_065__c2",
+     "entity": "ctrl_065__trip",
+     "attribute": "departure_city",
+     "value": "parnu",
+     "modality": "hedged"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "expect_soft": [
+    "hedge_vs_assert"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -165401,11 +166632,35 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_066__c1",
+     "entity": "ctrl_066__event",
+     "attribute": "venue_city",
+     "value": "vienna",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_066__c2",
+     "entity": "ctrl_066__event",
+     "attribute": "venue_city",
+     "value": "malmo",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
+   "retractions": [
+    "ctrl_066__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -165444,7 +166699,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_067__c1",
+     "entity": "ctrl_067__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-28",
+     "modality": "asserted",
+     "num": 20260828
+    },
+    {
+     "id": "ctrl_067__c2",
+     "entity": "ctrl_067__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-28",
+     "modality": "asserted",
+     "num": 20260828
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -165487,7 +166759,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_068__c1",
+     "entity": "ctrl_068__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-16",
+     "modality": "asserted",
+     "num": 20260816
+    },
+    {
+     "id": "ctrl_068__c2",
+     "entity": "ctrl_068__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-13",
+     "modality": "question",
+     "num": 20260813
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -165530,11 +166819,31 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_069__c1",
+     "entity": "ctrl_069__trip",
+     "attribute": "total_price",
+     "value": "2250 USD",
+     "modality": "asserted",
+     "num": 2250
+    },
+    {
+     "id": "ctrl_069__c2",
+     "entity": "ctrl_069__trip",
+     "attribute": "total_price",
+     "value": "3000 USD",
+     "modality": "asserted",
+     "num": 3000
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_069__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -165573,11 +166882,32 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_070__c1",
+     "entity": "ctrl_070__event",
+     "attribute": "venue_city",
+     "value": "malmo",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_070__c2",
+     "entity": "ctrl_070__event",
+     "attribute": "venue_city",
+     "value": "malmo",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
    "labels": {
     "categories": [
      "control"
@@ -165616,8 +166946,22 @@
    "clean_fix": {},
    "task": "Draft the event schedule as a timeline.",
    "conflict": null,
-   "facts": [],
-   "before": [],
+   "facts": [
+    {
+     "id": "ctrl_071__c2",
+     "entity": "ctrl_071__keynote",
+     "attribute": "before",
+     "value": "ctrl_071__demo",
+     "modality": "conditional"
+    }
+   ],
+   "before": [
+    [
+     "ctrl_071__b1",
+     "ctrl_071__demo",
+     "ctrl_071__keynote"
+    ]
+   ],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
@@ -165659,11 +167003,31 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_072__c1",
+     "entity": "ctrl_072__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-04",
+     "modality": "asserted",
+     "num": 20260804
+    },
+    {
+     "id": "ctrl_072__c2",
+     "entity": "ctrl_072__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-10",
+     "modality": "asserted",
+     "num": 20260810
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_072__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -165686,7 +167050,7 @@
     {
      "idx": 0,
      "role": "user",
-     "content": "Budget's $2k."
+     "content": "Budget's $2.5k."
     },
     {
      "idx": 1,
@@ -165702,7 +167066,24 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_073__c1",
+     "entity": "ctrl_073__trip",
+     "attribute": "total_price",
+     "value": "2500 USD",
+     "modality": "asserted",
+     "num": 2500
+    },
+    {
+     "id": "ctrl_073__c2",
+     "entity": "ctrl_073__trip",
+     "attribute": "total_price",
+     "value": "2500 USD",
+     "modality": "asserted",
+     "num": 2500
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -165745,11 +167126,29 @@
    "clean_fix": {},
    "task": "Draft the departure-morning plan for the group.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_074__c1",
+     "entity": "ctrl_074__trip",
+     "attribute": "departure_city",
+     "value": "oslo",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_074__c2",
+     "entity": "ctrl_074__trip",
+     "attribute": "departure_city",
+     "value": "bergen",
+     "modality": "hedged"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "expect_soft": [
+    "hedge_vs_assert"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -165788,11 +167187,35 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_075__c1",
+     "entity": "ctrl_075__event",
+     "attribute": "venue_city",
+     "value": "krakow",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_075__c2",
+     "entity": "ctrl_075__event",
+     "attribute": "venue_city",
+     "value": "graz",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
+   "retractions": [
+    "ctrl_075__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -165831,7 +167254,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_076__c1",
+     "entity": "ctrl_076__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-24",
+     "modality": "asserted",
+     "num": 20260824
+    },
+    {
+     "id": "ctrl_076__c2",
+     "entity": "ctrl_076__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-24",
+     "modality": "asserted",
+     "num": 20260824
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -165874,7 +167314,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_077__c1",
+     "entity": "ctrl_077__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-08",
+     "modality": "asserted",
+     "num": 20260808
+    },
+    {
+     "id": "ctrl_077__c2",
+     "entity": "ctrl_077__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-05",
+     "modality": "question",
+     "num": 20260805
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -165917,11 +167374,31 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_078__c1",
+     "entity": "ctrl_078__trip",
+     "attribute": "total_price",
+     "value": "2500 USD",
+     "modality": "asserted",
+     "num": 2500
+    },
+    {
+     "id": "ctrl_078__c2",
+     "entity": "ctrl_078__trip",
+     "attribute": "total_price",
+     "value": "3300 USD",
+     "modality": "asserted",
+     "num": 3300
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_078__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -165960,11 +167437,32 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_079__c1",
+     "entity": "ctrl_079__event",
+     "attribute": "venue_city",
+     "value": "graz",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_079__c2",
+     "entity": "ctrl_079__event",
+     "attribute": "venue_city",
+     "value": "graz",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
    "labels": {
     "categories": [
      "control"
@@ -166003,8 +167501,22 @@
    "clean_fix": {},
    "task": "Draft the event schedule as a timeline.",
    "conflict": null,
-   "facts": [],
-   "before": [],
+   "facts": [
+    {
+     "id": "ctrl_080__c2",
+     "entity": "ctrl_080__keynote",
+     "attribute": "before",
+     "value": "ctrl_080__demo",
+     "modality": "conditional"
+    }
+   ],
+   "before": [
+    [
+     "ctrl_080__b1",
+     "ctrl_080__demo",
+     "ctrl_080__keynote"
+    ]
+   ],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
@@ -166046,11 +167558,31 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_081__c1",
+     "entity": "ctrl_081__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-19",
+     "modality": "asserted",
+     "num": 20260819
+    },
+    {
+     "id": "ctrl_081__c2",
+     "entity": "ctrl_081__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-21",
+     "modality": "asserted",
+     "num": 20260821
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_081__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -166073,7 +167605,7 @@
     {
      "idx": 0,
      "role": "user",
-     "content": "Budget's $3k."
+     "content": "Budget's $3.5k."
     },
     {
      "idx": 1,
@@ -166089,7 +167621,24 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_082__c1",
+     "entity": "ctrl_082__trip",
+     "attribute": "total_price",
+     "value": "3500 USD",
+     "modality": "asserted",
+     "num": 3500
+    },
+    {
+     "id": "ctrl_082__c2",
+     "entity": "ctrl_082__trip",
+     "attribute": "total_price",
+     "value": "3500 USD",
+     "modality": "asserted",
+     "num": 3500
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -166132,11 +167681,29 @@
    "clean_fix": {},
    "task": "Draft the departure-morning plan for the group.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_083__c1",
+     "entity": "ctrl_083__trip",
+     "attribute": "departure_city",
+     "value": "tartu",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_083__c2",
+     "entity": "ctrl_083__trip",
+     "attribute": "departure_city",
+     "value": "parnu",
+     "modality": "hedged"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "expect_soft": [
+    "hedge_vs_assert"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -166175,11 +167742,35 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_084__c1",
+     "entity": "ctrl_084__event",
+     "attribute": "venue_city",
+     "value": "porto",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_084__c2",
+     "entity": "ctrl_084__event",
+     "attribute": "venue_city",
+     "value": "milan",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
+   "retractions": [
+    "ctrl_084__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -166218,7 +167809,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_085__c1",
+     "entity": "ctrl_085__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-11",
+     "modality": "asserted",
+     "num": 20260811
+    },
+    {
+     "id": "ctrl_085__c2",
+     "entity": "ctrl_085__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-11",
+     "modality": "asserted",
+     "num": 20260811
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -166261,7 +167869,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_086__c1",
+     "entity": "ctrl_086__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-07",
+     "modality": "asserted",
+     "num": 20260807
+    },
+    {
+     "id": "ctrl_086__c2",
+     "entity": "ctrl_086__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-03",
+     "modality": "question",
+     "num": 20260803
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -166304,11 +167929,31 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_087__c1",
+     "entity": "ctrl_087__trip",
+     "attribute": "total_price",
+     "value": "2750 USD",
+     "modality": "asserted",
+     "num": 2750
+    },
+    {
+     "id": "ctrl_087__c2",
+     "entity": "ctrl_087__trip",
+     "attribute": "total_price",
+     "value": "3600 USD",
+     "modality": "asserted",
+     "num": 3600
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_087__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -166347,11 +167992,32 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_088__c1",
+     "entity": "ctrl_088__event",
+     "attribute": "venue_city",
+     "value": "milan",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_088__c2",
+     "entity": "ctrl_088__event",
+     "attribute": "venue_city",
+     "value": "milan",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
    "labels": {
     "categories": [
      "control"
@@ -166390,8 +168056,22 @@
    "clean_fix": {},
    "task": "Draft the event schedule as a timeline.",
    "conflict": null,
-   "facts": [],
-   "before": [],
+   "facts": [
+    {
+     "id": "ctrl_089__c2",
+     "entity": "ctrl_089__keynote",
+     "attribute": "before",
+     "value": "ctrl_089__demo",
+     "modality": "conditional"
+    }
+   ],
+   "before": [
+    [
+     "ctrl_089__b1",
+     "ctrl_089__demo",
+     "ctrl_089__keynote"
+    ]
+   ],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
@@ -166433,11 +168113,31 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_090__c1",
+     "entity": "ctrl_090__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-02",
+     "modality": "asserted",
+     "num": 20260802
+    },
+    {
+     "id": "ctrl_090__c2",
+     "entity": "ctrl_090__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-05",
+     "modality": "asserted",
+     "num": 20260805
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_090__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -166476,7 +168176,24 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_091__c1",
+     "entity": "ctrl_091__trip",
+     "attribute": "total_price",
+     "value": "1000 USD",
+     "modality": "asserted",
+     "num": 1000
+    },
+    {
+     "id": "ctrl_091__c2",
+     "entity": "ctrl_091__trip",
+     "attribute": "total_price",
+     "value": "1000 USD",
+     "modality": "asserted",
+     "num": 1000
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -166519,11 +168236,29 @@
    "clean_fix": {},
    "task": "Draft the departure-morning plan for the group.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_092__c1",
+     "entity": "ctrl_092__trip",
+     "attribute": "departure_city",
+     "value": "oslo",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_092__c2",
+     "entity": "ctrl_092__trip",
+     "attribute": "departure_city",
+     "value": "bergen",
+     "modality": "hedged"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "expect_soft": [
+    "hedge_vs_assert"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -166562,11 +168297,35 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_093__c1",
+     "entity": "ctrl_093__event",
+     "attribute": "venue_city",
+     "value": "zurich",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_093__c2",
+     "entity": "ctrl_093__event",
+     "attribute": "venue_city",
+     "value": "sevilla",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
+   "retractions": [
+    "ctrl_093__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -166605,7 +168364,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_094__c1",
+     "entity": "ctrl_094__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-30",
+     "modality": "asserted",
+     "num": 20260830
+    },
+    {
+     "id": "ctrl_094__c2",
+     "entity": "ctrl_094__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-30",
+     "modality": "asserted",
+     "num": 20260830
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -166648,7 +168424,24 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_095__c1",
+     "entity": "ctrl_095__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-12",
+     "modality": "asserted",
+     "num": 20260812
+    },
+    {
+     "id": "ctrl_095__c2",
+     "entity": "ctrl_095__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-09",
+     "modality": "question",
+     "num": 20260809
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -166691,11 +168484,31 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_096__c1",
+     "entity": "ctrl_096__trip",
+     "attribute": "total_price",
+     "value": "1000 USD",
+     "modality": "asserted",
+     "num": 1000
+    },
+    {
+     "id": "ctrl_096__c2",
+     "entity": "ctrl_096__trip",
+     "attribute": "total_price",
+     "value": "1500 USD",
+     "modality": "asserted",
+     "num": 1500
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_096__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -166734,11 +168547,32 @@
    "clean_fix": {},
    "task": "Write the directions email for attendees.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_097__c1",
+     "entity": "ctrl_097__event",
+     "attribute": "venue_city",
+     "value": "sevilla",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_097__c2",
+     "entity": "ctrl_097__event",
+     "attribute": "venue_city",
+     "value": "sevilla",
+     "modality": "asserted"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "ontology": [
+    [
+     "functional",
+     "venue_city"
+    ]
+   ],
    "labels": {
     "categories": [
      "control"
@@ -166777,8 +168611,22 @@
    "clean_fix": {},
    "task": "Draft the event schedule as a timeline.",
    "conflict": null,
-   "facts": [],
-   "before": [],
+   "facts": [
+    {
+     "id": "ctrl_098__c2",
+     "entity": "ctrl_098__keynote",
+     "attribute": "before",
+     "value": "ctrl_098__demo",
+     "modality": "conditional"
+    }
+   ],
+   "before": [
+    [
+     "ctrl_098__b1",
+     "ctrl_098__demo",
+     "ctrl_098__keynote"
+    ]
+   ],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
@@ -166820,11 +168668,31 @@
    "clean_fix": {},
    "task": "Draft the booking summary for the travel agent.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_099__c1",
+     "entity": "ctrl_099__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-14",
+     "modality": "asserted",
+     "num": 20260814
+    },
+    {
+     "id": "ctrl_099__c2",
+     "entity": "ctrl_099__trip",
+     "attribute": "departure_date",
+     "value": "2026-08-17",
+     "modality": "asserted",
+     "num": 20260817
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "retractions": [
+    "ctrl_099__c1"
+   ],
    "labels": {
     "categories": [
      "control"
@@ -166863,7 +168731,24 @@
    "clean_fix": {},
    "task": "Draft the trip cost plan.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_100__c1",
+     "entity": "ctrl_100__trip",
+     "attribute": "total_price",
+     "value": "2000 USD",
+     "modality": "asserted",
+     "num": 2000
+    },
+    {
+     "id": "ctrl_100__c2",
+     "entity": "ctrl_100__trip",
+     "attribute": "total_price",
+     "value": "2000 USD",
+     "modality": "asserted",
+     "num": 2000
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
@@ -166906,11 +168791,29 @@
    "clean_fix": {},
    "task": "Draft the departure-morning plan for the group.",
    "conflict": null,
-   "facts": [],
+   "facts": [
+    {
+     "id": "ctrl_101__c1",
+     "entity": "ctrl_101__trip",
+     "attribute": "departure_city",
+     "value": "tartu",
+     "modality": "asserted"
+    },
+    {
+     "id": "ctrl_101__c2",
+     "entity": "ctrl_101__trip",
+     "attribute": "departure_city",
+     "value": "parnu",
+     "modality": "hedged"
+    }
+   ],
    "before": [],
    "constraints": [],
    "same_as": [],
    "expect_kinds": [],
+   "expect_soft": [
+    "hedge_vs_assert"
+   ],
    "labels": {
     "categories": [
      "control"

@@ -9,7 +9,11 @@ make test-all       # Full verification: build + unit + snapshot (~70s, all CPUs
 make test-fast      # Unit tests only (~30s)
 make test           # Unit + snapshot tests
 make e2e-test       # Snapshot tests only (parallel)
+make e2e-reactive   # Reactive agent path against real engine processes
 make test-affected  # Run only snapshots affected by uncommitted changes
+make perf-gate      # Performance gate: this tree vs the approved baseline (same host)
+make bench-genbi    # Reactive agent benchmark on genbi-trust (needs GENBI_TRUST_DIR)
+make oracle-test    # Differential correctness oracle only (~15s)
 ```
 
 ## Test Tiers
@@ -30,6 +34,27 @@ Rust integration tests in `tests/`. Exercise the engine end-to-end within a sing
 
 ```bash
 make integration-test   # cargo test --all-features --test '*'
+```
+
+### Differential Correctness Oracle
+
+`tests/differential_oracle/` replays one history (statements, restarts and named checkpoints) through independent adapters and compares their results at every checkpoint:
+
+| Adapter | What it is |
+|---------|------------|
+| `reference` | Naive finite evaluator in the test: stratified naive fixpoint over sets. Shares only the parser with the engine. |
+| `recompute` | The engine's snapshot evaluator, queried afresh. |
+| `subscription` | Standing queries assembled purely from pushed `inserted`/`retracted` deltas, through the real notification, dependency-filtering and coalescing path a subscribed agent uses. |
+| `spec` | Results recorded in `.iql.out` transcripts (corpus cases only). |
+
+Histories come from hand-written scenarios (duplicate supports, recursive edge removal, negation, aggregates, rule replacement, restart), seeded random generation, and the `.iql.out` corpus of the derived-result categories. Results are compared as Z-sets, so a row reported twice or retracted without being present is a divergence of its own. A divergence is minimized (delta debugging) to a short reproducing script.
+
+Constructs the reference does not model (e.g. `avg`, `top_k`, arithmetic, floats, session state) are reported as explicit skips with a reason, never counted as agreement; the engine adapters are still compared with each other and the spec. A new evaluation strategy (such as persistent per-KG dataflows) joins by implementing the `Adapter` trait: `observe` takes the revision the result must reflect.
+
+```bash
+make oracle-test                                  # All oracle tests
+INPUTLAYER_ORACLE_SEEDS=500 make oracle-test      # More random histories
+INPUTLAYER_ORACLE_SEED=17 cargo test --all-features --test differential_oracle seeded  # One seed
 ```
 
 ### Tier 3: Snapshot Tests (E2E)
@@ -59,6 +84,78 @@ Environment variables:
 | `INPUTLAYER_TEST_PARALLEL` | 4 | Default parallel job count |
 | `INPUTLAYER_TEST_PORT` | 8080 | Server port for tests |
 | `INPUTLAYER_RESTART_INTERVAL` | 500 | Restart server every N tests (sequential mode) |
+
+## Performance Gate
+
+`make perf-gate` is the performance acceptance check for every implementation
+PR. It builds the approved baseline commit and this tree's server, measures
+both on this host in interleaved rounds, and checks query latency,
+durable-write throughput and writer-to-subscribed-agent delta latency against
+the budgets in `perf-gate/policy.toml`. Only a PASS is acceptable. Attach
+`target/perf-gate/latest/report.md` to the PR. Method, fixtures and runner
+requirements are in [`perf-gate/README.md`](perf-gate/README.md). The
+Criterion benches in `benches/` are diagnostic only.
+
+## Reactive Agent Path (E2E)
+
+`make e2e-reactive` drives the supported agent path end to end: each test
+starts a real `inputlayer-server` process with its own data directory, agents
+subscribe to standing queries over `/ws`, and independent writer connections
+insert and retract facts and change rules. Agents must receive the exact
+added/retracted rows as `subscription_delta` pushes, with contiguous `seq` and
+increasing `revision`, and end equal to a fresh full query on another
+connection, without re-querying.
+Scenarios cover one subscriber, 64 subscribers, reconnect/resubscribe and
+crash-restart, unrelated writes, and write bursts.
+
+Every request the harness sends carries an `id`, and a reply that does not
+echo it fails the scenario (`Violation::Uncorrelated`); a `notice` is never
+taken for a reply. `tests/e2e_reactive/wire.rs` pipelines requests (malformed
+ones included) while the engine interleaves pushes, a streamed result and a
+`notifications_missed` notice, and requires every reply to correlate in order.
+
+```bash
+make e2e-reactive                                   # release build, writes latency samples
+cargo test --test e2e_reactive                      # same scenarios, debug build
+```
+
+`tests/e2e_reactive/stream.rs` requires the stream contract: notifications
+arrive in strictly increasing `seq` order under concurrent writers, a reconnect
+cursor from before an engine restart gets one `replay_gap` notice and nothing
+replayed, and commits racing a `.subscribe` all reach the agent.
+
+Results over `storage.performance.max_result_rows` are required to fail
+closed: the subscription is refused, or a refresh pushes `subscription_error`
+and the next delta is relative to the last complete result.
+
+Defects tracked by the reactive plan run as **expected failures**
+(`tests/e2e_reactive/known_defects.rs`): an oversized delta that advances the
+subscription without delivery (W05). Each asserts the correct contract; its
+own violation passes as `XFAIL`, any other violation fails, and a holding
+contract fails as `XPASS` so the marker is removed and the scenario becomes
+required when the plan item lands.
+
+Not yet covered by this pipeline (each is added when the work that enables it
+lands):
+
+- Public Python and JavaScript SDK agents. Agents use the testkit's raw `/ws`
+  client until the SDKs have a subscribe API; cross-SDK conformance comes with
+  R3.
+- Pending calls interleaved with pushes on one connection, and slow
+  consumers. The perf gate's `interference` fixture measures
+  slow-consumer latency, not correctness.
+- Credential revocation. It is covered over a real `/ws` connection by
+  `tests/credential_revocation_tests.rs`, not here.
+- Gateway finding additions, resolutions and authoritative reset.
+- Running the same histories against recompute and persistent-dataflow modes
+  (R4). Until then, the differential oracle (`make oracle-test`) compares
+  recompute and subscription maintenance against a naive reference.
+
+Every writer->agent delivery is recorded as a raw sample (write sent, write
+acknowledged, delta arrived) in `target/e2e-reactive/<scenario>.jsonl`, schema
+`inputlayer.reactive.delta_latency.v1` (see `testkit/src/metrics.rs`). The
+harness lives in the test-only `testkit` crate (engine process, `/ws` agent
+client, fixtures, samples), shared with the benches.
 
 ## Server Tracing (Debug Logs to File)
 
@@ -101,6 +198,10 @@ Source-to-category mapping:
 | `make test` | Unit + snapshot | Pre-commit check |
 | `make test-all` | Build + unit + snapshot + check | Full verification before merge |
 | `make test-affected` | Snapshot tests for changed files only | Fast E2E feedback |
+| `make perf-gate` | Paired latency/throughput gate over `/ws` vs the approved baseline | Every implementation PR (see `perf-gate/README.md`) |
+| `make perf-gate-check` | Clippy + unit tests of the gate tool | After changing `perf-gate/` |
+| `make e2e-reactive` | Reactive agent path against real engines, latency samples | Subscription or wire changes |
+| `make oracle-test` | Differential correctness oracle only | Changing evaluation, subscriptions or rule maintenance |
 
 ### Code Quality
 

@@ -24,7 +24,6 @@ from inputlayer._sync import run_sync
 from inputlayer.integrations.langgraph._checkpoint_serde import CKPT_ID, CKPT_TS
 from inputlayer.integrations.langgraph._utils import (
     b64e,
-    check_error_response,
     escape_iql,
     validate_row_length,
     validate_thread_id,
@@ -108,7 +107,6 @@ class _SyncAndMaintenanceMixin:
                 f"KG operation timed out after {self._kg_timeout}s. "
                 f"Query: {iql[:100]}{'...' if len(iql) > 100 else ''}"
             ) from None
-        check_error_response(result, "InputLayerCheckpointer", iql)
         return result
 
     def _get_setup_lock(self) -> asyncio.Lock:

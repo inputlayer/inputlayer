@@ -10,7 +10,7 @@ from inputlayer._protocol import (
     ResultResponse,
 )
 from inputlayer.connection import Connection
-from inputlayer.exceptions import AuthenticationError, ConnectionError
+from inputlayer.exceptions import AuthenticationError, ConnectionError, QueryError
 
 
 def _auth_response() -> str:
@@ -20,6 +20,8 @@ def _auth_response() -> str:
         "knowledge_graph": "default",
         "version": "0.1.0",
         "role": "admin",
+        "protocol_version": 2,
+        "stream_epoch": "00112233aabbccdd",
     })
 
 
@@ -108,17 +110,15 @@ class TestConnectionExecute:
         assert result.rows == [[1, 2]]
 
     @pytest.mark.asyncio
-    async def test_execute_error_as_result(self):
+    async def test_execute_error_raises(self):
         conn = Connection("ws://localhost:8080/ws", username="admin", password="admin")
         mock_ws = AsyncMock()
         mock_ws.recv = AsyncMock(return_value=_error_response("Parse error"))
         conn._ws = mock_ws
         conn._connected = True
 
-        result = await conn.execute("bad query")
-        # Errors are returned as ResultResponse with error column
-        assert result.columns == ["error"]
-        assert result.rows[0][0] == "Parse error"
+        with pytest.raises(QueryError, match="Parse error"):
+            await conn.execute("bad query")
 
     @pytest.mark.asyncio
     async def test_execute_not_connected(self):
@@ -199,6 +199,27 @@ class TestConnectionNotifications:
         assert result.rows == [[42]]
         assert len(received_events) == 1
         assert received_events[0].relation == "edge"
+
+    @pytest.mark.asyncio
+    async def test_notices_and_subscription_pushes_are_not_replies(self):
+        """A notice or subscription push before the reply must not answer the call."""
+        conn = Connection("ws://localhost:8080/ws", username="admin", password="admin")
+        responses = [
+            json.dumps({"type": "notice", "code": "notifications_missed", "message": "Missed 2"}),
+            json.dumps({
+                "type": "subscription_delta", "subscription": "s", "generation": 1,
+                "knowledge_graph": "default", "seq": 1, "revision": 4, "columns": ["x"],
+                "inserted": [[1]], "retracted": [],
+            }),
+            _result_response(["x"], [[42]]),
+        ]
+        mock_ws = AsyncMock()
+        mock_ws.recv = AsyncMock(side_effect=responses)
+        conn._ws = mock_ws
+        conn._connected = True
+
+        result = await conn.execute("?x(X)")
+        assert result.rows == [[42]]
 
 
     def test_failing_callback_does_not_crash_dispatcher(self) -> None:
@@ -530,11 +551,9 @@ class TestConcurrentMultiKGAtomicity:
         responses = [
             # 1. ".kg use new_kg" -> error: not found
             json.dumps({
-                "type": "result",
-                "columns": ["error"],
-                "rows": [["Knowledge graph 'new_kg' not found"]],
-                "row_count": 1, "total_count": 1,
-                "truncated": False, "execution_time_ms": 0,
+                "type": "error",
+                "message": "Knowledge graph 'new_kg' not found",
+                "code": "not_found",
             }),
             # 2. ".kg create new_kg" -> ok
             _result_response(["ok"], [["created"]]),

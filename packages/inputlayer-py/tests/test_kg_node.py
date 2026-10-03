@@ -320,22 +320,27 @@ class TestKgNodeQueryCallableNone:
             await node({"kg": kg})
 
 
-class TestKgNodeErrorResponse:
-    async def test_query_error_response_raises(self) -> None:
-        """KG error responses (columns=['error']) must raise, not return as data."""
-        kg = _mock_kg(columns=["error"], rows=[["unknown relation: broken"]])
+class TestKgNodeEngineError:
+    async def test_query_error_propagates(self) -> None:
+        """An engine failure raises from the node instead of becoming state."""
+        from inputlayer.exceptions import QueryError
+
+        kg = _mock_kg()
+        kg.execute = AsyncMock(
+            side_effect=QueryError("unknown relation: broken", query="?broken(X)")
+        )
         node = kg_node(query="?broken(X)")
 
-        with pytest.raises(RuntimeError, match=r"KG returned an error.*unknown relation"):
+        with pytest.raises(QueryError, match=r"unknown relation[\s\S]*broken\(X\)"):
             await node({"kg": kg})
 
-    async def test_query_error_response_includes_query(self) -> None:
-        """Error message must include the query for debugging."""
-        kg = _mock_kg(columns=["error"], rows=[["parse error"]])
-        node = kg_node(query="?bad_syntax(")
+    async def test_error_column_is_data(self) -> None:
+        """A relation named `error` is ordinary data."""
+        kg = _mock_kg(columns=["error"], rows=[["disk full"]])
+        node = kg_node(query="?error(E)")
 
-        with pytest.raises(RuntimeError, match="bad_syntax"):
-            await node({"kg": kg})
+        state = await node({"kg": kg})
+        assert state["results"]["rows"] == [["disk full"]]
 
 
 class TestKgNodeInsertTypeValidation:

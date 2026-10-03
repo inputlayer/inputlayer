@@ -17,7 +17,7 @@ use crate::session::{SessionConfig, SessionId, SessionManager};
 use crate::statement;
 use crate::statement::meta::{IndexCreateOptions, MetaCommand};
 use crate::statement::parser::SortDirection;
-use crate::storage_engine::StorageEngine;
+use crate::storage_engine::{KnowledgeGraphSnapshot, StorageEngine};
 use crate::value::{Tuple, Value};
 use crate::Config;
 use parking_lot::RwLock;
@@ -26,11 +26,13 @@ use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
+use super::notification_log::NotificationLog;
 use super::wire::{
     ColumnDef, ErrorCode, QueryResult, StatementError, WireDataType, WireTuple, WireValue,
 };
 use catalog_staging::CatalogStatement;
 use fact_staging::FactStatement;
+pub use inputlayer_ws_protocol::{Notification, ValidationError};
 use write_run::{WriteRun, WriteStatement};
 
 mod catalog_staging;
@@ -99,17 +101,6 @@ const MAX_QUEUED_LOGINS: usize = 64;
 /// WebSocket handlers can detect this prefix to extract per-line error info.
 pub const VALIDATION_ERROR_PREFIX: &str = "VALIDATION_ERRORS:";
 
-/// A parse/validation error for a specific statement in a program.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ValidationError {
-    /// 1-based line number in the original program text
-    pub line: usize,
-    /// 0-based index of the statement (counting only non-empty lines)
-    pub statement_index: usize,
-    /// The parse error message
-    pub error: String,
-}
-
 /// A program that failed as a whole.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProgramError {
@@ -123,67 +114,6 @@ impl From<String> for ProgramError {
         Self {
             message,
             code: None,
-        }
-    }
-}
-
-/// Notification sent to WebSocket subscribers when persistent data changes.
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum PersistentNotification {
-    /// A base relation was updated (insert or delete)
-    PersistentUpdate {
-        knowledge_graph: String,
-        relation: String,
-        operation: String,
-        count: usize,
-        /// Epoch milliseconds when the change occurred (#40)
-        timestamp_ms: u64,
-        /// Session that triggered the change (None for API-key or system operations)
-        #[serde(skip_serializing_if = "Option::is_none")]
-        session_id: Option<String>,
-        /// Monotonic sequence number for dedup on reconnect (#39)
-        seq: u64,
-    },
-    /// A rule was registered or removed (#16)
-    RuleChange {
-        knowledge_graph: String,
-        rule_name: String,
-        /// "registered" or "removed" or "dropped"
-        operation: String,
-        timestamp_ms: u64,
-        /// Monotonic sequence number for dedup on reconnect (#39)
-        seq: u64,
-    },
-    /// A knowledge graph was created or dropped (#16)
-    KgChange {
-        knowledge_graph: String,
-        /// "created" or "dropped"
-        operation: String,
-        timestamp_ms: u64,
-        /// Monotonic sequence number for dedup on reconnect (#39)
-        seq: u64,
-    },
-    /// A schema change occurred (index created/dropped, relation dropped) (#16)
-    SchemaChange {
-        knowledge_graph: String,
-        entity: String,
-        /// "created" or "dropped"
-        operation: String,
-        timestamp_ms: u64,
-        /// Monotonic sequence number for dedup on reconnect (#39)
-        seq: u64,
-    },
-}
-
-impl PersistentNotification {
-    /// Get the sequence number of this notification.
-    pub fn seq(&self) -> u64 {
-        match self {
-            Self::PersistentUpdate { seq, .. }
-            | Self::RuleChange { seq, .. }
-            | Self::KgChange { seq, .. }
-            | Self::SchemaChange { seq, .. } => *seq,
         }
     }
 }
@@ -202,18 +132,12 @@ pub struct Handler {
     insert_count: Arc<AtomicU64>,
     /// Session manager for ephemeral state
     sessions: SessionManager,
-    /// Broadcast channel for persistent data change notifications.
-    /// WebSocket connections subscribe to receive push updates.
-    notify_tx: tokio::sync::broadcast::Sender<PersistentNotification>,
+    /// The ordered stream of committed-change notifications.
+    notifications: Arc<NotificationLog>,
     /// Semaphore limiting concurrent DD computations.
     /// Prevents blocking-thread-pool explosion by capping CPU-bound parallelism
     /// at the hardware thread count. Tokio workers queue via async `acquire()`.
     query_semaphore: Arc<tokio::sync::Semaphore>,
-    /// Monotonic sequence counter for notification dedup (#39).
-    notification_seq: Arc<AtomicU64>,
-    /// Bounded ring buffer of recent notifications for replay on reconnect (#39).
-    notification_buffer:
-        Arc<parking_lot::Mutex<std::collections::VecDeque<PersistentNotification>>>,
     /// Accumulated timing histogram buckets for Prometheus export.
     timing_histograms: Arc<crate::execution::timing::TimingHistograms>,
     /// Teaching agent for guided onboarding.
@@ -226,6 +150,10 @@ pub struct Handler {
     password_permits: Arc<tokio::sync::Semaphore>,
     /// Caps logins in flight, including those waiting for `password_permits`.
     login_queue: Arc<tokio::sync::Semaphore>,
+    /// Live users and API keys; sessions hold principals issued from it.
+    credentials: crate::auth::CredentialRegistry,
+    /// Bumped after every change to the KG access lists (`kg_acls`).
+    kg_acl_generation: AtomicU64,
 }
 
 /// `.index` command implementations shared by `Handler` and `QueryJob`.
@@ -278,16 +206,6 @@ fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
-}
-
-/// Set the sequence number on a notification (all variants have a `seq` field).
-fn set_notification_seq(notif: &mut PersistentNotification, seq: u64) {
-    match notif {
-        PersistentNotification::PersistentUpdate { seq: s, .. }
-        | PersistentNotification::RuleChange { seq: s, .. }
-        | PersistentNotification::KgChange { seq: s, .. }
-        | PersistentNotification::SchemaChange { seq: s, .. } => *s = seq,
-    }
 }
 
 /// Reject a session rule that puts negation inside a recursive cycle,
@@ -370,20 +288,44 @@ fn debug_query(
     Ok((trace.format_trace(), optimizations))
 }
 
+/// Test seam: runs once on the executing thread just before `QueryJob::execute`
+/// dispatches a meta command, while it holds its storage read guard.
+#[cfg(test)]
+mod meta_dispatch_hook {
+    use std::cell::RefCell;
+
+    thread_local! {
+        static HOOK: RefCell<Option<Box<dyn FnOnce()>>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn set(hook: impl FnOnce() + 'static) {
+        HOOK.with(|h| *h.borrow_mut() = Some(Box::new(hook)));
+    }
+
+    pub(super) fn run() {
+        if let Some(hook) = HOOK.with(|h| h.borrow_mut().take()) {
+            hook();
+        }
+    }
+}
+
+#[cfg(test)]
+mod guard_reentry_tests;
+
 /// Self-contained snapshot of Handler state for executing a single query on a blocking thread.
 /// All fields are `Arc`-wrapped (`Send + Sync`), allowing the job to be moved into
 /// `tokio::task::spawn_blocking` without holding any `!Send` lock guards across `.await` points.
 struct QueryJob {
     storage: Arc<RwLock<StorageEngine>>,
     config: Arc<crate::Config>,
-    notify_tx: tokio::sync::broadcast::Sender<PersistentNotification>,
+    notifications: Arc<NotificationLog>,
     insert_count: Arc<AtomicU64>,
     query_count: Arc<AtomicU64>,
     start_time: Instant,
-    notification_seq: Arc<AtomicU64>,
-    notification_buffer:
-        Arc<parking_lot::Mutex<std::collections::VecDeque<PersistentNotification>>>,
     timing_histograms: Arc<crate::execution::timing::TimingHistograms>,
+    /// When set, the query reads this snapshot of its knowledge graph instead
+    /// of the one current when it runs.
+    pinned: Option<Arc<KnowledgeGraphSnapshot>>,
 }
 
 impl QueryJob {
@@ -399,22 +341,8 @@ impl QueryJob {
         self.start_time.elapsed().as_secs()
     }
 
-    /// Assign a seq number, buffer, and broadcast a notification.
-    fn send_notification(&self, mut notif: PersistentNotification) {
-        let seq = self.notification_seq.fetch_add(1, Ordering::Relaxed) + 1;
-        set_notification_seq(&mut notif, seq);
-        {
-            let mut buf = self.notification_buffer.lock();
-            buf.push_back(notif.clone());
-            // Keep buffer bounded to broadcast channel capacity (notification_buffer_size)
-            let max_buf = self.config.http.rate_limit.notification_buffer_size;
-            while buf.len() > max_buf {
-                buf.pop_front();
-            }
-        }
-        if self.notify_tx.send(notif).is_err() {
-            tracing::debug!("send_notification: no active subscribers");
-        }
+    fn send_notification(&self, notification: Notification) {
+        self.notifications.publish(notification);
     }
 
     fn notify_persistent_update(&self, kg: &str, relation: &str, operation: &str, count: usize) {
@@ -429,7 +357,7 @@ impl QueryJob {
         count: usize,
         session_id: Option<String>,
     ) {
-        self.send_notification(PersistentNotification::PersistentUpdate {
+        self.send_notification(Notification::PersistentUpdate {
             knowledge_graph: kg.to_string(),
             relation: relation.to_string(),
             operation: operation.to_string(),
@@ -441,7 +369,7 @@ impl QueryJob {
     }
 
     fn notify_rule_change(&self, kg: &str, rule_name: &str, operation: &str) {
-        self.send_notification(PersistentNotification::RuleChange {
+        self.send_notification(Notification::RuleChange {
             knowledge_graph: kg.to_string(),
             rule_name: rule_name.to_string(),
             operation: operation.to_string(),
@@ -451,7 +379,7 @@ impl QueryJob {
     }
 
     fn notify_kg_change(&self, kg: &str, operation: &str) {
-        self.send_notification(PersistentNotification::KgChange {
+        self.send_notification(Notification::KgChange {
             knowledge_graph: kg.to_string(),
             operation: operation.to_string(),
             timestamp_ms: now_ms(),
@@ -460,7 +388,7 @@ impl QueryJob {
     }
 
     fn notify_schema_change(&self, kg: &str, entity: &str, operation: &str) {
-        self.send_notification(PersistentNotification::SchemaChange {
+        self.send_notification(Notification::SchemaChange {
             knowledge_graph: kg.to_string(),
             entity: entity.to_string(),
             operation: operation.to_string(),
@@ -468,58 +396,51 @@ impl QueryJob {
             seq: 0,
         });
     }
+}
 
-    fn create_index(&self, kg: &str, opts: &IndexCreateOptions) -> Result<String, String> {
-        index_commands::create(&self.storage.read(), kg, opts)
-    }
+/// The storage state a `.why` or `.why_not` proof reads, captured under the
+/// caller's storage guard.
+///
+/// Proof search runs on this snapshot alone, so the caller releases its guard
+/// before the costly evaluation instead of re-acquiring storage inside it.
+struct ProofSnapshot {
+    snapshot: Arc<KnowledgeGraphSnapshot>,
+    index_metrics: std::collections::HashMap<String, String>,
+}
 
-    fn drop_index(&self, kg: &str, name: &str) -> Result<String, String> {
-        index_commands::drop(&self.storage.read(), kg, name)
-    }
-
-    fn list_indexes(&self, kg: &str) -> Result<Vec<IndexStats>, String> {
-        index_commands::stats(&self.storage.read(), kg, None)
-    }
-
-    fn get_index_stats(&self, kg: &str, name: &str) -> Result<Vec<IndexStats>, String> {
-        index_commands::stats(&self.storage.read(), kg, Some(name))
-    }
-
-    fn rebuild_index(&self, kg: &str, name: &str) -> Result<String, String> {
-        index_commands::rebuild(&self.storage.read(), kg, name)
+impl ProofSnapshot {
+    fn capture(storage: &StorageEngine, kg: &str) -> Result<Self, String> {
+        storage
+            .ensure_knowledge_graph(kg)
+            .map_err(|e| format!("Knowledge graph not found: {e}"))?;
+        let (snapshot, index_metrics) = storage
+            .proof_snapshot_on(kg)
+            .map_err(|e| format!("Failed to access knowledge graph: {e}"))?;
+        Ok(Self {
+            snapshot,
+            index_metrics,
+        })
     }
 
     /// Build proof trees explaining why query results were derived.
     ///
     /// Returns a QueryResult with both the result rows AND proof trees
     /// in the `proof_trees` field, so clients get typed data not text.
-    fn why_query(
-        &self,
-        knowledge_graph: Option<String>,
-        query: String,
+    fn why(
+        self,
+        query: &str,
         full_mode: bool,
+        timing_mode: crate::execution::TimingMode,
     ) -> Result<QueryResult, String> {
         use crate::provenance::backward_chaining::{build_proof_tree, ProofContext};
         use crate::provenance::ProofConfig;
 
         let start = std::time::Instant::now();
-        let storage = self.storage.read();
-        let kg_name = if let Some(ref kg) = knowledge_graph {
-            storage
-                .ensure_knowledge_graph(kg)
-                .map_err(|e| format!("Knowledge graph not found: {e}"))?;
-            kg.clone()
-        } else {
-            storage
-                .current_knowledge_graph()
-                .ok_or("No knowledge graph selected")?
-                .to_string()
-        };
-
         let query_start = std::time::Instant::now();
-        let (mut result_tuples, rules, base_data, derived_data, index_metrics) = storage
-            .execute_and_get_context(&kg_name, &query)
-            .map_err(|e| format!("{e}"))?;
+        let (mut result_tuples, derived_data) = self
+            .snapshot
+            .execute_with_rules_tuples_and_derived(query)
+            .map_err(|e| format!("Query execution failed: {e}"))?;
         let row_capped = crate::last_result_truncated();
         let query_us = query_start.elapsed().as_micros() as u64;
 
@@ -528,8 +449,10 @@ impl QueryJob {
         }
 
         result_tuples.sort();
+        let (rules, base_data) = self.snapshot.proof_inputs();
+        let derived_data = crate::value::relation::to_vec_map(&derived_data);
 
-        let relation = extract_query_relation(&query)
+        let relation = extract_query_relation(query)
             .ok_or_else(|| "Could not determine query relation name".to_string())?;
         let config = ProofConfig {
             full_mode,
@@ -540,7 +463,8 @@ impl QueryJob {
         let index_info: std::collections::HashMap<
             String,
             crate::provenance::backward_chaining::IndexProofInfo,
-        > = index_metrics
+        > = self
+            .index_metrics
             .into_iter()
             .map(|(name, metric)| {
                 (
@@ -556,7 +480,7 @@ impl QueryJob {
             .with_derived_data(&derived_data);
 
         // Build wire rows and proof trees
-        let schema = extract_query_schema(&query, &result_tuples);
+        let schema = extract_query_schema(query, &result_tuples);
         let mut rows = Vec::new();
         let mut graphs = Vec::new();
 
@@ -597,42 +521,10 @@ impl QueryJob {
                     builder.finish(vec![id])
                 }
             };
-            graph.query = Some(query.clone());
+            graph.query = Some(query.to_string());
             graphs.push(graph);
         }
         let proof_us = proof_start.elapsed().as_micros() as u64;
-
-        let timing_breakdown =
-            if self.config.storage.performance.timing_mode == crate::execution::TimingMode::Off {
-                None
-            } else {
-                let total_us = start.elapsed().as_micros() as u64;
-                Some(crate::execution::TimingBreakdown {
-                    total_us,
-                    parse_us: 0,
-                    sip_us: 0,
-                    magic_sets_us: 0,
-                    ir_build_us: 0,
-                    optimize_us: 0,
-                    shared_views_us: 0,
-                    rules: vec![
-                        crate::execution::timing::RuleTiming {
-                            rule_head: "query_execution".into(),
-                            execution_us: query_us,
-                            is_recursive: false,
-                            workers: 1,
-                        },
-                        crate::execution::timing::RuleTiming {
-                            rule_head: "proof_tree_construction".into(),
-                            execution_us: proof_us,
-                            is_recursive: false,
-                            workers: 1,
-                        },
-                    ],
-                    optimizer_detail: None,
-                    ir_builder_detail: None,
-                })
-            };
 
         let total_count = rows.len();
         Ok(QueryResult {
@@ -644,7 +536,13 @@ impl QueryJob {
             metadata: None,
             switched_kg: None,
             proof_trees: Some(graphs),
-            timing_breakdown,
+            timing_breakdown: proof_timing(
+                timing_mode,
+                start,
+                query_us,
+                "proof_tree_construction",
+                proof_us,
+            ),
             errors: Vec::new(),
         })
     }
@@ -652,34 +550,19 @@ impl QueryJob {
     /// Explain why a specific tuple was NOT derived.
     ///
     /// Returns a QueryResult with the explanation as structured proof tree.
-    fn why_not_query(
-        &self,
-        knowledge_graph: Option<String>,
-        input: String,
+    fn why_not(
+        self,
+        input: &str,
+        timing_mode: crate::execution::TimingMode,
     ) -> Result<QueryResult, String> {
         use crate::provenance::backward_chaining::ProofContext;
         use crate::provenance::why_not::{explain_why_not, format_why_not_text};
         use crate::provenance::ProofConfig;
 
         let start = std::time::Instant::now();
-        let storage = self.storage.read();
-        let kg_name = if let Some(ref kg) = knowledge_graph {
-            storage
-                .ensure_knowledge_graph(kg)
-                .map_err(|e| format!("Knowledge graph not found: {e}"))?;
-            kg.clone()
-        } else {
-            storage
-                .current_knowledge_graph()
-                .ok_or("No knowledge graph selected")?
-                .to_string()
-        };
-
-        let (relation, tuple) = parse_why_not_target(&input)?;
+        let (relation, tuple) = parse_why_not_target(input)?;
         let query_start = std::time::Instant::now();
-        let (rules, base_data) = storage
-            .get_rules_and_data(&kg_name)
-            .map_err(|e| format!("Failed to access knowledge graph: {e}"))?;
+        let (rules, base_data) = self.snapshot.proof_inputs();
         let ctx = ProofContext::new(&rules, &base_data, ProofConfig::default());
         let query_us = query_start.elapsed().as_micros() as u64;
 
@@ -697,38 +580,6 @@ impl QueryJob {
             .collect();
         let total_count = rows.len();
 
-        let timing_breakdown =
-            if self.config.storage.performance.timing_mode == crate::execution::TimingMode::Off {
-                None
-            } else {
-                let total_us = start.elapsed().as_micros() as u64;
-                Some(crate::execution::TimingBreakdown {
-                    total_us,
-                    parse_us: 0,
-                    sip_us: 0,
-                    magic_sets_us: 0,
-                    ir_build_us: 0,
-                    optimize_us: 0,
-                    shared_views_us: 0,
-                    rules: vec![
-                        crate::execution::timing::RuleTiming {
-                            rule_head: "query_execution".into(),
-                            execution_us: query_us,
-                            is_recursive: false,
-                            workers: 1,
-                        },
-                        crate::execution::timing::RuleTiming {
-                            rule_head: "explanation".into(),
-                            execution_us: explain_us,
-                            is_recursive: false,
-                            workers: 1,
-                        },
-                    ],
-                    optimizer_detail: None,
-                    ir_builder_detail: None,
-                })
-            };
-
         Ok(QueryResult {
             rows,
             schema: vec![ColumnDef::string("explanation")],
@@ -738,17 +589,57 @@ impl QueryJob {
             metadata: None,
             switched_kg: None,
             proof_trees: Some(vec![graph]),
-            timing_breakdown,
+            timing_breakdown: proof_timing(timing_mode, start, query_us, "explanation", explain_us),
             errors: Vec::new(),
         })
     }
 }
 
+/// Timing for a proof command: query evaluation, then the named proof phase.
+fn proof_timing(
+    timing_mode: crate::execution::TimingMode,
+    start: Instant,
+    query_us: u64,
+    phase: &str,
+    phase_us: u64,
+) -> Option<crate::execution::TimingBreakdown> {
+    if timing_mode == crate::execution::TimingMode::Off {
+        return None;
+    }
+    let total_us = start.elapsed().as_micros() as u64;
+    Some(crate::execution::TimingBreakdown {
+        total_us,
+        parse_us: 0,
+        sip_us: 0,
+        magic_sets_us: 0,
+        ir_build_us: 0,
+        optimize_us: 0,
+        shared_views_us: 0,
+        rules: vec![
+            crate::execution::timing::RuleTiming {
+                rule_head: "query_execution".into(),
+                execution_us: query_us,
+                is_recursive: false,
+                workers: 1,
+            },
+            crate::execution::timing::RuleTiming {
+                rule_head: phase.into(),
+                execution_us: phase_us,
+                is_recursive: false,
+                workers: 1,
+            },
+        ],
+        optimizer_detail: None,
+        ir_builder_detail: None,
+    })
+}
+
 impl Handler {
     /// Create a new handler with the given storage engine.
     pub fn new(storage: StorageEngine) -> Self {
-        let notify_buf = storage.config().http.rate_limit.notification_buffer_size;
-        let (notify_tx, _) = tokio::sync::broadcast::channel(notify_buf);
+        let notifications = Arc::new(NotificationLog::new(
+            storage.config().http.rate_limit.notification_buffer_size,
+        ));
         let config = Arc::new(storage.config().clone());
         let ncpu = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
         // Reserve ~25% of cores (min 2) for Tokio async I/O, health checks, WebSocket handling.
@@ -762,12 +653,8 @@ impl Handler {
             query_count: Arc::new(AtomicU64::new(0)),
             insert_count: Arc::new(AtomicU64::new(0)),
             sessions: SessionManager::default(),
-            notify_tx,
+            notifications,
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
-            notification_seq: Arc::new(AtomicU64::new(0)),
-            notification_buffer: Arc::new(parking_lot::Mutex::new(
-                std::collections::VecDeque::new(),
-            )),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             agent: Arc::new(crate::agent::AgentManager::new(
                 crate::agent::AgentConfig::default(),
@@ -776,6 +663,8 @@ impl Handler {
             login_throttle: Arc::default(),
             password_permits: Arc::new(tokio::sync::Semaphore::new((ncpu / 4).clamp(1, 4))),
             login_queue: Arc::new(tokio::sync::Semaphore::new(MAX_QUEUED_LOGINS)),
+            credentials: crate::auth::CredentialRegistry::default(),
+            kg_acl_generation: AtomicU64::new(0),
         }
     }
 
@@ -789,8 +678,9 @@ impl Handler {
 
     /// Create a new handler with custom session configuration.
     pub fn with_session_config(storage: StorageEngine, session_config: SessionConfig) -> Self {
-        let notify_buf = storage.config().http.rate_limit.notification_buffer_size;
-        let (notify_tx, _) = tokio::sync::broadcast::channel(notify_buf);
+        let notifications = Arc::new(NotificationLog::new(
+            storage.config().http.rate_limit.notification_buffer_size,
+        ));
         let config = Arc::new(storage.config().clone());
         let ncpu = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
         // Reserve ~25% of cores (min 2) for Tokio async I/O, health checks, WebSocket handling.
@@ -803,12 +693,8 @@ impl Handler {
             query_count: Arc::new(AtomicU64::new(0)),
             insert_count: Arc::new(AtomicU64::new(0)),
             sessions: SessionManager::new(session_config),
-            notify_tx,
+            notifications,
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
-            notification_seq: Arc::new(AtomicU64::new(0)),
-            notification_buffer: Arc::new(parking_lot::Mutex::new(
-                std::collections::VecDeque::new(),
-            )),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             agent: Arc::new(crate::agent::AgentManager::new(
                 crate::agent::AgentConfig::default(),
@@ -817,6 +703,8 @@ impl Handler {
             login_throttle: Arc::default(),
             password_permits: Arc::new(tokio::sync::Semaphore::new((ncpu / 4).clamp(1, 4))),
             login_queue: Arc::new(tokio::sync::Semaphore::new(MAX_QUEUED_LOGINS)),
+            credentials: crate::auth::CredentialRegistry::default(),
+            kg_acl_generation: AtomicU64::new(0),
         }
     }
 
@@ -825,13 +713,12 @@ impl Handler {
         QueryJob {
             storage: Arc::clone(&self.storage),
             config: Arc::clone(&self.config),
-            notify_tx: self.notify_tx.clone(),
+            notifications: Arc::clone(&self.notifications),
             insert_count: Arc::clone(&self.insert_count),
             query_count: Arc::clone(&self.query_count),
             start_time: self.start_time,
-            notification_seq: Arc::clone(&self.notification_seq),
-            notification_buffer: Arc::clone(&self.notification_buffer),
             timing_histograms: Arc::clone(&self.timing_histograms),
+            pinned: None,
         }
     }
 
@@ -845,29 +732,18 @@ impl Handler {
         &self.subscription_metrics
     }
 
-    /// Subscribe to persistent data change notifications.
-    /// Returns a broadcast receiver for push updates.
-    pub fn subscribe_notifications(
-        &self,
-    ) -> tokio::sync::broadcast::Receiver<PersistentNotification> {
-        self.notify_tx.subscribe()
+    /// Live change notifications from now on.
+    pub fn subscribe_notifications(&self) -> tokio::sync::broadcast::Receiver<Notification> {
+        self.notifications.subscribe()
     }
 
-    /// Assign a seq number, buffer, and broadcast a notification.
-    fn send_notification(&self, mut notif: PersistentNotification) {
-        let seq = self.notification_seq.fetch_add(1, Ordering::Relaxed) + 1;
-        set_notification_seq(&mut notif, seq);
-        {
-            let mut buf = self.notification_buffer.lock();
-            buf.push_back(notif.clone());
-            let max_buf = self.config.http.rate_limit.notification_buffer_size;
-            while buf.len() > max_buf {
-                buf.pop_front();
-            }
-        }
-        if self.notify_tx.send(notif).is_err() {
-            tracing::debug!("send_notification: no active subscribers");
-        }
+    /// The ordered change-notification stream of this engine run.
+    pub fn notifications(&self) -> &NotificationLog {
+        &self.notifications
+    }
+
+    fn send_notification(&self, notification: Notification) {
+        self.notifications.publish(notification);
     }
 
     /// Send a persistent data change notification.
@@ -879,7 +755,7 @@ impl Handler {
         operation: &str,
         count: usize,
     ) {
-        self.send_notification(PersistentNotification::PersistentUpdate {
+        self.send_notification(Notification::PersistentUpdate {
             knowledge_graph: kg.to_string(),
             relation: relation.to_string(),
             operation: operation.to_string(),
@@ -892,7 +768,7 @@ impl Handler {
 
     /// Send a rule change notification.
     pub fn notify_rule_change(&self, kg: &str, rule_name: &str, operation: &str) {
-        self.send_notification(PersistentNotification::RuleChange {
+        self.send_notification(Notification::RuleChange {
             knowledge_graph: kg.to_string(),
             rule_name: rule_name.to_string(),
             operation: operation.to_string(),
@@ -903,7 +779,7 @@ impl Handler {
 
     /// Send a knowledge graph change notification.
     pub fn notify_kg_change(&self, kg: &str, operation: &str) {
-        self.send_notification(PersistentNotification::KgChange {
+        self.send_notification(Notification::KgChange {
             knowledge_graph: kg.to_string(),
             operation: operation.to_string(),
             timestamp_ms: now_ms(),
@@ -913,23 +789,13 @@ impl Handler {
 
     /// Send a schema change notification.
     pub fn notify_schema_change(&self, kg: &str, entity: &str, operation: &str) {
-        self.send_notification(PersistentNotification::SchemaChange {
+        self.send_notification(Notification::SchemaChange {
             knowledge_graph: kg.to_string(),
             entity: entity.to_string(),
             operation: operation.to_string(),
             timestamp_ms: now_ms(),
             seq: 0,
         });
-    }
-
-    /// Get buffered notifications with sequence number > `since_seq`.
-    /// Returns notifications in order. Used for replay on WS reconnect (#39).
-    pub fn get_notifications_since(&self, since_seq: u64) -> Vec<PersistentNotification> {
-        let buf = self.notification_buffer.lock();
-        buf.iter()
-            .filter(|n| n.seq() > since_seq)
-            .cloned()
-            .collect()
     }
 
     /// Get the session manager.
@@ -961,8 +827,9 @@ impl Handler {
     pub fn create_session_with_auth(
         &self,
         knowledge_graph: &str,
-        auth: &crate::auth::AuthIdentity,
+        principal: &crate::auth::Principal,
     ) -> Result<SessionId, String> {
+        let auth = principal.identity()?;
         // Admins skip per-KG checks
         if auth.role != crate::auth::Role::Admin
             && self
@@ -1010,10 +877,61 @@ impl Handler {
 
     // ── Auth / RBAC ─────────────────────────────────────────────────────────
 
-    /// Bootstrap the `_internal` knowledge graph with an admin user if it doesn't exist.
-    /// Called once on server startup. Creates the `_internal` KG and inserts an admin
-    /// user if the `users` relation is empty.
+    /// Bootstrap auth: create the `_internal` knowledge graph and an admin
+    /// user if there is none, then load the credential registry from it.
+    /// Called once on server startup; until then no credential authenticates.
     pub fn bootstrap_auth(&self) {
+        self.seed_admin_credentials();
+        self.load_credentials();
+    }
+
+    /// Load every user and API key from `_internal` into the registry.
+    fn load_credentials(&self) {
+        use crate::auth::{self, ApiKeyRecord, UserRecord};
+
+        let snapshot = match self.storage.read().get_snapshot_for(auth::INTERNAL_KG) {
+            Ok(snapshot) => snapshot,
+            Err(e) => {
+                warn!(error = %e, "auth_credentials_load_failed");
+                return;
+            }
+        };
+        let rows = |relation: &str| {
+            snapshot
+                .input_tuples
+                .get(relation)
+                .into_iter()
+                .flatten()
+                .filter_map(|tuple| match tuple.values() {
+                    [a, b, c, ..] => Some((a.as_str()?, b.as_str()?, c.as_str()?)),
+                    _ => None,
+                })
+        };
+        let users = rows("users")
+            .filter_map(|(username, hash, role)| match role.parse() {
+                Ok(role) => Some(UserRecord {
+                    username: username.to_string(),
+                    password_hash: hash.to_string(),
+                    role,
+                }),
+                Err(e) => {
+                    warn!(username, error = %e, "auth_user_skipped");
+                    None
+                }
+            })
+            .collect();
+        let keys = rows("api_keys")
+            .map(|(label, key_hash, username)| ApiKeyRecord {
+                label: label.to_string(),
+                key_hash: key_hash.to_string(),
+                username: username.to_string(),
+            })
+            .collect();
+        self.credentials.load(users, keys);
+    }
+
+    /// Insert the bootstrap admin user and API key when `_internal` has no users.
+    fn seed_admin_credentials(&self) {
         use crate::auth;
         use crate::value::Value;
 
@@ -1182,30 +1100,17 @@ impl Handler {
         &self,
         username: &str,
         password: &str,
-    ) -> Result<crate::auth::AuthIdentity, String> {
-        use crate::auth;
-        use std::str::FromStr;
-
-        let storage = self.storage.read();
-        let snapshot = storage
-            .get_snapshot_for(auth::INTERNAL_KG)
-            .map_err(|_| "Authentication service unavailable".to_string())?;
-        drop(storage);
-
-        let user = snapshot.input_tuples.get("users").and_then(|users| {
-            users.iter().find_map(|tuple| match tuple.values() {
-                [u, h, r, ..] if u.as_str() == Some(username) => Some((h.as_str()?, r.as_str()?)),
-                _ => None,
-            })
-        });
-        let verified = auth::verify_password_or_dummy(password, user.map(|(hash, _)| hash));
-        match user {
-            Some((_, role)) if verified => Ok(auth::AuthIdentity {
-                username: username.to_string(),
-                role: auth::Role::from_str(role)?,
-            }),
-            _ => Err("Invalid credentials".to_string()),
+    ) -> Result<crate::auth::Principal, String> {
+        let candidate = self.credentials.password_candidate(username);
+        let hash = candidate.as_ref().map(|c| c.password_hash.as_str());
+        if !crate::auth::verify_password_or_dummy(password, hash) {
+            return Err("Invalid credentials".to_string());
         }
+        // Verified but replaced meanwhile: the old password is no longer valid.
+        candidate
+            .ok_or_else(|| "Invalid credentials".to_string())?
+            .accept()
+            .map_err(|_| "Invalid credentials".to_string())
     }
 
     /// Password login from `peer`: throttled per IP and username, with
@@ -1216,7 +1121,7 @@ impl Handler {
         username: &str,
         password: &str,
         peer: std::net::IpAddr,
-    ) -> Result<crate::auth::AuthIdentity, String> {
+    ) -> Result<crate::auth::Principal, String> {
         let attempt = self.login_throttle.begin(peer, username).map_err(|wait| {
             let retry_secs = wait.as_secs().max(1);
             warn!(username, %peer, retry_secs, "audit_auth_login_throttled");
@@ -1246,9 +1151,9 @@ impl Handler {
                 Err(_) => Err(unavailable()),
             };
             match &result {
-                Ok(identity) => {
+                Ok(principal) => {
                     handler.login_throttle.succeed(&attempt);
-                    info!(username = %user, role = %identity.role, %peer, "audit_auth_login_success");
+                    info!(username = %user, credential = %principal.credential(), %peer, "audit_auth_login_success");
                 }
                 Err(_) => {
                     handler.login_throttle.fail(&attempt);
@@ -1261,60 +1166,25 @@ impl Handler {
         .unwrap_or_else(|_| Err(unavailable()))
     }
 
-    /// Authenticate an API key.
-    /// Returns `AuthIdentity` on success, error message on failure.
-    pub fn authenticate_api_key(&self, key: &str) -> Result<crate::auth::AuthIdentity, String> {
-        use crate::auth;
-        use std::str::FromStr;
-
-        let key_hash = auth::hash_api_key(key);
-
-        let storage = self.storage.read();
-        let snapshot = storage
-            .get_snapshot_for(auth::INTERNAL_KG)
-            .map_err(|_| "Authentication service unavailable".to_string())?;
-        drop(storage);
-
-        let empty_vec = crate::value::Relation::new();
-        let api_keys = snapshot.input_tuples.get("api_keys").unwrap_or(&empty_vec);
-
-        for tuple in api_keys {
-            let vals = tuple.values();
-            // api_keys: (label, key_hash, username)
-            if vals.len() >= 3 {
-                if let (Some(hash), Some(uname)) = (vals[1].as_str(), vals[2].as_str()) {
-                    if hash == key_hash {
-                        // Look up user's role
-                        let empty_users = crate::value::Relation::new();
-                        let users = snapshot.input_tuples.get("users").unwrap_or(&empty_users);
-                        for user_tuple in users {
-                            let uvals = user_tuple.values();
-                            if uvals.len() >= 3 {
-                                if let (Some(u), Some(r)) = (uvals[0].as_str(), uvals[2].as_str()) {
-                                    if u == uname {
-                                        let role = auth::Role::from_str(r)?;
-                                        tracing::info!(
-                                            username = uname,
-                                            role = %role,
-                                            "audit_auth_apikey_success"
-                                        );
-                                        return Ok(auth::AuthIdentity {
-                                            username: uname.to_string(),
-                                            role,
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                        tracing::warn!(username = uname, "audit_auth_apikey_owner_not_found");
-                        return Err("API key owner not found".to_string());
-                    }
-                }
+    /// Authenticate an API key: one hash and one registry lookup.
+    pub fn authenticate_api_key(&self, key: &str) -> Result<crate::auth::Principal, String> {
+        match self
+            .credentials
+            .authenticate_key(&crate::auth::hash_api_key(key))
+        {
+            Ok(principal) => {
+                tracing::info!(
+                    username = principal.username(),
+                    credential = %principal.credential(),
+                    "audit_auth_apikey_success"
+                );
+                Ok(principal)
+            }
+            Err(rejected) => {
+                tracing::warn!(reason = %rejected, "audit_auth_apikey_rejected");
+                Err(rejected.to_string())
             }
         }
-
-        tracing::warn!("audit_auth_apikey_invalid");
-        Err("Invalid API key".to_string())
     }
 
     // ── User CRUD ───────────────────────────────────────────────────────────
@@ -1381,8 +1251,7 @@ impl Handler {
         use crate::value::Value;
         use std::str::FromStr;
 
-        // Validate role
-        let _role = auth::Role::from_str(role_str)?;
+        let role = auth::Role::from_str(role_str)?;
 
         // Check user doesn't already exist
         let storage = self.storage.read();
@@ -1411,6 +1280,11 @@ impl Handler {
         storage
             .insert_tuples_into(auth::INTERNAL_KG, "users", vec![tuple])
             .map_err(|e| format!("Failed to create user: {e}"))?;
+        self.credentials.put_user(auth::UserRecord {
+            username: username.to_string(),
+            password_hash: hash,
+            role,
+        });
 
         tracing::info!(username, role = role_str, "audit_user_created");
         Ok(self.message_result(&format!(
@@ -1449,6 +1323,7 @@ impl Handler {
         storage
             .delete_tuples_from(auth::INTERNAL_KG, "users", vec![tuple])
             .map_err(|e| format!("Failed to drop user: {e}"))?;
+        self.credentials.remove_user(username);
 
         // Also revoke all API keys owned by this user
         if let Some(api_keys) = snapshot.input_tuples.get("api_keys") {
@@ -1481,6 +1356,7 @@ impl Handler {
                 .collect();
             if !to_delete.is_empty() {
                 let _ = storage.delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_delete);
+                self.kg_acls_changed();
             }
         }
 
@@ -1534,6 +1410,7 @@ impl Handler {
         storage
             .insert_tuples_into(auth::INTERNAL_KG, "users", vec![new_tuple])
             .map_err(|e| format!("Failed to update password: {e}"))?;
+        self.credentials.set_password(username, new_hash);
 
         tracing::info!(username, "audit_user_password_changed");
         Ok(self.message_result(&format!("Password updated for '{username}'.")))
@@ -1545,8 +1422,7 @@ impl Handler {
         use crate::value::Value;
         use std::str::FromStr;
 
-        // Validate role
-        let _role = auth::Role::from_str(new_role)?;
+        let role = auth::Role::from_str(new_role)?;
 
         if username == "admin" && new_role != "admin" {
             return Err("Cannot change the 'admin' user's role".to_string());
@@ -1588,14 +1464,48 @@ impl Handler {
         storage
             .insert_tuples_into(auth::INTERNAL_KG, "users", vec![new_tuple])
             .map_err(|e| format!("Failed to update role: {e}"))?;
+        self.credentials.set_role(username, role);
 
         Ok(self.message_result(&format!("Role updated to '{new_role}' for '{username}'.")))
     }
 
     // ── API Key CRUD ────────────────────────────────────────────────────────
 
-    /// Create a new API key. Returns the plaintext key (shown only once).
+    /// `.apikey create`: the plaintext key as a result row (shown only once).
     pub fn handle_apikey_create(&self, label: &str, owner: &str) -> Result<QueryResult, String> {
+        let plaintext_key = self.create_api_key(label, owner)?;
+        Ok(QueryResult {
+            rows: vec![WireTuple {
+                values: vec![
+                    WireValue::String(label.to_string()),
+                    WireValue::String(plaintext_key),
+                ],
+                provenance: None,
+            }],
+            schema: vec![
+                ColumnDef {
+                    name: "label".to_string(),
+                    data_type: WireDataType::String,
+                },
+                ColumnDef {
+                    name: "api_key".to_string(),
+                    data_type: WireDataType::String,
+                },
+            ],
+            total_count: 1,
+            truncated: false,
+            execution_time_ms: 0,
+            metadata: None,
+            switched_kg: None,
+            proof_trees: None,
+            timing_breakdown: None,
+            errors: Vec::new(),
+        })
+    }
+
+    /// Create an API key for `owner`; returns the plaintext key, which is
+    /// not stored and cannot be recovered.
+    pub fn create_api_key(&self, label: &str, owner: &str) -> Result<String, String> {
         use crate::auth;
         use crate::value::Value;
 
@@ -1628,36 +1538,14 @@ impl Handler {
         storage
             .insert_tuples_into(auth::INTERNAL_KG, "api_keys", vec![tuple])
             .map_err(|e| format!("Failed to create API key: {e}"))?;
+        self.credentials.put_key(auth::ApiKeyRecord {
+            label: label.to_string(),
+            key_hash,
+            username: owner.to_string(),
+        });
 
         tracing::info!(label, owner, "audit_apikey_created");
-        // Return the plaintext key (shown only once)
-        Ok(QueryResult {
-            rows: vec![WireTuple {
-                values: vec![
-                    WireValue::String(label.to_string()),
-                    WireValue::String(plaintext_key),
-                ],
-                provenance: None,
-            }],
-            schema: vec![
-                ColumnDef {
-                    name: "label".to_string(),
-                    data_type: WireDataType::String,
-                },
-                ColumnDef {
-                    name: "api_key".to_string(),
-                    data_type: WireDataType::String,
-                },
-            ],
-            total_count: 1,
-            truncated: false,
-            execution_time_ms: 0,
-            metadata: None,
-            switched_kg: None,
-            proof_trees: None,
-            timing_breakdown: None,
-            errors: Vec::new(),
-        })
+        Ok(plaintext_key)
     }
 
     /// List all API keys (label and owner, never the hash).
@@ -1738,6 +1626,7 @@ impl Handler {
         storage
             .delete_tuples_from(auth::INTERNAL_KG, "api_keys", vec![tuple])
             .map_err(|e| format!("Failed to revoke API key: {e}"))?;
+        self.credentials.revoke_key(label);
 
         tracing::info!(label, "audit_apikey_revoked");
         Ok(self.message_result(&format!("API key '{label}' revoked.")))
@@ -1869,9 +1758,9 @@ impl Handler {
         }
 
         if !to_remove.is_empty() {
-            storage
-                .delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove)
-                .map_err(|e| format!("Failed to update ACL: {e}"))?;
+            let removed = storage.delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove);
+            self.kg_acls_changed();
+            removed.map_err(|e| format!("Failed to update ACL: {e}"))?;
         }
 
         // Insert new ACL entry
@@ -1880,14 +1769,25 @@ impl Handler {
             Value::String(username.to_string().into()),
             Value::String(role.to_lowercase().into()),
         ]);
-        storage
-            .insert_tuples_into(auth::INTERNAL_KG, "kg_acls", vec![tuple])
-            .map_err(|e| format!("Failed to grant ACL: {e}"))?;
+        let granted = storage.insert_tuples_into(auth::INTERNAL_KG, "kg_acls", vec![tuple]);
+        self.kg_acls_changed();
+        granted.map_err(|e| format!("Failed to grant ACL: {e}"))?;
 
         tracing::info!(kg = kg_name, user = username, role, "audit_kg_acl_granted");
         Ok(format!(
             "Granted '{role}' access on '{kg_name}' to '{username}'."
         ))
+    }
+
+    /// Count a change to the KG access lists, after it is visible.
+    fn kg_acls_changed(&self) {
+        self.kg_acl_generation.fetch_add(1, Ordering::Release);
+    }
+
+    /// Changes so far to the KG access lists: a reader that saw a value and
+    /// sees it again knows no grant or revocation happened in between.
+    pub fn kg_acl_generation(&self) -> u64 {
+        self.kg_acl_generation.load(Ordering::Acquire)
     }
 
     /// Revoke a user's access to a knowledge graph.
@@ -1920,38 +1820,12 @@ impl Handler {
             ));
         }
 
-        storage
-            .delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove)
-            .map_err(|e| format!("Failed to revoke ACL: {e}"))?;
+        let revoked = storage.delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove);
+        self.kg_acls_changed();
+        revoked.map_err(|e| format!("Failed to revoke ACL: {e}"))?;
 
         tracing::info!(kg = kg_name, user = username, "audit_kg_acl_revoked");
         Ok(format!("Revoked access on '{kg_name}' from '{username}'."))
-    }
-
-    /// Look up the current global role for a user from storage.
-    /// Returns None if the user no longer exists (e.g., was dropped).
-    fn refresh_user_role(&self, identity: &crate::auth::AuthIdentity) -> Option<crate::auth::Role> {
-        use crate::auth;
-
-        let storage = self.storage.read();
-        let snapshot = storage.get_snapshot_for(auth::INTERNAL_KG).ok()?;
-        drop(storage);
-
-        let empty_vec = crate::value::Relation::new();
-        let users = snapshot.input_tuples.get("users").unwrap_or(&empty_vec);
-
-        for tuple in users {
-            let vals = tuple.values();
-            if vals.len() >= 3 {
-                if let (Some(u), Some(r)) = (vals[0].as_str(), vals[2].as_str()) {
-                    if u == identity.username {
-                        return r.parse::<auth::Role>().ok();
-                    }
-                }
-            }
-        }
-
-        None // user was dropped
     }
 
     /// Remove all ACL entries for a dropped knowledge graph.
@@ -1981,6 +1855,7 @@ impl Handler {
         if !to_remove.is_empty() {
             let count = to_remove.len();
             let _ = storage.delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove);
+            self.kg_acls_changed();
             tracing::info!(kg = kg_name, count, "audit_kg_acls_cleaned_up");
         }
     }
@@ -2264,6 +2139,19 @@ impl Handler {
             });
         }
 
+        self.run_job(self.make_query_job(), knowledge_graph, program, statements)
+            .await
+    }
+
+    /// Run `job` for `program` on the blocking pool under the query semaphore
+    /// and the query timeout.
+    async fn run_job(
+        &self,
+        job: QueryJob,
+        knowledge_graph: Option<String>,
+        program: String,
+        statements: Option<Vec<statement::Statement>>,
+    ) -> Result<QueryResult, String> {
         let program_len = program.len();
         let query_start = Instant::now();
 
@@ -2302,7 +2190,6 @@ impl Handler {
 
         // Offload CPU-bound DD computation to the blocking thread pool.
         // This keeps Tokio worker threads free for I/O and other async tasks.
-        let job = self.make_query_job();
         let timeout_ms = self.config.storage.performance.query_timeout_ms;
 
         // Cooperative cancellation flag: set on timeout so DD spin loops exit promptly.
@@ -2491,6 +2378,28 @@ impl QueryJob {
             }};
         }
 
+        // A proof reads only the snapshot captured under `storage`, so the
+        // guard is released before proof search; a failed proof re-acquires
+        // it for the statements that follow.
+        let timing_mode = self.config.storage.performance.timing_mode;
+        macro_rules! run_proof {
+            ($label:literal, $kg:expr, |$proof:ident| $eval:expr) => {{
+                match ProofSnapshot::capture(&storage, $kg) {
+                    Ok($proof) => {
+                        drop(storage);
+                        match $eval {
+                            Ok(qr) => return Ok(QueryResult { errors, ..qr }),
+                            Err(e) => {
+                                storage = self.storage.read();
+                                fail!(ErrorCode::Validation, format!("{}: {e}", $label));
+                            }
+                        }
+                    }
+                    Err(e) => fail!(ErrorCode::Validation, format!("{}: {e}", $label)),
+                }
+            }};
+        }
+
         // Writes queue here and commit as one transaction after the last
         // statement.
         let mut write_run = WriteRun::default();
@@ -2582,6 +2491,8 @@ impl QueryJob {
                             }
                             statement::Statement::Meta(meta) => {
                                 let kg = kg_name.as_str();
+                                #[cfg(test)]
+                                meta_dispatch_hook::run();
                                 match meta {
                                     // === Knowledge Graph commands ===
                                     MetaCommand::KgShow => {
@@ -2926,7 +2837,7 @@ impl QueryJob {
                                             Err(_) => query,
                                         };
                                         let debug_result =
-                                            debug_query(&self.storage.read(), Some(kg), &debug_src);
+                                            debug_query(&storage, Some(kg), &debug_src);
                                         match debug_result {
                                             Ok((plan, optimizations)) => {
                                                 messages.push("Query Plan:".to_string());
@@ -2952,46 +2863,28 @@ impl QueryJob {
                                             Ok(t) => t.query,
                                             Err(_) => query,
                                         };
-                                        match self.why_query(Some(kg.to_string()), why_q, false) {
-                                            Ok(qr) => {
-                                                drop(storage);
-                                                return Ok(QueryResult { errors, ..qr });
-                                            }
-                                            Err(e) => fail!(
-                                                ErrorCode::Validation,
-                                                format!("Why error: {e}")
-                                            ),
-                                        }
+                                        run_proof!("Why error", kg, |proof| proof.why(
+                                            &why_q,
+                                            false,
+                                            timing_mode
+                                        ));
                                     }
                                     MetaCommand::WhyFull(query) => {
                                         let why_q = match transform_query_shorthand(&query) {
                                             Ok(t) => t.query,
                                             Err(_) => query,
                                         };
-                                        match self.why_query(Some(kg.to_string()), why_q, true) {
-                                            Ok(qr) => {
-                                                drop(storage);
-                                                return Ok(QueryResult { errors, ..qr });
-                                            }
-                                            Err(e) => fail!(
-                                                ErrorCode::Validation,
-                                                format!("Why error: {e}")
-                                            ),
-                                        }
+                                        run_proof!("Why error", kg, |proof| proof.why(
+                                            &why_q,
+                                            true,
+                                            timing_mode
+                                        ));
                                     }
 
                                     // === Why Not (negative explanation) command ===
                                     MetaCommand::WhyNot(input) => {
-                                        match self.why_not_query(Some(kg.to_string()), input) {
-                                            Ok(qr) => {
-                                                drop(storage);
-                                                return Ok(QueryResult { errors, ..qr });
-                                            }
-                                            Err(e) => fail!(
-                                                ErrorCode::Validation,
-                                                format!("Why-not error: {e}")
-                                            ),
-                                        }
+                                        run_proof!("Why-not error", kg, |proof| proof
+                                            .why_not(&input, timing_mode));
                                     }
 
                                     // === Agent commands ===
@@ -3043,7 +2936,7 @@ impl QueryJob {
                                     // === Index commands ===
                                     MetaCommand::IndexCreate(opts) => {
                                         info!(index = %opts.name, "meta_index_create_start");
-                                        match self.create_index(kg, &opts) {
+                                        match index_commands::create(&storage, kg, &opts) {
                                             Ok(msg) => {
                                                 info!(index = %opts.name, "meta_index_create_ok");
                                                 messages.push(msg);
@@ -3065,7 +2958,7 @@ impl QueryJob {
                                     }
                                     MetaCommand::IndexDrop(name) => {
                                         info!(index = %name, "meta_index_drop_start");
-                                        match self.drop_index(kg, &name) {
+                                        match index_commands::drop(&storage, kg, &name) {
                                             Ok(msg) => {
                                                 info!(index = %name, "meta_index_drop_ok");
                                                 messages.push(msg);
@@ -3085,30 +2978,35 @@ impl QueryJob {
                                             }
                                         }
                                     }
-                                    MetaCommand::IndexList => match self.list_indexes(kg) {
-                                        Ok(stats) => {
-                                            info!(count = stats.len(), "meta_index_list_ok");
-                                            if stats.is_empty() {
-                                                messages.push("No indexes.".to_string());
-                                            } else {
-                                                for s in &stats {
-                                                    messages.push(format!(
+                                    MetaCommand::IndexList => {
+                                        match index_commands::stats(&storage, kg, None) {
+                                            Ok(stats) => {
+                                                info!(count = stats.len(), "meta_index_list_ok");
+                                                if stats.is_empty() {
+                                                    messages.push("No indexes.".to_string());
+                                                } else {
+                                                    for s in &stats {
+                                                        messages.push(format!(
                                                             "Index '{}' on {}.{} (type: {}, metric: {}, vectors: {})",
                                                             s.name, s.relation, s.column,
                                                             s.index_type, s.metric,
                                                             s.tuple_count
                                                         ));
+                                                    }
                                                 }
                                             }
+                                            Err(e) => {
+                                                info!(error = %e, "meta_index_list_err");
+                                                fail!(
+                                                    ErrorCode::Internal,
+                                                    format!("Index error: {e}")
+                                                );
+                                            }
                                         }
-                                        Err(e) => {
-                                            info!(error = %e, "meta_index_list_err");
-                                            fail!(ErrorCode::Internal, format!("Index error: {e}"));
-                                        }
-                                    },
+                                    }
                                     MetaCommand::IndexStats(name) => {
                                         info!(index = %name, "meta_index_stats_start");
-                                        match self.get_index_stats(kg, &name) {
+                                        match index_commands::stats(&storage, kg, Some(&name)) {
                                             Ok(stats) => {
                                                 info!(index = %name, count = stats.len(), "meta_index_stats_ok");
                                                 for s in &stats {
@@ -3134,7 +3032,7 @@ impl QueryJob {
                                         }
                                     }
                                     MetaCommand::IndexRebuild(name) => {
-                                        match self.rebuild_index(kg, &name) {
+                                        match index_commands::rebuild(&storage, kg, &name) {
                                             Ok(msg) => messages.push(msg),
                                             Err(e) => fail!(
                                                 index_error_code(
@@ -3330,7 +3228,11 @@ impl QueryJob {
             .and_then(|rel| storage.get_schema_in(&kg_name, &rel).ok().flatten())
             .map(|s| s.columns.iter().map(|c| c.name.clone()).collect());
 
-        let snapshot = match storage.get_snapshot_for(&kg_name) {
+        let snapshot = match self
+            .pinned
+            .clone()
+            .map_or_else(|| storage.get_snapshot_for(&kg_name), Ok)
+        {
             Ok(snapshot) => snapshot,
             Err(e) => fail_query!(storage_error_code(&e, ErrorCode::Internal), e.to_string()),
         };
@@ -3884,12 +3786,17 @@ impl Handler {
     ///
     /// A one-statement program whose statement failed is an `Err`; a longer
     /// program reports failed statements in `QueryResult::errors`.
+    ///
+    /// `auth` is checked twice: at admission, where it yields the permission
+    /// snapshot the whole program is authorized with, and at release, so a
+    /// credential revoked while the program ran receives none of its output.
+    /// Writes admitted before the revocation stay committed.
     pub async fn execute_program(
         &self,
         session_id: Option<&SessionId>,
         knowledge_graph: Option<String>,
         program: String,
-        auth: Option<&crate::auth::AuthIdentity>,
+        auth: Option<&crate::auth::Principal>,
     ) -> Result<QueryResult, String> {
         self.execute_program_status(session_id, knowledge_graph, program, auth)
             .await
@@ -3902,19 +3809,52 @@ impl Handler {
         session_id: Option<&SessionId>,
         knowledge_graph: Option<String>,
         program: String,
-        auth: Option<&crate::auth::AuthIdentity>,
+        auth: Option<&crate::auth::Principal>,
     ) -> Result<QueryResult, ProgramError> {
         let single_statement = program_statement_count(&program) == 1;
         let result = self
             .run_execute_program(session_id, knowledge_graph, program, auth)
             .await?;
-        match result.errors.as_slice() {
-            [error] if single_statement => Err(ProgramError {
-                message: error.message.clone(),
-                code: Some(error.code),
-            }),
-            _ => Ok(result),
+        settle_result(result, auth, single_statement)
+    }
+
+    /// Run the query `query` (`?body`) on `snapshot`, a snapshot of
+    /// `knowledge_graph`, as `auth` would run it with `execute_program`:
+    /// admitted and authorized the same way, but reading `snapshot` instead of
+    /// whatever is current when the query runs. The result is therefore the
+    /// query's exact answer at `snapshot.revision`.
+    pub async fn query_snapshot(
+        &self,
+        knowledge_graph: &str,
+        snapshot: Arc<KnowledgeGraphSnapshot>,
+        query: &str,
+        auth: Option<&crate::auth::Principal>,
+    ) -> Result<QueryResult, String> {
+        let identity = auth
+            .map(crate::auth::Principal::identity)
+            .transpose()
+            .map_err(String::from)?;
+        let statements = parse_program(query).map_err(|errors| {
+            let errors_json = serde_json::to_string(&errors).unwrap_or_default();
+            format!("{VALIDATION_ERROR_PREFIX}{errors_json}")
+        })?;
+        if !matches!(statements.as_slice(), [statement::Statement::Query(_)]) {
+            return Err("A snapshot query must be a single query".to_string());
         }
+        self.authorize_program(identity.as_ref(), Some(knowledge_graph), &statements)?;
+        let job = QueryJob {
+            pinned: Some(snapshot),
+            ..self.make_query_job()
+        };
+        let result = self
+            .run_job(
+                job,
+                Some(knowledge_graph.to_string()),
+                query.to_string(),
+                Some(statements),
+            )
+            .await?;
+        settle_result(result, auth, true).map_err(|e| e.message)
     }
 
     async fn run_execute_program(
@@ -3922,7 +3862,7 @@ impl Handler {
         session_id: Option<&SessionId>,
         knowledge_graph: Option<String>,
         program: String,
-        auth: Option<&crate::auth::AuthIdentity>,
+        auth: Option<&crate::auth::Principal>,
     ) -> Result<QueryResult, String> {
         // Input size validation (protects parsing and downstream handlers)
         let max_bytes = self.config.storage.performance.max_query_size_bytes;
@@ -3936,24 +3876,12 @@ impl Handler {
 
         let trimmed = program.trim();
 
-        // Refresh the user's global role from storage on every call.
-        // The AuthIdentity passed in was captured at login time and may be stale
-        // if an admin changed the user's role since then.
-        let refreshed_identity = if let Some(identity) = auth {
-            match self.refresh_user_role(identity) {
-                Some(role) => Some(crate::auth::AuthIdentity {
-                    username: identity.username.clone(),
-                    role,
-                }),
-                None => {
-                    // User was dropped while session was active
-                    return Err("Access denied: user no longer exists".to_string());
-                }
-            }
-        } else {
-            None
-        };
-        let effective_auth = refreshed_identity.as_ref().or(auth);
+        // Admission: one immutable permission snapshot for the whole program.
+        let identity = auth
+            .map(crate::auth::Principal::identity)
+            .transpose()
+            .map_err(String::from)?;
+        let effective_auth = identity.as_ref();
 
         // Protect _internal KG from direct access.
         // Block both explicit commands AND sessions already bound to _internal.
@@ -4064,34 +3992,19 @@ impl Handler {
                     MetaCommand::OntologyInstall(spec) => {
                         let spec = spec.clone();
                         return self
-                            .handle_ontology_install(
-                                session_id,
-                                knowledge_graph,
-                                &spec,
-                                effective_auth,
-                            )
+                            .handle_ontology_install(session_id, knowledge_graph, &spec, auth)
                             .await;
                     }
                     MetaCommand::OntologyRemove(name) => {
                         let name = name.clone();
                         return self
-                            .handle_ontology_remove(
-                                session_id,
-                                knowledge_graph,
-                                &name,
-                                effective_auth,
-                            )
+                            .handle_ontology_remove(session_id, knowledge_graph, &name, auth)
                             .await;
                     }
                     MetaCommand::OntologyUpgrade(spec) => {
                         let spec = spec.clone();
                         return self
-                            .handle_ontology_upgrade(
-                                session_id,
-                                knowledge_graph,
-                                &spec,
-                                effective_auth,
-                            )
+                            .handle_ontology_upgrade(session_id, knowledge_graph, &spec, auth)
                             .await;
                     }
 
@@ -4116,8 +4029,8 @@ impl Handler {
                         return self.handle_user_role(username, role);
                     }
                     MetaCommand::ApiKeyCreate(label) => {
-                        let owner =
-                            auth.map_or_else(|| "admin".to_string(), |a| a.username.clone());
+                        let owner = effective_auth
+                            .map_or_else(|| "admin".to_string(), |a| a.username.clone());
                         return self.handle_apikey_create(label, &owner);
                     }
                     MetaCommand::ApiKeyList => {
@@ -4456,7 +4369,7 @@ impl Handler {
         session_id: Option<&SessionId>,
         kg: &str,
         name: &str,
-        auth: Option<&crate::auth::AuthIdentity>,
+        auth: Option<&crate::auth::Principal>,
     ) -> Vec<(String, String)> {
         let query = "?pack_item(P, K, I)".to_string();
         let result =
@@ -4486,7 +4399,7 @@ impl Handler {
         session_id: Option<&SessionId>,
         kg: &str,
         name: &str,
-        auth: Option<&crate::auth::AuthIdentity>,
+        auth: Option<&crate::auth::Principal>,
     ) -> std::collections::BTreeSet<(String, String)> {
         let result = Box::pin(self.execute_program(
             session_id,
@@ -4520,7 +4433,7 @@ impl Handler {
         session_id: Option<&SessionId>,
         kg: &str,
         name: &str,
-        auth: Option<&crate::auth::AuthIdentity>,
+        auth: Option<&crate::auth::Principal>,
     ) -> Option<(String, String)> {
         let result = Box::pin(self.execute_program(
             session_id,
@@ -4551,7 +4464,7 @@ impl Handler {
         session_id: Option<&SessionId>,
         knowledge_graph: Option<String>,
         spec: &str,
-        auth: Option<&crate::auth::AuthIdentity>,
+        auth: Option<&crate::auth::Principal>,
     ) -> Result<QueryResult, String> {
         use inputlayer_ontology_client::registry;
         let kg = self.resolve_ontology_kg(session_id, knowledge_graph.as_ref())?;
@@ -4784,7 +4697,7 @@ impl Handler {
         session_id: Option<&SessionId>,
         knowledge_graph: Option<String>,
         name: &str,
-        auth: Option<&crate::auth::AuthIdentity>,
+        auth: Option<&crate::auth::Principal>,
     ) -> Result<QueryResult, String> {
         inputlayer_ontology_client::registry::validate_component("ontology name", name)
             .map_err(|e| e.to_string())?;
@@ -4910,7 +4823,7 @@ impl Handler {
         session_id: Option<&SessionId>,
         knowledge_graph: Option<String>,
         spec: &str,
-        auth: Option<&crate::auth::AuthIdentity>,
+        auth: Option<&crate::auth::Principal>,
     ) -> Result<QueryResult, String> {
         let name = spec.split('@').next().unwrap_or(spec).to_string();
         inputlayer_ontology_client::registry::validate_component("ontology name", &name)
@@ -5336,6 +5249,27 @@ fn format_term(term: &Term) -> String {
 }
 
 /// Statements in `program`, counted the way `parse_program` splits them.
+/// A program's final result: an error if `auth` was revoked meanwhile, or
+/// when the program was one failed statement.
+fn settle_result(
+    result: QueryResult,
+    auth: Option<&crate::auth::Principal>,
+    single_statement: bool,
+) -> Result<QueryResult, ProgramError> {
+    if let Some(principal) = auth {
+        principal
+            .identity()
+            .map_err(|revoked| ProgramError::from(String::from(revoked)))?;
+    }
+    match result.errors.as_slice() {
+        [error] if single_statement => Err(ProgramError {
+            message: error.message.clone(),
+            code: Some(error.code),
+        }),
+        _ => Ok(result),
+    }
+}
+
 fn program_statement_count(program: &str) -> usize {
     join_continuation_lines(&strip_comments(program))
         .lines()
@@ -5674,7 +5608,7 @@ mod tests {
         handler.notify_persistent_update("test_kg", "edge", "insert", 5);
 
         match rx.try_recv() {
-            Ok(PersistentNotification::PersistentUpdate {
+            Ok(Notification::PersistentUpdate {
                 knowledge_graph,
                 relation,
                 operation,
@@ -5729,43 +5663,31 @@ mod tests {
     }
 
     #[test]
-    fn test_get_notifications_since() {
-        let (storage, _tmp) = make_test_storage();
-        let handler = Handler::new(storage);
-
-        handler.notify_persistent_update("kg", "a", "insert", 1);
-        handler.notify_persistent_update("kg", "b", "insert", 2);
-        handler.notify_kg_change("kg", "created");
-
-        // Get all since seq 0 (all notifications)
-        let all = handler.get_notifications_since(0);
-        assert_eq!(all.len(), 3);
-
-        // Get only since seq 2
-        let since2 = handler.get_notifications_since(2);
-        assert_eq!(since2.len(), 1);
-        assert_eq!(since2[0].seq(), 3);
-
-        // Get since last - should be empty
-        let none = handler.get_notifications_since(3);
-        assert!(none.is_empty());
-    }
-
-    #[test]
-    fn test_notification_buffer_bounded() {
+    fn test_notification_ring_retains_the_configured_buffer_size() {
+        use crate::protocol::notification_log::{Cursor, ReplayGap};
         let (storage, _tmp) = make_test_storage();
         let handler = Handler::new(storage);
         let buf_size = handler.config().http.rate_limit.notification_buffer_size;
 
-        // Send more notifications than buffer size
         for i in 0..(buf_size + 10) {
             handler.notify_persistent_update("kg", &format!("r{i}"), "insert", 1);
         }
 
-        let all = handler.get_notifications_since(0);
-        assert_eq!(all.len(), buf_size);
-        // First notification in buffer should be seq 11 (oldest 10 evicted)
-        assert_eq!(all[0].seq(), 11);
+        let log = handler.notifications();
+        let cursor = |last_seq| Cursor {
+            epoch: Some(log.epoch().to_string()),
+            last_seq,
+        };
+        // The oldest 10 were evicted: history after seq 10 is complete.
+        let retained = log.resume(Some(&cursor(10))).replay.unwrap();
+        assert_eq!(retained.len(), buf_size);
+        assert_eq!(retained[0].seq(), 11);
+        assert_eq!(
+            log.resume(Some(&cursor(9))).replay.unwrap_err(),
+            ReplayGap::Evicted {
+                oldest_retained: 11
+            }
+        );
     }
 
     // --- query_program tests ---
@@ -6785,7 +6707,7 @@ mod tests {
             .await
             .expect("query execution failed");
         match rx.try_recv() {
-            Ok(PersistentNotification::PersistentUpdate {
+            Ok(Notification::PersistentUpdate {
                 operation, count, ..
             }) => {
                 assert_eq!(operation, "insert");
@@ -6814,7 +6736,7 @@ mod tests {
             .await
             .expect("query execution failed");
         match rx.try_recv() {
-            Ok(PersistentNotification::PersistentUpdate {
+            Ok(Notification::PersistentUpdate {
                 operation, count, ..
             }) => {
                 assert_eq!(operation, "delete");
@@ -7138,7 +7060,7 @@ mod tests {
 
     #[test]
     fn test_persistent_notification_serialize() {
-        let notif = PersistentNotification::PersistentUpdate {
+        let notif = Notification::PersistentUpdate {
             knowledge_graph: "test".to_string(),
             relation: "edge".to_string(),
             operation: "insert".to_string(),

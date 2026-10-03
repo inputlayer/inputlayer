@@ -86,7 +86,7 @@ fn program_commits_one_record_across_relations() {
     let storage = open(&temp);
     storage.insert_tuples_into(KG, "r", vec![t(1)]).unwrap();
     let before = wal_records(&temp).len();
-    let version = storage.get_snapshot_for(KG).unwrap().version;
+    let revision = storage.get_snapshot_for(KG).unwrap().revision;
 
     let commit = storage
         .commit_program(
@@ -120,7 +120,7 @@ fn program_commits_one_record_across_relations() {
     assert_eq!(records.len(), before + 1, "one WAL record per program");
     let record = records.last().unwrap();
     assert!(record.contains("default:r") && record.contains("default:s"));
-    assert_ne!(storage.get_snapshot_for(KG).unwrap().version, version);
+    assert_ne!(storage.get_snapshot_for(KG).unwrap().revision, revision);
     assert_eq!(rows(&storage, "r"), [t(2), t(3)]);
     assert_eq!(rows(&storage, "s"), [t(9)]);
 
@@ -137,7 +137,7 @@ fn late_arity_error_rejects_the_whole_program() {
         let storage = open(&temp);
         storage.insert_tuples_into(KG, "r", vec![t(1)]).unwrap();
         let before = wal_records(&temp);
-        let version = storage.get_snapshot_for(KG).unwrap().version;
+        let revision = storage.get_snapshot_for(KG).unwrap().revision;
 
         let err = storage
             .commit_program(
@@ -160,7 +160,7 @@ fn late_arity_error_rejects_the_whole_program() {
             "Arity mismatch for relation 'r': existing arity is 2, but trying to insert tuples with arity 1"
         );
         assert_eq!(wal_records(&temp), before);
-        assert_eq!(storage.get_snapshot_for(KG).unwrap().version, version);
+        assert_eq!(storage.get_snapshot_for(KG).unwrap().revision, revision);
         assert_eq!(rows(&storage, "r"), [t(1)]);
         assert!(rows(&storage, "s").is_empty());
     }
@@ -230,7 +230,7 @@ fn duplicates_and_changes_that_cancel_out_write_nothing() {
     let storage = open(&temp);
     storage.insert_tuples_into(KG, "r", vec![t(1)]).unwrap();
     let before = wal_records(&temp);
-    let version = storage.get_snapshot_for(KG).unwrap().version;
+    let revision = storage.get_snapshot_for(KG).unwrap().revision;
 
     let commit = storage
         .commit_program(
@@ -250,7 +250,7 @@ fn duplicates_and_changes_that_cancel_out_write_nothing() {
     assert_eq!(counts(&commit), [(0, 0), (1, 0), (0, 1), (0, 1), (1, 0)]);
     assert!(commit.relations.is_empty());
     assert_eq!(wal_records(&temp), before);
-    assert_eq!(storage.get_snapshot_for(KG).unwrap().version, version);
+    assert_eq!(storage.get_snapshot_for(KG).unwrap().revision, revision);
     assert_eq!(rows(&storage, "r"), [t(1)]);
 }
 

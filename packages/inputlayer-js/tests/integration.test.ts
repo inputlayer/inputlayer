@@ -21,7 +21,12 @@ import {
   compileDelete,
   compileConditionalDelete,
   compileRule,
+  QueryError,
+  StatementFailedError,
 } from '../src/index';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const SERVER_URL = process.env.INPUTLAYER_TEST_SERVER ?? '';
 const USERNAME = process.env.INPUTLAYER_TEST_USER ?? 'admin';
@@ -186,8 +191,13 @@ describe.skipIf(SKIP)('Integration: Insert & Query', () => {
 
   it('queries with ordering and limit', async () => {
     const kg = client.knowledgeGraph(kg_name);
-    const result = await kg.execute('?employee(Id, Name, Dept, Salary:desc, Active) :limit 2');
-    expect(result.length).toBeLessThanOrEqual(2);
+    // IQL orders and limits inside an aggregate rule head.
+    const result = await kg.execute(
+      'top2(top_k<2, Id, Salary:desc>) <- employee(Id, Name, Dept, Salary, Active)\n?top2(Id, Salary)',
+    );
+    expect(result.length).toBe(2);
+    const salaries = result.toTuples().map((row) => Number(row[1]));
+    expect(salaries).toEqual([...salaries].sort((a, b) => b - a));
   });
 });
 
@@ -746,5 +756,78 @@ describe.skipIf(SKIP)('Integration: Server Operations', () => {
   it('triggers compaction without error', async () => {
     const kg = client.knowledgeGraph('default');
     await kg.compact();
+  });
+});
+
+// ── Engine Failure Tests ────────────────────────────────────────────
+
+describe.skipIf(SKIP)('Integration: Engine failures', () => {
+  let client: InputLayer;
+  const kg_name = kgName('failures');
+  const Reach = relation('Reach', { src: 'int', dst: 'int' });
+
+  beforeAll(async () => {
+    client = new InputLayer(API_KEY ? { url: SERVER_URL, apiKey: API_KEY } : { url: SERVER_URL, username: USERNAME, password: PASSWORD });
+    await client.connect();
+    const kg = client.knowledgeGraph(kg_name);
+    await kg.define(Edge);
+    await kg.execute('+reach(X, Y) <- edge(X, Y)');
+  });
+
+  afterAll(async () => {
+    try { await client.dropKnowledgeGraph(kg_name); } catch {}
+    await client.close();
+  });
+
+  it('a failed insert rejects', async () => {
+    const kg = client.knowledgeGraph(kg_name);
+    const err = (await kg.insert(Reach, { src: 1, dst: 2 }).catch((e: unknown) => e)) as QueryError;
+    expect(err).toBeInstanceOf(QueryError);
+    expect(err).not.toBeInstanceOf(StatementFailedError);
+    expect(err.code).toBeDefined();
+    expect(err.message).toContain('derived relation');
+  });
+
+  it('insert counts the facts the engine stored', async () => {
+    const kg = client.knowledgeGraph(kg_name);
+    const first = await kg.insert(Edge, [{ src: 100, dst: 101 }, { src: 101, dst: 102 }]);
+    const again = await kg.insert(Edge, [{ src: 100, dst: 101 }, { src: 102, dst: 103 }]);
+    expect([first.count, again.count]).toEqual([2, 1]);
+  });
+
+  it('a partial failure names each failed statement', async () => {
+    const kg = client.knowledgeGraph(kg_name);
+    const err = (await kg
+      .execute('+edge[(200, 201)]\n.rel drop no_such_rel\n+edge[(201, 202)]')
+      .catch((e: unknown) => e)) as StatementFailedError;
+    expect(err).toBeInstanceOf(StatementFailedError);
+    expect(err.errors.map((e) => [e.index, e.code])).toEqual([[1, 'not_found']]);
+    // The engine ran the other statements.
+    expect((await kg.execute('?edge(200, Y)')).length).toBe(1);
+    expect((await kg.execute('?edge(201, Y)')).length).toBe(1);
+  });
+
+  it('a partial failure survives a chunked result', async () => {
+    const kg = client.knowledgeGraph(kg_name);
+    const pad = 'x'.repeat(64);
+    for (const start of [0, 10_000]) {
+      const rows = Array.from({ length: 10_000 }, (_, i) => `(${start + i}, "${pad}")`);
+      await kg.execute(`+big[${rows.join(', ')}]`);
+    }
+    const err = (await kg
+      .execute('.rel drop no_such_rel\n?big(Id, Pad)')
+      .catch((e: unknown) => e)) as StatementFailedError;
+    expect(err).toBeInstanceOf(StatementFailedError);
+    expect(err.errors.map((e) => [e.index, e.code])).toEqual([[0, 'not_found']]);
+    expect(err.result.rows).toHaveLength(20_000);
+  });
+
+  it('load rejects on a failed statement', async () => {
+    const kg = client.knowledgeGraph(kg_name);
+    const path = join(mkdtempSync(join(tmpdir(), 'il-load-')), 'seed.iql');
+    writeFileSync(path, '+edge[(300, 301)]\n+edge[(1, 2, 3)]\n');
+    const err = (await kg.load(path).catch((e: unknown) => e)) as StatementFailedError;
+    expect(err).toBeInstanceOf(StatementFailedError);
+    expect(err.errors.map((e) => [e.index, e.code])).toEqual([[1, 'validation']]);
   });
 });

@@ -7,12 +7,16 @@
 //! accumulated and checked against the *new* dependency set on completion, so
 //! a burst of commits costs one follow-up evaluation and the final state is
 //! never dropped.
+//!
+//! Every delta names the knowledge graph revision its refresh evaluated, so a
+//! subscription's pushes carry strictly increasing revisions after the
+//! snapshot's.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Serialize;
+use inputlayer_ws_protocol::SubscriptionPush;
 
-use super::{Dependencies, Refresh, Row, StandingQuery};
+use super::{Dependencies, Refresh, StandingQuery};
 
 /// Committed persistent changes in one knowledge graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,26 +42,6 @@ impl ChangeSet {
             }
         }
     }
-}
-
-/// Unsolicited message pushed to the subscriber.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum Push {
-    /// The result set changed.
-    SubscriptionDelta {
-        subscription: String,
-        knowledge_graph: String,
-        seq: u64,
-        columns: Vec<String>,
-        inserted: Vec<Row>,
-        retracted: Vec<Row>,
-    },
-    /// Re-evaluation failed; the subscription stays registered.
-    SubscriptionError {
-        subscription: String,
-        message: String,
-    },
 }
 
 /// An evaluation to run: the caller drives `view.refresh()` and hands the view
@@ -99,7 +83,8 @@ impl Dispatch {
 }
 
 struct Entry {
-    /// Distinguishes this registration from an earlier one with the same id.
+    /// Distinguishes this registration from an earlier one with the same id;
+    /// sent to the client as the subscription's generation.
     token: u64,
     knowledge_graph: String,
     seq: u64,
@@ -156,14 +141,15 @@ impl SubscriptionRegistry {
         Ok(())
     }
 
-    /// Register a subscription whose initial refresh already ran.
+    /// Register a subscription whose initial refresh already ran; returns its
+    /// generation, unique within this registry.
     pub fn add(
         &mut self,
         id: &str,
         knowledge_graph: &str,
         view: Box<dyn StandingQuery>,
         dependencies: Dependencies,
-    ) -> Result<(), String> {
+    ) -> Result<u64, String> {
         self.check_can_add(id)?;
         self.next_token += 1;
         self.entries.insert(
@@ -177,7 +163,26 @@ impl SubscriptionRegistry {
                 pending: None,
             },
         );
-        Ok(())
+        Ok(self.next_token)
+    }
+
+    /// Re-evaluate `id` whatever changed: its knowledge graph may have moved
+    /// past its last refresh without a notification reaching it. Returns the
+    /// evaluation to start when the subscription is idle; one in flight runs
+    /// again on completion.
+    pub fn invalidate(&mut self, id: &str) -> Option<Dispatch> {
+        let entry = self.entries.get_mut(id)?;
+        match entry.view.take() {
+            Some(view) => Some(Dispatch {
+                id: id.to_string(),
+                token: entry.token,
+                view,
+            }),
+            None => {
+                entry.pending = Some(ChangeSet::Everything);
+                None
+            }
+        }
     }
 
     /// Remove a subscription. Returns false if it did not exist.
@@ -232,7 +237,10 @@ impl SubscriptionRegistry {
 
     /// Accept a finished evaluation: returns the message to push (if the result
     /// changed or failed) and a follow-up evaluation (if changes arrived meanwhile).
-    pub fn on_complete(&mut self, completion: Completion) -> (Option<Push>, Option<Dispatch>) {
+    pub fn on_complete(
+        &mut self,
+        completion: Completion,
+    ) -> (Option<SubscriptionPush>, Option<Dispatch>) {
         let Completion {
             id,
             token,
@@ -249,18 +257,21 @@ impl SubscriptionRegistry {
                 entry.dependencies = refresh.dependencies;
                 changed.then(|| {
                     entry.seq += 1;
-                    Push::SubscriptionDelta {
+                    SubscriptionPush::SubscriptionDelta {
                         subscription: id.clone(),
+                        generation: token,
                         knowledge_graph: entry.knowledge_graph.clone(),
                         seq: entry.seq,
+                        revision: refresh.revision,
                         columns: refresh.columns,
                         inserted: refresh.inserted,
                         retracted: refresh.retracted,
                     }
                 })
             }
-            Err(message) => Some(Push::SubscriptionError {
+            Err(message) => Some(SubscriptionPush::SubscriptionError {
                 subscription: id.clone(),
+                generation: token,
                 message,
             }),
         };
@@ -306,6 +317,14 @@ mod tests {
             inserted: rows(inserted),
             retracted: rows(retracted),
             dependencies: deps_on(relation),
+            revision: 0,
+        }
+    }
+
+    fn at(revision: u64, refresh: Refresh) -> Refresh {
+        Refresh {
+            revision,
+            ..refresh
         }
     }
 
@@ -320,7 +339,7 @@ mod tests {
     async fn complete(
         registry: &mut SubscriptionRegistry,
         d: Dispatch,
-    ) -> (Option<Push>, Option<Dispatch>) {
+    ) -> (Option<SubscriptionPush>, Option<Dispatch>) {
         registry.on_complete(d.run().await)
     }
 
@@ -335,7 +354,7 @@ mod tests {
             assert_eq!(dispatches.len(), 1);
             let (push, follow_up) = complete(&mut registry, dispatches.remove(0)).await;
             assert!(
-                matches!(push, Some(Push::SubscriptionDelta { seq, .. }) if seq == expected_seq)
+                matches!(push, Some(SubscriptionPush::SubscriptionDelta { seq, .. }) if seq == expected_seq)
             );
             assert!(follow_up.is_none());
         }
@@ -367,9 +386,15 @@ mod tests {
                 .is_empty());
         }
         let (push, follow_up) = complete(&mut registry, first).await;
-        assert!(matches!(push, Some(Push::SubscriptionDelta { seq: 1, .. })));
+        assert!(matches!(
+            push,
+            Some(SubscriptionPush::SubscriptionDelta { seq: 1, .. })
+        ));
         let (push, follow_up) = complete(&mut registry, follow_up.unwrap()).await;
-        assert!(matches!(push, Some(Push::SubscriptionDelta { seq: 2, .. })));
+        assert!(matches!(
+            push,
+            Some(SubscriptionPush::SubscriptionDelta { seq: 2, .. })
+        ));
         assert!(follow_up.is_none());
     }
 
@@ -390,7 +415,10 @@ mod tests {
         let (push, follow_up) = complete(&mut registry, first).await;
         assert!(push.is_none(), "unchanged result pushes nothing");
         let (push, _) = complete(&mut registry, follow_up.unwrap()).await;
-        assert!(matches!(push, Some(Push::SubscriptionDelta { seq: 1, .. })));
+        assert!(matches!(
+            push,
+            Some(SubscriptionPush::SubscriptionDelta { seq: 1, .. })
+        ));
     }
 
     #[tokio::test]
@@ -403,8 +431,9 @@ mod tests {
         let (push, _) = complete(&mut registry, d).await;
         assert_eq!(
             push,
-            Some(Push::SubscriptionError {
+            Some(SubscriptionPush::SubscriptionError {
                 subscription: "s".to_string(),
+                generation: 1,
                 message: "boom".to_string()
             })
         );
@@ -413,7 +442,10 @@ mod tests {
             .on_change("kg", &ChangeSet::relation("a"))
             .remove(0);
         let (push, _) = complete(&mut registry, d).await;
-        assert!(matches!(push, Some(Push::SubscriptionDelta { seq: 1, .. })));
+        assert!(matches!(
+            push,
+            Some(SubscriptionPush::SubscriptionDelta { seq: 1, .. })
+        ));
     }
 
     #[tokio::test]
@@ -423,9 +455,10 @@ mod tests {
             .on_change("kg", &ChangeSet::relation("a"))
             .remove(0);
         assert!(registry.remove("s"));
-        registry
+        let generation = registry
             .add("s", "kg", Box::new(Scripted(vec![])), deps_on("a"))
             .unwrap();
+        assert_eq!(generation, 2, "a reused name gets a new generation");
         let (push, follow_up) = complete(&mut registry, stale).await;
         assert!(push.is_none() && follow_up.is_none());
     }
@@ -449,29 +482,43 @@ mod tests {
         assert_eq!(registry.on_unknown_changes().len(), 1);
     }
 
-    #[test]
-    fn test_push_serializes_with_protocol_type_tags() {
-        let delta = Push::SubscriptionDelta {
-            subscription: "s".to_string(),
-            knowledge_graph: "kg".to_string(),
-            seq: 1,
-            columns: vec!["x".to_string()],
-            inserted: vec![vec![serde_json::json!(1)]],
-            retracted: vec![],
-        };
-        assert_eq!(
-            serde_json::to_value(&delta).unwrap(),
-            serde_json::json!({"type": "subscription_delta", "subscription": "s",
-                "knowledge_graph": "kg", "seq": 1, "columns": ["x"],
-                "inserted": [[1]], "retracted": []})
-        );
-        let error = Push::SubscriptionError {
-            subscription: "s".to_string(),
-            message: "m".to_string(),
-        };
-        assert_eq!(
-            serde_json::to_value(&error).unwrap(),
-            serde_json::json!({"type": "subscription_error", "subscription": "s", "message": "m"})
-        );
+    #[tokio::test]
+    async fn test_registry_delta_names_the_revision_it_evaluated() {
+        let mut registry = registry_with(vec![Ok(at(42, refresh(&[1], &[], "a")))]);
+        let d = registry
+            .on_change("kg", &ChangeSet::relation("a"))
+            .remove(0);
+        let (push, _) = complete(&mut registry, d).await;
+        assert!(matches!(
+            push,
+            Some(SubscriptionPush::SubscriptionDelta {
+                seq: 1,
+                revision: 42,
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_registry_invalidate_dispatches_idle_and_reruns_in_flight() {
+        let mut registry = registry_with(vec![
+            Ok(refresh(&[], &[], "a")),
+            Ok(refresh(&[1], &[], "a")),
+            Ok(refresh(&[2], &[], "a")),
+        ]);
+        // Idle: evaluated now, although nothing it depends on was announced.
+        let idle = registry
+            .invalidate("s")
+            .expect("idle subscription dispatches");
+        assert!(registry.invalidate("s").is_none(), "in flight: rerun later");
+        let (push, follow_up) = complete(&mut registry, idle).await;
+        assert!(push.is_none());
+        let (push, follow_up) = complete(&mut registry, follow_up.expect("rerun")).await;
+        assert!(matches!(
+            push,
+            Some(SubscriptionPush::SubscriptionDelta { seq: 1, .. })
+        ));
+        assert!(follow_up.is_none());
+        assert!(registry.invalidate("missing").is_none());
     }
 }

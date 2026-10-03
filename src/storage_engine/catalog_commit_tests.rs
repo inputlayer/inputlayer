@@ -150,7 +150,7 @@ fn late_failure_leaves_data_schema_and_rules_unchanged_now_and_after_restart() {
             .unwrap();
         let files = catalog_files(&temp);
         let records = wal_records(&temp);
-        let version = storage.get_snapshot_for(KG).unwrap().version;
+        let revision = storage.get_snapshot_for(KG).unwrap().revision;
 
         let mut failing = migration();
         // Arity mismatch with the existing two-column rule `pair`.
@@ -162,7 +162,7 @@ fn late_failure_leaves_data_schema_and_rules_unchanged_now_and_after_restart() {
         assert_eq!(statement, 3);
         assert!(error.to_string().contains("Arity mismatch"), "{error}");
 
-        assert_eq!(storage.get_snapshot_for(KG).unwrap().version, version);
+        assert_eq!(storage.get_snapshot_for(KG).unwrap().revision, revision);
         assert_eq!(wal_records(&temp), records);
         assert_eq!(catalog_files(&temp), files);
         assert!(!storage.has_schema_in(KG, "item").unwrap());

@@ -17,6 +17,7 @@ from inputlayer._protocol import (
     ErrorResponse,
     ExecuteMessage,
     LoginMessage,
+    NoticeResponse,
     NotificationResponse,
     PingMessage,
     PongResponse,
@@ -24,12 +25,17 @@ from inputlayer._protocol import (
     ResultEndResponse,
     ResultResponse,
     ResultStartResponse,
+    ServerMessage,
+    SubscriptionDeltaResponse,
+    SubscriptionErrorResponse,
     deserialize_message,
 )
 from inputlayer.exceptions import (
     AuthenticationError,
     ConnectionError,
     InternalError,
+    QueryError,
+    StatementFailedError,
 )
 from inputlayer.notifications import NotificationDispatcher, NotificationEvent
 
@@ -169,7 +175,7 @@ class Connection:
         raw = await self._ws.recv()
         response = deserialize_message(raw)
 
-        if isinstance(response, AuthErrorResponse):
+        if isinstance(response, (AuthErrorResponse, NoticeResponse)):
             raise AuthenticationError(response.message)
         if isinstance(response, AuthenticatedResponse):
             self._session_id = response.session_id
@@ -213,9 +219,7 @@ class Connection:
 
         async with self._get_execute_lock():
             if preamble is not None:
-                result = await self._send_and_recv(preamble)
-                if result.switched_kg:
-                    self._current_kg = result.switched_kg
+                await self._send_and_recv(preamble)
             return await self._send_and_recv(program)
 
     async def execute_sequence(self, programs: list[str]) -> list[ResultResponse]:
@@ -223,18 +227,13 @@ class Connection:
 
         Used for compound operations (aggregate query setup/run/cleanup,
         OR-split queries, etc.) where interleaving would corrupt state.
+        Stops at the first failed program and raises its error.
         """
         if not self._connected or not self._ws:
             raise ConnectionError("Not connected")
 
         async with self._get_execute_lock():
-            results = []
-            for program in programs:
-                result = await self._send_and_recv(program)
-                if result.switched_kg:
-                    self._current_kg = result.switched_kg
-                results.append(result)
-            return results
+            return [await self._send_and_recv(program) for program in programs]
 
     async def _send_and_recv(self, program: str) -> ResultResponse:
         """Send a single program and read its result. Caller must hold the lock."""
@@ -244,38 +243,41 @@ class Connection:
         return await self._read_result()
 
     async def _read_result(self) -> ResultResponse:
-        """Read messages until we get a complete result, dispatching notifications."""
+        """Read messages until we get a complete result, dispatching notifications.
+
+        Raises ``QueryError`` for an ``error`` frame and
+        ``StatementFailedError`` for a result whose ``errors`` is not empty,
+        so no caller can read a failed program as data.
+        """
         assert self._ws is not None
         while True:
             raw = await self._ws.recv()
             response = deserialize_message(raw)
 
-            if isinstance(response, NotificationResponse):
-                self._dispatch_notification(response)
+            if self._handle_push(response):
                 continue
 
             if isinstance(response, PongResponse):
                 continue
 
             if isinstance(response, ResultResponse):
-                if response.switched_kg:
-                    self._current_kg = response.switched_kg
-                return response
+                return self._accept(response)
 
             if isinstance(response, ErrorResponse):
-                return ResultResponse(
-                    columns=["error"],
-                    rows=[[response.message]],
-                    row_count=1,
-                    total_count=1,
-                    truncated=False,
-                    execution_time_ms=0,
-                )
+                raise _query_error(response)
 
             if isinstance(response, ResultStartResponse):
-                return await self._assemble_stream(response)
+                return self._accept(await self._assemble_stream(response))
 
             raise InternalError(f"Unexpected message during result read: {response!r}")
+
+    def _accept(self, result: ResultResponse) -> ResultResponse:
+        """Track a KG switch, then raise if any statement failed."""
+        if result.switched_kg:
+            self._current_kg = result.switched_kg
+        if result.errors:
+            raise StatementFailedError(result.errors, result)
+        return result
 
     async def _assemble_stream(self, start: ResultStartResponse) -> ResultResponse:
         """Assemble a streamed result from chunks."""
@@ -287,8 +289,7 @@ class Connection:
             raw = await self._ws.recv()
             response = deserialize_message(raw)
 
-            if isinstance(response, NotificationResponse):
-                self._dispatch_notification(response)
+            if self._handle_push(response):
                 continue
 
             if isinstance(response, ResultChunkResponse):
@@ -298,8 +299,6 @@ class Connection:
                 continue
 
             if isinstance(response, ResultEndResponse):
-                if start.switched_kg:
-                    self._current_kg = start.switched_kg
                 return ResultResponse(
                     columns=start.columns,
                     rows=all_rows,
@@ -311,11 +310,32 @@ class Connection:
                     metadata=start.metadata,
                     switched_kg=start.switched_kg,
                     proof_trees=start.proof_trees,
+                    timing_breakdown=start.timing_breakdown,
+                    errors=start.errors,
                 )
+
+            if isinstance(response, ErrorResponse):
+                raise _query_error(response)
 
             raise InternalError(f"Unexpected message during streaming: {response!r}")
 
     # ── Notification handling ─────────────────────────────────────────
+
+    def _handle_push(self, response: ServerMessage) -> bool:
+        """Handle a frame the server sent unprompted; ``False`` for replies.
+
+        Notices are logged (a closing one is followed by the socket closing,
+        which fails the pending call). Subscription pushes have no consumer
+        in this SDK yet and are dropped.
+        """
+        if isinstance(response, NotificationResponse):
+            self._dispatch_notification(response)
+            return True
+        if isinstance(response, NoticeResponse):
+            level = logging.WARNING if response.closes_connection else logging.INFO
+            logger.log(level, "server notice (%s): %s", response.code, response.message)
+            return True
+        return isinstance(response, (SubscriptionDeltaResponse, SubscriptionErrorResponse))
 
     def _dispatch_notification(self, notif: NotificationResponse) -> None:
         event = NotificationEvent(
@@ -337,12 +357,8 @@ class Connection:
         assert self._ws is not None
         try:
             async for raw in self._ws:
-                try:
-                    response = deserialize_message(raw)
-                    if isinstance(response, NotificationResponse):
-                        self._dispatch_notification(response)
-                except Exception:
-                    pass
+                with contextlib.suppress(Exception):
+                    self._handle_push(deserialize_message(raw))
         except asyncio.CancelledError:
             pass
         except Exception:
@@ -373,3 +389,11 @@ class Connection:
             raise ConnectionError("Not connected")
         async with self._get_execute_lock():
             await self._ws.send(PingMessage().to_json())
+
+
+def _query_error(response: ErrorResponse) -> QueryError:
+    return QueryError(
+        response.message,
+        code=response.code,
+        validation_errors=response.validation_errors,
+    )

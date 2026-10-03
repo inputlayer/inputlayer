@@ -1,0 +1,22 @@
+[package]
+name = "inputlayer-ws-protocol"
+version = "0.1.0"
+edition = "2021"
+description = "Frame types of the InputLayer engine's /ws protocol, shared by the engine and its Rust clients"
+license = "Elastic-2.0"
+repository = "https://github.com/inputlayer/inputlayer"
+rust-version = "1.88"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+missing_errors_doc = "allow"
+must_use_candidate = "allow"
+module_name_repetitions = "allow"
+large_enum_variant = "allow"
+doc_markdown = "allow"

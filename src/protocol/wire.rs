@@ -293,30 +293,7 @@ impl ColumnDef {
     }
 }
 
-/// Why a statement failed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ErrorCode {
-    /// The input was rejected (schema, size limits, bad values or rules).
-    Validation,
-    /// The named KG, relation, rule or index does not exist.
-    NotFound,
-    /// The statement conflicts with current state (already exists, in use).
-    Conflict,
-    /// The statement cannot run on this path (client-only, WS-only).
-    Unsupported,
-    /// The engine failed to apply a valid statement.
-    Internal,
-}
-
-/// A failed statement of a program.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StatementError {
-    /// 0-based statement index in the program.
-    pub index: usize,
-    pub code: ErrorCode,
-    pub message: String,
-}
+pub use inputlayer_ws_protocol::{ErrorCode, StatementError};
 
 // Query Result
 /// Result of a query execution.

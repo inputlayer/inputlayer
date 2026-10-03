@@ -1,13 +1,28 @@
 """WebSocket wire protocol: message serialization and deserialization.
 
-Matches the AsyncAPI spec at ``docs/spec/asyncapi.yaml``.
+Matches the AsyncAPI spec at ``docs/spec/asyncapi.yaml`` (protocol version 2,
+defined by the ``inputlayer-ws-protocol`` crate).
+
+Any request may carry an ``id``; every reply to it (``authenticated``,
+``auth_error``, ``result``, ``result_start``/``result_chunk``/``result_end``,
+``error``, ``pong``) echoes it. Pushes (notifications, subscription deltas) and
+``notice`` frames never carry one and are never replies.
 """
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
+
+PROTOCOL_VERSION = 2
+"""The ``/ws`` protocol version this SDK speaks (``authenticated.protocol_version``)."""
+
+
+def _with_id(frame: dict[str, Any], request_id: str | None) -> str:
+    if request_id is not None:
+        frame["id"] = request_id
+    return json.dumps(frame)
 
 # ── Client → Server messages ──────────────────────────────────────────
 
@@ -15,41 +30,46 @@ from typing import Any
 class LoginMessage:
     username: str
     password: str
+    id: str | None = None
 
     def to_json(self) -> str:
-        return json.dumps({
+        return _with_id({
             "type": "login",
             "username": self.username,
             "password": self.password,
-        })
+        }, self.id)
 
 
 @dataclass(frozen=True)
 class AuthenticateMessage:
     api_key: str
+    id: str | None = None
 
     def to_json(self) -> str:
-        return json.dumps({
+        return _with_id({
             "type": "authenticate",
             "api_key": self.api_key,
-        })
+        }, self.id)
 
 
 @dataclass(frozen=True)
 class ExecuteMessage:
     program: str
+    id: str | None = None
 
     def to_json(self) -> str:
-        return json.dumps({
+        return _with_id({
             "type": "execute",
             "program": self.program,
-        })
+        }, self.id)
 
 
 @dataclass(frozen=True)
 class PingMessage:
+    id: str | None = None
+
     def to_json(self) -> str:
-        return json.dumps({"type": "ping"})
+        return _with_id({"type": "ping"}, self.id)
 
 
 # ── Server → Client messages ─────────────────────────────────────────
@@ -60,11 +80,52 @@ class AuthenticatedResponse:
     knowledge_graph: str
     version: str
     role: str
+    protocol_version: int
+    stream_epoch: str
+    """This engine run's id; notification ``seq`` numbers belong to it. Pass it
+    back with ``last_seq`` when reconnecting."""
+    id: str | None = None
 
 
 @dataclass(frozen=True)
 class AuthErrorResponse:
     message: str
+    id: str | None = None
+
+
+ErrorCode = Literal[
+    "validation",
+    "not_found",
+    "conflict",
+    "unsupported",
+    "internal",
+    "invalid_request",
+    "rate_limited",
+]
+"""Why the engine rejected a statement or request (``code`` on ``error`` and ``errors[]``).
+
+``invalid_request`` and ``rate_limited`` reject a whole request before it runs."""
+
+
+@dataclass(frozen=True)
+class StatementError:
+    """A failed statement of a multi-statement program (0-based ``index``)."""
+
+    index: int
+    code: ErrorCode
+    message: str
+
+
+@dataclass(frozen=True)
+class Subscribed:
+    """The subscription a ``.subscribe`` registered; pushes for it carry this generation.
+
+    ``revision`` is the knowledge graph revision the snapshot is the exact answer
+    at; every later delta names a higher one."""
+
+    subscription: str
+    generation: int
+    revision: int
 
 
 @dataclass(frozen=True)
@@ -80,14 +141,17 @@ class ResultResponse:
     switched_kg: str | None = None
     proof_trees: list[dict[str, Any]] | None = None
     timing_breakdown: dict[str, Any] | None = None
-    errors: list[dict[str, Any]] | None = None
+    errors: list[StatementError] | None = None
+    subscribed: Subscribed | None = None
+    id: str | None = None
 
 
 @dataclass(frozen=True)
 class ErrorResponse:
     message: str
     validation_errors: list[dict[str, Any]] | None = None
-    code: str | None = None
+    code: ErrorCode | None = None
+    id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -100,7 +164,8 @@ class ResultStartResponse:
     switched_kg: str | None = None
     proof_trees: list[dict[str, Any]] | None = None
     timing_breakdown: dict[str, Any] | None = None
-    errors: list[dict[str, Any]] | None = None
+    errors: list[StatementError] | None = None
+    id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -108,17 +173,70 @@ class ResultChunkResponse:
     rows: list[list[Any]]
     chunk_index: int
     row_provenance: list[str] | None = None
+    id: str | None = None
 
 
 @dataclass(frozen=True)
 class ResultEndResponse:
     row_count: int
     chunk_count: int
+    id: str | None = None
 
 
 @dataclass(frozen=True)
 class PongResponse:
-    pass
+    id: str | None = None
+
+
+NoticeCode = Literal[
+    "notifications_missed",
+    "replay_gap",
+    "slow_consumer",
+    "idle_timeout",
+    "lifetime_exceeded",
+    "auth_timeout",
+    "credential_revoked",
+    "server_shutdown",
+]
+"""A connection event. The server closes the connection after every one but
+``notifications_missed`` and ``replay_gap``."""
+
+
+@dataclass(frozen=True)
+class NoticeResponse:
+    """A connection event announced by the server; never a reply."""
+
+    code: NoticeCode
+    message: str
+
+    @property
+    def closes_connection(self) -> bool:
+        return self.code not in ("notifications_missed", "replay_gap")
+
+
+@dataclass(frozen=True)
+class SubscriptionDeltaResponse:
+    """Rows that entered and left a standing query's result."""
+
+    subscription: str
+    generation: int
+    knowledge_graph: str
+    seq: int
+    """Delta number within the generation, from 1, without gaps."""
+    revision: int
+    """The knowledge graph revision the result reaches with this delta."""
+    columns: list[str]
+    inserted: list[list[Any]]
+    retracted: list[list[Any]]
+
+
+@dataclass(frozen=True)
+class SubscriptionErrorResponse:
+    """A standing query failed to re-evaluate; it stays registered."""
+
+    subscription: str
+    generation: int
+    message: str
 
 
 @dataclass(frozen=True)
@@ -149,8 +267,16 @@ ServerMessage = (
     | ResultChunkResponse
     | ResultEndResponse
     | PongResponse
+    | NoticeResponse
     | NotificationResponse
+    | SubscriptionDeltaResponse
+    | SubscriptionErrorResponse
 )
+
+PushMessage = (
+    NoticeResponse | NotificationResponse | SubscriptionDeltaResponse | SubscriptionErrorResponse
+)
+"""Frames the server sends unprompted: never the reply to a request."""
 
 
 # ── Serialization / Deserialization ───────────────────────────────────
@@ -160,6 +286,25 @@ def serialize_message(
 ) -> str:
     """Serialize a client message to JSON."""
     return msg.to_json()
+
+
+def _statement_errors(raw: list[dict[str, Any]] | None) -> list[StatementError] | None:
+    if raw is None:
+        return None
+    return [
+        StatementError(index=e["index"], code=e["code"], message=e["message"])
+        for e in raw
+    ]
+
+
+def _subscribed(raw: dict[str, Any] | None) -> Subscribed | None:
+    if raw is None:
+        return None
+    return Subscribed(
+        subscription=raw["subscription"],
+        generation=raw["generation"],
+        revision=raw["revision"],
+    )
 
 
 def deserialize_message(data: str | bytes) -> ServerMessage:
@@ -175,9 +320,12 @@ def deserialize_message(data: str | bytes) -> ServerMessage:
             knowledge_graph=obj["knowledge_graph"],
             version=obj["version"],
             role=obj["role"],
+            protocol_version=obj["protocol_version"],
+            stream_epoch=obj["stream_epoch"],
+            id=obj.get("id"),
         )
     if msg_type == "auth_error":
-        return AuthErrorResponse(message=obj["message"])
+        return AuthErrorResponse(message=obj["message"], id=obj.get("id"))
     if msg_type == "result":
         return ResultResponse(
             columns=obj["columns"],
@@ -191,13 +339,16 @@ def deserialize_message(data: str | bytes) -> ServerMessage:
             switched_kg=obj.get("switched_kg"),
             proof_trees=obj.get("proof_trees"),
             timing_breakdown=obj.get("timing_breakdown"),
-            errors=obj.get("errors"),
+            errors=_statement_errors(obj.get("errors")),
+            subscribed=_subscribed(obj.get("subscribed")),
+            id=obj.get("id"),
         )
     if msg_type == "error":
         return ErrorResponse(
             message=obj["message"],
             validation_errors=obj.get("validation_errors"),
             code=obj.get("code"),
+            id=obj.get("id"),
         )
     if msg_type == "result_start":
         return ResultStartResponse(
@@ -209,21 +360,43 @@ def deserialize_message(data: str | bytes) -> ServerMessage:
             switched_kg=obj.get("switched_kg"),
             proof_trees=obj.get("proof_trees"),
             timing_breakdown=obj.get("timing_breakdown"),
-            errors=obj.get("errors"),
+            errors=_statement_errors(obj.get("errors")),
+            id=obj.get("id"),
         )
     if msg_type == "result_chunk":
         return ResultChunkResponse(
             rows=obj["rows"],
             chunk_index=obj["chunk_index"],
             row_provenance=obj.get("row_provenance"),
+            id=obj.get("id"),
         )
     if msg_type == "result_end":
         return ResultEndResponse(
             row_count=obj["row_count"],
             chunk_count=obj["chunk_count"],
+            id=obj.get("id"),
         )
     if msg_type == "pong":
-        return PongResponse()
+        return PongResponse(id=obj.get("id"))
+    if msg_type == "notice":
+        return NoticeResponse(code=obj["code"], message=obj["message"])
+    if msg_type == "subscription_delta":
+        return SubscriptionDeltaResponse(
+            subscription=obj["subscription"],
+            generation=obj["generation"],
+            knowledge_graph=obj["knowledge_graph"],
+            seq=obj["seq"],
+            revision=obj["revision"],
+            columns=obj["columns"],
+            inserted=obj["inserted"],
+            retracted=obj["retracted"],
+        )
+    if msg_type == "subscription_error":
+        return SubscriptionErrorResponse(
+            subscription=obj["subscription"],
+            generation=obj["generation"],
+            message=obj["message"],
+        )
     if msg_type in ("persistent_update", "rule_change", "kg_change", "schema_change"):
         return NotificationResponse(
             type=msg_type,

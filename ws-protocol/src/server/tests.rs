@@ -1,0 +1,191 @@
+use super::*;
+
+#[allow(clippy::unnecessary_wraps)] // reads as the `id` field it fills
+fn id(s: &str) -> Option<RequestId> {
+    Some(RequestId::new(s).unwrap())
+}
+
+fn result(id: Option<RequestId>) -> ServerFrame {
+    ServerFrame::Result(ResultFrame {
+        id,
+        columns: vec!["x".into()],
+        rows: vec![vec![serde_json::json!(1)]],
+        row_count: 1,
+        total_count: 1,
+        truncated: false,
+        execution_time_ms: 0,
+        row_provenance: Vec::new(),
+        metadata: None,
+        switched_kg: None,
+        proof_trees: None,
+        timing_breakdown: None,
+        errors: Vec::new(),
+        subscribed: None,
+    })
+}
+
+fn round_trip(frame: &ServerFrame) -> ServerFrame {
+    let json = serde_json::to_string(frame).unwrap();
+    serde_json::from_str(&json).unwrap_or_else(|e| panic!("{json}: {e}"))
+}
+
+#[test]
+fn every_reply_echoes_its_id() {
+    let replies = [
+        ServerFrame::Authenticated {
+            id: id("a"),
+            session_id: "s".into(),
+            knowledge_graph: "default".into(),
+            version: "0".into(),
+            role: "admin".into(),
+            protocol_version: crate::PROTOCOL_VERSION,
+            stream_epoch: "0123456789abcdef".into(),
+        },
+        ServerFrame::AuthError {
+            id: id("a"),
+            message: "no".into(),
+        },
+        result(id("a")),
+        ServerFrame::ResultStart(ResultStartFrame {
+            id: id("a"),
+            columns: Vec::new(),
+            total_count: 0,
+            truncated: false,
+            execution_time_ms: 0,
+            metadata: None,
+            switched_kg: None,
+            proof_trees: None,
+            timing_breakdown: None,
+            errors: Vec::new(),
+        }),
+        ServerFrame::ResultChunk {
+            id: id("a"),
+            rows: Vec::new(),
+            row_provenance: Vec::new(),
+            chunk_index: 0,
+        },
+        ServerFrame::ResultEnd {
+            id: id("a"),
+            row_count: 0,
+            chunk_count: 0,
+        },
+        ServerFrame::error(id("a"), Some(ErrorCode::InvalidRequest), "bad".into()),
+        ServerFrame::Pong { id: id("a") },
+    ];
+    for frame in replies {
+        let json = serde_json::to_value(&frame).unwrap();
+        assert_eq!(json["id"], "a", "{json}");
+        let parsed = round_trip(&frame);
+        assert_eq!(parsed, frame);
+        assert_eq!(parsed.class(), FrameClass::Reply);
+        assert_eq!(parsed.request_id(), id("a").as_ref());
+    }
+}
+
+#[test]
+fn replies_without_id_omit_it() {
+    assert_eq!(
+        serde_json::to_string(&ServerFrame::Pong { id: None }).unwrap(),
+        r#"{"type":"pong"}"#
+    );
+    let json = serde_json::to_value(result(None)).unwrap();
+    assert!(json.get("id").is_none(), "{json}");
+}
+
+#[test]
+fn notices_and_pushes_never_carry_an_id() {
+    let frames = [
+        ServerFrame::Notice {
+            code: NoticeCode::IdleTimeout,
+            message: "Idle timeout".into(),
+        },
+        ServerFrame::Subscription(SubscriptionPush::SubscriptionDelta {
+            subscription: "s".into(),
+            generation: 2,
+            knowledge_graph: "default".into(),
+            seq: 1,
+            revision: 12,
+            columns: vec!["x".into()],
+            inserted: vec![vec![serde_json::json!(1)]],
+            retracted: Vec::new(),
+        }),
+        ServerFrame::Subscription(SubscriptionPush::SubscriptionError {
+            subscription: "s".into(),
+            generation: 2,
+            message: "boom".into(),
+        }),
+        ServerFrame::Notification(Notification::KgChange {
+            knowledge_graph: "kg".into(),
+            operation: "created".into(),
+            timestamp_ms: 1,
+            seq: 9,
+        }),
+    ];
+    for frame in frames {
+        let parsed = round_trip(&frame);
+        assert_eq!(parsed, frame);
+        assert_ne!(parsed.class(), FrameClass::Reply);
+        assert_eq!(parsed.request_id(), None);
+    }
+}
+
+#[test]
+fn notice_wire_shape() {
+    let frame = ServerFrame::Notice {
+        code: NoticeCode::NotificationsMissed,
+        message: "Missed 3 notification(s)".into(),
+    };
+    assert_eq!(
+        serde_json::to_string(&frame).unwrap(),
+        r#"{"type":"notice","code":"notifications_missed","message":"Missed 3 notification(s)"}"#
+    );
+    assert!(!NoticeCode::NotificationsMissed.closes_connection());
+    assert!(!NoticeCode::ReplayGap.closes_connection());
+    assert!(NoticeCode::IdleTimeout.closes_connection());
+    assert_eq!(
+        serde_json::to_value(NoticeCode::ReplayGap).unwrap(),
+        serde_json::json!("replay_gap")
+    );
+}
+
+#[test]
+fn push_wire_shape() {
+    let json = r#"{"type":"subscription_delta","subscription":"s","generation":4,
+        "knowledge_graph":"default","seq":1,"revision":9,"columns":["X"],"inserted":[[3]],
+        "retracted":[]}"#;
+    let frame: ServerFrame = serde_json::from_str(json).unwrap();
+    let ServerFrame::Subscription(push) = &frame else {
+        panic!("{frame:?}");
+    };
+    assert_eq!(push.subscription(), ("s", 4));
+
+    let json = r#"{"type":"persistent_update","knowledge_graph":"default","relation":"edge",
+        "operation":"insert","count":5,"timestamp_ms":1,"seq":42}"#;
+    let ServerFrame::Notification(notification) = serde_json::from_str(json).unwrap() else {
+        panic!("not a notification");
+    };
+    assert_eq!(notification.knowledge_graph(), "default");
+    assert_eq!(notification.seq(), 42);
+}
+
+#[test]
+fn subscribe_reply_names_the_subscription() {
+    let ServerFrame::Result(mut frame) = result(id("r")) else {
+        unreachable!()
+    };
+    frame.subscribed = Some(Subscribed {
+        subscription: "s".into(),
+        generation: 7,
+        revision: 3,
+    });
+    let json = serde_json::to_value(ServerFrame::Result(frame)).unwrap();
+    assert_eq!(
+        json["subscribed"],
+        serde_json::json!({"subscription": "s", "generation": 7, "revision": 3})
+    );
+}
+
+#[test]
+fn unknown_frame_types_are_rejected() {
+    assert!(serde_json::from_str::<ServerFrame>(r#"{"type":"bogus"}"#).is_err());
+}

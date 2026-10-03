@@ -12,7 +12,6 @@ from inputlayer.exceptions import (
     QueryError,
     QueryTimeoutError,
 )
-from inputlayer.integrations.langgraph._utils import is_error_response
 
 logger = logging.getLogger(__name__)
 
@@ -109,16 +108,6 @@ def kg_router(
                     )
                     continue
                 result = await kg.execute(q)
-                if is_error_response(result):
-                    err_msg = result.rows[0][0] if result.rows[0] else "unknown"
-                    logger.warning(
-                        "kg_router: branch %r query returned error: %s - "
-                        "skipping to next branch. Query: %s",
-                        target,
-                        err_msg,
-                        q[:100] + ("..." if len(q) > 100 else ""),
-                    )
-                    continue
                 if result.rows:
                     return target
             except (

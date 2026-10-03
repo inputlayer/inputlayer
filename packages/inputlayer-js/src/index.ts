@@ -58,6 +58,8 @@ export {
   RuleNotFoundError,
   IndexNotFoundError,
   InternalError,
+  QueryError,
+  StatementFailedError,
 } from './errors.js';
 
 // Result
@@ -132,11 +134,24 @@ export type {
   ResultChunkResponse,
   ResultEndResponse,
   PongResponse,
+  NoticeCode,
+  NoticeResponse,
   NotificationResponse,
+  PushMessage,
+  Subscribed,
+  SubscriptionDeltaResponse,
+  SubscriptionErrorResponse,
   TimingBreakdown,
   RuleTiming,
+  ErrorCode,
+  StatementError,
 } from './protocol.js';
-export { serializeMessage, deserializeMessage } from './protocol.js';
+export {
+  PROTOCOL_VERSION,
+  serializeMessage,
+  deserializeMessage,
+  isPush,
+} from './protocol.js';
 
 // Connection (for advanced usage)
 export { Connection } from './connection.js';

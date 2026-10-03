@@ -9,26 +9,28 @@ use std::sync::Arc;
 use tokio::task::JoinSet;
 use tracing::{debug, warn};
 
-use crate::auth::AuthIdentity;
-use crate::protocol::handler::PersistentNotification;
+use inputlayer_ws_protocol::SubscriptionPush;
+
+use crate::auth::Principal;
+use crate::protocol::handler::Notification;
 use crate::protocol::Handler;
 
 use super::{
-    ChangeSet, Completion, Dispatch, Push, ReevaluatingQuery, Refresh, StandingQuery,
+    ChangeSet, Completion, Dispatch, ReevaluatingQuery, Refresh, StandingQuery,
     SubscriptionRegistry,
 };
 
 /// Subscriptions owned by one WebSocket connection.
 pub struct ConnectionSubscriptions {
     handler: Arc<Handler>,
-    auth: Option<AuthIdentity>,
+    auth: Option<Principal>,
     registry: SubscriptionRegistry,
     in_flight: JoinSet<Completion>,
 }
 
 impl ConnectionSubscriptions {
     /// Empty set, limited by `http.rate_limit.ws_max_subscriptions`.
-    pub fn new(handler: Arc<Handler>, auth: Option<AuthIdentity>) -> Self {
+    pub fn new(handler: Arc<Handler>, auth: Option<Principal>) -> Self {
         let limit = handler.config().http.rate_limit.ws_max_subscriptions;
         Self {
             handler,
@@ -38,35 +40,60 @@ impl ConnectionSubscriptions {
         }
     }
 
-    /// Register `id` for `query` on `knowledge_graph`; returns the initial snapshot.
+    /// Register `id` for `query` on `knowledge_graph`; returns the initial
+    /// snapshot and the subscription's generation.
     pub async fn subscribe(
         &mut self,
         knowledge_graph: &str,
         id: &str,
         query: &str,
-    ) -> Result<Refresh, String> {
+    ) -> Result<(Refresh, u64), String> {
         self.registry.check_can_add(id)?;
-        let mut view = ReevaluatingQuery::new(
+        let view = ReevaluatingQuery::new(
             Arc::clone(&self.handler),
             knowledge_graph,
             query,
             self.auth.clone(),
         )?;
+        self.register(knowledge_graph, id, Box::new(view)).await
+    }
+
+    /// Take `view`'s initial snapshot and register it as `id`.
+    ///
+    /// The snapshot is the query's answer at its revision. A commit published
+    /// after that revision but announced before the subscription existed would
+    /// reach no one, so registration compares the knowledge graph's current
+    /// revision and re-evaluates at once when it moved on.
+    async fn register(
+        &mut self,
+        knowledge_graph: &str,
+        id: &str,
+        mut view: Box<dyn StandingQuery>,
+    ) -> Result<(Refresh, u64), String> {
         self.handler.subscription_metrics().record_evaluation();
         let snapshot = view.refresh().await?;
-        self.registry.add(
-            id,
-            knowledge_graph,
-            Box::new(view),
-            snapshot.dependencies.clone(),
-        )?;
+        let generation =
+            self.registry
+                .add(id, knowledge_graph, view, snapshot.dependencies.clone())?;
         self.handler.subscription_metrics().add_active(1);
         debug!(
             subscription = id,
             kg = knowledge_graph,
+            generation,
+            revision = snapshot.revision,
             "subscription_added"
         );
-        Ok(snapshot)
+        let moved_on = self
+            .handler
+            .get_storage()
+            .get_snapshot_for(knowledge_graph)
+            .map_or(true, |current| current.revision > snapshot.revision);
+        if moved_on {
+            if let Some(dispatch) = self.registry.invalidate(id) {
+                self.start(dispatch);
+            }
+        }
+        Ok((snapshot, generation))
     }
 
     /// Remove `id`; errors if it is not registered.
@@ -85,30 +112,11 @@ impl ConnectionSubscriptions {
     }
 
     /// Feed a persistent-change notification.
-    pub fn on_notification(&mut self, notification: &PersistentNotification) {
+    pub fn on_notification(&mut self, notification: &Notification) {
         if self.registry.is_empty() {
             return;
         }
-        let (knowledge_graph, change) = match notification {
-            PersistentNotification::PersistentUpdate {
-                knowledge_graph,
-                relation,
-                ..
-            } => (knowledge_graph, ChangeSet::relation(relation)),
-            PersistentNotification::RuleChange {
-                knowledge_graph,
-                rule_name,
-                ..
-            } => (knowledge_graph, ChangeSet::relation(rule_name)),
-            PersistentNotification::SchemaChange {
-                knowledge_graph,
-                entity,
-                ..
-            } => (knowledge_graph, ChangeSet::relation(entity)),
-            PersistentNotification::KgChange {
-                knowledge_graph, ..
-            } => (knowledge_graph, ChangeSet::Everything),
-        };
+        let (knowledge_graph, change) = change_of(notification);
         for dispatch in self.registry.on_change(knowledge_graph, &change) {
             self.start(dispatch);
         }
@@ -133,7 +141,7 @@ impl ConnectionSubscriptions {
     }
 
     /// Accept a finished evaluation; returns the message to push, if any.
-    pub fn on_completion(&mut self, completion: Completion) -> Option<Push> {
+    pub fn on_completion(&mut self, completion: Completion) -> Option<SubscriptionPush> {
         let (push, follow_up) = self.registry.on_complete(completion);
         if let Some(dispatch) = follow_up {
             self.start(dispatch);
@@ -148,8 +156,36 @@ impl ConnectionSubscriptions {
     }
 }
 
+/// The knowledge graph a notification is about and what it changed there.
+pub fn change_of(notification: &Notification) -> (&str, ChangeSet) {
+    match notification {
+        Notification::PersistentUpdate {
+            knowledge_graph,
+            relation,
+            ..
+        } => (knowledge_graph, ChangeSet::relation(relation)),
+        Notification::RuleChange {
+            knowledge_graph,
+            rule_name,
+            ..
+        } => (knowledge_graph, ChangeSet::relation(rule_name)),
+        Notification::SchemaChange {
+            knowledge_graph,
+            entity,
+            ..
+        } => (knowledge_graph, ChangeSet::relation(entity)),
+        Notification::KgChange {
+            knowledge_graph, ..
+        } => (knowledge_graph, ChangeSet::Everything),
+    }
+}
+
 impl Drop for ConnectionSubscriptions {
     fn drop(&mut self) {
         self.clear();
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests;

@@ -36,6 +36,13 @@ impl Drop for Server {
 }
 
 async fn start_server(max_subscriptions: usize) -> Server {
+    start_server_with(max_subscriptions, |_| {}).await
+}
+
+async fn start_server_with(
+    max_subscriptions: usize,
+    configure: impl FnOnce(&mut Config),
+) -> Server {
     let tmp = TempDir::new().unwrap();
     let mut config = Config::default();
     config.storage.data_dir = tmp.path().join("data");
@@ -44,6 +51,7 @@ async fn start_server(max_subscriptions: usize) -> Server {
     config.http.rate_limit.ws_max_subscriptions = max_subscriptions;
     config.http.rate_limit.ws_max_messages_per_sec = 0;
     config.http.gui.enabled = false;
+    configure(&mut config);
     let handler = Arc::new(Handler::from_config(config).unwrap());
     handler.bootstrap_auth();
     handler.get_storage().create_knowledge_graph(KG).unwrap();
@@ -197,6 +205,25 @@ async fn test_subscribe_returns_snapshot_and_insert_produces_delta() {
     assert_eq!(delta["columns"], snapshot["columns"]);
     assert_eq!(rows(&delta["inserted"]), vec![json!([1, 4])]);
     assert!(rows(&delta["retracted"]).is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_snapshot_and_deltas_name_strictly_increasing_revisions() {
+    let server = start_server(64).await;
+    server.write("+n(1)").await;
+    let mut client = Client::connect(&server).await;
+    let snapshot = client.subscribe("n", "?n(X)").await;
+    let mut revision = snapshot["subscribed"]["revision"].as_u64().unwrap();
+    assert!(revision > 0, "{snapshot}");
+
+    for (i, write) in ["+n(2)", "-n(1)", "+other(1)\n+n(3)"].iter().enumerate() {
+        server.write(write).await;
+        let delta = client.next_push_for("n").await;
+        assert_eq!(delta["seq"], i + 1, "{delta}");
+        let next = delta["revision"].as_u64().unwrap();
+        assert!(next > revision, "revision {next} after {revision}: {delta}");
+        revision = next;
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -385,13 +412,9 @@ async fn test_limit_duplicates_and_invalid_queries_are_errors() {
 }
 
 async fn admin(server: &Server, program: &str) {
-    let identity = inputlayer::auth::AuthIdentity {
-        username: "admin".to_string(),
-        role: inputlayer::auth::Role::Admin,
-    };
     server
         .handler
-        .execute_program(None, None, program.to_string(), Some(&identity))
+        .execute_program(None, None, program.to_string(), None)
         .await
         .unwrap_or_else(|e| panic!("{program:?} failed: {e}"));
 }
@@ -519,4 +542,71 @@ async fn test_mutual_recursion_subscription_tracks_joint_fixpoint() {
     server.write("-succ(1, 2)").await;
     let delta = client.next_push_for("ev").await;
     assert_eq!(rows(&delta["retracted"]), vec![json!([2]), json!([4])]);
+}
+
+async fn start_capped_server(max_result_rows: usize) -> Server {
+    start_server_with(64, |config| {
+        config.storage.performance.max_result_rows = max_result_rows;
+    })
+    .await
+}
+
+fn assert_cap_error(message: &Value) {
+    assert!(
+        message["message"]
+            .as_str()
+            .unwrap()
+            .contains("max_result_rows (3)"),
+        "{message}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_subscribe_over_result_cap_fails_without_registering() {
+    let server = start_capped_server(3).await;
+    let facts: Vec<String> = (1..=10).map(|i| format!("({i})")).collect();
+    server.write(&format!("+a[{}]", facts.join(", "))).await;
+    server.write("+b[(1), (2), (3)]").await;
+    let mut client = Client::connect(&server).await;
+
+    let reply = client.execute(".subscribe s ?a(X)").await;
+    assert_eq!(reply["type"], "error", "{reply}");
+    assert_cap_error(&reply);
+    assert_eq!(server.handler.subscription_metrics().active(), 0);
+
+    // Exactly at the cap is complete; the failed id is free.
+    let snapshot = client.subscribe("s", "?b(X)").await;
+    assert_eq!(snapshot["truncated"], false);
+    assert_eq!(rows(&snapshot["rows"]).len(), 3);
+    server.wait_for_active(1).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_crossing_result_cap_keeps_last_complete_result() {
+    let server = start_capped_server(3).await;
+    server.write("+a[(1), (2)]").await;
+    let mut client = Client::connect(&server).await;
+    client.subscribe("s", "?a(X)").await;
+
+    server.write("+a(3)").await;
+    let delta = client.next_push_for("s").await;
+    assert_eq!(delta["seq"], 1, "{delta}");
+    assert_eq!(rows(&delta["inserted"]), vec![json!([3])]);
+
+    // Over the cap: errors, never a delta computed from the capped rows.
+    for program in ["+a(4)", "+a(5)", "-a(1)"] {
+        server.write(program).await;
+        let push = client.next_push_for("s").await;
+        assert_eq!(push["type"], "subscription_error", "{program}: {push}");
+        assert_cap_error(&push);
+    }
+    assert_eq!(server.handler.subscription_metrics().active(), 1);
+
+    // Back under the cap: one delta from the last complete result {1, 2, 3}.
+    server.write("-a(5)").await;
+    let delta = client.next_push_for("s").await;
+    assert_eq!(delta["type"], "subscription_delta", "{delta}");
+    assert_eq!(delta["seq"], 2);
+    assert_eq!(rows(&delta["inserted"]), vec![json!([4])]);
+    assert_eq!(rows(&delta["retracted"]), vec![json!([1])]);
 }

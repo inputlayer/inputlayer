@@ -2,16 +2,17 @@
 //! with the previous result.
 //!
 //! Bound queries go through Magic Sets, so a re-run touches only the relevant
-//! slice of the KG. Evaluation uses the normal query path (`execute_program`),
+//! slice of the KG. Each evaluation pins the KG's current snapshot and runs
+//! the query on it through the normal query path ([`Handler::query_snapshot`]),
 //! which runs on the blocking pool under the query semaphore and re-checks the
-//! subscriber's read permission every time.
+//! subscriber's credential and read permission every time.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 
-use crate::auth::AuthIdentity;
+use crate::auth::Principal;
 use crate::protocol::rest::handlers::wire_value_to_json;
 use crate::protocol::Handler;
 use crate::statement::{parse_query, QueryGoal};
@@ -24,7 +25,7 @@ pub struct ReevaluatingQuery {
     knowledge_graph: String,
     query: String,
     goal: QueryGoal,
-    auth: Option<AuthIdentity>,
+    auth: Option<Principal>,
     columns: Vec<String>,
     /// Current result, keyed by the row's canonical JSON for a deterministic,
     /// set-semantics comparison.
@@ -37,7 +38,7 @@ impl ReevaluatingQuery {
         handler: Arc<Handler>,
         knowledge_graph: &str,
         query: &str,
-        auth: Option<AuthIdentity>,
+        auth: Option<Principal>,
     ) -> Result<Self, String> {
         let body = query
             .trim()
@@ -62,26 +63,33 @@ impl ReevaluatingQuery {
     }
 
     async fn evaluate(&mut self) -> Result<Refresh, String> {
-        // Dependencies come from the rules before the query runs: a rule
-        // added in between is announced by its own notification afterwards.
-        let rules = {
-            let storage = self.handler.get_storage();
-            let snapshot = storage
-                .get_snapshot_for(&self.knowledge_graph)
-                .map_err(|e| format!("Knowledge graph '{}': {e}", self.knowledge_graph))?;
-            Arc::clone(&snapshot.rules)
-        };
-        let dependencies = Dependencies::for_query(&self.goal, &rules);
+        // One snapshot for everything: its rules give the dependencies, the
+        // query reads its data, and its revision names the result.
+        let snapshot = self
+            .handler
+            .get_storage()
+            .get_snapshot_for(&self.knowledge_graph)
+            .map_err(|e| format!("Knowledge graph '{}': {e}", self.knowledge_graph))?;
+        let dependencies = Dependencies::for_query(&self.goal, &snapshot.rules);
+        let revision = snapshot.revision;
 
         let result = self
             .handler
-            .execute_program(
-                None,
-                Some(self.knowledge_graph.clone()),
-                self.query.clone(),
+            .query_snapshot(
+                &self.knowledge_graph,
+                snapshot,
+                &self.query,
                 self.auth.as_ref(),
             )
             .await?;
+        // A capped result is not the result set: adopting it would announce
+        // every cut row as retracted. Fail before touching state, so the last
+        // complete result stays the base for the next delta.
+        if result.truncated {
+            return Err(incomplete_result_error(
+                self.handler.config().storage.performance.max_result_rows,
+            ));
+        }
         if !result.schema.is_empty() {
             self.columns = result.schema.into_iter().map(|c| c.name).collect();
         }
@@ -101,8 +109,17 @@ impl ReevaluatingQuery {
             inserted,
             retracted,
             dependencies,
+            revision,
         })
     }
+}
+
+/// Error for a result cut at `max_result_rows`.
+fn incomplete_result_error(max_result_rows: usize) -> String {
+    format!(
+        "Subscription result exceeds storage.performance.max_result_rows \
+         ({max_result_rows}); no complete result to deliver. Narrow the query."
+    )
 }
 
 /// Rows of `a` missing from `b`, in key order.

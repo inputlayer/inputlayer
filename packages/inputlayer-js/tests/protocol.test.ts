@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { serializeMessage, deserializeMessage } from '../src/protocol';
+import { serializeMessage, deserializeMessage, isPush } from '../src/protocol';
 
 describe('serializeMessage', () => {
   it('serializes login message', () => {
@@ -135,5 +135,42 @@ describe('deserializeMessage', () => {
 
   it('throws on unknown message type', () => {
     expect(() => deserializeMessage('{"type":"unknown"}')).toThrow('Unknown message type');
+  });
+});
+
+describe('request ids and pushes', () => {
+  it('serializes an optional request id', () => {
+    expect(JSON.parse(serializeMessage({ type: 'ping', id: 'p' }))).toEqual({
+      type: 'ping',
+      id: 'p',
+    });
+    expect(JSON.parse(serializeMessage({ type: 'execute', program: '?a(X)' }))).toEqual({
+      type: 'execute',
+      program: '?a(X)',
+    });
+  });
+
+  it('keeps the id a reply echoes', () => {
+    const pong = deserializeMessage('{"type":"pong","id":"p"}');
+    expect(pong.type === 'pong' && pong.id).toBe('p');
+    expect(isPush(pong)).toBe(false);
+    const error = deserializeMessage(
+      '{"type":"error","message":"bad","code":"invalid_request"}',
+    );
+    expect(error.type === 'error' && error.code).toBe('invalid_request');
+    expect(isPush(error)).toBe(false);
+  });
+
+  it('classifies notices and subscription frames as pushes', () => {
+    const frames = [
+      '{"type":"notice","code":"idle_timeout","message":"Idle timeout"}',
+      '{"type":"notice","code":"replay_gap","message":"re-read state"}',
+      '{"type":"subscription_delta","subscription":"s","generation":2,"knowledge_graph":"kg","seq":1,"revision":5,"columns":["x"],"inserted":[[1]],"retracted":[]}',
+      '{"type":"subscription_error","subscription":"s","generation":2,"message":"boom"}',
+      '{"type":"kg_change","knowledge_graph":"kg","operation":"created","timestamp_ms":1,"seq":1}',
+    ];
+    for (const frame of frames) {
+      expect(isPush(deserializeMessage(frame))).toBe(true);
+    }
   });
 });

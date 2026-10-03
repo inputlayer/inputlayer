@@ -29,6 +29,7 @@ from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from inputlayer._sync import run_sync
+from inputlayer.exceptions import QueryError
 from inputlayer.integrations.langchain.params import bind_params, iql_literal
 from inputlayer.relation import Relation
 
@@ -140,9 +141,10 @@ class InputLayerIQLTool(BaseTool):
             _check_read_only(compiled)
 
         logger.debug("IQL tool query: %s", compiled)
-        result = await self.kg.execute(compiled)
-        if result.columns == ["error"]:
-            return f"Error: {_extract_error_message(result)}"
+        try:
+            result = await self.kg.execute(compiled)
+        except QueryError as err:
+            return f"Error: {err.message}"
         return _format_result(result, self.max_rows)
 
 
@@ -349,9 +351,10 @@ def _make_relation_runner(
 
         for q in queries:
             logger.debug("Structured tool query: %s", q)
-            result = await kg.execute(q)
-            if result.columns == ["error"]:
-                return json.dumps({"error": _extract_error_message(result)})
+            try:
+                result = await kg.execute(q)
+            except QueryError as err:
+                return json.dumps({"error": err.message})
             if not merged_columns:
                 merged_columns = result.columns
             for row in result.rows:
@@ -401,24 +404,6 @@ def _hashable(v: Any) -> Any:
 
 
 # ── Result formatting ────────────────────────────────────────────────
-
-
-def _extract_error_message(result: Any) -> str:
-    """Extract a single error message from an ``error`` result set.
-
-    The engine signals an error with ``columns == ["error"]`` and a single
-    row whose first cell is the message. Guard against both the no-row and
-    empty-row shapes so a malformed response never masquerades as a
-    successful result or crashes the caller.
-    """
-    rows = getattr(result, "rows", None) or []
-    if not rows:
-        return "unknown error"
-    first = rows[0]
-    if not first:
-        return "unknown error"
-    msg = first[0]
-    return str(msg) if msg is not None else "unknown error"
 
 
 def _format_result(result: Any, max_rows: int) -> str:

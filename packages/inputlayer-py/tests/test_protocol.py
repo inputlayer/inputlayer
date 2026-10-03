@@ -11,6 +11,7 @@ from inputlayer._protocol import (
     ErrorResponse,
     ExecuteMessage,
     LoginMessage,
+    NoticeResponse,
     NotificationResponse,
     PingMessage,
     PongResponse,
@@ -18,6 +19,8 @@ from inputlayer._protocol import (
     ResultEndResponse,
     ResultResponse,
     ResultStartResponse,
+    SubscriptionDeltaResponse,
+    SubscriptionErrorResponse,
     deserialize_message,
     serialize_message,
 )
@@ -83,9 +86,12 @@ class TestDeserializeAuthenticated:
             "knowledge_graph": "default",
             "version": "0.1.0",
             "role": "admin",
+            "protocol_version": 2,
+            "stream_epoch": "00112233aabbccdd",
         })
         msg = deserialize_message(data)
         assert isinstance(msg, AuthenticatedResponse)
+        assert msg.stream_epoch == "00112233aabbccdd"
         assert msg.session_id == "42"
         assert msg.knowledge_graph == "default"
         assert msg.version == "0.1.0"
@@ -291,3 +297,67 @@ class TestDeserializeUnknown:
         data = json.dumps({"type": "unknown_type"})
         with pytest.raises(ValueError, match="Unknown message type"):
             deserialize_message(data)
+
+
+class TestRequestIds:
+    def test_requests_carry_an_optional_id(self):
+        assert json.loads(ExecuteMessage(program="?a(X)").to_json()) == {
+            "type": "execute", "program": "?a(X)",
+        }
+        assert json.loads(ExecuteMessage(program="?a(X)", id="7").to_json())["id"] == "7"
+        assert json.loads(PingMessage(id="p").to_json()) == {"type": "ping", "id": "p"}
+
+    def test_replies_expose_the_echoed_id(self):
+        result = deserialize_message(json.dumps({
+            "type": "result", "id": "7", "columns": ["x"], "rows": [[1]],
+            "row_count": 1, "total_count": 1, "truncated": False,
+            "execution_time_ms": 0, "errors": [],
+        }))
+        assert result.id == "7"
+        error = deserialize_message(json.dumps({
+            "type": "error", "message": "bad", "code": "invalid_request",
+        }))
+        assert error.id is None
+        assert error.code == "invalid_request"
+        assert deserialize_message('{"type": "pong", "id": "p"}').id == "p"
+
+    def test_subscribe_reply_names_its_generation(self):
+        result = deserialize_message(json.dumps({
+            "type": "result", "id": "s", "columns": ["x"], "rows": [],
+            "row_count": 0, "total_count": 0, "truncated": False,
+            "execution_time_ms": 0, "errors": [],
+            "subscribed": {"subscription": "live", "generation": 3, "revision": 11},
+        }))
+        assert result.subscribed.subscription == "live"
+        assert result.subscribed.generation == 3
+        assert result.subscribed.revision == 11
+
+
+class TestDeserializePushes:
+    def test_notice(self):
+        notice = deserialize_message(json.dumps({
+            "type": "notice", "code": "notifications_missed", "message": "Missed 2",
+        }))
+        assert isinstance(notice, NoticeResponse)
+        assert not notice.closes_connection
+        idle = deserialize_message('{"type":"notice","code":"idle_timeout","message":"Idle"}')
+        assert idle.closes_connection
+        gap = deserialize_message('{"type":"notice","code":"replay_gap","message":"re-read"}')
+        assert gap.code == "replay_gap"
+        assert not gap.closes_connection
+
+    def test_subscription_frames(self):
+        delta = deserialize_message(json.dumps({
+            "type": "subscription_delta", "subscription": "live", "generation": 3,
+            "knowledge_graph": "default", "seq": 1, "revision": 12, "columns": ["x"],
+            "inserted": [[1]], "retracted": [],
+        }))
+        assert isinstance(delta, SubscriptionDeltaResponse)
+        assert (delta.subscription, delta.generation, delta.inserted) == ("live", 3, [[1]])
+        assert (delta.seq, delta.revision) == (1, 12)
+        error = deserialize_message(json.dumps({
+            "type": "subscription_error", "subscription": "live", "generation": 3,
+            "message": "boom",
+        }))
+        assert isinstance(error, SubscriptionErrorResponse)
+
