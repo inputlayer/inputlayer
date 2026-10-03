@@ -33,13 +33,17 @@ export function CustomerClient({ story, slug }: CustomerClientProps) {
     <PageLayout>
       <ContentHero
         heading={story.title}
-        subtitle={story.industry ? `Industry: ${story.industry}` : undefined}
+        subtitle={`Illustrative story${story.industry ? ` · Industry: ${story.industry}` : ""}`}
         breadcrumbs={[
           { label: "Customers", href: "/customers/" },
         ]}
       />
 
       <article className="mx-auto max-w-3xl px-6 py-12">
+        <p className="mb-8 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+          This is an illustrative story, not a confirmed customer reference. Figures in it are not independently
+          measured.
+        </p>
         <div className="docs-prose">
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={MdxComponents}>
             {story.content}

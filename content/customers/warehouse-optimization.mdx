@@ -8,11 +8,11 @@ keyMetric: "<50ms reasoning latency"
 
 A European appliance manufacturer needed sub-50ms routing decisions for their warehouse picking robots. Their existing databases handled inventory tracking and order management well. The problem was the gap between them: when a robot needed the optimal route, application code had to pull from inventory, cross-reference with order priorities, factor in the warehouse layout, and compute a path. That added hundreds of milliseconds per decision.
 
-They added InputLayer as the reasoning layer. Warehouse layout, inventory positions, and order priorities are ingested as facts. The routing logic is expressed as rules. Result: sub-50ms query latency, down from hundreds of milliseconds.
+They added InputLayer as the streaming layer between those systems and the routing decisions. Warehouse layout, inventory positions, and order priorities are ingested as facts. The routing logic is expressed as rules. Result: sub-50ms query latency, down from hundreds of milliseconds.
 
 ## The challenge
 
-The company operates large-scale distribution centers across Europe. Inventory tracking, order management, and warehouse layouts each lived in separate systems. They were good at what they did. The problem was stitching them together for real-time decisions.
+The company operates large-scale distribution centers across Europe. Inventory tracking, order management, and warehouse layouts each lived in separate systems. They were good at what they did. The problem was stitching them together for decisions made while a robot waits.
 
 ```flow
 Picking robot needs route -> Inventory DB [primary] -> Order priority DB -> Layout DB -> Application code stitches it all together [highlight]
@@ -22,7 +22,7 @@ For a warehouse running thousands of picks per hour, hundreds of milliseconds pe
 
 ## The solution
 
-InputLayer was added alongside the existing infrastructure. Warehouse layout, inventory positions, and order priorities are ingested as facts. The routing logic is expressed as rules that the engine evaluates in real time.
+InputLayer was added alongside the existing infrastructure. Warehouse layout, inventory positions, and order priorities are ingested as facts. The routing logic is expressed as rules that the engine keeps current as those facts change.
 
 The warehouse layout is encoded as facts: "Aisle 3 connects to Dock B," "Bin 3-14 contains Item X," "Order 2847 needs Item X from high-priority queue." The routing rules compute optimal paths through this graph, taking all factors into account simultaneously.
 

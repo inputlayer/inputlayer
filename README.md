@@ -3,9 +3,44 @@
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-Elastic%202.0-blue.svg)](./LICENSE)
 
-**Streaming reasoning layer for AI systems.**
+**The streaming engine for AI agents.**
 
-Store facts. Define rules. InputLayer derives the conclusions, keeps them current as data changes, and explains every result with a proof tree. Combine recursive reasoning with vector search in a single query. Source-available and free to use.
+### Agents that react in milliseconds, not on the next run.
+
+Today's agents are batch jobs. They wake up, re-read everything, reason, act and go back to sleep: stale between runs, slow to react, and paying to recompute what didn't change. InputLayer makes your agents streaming. Every change is reasoned over the moment it lands, only what changed is recomputed, and a conclusion that stops being true is withdrawn right away.
+
+Self-hosted, source-available under the Elastic License 2.0. Rust engine with Python and JS SDKs.
+
+> Your data stack went streaming years ago. Your agents are the last batch jobs left.
+
+---
+
+## Why Streaming Agents
+
+- **React when it happens, not when the cron fires.** A batch agent learns about a change on its next run, seconds to hours later. A streaming agent knows within milliseconds and can act while it still matters.
+- **Never act on something that stopped being true.** Batch agents see what's there and miss what disappeared: the cancelled order, the revoked approval, the delay that cleared. InputLayer withdraws a conclusion the moment its last reason goes away.
+- **Pay for change, not for re-reading the world.** Batch cost grows with data volume times how often you run. Streaming cost grows with what actually changed.
+
+## How It Works
+
+1. **Stream facts in** from the systems you already run: orders, carriers, permissions, inventory, written as they change from CDC, webhooks or your app.
+2. **Declare the reasoning** as rules, not glue code. Rules chain, recurse and combine with vector similarity.
+3. **React to changes.** When a fact changes, InputLayer updates just the affected conclusions and tells the agent what was added and what was withdrawn, with the facts and rules behind each one.
+
+```iql
+// rules, written once
++late(O) <- shipment(O,S), eta(S,T), promised(O,P), T > P
++can_offer(O,C) <- late(O), customer(O,C), eligible(C, "expedite")
+```
+
+```python
+# agent: react to what changed
+for change in kg.watch("?can_offer(O, C)"):
+    for row in change.added:   offer(row)
+    for row in change.removed: withdraw(row)
+```
+
+The SDK form shown is the upcoming release; standing queries run over the [WebSocket API](https://inputlayer.ai/docs/guides/websocket-api/) today.
 
 ---
 
@@ -41,19 +76,19 @@ Four facts, two rules, and the engine derived every reachable destination - incl
 
 ---
 
-## What Makes It Different
+## Under the Hood
 
 ### Rules + vector search in one query
 
 A shopper asks for printer ink. In embedding space, every ink cartridge looks the same. But only specific models fit their printer - that's a structured fact, not a similarity score. InputLayer evaluates compatibility rules and ranks by cosine distance in a single query.
 
-### Correct conclusion retraction
+### Conclusions withdrawn when they stop holding
 
-An entity is cleared from a sanctions list. Every flag derived through it retracts - but only if no second ownership path still supports it. InputLayer tracks every derivation path independently and only retracts when all paths are gone.
+An entity is cleared from a sanctions list. Every flag derived through it is withdrawn - but only if no second ownership path still supports it. InputLayer tracks every derivation path independently and only retracts when all paths are gone.
 
 ### Incremental updates
 
-One fact changes in a 2,000-node graph with 400,000 derived relationships. InputLayer updates only the affected derivations in **6.83ms**. Full recompute: 11.3 seconds. **1,652x faster.**
+When a fact changes, InputLayer updates only the affected derivations instead of recomputing everything. After inserting 100 edges into a 2,000-node graph with recursive rules, a bound reachability query answers in **6.83 ms**, versus 11.3 seconds to recompute the full transitive closure (single machine; see [BENCHMARKS.md](./BENCHMARKS.md)).
 
 ### Provenance
 
@@ -88,7 +123,7 @@ cargo build --release
 
 Open [http://localhost:8080](http://localhost:8080) for the interactive GUI, or connect via WebSocket at `ws://localhost:8080/ws`.
 
-If you know SQL, the query language takes about 10 minutes to learn. See the [Quick Start Guide](https://inputlayer.ai/docs/guides/quickstart/).
+See the [Quick Start Guide](https://inputlayer.ai/docs/guides/quickstart/) to load a sample and watch conclusions change as facts do.
 
 ---
 
@@ -132,11 +167,13 @@ See [Python SDK docs](https://inputlayer.ai/docs/guides/python-sdk/) and [TypeSc
 
 ## Use Cases
 
-- **[Financial Risk](https://inputlayer.ai/use-cases/financial-risk/)** - Trace ownership chains to any depth for sanctions screening. Correct retraction handles the diamond problem.
-- **[Conversational Commerce](https://inputlayer.ai/use-cases/commerce/)** - Compatibility rules + vector similarity in one query. The wrong cartridge never gets recommended.
-- **[Manufacturing](https://inputlayer.ai/use-cases/manufacturing/)** - Multi-hop dependency chains from training records to production line availability, updated in milliseconds.
-- **[Supply Chain](https://inputlayer.ai/use-cases/supply-chain/)** - A port closes and every affected supplier, order, and SLA penalty is identified across the graph.
-- **[Agentic AI](https://inputlayer.ai/use-cases/agentic-ai/)** - Agent memory as a knowledge graph with `.why` proof trees for every conclusion.
+Built for agents that act on a world that keeps changing. Keep your LLM, your vector store for documents and your systems of record; InputLayer is the streaming layer between your data and your agent's decisions.
+
+- **[Financial Risk](https://inputlayer.ai/use-cases/financial-risk/)** - Sanctions and ownership flags that update the moment an ownership link changes. A flag is withdrawn only when every path supporting it is gone.
+- **[Conversational Commerce](https://inputlayer.ai/use-cases/commerce/)** - Compatibility rules + vector similarity in one query, with recommendations withdrawn the moment stock runs out.
+- **[Manufacturing](https://inputlayer.ai/use-cases/manufacturing/)** - Production line availability recomputed per event, not per sweep, from training records to equipment status.
+- **[Supply Chain](https://inputlayer.ai/use-cases/supply-chain/)** - A port closes and every affected supplier, order, and SLA penalty is identified across the graph as it happens.
+- **[Agentic AI](https://inputlayer.ai/use-cases/agentic-ai/)** - Agent conclusions that stay current as observations change, with `.why` proof trees for every conclusion.
 
 ---
 

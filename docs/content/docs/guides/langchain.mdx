@@ -60,7 +60,7 @@ async def main():
         await vs.aadd_texts(
             texts=[
                 "LangChain is a framework for building LLM applications.",
-                "InputLayer is a streaming reasoning layer for AI.",
+                "InputLayer is the streaming engine for AI agents.",
             ],
             metadatas=[
                 {"source": "langchain.com"},
@@ -74,7 +74,7 @@ async def main():
         for d in docs:
             print(f"{d.metadata['source']} - {d.page_content}")
             # langchain.com - LangChain is a framework for building LLM applications.
-            # inputlayer.ai - InputLayer is a streaming reasoning layer for AI.
+            # inputlayer.ai - InputLayer is the streaming engine for AI agents.
 
 asyncio.run(main())
 ```

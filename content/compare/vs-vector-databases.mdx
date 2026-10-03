@@ -10,7 +10,7 @@ Your vector database finds content that looks like your query. InputLayer follow
 
 A shopper asks "ink for my printer." Every cartridge in the catalog is semantically similar to "printer ink" - a Canon PG-245 and an Epson 202 are nearly identical in embedding space. But only one fits the printer the shopper bought eight months ago. That connection - purchase history to compatibility matrix to live inventory - is a chain of structured facts, not a similarity match.
 
-InputLayer traces that chain in a single query and keeps the answer current as inventory changes.
+InputLayer traces that chain in a single query and keeps the answer current as inventory changes. It is the streaming engine for AI agents: when stock runs out, the agent is told the recommendation was withdrawn instead of finding out on its next run.
 
 ## What each system does
 
@@ -19,7 +19,7 @@ InputLayer traces that chain in a single query and keeps the answer current as i
 | Find similar content | Native, optimized at scale | Native | Use either or both |
 | Follow chains of relationships | Outside scope | Native | InputLayer handles this |
 | Evaluate rules recursively | Outside scope | Native | InputLayer handles this |
-| Update conclusions when facts change | Re-index | Native (6.83ms per change) | InputLayer handles this |
+| Update conclusions when facts change | Re-index | Incremental, only affected conclusions | InputLayer handles this |
 | Retract stale conclusions automatically | Outside scope | Native | InputLayer handles this |
 | Enforce access policies in the query | Metadata filters only | Recursive logic | InputLayer handles hierarchies |
 
@@ -61,7 +61,7 @@ Some teams use both in parallel. Others move their reasoning-heavy queries entir
 
 ## Performance
 
-InputLayer's incremental computation means that when facts change, only affected conclusions recompute. On a 2,000-node graph with 400,000 derived relationships, a single fact change takes 6.83ms - not the 11.3 seconds a full recompute would take. That's 1,652x faster.
+InputLayer's incremental computation means that when facts change, only affected conclusions recompute. After inserting 100 edges into a 2,000-node graph with recursive rules, a bound reachability query answers in 6.83 ms, versus 11.3 seconds to recompute the full transitive closure (single machine; see [BENCHMARKS.md](https://github.com/inputlayer/inputlayer/blob/main/BENCHMARKS.md)).
 
 For pure vector similarity at massive scale (billions of vectors), dedicated vector databases are purpose-built and optimized for that specific workload.
 
@@ -71,4 +71,4 @@ For pure vector similarity at massive scale (billions of vectors), dedicated vec
 docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer
 ```
 
-The [quickstart guide](/docs/guides/quickstart/) takes about 5 minutes. The [vector search documentation](/docs/guides/vectors/) covers how InputLayer's native vector capabilities work, and the [Python SDK](/docs/guides/python-sdk/) makes integration with your existing stack straightforward.
+The [quickstart guide](/docs/guides/quickstart/) gets you running. The [vector search documentation](/docs/guides/vectors/) covers how InputLayer's native vector capabilities work, and the [Python SDK](/docs/guides/python-sdk/) makes integration with your existing stack straightforward.

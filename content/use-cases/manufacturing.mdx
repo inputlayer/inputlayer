@@ -1,7 +1,7 @@
 ---
 title: "Manufacturing Operations"
 icon: "Factory"
-subtitle: "Live operational reasoning for production planning, equipment availability, and job spec fulfillment."
+subtitle: "Production-line availability recomputed per event, not per sweep, as training records, equipment and job specs change."
 order: 3
 ---
 
@@ -133,4 +133,4 @@ Both lines are back. The new training fact propagated up through the entire depe
 
 The proof tree shows: line_4 is available because it requires operator_kim, and operator_kim is available because she's qualified by cert_safety, and cert_safety is available because training_mar_2026 is completed. When an auditor asks why Line 4 was allowed to run, the answer traces through four levels of dependencies to the specific training record.
 
-Every code block on this page runs against a live InputLayer instance. Paste them into the [demo](https://demo.inputlayer.ai) to see the results yourself.
+Every code block on this page runs against a local InputLayer instance. Start one with the [quickstart](/docs/guides/quickstart/) and paste the blocks into the REPL to see the results yourself.

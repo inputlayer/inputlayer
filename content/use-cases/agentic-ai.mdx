@@ -1,7 +1,7 @@
 ---
 title: "Agentic AI"
 icon: "Brain"
-subtitle: "Structured memory, multi-hop reasoning, and policy-aware retrieval for AI agents."
+subtitle: "Agent conclusions that stay current as observations change, are withdrawn when their reasons go away, and show the facts and rules behind them."
 order: 5
 ---
 
@@ -135,4 +135,4 @@ The churn risk retracted. The engagement_drop condition no longer holds, so the 
 
 Three properties work together here. The rules guarantee that every conclusion follows from specific, inspectable conditions - not from whatever a model generates in a particular context window. The proof tree (`.why` and `.why_not`) makes the reasoning transparent and auditable. And correct retraction means that when facts change, conclusions update - the agent never acts on a belief that's no longer supported by the evidence.
 
-Every code block on this page runs against a live InputLayer instance. Paste them into the [demo](https://demo.inputlayer.ai) to see the results yourself.
+Every code block on this page runs against a local InputLayer instance. Start one with the [quickstart](/docs/guides/quickstart/) and paste the blocks into the REPL to see the results yourself.

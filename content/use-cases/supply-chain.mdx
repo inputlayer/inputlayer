@@ -1,7 +1,7 @@
 ---
 title: "Supply Chain"
 icon: "Truck"
-subtitle: "Supplier risk propagation, sanctions screening, and order fulfillment reasoning over live entity graphs."
+subtitle: "Supplier risk and order impact that update the moment a port closes or a supplier status changes."
 order: 4
 ---
 
@@ -154,4 +154,4 @@ Supplier A recovered. Orders 101 and 102 are no longer at risk. Globex's SLA pen
 
 The proof shows: order_103 is at risk because it's supplied by supplier_b, and supplier_b is disrupted because it ships via Shanghai, and Shanghai is closed. Three facts, three rules, one chain. When a procurement team needs to explain to Initech why their order is delayed, the answer is a structured trace, not a phone call to someone who might know.
 
-Every code block on this page runs against a live InputLayer instance. Paste them into the [demo](https://demo.inputlayer.ai) to see the results yourself.
+Every code block on this page runs against a local InputLayer instance. Start one with the [quickstart](/docs/guides/quickstart/) and paste the blocks into the REPL to see the results yourself.
