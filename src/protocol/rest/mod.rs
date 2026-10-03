@@ -55,7 +55,7 @@ async fn connection_limit_middleware(
 
 /// Middleware: API key authentication via `_internal` KG.
 /// Checks for `Authorization: Bearer <key>` header and validates against stored API keys.
-/// Skips auth for /health, /live, /ready endpoints and WebSocket upgrades
+/// Skips auth for /health, /live, /ready endpoints and the `/ws` upgrade
 /// (WS has its own auth flow).
 async fn auth_middleware(
     Extension(handler): Extension<Arc<Handler>>,
@@ -72,8 +72,8 @@ async fn auth_middleware(
         return next.run(req).await;
     }
 
-    // WebSocket endpoints handle their own auth flow (Login/Authenticate messages)
-    if effective_path == "/ws" || effective_path.starts_with("/sessions/") {
+    // The WebSocket endpoint handles its own auth flow (Login/Authenticate messages)
+    if effective_path == "/ws" {
         return next.run(req).await;
     }
 
@@ -238,7 +238,6 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
         .route("/metrics", get(admin::stats))
         .route("/metrics/prometheus", get(admin::prometheus_metrics))
         .route("/ws", get(ws::global_websocket))
-        .route("/sessions/:id/ws", get(ws::session_websocket))
         .route("/api/asyncapi.yaml", get(asyncapi_yaml))
         .route("/api/openapi.yaml", get(openapi_yaml))
         .route("/api/ws-docs", get(asyncapi_docs));
@@ -250,7 +249,7 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
 
     // Apply authentication middleware.
     // Auth is always required - API keys are validated against the _internal KG.
-    // Health/live/ready endpoints and WebSocket paths bypass auth.
+    // Health/live/ready endpoints and `/ws` bypass auth.
     // NOTE: Layer ordering matters! In Axum, .layer(A).layer(B) means B runs first.
     // Auth middleware needs Extension<Handler>, so Extension must be the OUTER layer.
     api_app = api_app
