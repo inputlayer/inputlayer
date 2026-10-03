@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint perf-gate perf-gate-check test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test python-test-live python-test-examples js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint perf-gate perf-gate-check bench-genbi test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test python-test-live python-test-examples js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -483,6 +483,12 @@ lint:
 # Pass options through PERF_GATE_ARGS, e.g. PERF_GATE_ARGS="--aa".
 perf-gate:
 	./scripts/perf-gate.sh $(PERF_GATE_ARGS)
+
+# Reactive agent benchmark on the genbi-trust suite (read in place from
+# GENBI_TRUST_DIR); see perf-gate/README.md. Options via GENBI_ARGS, e.g.
+# GENBI_ARGS="--cases priority --repeat 3".
+bench-genbi:
+	./scripts/bench-genbi.sh $(GENBI_ARGS)
 
 # Lint and unit-test the performance gate tool itself (its own workspace)
 perf-gate-check:

@@ -111,10 +111,19 @@ impl RunningServer {
 
     /// Peak resident set size so far, from `/proc/<pid>/status`.
     pub fn peak_rss_kb(&self) -> Option<u64> {
+        self.status_kb("VmHWM:")
+    }
+
+    /// Current resident set size, from `/proc/<pid>/status`.
+    pub fn rss_kb(&self) -> Option<u64> {
+        self.status_kb("VmRSS:")
+    }
+
+    fn status_kb(&self, field: &str) -> Option<u64> {
         let status = std::fs::read_to_string(format!("/proc/{}/status", self.child.id())).ok()?;
         status
             .lines()
-            .find_map(|line| line.strip_prefix("VmHWM:"))
+            .find_map(|line| line.strip_prefix(field))
             .and_then(|rest| rest.trim().trim_end_matches("kB").trim().parse().ok())
     }
 
