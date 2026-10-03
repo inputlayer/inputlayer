@@ -104,7 +104,9 @@ async_io = true
 # Number of worker threads (0 = use all CPU cores)
 num_threads = 0
 
-# Query timeout in milliseconds (0 = no timeout)
+# Request deadline in milliseconds (0 = none): queueing, waiting for a
+# compute slot and computing together. A client's `timeout_ms` can only
+# shorten it. A write that began committing always completes.
 query_timeout_ms = 30000
 
 # Maximum query text size in bytes
@@ -224,6 +226,10 @@ ws_max_messages_per_sec = 1000
 
 # Maximum WebSocket connection lifetime in seconds (0 = unlimited, default: 24h)
 ws_max_lifetime_secs = 86400
+
+# Maximum requests per WebSocket connection admitted and not yet answered
+# (at least 1, default: 16). Queries overlap up to this bound; replies stay in request order.
+ws_max_in_flight_requests = 16
 
 # Maximum HTTP requests per second per IP address (0 = unlimited)
 per_ip_max_rps = 0

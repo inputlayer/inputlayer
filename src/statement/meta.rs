@@ -128,6 +128,75 @@ pub enum MetaCommand {
     }, // .kg acl revoke <kg> <user>
 }
 
+impl MetaCommand {
+    /// Whether running the command changes durable state: knowledge graphs,
+    /// relations, rules, indexes, ontologies, users, credentials or access,
+    /// or claims a backup destination and starts an export.
+    /// Such a command is not interrupted once it starts, so a stopped request
+    /// never leaves it half done.
+    pub fn changes_durable_state(&self) -> bool {
+        match self {
+            Self::KgCreate(_)
+            | Self::KgDrop(_)
+            | Self::RelDrop(_)
+            | Self::RuleDrop(_)
+            | Self::RuleDropPrefix(_)
+            | Self::RuleEdit { .. }
+            | Self::RuleClear(_)
+            | Self::RuleRemove { .. }
+            | Self::IndexCreate(_)
+            | Self::IndexDrop(_)
+            | Self::IndexRebuild(_)
+            | Self::ClearPrefix(_)
+            | Self::Compact
+            | Self::Backup(_)
+            | Self::OntologyInstall(_)
+            | Self::OntologyRemove(_)
+            | Self::OntologyUpgrade(_)
+            | Self::Load { .. }
+            | Self::UserCreate { .. }
+            | Self::UserDrop(_)
+            | Self::UserPassword { .. }
+            | Self::UserRole { .. }
+            | Self::ApiKeyCreate(_)
+            | Self::ApiKeyRevoke(_)
+            | Self::KgAclGrant { .. }
+            | Self::KgAclRevoke { .. } => true,
+            Self::KgShow
+            | Self::KgList
+            | Self::KgUse(_)
+            | Self::RelList
+            | Self::RelDescribe(_)
+            | Self::RuleList
+            | Self::RuleQuery(_)
+            | Self::RuleShowDef(_)
+            | Self::SessionList
+            | Self::SessionClear
+            | Self::SessionDrop(_)
+            | Self::SessionDropName(_)
+            | Self::IndexList
+            | Self::IndexStats(_)
+            | Self::Status
+            | Self::BackupStatus
+            | Self::Debug(_)
+            | Self::Why(_)
+            | Self::WhyFull(_)
+            | Self::WhyNot(_)
+            | Self::Subscribe { .. }
+            | Self::Unsubscribe(_)
+            | Self::AgentMessage(_)
+            | Self::AgentStart(_)
+            | Self::AgentSetup(_)
+            | Self::AgentExamples
+            | Self::Help
+            | Self::Quit
+            | Self::UserList
+            | Self::ApiKeyList
+            | Self::KgAclList(_) => false,
+        }
+    }
+}
+
 /// Custom Debug implementation that redacts sensitive fields (passwords).
 impl std::fmt::Debug for MetaCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

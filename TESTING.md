@@ -106,7 +106,16 @@ added/retracted rows as `subscription_delta` pushes, with contiguous `seq` and
 increasing `revision`, and end equal to a fresh full query on another
 connection, without re-querying.
 Scenarios cover one subscriber, 64 subscribers, reconnect/resubscribe and
-crash-restart, unrelated writes, and write bursts.
+crash-restart, unrelated writes, write bursts, deltas arriving while the
+agent's own long query runs on its connection, and an agent cancelling that
+query by id (`cancel`) and keeping its subscription.
+
+Deadlines and cancellation are tested adversarially over an in-process `/ws`
+connection by `tests/ws_cancel_tests.rs`: a queued request whose deadline
+passes or that is cancelled never runs later, a running query stops promptly,
+and a large write cancelled at increasing delays across its commit boundary
+always reports an outcome that matches the data, and a blind retry leaves
+exactly one copy.
 
 Every request the harness sends carries an `id`, and a reply that does not
 echo it fails the scenario (`Violation::Uncorrelated`); a `notice` is never

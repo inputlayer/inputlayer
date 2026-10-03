@@ -1,13 +1,13 @@
 //! Query Execution Module
 //!
 //! Provides production-grade query execution with:
-//! - Timeout enforcement via cooperative cancellation
+//! - Deadlines and cancellation via cooperative checks ([`RequestControl`])
 
 pub mod hnsw_resolve;
-mod timeout;
+mod request_control;
 pub mod timing;
 
-pub use timeout::{CancelHandle, QueryTimeout, TimeoutError};
+pub use request_control::{Halt, RequestControl, Stop};
 pub use timing::{
     IrBuilderTiming, OptimizerTiming, RuleTiming, TimingBreakdown, TimingCollector,
     TimingHistograms, TimingMode,
@@ -16,10 +16,6 @@ pub use timing::{
 /// Execution error types
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ExecutionError {
-    /// Query timed out
-    #[error("Query timeout: {0}")]
-    Timeout(#[from] TimeoutError),
-
     /// Query execution error
     #[error("Query error: {0}")]
     QueryError(String),

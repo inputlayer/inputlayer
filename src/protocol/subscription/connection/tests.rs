@@ -9,6 +9,35 @@ use crate::Config;
 
 const KG: &str = "handoff";
 
+impl ConnectionSubscriptions {
+    /// Open, evaluate and register `query` as `id` in one step.
+    async fn subscribe(
+        &mut self,
+        knowledge_graph: &str,
+        id: &str,
+        query: &str,
+    ) -> Result<(Refresh, u64), String> {
+        let opening = self.begin_subscribe(knowledge_graph, id, query)?;
+        self.finish_subscribe(opening.run().await)
+    }
+
+    /// Evaluate and register `view` as `id`.
+    async fn register(
+        &mut self,
+        knowledge_graph: &str,
+        id: &str,
+        view: Box<dyn StandingQuery>,
+    ) -> Result<(Refresh, u64), String> {
+        self.handler.subscription_metrics().record_evaluation();
+        let opening = Opening {
+            id: id.to_string(),
+            knowledge_graph: knowledge_graph.to_string(),
+            view,
+        };
+        self.finish_subscribe(opening.run().await)
+    }
+}
+
 fn handler() -> (Arc<Handler>, TempDir) {
     let tmp = TempDir::new().unwrap();
     let mut config = Config::default();

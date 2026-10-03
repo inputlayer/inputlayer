@@ -20,6 +20,15 @@ pub enum ErrorCode {
     InvalidRequest,
     /// The connection is over its message rate; nothing ran.
     RateLimited,
+    /// The request's deadline passed before it began committing; nothing it
+    /// would have changed was applied.
+    DeadlineExceeded,
+    /// The client cancelled the request before it began committing; nothing
+    /// it would have changed was applied.
+    Cancelled,
+    /// The request failed after it began committing: its changes may or may
+    /// not be applied. Read the state back before retrying.
+    OutcomeUnknown,
 }
 
 /// A failed statement of a program.

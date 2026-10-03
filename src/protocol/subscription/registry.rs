@@ -197,6 +197,14 @@ impl SubscriptionRegistry {
         count
     }
 
+    /// Remove every subscription not on `knowledge_graph`; returns how many.
+    pub fn retain_knowledge_graph(&mut self, knowledge_graph: &str) -> usize {
+        let before = self.entries.len();
+        self.entries
+            .retain(|_, entry| entry.knowledge_graph == knowledge_graph);
+        before - self.entries.len()
+    }
+
     /// React to committed changes in `knowledge_graph`: returns evaluations to start.
     pub fn on_change(&mut self, knowledge_graph: &str, change: &ChangeSet) -> Vec<Dispatch> {
         let mut dispatches = Vec::new();
@@ -474,6 +482,18 @@ mod tests {
         assert!(err.contains("limit"), "{err}");
         assert_eq!(registry.clear(), 2);
         assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn test_registry_retain_knowledge_graph() {
+        let mut registry = SubscriptionRegistry::new(4);
+        let view = || Box::new(Scripted(vec![])) as Box<dyn StandingQuery>;
+        registry.add("a", "one", view(), deps_on("r")).unwrap();
+        registry.add("b", "two", view(), deps_on("r")).unwrap();
+        assert_eq!(registry.retain_knowledge_graph("two"), 1);
+        assert_eq!(registry.len(), 1);
+        assert!(registry.on_change("one", &ChangeSet::Everything).is_empty());
+        assert_eq!(registry.on_change("two", &ChangeSet::Everything).len(), 1);
     }
 
     #[test]

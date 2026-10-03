@@ -125,6 +125,7 @@ impl Engine {
         self.send(ClientFrame::Execute {
             id: Some(RequestId::from(self.last_id)),
             program: program.to_string(),
+            timeout_ms: None,
         })
         .await?;
 

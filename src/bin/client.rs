@@ -193,6 +193,7 @@ impl WsClient {
         let req = ClientFrame::Execute {
             id: Some(RequestId::from(self.last_id)),
             program: program.to_string(),
+            timeout_ms: None,
         };
         let text = serde_json::to_string(&req).map_err(|e| format!("Serialize error: {e}"))?;
         self.sender

@@ -3,9 +3,16 @@
 //! Evaluations run as tasks in a [`JoinSet`], so neither the read loop nor the
 //! write path waits on them. Dropping this value (disconnect) aborts them and
 //! releases the subscriptions.
+//!
+//! A `.subscribe` evaluates its initial snapshot off the loop too:
+//! [`ConnectionSubscriptions::begin_subscribe`] returns an [`Opening`] to run
+//! anywhere, and [`ConnectionSubscriptions::finish_subscribe`] registers its
+//! result. Commits landing in between are caught by the revision handoff at
+//! registration, not by watching notifications.
 
 use std::sync::Arc;
 
+use futures_util::FutureExt;
 use tokio::task::JoinSet;
 use tracing::{debug, warn};
 
@@ -19,6 +26,43 @@ use super::{
     ChangeSet, Completion, Dispatch, ReevaluatingQuery, Refresh, StandingQuery,
     SubscriptionRegistry,
 };
+
+/// A subscription's initial snapshot, evaluated off the connection loop.
+pub struct Opening {
+    id: String,
+    knowledge_graph: String,
+    view: Box<dyn StandingQuery>,
+}
+
+/// An evaluated [`Opening`], handed back to
+/// [`ConnectionSubscriptions::finish_subscribe`].
+pub struct Opened {
+    id: String,
+    knowledge_graph: String,
+    view: Box<dyn StandingQuery>,
+    snapshot: Result<Refresh, String>,
+}
+
+impl Opening {
+    /// Evaluate the initial snapshot, turning a panic into an error.
+    pub async fn run(self) -> Opened {
+        let Opening {
+            id,
+            knowledge_graph,
+            mut view,
+        } = self;
+        let snapshot = std::panic::AssertUnwindSafe(view.refresh())
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|_| Err("Internal error while evaluating subscription".to_string()));
+        Opened {
+            id,
+            knowledge_graph,
+            view,
+            snapshot,
+        }
+    }
+}
 
 /// Subscriptions owned by one WebSocket connection.
 pub struct ConnectionSubscriptions {
@@ -40,14 +84,15 @@ impl ConnectionSubscriptions {
         }
     }
 
-    /// Register `id` for `query` on `knowledge_graph`; returns the initial
-    /// snapshot and the subscription's generation.
-    pub async fn subscribe(
+    /// Start registering `id` for `query` on `knowledge_graph`. Run the
+    /// returned [`Opening`] anywhere, then pass its result to
+    /// [`Self::finish_subscribe`].
+    pub fn begin_subscribe(
         &mut self,
         knowledge_graph: &str,
         id: &str,
         query: &str,
-    ) -> Result<(Refresh, u64), String> {
+    ) -> Result<Opening, String> {
         self.registry.check_can_add(id)?;
         let view = ReevaluatingQuery::new(
             Arc::clone(&self.handler),
@@ -55,26 +100,32 @@ impl ConnectionSubscriptions {
             query,
             self.auth.clone(),
         )?;
-        self.register(knowledge_graph, id, Box::new(view)).await
+        self.handler.subscription_metrics().record_evaluation();
+        Ok(Opening {
+            id: id.to_string(),
+            knowledge_graph: knowledge_graph.to_string(),
+            view: Box::new(view),
+        })
     }
 
-    /// Take `view`'s initial snapshot and register it as `id`.
+    /// Register an evaluated [`Opening`]; returns its initial snapshot and the
+    /// subscription's generation.
     ///
     /// The snapshot is the query's answer at its revision. A commit published
     /// after that revision but announced before the subscription existed would
     /// reach no one, so registration compares the knowledge graph's current
     /// revision and re-evaluates at once when it moved on.
-    async fn register(
-        &mut self,
-        knowledge_graph: &str,
-        id: &str,
-        mut view: Box<dyn StandingQuery>,
-    ) -> Result<(Refresh, u64), String> {
-        self.handler.subscription_metrics().record_evaluation();
-        let snapshot = view.refresh().await?;
+    pub fn finish_subscribe(&mut self, opened: Opened) -> Result<(Refresh, u64), String> {
+        let Opened {
+            id,
+            knowledge_graph,
+            view,
+            snapshot,
+        } = opened;
+        let snapshot = snapshot?;
         let generation =
             self.registry
-                .add(id, knowledge_graph, view, snapshot.dependencies.clone())?;
+                .add(&id, &knowledge_graph, view, snapshot.dependencies.clone())?;
         self.handler.subscription_metrics().add_active(1);
         debug!(
             subscription = id,
@@ -86,10 +137,10 @@ impl ConnectionSubscriptions {
         let moved_on = self
             .handler
             .get_storage()
-            .get_snapshot_for(knowledge_graph)
+            .get_snapshot_for(&knowledge_graph)
             .map_or(true, |current| current.revision > snapshot.revision);
         if moved_on {
-            if let Some(dispatch) = self.registry.invalidate(id) {
+            if let Some(dispatch) = self.registry.invalidate(&id) {
                 self.start(dispatch);
             }
         }
@@ -108,6 +159,13 @@ impl ConnectionSubscriptions {
     /// Remove every subscription.
     pub fn clear(&mut self) {
         let removed = self.registry.clear() as u64;
+        self.handler.subscription_metrics().remove_active(removed);
+    }
+
+    /// Remove every subscription not on `knowledge_graph`: subscriptions are
+    /// scoped to the connection's KG, so switching drops them.
+    pub fn retain_knowledge_graph(&mut self, knowledge_graph: &str) {
+        let removed = self.registry.retain_knowledge_graph(knowledge_graph) as u64;
         self.handler.subscription_metrics().remove_active(removed);
     }
 

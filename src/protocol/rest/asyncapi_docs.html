@@ -90,6 +90,9 @@
 <h3 id="request-ids">Request IDs</h3>
 <p>Any request may carry an <code>id</code> (a non-empty string of at most 64 bytes). Every frame answering it &mdash; <code>authenticated</code>, <code>auth_error</code>, <code>result</code>, <code>result_start</code>, <code>result_chunk</code>, <code>result_end</code>, <code>error</code>, <code>pong</code> &mdash; echoes it. Pushes and notices never carry an <code>id</code>, so they cannot be mistaken for a reply. A malformed request (or one whose <code>id</code> is invalid or given twice) gets exactly one <code>error</code> with code <code>invalid_request</code>, carrying the <code>id</code> when it could be read; the connection stays usable.</p>
 
+<h3 id="deadlines">Deadlines and cancellation</h3>
+<p>Every <code>execute</code> runs under one deadline, counted from when the server reads it: queueing, admission and computation together. It is <code>storage.performance.query_timeout_ms</code>, or the request's <code>timeout_ms</code> when sooner. A <code>cancel</code> names an unanswered request by its <code>id</code> and acts on arrival; its <code>cancel_ack</code> says <code>cancelled</code> (nothing applied; the target fails with code <code>cancelled</code>), <code>too_late</code> (it finished or began committing, which is never interrupted) or <code>not_found</code>. An expired request fails with <code>deadline_exceeded</code>; <code>outcome_unknown</code> means a commit failed in a way that may have applied it.</p>
+
 <h2 id="client-messages">Client &rarr; Server Messages</h2>
 
 <div class="msg-card">
@@ -103,8 +106,20 @@
       <tr><td>type</td><td>string</td><td>Always <code>"execute"</code></td></tr>
       <tr><td>id</td><td>string?</td><td>Request id, echoed on every reply</td></tr>
       <tr><td>program</td><td>string</td><td>The Datalog statement or meta command</td></tr>
+      <tr><td>timeout_ms</td><td>integer?</td><td>Deadline from arrival, capped by the server's query timeout</td></tr>
     </table>
     <pre><code>{"type": "execute", "id": "7", "program": "?edge(X, Y)"}</code></pre>
+  </div>
+</div>
+
+<div class="msg-card">
+  <div class="msg-card-header">
+    <span class="badge badge-send">SEND</span>
+    <h4>cancel</h4>
+  </div>
+  <div class="msg-card-body">
+    <p>Cancel the unanswered request <code>target</code>. Answered by <code>cancel_ack</code> with <code>outcome</code> <code>cancelled</code>, <code>too_late</code> or <code>not_found</code>.</p>
+    <pre><code>{"type": "cancel", "id": "9", "target": "7"}</code></pre>
   </div>
 </div>
 
@@ -180,7 +195,7 @@
       <tr><td>type</td><td>string</td><td>Always <code>"error"</code></td></tr>
       <tr><td>id</td><td>string?</td><td>The request's id, when it could be read</td></tr>
       <tr><td>message</td><td>string</td><td>Human-readable error message</td></tr>
-      <tr><td>code</td><td>string?</td><td><code>validation</code>, <code>not_found</code>, <code>conflict</code>, <code>unsupported</code>, <code>internal</code>, <code>invalid_request</code> or <code>rate_limited</code></td></tr>
+      <tr><td>code</td><td>string?</td><td><code>validation</code>, <code>not_found</code>, <code>conflict</code>, <code>unsupported</code>, <code>internal</code>, <code>invalid_request</code>, <code>rate_limited</code>, <code>deadline_exceeded</code>, <code>cancelled</code> or <code>outcome_unknown</code></td></tr>
     </table>
     <pre><code>{"type": "error", "id": "7", "message": "Knowledge graph 'missing' not found", "code": "not_found"}</code></pre>
   </div>

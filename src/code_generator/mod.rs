@@ -19,6 +19,7 @@
 mod static_input;
 
 use crate::boolean_specialization::SemiringType;
+use crate::execution::RequestControl;
 use crate::ir::{AggregateFunction, ArithOp, BuiltinFunction, IRExpression, IRNode, Predicate};
 use crate::semiring_types::{BooleanDiff, DiffType};
 use differential_dataflow::collection::vec::Collection;
@@ -45,36 +46,32 @@ use crate::vector_ops;
 
 mod scc;
 
-// Thread-local cancellation flag for cooperative query timeout.
-// Set by Handler before DD computation, checked in spin loops.
+// The running request's deadline and cancellation, for cooperative stops.
+// Set by the handler before computation, checked in spin loops.
 thread_local! {
-    static QUERY_CANCEL: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };
+    static REQUEST_CONTROL: RefCell<Option<Arc<RequestControl>>> = const { RefCell::new(None) };
 }
 
-/// Set the query cancellation flag for the current thread.
-/// Called from `spawn_blocking` before starting DD computation.
-pub fn set_query_cancel_flag(flag: Option<Arc<AtomicBool>>) {
-    QUERY_CANCEL.with(|cell| {
-        *cell.borrow_mut() = flag;
+/// Set the running request's control for the current thread.
+/// Called from `spawn_blocking` before starting computation.
+pub fn set_request_control(control: Option<Arc<RequestControl>>) {
+    REQUEST_CONTROL.with(|cell| {
+        *cell.borrow_mut() = control;
     });
 }
 
-/// The current thread's query cancellation flag.
-pub(crate) fn current_query_cancel_flag() -> Option<Arc<AtomicBool>> {
-    QUERY_CANCEL.with(|cell| cell.borrow().clone())
+/// The current thread's request control.
+pub(crate) fn current_request_control() -> Option<Arc<RequestControl>> {
+    REQUEST_CONTROL.with(|cell| cell.borrow().clone())
 }
 
-/// Check if the current query has been cancelled.
+/// Whether the current request was stopped (deadline or cancel).
 fn is_query_cancelled() -> bool {
-    QUERY_CANCEL.with(|cell| {
-        cell.borrow()
-            .as_ref()
-            .is_some_and(|f| f.load(Ordering::Relaxed))
-    })
+    REQUEST_CONTROL.with(|cell| cell.borrow().as_ref().is_some_and(|c| c.is_stopped()))
 }
 
-/// Error returned when a query stops on its cancel flag.
-const QUERY_CANCELLED: &str = "Query cancelled due to timeout";
+/// Error returned when a query stops on its request's deadline or cancel.
+const QUERY_CANCELLED: &str = "Query stopped: deadline exceeded or cancelled";
 
 /// Collects a dataflow's output rows. Full at `limit` rows (0 = unlimited),
 /// which stops only this dataflow and leaves the query cancel flag alone.
@@ -1122,21 +1119,21 @@ impl CodeGenerator {
             })
             .collect();
 
-        let cancel = current_query_cancel_flag();
+        let control = current_request_control();
         let limit = self.max_result_rows;
         let semiring_type = self.semiring_type;
 
         let all_results: Vec<Result<Vec<Tuple>, String>> = partitioned_inputs
             .into_par_iter()
             .map(|partition| {
-                let prev = current_query_cancel_flag();
-                set_query_cancel_flag(cancel.clone());
+                let prev = current_request_control();
+                set_request_control(control.clone());
                 let mut temp_codegen = CodeGenerator::new();
                 temp_codegen.set_semiring_type(semiring_type);
                 temp_codegen.set_max_result_rows(limit);
                 temp_codegen.set_inputs(partition);
                 let result = temp_codegen.generate_and_execute_tuples(ir);
-                set_query_cancel_flag(prev);
+                set_request_control(prev);
                 result
             })
             .collect();
@@ -8192,16 +8189,17 @@ mod tests {
         );
         let config = ExecutionConfig::with_workers(4);
 
-        let flag = Arc::new(AtomicBool::new(true));
-        set_query_cancel_flag(Some(Arc::clone(&flag)));
+        let control = RequestControl::new(None);
+        control.cancel();
+        set_request_control(Some(control));
         let cancelled = codegen.execute_with_config(&scan("r", 1), config.clone());
-        set_query_cancel_flag(None);
-        assert!(cancelled.is_err(), "cancel flag must reach workers");
+        set_request_control(None);
+        assert!(cancelled.is_err(), "cancel must reach workers");
 
         codegen.set_max_result_rows(10);
-        set_query_cancel_flag(Some(Arc::new(AtomicBool::new(false))));
+        set_request_control(Some(RequestControl::new(None)));
         let limited = codegen.execute_with_config(&scan("r", 1), config);
-        set_query_cancel_flag(None);
+        set_request_control(None);
         assert_eq!(limited.unwrap().len(), 10);
     }
 
@@ -8313,58 +8311,42 @@ mod tests {
 
     // === Regression tests for production readiness fixes ===
 
-    /// Regression: cooperative cancellation flag mechanism works correctly.
-    /// Ensures set_query_cancel_flag / is_query_cancelled communicate properly.
+    /// Regression: the thread's request control reaches the cooperative
+    /// checks: set_request_control / is_query_cancelled communicate properly.
     #[test]
-    fn test_query_cancel_flag_mechanism() {
-        // Initially no flag set - not cancelled
-        assert!(
-            !is_query_cancelled(),
-            "Should not be cancelled when no flag is set"
-        );
+    fn test_request_control_mechanism() {
+        assert!(!is_query_cancelled(), "no control set: not cancelled");
 
-        // Set a flag that is NOT triggered
-        let flag = Arc::new(AtomicBool::new(false));
-        set_query_cancel_flag(Some(Arc::clone(&flag)));
-        assert!(
-            !is_query_cancelled(),
-            "Should not be cancelled when flag is false"
-        );
+        let control = RequestControl::new(None);
+        set_request_control(Some(Arc::clone(&control)));
+        assert!(!is_query_cancelled(), "running request: not cancelled");
 
-        // Trigger the cancellation
-        flag.store(true, Ordering::Relaxed);
-        assert!(
-            is_query_cancelled(),
-            "Should be cancelled after flag is set to true"
-        );
+        control.cancel();
+        assert!(is_query_cancelled(), "cancelled request must be seen");
 
-        // Clear the flag
-        set_query_cancel_flag(None);
-        assert!(
-            !is_query_cancelled(),
-            "Should not be cancelled after flag is cleared"
-        );
+        set_request_control(None);
+        assert!(!is_query_cancelled(), "control cleared: not cancelled");
     }
 
-    /// Regression: cancel flag can be set from another thread (simulating timeout handler).
+    /// Regression: a stop from another thread (the deadline or a client
+    /// cancel) is visible to the computing thread.
     #[test]
-    fn test_query_cancel_flag_cross_thread() {
-        let flag = Arc::new(AtomicBool::new(false));
-        let flag_clone = Arc::clone(&flag);
-        set_query_cancel_flag(Some(flag));
+    fn test_request_control_cross_thread() {
+        let control = RequestControl::new(None);
+        let canceller = Arc::clone(&control);
+        set_request_control(Some(control));
 
-        // Simulate timeout handler setting flag from another thread
         let handle = std::thread::spawn(move || {
-            flag_clone.store(true, Ordering::Relaxed);
+            canceller.cancel();
         });
         handle.join().unwrap();
 
         assert!(
             is_query_cancelled(),
-            "Cancellation flag set from another thread should be visible"
+            "a stop from another thread should be visible"
         );
 
-        set_query_cancel_flag(None);
+        set_request_control(None);
     }
 
     // === Regression tests for result set size limit ===
@@ -8428,8 +8410,8 @@ mod tests {
     /// shared cancel flag, so later rules of the same request still run.
     #[test]
     fn test_result_limit_leaves_cancel_flag_clear() {
-        let flag = Arc::new(AtomicBool::new(false));
-        set_query_cancel_flag(Some(Arc::clone(&flag)));
+        let control = RequestControl::new(None);
+        set_request_control(Some(Arc::clone(&control)));
 
         let mut codegen = CodeGenerator::new();
         codegen.set_max_result_rows(5);
@@ -8444,8 +8426,8 @@ mod tests {
             schema: vec!["x".to_string()],
         };
         let results = codegen.execute(&ir).unwrap();
-        let cancelled = flag.load(Ordering::Relaxed);
-        set_query_cancel_flag(None);
+        let cancelled = control.is_stopped();
+        set_request_control(None);
 
         assert_eq!(results.len(), 5);
         assert!(!cancelled, "row limit must not signal query cancel");
@@ -8455,11 +8437,9 @@ mod tests {
     /// result_limit is set but not yet reached.
     #[test]
     fn test_timeout_cancel_returns_error_with_result_limit() {
-        use std::sync::atomic::AtomicBool;
-        use std::sync::Arc;
-
-        let flag = Arc::new(AtomicBool::new(true)); // pre-cancelled
-        set_query_cancel_flag(Some(Arc::clone(&flag)));
+        let control = RequestControl::new(None);
+        control.cancel(); // pre-cancelled
+        set_request_control(Some(control));
 
         let mut codegen = CodeGenerator::new();
         codegen.set_max_result_rows(10_000); // much higher than data size
@@ -8477,9 +8457,9 @@ mod tests {
             result.is_err(),
             "Should return timeout error when cancel is external"
         );
-        assert!(result.unwrap_err().contains("timeout"));
+        assert_eq!(result.unwrap_err(), QUERY_CANCELLED);
 
-        set_query_cancel_flag(None);
+        set_request_control(None);
     }
 
     /// Inputs share tuples with the caller's map; adding a relation to the

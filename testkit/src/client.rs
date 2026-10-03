@@ -73,12 +73,16 @@ pub struct QueryResult {
     pub truncated: bool,
     /// Failed statements of a multi-statement program.
     pub errors: Vec<Value>,
+    /// When the result's last frame arrived.
+    pub at: Instant,
     /// For a `.subscribe` reply: the revision the snapshot is the answer at.
     pub subscribed_revision: Option<u64>,
 }
 
 impl QueryResult {
-    fn from_header(header: &Value) -> Self {
+    fn from_header(header: &Frame) -> Self {
+        let at = header.at;
+        let header = &header.value;
         Self {
             columns: header["columns"]
                 .as_array()
@@ -95,14 +99,16 @@ impl QueryResult {
                 .unwrap_or_default(),
             truncated: header["truncated"].as_bool().unwrap_or_default(),
             errors: header["errors"].as_array().cloned().unwrap_or_default(),
+            at,
             subscribed_revision: header["subscribed"]["revision"].as_u64(),
         }
     }
 
-    fn extend_rows(&mut self, frame: &Value) {
-        if let Some(rows) = frame["rows"].as_array() {
+    fn extend_rows(&mut self, frame: &Frame) {
+        if let Some(rows) = frame.value["rows"].as_array() {
             self.rows.extend(rows.iter().cloned());
         }
+        self.at = frame.at;
     }
 
     /// Fail unless the engine reported the whole result.
@@ -133,11 +139,18 @@ pub struct Commit {
 ///
 /// Every request carries an id; a reply that does not echo it is a
 /// [`Violation::Uncorrelated`]. Notices are never taken for replies.
+/// Requests may be pipelined: [`Self::send_execute`] sends without waiting
+/// and [`Self::result`] reads replies in request order, which the engine
+/// guarantees. Pushes arriving meanwhile are kept for [`Self::next_push`].
 pub struct WsClient {
     sink: Sink,
     inbox: mpsc::UnboundedReceiver<Frame>,
     /// Pushes read while waiting for a reply, in arrival order.
     pushes: VecDeque<Frame>,
+    /// Replies read while waiting for a push, for requests still outstanding.
+    replies: VecDeque<Frame>,
+    /// Ids of the requests whose reply has not been consumed, oldest first.
+    outstanding: VecDeque<String>,
     /// Connection notices that did not close it (`notifications_missed`).
     notices: Vec<Frame>,
     /// Id of the last request sent.
@@ -180,6 +193,8 @@ impl WsClient {
             sink,
             inbox,
             pushes: VecDeque::new(),
+            replies: VecDeque::new(),
+            outstanding: VecDeque::new(),
             notices: Vec::new(),
             last_id: 0,
             stream_epoch: String::new(),
@@ -211,15 +226,26 @@ impl WsClient {
         &self.stream_epoch
     }
 
-    /// Send `request` tagged with a fresh id; returns its first reply.
-    async fn request(&mut self, mut request: Value) -> Checked<Frame> {
+    /// Send `request` tagged with a fresh id; returns its whole reply, which
+    /// must be one frame.
+    async fn request(&mut self, request: Value) -> Checked<Frame> {
+        self.send(request).await?;
+        let reply = self.next_reply().await;
+        self.outstanding.pop_front();
+        reply
+    }
+
+    /// Send `request` tagged with a fresh id, without waiting for its reply.
+    async fn send(&mut self, mut request: Value) -> Checked<()> {
         self.last_id += 1;
-        request["id"] = json!(self.last_id.to_string());
+        let id = self.last_id.to_string();
+        request["id"] = json!(id);
         self.sink
             .send(Message::Text(request.to_string()))
             .await
             .map_err(|e| Violation::Transport(format!("send: {e}")))?;
-        self.next_reply().await
+        self.outstanding.push_back(id);
+        Ok(())
     }
 
     /// Next reply or push. Notices are kept aside; one that closes the
@@ -250,44 +276,98 @@ impl WsClient {
         }
     }
 
-    /// Next frame answering the last request; pushes read meanwhile are kept
-    /// for [`Self::next_push`].
+    /// Next frame answering the oldest outstanding request; pushes read
+    /// meanwhile are kept for [`Self::next_push`].
     async fn next_reply(&mut self) -> Checked<Frame> {
-        loop {
-            let frame = self.next_frame(FRAME_TIMEOUT, "a reply").await?;
-            if frame.class()? == FrameClass::Push {
-                self.pushes.push_back(frame);
-                continue;
-            }
-            let expected = self.last_id.to_string();
-            if frame.request_id.as_ref().map(RequestId::as_str) != Some(expected.as_str()) {
-                return Err(Violation::Uncorrelated {
-                    expected,
-                    frame: frame.value.to_string(),
-                });
-            }
-            return Ok(frame);
+        let Some(expected) = self.outstanding.front().cloned() else {
+            return Err(Violation::Transport("no request outstanding".to_string()));
+        };
+        let frame = match self.replies.pop_front() {
+            Some(frame) => frame,
+            None => loop {
+                let frame = self.next_frame(FRAME_TIMEOUT, "a reply").await?;
+                if frame.class()? == FrameClass::Push {
+                    self.pushes.push_back(frame);
+                    continue;
+                }
+                break frame;
+            },
+        };
+        if frame.request_id.as_ref().map(RequestId::as_str) != Some(expected.as_str()) {
+            return Err(Violation::Uncorrelated {
+                expected,
+                frame: frame.value.to_string(),
+            });
         }
+        Ok(frame)
     }
 
     /// Run `program`; returns its complete result or the engine's error.
     pub async fn execute(&mut self, program: &str) -> Checked<QueryResult> {
-        let header = self
-            .request(json!({"type": "execute", "program": program}))
+        self.send_execute(program).await?;
+        self.result().await
+    }
+
+    /// Send `program` without waiting; returns its request id (for
+    /// [`Self::send_cancel`]). Read its reply with [`Self::result`].
+    pub async fn send_execute(&mut self, program: &str) -> Checked<String> {
+        self.send(json!({"type": "execute", "program": program}))
             .await?;
+        Ok(self.last_id.to_string())
+    }
+
+    /// Send a `cancel` of the unanswered request `target` without waiting.
+    /// Its acknowledgement comes after the target's reply: read it with
+    /// [`Self::cancel_ack`].
+    pub async fn send_cancel(&mut self, target: &str) -> Checked<()> {
+        self.send(json!({"type": "cancel", "target": target})).await
+    }
+
+    /// The `cancel_ack` answering the oldest outstanding request: its
+    /// `outcome` (`cancelled`, `too_late` or `not_found`).
+    pub async fn cancel_ack(&mut self) -> Checked<String> {
+        let reply = self.next_reply().await;
+        self.outstanding.pop_front();
+        let reply = reply?;
+        if reply.kind() != "cancel_ack" {
+            return Err(Violation::Transport(format!(
+                "expected cancel_ack: {}",
+                reply.value
+            )));
+        }
+        Ok(reply.value["outcome"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string())
+    }
+
+    /// The reply to the oldest request sent with [`Self::send_execute`]: its
+    /// complete result or the engine's error.
+    pub async fn result(&mut self) -> Checked<QueryResult> {
+        let result = self.read_result().await;
+        self.outstanding.pop_front();
+        result
+    }
+
+    /// Read the reply to the oldest outstanding request.
+    async fn read_result(&mut self) -> Checked<QueryResult> {
+        let header = self.next_reply().await?;
         match header.kind() {
             "result" => {
-                let mut result = QueryResult::from_header(&header.value);
-                result.extend_rows(&header.value);
+                let mut result = QueryResult::from_header(&header);
+                result.extend_rows(&header);
                 Ok(result)
             }
             "result_start" => {
-                let mut result = QueryResult::from_header(&header.value);
+                let mut result = QueryResult::from_header(&header);
                 loop {
                     let frame = self.next_reply().await?;
                     match frame.kind() {
-                        "result_chunk" => result.extend_rows(&frame.value),
-                        "result_end" => return Ok(result),
+                        "result_chunk" => result.extend_rows(&frame),
+                        "result_end" => {
+                            result.at = frame.at;
+                            return Ok(result);
+                        }
                         _ => {
                             return Err(Violation::Transport(format!(
                                 "unexpected frame inside a streamed result: {}",
@@ -329,18 +409,27 @@ impl WsClient {
         self.execute(query).await?.complete()
     }
 
-    /// Next pushed message, waiting up to `timeout`.
+    /// Next pushed message, waiting up to `timeout`. A reply arriving
+    /// meanwhile is kept for [`Self::result`] while a request is outstanding,
+    /// and is a violation otherwise.
     pub async fn next_push(&mut self, timeout: Duration) -> Checked<Frame> {
         if let Some(frame) = self.pushes.pop_front() {
             return Ok(frame);
         }
-        let frame = self.next_frame(timeout, "a push").await?;
-        match frame.class()? {
-            FrameClass::Push => Ok(frame),
-            _ => Err(Violation::Transport(format!(
-                "unsolicited reply: {}",
-                frame.value
-            ))),
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let frame = self.next_frame(remaining, "a push").await?;
+            match frame.class()? {
+                FrameClass::Push => return Ok(frame),
+                _ if !self.outstanding.is_empty() => self.replies.push_back(frame),
+                _ => {
+                    return Err(Violation::Transport(format!(
+                        "unsolicited reply: {}",
+                        frame.value
+                    )))
+                }
+            }
         }
     }
 

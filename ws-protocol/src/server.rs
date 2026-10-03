@@ -82,6 +82,14 @@ pub enum ServerFrame {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         id: Option<RequestId>,
     },
+    /// Answer to `cancel`: what cancelling `target` did. The target's own
+    /// reply still follows, in request order, and reports its outcome.
+    CancelAck {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<RequestId>,
+        target: RequestId,
+        outcome: CancelOutcome,
+    },
     /// A connection event.
     Notice { code: NoticeCode, message: String },
     /// A standing query's result changed or failed.
@@ -111,6 +119,7 @@ impl ServerFrame {
             | Self::ResultChunk { id, .. }
             | Self::ResultEnd { id, .. }
             | Self::Error { id, .. }
+            | Self::CancelAck { id, .. }
             | Self::Pong { id } => id.as_ref(),
             Self::Result(frame) => frame.id.as_ref(),
             Self::ResultStart(frame) => frame.id.as_ref(),
@@ -127,6 +136,22 @@ impl ServerFrame {
             code,
         }
     }
+}
+
+/// What a `cancel` did to its target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CancelOutcome {
+    /// The target stopped before it began committing: nothing it would have
+    /// changed is applied, and it replies with an error of code `cancelled`
+    /// (`deadline_exceeded` if its deadline had already stopped it).
+    Cancelled,
+    /// The target already finished or began committing, which is not
+    /// interrupted; its reply reports what it did.
+    TooLate,
+    /// No unanswered request of this connection has that id (never sent,
+    /// already answered, or a request that cannot be cancelled).
+    NotFound,
 }
 
 /// A complete result.

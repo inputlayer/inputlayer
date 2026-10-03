@@ -4,6 +4,7 @@
 //! writes make the engine push notifications, a subscription delta and a
 //! `notifications_missed` notice between the replies. Every reply must echo
 //! its request's `id`, in request order; pushes and notices never carry one.
+//! An id still awaiting its reply cannot be reused; an answered one can.
 
 use std::time::Duration;
 
@@ -122,7 +123,7 @@ async fn replies_correlate_through_pushes_notices_and_bad_requests() -> Checked<
         "not json".to_string(),
         json!({"type": "bogus", "id": "x"}).to_string(),
         json!({"type": "execute", "id": "q2", "program": "?r0(X)"}).to_string(),
-        // An id may be reused once its request is answered.
+        // Still awaiting its reply: the reuse is refused.
         json!({"type": "execute", "id": "q2", "program": "?r1(X)"}).to_string(),
         json!({"type": "ping", "id": "last"}).to_string(),
     ];
@@ -200,7 +201,7 @@ async fn replies_correlate_through_pushes_notices_and_bad_requests() -> Checked<
 
     let after_stream = &replies[3 + chunks..];
     assert_eq!(after_stream[0].raw["type"], "pong");
-    for bad in &after_stream[1..5] {
+    for bad in after_stream[1..5].iter().chain(&after_stream[6..7]) {
         assert!(
             matches!(
                 bad.frame,
@@ -213,11 +214,12 @@ async fn replies_correlate_through_pushes_notices_and_bad_requests() -> Checked<
             bad.raw
         );
     }
-    for reply in &after_stream[5..7] {
-        let mut rows = reply.raw["rows"].as_array().expect("a result").clone();
-        rows.sort_by_key(Value::to_string);
-        assert_eq!(rows, [json!([0]), json!([1])], "{}", reply.raw);
-    }
+    let mut rows = after_stream[5].raw["rows"]
+        .as_array()
+        .expect("a result")
+        .clone();
+    rows.sort_by_key(Value::to_string);
+    assert_eq!(rows, [json!([0]), json!([1])], "{}", after_stream[5].raw);
 
     // The lag while `w` ran is announced, not passed off as a reply.
     assert!(
@@ -248,5 +250,22 @@ async fn replies_correlate_through_pushes_notices_and_bad_requests() -> Checked<
     assert_eq!(subscription, "live");
     assert_eq!(*delta_generation, generation);
     assert_eq!(inserted, &vec![vec![json!(1)]]);
+
+    // Answered: the id may be reused.
+    send(
+        &mut socket,
+        json!({"type": "execute", "id": "q2", "program": "?r1(X)"}).to_string(),
+    )
+    .await;
+    let reply = loop {
+        let received = recv(&mut socket).await?;
+        if received.frame.class() == FrameClass::Reply {
+            break received;
+        }
+    };
+    assert_eq!(reply.id(), Some("q2"));
+    let mut rows = reply.raw["rows"].as_array().expect("a result").clone();
+    rows.sort_by_key(Value::to_string);
+    assert_eq!(rows, [json!([0]), json!([1])], "{}", reply.raw);
     Ok(())
 }

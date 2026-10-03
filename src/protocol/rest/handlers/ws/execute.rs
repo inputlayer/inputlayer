@@ -1,22 +1,23 @@
-//! Answering `execute`: programs, streamed results and subscription commands.
+//! Answering `execute`: running a program and building its reply frames.
 //!
-//! Every frame sent here answers one request and carries its `id`.
+//! Every frame built here answers one request and carries its `id`. Frames
+//! are returned encoded, for the connection loop to write when the request is
+//! released (see the `pipeline` module).
 
 use std::sync::Arc;
+use std::time::Instant;
 
-use axum::extract::ws::Message;
 use inputlayer_ws_protocol::{
     ErrorCode, RequestId, ResultFrame, ResultStartFrame, ServerFrame, SessionMetadata, Subscribed,
 };
 use tracing::{info, warn};
 
-use super::outbound::Outbound;
+use super::outbound::encode;
 use crate::auth::Principal;
+use crate::execution::RequestControl;
 use crate::protocol::handler::{ProgramError, ValidationError, VALIDATION_ERROR_PREFIX};
 use crate::protocol::rest::handlers::wire_value_to_json;
-use crate::protocol::subscription::ConnectionSubscriptions;
 use crate::protocol::{Handler, QueryResult};
-use crate::statement::{MetaCommand, Statement};
 
 /// Results whose single-frame JSON exceeds this many bytes are streamed as
 /// `result_start` / `result_chunk` / `result_end`.
@@ -25,140 +26,29 @@ const STREAMING_THRESHOLD: usize = 1024 * 1024; // 1 MB
 /// Maximum number of rows per `result_chunk`.
 const STREAMING_CHUNK_ROWS: usize = 500;
 
+/// Results with more rows than this are serialized on the blocking pool, so
+/// a large result never stalls the connection loop polling the request.
+const INLINE_FRAME_ROWS: usize = 256;
+
 /// Maximum characters of a program logged as a preview.
 const LOG_PREVIEW_CHARS: usize = 80;
 
-/// Run `program` for the request `id` and send its reply. Returns `false` if
-/// the connection is dead.
+/// Run `program` in `session_id` as `auth` for the request `id`, under
+/// `control`; returns its reply frames.
 pub(super) async fn execute(
-    handler: &Arc<Handler>,
-    session_id: &str,
+    handler: Arc<Handler>,
+    session_id: String,
     id: Option<RequestId>,
     program: String,
-    auth: &Principal,
-    sender: &mut Outbound,
-    subscriptions: &mut ConnectionSubscriptions,
-) -> bool {
-    if let Some(command) = subscription_command(&program) {
-        return send_subscription_command(handler, session_id, id, command, subscriptions, sender)
-            .await;
-    }
-    let session_kg = || {
-        handler
-            .session_manager()
-            .session_kg(&session_id.to_string())
-            .ok()
-    };
-    let kg_before = session_kg();
-    let alive = send_program(handler, session_id, id, program, auth, sender).await;
-    // Subscriptions are scoped to the connection's KG: switching drops them.
-    if session_kg() != kg_before {
-        subscriptions.clear();
-    }
-    alive
-}
-
-/// Extract `.subscribe` / `.unsubscribe` from a program.
-fn subscription_command(program: &str) -> Option<MetaCommand> {
-    let trimmed = program.trim();
-    if !trimmed.starts_with(".subscribe") && !trimmed.starts_with(".unsubscribe") {
-        return None;
-    }
-    match crate::statement::parse_statement(trimmed) {
-        Ok(Statement::Meta(
-            command @ (MetaCommand::Subscribe { .. } | MetaCommand::Unsubscribe(_)),
-        )) => Some(command),
-        _ => None,
-    }
-}
-
-/// Run `.subscribe` / `.unsubscribe` against this connection's subscriptions.
-/// A `.subscribe` reply is a `result` holding the snapshot and naming the
-/// subscription's generation.
-async fn send_subscription_command(
-    handler: &Arc<Handler>,
-    session_id: &str,
-    id: Option<RequestId>,
-    command: MetaCommand,
-    subscriptions: &mut ConnectionSubscriptions,
-    sender: &mut Outbound,
-) -> bool {
-    let start = std::time::Instant::now();
-    let outcome = match command {
-        MetaCommand::Subscribe {
-            id: subscription,
-            query,
-        } => match handler
-            .session_manager()
-            .session_kg(&session_id.to_string())
-        {
-            Ok(kg) => subscriptions
-                .subscribe(&kg, &subscription, &query)
-                .await
-                .map(|(snapshot, generation)| {
-                    let subscribed = Subscribed {
-                        subscription,
-                        generation,
-                        revision: snapshot.revision,
-                    };
-                    (snapshot.columns, snapshot.inserted, Some(subscribed))
-                }),
-            Err(e) => Err(e),
-        },
-        MetaCommand::Unsubscribe(subscription) => {
-            subscriptions.unsubscribe(&subscription).map(|()| {
-                let message = format!("Unsubscribed '{subscription}'.");
-                (
-                    vec!["message".to_string()],
-                    vec![vec![serde_json::Value::String(message)]],
-                    None,
-                )
-            })
-        }
-        _ => Err("Not a subscription command".to_string()),
-    };
-    let frame = match outcome {
-        Ok((columns, rows, subscribed)) => ServerFrame::Result(ResultFrame {
-            id,
-            columns,
-            row_count: rows.len(),
-            total_count: rows.len(),
-            rows,
-            // A subscription snapshot is complete by construction: a capped
-            // result fails the `.subscribe` instead.
-            truncated: false,
-            execution_time_ms: start.elapsed().as_millis() as u64,
-            row_provenance: Vec::new(),
-            metadata: None,
-            switched_kg: None,
-            proof_trees: None,
-            timing_breakdown: None,
-            errors: Vec::new(),
-            subscribed,
-        }),
-        Err(message) => ServerFrame::error(id, None, message),
-    };
-    sender.send_frame(&frame).await
-}
-
-/// Run a program and send its result: one `result` frame, or for results
-/// over [`STREAMING_THRESHOLD`] a `result_start`, `result_chunk`s of up to
-/// [`STREAMING_CHUNK_ROWS`] rows and a `result_end`.
-async fn send_program(
-    handler: &Arc<Handler>,
-    session_id: &str,
-    id: Option<RequestId>,
-    program: String,
-    auth: &Principal,
-    sender: &mut Outbound,
-) -> bool {
-    let start = std::time::Instant::now();
+    auth: Principal,
+    control: Arc<RequestControl>,
+) -> Vec<String> {
+    let start = Instant::now();
     let program_len = program.len();
     let program_preview = log_preview(&program);
     info!(program_len, program_preview = %program_preview, "ws_execute_start");
-    let sid = session_id.to_string();
     let result = handler
-        .execute_program_status(Some(&sid), None, program, Some(auth))
+        .execute_program_status(Some(&session_id), None, program, Some(&auth), &control)
         .await;
     let elapsed_ms = start.elapsed().as_millis() as u64;
     let slow_query_ms = handler.config().storage.performance.slow_query_log_ms;
@@ -176,38 +66,50 @@ async fn send_program(
         ok = result.is_ok(),
         "ws_execute_end"
     );
-
-    let frame = match result {
-        Ok(response) => result_frame(id, response),
-        Err(e) => program_error_frame(id, e),
-    };
-    match frame {
-        ServerFrame::Result(result) => send_result(sender, result).await,
-        other => sender.send_frame(&other).await,
+    match result {
+        Ok(response) if response.rows.len() <= INLINE_FRAME_ROWS => program_frames(id, response),
+        Ok(response) => {
+            let reply_id = id.clone();
+            tokio::task::spawn_blocking(move || program_frames(reply_id, response))
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::error!(error = %e, "ws_result_serialization_failed");
+                    let message = "Internal server error".to_string();
+                    vec![encode(&ServerFrame::error(
+                        id,
+                        Some(ErrorCode::Internal),
+                        message,
+                    ))]
+                })
+        }
+        Err(e) => vec![encode(&program_error_frame(id, e))],
     }
 }
 
-/// Send `result` in one frame, or streamed when over [`STREAMING_THRESHOLD`].
-async fn send_result(sender: &mut Outbound, result: ResultFrame) -> bool {
-    let frame = ServerFrame::Result(result);
+/// Frames of a successful program: one `result` frame, or for results over
+/// [`STREAMING_THRESHOLD`] a `result_start`, `result_chunk`s of up to
+/// [`STREAMING_CHUNK_ROWS`] rows and a `result_end`.
+fn program_frames(id: Option<RequestId>, response: QueryResult) -> Vec<String> {
+    let frame = result_frame(id, response);
     let json = match serde_json::to_string(&frame) {
         Ok(json) => json,
         // Reports the failure to the client.
-        Err(_) => return sender.send_frame(&frame).await,
+        Err(_) => return vec![encode(&frame)],
     };
     if json.len() <= STREAMING_THRESHOLD {
-        return sender.send(Message::Text(json)).await.is_ok();
+        return vec![json];
     }
     let json_size = json.len();
     drop(json);
     let ServerFrame::Result(result) = frame else {
-        unreachable!("constructed as a result above");
+        // Only a result frame can be this large.
+        return vec![encode(&frame)];
     };
     info!(
         row_count = result.row_count,
         json_size, "ws_streaming_result"
     );
-    stream_result(sender, result).await
+    stream_frames(result)
 }
 
 /// The single-frame reply for a program's result.
@@ -256,8 +158,8 @@ fn result_frame(id: Option<RequestId>, response: QueryResult) -> ServerFrame {
     })
 }
 
-/// Send `result` as `result_start`, chunks and `result_end`.
-async fn stream_result(sender: &mut Outbound, result: ResultFrame) -> bool {
+/// `result` as `result_start`, chunks and `result_end`.
+fn stream_frames(result: ResultFrame) -> Vec<String> {
     let ResultFrame {
         id,
         columns,
@@ -274,7 +176,7 @@ async fn stream_result(sender: &mut Outbound, result: ResultFrame) -> bool {
         errors,
         subscribed: _,
     } = result;
-    let start = ServerFrame::ResultStart(ResultStartFrame {
+    let mut frames = vec![encode(&ServerFrame::ResultStart(ResultStartFrame {
         id: id.clone(),
         columns,
         total_count,
@@ -285,10 +187,7 @@ async fn stream_result(sender: &mut Outbound, result: ResultFrame) -> bool {
         proof_trees,
         timing_breakdown,
         errors,
-    });
-    if !sender.send_frame(&start).await {
-        return false;
-    }
+    }))];
     let mut chunk_count = 0;
     let mut rows = rows.into_iter();
     let mut provenance = row_provenance.into_iter();
@@ -297,23 +196,49 @@ async fn stream_result(sender: &mut Outbound, result: ResultFrame) -> bool {
         if chunk.is_empty() {
             break;
         }
-        let frame = ServerFrame::ResultChunk {
+        frames.push(encode(&ServerFrame::ResultChunk {
             id: id.clone(),
             row_provenance: provenance.by_ref().take(chunk.len()).collect(),
             rows: chunk,
             chunk_index: chunk_count,
-        };
-        if !sender.send_frame(&frame).await {
-            return false;
-        }
+        }));
         chunk_count += 1;
     }
-    let end = ServerFrame::ResultEnd {
+    frames.push(encode(&ServerFrame::ResultEnd {
         id,
         row_count,
         chunk_count,
-    };
-    sender.send_frame(&end).await
+    }));
+    frames
+}
+
+/// The `result` frame of a subscription command. A `.subscribe` reply holds
+/// the snapshot and names the subscription's generation.
+pub(super) fn subscription_reply(
+    id: Option<RequestId>,
+    columns: Vec<String>,
+    rows: Vec<Vec<serde_json::Value>>,
+    subscribed: Option<Subscribed>,
+    started: Instant,
+) -> ServerFrame {
+    ServerFrame::Result(ResultFrame {
+        id,
+        columns,
+        row_count: rows.len(),
+        total_count: rows.len(),
+        rows,
+        // A subscription snapshot is complete by construction: a capped
+        // result fails the `.subscribe` instead.
+        truncated: false,
+        execution_time_ms: started.elapsed().as_millis() as u64,
+        row_provenance: Vec::new(),
+        metadata: None,
+        switched_kg: None,
+        proof_trees: None,
+        timing_breakdown: None,
+        errors: Vec::new(),
+        subscribed,
+    })
 }
 
 /// The `error` frame for a failed program, unpacking parse errors.

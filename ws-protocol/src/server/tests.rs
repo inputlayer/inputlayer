@@ -189,3 +189,31 @@ fn subscribe_reply_names_the_subscription() {
 fn unknown_frame_types_are_rejected() {
     assert!(serde_json::from_str::<ServerFrame>(r#"{"type":"bogus"}"#).is_err());
 }
+
+#[test]
+fn cancel_ack_is_a_reply_to_the_cancel() {
+    let ack = ServerFrame::CancelAck {
+        id: id("c"),
+        target: RequestId::new("q").unwrap(),
+        outcome: CancelOutcome::TooLate,
+    };
+    let json = serde_json::to_value(&ack).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({"type": "cancel_ack", "id": "c", "target": "q", "outcome": "too_late"})
+    );
+    assert_eq!(round_trip(&ack), ack);
+    assert_eq!(ack.class(), FrameClass::Reply);
+    assert_eq!(ack.request_id(), id("c").as_ref());
+}
+
+#[test]
+fn stop_codes_serialize_in_snake_case() {
+    for (code, name) in [
+        (ErrorCode::DeadlineExceeded, "deadline_exceeded"),
+        (ErrorCode::Cancelled, "cancelled"),
+        (ErrorCode::OutcomeUnknown, "outcome_unknown"),
+    ] {
+        assert_eq!(serde_json::to_value(code).unwrap(), name);
+    }
+}

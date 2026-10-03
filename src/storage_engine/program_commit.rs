@@ -7,12 +7,13 @@ use super::write_program::{
     StatementEffect, StatementOutcome, WriteProgram,
 };
 use super::{validate_names, KnowledgeGraph, StorageEngine};
+use crate::execution::RequestControl;
 use crate::schema::SchemaCatalog;
 use crate::storage::persist::{PersistBackend, Transaction};
 use crate::storage::{StorageError, StorageResult};
 use crate::value::{Relation, Tuple};
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 use tracing::{error, info, warn};
 
@@ -28,16 +29,19 @@ impl StorageEngine {
     /// readers see the program's rules and data together. An empty delta
     /// writes and publishes nothing.
     ///
-    /// `cancel` is checked once more under the lock, just before the WAL write;
-    /// once that write starts the commit completes.
+    /// `control`, the request's deadline and cancellation, enters its commit
+    /// under the lock just before the WAL write: a request stopped before then
+    /// writes nothing, and once the WAL write starts the commit completes and
+    /// a later stop cannot interrupt it.
     ///
     /// # Errors
-    /// See [`CommitError`]; on any error nothing was written or published.
+    /// See [`CommitError`]; on any error but [`CommitError::Unknown`] nothing
+    /// was written or published.
     pub fn commit_program(
         &self,
         kg: &str,
         program: WriteProgram,
-        cancel: Option<&AtomicBool>,
+        control: Option<&RequestControl>,
     ) -> Result<ProgramCommit, CommitError> {
         let handle = self.kg_handle(kg).map_err(CommitError::Failed)?;
         let mut db = Self::lock_live(&handle, kg).map_err(CommitError::Failed)?;
@@ -74,8 +78,8 @@ impl StorageEngine {
                 relations: Vec::new(),
             });
         }
-        if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
-            return Err(CommitError::Cancelled);
+        if let Some(control) = control {
+            control.begin_commit().map_err(CommitError::Cancelled)?;
         }
 
         let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
@@ -102,7 +106,7 @@ impl StorageEngine {
         }
         Ok(ProgramCommit {
             statements,
-            relations: relations.map_err(CommitError::Failed)?,
+            relations: relations.map_err(CommitError::Unknown)?,
         })
     }
 }

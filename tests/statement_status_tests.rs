@@ -18,7 +18,13 @@ fn handler() -> (Handler, TempDir) {
 
 async fn run(handler: &Handler, program: &str) -> Result<QueryResult, ProgramError> {
     handler
-        .execute_program_status(None, Some("default".to_string()), program.to_string(), None)
+        .execute_program_status(
+            None,
+            Some("default".to_string()),
+            program.to_string(),
+            None,
+            &handler.request_control(None),
+        )
         .await
 }
 

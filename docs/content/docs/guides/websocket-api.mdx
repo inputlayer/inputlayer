@@ -97,11 +97,49 @@ Any request (`login`, `authenticate`, `execute`, `ping`) may carry an `id`, a no
 {"type": "execute", "id": "42", "program": "?edge(X, Y)"}
 ```
 
-Every frame answering it echoes the `id`: `authenticated`, `auth_error`, `result`, `result_start`, `result_chunk`, `result_end`, `error` and `pong`. A request without an `id` gets replies without one. Keep an `id` unique among your requests still awaiting a reply; it can be reused once answered. The server answers requests one at a time, in the order received.
+Every frame answering it echoes the `id`: `authenticated`, `auth_error`, `result`, `result_start`, `result_chunk`, `result_end`, `error` and `pong`. A request without an `id` gets replies without one. An `id` must be unique among your requests still awaiting a reply; it can be reused once answered. A request reusing an `id` that is still awaiting its reply gets an `invalid_request` error and does not run.
 
 Frames you did not ask for never carry an `id` and have their own types, so they cannot be read as a reply: [notifications](#notifications), [standing-query pushes](#standing-queries) and [notices](#notices).
 
 A request that is not a valid frame (bad JSON, unknown `type`, a missing field, or an `id` that is not a 1-64 byte string or appears twice) gets exactly one `error` with code `invalid_request`, carrying the `id` when it could be read. Nothing runs and the connection stays usable.
+
+### Pipelining
+
+A client may send several requests without waiting for each reply:
+
+- **Replies come back in request order**, one reply (or one streamed `result_start` ... `result_end` sequence) per request, even when a later request finishes first.
+- **Queries overlap.** A program made only of queries (`?...`) runs concurrently with the connection's other queries.
+- **Everything else runs alone, in order**: inserts, deletes, rules, session rules and facts, meta commands such as `.kg use`, `.session clear`, `.subscribe` and `.unsubscribe`. Such a request starts only after every earlier request has replied, and no later request starts before it replies. A query sent after `.kg use other` therefore always reads `other`, and an insert sent after it always writes there.
+- **Pushes are not held up by requests.** Notifications and subscription deltas are delivered while the connection's own requests run, between replies (never inside a streamed result).
+- At most `http.rate_limit.ws_max_in_flight_requests` requests (default 16) are admitted and not yet answered; at that bound the server stops reading the connection until a reply goes out.
+- Closing the connection abandons its running queries and stops their computation; a running write finishes before the session is closed.
+
+### Deadlines and Cancellation
+
+Every `execute` runs under **one deadline**, counted from when the server reads it: waiting behind earlier requests, waiting for a compute slot and computing all count against it. The deadline is `storage.performance.query_timeout_ms` (default 30 s), or the request's own `timeout_ms` when that is sooner:
+
+```json
+{"type": "execute", "id": "q1", "program": "?path(X, Y)", "timeout_ms": 2000}
+```
+
+`cancel` stops an unanswered request named by its `id`, wherever it is (still waiting behind other requests, or computing). It acts as soon as the server reads it, and is answered by `cancel_ack`, released in request order like any reply, so after the target's own reply:
+
+```json
+{"type": "cancel", "id": "c1", "target": "q1"}
+{"type": "cancel_ack", "id": "c1", "target": "q1", "outcome": "cancelled"}
+```
+
+| `outcome` | Meaning |
+|---|---|
+| `cancelled` | The target stopped before it began committing. Nothing it would have changed is applied, it never runs later, and it replies with an `error` of code `cancelled`. |
+| `too_late` | The target already finished or began committing. A commit is never interrupted; the target's reply reports what it committed. |
+| `not_found` | No unanswered request on this connection has that `id` (already answered, never sent, or a `.subscribe`). |
+
+A `cancel` is read like any other frame: while `http.rate_limit.ws_max_in_flight_requests` requests are unanswered the server reads nothing, so keep a slot free if you may need to cancel.
+
+A request whose deadline passes is stopped the same way and fails with code `deadline_exceeded`; a write that already began committing completes and returns its result. Code `outcome_unknown` means the commit itself failed in a way that may have left the changes applied: read the state back before retrying.
+
+Writes of facts are idempotent: inserting a fact that is present, or deleting one that is absent, changes nothing. After `cancelled`, `deadline_exceeded`, `outcome_unknown` or a lost connection, a client can resend the same write without duplicating it.
 
 ### Result Response
 
@@ -128,7 +166,7 @@ A request that is not a valid frame (bad JSON, unknown `type`, a missing field, 
 }
 ```
 
-A program of one statement that fails gets an `error`. `code` says why: `validation`, `not_found`, `conflict`, `unsupported` or `internal`; `invalid_request` and `rate_limited` reject a request before it runs. It is absent for auth and other engine failures.
+A program of one statement that fails gets an `error`. `code` says why: `validation`, `not_found`, `conflict`, `unsupported` or `internal`; `invalid_request` and `rate_limited` reject a request before it runs; `deadline_exceeded`, `cancelled` and `outcome_unknown` are described in [Deadlines and Cancellation](#deadlines-and-cancellation). It is absent for auth and other engine failures.
 
 ### Statement Failures
 

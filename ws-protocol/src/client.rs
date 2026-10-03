@@ -26,6 +26,17 @@ pub enum ClientFrame {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         id: Option<RequestId>,
         program: String,
+        /// Milliseconds the request may take, from its arrival: queueing,
+        /// admission and computation together. Capped by the engine's own
+        /// query timeout.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout_ms: Option<u64>,
+    },
+    /// Cancel the unanswered request `target`; answered by `cancel_ack`.
+    Cancel {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<RequestId>,
+        target: RequestId,
     },
     /// Keep-alive; answered by `pong`.
     Ping {
@@ -41,6 +52,7 @@ impl ClientFrame {
             Self::Login { id, .. }
             | Self::Authenticate { id, .. }
             | Self::Execute { id, .. }
+            | Self::Cancel { id, .. }
             | Self::Ping { id } => id.as_ref(),
         }
     }
@@ -60,6 +72,30 @@ mod tests {
             serde_json::to_string(&frame).unwrap(),
             r#"{"type":"execute","program":"?a(X)"}"#
         );
+    }
+
+    #[test]
+    fn cancel_and_timeout_round_trip() {
+        let cancel: ClientFrame =
+            serde_json::from_str(r#"{"type":"cancel","id":"c","target":"q"}"#).unwrap();
+        assert_eq!(
+            cancel,
+            ClientFrame::Cancel {
+                id: Some(RequestId::new("c").unwrap()),
+                target: RequestId::new("q").unwrap(),
+            }
+        );
+        let execute: ClientFrame =
+            serde_json::from_str(r#"{"type":"execute","program":"?a(X)","timeout_ms":250}"#)
+                .unwrap();
+        assert!(matches!(
+            execute,
+            ClientFrame::Execute {
+                timeout_ms: Some(250),
+                ..
+            }
+        ));
+        assert!(serde_json::from_str::<ClientFrame>(r#"{"type":"cancel"}"#).is_err());
     }
 
     #[test]

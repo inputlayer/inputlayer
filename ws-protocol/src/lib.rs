@@ -32,6 +32,18 @@
 //! subscription's pushes have their own gapless `seq` and name the knowledge
 //! graph revision they reach, above the snapshot's
 //! [`Subscribed::revision`]; subscriptions never outlive their connection.
+//!
+//! # Deadlines and cancellation
+//!
+//! An `execute` runs under one deadline covering its queueing, admission and
+//! computation (`timeout_ms`, capped by the engine's query timeout). A
+//! [`ClientFrame::Cancel`] names an unanswered request by its `id` and is
+//! answered by [`ServerFrame::CancelAck`]. A request stopped by either before
+//! it began committing applied nothing and fails with
+//! [`ErrorCode::DeadlineExceeded`] or [`ErrorCode::Cancelled`]; once it began
+//! committing it is not interrupted, and its reply reports the committed
+//! result, or [`ErrorCode::OutcomeUnknown`] if the commit itself failed in a
+//! way that leaves the outcome open.
 
 mod client;
 mod error;
@@ -47,7 +59,8 @@ pub use notice::NoticeCode;
 pub use push::{Notification, Row, SubscriptionPush};
 pub use request_id::{probe_request_id, InvalidRequestId, RequestId, MAX_REQUEST_ID_LEN};
 pub use server::{
-    FrameClass, ResultFrame, ResultStartFrame, ServerFrame, SessionMetadata, Subscribed,
+    CancelOutcome, FrameClass, ResultFrame, ResultStartFrame, ServerFrame, SessionMetadata,
+    Subscribed,
 };
 pub use timing::{IrBuilderTiming, OptimizerTiming, RuleTiming, TimingBreakdown};
 

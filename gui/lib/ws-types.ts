@@ -138,6 +138,9 @@ export type WsErrorCode =
   | "internal"
   | "invalid_request"
   | "rate_limited"
+  | "deadline_exceeded"
+  | "cancelled"
+  | "outcome_unknown"
 
 /** A failed statement of a multi-statement program (0-based `index`). */
 export interface WsStatementError {

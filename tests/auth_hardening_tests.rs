@@ -258,6 +258,7 @@ async fn parallel_bad_logins_do_not_stall_queries() {
                         Some("latency".to_string()),
                         "?edge(X, Y)".to_string(),
                         Some(&admin),
+                        &handler.request_control(None),
                     )
                     .await
                     .unwrap();
@@ -273,6 +274,7 @@ async fn parallel_bad_logins_do_not_stall_queries() {
             Some("latency".to_string()),
             "+edge(1, 2)".to_string(),
             Some(&admin),
+            &handler.request_control(None),
         )
         .await
         .unwrap();

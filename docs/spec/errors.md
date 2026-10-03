@@ -213,13 +213,15 @@ The InputLayer server isn't running. Start it with:
 inputlayer-server
 ```
 
-### Request Timeout
+### Request Deadline Exceeded
 
 ```
-Error: Request timed out
+Error: Request deadline exceeded before it began committing; nothing was applied
 ```
 
-The query took too long. Try:
+Code `deadline_exceeded`. The request's deadline (`storage.performance.query_timeout_ms`, or the request's `timeout_ms`) covers queueing and computing together, and passed before the request began committing, so nothing was applied. Try:
 - Adding filters to reduce data
 - Breaking into smaller queries
-- Increasing timeout in config
+- Increasing the timeout in config, or the request's `timeout_ms`
+
+A request cancelled by the client fails the same way with code `cancelled`. Code `outcome_unknown` means a commit failed in a way that may have applied it: read the state back before retrying.

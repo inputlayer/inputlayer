@@ -217,6 +217,110 @@ async fn unrelated_writes_produce_no_deltas() -> Checked<()> {
     Ok(())
 }
 
+/// Complete bipartite graph, both directions: no odd cycle, so
+/// [`TRIANGLES`] returns nothing, yet the cyclic join runs long.
+const BIPARTITE_SIDE: i64 = 14;
+const TRIANGLES: &str = "?edge(X, Y), edge(Y, Z), edge(Z, X)";
+/// Below this, the agent's own query proves nothing about blocking.
+const LONG_QUERY: Duration = Duration::from_millis(500);
+/// Writer ack to the agent's delta while the agent's own query runs.
+const DELTA_BUDGET: Duration = Duration::from_millis(250);
+
+#[tokio::test(flavor = "multi_thread")]
+async fn agent_receives_deltas_while_its_own_long_query_runs() -> Checked<()> {
+    let engine = engine().start().await.expect("start engine");
+    let side = BIPARTITE_SIDE;
+    Fixture::new("bipartite", KG)
+        .facts(
+            "edge",
+            (0..side).flat_map(|a| {
+                (side..2 * side).flat_map(move |b| [format!("({a}, {b})"), format!("({b}, {a})")])
+            }),
+        )
+        .facts("seen", ["(0)".to_string()])
+        .install(&engine)
+        .await?;
+    let mut agent = Agent::connect(&engine, KG).await?;
+    let mut writer = WsClient::connect(&engine, KG).await?;
+    agent.subscribe("seen", "?seen(X)").await?;
+
+    let mut log = SampleLog::new("long_query_on_subscriber", "bipartite_triangles");
+    let sent = std::time::Instant::now();
+    agent.send_execute(TRIANGLES).await?;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let commit = writer.commit("+seen(1)").await?;
+    let delta = agent.next_delta("seen").await?;
+    delta.assert_rows(&[json!([1])], &[])?;
+    log.record("insert", 0, commit, 0, 1, delta.at);
+
+    // A host too slow to finish the join answers with the query timeout.
+    let long_at = match agent.result().await {
+        Ok(long) => {
+            assert!(long.rows.is_empty(), "{:?}", long.rows);
+            long.at
+        }
+        Err(Violation::Rejected(message)) if message.contains("deadline exceeded") => {
+            std::time::Instant::now()
+        }
+        Err(other) => return Err(other),
+    };
+    let ran = long_at - sent;
+    assert!(
+        ran >= LONG_QUERY,
+        "fixture too fast to show blocking: {ran:?}"
+    );
+    assert!(delta.at < long_at, "the delta waited for the agent's query");
+    let latency = delta.at - commit.acked_at;
+    assert!(
+        latency <= DELTA_BUDGET,
+        "delta took {latency:?} after the ack"
+    );
+    log.finish().expect("write samples");
+    Ok(())
+}
+
+/// Cancel to error reply for a running query, computation stop included.
+const CANCEL_BUDGET: Duration = Duration::from_millis(500);
+
+#[tokio::test(flavor = "multi_thread")]
+async fn agent_cancels_its_long_query_and_keeps_its_subscription() -> Checked<()> {
+    let engine = engine().start().await.expect("start engine");
+    let side = BIPARTITE_SIDE;
+    Fixture::new("bipartite", KG)
+        .facts(
+            "edge",
+            (0..side).flat_map(|a| {
+                (side..2 * side).flat_map(move |b| [format!("({a}, {b})"), format!("({b}, {a})")])
+            }),
+        )
+        .facts("seen", ["(0)".to_string()])
+        .install(&engine)
+        .await?;
+    let mut agent = Agent::connect(&engine, KG).await?;
+    let mut writer = WsClient::connect(&engine, KG).await?;
+    agent.subscribe("seen", "?seen(X)").await?;
+
+    let long = agent.send_execute(TRIANGLES).await?;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let cancelled_at = std::time::Instant::now();
+    agent.send_cancel(&long).await?;
+    match agent.result().await {
+        Err(Violation::Rejected(message)) if message.contains("cancelled") => {}
+        other => panic!("the cancelled query answered {other:?}"),
+    }
+    let stopped_in = cancelled_at.elapsed();
+    assert!(stopped_in <= CANCEL_BUDGET, "cancel took {stopped_in:?}");
+    assert_eq!(agent.cancel_ack().await?, "cancelled");
+
+    // The subscription is untouched: the next commit still arrives as a delta.
+    let commit = writer.commit("+seen(1)").await?;
+    let delta = agent.next_delta("seen").await?;
+    delta.assert_rows(&[json!([1])], &[])?;
+    assert!(delta.at >= commit.sent_at);
+    agent.converge("seen", &[json!([0]), json!([1])]).await?;
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn write_burst_converges_without_requery() -> Checked<()> {
     let engine = reachability_engine(4).await?;

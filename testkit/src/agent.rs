@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use crate::client::{Frame, WsClient, FRAME_TIMEOUT};
+use crate::client::{Frame, QueryResult, WsClient, FRAME_TIMEOUT};
 use crate::contract::{Checked, Violation};
 use crate::engine::Engine;
 
@@ -146,7 +146,8 @@ fn subscription_of(frame: &Frame) -> String {
         .to_string()
 }
 
-/// A connection that only subscribes and listens.
+/// A subscribing connection: it listens for deltas and may run requests of
+/// its own meanwhile.
 pub struct Agent {
     client: WsClient,
     views: BTreeMap<String, View>,
@@ -241,6 +242,29 @@ impl Agent {
             self.route(frame);
         }
         Ok(self.notices.len())
+    }
+
+    /// Send a request of the agent's own without waiting; deltas keep
+    /// arriving while it runs. Returns its request id; read its reply with
+    /// [`Self::result`].
+    pub async fn send_execute(&mut self, program: &str) -> Checked<String> {
+        self.client.send_execute(program).await
+    }
+
+    /// Cancel the agent's unanswered request `target`; read the outcome with
+    /// [`Self::cancel_ack`] after the target's reply.
+    pub async fn send_cancel(&mut self, target: &str) -> Checked<()> {
+        self.client.send_cancel(target).await
+    }
+
+    /// The outcome of the agent's oldest outstanding `cancel`.
+    pub async fn cancel_ack(&mut self) -> Checked<String> {
+        self.client.cancel_ack().await
+    }
+
+    /// The reply to the agent's oldest outstanding request.
+    pub async fn result(&mut self) -> Checked<QueryResult> {
+        self.client.result().await
     }
 
     /// Close the connection.
