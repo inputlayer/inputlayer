@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint perf-gate perf-gate-check bench-genbi test test-fast test-release unit-test integration-test e2e-test e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test python-test-live python-test-examples js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint perf-gate perf-gate-check bench-genbi test test-fast test-release unit-test integration-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop deny python-test python-test-live python-test-examples js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -75,6 +75,14 @@ test-all: check static-analysis
 	SNAP_FAILED=$$(sed "$$STRIP_ANSI" "$$SNAP_TMPFILE" | grep -E "^Failed:" | awk '{print $$2}'); \
 	rm -f "$$SNAP_TMPFILE"; \
 	if [ $$SNAP_EXIT -ne 0 ]; then FAILURES=$$((FAILURES + 1)); fi; \
+	echo ""; \
+	echo "=== Reactive Agent Path (E2E) ==="; \
+	if $(MAKE) --no-print-directory e2e-reactive; then \
+		REACTIVE_STATUS="PASS"; \
+	else \
+		REACTIVE_STATUS="FAIL"; \
+		FAILURES=$$((FAILURES + 1)); \
+	fi; \
 	echo ""; \
 	echo "=== Python SDK Tests ==="; \
 	if python -m pytest --version >/dev/null 2>&1; then \
@@ -160,6 +168,7 @@ test-all: check static-analysis
 	printf "  | %-14s | %-48s |\n" "Build" "$$BUILD_STATUS"; \
 	printf "  | %-14s | %-48s |\n" "Cargo Tests" "$$UNIT_PASSED passed, $$UNIT_FAILED failed, $$UNIT_IGNORED ignored"; \
 	printf "  | %-14s | %-48s |\n" "Snapshot Tests" "$${SNAP_PASSED:-0} passed, $${SNAP_FAILED:-0} failed"; \
+	printf "  | %-14s | %-48s |\n" "Reactive E2E" "$${REACTIVE_STATUS:-SKIPPED}"; \
 	printf "  | %-14s | %-48s |\n" "Python Tests" "$${PY_PASSED:-0} passed, $${PY_FAILED:-0} failed"; \
 	printf "  | %-14s | %-48s |\n" "JS/TS Tests" "$${JS_PASSED:-0} passed, $${JS_FAILED:-0} failed"; \
 	printf "  | %-14s | %-48s |\n" "Coverage" "$${COV_STATUS:-SKIPPED}"; \
@@ -221,6 +230,14 @@ ci-test-all:
 	rm -f "$$SNAP_TMPFILE"; \
 	if [ $$SNAP_EXIT -ne 0 ]; then FAILURES=$$((FAILURES + 1)); fi; \
 	echo ""; \
+	echo "=== Reactive Agent Path (E2E) ==="; \
+	if CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_CODEGEN_UNITS=4 $(MAKE) --no-print-directory e2e-reactive; then \
+		REACTIVE_STATUS="PASS"; \
+	else \
+		REACTIVE_STATUS="FAIL"; \
+		FAILURES=$$((FAILURES + 1)); \
+	fi; \
+	echo ""; \
 	echo "=== Python SDK Tests ==="; \
 	if python -m pytest --version >/dev/null 2>&1; then \
 		PY_TMPFILE=$$(mktemp); \
@@ -267,6 +284,7 @@ ci-test-all:
 	printf "  | %-14s | %-48s |\n" "Build" "$$BUILD_STATUS"; \
 	printf "  | %-14s | %-48s |\n" "Unit Tests" "$$UNIT_PASSED passed, $$UNIT_FAILED failed"; \
 	printf "  | %-14s | %-48s |\n" "Snapshot Tests" "$${SNAP_PASSED:-0} passed, $${SNAP_FAILED:-0} failed"; \
+	printf "  | %-14s | %-48s |\n" "Reactive E2E" "$${REACTIVE_STATUS:-SKIPPED}"; \
 	printf "  | %-14s | %-48s |\n" "Python Tests" "$${PY_PASSED:-0} passed, $${PY_FAILED:-0} failed"; \
 	printf "  | %-14s | %-48s |\n" "JS/TS Tests" "$${JS_PASSED:-0} passed, $${JS_FAILED:-0} failed"; \
 	echo ""; \
@@ -294,6 +312,19 @@ integration-test:
 # Tier 3: E2E snapshot tests (parallel, against live server)
 e2e-test:
 	./scripts/run_snapshot_tests.sh
+
+# Reactive agent path E2E: real engine processes, agents subscribed over /ws,
+# independent writers; release build for representative latency. Known
+# defects (S05/W04/W05) run as expected failures. Raw writer->agent delta
+# latency samples (schema inputlayer.reactive.delta_latency.v1) land in
+# $(E2E_REACTIVE_SAMPLES)/<scenario>.jsonl.
+E2E_REACTIVE_SAMPLES ?= target/e2e-reactive
+e2e-reactive:
+	rm -rf $(E2E_REACTIVE_SAMPLES)
+	cargo test --release -p inputlayer-testkit
+	INPUTLAYER_REACTIVE_SAMPLES_DIR=$(abspath $(E2E_REACTIVE_SAMPLES)) \
+		cargo test --release --test e2e_reactive -- --nocapture
+	@ls $(E2E_REACTIVE_SAMPLES)/*.jsonl >/dev/null || { echo "ERROR: no latency samples written"; exit 1; }
 
 # Regenerate snapshot .iql.out files (sequential mode)
 e2e-update:
@@ -477,6 +508,7 @@ fmt-check:
 # Run clippy lints
 lint:
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
+	cargo clippy --all-features --test e2e_reactive -- -D warnings
 
 # Performance gate: this tree's server vs the approved baseline, same host.
 # Mandatory before calling a PR done; see perf-gate/README.md.

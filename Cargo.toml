@@ -2,7 +2,7 @@
 # per #82); the gateway is a separate member so HTTP/LLM client dependencies
 # never enter the engine crate.
 [workspace]
-members = ["gateway", "ontology-client"]
+members = ["gateway", "ontology-client", "testkit"]
 # The performance gate is its own workspace: bench-only dependencies stay out
 # of the engine build and the release image.
 exclude = ["perf-gate"]
@@ -107,6 +107,7 @@ inputlayer-ontology-client = { path = "ontology-client", version = "0.1.0" }
 tempfile = "3.0"
 proptest = "1.4"
 criterion = "0.5"
+inputlayer-testkit = { path = "testkit" }
 figment = { version = "0.10", features = ["test"] }
 
 [[bin]]
@@ -140,6 +141,13 @@ path = "examples/rust/pipeline_demo.rs"
 [[example]]
 name = "storage_demo"
 path = "examples/storage_demo.rs"
+
+# Reactive agent path against real engine processes; slow, so it runs only
+# when selected (`make e2e-reactive`, part of `make test-all`/CI).
+[[test]]
+name = "e2e_reactive"
+path = "tests/e2e_reactive/main.rs"
+test = false
 
 [[bench]]
 name = "query_benchmarks"
