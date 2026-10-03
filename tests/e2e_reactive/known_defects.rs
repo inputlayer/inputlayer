@@ -1,4 +1,4 @@
-//! Expected failures for defects the reactive plan tracks (S05, W04, W05).
+//! Expected failures for defects the reactive plan tracks (W04, W05).
 //!
 //! Each test sets up strictly, then runs the check of the *correct* contract
 //! and hands its outcome to [`KnownDefect::judge`]: the defect's own violation
@@ -10,79 +10,10 @@
 use inputlayer_testkit::{
     Agent, Checked, Engine, Fixture, KnownDefect, Reproduction, Violation, WsClient,
 };
-use serde_json::{json, Value};
 
 use crate::engine;
 
 const KG: &str = "agents";
-
-fn items(range: std::ops::Range<i64>) -> Vec<Value> {
-    range.map(|i| json!([i])).collect()
-}
-
-const S05_CAPPED_SNAPSHOT: KnownDefect = KnownDefect {
-    plan_item: "S05",
-    summary: "a capped snapshot is adopted as the complete result",
-    signature: |v| matches!(v, Violation::Diverged { .. }),
-    reproduction: Reproduction::Deterministic,
-};
-
-#[tokio::test(flavor = "multi_thread")]
-async fn s05_capped_snapshot_is_adopted_as_complete() -> Checked<()> {
-    let engine = engine()
-        .max_result_rows(3)
-        .start()
-        .await
-        .expect("start engine");
-    Fixture::new("items_10", KG)
-        .facts("item", (0..10).map(|i| format!("({i})")))
-        .install(&engine)
-        .await?;
-    let mut agent = Agent::connect(&engine, KG).await?;
-
-    // Correct: refuse the subscription, or deliver all ten rows.
-    let outcome = match agent.subscribe("all", "?item(X)").await {
-        Err(Violation::Rejected(_) | Violation::IncompleteSnapshot { .. }) => Ok(()),
-        Err(other) => return Err(other),
-        Ok(view) => view.assert_matches(&items(0..10)),
-    };
-    S05_CAPPED_SNAPSHOT.judge(outcome);
-    Ok(())
-}
-
-const S05_CAPPED_DELTA: KnownDefect = KnownDefect {
-    plan_item: "S05",
-    summary: "a refresh over the result cap is adopted as the complete result",
-    signature: |v| matches!(v, Violation::Diverged { .. }),
-    reproduction: Reproduction::Deterministic,
-};
-
-#[tokio::test(flavor = "multi_thread")]
-async fn s05_refresh_over_cap_is_adopted_as_complete() -> Checked<()> {
-    let engine = engine()
-        .max_result_rows(3)
-        .start()
-        .await
-        .expect("start engine");
-    Fixture::new("items_2", KG)
-        .facts("item", (0..2).map(|i| format!("({i})")))
-        .install(&engine)
-        .await?;
-    let mut agent = Agent::connect(&engine, KG).await?;
-    agent.subscribe("all", "?item(X)").await?;
-    agent.view("all").assert_matches(&items(0..2))?;
-    let mut writer = WsClient::connect(&engine, KG).await?;
-    writer.commit("+item[(2), (3), (4), (5), (6)]").await?;
-
-    // Correct: fail closed with a subscription error, never a capped delta.
-    let outcome = match agent.next_delta("all").await {
-        Err(Violation::SubscriptionError { .. }) => Ok(()),
-        Err(other) => return Err(other),
-        Ok(_) => agent.view("all").assert_matches(&items(0..7)),
-    };
-    S05_CAPPED_DELTA.judge(outcome);
-    Ok(())
-}
 
 const W05_OVERSIZED_DELTA: KnownDefect = KnownDefect {
     plan_item: "W05",

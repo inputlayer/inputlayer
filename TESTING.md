@@ -90,10 +90,14 @@ make e2e-reactive                                   # release build, writes late
 cargo test --test e2e_reactive                      # same scenarios, debug build
 ```
 
+Results over `storage.performance.max_result_rows` are required to fail
+closed: the subscription is refused, or a refresh pushes `subscription_error`
+and the next delta is relative to the last complete result.
+
 Defects tracked by the reactive plan run as **expected failures**
-(`tests/e2e_reactive/known_defects.rs`): capped results adopted as complete
-(S05), out-of-order and restart-cursor notification delivery (W04), and an
-oversized delta that advances the subscription without delivery (W05). Each
+(`tests/e2e_reactive/known_defects.rs`): out-of-order and restart-cursor
+notification delivery (W04), and an oversized delta that advances the
+subscription without delivery (W05). Each
 asserts the correct contract; its own violation passes as `XFAIL`, any other
 violation fails, and a holding contract fails as `XPASS` so the marker is
 removed and the scenario becomes required when the plan item lands.

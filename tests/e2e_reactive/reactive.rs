@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use inputlayer_testkit::fixture::reachability_chain;
-use inputlayer_testkit::{Agent, Checked, Engine, SampleLog, WsClient};
+use inputlayer_testkit::{Agent, Checked, Engine, Fixture, SampleLog, Violation, WsClient};
 use serde_json::{json, Value};
 
 use crate::engine;
@@ -245,5 +245,78 @@ async fn write_burst_converges_without_requery() -> Checked<()> {
     );
     // Converged: any further delta would move the agent away from the truth.
     agent.expect_quiet("r", Duration::from_millis(300)).await?;
+    Ok(())
+}
+
+/// Result cap of the result-cap scenarios.
+const CAP: usize = 3;
+
+fn items(range: std::ops::Range<i64>) -> Vec<Value> {
+    range.map(|i| json!([i])).collect()
+}
+
+/// Engine with the result cap at [`CAP`] and `item(0..n)` installed.
+async fn capped_engine(n: i64) -> Checked<Engine> {
+    let engine = engine()
+        .max_result_rows(CAP)
+        .start()
+        .await
+        .expect("start engine");
+    Fixture::new(&format!("items_{n}"), KG)
+        .facts("item", (0..n).map(|i| format!("({i})")))
+        .install(&engine)
+        .await?;
+    Ok(engine)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn subscribe_over_result_cap_is_refused_and_not_registered() -> Checked<()> {
+    let engine = capped_engine(10).await?;
+    let mut agent = Agent::connect(&engine, KG).await?;
+
+    // A capped snapshot is not the result: the subscription is refused.
+    match agent.subscribe("all", "?item(X)").await {
+        Err(Violation::Rejected(message)) if message.contains("max_result_rows") => {}
+        Err(other) => return Err(other),
+        Ok(view) => panic!("capped snapshot adopted as complete: {:?}", view.rows),
+    }
+    // Nothing was registered: writes push nothing, and the id is free.
+    let mut writer = WsClient::connect(&engine, KG).await?;
+    writer.commit("+item(10)").await?;
+    agent
+        .expect_quiet("all", Duration::from_millis(300))
+        .await?;
+    agent.subscribe("all", "?item(X), X < 3").await?;
+    agent.view("all").assert_matches(&items(0..3))?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refresh_over_result_cap_fails_closed_and_recovers() -> Checked<()> {
+    let engine = capped_engine(2).await?;
+    let mut agent = Agent::connect(&engine, KG).await?;
+    agent.subscribe("all", "?item(X)").await?;
+    let mut writer = WsClient::connect(&engine, KG).await?;
+
+    // Over the cap: an error push, never a delta computed from capped rows.
+    writer.commit("+item[(2), (3), (4), (5), (6)]").await?;
+    match agent.next_delta("all").await {
+        Err(Violation::SubscriptionError { message, .. })
+            if message.contains("max_result_rows") => {}
+        Err(other) => return Err(other),
+        Ok(delta) => panic!("capped refresh delivered as a delta: {delta:?}"),
+    }
+    agent.view("all").assert_matches(&items(0..2))?;
+
+    // Back under the cap: the next delta is relative to the last complete
+    // result and keeps `seq` contiguous.
+    writer.commit("-item[(3), (4), (5), (6)]").await?;
+    let delta = agent.next_delta("all").await?;
+    delta.assert_rows(&items(2..3), &[])?;
+    assert_eq!(delta.seq, 1);
+    let mut auditor = WsClient::connect(&engine, KG).await?;
+    agent
+        .view("all")
+        .assert_matches(&auditor.query("?item(X)").await?.rows)?;
     Ok(())
 }
