@@ -141,6 +141,7 @@ export type WsErrorCode =
   | "deadline_exceeded"
   | "cancelled"
   | "outcome_unknown"
+  | "store_read_only"
 
 /** A failed statement of a multi-statement program (0-based `index`). */
 export interface WsStatementError {

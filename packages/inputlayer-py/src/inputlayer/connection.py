@@ -34,8 +34,10 @@ from inputlayer.exceptions import (
     AuthenticationError,
     ConnectionError,
     InternalError,
+    OutcomeUnknownError,
     QueryError,
     StatementFailedError,
+    StoreReadOnlyError,
 )
 from inputlayer.notifications import NotificationDispatcher, NotificationEvent
 
@@ -275,6 +277,13 @@ class Connection:
         """Track a KG switch, then raise if any statement failed."""
         if result.switched_kg:
             self._current_kg = result.switched_kg
+        for code, error_type in (
+            ("outcome_unknown", OutcomeUnknownError),
+            ("store_read_only", StoreReadOnlyError),
+        ):
+            for error in result.errors or []:
+                if error.code == code:
+                    raise error_type(error.message, result)
         if result.errors:
             raise StatementFailedError(result.errors, result)
         return result
@@ -392,6 +401,10 @@ class Connection:
 
 
 def _query_error(response: ErrorResponse) -> QueryError:
+    if response.code == "outcome_unknown":
+        return OutcomeUnknownError(response.message)
+    if response.code == "store_read_only":
+        return StoreReadOnlyError(response.message)
     return QueryError(
         response.message,
         code=response.code,

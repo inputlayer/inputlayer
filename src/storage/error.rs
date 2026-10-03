@@ -94,6 +94,24 @@ pub enum StorageError {
     #[error("{0}")]
     WriteRejected(String),
 
+    /// A WAL write failed and could not be undone on disk, so a restart may still
+    /// recover its transaction: the commit's outcome is unknown, not failed.
+    #[error(
+        "write outcome unknown, store read-only until restart recovery: write {write}; undo {undo}"
+    )]
+    OutcomeUnknown {
+        /// Why the write failed
+        write: String,
+        /// Why neither cutting it off nor recording the cut succeeded
+        undo: String,
+    },
+
+    #[error("WAL retirement durability is pending: {0}")]
+    WalDurabilityPending(#[source] std::io::Error),
+
+    #[error("store read-only until restart recovery")]
+    StoreReadOnly,
+
     /// Generic error
     #[error("{0}")]
     Other(String),

@@ -28,8 +28,8 @@ export class AuthenticationError extends InputLayerError {
 /**
  * The engine rejected a program: it answered with an `error` frame.
  *
- * `code` says why (`validation`, `not_found`, `conflict`, `unsupported` or
- * `internal`). It is undefined when the failure has no statement cause, such
+ * `code` says why (an `ErrorCode` such as `validation` or `not_found`). It is
+ * undefined when the failure has no statement cause, such
  * as an overloaded or shutting-down server or a result too large to send.
  * `validationErrors` lists parse errors.
  */
@@ -45,6 +45,31 @@ export class QueryError extends InputLayerError {
     this.name = 'QueryError';
     this.code = opts?.code;
     this.validationErrors = opts?.validationErrors ?? [];
+  }
+}
+
+/**
+ * Write outcome unknown, store read-only until restart recovery.
+ *
+ * The transaction may or may not survive restart; read the recovered data
+ * before retrying it. `result` holds the server's response when it has one.
+ */
+export class OutcomeUnknownError extends QueryError {
+  constructor(message: string, readonly result?: ResultResponse) {
+    super(message, { code: 'outcome_unknown' });
+    this.name = 'OutcomeUnknownError';
+  }
+}
+
+/**
+ * A write was refused because an earlier outcome is unknown.
+ *
+ * Every write fails until the server restarts and runs recovery.
+ */
+export class StoreReadOnlyError extends QueryError {
+  constructor(message: string, readonly result?: ResultResponse) {
+    super(message, { code: 'store_read_only' });
+    this.name = 'StoreReadOnlyError';
   }
 }
 

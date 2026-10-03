@@ -37,6 +37,7 @@ from inputlayer.exceptions import (
     InternalError,
     KnowledgeGraphExistsError,
     KnowledgeGraphNotFoundError,
+    OutcomeUnknownError,
     PermissionError,
     QueryError,
     QueryTimeoutError,
@@ -44,6 +45,7 @@ from inputlayer.exceptions import (
     RuleNotFoundError,
     SchemaConflictError,
     StatementFailedError,
+    StoreReadOnlyError,
     ValidationError,
 )
 
@@ -117,6 +119,7 @@ __all__ = [
     "KnowledgeGraphNotFoundError",
     # Notifications
     "NotificationEvent",
+    "OutcomeUnknownError",
     "PermissionError",
     "ProofNode",
     "ProofTree",
@@ -138,6 +141,7 @@ __all__ = [
     "Session",
     "StatementError",
     "StatementFailedError",
+    "StoreReadOnlyError",
     "Timestamp",
     # Auth
     "UserInfo",

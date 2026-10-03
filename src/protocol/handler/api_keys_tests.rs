@@ -111,6 +111,7 @@ fn an_expiry_set_before_a_restart_still_holds_after_it() {
     assert!(handler
         .handle_apikey_expire("old", Duration::from_secs(60))
         .unwrap_err()
+        .message
         .contains("already expired"));
 }
 
@@ -124,10 +125,15 @@ fn an_expiry_cannot_be_pushed_back() {
     let err = handler
         .handle_apikey_expire("short", Duration::from_secs(3_600))
         .unwrap_err();
-    assert!(err.contains("can only be brought forward"), "{err}");
+    assert!(
+        err.message.contains("can only be brought forward"),
+        "{}",
+        err.message
+    );
     assert!(handler
         .handle_apikey_expire("missing", Duration::ZERO)
         .unwrap_err()
+        .message
         .contains("not found"));
 }
 

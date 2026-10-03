@@ -91,8 +91,8 @@ pub(super) fn migrate_v1(root: &Path) -> StorageResult<()> {
             fs::remove_file(&path)?;
         }
     }
-    sync_directory(&batches_dir);
-    sync_directory(&shards_dir);
+    sync_directory(&batches_dir)?;
+    sync_directory(&shards_dir)?;
     tracing::info!("persist_migrate_v1_done");
     Ok(())
 }
@@ -167,8 +167,8 @@ fn quarantine_orphans(shards_dir: &Path, batches_dir: &Path) -> StorageResult<()
             dir = %quarantine.display(),
             "v1 migration quarantined unreferenced batch files"
         );
-        sync_directory(&quarantine);
-        sync_directory(batches_dir);
+        sync_directory(&quarantine)?;
+        sync_directory(batches_dir)?;
     }
     Ok(())
 }

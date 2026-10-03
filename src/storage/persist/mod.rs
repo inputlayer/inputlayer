@@ -26,7 +26,8 @@
 //! On startup:
 //! 1. Migrate v1 data (see `migrate`) and load shard metadata
 //! 2. Read batch files
-//! 3. Replay the WAL's intact prefix of committed transactions
+//! 3. Replay the WAL's intact prefix of committed transactions, skipping changes
+//!    a shard's batches already hold (below its `flushed_upper`)
 //! 4. Consolidate to get current state
 //!
 //! Rule and schema changes in the WAL are handed to the engine
@@ -41,6 +42,7 @@ mod export_writer;
 mod migrate;
 pub mod transaction;
 pub mod wal;
+mod wal_cut;
 mod wal_record;
 
 pub use batch::{Batch, BatchRef, ShardInfo, ShardMeta, Update};
@@ -101,7 +103,7 @@ impl Default for PersistConfig {
 /// Trait for persist backends
 pub trait PersistBackend: Send + Sync {
     /// Commit a transaction: make it durable per the durability mode, then visible
-    /// to reads. All of it is committed, or on error none of it.
+    /// to reads.
     fn commit(&self, txn: Transaction) -> StorageResult<()>;
 
     /// Read all updates for a shard since a frontier
@@ -135,6 +137,16 @@ struct ShardState {
     buffer: Vec<Update>,
 }
 
+/// A flush failure injected by tests, consumed by the first flush that reaches it.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FlushFault {
+    /// Writing the batch file fails as on a full disk.
+    BatchWrite,
+    /// Saving the shard metadata that references the batch fails.
+    MetaSave,
+}
+
 /// File-based persist implementation
 ///
 /// Lock order everywhere: `wal`, then `shards`, then `catalog`.
@@ -147,16 +159,21 @@ pub struct FilePersist {
     /// Catalog changes replayed from the WAL at startup, until the engine takes them.
     recovered_catalog: Mutex<Vec<CatalogRecord>>,
     next_batch_id: AtomicU64,
+    #[cfg(test)]
+    flush_faults: Mutex<Vec<FlushFault>>,
 }
 
 impl FilePersist {
     /// Create a new `FilePersist` instance
     pub fn new(config: PersistConfig) -> StorageResult<Self> {
         // Create directory structure
-        fs::create_dir_all(&config.path)?;
+        create_directory(&config.path)?;
         fs::create_dir_all(config.path.join("shards"))?;
         fs::create_dir_all(config.path.join("batches"))?;
 
+        sync_directory(&config.path.join("batches"))?;
+        sync_directory(&config.path.join("shards"))?;
+        sync_directory(&config.path)?;
         let (wal, recovered) = PersistWal::open(config.path.join("wal"))?;
         migrate::migrate_v1(&config.path)?;
 
@@ -167,6 +184,8 @@ impl FilePersist {
             catalog: Mutex::new(CatalogLog::default()),
             recovered_catalog: Mutex::new(Vec::new()),
             next_batch_id: AtomicU64::new(1),
+            #[cfg(test)]
+            flush_faults: Mutex::new(Vec::new()),
         };
 
         // Load existing shards, clean up orphans, and replay WAL
@@ -189,6 +208,10 @@ impl FilePersist {
             for shard_name in &shard_names {
                 persist.flush(shard_name)?;
             }
+            // Records replay skipped as already flushed stay until retired here.
+            let mut wal = persist.wal.lock();
+            let shards = persist.shards.read();
+            retire_flushed(&mut wal, &shards, &mut persist.catalog.lock())?;
         }
 
         // Clean up stale .archived and .new WAL files from previous runs
@@ -328,13 +351,17 @@ impl FilePersist {
 
         if removed > 0 {
             eprintln!("[persist] Cleaned up {removed} orphaned batch file(s)");
-            sync_directory(&batches_dir);
+            let _ = sync_directory(&batches_dir);
         }
     }
 
     /// Replay recovered transactions: fact changes into shard buffers, catalog
     /// changes kept for [`Self::take_recovered_catalog`]. Returns how many
     /// transactions there were.
+    ///
+    /// A fact change below its shard's flushed frontier is already in the batch
+    /// files - its WAL retirement failed or a crash cut it short - and is skipped,
+    /// so no change applies twice.
     fn replay(&self, txns: Vec<Transaction>) -> usize {
         let count = txns.len();
         let mut shards = self.shards.write();
@@ -342,9 +369,15 @@ impl FilePersist {
         let mut recovered = self.recovered_catalog.lock();
         for txn in txns {
             log.logged(&txn);
+            let revision = txn.revision();
             let (updates, catalog) = txn.split();
             for (shard, updates) in updates {
-                buffer_updates(&mut shards, shard, updates);
+                let flushed = shards
+                    .get(&shard)
+                    .is_some_and(|state| state.meta.flushed(revision));
+                if !flushed {
+                    buffer_updates(&mut shards, shard, updates);
+                }
             }
             recovered.extend(catalog);
         }
@@ -414,8 +447,13 @@ impl FilePersist {
     }
 
     /// Flush a shard's buffer to a batch. Returns `false` if the shard does not exist.
+    ///
+    /// On error the shard is unchanged in memory and its updates stay in the WAL,
+    /// so the next flush retries them; only the WAL retirement can fail after the
+    /// batch is saved, and replay skips what the batch holds (see [`Self::replay`]).
     fn flush_existing(&self, shard: &str) -> StorageResult<bool> {
         let mut wal = self.wal.lock();
+        wal.check_writable()?;
         let mut shards = self.shards.write();
         let Some(state) = shards.get_mut(shard) else {
             return Ok(false);
@@ -425,38 +463,48 @@ impl FilePersist {
             return Ok(true);
         }
 
-        // Step 1: Write buffer to batch file (atomic via temp+rename in write_batch)
-        let batch = Batch::new(state.buffer.clone());
-        let (batch_id, path) = self.write_batch(&state.buffer)?;
+        let batch = Batch::new(std::mem::take(&mut state.buffer));
+        match self.save_batch(&state.meta, &batch) {
+            Ok(meta) => state.meta = meta,
+            Err(e) => {
+                state.buffer = batch.updates;
+                return Err(e);
+            }
+        }
 
-        let batch_ref = BatchRef {
+        // Remove WAL entries LAST (safe - metadata already points to the batch),
+        // with any catalog changes the catalog files already reflect.
+        retire_flushed(&mut wal, &shards, &mut self.catalog.lock())?;
+        Ok(true)
+    }
+
+    /// Write `batch` to a batch file and save `meta` with it added, returning that
+    /// metadata.
+    fn save_batch(&self, meta: &ShardMeta, batch: &Batch) -> StorageResult<ShardMeta> {
+        // Step 1: Write the batch file (atomic via temp+rename in write_batch)
+        #[cfg(test)]
+        self.check_flush_fault(FlushFault::BatchWrite)?;
+        let (batch_id, path) = self.write_batch(&batch.updates)?;
+
+        // Step 2: Point the metadata at it and save atomically
+        let mut meta = meta.clone();
+        meta.add_batch(BatchRef {
             id: batch_id,
             path: path.clone(),
             lower: batch.lower,
             upper: batch.upper,
             len: batch.len(),
-        };
+        });
+        meta.flushed_upper = meta.flushed_upper.max(batch.upper);
+        self.save_flushed_meta(&meta)?;
+        Ok(meta)
+    }
 
-        // Step 2: Update metadata and save atomically
-        state.meta.add_batch(batch_ref);
-        state.buffer.clear();
-
-        if let Err(e) = self.save_shard_meta(&state.meta) {
-            // Metadata save failed - clean up the orphaned batch file
-            let _ = fs::remove_file(&path);
-            return Err(e);
-        }
-
-        // Step 3: Remove WAL entries LAST (safe - metadata already points to batch),
-        // with any catalog changes the catalog files already reflect.
-        let mut log = self.catalog.lock();
-        wal.retain_ops(|revision, op| match op {
-            TxnOp::Facts { shard: s, .. } => s != shard,
-            TxnOp::Catalog { .. } => log.keeps(revision, op),
-        })?;
-        log.pruned();
-
-        Ok(true)
+    /// Save the metadata of a flush; see [`Self::save_shard_meta`].
+    fn save_flushed_meta(&self, meta: &ShardMeta) -> StorageResult<()> {
+        #[cfg(test)]
+        self.check_flush_fault(FlushFault::MetaSave)?;
+        self.save_shard_meta(meta)
     }
 
     /// Flush all dirty shards (shards with non-empty buffers).
@@ -478,18 +526,84 @@ impl FilePersist {
         Ok(())
     }
 
+    /// Fail unless every shard `txn` changes has flushed only earlier revisions.
+    /// Replay skips a shard's WAL records below its flushed frontier, so a later
+    /// record there would be committed now and lost at restart. Revisions rise
+    /// per knowledge graph, so this only fails on a caller bug.
+    fn check_unflushed(&self, txn: &Transaction) -> StorageResult<()> {
+        let shards = self.shards.read();
+        let revision = txn.revision();
+        match txn
+            .shards()
+            .find(|shard| shards.get(*shard).is_some_and(|s| s.meta.flushed(revision)))
+        {
+            Some(shard) => Err(StorageError::Other(format!(
+                "revision {revision} is not after the revisions shard {shard} has flushed"
+            ))),
+            None => Ok(()),
+        }
+    }
+
+    /// Flush the shards whose buffers `commit` filled, or every dirty shard when
+    /// the WAL is over its size limit. A concurrent delete_shard may have removed
+    /// a shard.
+    fn flush_after_commit(&self, full: &[String]) -> StorageResult<()> {
+        if !full.is_empty() {
+            for shard in full {
+                self.flush_existing(shard)?;
+            }
+        } else if self.config.max_wal_size_bytes > 0 {
+            let wal_size = self.wal.lock().file_size();
+            if wal_size > self.config.max_wal_size_bytes {
+                tracing::info!(
+                    wal_size_bytes = wal_size,
+                    max = self.config.max_wal_size_bytes,
+                    "wal_size_limit_flush"
+                );
+                self.flush_all()?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn check_writable(&self) -> StorageResult<()> {
+        self.wal.lock().check_writable()
+    }
+
     /// Make a later WAL write fail at `fault`.
     #[cfg(test)]
     pub(crate) fn inject_wal_fault(&self, fault: wal::WalFault) {
         self.wal.lock().inject_fault(fault);
     }
+
+    /// Make a later flush fail at `fault`.
+    #[cfg(test)]
+    pub(crate) fn inject_flush_fault(&self, fault: FlushFault) {
+        self.flush_faults.lock().push(fault);
+    }
+
+    /// Fail with `fault` if a test injected it.
+    #[cfg(test)]
+    fn check_flush_fault(&self, fault: FlushFault) -> StorageResult<()> {
+        let mut faults = self.flush_faults.lock();
+        match faults.iter().position(|f| *f == fault) {
+            Some(i) => {
+                faults.remove(i);
+                let kind = std::io::ErrorKind::StorageFull;
+                Err(std::io::Error::new(kind, format!("injected flush fault: {fault:?}")).into())
+            }
+            None => Ok(()),
+        }
+    }
 }
 
 impl PersistBackend for FilePersist {
     fn commit(&self, txn: Transaction) -> StorageResult<()> {
+        self.check_writable()?;
         if txn.is_empty() {
             return Ok(());
         }
+        let revision = txn.revision();
         for shard in txn.shards() {
             self.ensure_shard(shard)?;
         }
@@ -499,6 +613,10 @@ impl PersistBackend for FilePersist {
         // Lock order everywhere: WAL, then shards.
         let full: Vec<String> = {
             let mut wal = self.wal.lock();
+            wal.check_writable()?;
+            if self.config.durability_mode != DurabilityMode::Async {
+                self.check_unflushed(&txn)?;
+            }
             match self.config.durability_mode {
                 DurabilityMode::Immediate => wal.append(&txn, true)?,
                 DurabilityMode::Batched => wal.append(&txn, false)?,
@@ -524,24 +642,16 @@ impl PersistBackend for FilePersist {
                 .collect()
         };
 
-        // Flush full buffers; a concurrent delete_shard may have removed the shard.
-        if !full.is_empty() {
-            for shard in &full {
-                self.flush_existing(shard)?;
-            }
-        } else if self.config.max_wal_size_bytes > 0 {
-            // Check WAL size - force flush all dirty shards if WAL is too large
-            let wal_size = self.wal.lock().file_size();
-            if wal_size > self.config.max_wal_size_bytes {
-                tracing::info!(
-                    wal_size_bytes = wal_size,
-                    max = self.config.max_wal_size_bytes,
-                    "wal_size_limit_flush"
-                );
-                self.flush_all()?;
-            }
+        // Committed: the transaction is in the WAL and the buffers. Flushing is
+        // upkeep the next commit retries, so its failure must not report this
+        // commit failed - a restart would still recover it.
+        if let Err(e) = self.flush_after_commit(&full) {
+            tracing::error!(
+                revision,
+                error = %e,
+                "persist_flush_failed: updates stay in the WAL and buffers until a flush succeeds"
+            );
         }
-
         Ok(())
     }
 
@@ -592,7 +702,9 @@ impl PersistBackend for FilePersist {
         consolidate(&mut filtered);
 
         // Remember old batch refs for cleanup after the new batch is durable
-        let old_batches: Vec<BatchRef> = std::mem::take(&mut state.meta.batches);
+        let old_batches = state.meta.batches.clone();
+        let mut meta = state.meta.clone();
+        meta.batches.clear();
 
         // Step 1: Write new compacted batch FIRST (crash-safe ordering)
         // If we crash here, old batches still exist and metadata still points to them.
@@ -600,7 +712,7 @@ impl PersistBackend for FilePersist {
             let batch = Batch::new(filtered.clone());
             let (batch_id, path) = self.write_batch(&filtered)?;
 
-            state.meta.add_batch(BatchRef {
+            meta.add_batch(BatchRef {
                 id: batch_id,
                 path,
                 lower: batch.lower,
@@ -611,8 +723,9 @@ impl PersistBackend for FilePersist {
 
         // Step 2: Update metadata atomically (write-to-temp+rename in save_shard_meta)
         // After this succeeds, metadata points to the new batch only.
-        state.meta.advance_since(new_since);
-        self.save_shard_meta(&state.meta)?;
+        meta.advance_since(new_since);
+        self.save_shard_meta(&meta)?;
+        state.meta = meta;
 
         // Step 3: Delete old batch files LAST (safe - metadata no longer references them)
         // If we crash here, we have orphaned files but no data loss.
@@ -622,7 +735,7 @@ impl PersistBackend for FilePersist {
 
         // Sync batches directory to ensure deletions are durable
         if !old_batches.is_empty() {
-            sync_directory(&self.config.path.join("batches"));
+            sync_directory(&self.config.path.join("batches"))?;
         }
 
         Ok(())
@@ -642,6 +755,8 @@ impl PersistBackend for FilePersist {
     }
 
     fn ensure_shard(&self, shard: &str) -> StorageResult<()> {
+        let wal = self.wal.lock();
+        wal.check_writable()?;
         let mut shards = self.shards.write();
         if !shards.contains_key(shard) {
             let meta = ShardMeta::new(shard.to_string());
@@ -675,17 +790,19 @@ impl PersistBackend for FilePersist {
         // metadata is gone keeps a concurrent append from acking an entry
         // this delete then drops.
         let mut wal = self.wal.lock();
+        wal.check_writable()?;
         let mut shards = self.shards.write();
 
-        // Step 1: Drop this shard's WAL entries. A failure here changes nothing.
         wal.remove_shard_entries(shard)?;
         let removed_state = shards.remove(shard);
 
         // Step 2: Delete metadata so restart no longer sees the shard.
         let meta_path = shard_meta_path(&self.config.path.join("shards"), shard);
         match fs::remove_file(&meta_path) {
-            Ok(()) => sync_directory(&self.config.path.join("shards")),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Ok(()) => sync_directory(&self.config.path.join("shards"))?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                sync_directory(&self.config.path.join("shards"))?;
+            }
             Err(e) => return Err(e.into()),
         }
         drop(shards);
@@ -702,12 +819,29 @@ impl PersistBackend for FilePersist {
                 }
             }
             if deleted_any {
-                sync_directory(&self.config.path.join("batches"));
+                sync_directory(&self.config.path.join("batches"))?;
             }
         }
 
         Ok(())
     }
+}
+
+/// Drop from the WAL every fact change already in its shard's batches, and every
+/// catalog change the catalog files already reflect.
+fn retire_flushed(
+    wal: &mut PersistWal,
+    shards: &HashMap<String, ShardState>,
+    log: &mut CatalogLog,
+) -> StorageResult<()> {
+    wal.retain_ops(|revision, op| match op {
+        TxnOp::Facts { shard, .. } => !shards
+            .get(shard)
+            .is_some_and(|state| state.meta.flushed(revision)),
+        TxnOp::Catalog { .. } => log.keeps(revision, op),
+    })?;
+    log.pruned();
+    Ok(())
 }
 
 /// Append committed updates to a shard's buffer, creating the shard if needed, and
@@ -808,7 +942,7 @@ fn write_shard_meta(shards_dir: &Path, meta: &ShardMeta) -> StorageResult<()> {
         let _ = fs::remove_file(&tmp_path);
         return Err(e.into());
     }
-    sync_directory(shards_dir);
+    sync_directory(shards_dir)?;
 
     Ok(())
 }
@@ -869,7 +1003,7 @@ fn write_updates_parquet(path: &Path, updates: &[Update]) -> StorageResult<()> {
     // Atomic rename (POSIX guarantees atomicity)
     fs::rename(&tmp_path, path)?;
     if let Some(dir) = path.parent() {
-        sync_directory(dir);
+        sync_directory(dir)?;
     }
 
     Ok(())
@@ -1036,19 +1170,53 @@ fn read_updates_parquet(path: &Path) -> StorageResult<Vec<Update>> {
     Ok(updates)
 }
 
+fn create_directory(path: &Path) -> std::io::Result<()> {
+    let path = std::path::absolute(path)?;
+    fs::create_dir_all(&path)?;
+    for directory in path.ancestors().skip(1) {
+        sync_directory(directory)?;
+    }
+    Ok(())
+}
+
 /// Sync a directory to ensure metadata operations (rename, unlink) are durable.
 ///
 /// On POSIX systems, file deletion and rename are only guaranteed durable
 /// after the parent directory inode is fsynced. Without this, a crash can
 /// "resurrect" deleted files or roll back renames.
-fn sync_directory(dir: &std::path::Path) {
-    if let Ok(d) = fs::File::open(dir) {
-        let _ = d.sync_all();
-    }
+fn sync_directory(dir: &Path) -> std::io::Result<()> {
+    #[cfg(test)]
+    check_sync_fault(dir)?;
+    fs::File::open(dir)?.sync_all()
+}
+
+#[cfg(test)]
+thread_local! {
+    static SYNC_FAULTS: std::cell::RefCell<Vec<PathBuf>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(test)]
+pub(crate) fn inject_sync_fault(path: PathBuf) {
+    SYNC_FAULTS.with(|faults| faults.borrow_mut().push(path));
+}
+
+#[cfg(test)]
+fn check_sync_fault(path: &Path) -> std::io::Result<()> {
+    SYNC_FAULTS.with(|faults| {
+        let mut faults = faults.borrow_mut();
+        if let Some(i) = faults.iter().position(|p| p == path) {
+            faults.remove(i);
+            Err(std::io::Error::other("injected fsync failure"))
+        } else {
+            Ok(())
+        }
+    })
 }
 
 #[cfg(test)]
 mod commit_tests;
+#[cfg(test)]
+mod durability_tests;
 
 // Tests
 #[cfg(test)]

@@ -138,6 +138,11 @@ pub struct ShardMeta {
     pub since: u64,
     /// Write frontier: all times < upper are complete
     pub upper: u64,
+    /// WAL frontier: every WAL record of this shard below this revision is in
+    /// `batches`, so replay skips it. Only a flush advances it; absent in older
+    /// files, where 0 replays every record as before.
+    #[serde(default)]
+    pub flushed_upper: u64,
     /// Total number of updates across all batches
     pub total_updates: usize,
 }
@@ -155,6 +160,7 @@ impl ShardMeta {
             batches: Vec::new(),
             since: 0,
             upper: 0,
+            flushed_upper: 0,
             total_updates: 0,
         }
     }
@@ -166,6 +172,11 @@ impl ShardMeta {
             self.upper = batch_ref.upper;
         }
         self.batches.push(batch_ref);
+    }
+
+    /// Whether this shard's WAL changes at `revision` are already in its batches.
+    pub fn flushed(&self, revision: u64) -> bool {
+        revision < self.flushed_upper
     }
 
     /// Advance the compaction frontier

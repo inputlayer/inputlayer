@@ -166,13 +166,13 @@ Writes of facts are idempotent: inserting a fact that is present, or deleting on
 }
 ```
 
-A program of one statement that fails gets an `error`. `code` says why: `validation`, `not_found`, `conflict`, `unsupported` or `internal`; `invalid_request` and `rate_limited` reject a request before it runs; `deadline_exceeded`, `cancelled` and `outcome_unknown` are described in [Deadlines and Cancellation](#deadlines-and-cancellation). It is absent for auth and other engine failures.
+A program of one statement that fails gets an `error`. `code` says why: `validation`, `not_found`, `conflict`, `unsupported` or `internal`; `invalid_request` and `rate_limited` reject a request before it runs; `deadline_exceeded`, `cancelled` and `outcome_unknown` are described in [Deadlines and Cancellation](#deadlines-and-cancellation); `store_read_only` refuses a write while the store is read-only after an unknown outcome. It is absent for auth and other engine failures. For write outcomes and restart recovery, see [Persistence](persistence#wal-record-format).
 
 ### Statement Failures
 
 A multi-statement program replies with a `result` (or `result_start`) whose `errors` lists each failure by 0-based statement index.
 
-A program that changes facts, schemas or rules commits all of those changes as one transaction (see [Programs Commit Together](core-concepts#programs-commit-together)). If a statement fails, none of the program's changes is applied: the program stops at that statement, `errors` names it, its message ends with `(rolled back: none of the program's N write statements A-B was applied)` when the program had other writes, no statement reports success, and the program's query does not run:
+A program that changes facts, schemas or rules commits all of those changes as one transaction (see [Programs Commit Together](core-concepts#programs-commit-together)). An ordinary statement failure rolls back the program: it stops at that statement, `errors` names it, its message ends with `(rolled back: none of the program's N write statements A-B was applied)` when the program had other writes, no statement reports success, and the program's query does not run. An unknown commit outcome omits the rollback claim; follow the [persistence recovery guidance](persistence#wal-record-format). For example, an ordinary failure returns:
 
 ```json
 {

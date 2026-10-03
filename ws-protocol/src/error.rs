@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
+    /// The write was refused: the store is read-only until restart recovery.
+    StoreReadOnly,
     /// The input was rejected (schema, size limits, bad values or rules).
     Validation,
     /// The named KG, relation, rule or index does not exist.
