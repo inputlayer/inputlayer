@@ -255,11 +255,11 @@ async fn anthropic_base_url_comes_from_the_validated_config() {
 /// `INPUTLAYER_MEASURE=1 cargo test -p inputlayer-gateway --test provider_mock -- --nocapture`
 #[tokio::test]
 async fn adapter_overhead() {
+    const CALLS: usize = 2000;
     if std::env::var_os("INPUTLAYER_MEASURE").is_none() {
         eprintln!("skipping measurement: set INPUTLAYER_MEASURE=1 to run");
         return;
     }
-    const CALLS: usize = 2000;
     let anthropic_reply = json!({
         "content": [{ "type": "text", "text": "{\"claims\": []}" }],
         "stop_reason": "end_turn",
