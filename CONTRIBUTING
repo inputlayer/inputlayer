@@ -328,7 +328,7 @@ Before submitting:
 
 CI runs in two tiers so small PRs stay cheap and expensive checks run at release checkpoints.
 
-**Fast gate** (`.github/workflows/ci.yml`) runs only on PRs targeting `main`: format (`make fmt-check`), clippy (`make lint`, which also type-checks every target) and the unit + integration tests (`make unit-test`). The Rust jobs are skipped entirely when a change touches no Rust inputs (for example docs-only, `front/`-only or SDK-only PRs). A newer push to a PR cancels its in-progress run.
+**Fast gate** (`.github/workflows/ci.yml`) runs only on PRs targeting `main`: format (`make fmt-check`), clippy (`make lint`, which also type-checks every target) and the unit + integration tests (`make unit-test`). The Rust jobs are skipped entirely when a change touches no Rust inputs, as defined by the [workflow's path filter](.github/workflows/ci.yml) (for example `front/`-only or SDK-only PRs). A newer push to a PR cancels its in-progress run.
 
 **Full suite** (`.github/workflows/full-suite.yml`) runs on release commits or a manual run on `main`: the release build with all tests and snapshot specs, Python and JS SDK tests, the Python live-server integration, coverage, MSRV, `make doc-check` and the website build. Docker image builds (`docker.yml`) run on release commits only.
 
@@ -336,8 +336,8 @@ The triggers are:
 
 | Trigger | What runs |
 |---------|-----------|
-| PR labeled `release` | Full suite and Docker build when the label is added, then again on every push while it stays. The fast gate still runs format and clippy, and leaves the tests to the full suite. Remove the label to go back to the fast gate. |
-| Push to a `release/**` branch (`make release VERSION=x.y.z`) | Full suite and Docker build. A PR from that branch is covered by the branch push, so it does not run the suite a second time. |
+| PR targeting `main`, labeled `release` | Full suite and Docker build when the label is added, then again on every push while it stays. On PR updates, the fast gate still runs format and clippy when its path filter matches, and leaves the tests to the full suite. Removing the label restores fast-gate tests on the next push, unless the branch is covered by the row below. |
+| Push to a `release/**` branch (`make release VERSION=x.y.z`) | Full suite and Docker build. A PR from that branch in this repository is covered by the branch push, so it does not run the suite or Docker build a second time. |
 | Push of a `v*` tag | The Release workflow runs the full suite once, including SDK tests and the website build. Only after it passes do the crates.io, PyPI and npm publishing jobs and website deployment run. Deployment reuses the website artifact from the full suite. Docker builds and pushes images in its own workflow. |
 | Manual run (Actions tab, or `gh workflow run full-suite.yml --ref main`) | Full suite on `main` only; dispatches on other refs skip all jobs. No Docker build or publishing. Publishing workflows cannot be dispatched manually. |
 

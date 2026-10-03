@@ -172,8 +172,9 @@ contradiction.
 
 ## What we can prove
 
-The rule pack is validated on the real engine and enforced by CI on every
-run. On the 1,628-scenario benchmark corpus (16 corruption families:
+The rule pack is validated on the real engine; see the
+[CI policy](../../../CONTRIBUTING#continuous-integration) for when checks run.
+On the 1,628-scenario benchmark corpus (16 corruption families:
 value, negation, temporal, spatial, causal, structural, numeric, counting,
 identity, classification, instruction, plus controls), the engine detects
 every planted contradiction with an exact finding-kind match - 1,526 of
