@@ -4,14 +4,14 @@
 //! Bound queries go through Magic Sets, so a re-run touches only the relevant
 //! slice of the KG. Evaluation uses the normal query path (`execute_program`),
 //! which runs on the blocking pool under the query semaphore and re-checks the
-//! subscriber's read permission every time.
+//! subscriber's credential and read permission every time.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 
-use crate::auth::AuthIdentity;
+use crate::auth::Principal;
 use crate::protocol::rest::handlers::wire_value_to_json;
 use crate::protocol::Handler;
 use crate::statement::{parse_query, QueryGoal};
@@ -24,7 +24,7 @@ pub struct ReevaluatingQuery {
     knowledge_graph: String,
     query: String,
     goal: QueryGoal,
-    auth: Option<AuthIdentity>,
+    auth: Option<Principal>,
     columns: Vec<String>,
     /// Current result, keyed by the row's canonical JSON for a deterministic,
     /// set-semantics comparison.
@@ -37,7 +37,7 @@ impl ReevaluatingQuery {
         handler: Arc<Handler>,
         knowledge_graph: &str,
         query: &str,
-        auth: Option<AuthIdentity>,
+        auth: Option<Principal>,
     ) -> Result<Self, String> {
         let body = query
             .trim()

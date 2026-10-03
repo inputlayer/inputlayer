@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
-use inputlayer::auth::{AuthIdentity, Role};
 use inputlayer::protocol::rest::create_router;
 use inputlayer::protocol::Handler;
 use inputlayer::Config;
@@ -241,10 +240,8 @@ fn unknown_user_costs_as_much_as_known_user() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn parallel_bad_logins_do_not_stall_queries() {
     let (handler, _tmp) = handler(|c| c.storage.auto_create_knowledge_graphs = true);
-    let admin = AuthIdentity {
-        username: "admin".to_string(),
-        role: Role::Admin,
-    };
+    let key = handler.create_api_key("latency", "admin").unwrap();
+    let admin = handler.authenticate_api_key(&key).unwrap();
     let query = || {
         let handler = Arc::clone(&handler);
         let admin = admin.clone();

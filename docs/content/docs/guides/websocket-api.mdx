@@ -70,6 +70,8 @@ On failure:
 
 The server allows 30 seconds for authentication before closing the connection.
 
+The connection stays bound to the credential it authenticated with. If that credential is revoked (`.apikey revoke`, `.user password`, `.user drop`), the server sends nothing more for the connection except a final `{"type": "error", "message": "Credential revoked; reconnect with valid credentials"}` and closes it. See [Authentication](authentication#revocation).
+
 ## Executing Statements
 
 Send any InputLayer statement or meta command:
@@ -226,7 +228,7 @@ Session rules are automatically included when querying:
 
 ## Notifications
 
-The server pushes notifications when persistent data changes in the session's knowledge graph.
+The server pushes notifications when persistent data changes in the session's knowledge graph. `kg_change` notifications for other knowledge graphs go to admin sessions only, and changes to the internal `_internal` knowledge graph are never sent. Replay on reconnect (`last_seq`) applies the same rules.
 
 ### Persistent Update
 
