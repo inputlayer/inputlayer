@@ -58,6 +58,28 @@ docker compose up -d
 
 `GATEWAY_API_KEY` is what your applications present to the gateway - in the OpenAI SDK it is simply `api_key`. Left unset, the gateway runs open with a loud warning: acceptable on a private network, never on a public one.
 
+### Choosing the model provider
+
+`ANTHROPIC_API_KEY` alone selects Anthropic, as above. To run extraction and completions on a local model instead, point the gateway at any server that speaks the OpenAI chat completions API with `json_schema` structured outputs (Ollama, vLLM, llama.cpp, LM Studio):
+
+```bash
+export GATEWAY_MODEL_PROVIDER=openai-compatible
+export OPENAI_BASE_URL=http://127.0.0.1:11434/v1   # API root including /v1
+export GATEWAY_CHAT_MODEL=qwen3:8b                  # requests that name no model
+export GATEWAY_EXTRACTION_MODEL=qwen3:8b            # replaces each pack's Claude extraction model
+export OPENAI_API_KEY=...                           # optional, sent as a bearer token
+```
+
+| Variable | Anthropic | OpenAI-compatible |
+| --- | --- | --- |
+| `GATEWAY_MODEL_PROVIDER` | `anthropic` (implied by `ANTHROPIC_API_KEY`) | `openai-compatible` |
+| credentials | `ANTHROPIC_API_KEY` required | `OPENAI_API_KEY` optional |
+| endpoint | `ANTHROPIC_BASE_URL`, default `https://api.anthropic.com` | `OPENAI_BASE_URL` required |
+| `GATEWAY_CHAT_MODEL` | default `claude-sonnet-5`; `claude-*` request models are forwarded as-is | required; request models are forwarded as named |
+| `GATEWAY_EXTRACTION_MODEL` | optional override of the pack's model | required |
+
+The selection is validated once at startup: a named provider with a missing or malformed setting stops the gateway with the reason, instead of booting and failing every request. `/health` reports the active `model_provider`.
+
 ## 1. Install an ontology into a knowledge graph
 
 Ontology loading is an engine command. The `il` CLI (installed from source: `cargo install --git https://github.com/inputlayer/inputlayer --bin il inputlayer`) delegates to it:
