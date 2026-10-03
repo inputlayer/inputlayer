@@ -39,7 +39,7 @@ use timely::order::Product;
 use tracing::info;
 
 use crate::temporal_ops;
-use crate::value::{Relation, RelationMap, Tuple, Value};
+use crate::value::{aggregate, Relation, RelationMap, Tuple, Value};
 use crate::vector_ops;
 
 mod scc;
@@ -934,11 +934,11 @@ impl CodeGenerator {
                 let best = if is_min {
                     input
                         .iter()
-                        .min_by(|(a, _), (b, _)| value_at(a).cmp(&value_at(b)))
+                        .min_by(|(a, _), (b, _)| aggregate::agg_cmp(&value_at(a), &value_at(b)))
                 } else {
                     input
                         .iter()
-                        .max_by(|(a, _), (b, _)| value_at(a).cmp(&value_at(b)))
+                        .max_by(|(a, _), (b, _)| aggregate::agg_cmp(&value_at(a), &value_at(b)))
                 };
                 if let Some((tuple, _count)) = best {
                     output.push(((*tuple).clone(), R::one()));
@@ -2483,6 +2483,7 @@ impl CodeGenerator {
                     let mut agg_values: Vec<Value> = Vec::new();
 
                     for (func, col_idx) in &aggs_clone {
+                        let column = || tuples.iter().filter_map(|t| t.get(*col_idx));
                         let agg_result = match func {
                             AggregateFunction::Count => Value::Int64(tuples.len() as i64),
                             AggregateFunction::CountDistinct => {
@@ -2493,49 +2494,10 @@ impl CodeGenerator {
                                     .collect();
                                 Value::Int64(unique_values.len() as i64)
                             }
-                            AggregateFunction::Sum => {
-                                // Use saturating arithmetic to handle overflow safely.
-                                // Saturation at i64::MAX/MIN matches SQL behavior.
-                                let mut sum: i64 = 0;
-                                for t in &tuples {
-                                    let val =
-                                        t.get(*col_idx).map_or(0, super::value::Value::to_i64);
-                                    sum = sum.saturating_add(val);
-                                }
-                                Value::Int64(sum)
-                            }
-                            AggregateFunction::Min => {
-                                let min = tuples
-                                    .iter()
-                                    .filter_map(|t| t.get(*col_idx))
-                                    .min()
-                                    .cloned()
-                                    .unwrap_or(Value::Null);
-                                min
-                            }
-                            AggregateFunction::Max => {
-                                let max = tuples
-                                    .iter()
-                                    .filter_map(|t| t.get(*col_idx))
-                                    .max()
-                                    .cloned()
-                                    .unwrap_or(Value::Null);
-                                max
-                            }
-                            AggregateFunction::Avg => {
-                                let count = tuples.len() as f64;
-                                if count == 0.0 {
-                                    Value::Null // Guard against division by zero
-                                } else {
-                                    let sum: f64 = tuples
-                                        .iter()
-                                        .map(|t| {
-                                            t.get(*col_idx).map_or(0.0, super::value::Value::to_f64)
-                                        })
-                                        .sum();
-                                    Value::Float64(sum / count)
-                                }
-                            }
+                            AggregateFunction::Sum => aggregate::sum(column()),
+                            AggregateFunction::Min => aggregate::min(column()),
+                            AggregateFunction::Max => aggregate::max(column()),
+                            AggregateFunction::Avg => aggregate::avg(column()),
                             // Ranking aggregates handled above
                             _ => continue,
                         };
