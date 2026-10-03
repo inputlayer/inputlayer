@@ -12,7 +12,21 @@ pub struct MapOutcome {
     /// Per statement: the `id` of the extracted object it came from (the
     /// owner a retraction targets). Same length as `statements`.
     pub owners: Vec<Option<String>>,
-    pub skipped: Vec<String>,
+    /// Objects removed from the extraction because a value cannot be
+    /// stored safely. The rest of the request still evaluates.
+    pub dropped: Vec<String>,
+    /// Extraction and manifest disagree (schema drift): evaluating the
+    /// partial mapping would misreport, so the request must fail.
+    pub drift: Vec<String>,
+}
+
+/// Why a template slot could not be filled.
+#[derive(Debug, PartialEq)]
+enum FillError {
+    /// Field absent or structurally the wrong JSON type: schema drift.
+    Drift,
+    /// Value present but not storable (unsafe characters, not an integer).
+    Unsafe,
 }
 
 /// Escape a string for interpolation into an IQL string literal.
@@ -68,47 +82,59 @@ fn leading_int(value: &str) -> Option<i64> {
     None
 }
 
+/// Whether a string can sit inside a statement literal. The engine's bulk
+/// tuple split is not string-aware (a paren in a value can end the tuple
+/// early), quote and backslash escapes are stored verbatim, `:=` and `<-`
+/// reclassify the whole statement, and statements are newline-joined.
+pub fn storable(value: &str) -> bool {
+    !value
+        .chars()
+        .any(|c| c.is_control() || matches!(c, '(' | ')' | '[' | ']' | '"' | '\\'))
+        && !value.contains(":=")
+        && !value.contains("<-")
+}
+
 /// Substitute {field} placeholders from the object. Slots are TYPED by the
 /// template: a placeholder wrapped in double quotes is a string slot (value
-/// escaped), a bare placeholder is a numeric slot and accepts only JSON
-/// integers - a model-controlled string in a bare slot would sit unquoted
-/// inside the statement, where no escaping can contain it. Strings with
-/// control characters are rejected outright: statements are newline-joined
-/// into one program, so an embedded newline would split the batch. Returns
-/// None when a slot cannot be filled safely (row skipped: extraction noise
-/// becomes a missed finding, never a false or forged one).
-fn fill(template: &str, object: &Value, num: Option<i64>) -> Option<String> {
+/// must be `storable`), a bare placeholder is a numeric slot and accepts
+/// only integers - a model-controlled string in a bare slot would sit
+/// unquoted inside the statement, where no escaping can contain it.
+fn fill(template: &str, object: &Value, num: Option<i64>) -> Result<String, FillError> {
     let mut out = String::new();
     let mut rest = template;
     while let Some(start) = rest.find('{') {
         out.push_str(&rest[..start]);
-        let end = rest[start..].find('}')? + start;
+        let end = rest[start..].find('}').ok_or(FillError::Drift)? + start;
         let key = &rest[start + 1..end];
         let quoted = rest[..start].ends_with('"') && rest[end + 1..].starts_with('"');
         if key == "num" {
-            out.push_str(&num?.to_string());
+            out.push_str(&num.ok_or(FillError::Drift)?.to_string());
         } else if quoted {
-            match object.get(key)? {
-                Value::String(s) if !s.chars().any(char::is_control) => out.push_str(&esc(s)),
+            match object.get(key).ok_or(FillError::Drift)? {
+                Value::String(s) if storable(s) => out.push_str(s),
+                Value::String(_) => return Err(FillError::Unsafe),
                 Value::Number(n) => out.push_str(&n.to_string()),
                 Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
-                _ => return None,
+                _ => return Err(FillError::Drift),
             }
         } else {
-            match object.get(key)? {
+            match object.get(key).ok_or(FillError::Drift)? {
                 Value::Number(n) if n.is_i64() || n.is_u64() => out.push_str(&n.to_string()),
                 // The pack schema carries numerics as strings, with an
                 // optional unit ("2000", "2000 EUR"); the leading-integer
                 // parse is the only accepted coercion - its output is a
                 // parsed i64, so nothing hostile can reach the bare slot.
-                Value::String(s) => out.push_str(&leading_int(s.trim())?.to_string()),
-                _ => return None,
+                Value::String(s) => {
+                    out.push_str(&leading_int(s.trim()).ok_or(FillError::Unsafe)?.to_string());
+                }
+                Value::Number(_) => return Err(FillError::Unsafe),
+                _ => return Err(FillError::Drift),
             }
         }
         rest = &rest[end + 1..];
     }
     out.push_str(rest);
-    Some(out)
+    Ok(out)
 }
 
 /// Evaluate a manifest `when` clause. Supported forms:
@@ -140,48 +166,56 @@ fn when_matches(clause: &str, object: &Value) -> Option<Option<i64>> {
 }
 
 /// Map one extraction document to IQL statements per the manifest.
-pub fn map_extraction(manifest: &Manifest, extraction: &Value) -> MapOutcome {
-    let mut statements = Vec::new();
-    let mut owners = Vec::new();
-    let mut skipped = Vec::new();
+///
+/// An object with a value that cannot be stored is removed from the
+/// extraction (so it is never ledgered either) and reported in `dropped`.
+pub fn map_extraction(manifest: &Manifest, extraction: &mut Value) -> MapOutcome {
+    let mut out = MapOutcome {
+        statements: Vec::new(),
+        owners: Vec::new(),
+        dropped: Vec::new(),
+        drift: Vec::new(),
+    };
 
     for (section, rules) in &manifest.map {
-        let Some(section_value) = extraction.get(section) else {
+        let Some(section_value) = extraction.get_mut(section) else {
             continue;
         };
         if section == "ontology" {
-            map_ontology(rules, section_value, &mut statements, &mut skipped);
-            owners.resize(statements.len(), None);
+            map_ontology(rules, section_value, &mut out);
+            out.owners.resize(out.statements.len(), None);
             continue;
         }
-        let Some(objects) = section_value.as_array() else {
-            skipped.push(format!("{section}: not an array"));
+        let Some(objects) = section_value.as_array_mut() else {
+            out.drift.push(format!("{section}: not an array"));
             continue;
         };
-        for object in objects {
-            map_object(section, rules, object, &mut statements, &mut skipped);
-            let owner = object
-                .get(crate::ontology::OWNER_FIELD)
-                .and_then(Value::as_str)
-                .map(str::to_string);
-            owners.resize(statements.len(), owner);
-        }
+        objects.retain(|object| match map_object(rules, object) {
+            Ok(rendered) => {
+                let owner = object
+                    .get(crate::ontology::OWNER_FIELD)
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                out.statements.extend(rendered);
+                out.owners.resize(out.statements.len(), owner);
+                true
+            }
+            Err((FillError::Unsafe, reason)) => {
+                out.dropped.push(format!("{section}: {reason}: {object}"));
+                false
+            }
+            Err((FillError::Drift, reason)) => {
+                out.drift.push(format!("{section}: {reason}"));
+                true
+            }
+        });
     }
-
-    MapOutcome {
-        statements,
-        owners,
-        skipped,
-    }
+    out
 }
 
-fn map_object(
-    section: &str,
-    rules: &[MapRule],
-    object: &Value,
-    statements: &mut Vec<String>,
-    skipped: &mut Vec<String>,
-) {
+/// Render every statement for one object (first matching rule, plus its
+/// matching extras), all or nothing.
+fn map_object(rules: &[MapRule], object: &Value) -> Result<Vec<String>, (FillError, &'static str)> {
     for rule in rules {
         let num = match &rule.when {
             Some(clause) => match when_matches(clause, object) {
@@ -191,48 +225,31 @@ fn map_object(
             None => None,
         };
         let mut rendered = Vec::new();
-        let mut ok = true;
         for template in &rule.insert {
-            if let Some(statement) = fill(template, object, num) {
-                rendered.push(statement);
-            } else {
-                ok = false;
-                break;
-            }
+            rendered.push(fill(template, object, num).map_err(|e| match e {
+                FillError::Drift => (e, "object missing a mapped field"),
+                FillError::Unsafe => (e, "value cannot be stored"),
+            })?);
         }
-        if !ok {
-            skipped.push(format!("{section}: object missing a mapped field"));
-            return;
-        }
-        statements.extend(rendered);
         for extra in &rule.extra {
-            if let Some(clause) = &extra.when {
-                if let Some(bound) = when_matches(clause, object) {
-                    for template in &extra.insert {
-                        if let Some(statement) = fill(template, object, bound) {
-                            statements.push(statement);
-                        } else {
-                            // An extra whose condition matched but whose
-                            // template cannot fill is the same drift class as
-                            // a failed main template: it must surface (and
-                            // bail the request), not silently omit a fact.
-                            skipped.push(format!("{section}: extra template failed to fill"));
-                        }
-                    }
-                }
+            let Some(bound) = extra.when.as_ref().and_then(|c| when_matches(c, object)) else {
+                continue;
+            };
+            for template in &extra.insert {
+                // A matched extra that cannot fill is the same class as a
+                // failed main template: it never silently omits a fact.
+                rendered.push(fill(template, object, bound).map_err(|e| match e {
+                    FillError::Drift => (e, "extra template failed to fill"),
+                    FillError::Unsafe => (e, "value cannot be stored"),
+                })?);
             }
         }
-        return; // first matching rule wins
+        return Ok(rendered); // first matching rule wins
     }
-    skipped.push(format!("{section}: no mapping rule matched"));
+    Err((FillError::Drift, "no mapping rule matched"))
 }
 
-fn map_ontology(
-    rules: &[MapRule],
-    section_value: &Value,
-    statements: &mut Vec<String>,
-    skipped: &mut Vec<String>,
-) {
+fn map_ontology(rules: &[MapRule], section_value: &Value, out: &mut MapOutcome) {
     for rule in rules {
         let Some(by_key) = &rule.insert_by_key else {
             continue;
@@ -246,13 +263,19 @@ fn map_ontology(
                     Value::String(s) => serde_json::json!({ "item": s }),
                     Value::Object(_) => item.clone(),
                     _ => {
-                        skipped.push(format!("ontology.{key}: unsupported item"));
+                        out.drift.push(format!("ontology.{key}: unsupported item"));
                         continue;
                     }
                 };
                 match fill(template, &object, None) {
-                    Some(statement) => statements.push(statement),
-                    None => skipped.push(format!("ontology.{key}: item missing a field")),
+                    Ok(statement) => out.statements.push(statement),
+                    Err(FillError::Unsafe) => out
+                        .dropped
+                        .push(format!("ontology.{key}: value cannot be stored: {item}")),
+                    Err(FillError::Drift) => {
+                        out.drift
+                            .push(format!("ontology.{key}: item missing a field"));
+                    }
                 }
             }
         }
@@ -290,11 +313,11 @@ insert = ['+constraint[("{id}", "{type}", "{attr}", "{value}")]']
     #[test]
     fn maps_claims_with_numeric_mirror_extra() {
         let m = manifest(MAP_TOML);
-        let extraction = serde_json::json!({
+        let mut extraction = serde_json::json!({
             "claims": [{"id": "c1", "entity": "trip", "attribute": "departure_date",
                         "value": "2026-08-14", "msg": 1, "surface": "on August 14th"}]
         });
-        let out = map_extraction(&m, &extraction);
+        let out = map_extraction(&m, &mut extraction);
         assert_eq!(
             out.statements,
             vec![
@@ -303,21 +326,21 @@ insert = ['+constraint[("{id}", "{type}", "{attr}", "{value}")]']
                 "+claim_num[(\"c1\", \"trip\", \"departure_date\", 20260814)]",
             ]
         );
-        assert!(out.skipped.is_empty());
+        assert!(out.dropped.is_empty() && out.drift.is_empty());
         assert_eq!(out.owners, vec![Some("c1".to_string()); 3]);
     }
 
     #[test]
     fn owners_track_each_object() {
         let m = manifest(MAP_TOML);
-        let extraction = serde_json::json!({
+        let mut extraction = serde_json::json!({
             "claims": [
                 {"id": "c1", "entity": "e", "attribute": "a", "value": "v", "msg": 0, "surface": "s"},
                 {"id": "c2", "entity": "e", "attribute": "a", "value": "w", "msg": 1, "surface": "t"}
             ],
             "retractions": [{"target": "c1", "kind": "claim", "msg": 1, "surface": "t"}]
         });
-        let out = map_extraction(&m, &extraction);
+        let out = map_extraction(&m, &mut extraction);
         // Retractions are not a mapped section: they never become inserts.
         assert_eq!(out.statements.len(), 4);
         assert_eq!(
@@ -334,13 +357,13 @@ insert = ['+constraint[("{id}", "{type}", "{attr}", "{value}")]']
     #[test]
     fn constraint_discriminator_picks_numeric_rule() {
         let m = manifest(MAP_TOML);
-        let extraction = serde_json::json!({
+        let mut extraction = serde_json::json!({
             "constraints": [
                 {"id": "k1", "type": "max_value", "attr": "total_price", "value": "2000"},
                 {"id": "k2", "type": "forbid", "attr": "pricing", "value": ""}
             ]
         });
-        let out = map_extraction(&m, &extraction);
+        let out = map_extraction(&m, &mut extraction);
         assert_eq!(
             out.statements,
             vec![
@@ -351,63 +374,90 @@ insert = ['+constraint[("{id}", "{type}", "{attr}", "{value}")]']
     }
 
     #[test]
-    fn quote_injection_is_escaped() {
+    fn unstorable_values_drop_only_their_row() {
         let m = manifest(MAP_TOML);
-        let extraction = serde_json::json!({
-            "claims": [{"id": "c1", "entity": "e", "attribute": "a",
-                        "value": "x\"), +evil[(\"y", "msg": 0, "surface": "s"}]
+        for hostile in [
+            "x\"), +evil[(\"y",
+            "Option 1) Paris, option 2) Rome",
+            "a [b",
+            "a := b",
+            "a <- b",
+            "trail\\",
+        ] {
+            let mut extraction = serde_json::json!({
+                "claims": [
+                    {"id": "c1", "entity": "e", "attribute": "a", "value": "v", "msg": 0,
+                     "surface": hostile},
+                    {"id": "c2", "entity": "e", "attribute": "a", "value": "Paris, France",
+                     "msg": 0, "surface": "s"}
+                ]
+            });
+            let out = map_extraction(&m, &mut extraction);
+            assert_eq!(out.dropped.len(), 1, "{hostile:?}: {:?}", out.dropped);
+            assert!(out.drift.is_empty(), "{:?}", out.drift);
+            assert_eq!(out.statements.len(), 2, "{:?}", out.statements);
+            assert_eq!(out.owners, vec![Some("c2".to_string()); 2]);
+            // Never ledgered: the object leaves the extraction.
+            assert_eq!(extraction["claims"].as_array().map(Vec::len), Some(1));
+            assert_eq!(extraction["claims"][0]["id"], "c2");
+        }
+    }
+
+    #[test]
+    fn missing_field_is_drift() {
+        let m = manifest(MAP_TOML);
+        let mut extraction = serde_json::json!({
+            "claims": [{"id": "c1", "entity": "e", "attribute": "a", "value": "v", "msg": 0}]
         });
-        let out = map_extraction(&m, &extraction);
-        // The hostile text stays INSIDE the escaped literal: the unescaped
-        // breakout sequence x"), must not exist, the escaped one must.
-        assert!(
-            out.statements[0].contains("x\\\"),"),
-            "escaped: {}",
-            out.statements[0]
-        );
-        assert!(
-            !out.statements[0].contains("x\"),"),
-            "breakout: {}",
-            out.statements[0]
-        );
-        assert_eq!(out.statements.len(), 2);
+        let out = map_extraction(&m, &mut extraction);
+        assert_eq!(out.drift.len(), 1, "{:?}", out.drift);
+        assert!(out.statements.is_empty() && out.dropped.is_empty());
     }
 
     #[test]
     fn bare_slot_coerces_unit_bearing_bounds() {
         let m = manifest(MAP_TOML);
-        let extraction = serde_json::json!({
+        let mut extraction = serde_json::json!({
             "constraints": [{"id": "k1", "type": "max_value", "attr": "total_price",
                              "value": "2000 EUR"}]
         });
-        let out = map_extraction(&m, &extraction);
+        let out = map_extraction(&m, &mut extraction);
         assert_eq!(
             out.statements,
             vec!["+constraint_num[(\"k1\", \"max_value\", \"total_price\", 2000)]"]
         );
-        assert!(out.skipped.is_empty());
+        assert!(out.dropped.is_empty() && out.drift.is_empty());
     }
 
     #[test]
     fn bare_slot_rejects_hostile_strings() {
         let m = manifest(MAP_TOML);
         // {msg} sits unquoted in the claim_source template; a string there
-        // could not be contained by escaping, so the row must be skipped.
-        let extraction = serde_json::json!({
+        // could not be contained by escaping, so the row is dropped.
+        let mut extraction = serde_json::json!({
             "claims": [{"id": "c1", "entity": "e", "attribute": "a", "value": "v",
                         "msg": "0)], +evil[(1", "surface": "s"}]
         });
-        let out = map_extraction(&m, &extraction);
+        let out = map_extraction(&m, &mut extraction);
         assert!(out.statements.is_empty(), "{:?}", out.statements);
-        assert_eq!(out.skipped.len(), 1);
+        assert_eq!(out.dropped.len(), 1);
         // {value} sits unquoted in the constraint_num template; only a full
         // integer parse is accepted.
-        let extraction = serde_json::json!({
+        let mut extraction = serde_json::json!({
             "constraints": [{"id": "k1", "type": "max_value", "attr": "a",
                              "value": "0)], +evil[(1"}]
         });
-        let out = map_extraction(&m, &extraction);
+        let out = map_extraction(&m, &mut extraction);
         assert!(out.statements.is_empty(), "{:?}", out.statements);
+        // An integer beyond i64 cannot fill a bare slot either.
+        let mut extraction = serde_json::json!({
+            "constraints": [{"id": "k1", "type": "max_value", "attr": "a",
+                             "value": "100000000000000000000"}]
+        });
+        let out = map_extraction(&m, &mut extraction);
+        assert!(out.statements.is_empty(), "{:?}", out.statements);
+        assert_eq!(out.dropped.len(), 1);
+        assert!(out.drift.is_empty());
     }
 
     #[test]
@@ -415,16 +465,17 @@ insert = ['+constraint[("{id}", "{type}", "{attr}", "{value}")]']
         let m = manifest(MAP_TOML);
         // Statements are newline-joined into one program; an embedded
         // newline would split the batch even inside a quoted literal.
-        let extraction = serde_json::json!({
+        let mut extraction = serde_json::json!({
             "claims": [{"id": "c1", "entity": "e", "attribute": "a",
                         "value": "x\n+evil[(\"y\")]", "msg": 0, "surface": "s"}]
         });
-        let out = map_extraction(&m, &extraction);
+        let out = map_extraction(&m, &mut extraction);
         assert!(out.statements.is_empty(), "{:?}", out.statements);
+        assert_eq!(out.dropped.len(), 1);
     }
 
     #[test]
-    fn extra_fill_failure_surfaces_as_skip() {
+    fn extra_fill_failure_is_drift() {
         let m = manifest(
             r#"
 [ontology]
@@ -438,14 +489,13 @@ when = "numeric_mirror(attribute, value)"
 insert = ['+mirror[("{nonexistent}")]']
 "#,
         );
-        let extraction = serde_json::json!({
+        let mut extraction = serde_json::json!({
             "claims": [{"id": "c1", "attribute": "age", "value": "42"}]
         });
-        let out = map_extraction(&m, &extraction);
-        assert_eq!(out.statements, vec!["+claim[(\"c1\")]"]);
-        // The failed extra must be reported so run_verify bails, not
-        // silently omitted.
-        assert_eq!(out.skipped.len(), 1, "{:?}", out.skipped);
+        let out = map_extraction(&m, &mut extraction);
+        // The failed extra fails the whole object and bails the request.
+        assert!(out.statements.is_empty(), "{:?}", out.statements);
+        assert_eq!(out.drift.len(), 1, "{:?}", out.drift);
     }
 
     #[test]

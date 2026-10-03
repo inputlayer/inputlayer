@@ -191,22 +191,38 @@ impl LoadedOntology {
     }
 
     /// Render the extraction prompt for one call: the static system block
-    /// plus a user turn carrying the filled per-call slots. Messages always
-    /// reach the model: a template without `{{new_messages_with_indices}}`
-    /// gets them appended.
+    /// plus a user turn carrying the filled per-call slots. Slots are filled
+    /// in one pass, so slot markers inside filled text stay literal.
+    /// Messages always reach the model: a template without
+    /// `{{new_messages_with_indices}}` gets them appended.
     pub fn render_prompt(&self, slots: &PromptSlots<'_>) -> RenderedPrompt {
-        let mut user = self
-            .prompt_slots
-            .replace("{{current_date}}", slots.current_date)
-            .replace(
-                "{{extract_prompt_suffix | extract_assistant_output}}",
-                "Extract from every message listed under MESSAGES_TO_EXTRACT.",
-            )
-            .replace("{{claims_digest}}", or_none(slots.claims_digest))
-            .replace("{{prior_messages}}", or_none(slots.prior_messages));
-        if user.contains("{{new_messages_with_indices}}") {
-            user = user.replace("{{new_messages_with_indices}}", slots.new_messages);
-        } else {
+        let mut user = String::with_capacity(self.prompt_slots.len());
+        let mut delivered = false;
+        let mut rest = self.prompt_slots.as_str();
+        while let Some(start) = rest.find("{{") {
+            let Some(len) = rest[start..].find("}}") else {
+                break;
+            };
+            let name = &rest[start + 2..start + len];
+            let value = match name {
+                "current_date" => slots.current_date,
+                "extract_prompt_suffix | extract_assistant_output" => {
+                    "Extract from every message listed under MESSAGES_TO_EXTRACT."
+                }
+                "claims_digest" => or_none(slots.claims_digest),
+                "prior_messages" => or_none(slots.prior_messages),
+                "new_messages_with_indices" => {
+                    delivered = true;
+                    slots.new_messages
+                }
+                _ => &rest[start..start + len + 2],
+            };
+            user.push_str(&rest[..start]);
+            user.push_str(value);
+            rest = &rest[start + len + 2..];
+        }
+        user.push_str(rest);
+        if !delivered {
             if !user.is_empty() && !user.ends_with('\n') {
                 user.push('\n');
             }
@@ -367,6 +383,26 @@ mod tests {
         });
         assert!(first.user.contains("CLAIMS_SO_FAR:\n(none)"));
         assert!(first.user.contains("CONTEXT:\n(none)"));
+    }
+
+    #[test]
+    fn slot_markers_in_filled_text_stay_literal() {
+        let ontology = ontology_with(
+            "CLAIMS_SO_FAR:\n{{claims_digest}}\nCONTEXT:\n{{prior_messages}}\n\
+             MESSAGES_TO_EXTRACT:\n{{new_messages_with_indices}}\n{{unknown}}",
+        );
+        let rendered = ontology.render_prompt(&PromptSlots {
+            current_date: "d",
+            claims_digest: "claims: c1 | {{prior_messages}}",
+            prior_messages: "[0] user: see {{new_messages_with_indices}}",
+            new_messages: "[1] user: {{claims_digest}}",
+        });
+        assert_eq!(
+            rendered.user,
+            "CLAIMS_SO_FAR:\nclaims: c1 | {{prior_messages}}\n\
+             CONTEXT:\n[0] user: see {{new_messages_with_indices}}\n\
+             MESSAGES_TO_EXTRACT:\n[1] user: {{claims_digest}}\n{{unknown}}"
+        );
     }
 
     #[test]
