@@ -38,6 +38,11 @@ impl Drop for Server {
 
 /// A server with KG `shared` and user `bob` (global editor, viewer on `shared`).
 async fn start_server() -> Server {
+    start_server_with(|_| {}).await
+}
+
+/// [`start_server`] with `configure` applied to its config.
+async fn start_server_with(configure: impl FnOnce(&mut Config)) -> Server {
     let tmp = TempDir::new().unwrap();
     let mut config = Config::default();
     config.storage.data_dir = tmp.path().join("data");
@@ -46,6 +51,7 @@ async fn start_server() -> Server {
     config.http.rate_limit.ws_max_messages_per_sec = 0;
     config.http.ws_auth_timeout_ms = 60_000;
     config.http.gui.enabled = false;
+    configure(&mut config);
     let handler = Arc::new(Handler::from_config(config).unwrap());
     handler.bootstrap_auth();
     handler.get_storage().create_knowledge_graph(KG).unwrap();
@@ -395,4 +401,90 @@ async fn kg_and_internal_notices_reach_only_authorized_sessions() {
             .count();
         assert_eq!(kg_changes, expected_kg_changes, "{replayed:?}");
     }
+}
+
+/// The credential fence and the result cap compose: a subscriber held at its
+/// last complete result by the cap is closed by revocation, and the recovery
+/// delta that a live session would get never reaches it.
+#[tokio::test(flavor = "multi_thread")]
+async fn revocation_fences_a_subscription_held_at_the_result_cap() {
+    let server = start_server_with(|config| {
+        config.storage.performance.max_result_rows = 3;
+    })
+    .await;
+    let key = server.key("bob-capped", "bob");
+    let mut client = Client::connect(&server, Login::Key(&key)).await;
+    let reply = client.execute(".subscribe all ?d(X)").await;
+    assert_eq!(reply["type"], "result", "{reply}");
+    server.wait_for_active(1).await;
+
+    server.write("+d[(1,), (2,), (3,), (4,)]").await;
+    let mut push = client.recv().await.unwrap();
+    while push["type"] != "subscription_error" {
+        assert_ne!(push["type"], "subscription_delta", "capped delta: {push}");
+        push = client.recv().await.unwrap();
+    }
+    assert!(
+        push["message"]
+            .as_str()
+            .unwrap()
+            .contains("max_result_rows (3)"),
+        "{push}"
+    );
+
+    server.handler.handle_apikey_revoke("bob-capped").unwrap();
+    server.write("-d[(3,), (4,)]").await;
+    let frames: Vec<Value> = client
+        .drain()
+        .await
+        .into_iter()
+        .filter(|frame| frame["type"] != "persistent_update")
+        .collect();
+    assert_revoked(&frames);
+    server.wait_for_active(0).await;
+}
+
+/// `.why` searches its proof after releasing the storage guard and returns
+/// from its own path; a credential revoked during that search still gets no
+/// proof.
+#[tokio::test(flavor = "multi_thread")]
+async fn revocation_during_a_proof_withholds_it() {
+    let server = start_server().await;
+    // Proof search dominates: one tree per row, far costlier than the query.
+    let edges: Vec<String> = (0..2000).map(|i| format!("({i}, {})", i + 1)).collect();
+    server
+        .write(&format!(
+            "+edge[{}]\n+path(X, Y) <- edge(X, Y)",
+            edges.join(", ")
+        ))
+        .await;
+    let proof = ".why full ?path(X, Y)";
+
+    let key = server.key("bob-why", "bob");
+    let principal = server.handler.authenticate_api_key(&key).unwrap();
+    let started = Instant::now();
+    let result = server
+        .handler
+        .execute_program(
+            None,
+            Some(KG.to_string()),
+            proof.to_string(),
+            Some(&principal),
+        )
+        .await
+        .unwrap();
+    let evaluation = started.elapsed();
+    assert_eq!(result.proof_trees.map(|trees| trees.len()), Some(2000));
+    assert!(
+        evaluation >= Duration::from_millis(100),
+        "the proof must be slow enough to revoke during it ({evaluation:?})"
+    );
+
+    let mut client = Client::connect(&server, Login::Key(&key)).await;
+    client
+        .send(json!({"type": "execute", "program": proof}))
+        .await;
+    tokio::time::sleep(evaluation / 4).await;
+    server.handler.handle_apikey_revoke("bob-why").unwrap();
+    assert_revoked(&client.drain().await);
 }
