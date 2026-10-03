@@ -2,14 +2,16 @@
 //!
 //! `run` measures a baseline and a candidate server binary in interleaved
 //! rounds and writes every raw sample to a run file; `compare` judges a run
-//! file under the policy and exits zero only on a pass. See
-//! `perf-gate/README.md`.
+//! file under the policy and exits zero only on a pass; `genbi` benchmarks
+//! one server as the substrate for reactive agents on the genbi-trust suite.
+//! See `perf-gate/README.md`.
 
 mod client;
 mod compare;
 mod dataset;
 mod environment;
 mod fixtures;
+mod genbi;
 mod policy;
 mod profile;
 mod report;
@@ -46,6 +48,8 @@ enum Command {
     Run(RunArgs),
     /// Judge a run file; exit 0 pass, 1 fail, 2 inconclusive, 3 invalid.
     Compare(CompareArgs),
+    /// Benchmark one server as reactive-agent substrate on genbi-trust.
+    Genbi(genbi::GenbiArgs),
 }
 
 #[derive(clap::Args)]
@@ -101,6 +105,7 @@ fn main() -> ExitCode {
     let result = match Cli::parse().command {
         Command::Run(args) => run(&args).map(|()| ExitCode::SUCCESS),
         Command::Compare(args) => compare(&args),
+        Command::Genbi(args) => genbi::run(&args),
     };
     result.unwrap_or_else(|e| {
         eprintln!("perf-gate: {e:#}");

@@ -156,7 +156,7 @@ async fn collect(agent: &mut Client, probes: Probes) -> Result<Vec<Instant>> {
                 retracted,
                 ..
             } => (inserted, retracted),
-            Frame::SubscriptionError { message } => bail!("subscription error: {message}"),
+            Frame::SubscriptionError { message, .. } => bail!("subscription error: {message}"),
             other => bail!("unexpected push {other:?}"),
         };
         let rows = inserted

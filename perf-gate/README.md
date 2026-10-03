@@ -123,6 +123,89 @@ Some of them disable persistence, or time a refresh without the insert that
 triggered it. Use them to investigate a regression the gate finds, not as
 the acceptance oracle.
 
+## GenBI-trust reactive agent benchmark
+
+`make bench-genbi` measures this tree's server as the substrate for reactive
+AI agents on the organisation's
+[genbi-trust](https://github.com/inputlayer/genbi-trust) suite: 96 business
+scenarios in 24 categories, each with an IQL seed, business questions, ordered
+mutations and evaluator-private expected checkpoints. It is a detailed
+benchmark, not a baseline comparison; it does not replace `make perf-gate`.
+
+```bash
+GENBI_TRUST_DIR=/path/to/genbi-trust make bench-genbi
+GENBI_TRUST_DIR=... make bench-genbi GENBI_ARGS="--cases priority --repeat 3"
+GENBI_TRUST_DIR=... make bench-genbi GENBI_ARGS="--fault drop-retractions"  # must FAIL
+scripts/bench-genbi.sh --help
+```
+
+The suite is read in place and never copied into this repository.
+`target/genbi-bench/latest/` holds `result.json` (schema
+`inputlayer-genbi-bench/v1`: the perf gate's environment fingerprint, raw
+microsecond series, rates and gauges per scenario run) and `summary.md`.
+
+Per scenario, on a fresh server with the gate's configuration:
+
+1. **Cold load.** The seed's statements are sent one request each, with
+   consecutive bulk inserts into one relation merged into one batch (the same
+   facts). `.kg` commands and `?` queries in the seed are dropped. A
+   statement that fails is a finding; the seeds are marked unverified
+   upstream and are never edited.
+2. **Questions.** Every SQL check in `queries.json` and `mutations.json`
+   becomes one standing query: equality filters bind constants in one atom,
+   selected columns are projected from the full engine rows. SQLite views map
+   to seed relations through `src/genbi/binding.rs`. Checks that do not
+   translate (aggregates, `EXISTS`, `IN`, relations the seed lacks) are
+   reported as unsupported, never approximated.
+3. **Subscribe.** The writer evaluates each question once (`initial_query_us`,
+   cold), then each agent connection (`--agents`) subscribes to all of them
+   (`subscribe_us`); the snapshot is the agent's answer for the `initial`
+   checkpoint.
+4. **Mutations**, in order, from the independent writer connection. Each SQL
+   statement becomes IQL: `INSERT` an insert, `DELETE` a (conditional)
+   delete, `UPDATE` a retract and re-insert of the matching facts, read
+   untimed beforehand. The seeds keep the reporting clock and period in
+   `clock`/`period` as well as `benchmark_context`; an `UPDATE` of the table
+   rewrites them too. A mutation's statements go out as one program
+   (`ack_us`), as an agent-facing writer would send them; they commit one by
+   one, so agents may see intermediate deltas.
+5. **Convergence.** Agents apply pushes until none arrives for `--quiet-ms`.
+   The writer then re-queries every question (`requery_us`: the full
+   re-evaluation a polling agent pays after the ack, and the truth the delta
+   path must match), and agents keep applying pushes until their answers
+   equal it or `--deadline-ms` passes. `delta_us` is writer send to the last
+   delta frame, split into `delta_insert_us` / `delta_retract_us` by whether
+   the answer lost rows; `ack_to_delta_us` is the same delta from the ack:
+   propagation without the durable commit.
+6. **Correctness.** At every checkpoint each agent's maintained answer is
+   compared with the expected rows using `score_suite.py`'s rules
+   (multiset, integers stay integers). A check fails with `delta divergence`
+   when an agent's answer differs from the fresh evaluation, `subscription
+   error` on a pushed error, and `result mismatch` when agent and re-query
+   agree but differ from the expected rows (the seed's rules or data
+   disagree with the reference model). After an unsupported or failed
+   mutation, later checkpoints are `not run`. Checks after a change that
+   removed rows are tallied separately as retraction correctness.
+
+Memory is `/proc` RSS after load, after subscribing and at the end, plus
+peak RSS. Throughput is `load_statements` (seed statements per second of
+cold load) and `converged_mutations` (mutations per second of send-to-
+converged time, one serial writer).
+
+The summary lists the reactive-path categories first (multiple supports and
+retraction, change impact, event replay, conversation revisions, change
+cost, ingestion freshness, qualified workflows, then the reasoning
+categories), then the rest, then every failing check with its reason and
+missing/extra row counts, then all findings. Expected rows are never
+printed or written; only counts are.
+
+The command exits 0 when every agent converged on every answer and no
+subscription errored; delta-path failures exit 1. `--strict` also fails on
+result mismatches and unsupported checks. `--fault drop-retractions` (or
+`drop-inserts`) breaks the agents' delta application on purpose: a run with
+retractions must then fail, which proves the checks catch a broken delta
+path.
+
 ## Extending
 
 New fixtures go in `src/fixtures/`. Add a variant to `Fixture`, add its
