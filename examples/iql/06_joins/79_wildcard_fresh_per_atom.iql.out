@@ -1,0 +1,124 @@
+Connecting to server at http://127.0.0.1:8080...
+Connected!
+
+Server status: healthy
+Authenticated as: admin
+Current knowledge graph: default
+
+> .kg create test_wildcard_fresh_n06t79
+Knowledge graph 'test_wildcard_fresh_n06t79' created.
+Switched to knowledge graph: test_wildcard_fresh_n06t79
+> .kg use test_wildcard_fresh_n06t79
+Switched to knowledge graph: test_wildcard_fresh_n06t79
+> +user[(1, "ann", true), (2, "bob", false), (3, "cy", true)]
+Inserted 3 fact(s) into 'user'.
+> +w(A, B) <- user(A, _, _), user(B, _, _)
+Rule 'w' registered.
+> ?w(A, B)
+┌───┬───┐
+│ A │ B │
+├───┼───┤
+│ 1 │ 1 │
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 2 │ 1 │
+│ 2 │ 2 │
+│ 2 │ 3 │
+│ 3 │ 1 │
+│ 3 │ 2 │
+│ 3 │ 3 │
+└───┴───┘
+9 rows
+> pairs(A, B) <- user(A, _, _), user(B, _, _)
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 1 │
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 2 │ 1 │
+│ 2 │ 2 │
+│ 2 │ 3 │
+│ 3 │ 1 │
+│ 3 │ 2 │
+│ 3 │ 3 │
+└───┴───┘
+9 rows
+(session: 1 rule(s))
+> ?pairs(A, B)
+┌───┬───┐
+│ A │ B │
+├───┼───┤
+│ 1 │ 1 │
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 2 │ 1 │
+│ 2 │ 2 │
+│ 2 │ 3 │
+│ 3 │ 1 │
+│ 3 │ 2 │
+│ 3 │ 3 │
+└───┴───┘
+9 rows
+> +e[(1, 2, "a"), (2, 3, "b"), (3, 4, "c")]
+Inserted 3 fact(s) into 'e'.
+> +two(X, Z) <- e(X, Y, _), e(Y, Z, _)
+Rule 'two' registered.
+> ?two(X, Z)
+┌───┬───┐
+│ X │ Z │
+├───┼───┤
+│ 1 │ 3 │
+│ 2 │ 4 │
+└───┴───┘
+2 rows
+> +muted[(1, 99)]
+Inserted 1 fact(s) into 'muted'.
+> +unmuted_pair(A, B) <- user(A, _, _), user(B, _, _), !muted(A, _)
+Rule 'unmuted_pair' registered.
+> ?unmuted_pair(A, B)
+┌───┬───┐
+│ A │ B │
+├───┼───┤
+│ 2 │ 1 │
+│ 2 │ 2 │
+│ 2 │ 3 │
+│ 3 │ 1 │
+│ 3 │ 2 │
+│ 3 │ 3 │
+└───┴───┘
+6 rows
+> +peers(A, count<B>) <- user(A, _, _), user(B, _, _)
+Rule 'peers' registered.
+> ?peers(A, N)
+┌───┬───┐
+│ A │ N │
+├───┼───┤
+│ 1 │ 3 │
+│ 2 │ 3 │
+│ 3 │ 3 │
+└───┴───┘
+3 rows
+> +r(X, Y, L) <- e(X, Y, L)
+Rule 'r' registered.
+> +r(X, Z, "via") <- r(X, Y, _), r(Y, Z, _)
+Rule 'r' registered.
+> +reach(X, Y) <- r(X, Y, _)
+Rule 'reach' registered.
+> ?reach(X, Y)
+┌───┬───┐
+│ X │ Y │
+├───┼───┤
+│ 1 │ 2 │
+│ 1 │ 3 │
+│ 1 │ 4 │
+│ 2 │ 3 │
+│ 2 │ 4 │
+│ 3 │ 4 │
+└───┴───┘
+6 rows
+> .kg use default
+Switched to knowledge graph: default
+(Cleared 1 session rule(s), 0 session fact(s))
+> .kg drop test_wildcard_fresh_n06t79
+Knowledge graph 'test_wildcard_fresh_n06t79' dropped.
