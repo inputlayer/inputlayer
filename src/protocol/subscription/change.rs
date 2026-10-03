@@ -55,6 +55,14 @@ pub fn change_of(notification: &Notification) -> (&str, ChangeSet) {
     }
 }
 
+/// Whether a notification may change a knowledge graph's persistent rules.
+pub fn changes_rules(notification: &Notification) -> bool {
+    matches!(
+        notification,
+        Notification::RuleChange { .. } | Notification::KgChange { .. }
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

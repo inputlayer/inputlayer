@@ -51,7 +51,7 @@ mod testing;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-pub use change::{change_of, ChangeSet};
+pub use change::{change_of, changes_rules, ChangeSet};
 pub use connection::ConnectionSubscriptions;
 pub use dependencies::Dependencies;
 pub use hub::SubscriptionHub;

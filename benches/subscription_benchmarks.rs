@@ -115,7 +115,7 @@ async fn subscribe_all(
                 .begin_subscribe(KG, &format!("s{i}"), &query)
                 .expect("subscribe");
             subscriptions
-                .finish_subscribe(opening.run().await)
+                .finish_subscribe(opening.run().await, |_| true)
                 .expect("subscribe");
         }
         connections.push((subscriptions, count));

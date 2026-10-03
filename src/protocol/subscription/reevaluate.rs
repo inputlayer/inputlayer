@@ -7,8 +7,12 @@
 //! which runs on the blocking pool under the query semaphore.
 //!
 //! The evaluation runs for no one in particular: its rows depend only on the
-//! knowledge graph and the query. Whoever receives them is authorized
-//! separately, when subscribing and before each delivery.
+//! knowledge graph (data and persistent rules) and the query. Whoever receives
+//! them is authorized separately, when subscribing, before the snapshot is
+//! sent and before each delivery. That holds because authorization is per
+//! knowledge graph; row- or relation-level authorization would have to run
+//! the evaluation as the subscriber's scope and add that scope to the
+//! [`super::ViewKey`].
 
 use std::sync::Arc;
 

@@ -25,7 +25,7 @@ use crate::protocol::handler::Notification;
 
 use super::publication::{Doorbell, SubscriberId};
 use super::views::{Attach, Attachment, Completion, Dispatch, ViewId, ViewKey, ViewRegistry};
-use super::{change_of, StandingQuery, SubscriptionMetrics};
+use super::{change_of, changes_rules, StandingQuery, SubscriptionMetrics};
 
 type Reply = oneshot::Sender<Result<Attachment, String>>;
 
@@ -116,7 +116,7 @@ struct Worker {
     in_flight: JoinSet<Completion>,
     /// Running evaluation of each view, to stop it when the view goes.
     running: HashMap<ViewId, AbortHandle>,
-    /// Subscribers waiting for their view's first result.
+    /// Subscribers waiting for their view's next result.
     replies: HashMap<SubscriberId, Reply>,
     metrics: Arc<SubscriptionMetrics>,
 }
@@ -138,7 +138,11 @@ impl Worker {
                     Ok(notification) => {
                         let (knowledge_graph, change) = change_of(&notification);
                         let now = Instant::now().into_std();
-                        let dispatches = self.registry.on_change(knowledge_graph, &change, now);
+                        let dispatches = if changes_rules(&notification) {
+                            self.registry.on_rule_change(knowledge_graph, &change, now)
+                        } else {
+                            self.registry.on_change(knowledge_graph, &change, now)
+                        };
                         self.start_all(dispatches);
                     }
                     Err(RecvError::Lagged(missed)) => {
@@ -170,9 +174,6 @@ impl Worker {
                 let subscriber = doorbell.id();
                 match self.registry.attach(key, doorbell, || query) {
                     Attach::Attached(attachment) => self.answer(subscriber, reply, Ok(attachment)),
-                    Attach::Rejected(message) => {
-                        let _ = reply.send(Err(message));
-                    }
                     Attach::Waiting(dispatch) => {
                         self.replies.insert(subscriber, reply);
                         self.start_all(dispatch);

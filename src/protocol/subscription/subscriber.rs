@@ -6,7 +6,9 @@
 //! access to the knowledge graph is checked; a denied publication becomes a
 //! `subscription_error` and the subscriber keeps its last delivered result,
 //! so once access is restored its next delta is relative to that result and
-//! its `seq` has no gap.
+//! its `seq` has no gap. A failed refresh's error follows the view's last
+//! complete result: a subscriber that has not delivered that result yet gets
+//! it as a delta first, and the error on its next wake-up.
 
 use std::sync::Arc;
 
@@ -104,8 +106,8 @@ impl Subscriber {
         if publication.number == self.seen {
             return None;
         }
-        self.seen = publication.number;
         if !readable(&self.knowledge_graph) {
+            self.seen = publication.number;
             return Some(self.error(format!(
                 "Access denied to knowledge graph '{}'. The subscription keeps its last \
                  delivered result; once access is restored, its next delta is relative to it.",
@@ -113,17 +115,25 @@ impl Subscriber {
             )));
         }
         let (inserted, retracted) = match &publication.outcome {
-            Outcome::Failed(message) => return Some(self.error(message.clone())),
+            Outcome::Failed(message) if publication.result_number == self.base_number => {
+                self.seen = publication.number;
+                return Some(self.error(message.clone()));
+            }
             Outcome::Delta {
                 base,
                 inserted,
                 retracted,
             } if *base == self.base_number => (inserted.clone(), retracted.clone()),
-            Outcome::Delta { .. } | Outcome::Snapshot => (
+            Outcome::Delta { .. } | Outcome::Snapshot | Outcome::Failed(_) => (
                 publication.result.difference(&self.base),
                 self.base.difference(&publication.result),
             ),
         };
+        if matches!(publication.outcome, Outcome::Failed(_)) {
+            self.doorbell.ring();
+        } else {
+            self.seen = publication.number;
+        }
         self.adopt(&publication);
         if inserted.is_empty() && retracted.is_empty() {
             return None;

@@ -207,6 +207,31 @@ async fn a_failed_refresh_is_pushed_and_the_next_delta_follows_the_last_result()
 }
 
 #[tokio::test]
+async fn a_failure_after_a_skipped_delta_delivers_the_last_result_first() {
+    let (mut fixture, mut slow) = Fixture::new(vec![
+        ok(&[1]),
+        ok(&[1, 2]),
+        Err("deadline exceeded".to_string()),
+    ])
+    .await;
+    fixture.commit().await;
+    fixture.commit().await;
+    assert_eq!(fixture.mailboxes[0].try_recv().unwrap(), 1);
+    assert_eq!(
+        delta(slow.deliver(|_| true)),
+        (1, 2, rows(&[2]), vec![]),
+        "the delta the failure followed"
+    );
+    assert_eq!(
+        fixture.mailboxes[0].try_recv().unwrap(),
+        1,
+        "rings again for the error"
+    );
+    assert_eq!(error(slow.deliver(|_| true)), "deadline exceeded");
+    assert!(slow.deliver(|_| true).is_none(), "nothing new");
+}
+
+#[tokio::test]
 async fn rows_keep_their_exact_values() {
     let (mut fixture, mut subscriber) = Fixture::new(vec![ok(&[1]), ok(&[1, 2])]).await;
     fixture.commit().await;

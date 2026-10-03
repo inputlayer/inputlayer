@@ -13,7 +13,8 @@
 //! Attaching waits for the view's first evaluation when the view is new, so
 //! it runs off the loop: [`ConnectionSubscriptions::begin_subscribe`] returns
 //! an [`Opening`] to run anywhere, and
-//! [`ConnectionSubscriptions::finish_subscribe`] registers its result. A
+//! [`ConnectionSubscriptions::finish_subscribe`] registers its result, after
+//! checking read access again since it may have been revoked meanwhile. A
 //! subscriber attached but never registered (the opening was dropped, or
 //! registration failed) is detached again.
 
@@ -110,8 +111,13 @@ impl ConnectionSubscriptions {
     }
 
     /// Register an [`Opened`] subscription; returns its initial snapshot and
-    /// generation.
-    pub fn finish_subscribe(&mut self, opened: Opened) -> Result<(Snapshot, u64), String> {
+    /// generation. `readable` tells whether this connection may currently
+    /// read a knowledge graph: access may have been revoked while it opened.
+    pub fn finish_subscribe(
+        &mut self,
+        opened: Opened,
+        readable: impl FnOnce(&str) -> bool,
+    ) -> Result<(Snapshot, u64), String> {
         let Opened {
             id,
             key,
@@ -119,6 +125,12 @@ impl ConnectionSubscriptions {
             attachment,
         } = opened;
         let attachment = attachment?;
+        if !readable(&key.knowledge_graph) {
+            return Err(format!(
+                "Access denied to knowledge graph '{}'.",
+                key.knowledge_graph
+            ));
+        }
         // Checked again: another `.subscribe` may have taken the name meanwhile.
         self.check_can_add(&id)?;
         self.next_generation += 1;

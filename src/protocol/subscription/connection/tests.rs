@@ -21,7 +21,7 @@ impl ConnectionSubscriptions {
         query: &str,
     ) -> Result<(Snapshot, u64), String> {
         let opening = self.begin_subscribe(knowledge_graph, id, query)?;
-        self.finish_subscribe(opening.run().await)
+        self.finish_subscribe(opening.run().await, |_| true)
     }
 
     /// Attach `id` to the view of `key`, created from `view`, and register it.
@@ -32,7 +32,7 @@ impl ConnectionSubscriptions {
         view: Box<dyn StandingQuery>,
     ) -> Result<(Snapshot, u64), String> {
         let opening = self.opening(key, id, view);
-        self.finish_subscribe(opening.run().await)
+        self.finish_subscribe(opening.run().await, |_| true)
     }
 }
 
@@ -280,6 +280,12 @@ async fn unsubscribing_the_last_subscriber_drops_the_view_and_a_reused_name_star
 
     drop(second);
     first.clear();
+    no_views_left(&handler).await;
+    assert_eq!(handler.subscription_metrics().active(), 0);
+}
+
+/// Wait until every view is gone, failing after [`WAIT`].
+async fn no_views_left(handler: &Handler) {
     let deadline = tokio::time::Instant::now() + WAIT;
     while handler.subscription_metrics().views() != 0 {
         assert!(
@@ -288,7 +294,33 @@ async fn unsubscribing_the_last_subscriber_drops_the_view_and_a_reused_name_star
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_snapshot_is_withheld_when_access_is_lost_while_it_opens() {
+    let (handler, _tmp) = handler();
+    write(&handler, "+p(1)").await;
+    let mut subscriptions = ConnectionSubscriptions::new(Arc::clone(&handler), None);
+    let opened = subscriptions
+        .begin_subscribe(KG, "s", "?p(X)")
+        .unwrap()
+        .run()
+        .await;
+    let mut asked = None;
+    let message = subscriptions
+        .finish_subscribe(opened, |kg| {
+            asked = Some(kg.to_string());
+            false
+        })
+        .unwrap_err();
+    assert_eq!(asked.as_deref(), Some(KG));
+    assert!(message.contains("Access denied"), "{message}");
+    assert!(subscriptions.is_empty());
     assert_eq!(handler.subscription_metrics().active(), 0);
+    no_views_left(&handler).await;
+
+    let (snapshot, _) = subscriptions.subscribe(KG, "s", "?p(X)").await.unwrap();
+    assert_eq!(snapshot.rows, [vec![json!(1)]], "the name is free again");
 }
 
 #[tokio::test(flavor = "multi_thread")]

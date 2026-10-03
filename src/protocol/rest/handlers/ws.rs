@@ -487,7 +487,14 @@ async fn handle_global_ws_connection(
             released = requests.next_reply() => {
                 touch(idle_timer.as_mut());
                 let id = in_flight.release(released.ticket);
-                let frames = release_reply(&handler, &session_id, id, released, &mut subscriptions);
+                let frames = release_reply(
+                    &handler,
+                    &session_id,
+                    id,
+                    released,
+                    &mut subscriptions,
+                    |kg| kg_access.allows(&handler, &principal, kg),
+                );
                 if !send_frames(&mut sender, frames).await {
                     break;
                 }
@@ -728,13 +735,15 @@ fn start_requests(
 }
 
 /// Apply a released request's effect on the connection; returns its frames.
-/// `id` is the request's id, for replies built here.
+/// `id` is the request's id, for replies built here. `readable` tells whether
+/// the connection may currently read a knowledge graph.
 fn release_reply(
     handler: &Handler,
     session_id: &str,
     id: Option<inputlayer_ws_protocol::RequestId>,
     released: Released<Reply>,
     subscriptions: &mut ConnectionSubscriptions,
+    readable: impl FnOnce(&str) -> bool,
 ) -> Vec<String> {
     let frames = match released.reply {
         Some(Reply::Frames(frames)) => frames,
@@ -742,7 +751,7 @@ fn release_reply(
             name: subscription,
             opened,
             started,
-        }) => match subscriptions.finish_subscribe(opened) {
+        }) => match subscriptions.finish_subscribe(opened, readable) {
             Ok((snapshot, generation)) => {
                 let reply = execute::subscription_reply(
                     id.clone(),
