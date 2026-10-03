@@ -1,18 +1,63 @@
 name: CI
 
+# Fast gate: pull requests only. Format, clippy and
+# the unit + integration tests, skipped entirely when a change touches no
+# Rust inputs. The full suite runs on release commits or manually on main;
+# CONTRIBUTING describes the policy.
+
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Everything the Rust build or its tests read. docs/spec is pulled in
+      # by include_str!, examples/ is read by the example tests.
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - 'src/**'
+              - 'tests/**'
+              - 'benches/**'
+              - 'examples/**'
+              - 'gateway/**'
+              - 'ontology-client/**'
+              - 'ws-protocol/**'
+              - 'perf-gate/**'
+              - 'docs/spec/**'
+              - '**/Cargo.toml'
+              - 'config.toml'
+              - 'clippy.toml'
+              - 'Makefile'
+              - '.github/workflows/ci.yml'
+
   fmt:
     name: Format
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
@@ -25,8 +70,11 @@ jobs:
       - name: Check formatting
         run: make fmt-check
 
+  # clippy --all-targets type-checks every target, so it is the cargo check.
   lint:
     name: Clippy
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
@@ -54,203 +102,36 @@ jobs:
       - name: Performance gate tool (clippy + unit tests)
         run: make perf-gate-check
 
+  # Skipped when the full suite covers this commit (a PR labeled `release`,
+  # or one from a release/** branch of this repo), since its test job runs
+  # the same cargo test.
   test:
-    name: Tests
+    name: Tests (fast)
+    needs: changes
+    if: >-
+      needs.changes.outputs.rust == 'true' &&
+      !contains(github.event.pull_request.labels.*.name, 'release') &&
+      !(startsWith(github.head_ref, 'release/') &&
+        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      # Cargo.lock is not committed, so key on the manifests. No restore-keys:
+      # falling back to an older target/ would carry its artifacts forward and
+      # grow the cache until the runner runs out of disk.
       - name: Cache cargo
         uses: useblacksmith/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/release
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-test-
-
-      - name: Clean stale debug artifacts
-        run: rm -rf target/debug 2>/dev/null || true
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-        with:
-          enable-cache: true
-
-      - name: Install Python SDK dependencies
-        run: pip install -e "packages/inputlayer-py[dev]"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Run all tests (CI mode)
-        run: make ci-test-all
-
-  docs:
-    name: Documentation
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-docs-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-docs-
+          key: ${{ runner.os }}-cargo-test-fast-${{ hashFiles('**/Cargo.toml') }}
 
-      - name: Check documentation
-        run: make doc-check
-
-  website:
-    name: Website
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: front/package-lock.json
-
-      - name: Install dependencies
-        working-directory: front
-        run: npm ci
-
-      - name: Build website
-        working-directory: front
-        run: npm run build
-
-  coverage:
-    name: Coverage
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-tarpaulin
-        run: cargo install cargo-tarpaulin --locked
-
-      # Registry only: Cargo.lock is not committed, so the key never changes
-      # and a cached target/ grew until the runner ran out of disk.
-      - name: Cache cargo
-        uses: useblacksmith/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ runner.os }}-cargo-coverage-v2-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-coverage-v2-
-
-      - name: Generate coverage report
-        run: make coverage
-
-      - name: Coverage summary
-        run: make view-coverage
-
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: target/coverage/
-          retention-days: 14
-
-  python-langchain-live:
-    name: Python langchain integration (live server)
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: useblacksmith/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/release
-          key: ${{ runner.os }}-cargo-py-live-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-py-live-
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-        with:
-          enable-cache: true
-
-      - name: Sync Python dev dependencies
-        working-directory: packages/inputlayer-py
-        run: uv sync --extra dev
-
-      - name: Run langchain integration tests against a live server
-        run: make python-test-live
-
-      - name: Run langchain examples against a live server
-        run: make python-test-examples
-
-      - name: Upload server log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: inputlayer-server-log
-          path: /tmp/il_python_*_server.log
-          if-no-files-found: ignore
-          retention-days: 7
-
-  msrv:
-    name: Minimum Supported Rust Version
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.88"
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-msrv-
-
-      - name: Check MSRV
-        run: cargo check --all-features
+      - name: Run unit + integration tests
+        run: make unit-test

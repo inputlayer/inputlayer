@@ -222,6 +222,35 @@ async fn test_delete_produces_retraction() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_replacement_program_is_one_atomic_delta() {
+    let server = start_server(64).await;
+    server.write("+status(1, \"old\")").await;
+    let mut client = Client::connect(&server).await;
+    client.subscribe("s", "?status(K, V)").await;
+
+    // Retract-and-assert in one program: the subscriber sees the swap as one
+    // delta, never the retraction alone.
+    server
+        .write("-status(1, \"old\")\n+status(1, \"new\")")
+        .await;
+    let delta = client.next_push_for("s").await;
+    assert_eq!(delta["seq"], 1);
+    assert_eq!(rows(&delta["retracted"]), vec![json!([1, "old"])]);
+    assert_eq!(rows(&delta["inserted"]), vec![json!([1, "new"])]);
+
+    // A program that fails half way applies nothing and pushes nothing: the
+    // next delta is seq 2 and carries only the later write.
+    server
+        .write("-status(1, \"new\")\n+status(1, \"bad\", \"arity\")")
+        .await;
+    server.write("+status(2, \"two\")").await;
+    let delta = client.next_push_for("s").await;
+    assert_eq!(delta["seq"], 2);
+    assert!(rows(&delta["retracted"]).is_empty(), "{delta}");
+    assert_eq!(rows(&delta["inserted"]), vec![json!([2, "two"])]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_multi_path_derivation_retracts_only_when_last_path_goes() {
     let server = start_server(64).await;
     server.write("+a(1)\n+b(1)").await;

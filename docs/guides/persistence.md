@@ -133,11 +133,21 @@ one line, written with one append and, in `immediate` mode, one fsync:
 | `ops` | The changes, in commit order; each kind of change has its own typed operation |
 | `facts.shard` | Shard name in `"kg:relation"` format |
 | `facts.changes` | `[tuple, diff]` pairs: `+1` inserts, `-1` deletes. The tuple is base64 of the same lossless binary encoding batch files use, so every value (including NaN and infinities) survives replay exactly |
+| `rule` | `{"kg":..,"name":..,"definition":..}`: every clause of one rule after the commit, in the rule catalog's JSON, or `null` when the commit removes the rule |
+| `schema` | `{"kg":..,"relation":..,"schema":..}`: the persistent schema of one relation after the commit, or `null` when the commit removes it |
 
 The trailing newline is the commit boundary. A record without it, or whose checksum
 does not match, holds no committed data. A transaction is therefore recovered
 completely or not at all, never in part. If a write or fsync fails, the record is cut
 back off the WAL before the error is returned, so a failed write is never recovered.
+
+A program's rule and schema changes are in the same record as its facts. Each
+knowledge graph also keeps its rules (`rules/catalog.json`) and persistent schemas
+(`schema.json`) in catalog files, saved atomically after the record is written and
+stamped with the revision of the newest change they hold. The WAL keeps a rule or
+schema change until both files are saved past its revision; startup applies the
+changes the files are missing, so a crash between the record and the file save loses
+nothing.
 
 ### Automatic Compaction
 

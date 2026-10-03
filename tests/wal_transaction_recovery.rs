@@ -67,7 +67,7 @@ fn states_after_each_commit(txns: &[Transaction]) -> Vec<State> {
     let mut states = vec![State::new()];
     for txn in txns {
         let mut next = states.last().unwrap().clone();
-        for (shard, updates) in txn.clone().into_updates() {
+        for (shard, updates) in txn.clone().split().0 {
             let set = next.entry(shard).or_default();
             for u in updates {
                 if u.diff > 0 {

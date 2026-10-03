@@ -8,7 +8,7 @@ use crate::ast::{
 use serde::{Deserialize, Serialize};
 
 /// Rule definition for storage and serialization
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuleDef {
     /// Rule name (head relation)
     pub name: String,
@@ -17,7 +17,7 @@ pub struct RuleDef {
 }
 
 /// A serializable representation of a Rule for JSON storage
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SerializableRule {
     pub head_relation: String,
     pub head_args: Vec<SerializableTerm>,
@@ -25,7 +25,7 @@ pub struct SerializableRule {
 }
 
 /// Serializable term for JSON storage
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SerializableTerm {
     Variable(String),
     Constant(i64),
@@ -39,7 +39,7 @@ pub enum SerializableTerm {
 }
 
 /// Serializable arithmetic expression for JSON storage
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SerializableArithExpr {
     Variable(String),
     Constant(i64),
@@ -52,7 +52,7 @@ pub enum SerializableArithExpr {
 }
 
 /// Serializable arithmetic operator for JSON storage
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SerializableArithOp {
     Add,
     Sub,
@@ -62,7 +62,7 @@ pub enum SerializableArithOp {
 }
 
 /// Serializable body predicate for JSON storage
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum SerializableBodyPred {
     /// Atom predicate (positive or negated)
@@ -80,7 +80,7 @@ pub enum SerializableBodyPred {
 }
 
 /// Serializable comparison operator for JSON storage
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SerializableComparisonOp {
     Equal,
     NotEqual,

@@ -1,12 +1,15 @@
 //! Write-Ahead Log for persist layer
 //!
 //! The WAL makes each committed [`Transaction`] durable until its updates are flushed
-//! to batch files. Every transaction is one record (see the `wal_record` module), written
+//! to batch files. Every transaction is one record (see [`super::wal_record`]), written
 //! with one append and, when durable, one fsync. A failed append is cut back off the
 //! file, so the WAL never holds a transaction whose commit returned an error.
+//!
+//! Rule and schema changes stay in the WAL until their knowledge graph's catalog
+//! files are saved (see [`super::catalog_log`]).
 
 use super::sync_directory;
-use super::transaction::Transaction;
+use super::transaction::{Transaction, TxnOp};
 use super::wal_record;
 use crate::storage::{StorageError, StorageResult};
 use std::fs::{self, File, OpenOptions};
@@ -303,15 +306,22 @@ impl PersistWal {
 
     /// Remove every change to `shard` from the WAL, dropping transactions left empty.
     /// Other shards' changes, and their transactions' boundaries, are preserved.
+    pub fn remove_shard_entries(&mut self, shard_name: &str) -> StorageResult<()> {
+        self.retain_ops(|_, op| !matches!(op, TxnOp::Facts { shard, .. } if shard == shard_name))
+    }
+
+    /// Keep only the changes `keep(revision, op)` accepts, dropping transactions
+    /// left empty. Surviving changes keep their transactions' boundaries.
     ///
     /// Uses atomic write-to-new+rename: the surviving records are written to
     /// `current.wal.new`, synced, then renamed over `current.wal`. A crash at any
     /// point leaves either the old or the new WAL.
-    pub fn remove_shard_entries(&mut self, shard_name: &str) -> StorageResult<()> {
+    pub fn retain_ops(&mut self, mut keep: impl FnMut(u64, &TxnOp) -> bool) -> StorageResult<()> {
         let mut txns = self.read_all()?;
         let mut changed = false;
         for txn in &mut txns {
-            changed |= txn.remove_shard(shard_name);
+            let revision = txn.revision();
+            changed |= txn.retain(|op| keep(revision, op));
         }
         if !changed {
             return Ok(());
