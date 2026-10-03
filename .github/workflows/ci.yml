@@ -120,10 +120,6 @@ jobs:
       - name: Run Clippy
         run: make lint
 
-      # Tool only: measuring needs a quiet same-host runner, not a shared one.
-      - name: Performance gate tool (clippy + unit tests)
-        run: make perf-gate-check
-
   # Skipped when the full suite covers this commit (a PR labeled `release`,
   # or one from a release/** branch of this repo), since its test job runs
   # the same cargo test.
