@@ -135,8 +135,14 @@ export class InputLayer {
     return result.rows.length > 0 ? result.rows.map((row) => String(row[0])) : [];
   }
 
-  /** Drop a knowledge graph. */
+  /**
+   * Drop a knowledge graph. The engine refuses to drop the session's current
+   * KG, so this switches to `default` first when needed.
+   */
   async dropKnowledgeGraph(name: string): Promise<void> {
+    if (this.conn.currentKg === name) {
+      await this.conn.execute('.kg use default');
+    }
     await this.conn.execute(`.kg drop ${name}`);
     this.kgs.delete(name);
   }

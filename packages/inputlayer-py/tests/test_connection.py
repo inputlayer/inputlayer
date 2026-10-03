@@ -10,7 +10,7 @@ from inputlayer._protocol import (
     ResultResponse,
 )
 from inputlayer.connection import Connection
-from inputlayer.exceptions import AuthenticationError, ConnectionError
+from inputlayer.exceptions import AuthenticationError, ConnectionError, QueryError
 
 
 def _auth_response() -> str:
@@ -108,17 +108,15 @@ class TestConnectionExecute:
         assert result.rows == [[1, 2]]
 
     @pytest.mark.asyncio
-    async def test_execute_error_as_result(self):
+    async def test_execute_error_raises(self):
         conn = Connection("ws://localhost:8080/ws", username="admin", password="admin")
         mock_ws = AsyncMock()
         mock_ws.recv = AsyncMock(return_value=_error_response("Parse error"))
         conn._ws = mock_ws
         conn._connected = True
 
-        result = await conn.execute("bad query")
-        # Errors are returned as ResultResponse with error column
-        assert result.columns == ["error"]
-        assert result.rows[0][0] == "Parse error"
+        with pytest.raises(QueryError, match="Parse error"):
+            await conn.execute("bad query")
 
     @pytest.mark.asyncio
     async def test_execute_not_connected(self):
@@ -530,11 +528,9 @@ class TestConcurrentMultiKGAtomicity:
         responses = [
             # 1. ".kg use new_kg" -> error: not found
             json.dumps({
-                "type": "result",
-                "columns": ["error"],
-                "rows": [["Knowledge graph 'new_kg' not found"]],
-                "row_count": 1, "total_count": 1,
-                "truncated": False, "execution_time_ms": 0,
+                "type": "error",
+                "message": "Knowledge graph 'new_kg' not found",
+                "code": "not_found",
             }),
             # 2. ".kg create new_kg" -> ok
             _result_response(["ok"], [["created"]]),
