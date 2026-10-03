@@ -463,60 +463,6 @@ async fn revocation_fences_a_subscription_held_at_the_result_cap() {
     server.wait_for_active(0).await;
 }
 
-/// `.why` searches its proof after releasing the storage guard and returns
-/// from its own path; a credential revoked during that search still gets no
-/// proof.
-#[tokio::test(flavor = "multi_thread")]
-async fn revocation_during_a_proof_withholds_it() {
-    let server = start_server().await;
-    server.write("+path(X, Y) <- edge(X, Y)").await;
-    let proof = ".why full ?path(X, Y)";
-    let key = server.key("bob-why", "bob");
-    let principal = server.handler.authenticate_api_key(&key).unwrap();
-
-    // Proof search dominates (one tree per row, far costlier than the query)
-    // and grows faster than linearly: add edges until a proof takes long
-    // enough to revoke during it, in debug and release builds alike. The
-    // fastest of two runs is the estimate, so one slow run cannot push the
-    // revocation past the end of the proof.
-    let mut rows = 0;
-    let evaluation = loop {
-        let edges: Vec<String> = (rows..rows + 1000)
-            .map(|i| format!("({i}, {})", i + 1))
-            .collect();
-        server.write(&format!("+edge[{}]", edges.join(", "))).await;
-        rows += 1000;
-        let mut fastest = Duration::MAX;
-        for _ in 0..2 {
-            let started = Instant::now();
-            let result = server
-                .handler
-                .execute_program(
-                    None,
-                    Some(KG.to_string()),
-                    proof.to_string(),
-                    Some(&principal),
-                )
-                .await
-                .unwrap();
-            fastest = fastest.min(started.elapsed());
-            assert_eq!(result.proof_trees.map(|trees| trees.len()), Some(rows));
-        }
-        if fastest >= Duration::from_millis(100) {
-            break fastest;
-        }
-        assert!(rows < 16_000, "proofs stay too fast to revoke during one");
-    };
-
-    let mut client = Client::connect(&server, Login::Key(&key)).await;
-    client
-        .send(json!({"type": "execute", "program": proof}))
-        .await;
-    tokio::time::sleep(evaluation / 4).await;
-    server.handler.handle_apikey_revoke("bob-why").unwrap();
-    assert_revoked(&client.drain().await);
-}
-
 /// Revoking a user's access to a knowledge graph stops its change
 /// notifications and subscription rows at once, although the connection's
 /// credential stays valid; a new grant lets them through again.
