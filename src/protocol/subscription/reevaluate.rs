@@ -82,6 +82,14 @@ impl ReevaluatingQuery {
                 self.auth.as_ref(),
             )
             .await?;
+        // A capped result is not the result set: adopting it would announce
+        // every cut row as retracted. Fail before touching state, so the last
+        // complete result stays the base for the next delta.
+        if result.truncated {
+            return Err(incomplete_result_error(
+                self.handler.config().storage.performance.max_result_rows,
+            ));
+        }
         if !result.schema.is_empty() {
             self.columns = result.schema.into_iter().map(|c| c.name).collect();
         }
@@ -103,6 +111,14 @@ impl ReevaluatingQuery {
             dependencies,
         })
     }
+}
+
+/// Error for a result cut at `max_result_rows`.
+fn incomplete_result_error(max_result_rows: usize) -> String {
+    format!(
+        "Subscription result exceeds storage.performance.max_result_rows \
+         ({max_result_rows}); no complete result to deliver. Narrow the query."
+    )
 }
 
 /// Rows of `a` missing from `b`, in key order.
