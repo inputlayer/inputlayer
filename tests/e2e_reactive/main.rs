@@ -8,6 +8,7 @@
 //! The target is `test = false`: plain `cargo test` skips it; select it with
 //! `--test e2e_reactive` (as `make e2e-reactive`, `test-all` and CI do).
 //!
+//! `stream` covers the notification stream and snapshot handoff contract.
 //! `known_defects` holds expected failures for defects tracked by the reactive
 //! plan; each flips to a required pass when its plan item lands.
 //!
@@ -18,6 +19,7 @@
 
 mod known_defects;
 mod reactive;
+mod stream;
 mod wire;
 
 use inputlayer_testkit::EngineBuilder;

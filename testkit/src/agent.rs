@@ -2,7 +2,8 @@
 //! sets purely from pushed deltas, never re-querying.
 //!
 //! Each delta is checked as it is applied: sequence numbers are contiguous,
-//! retracted rows were present and inserted rows were absent. Comparing the
+//! revisions increase, retracted rows were present and inserted rows were
+//! absent. Comparing the
 //! maintained [`View`] with a fresh query on *another* connection
 //! ([`View::assert_matches`]) proves convergence.
 
@@ -31,6 +32,8 @@ pub struct View {
     pub rows: BTreeSet<RowKey>,
     /// Sequence number of the last applied delta (0 = snapshot only).
     pub seq: u64,
+    /// Knowledge graph revision the maintained rows are the answer at.
+    pub revision: u64,
 }
 
 impl View {
@@ -56,6 +59,13 @@ impl View {
                 got: delta.seq,
             });
         }
+        if delta.revision <= self.revision {
+            return Err(Violation::StaleRevision {
+                subscription: self.id.clone(),
+                previous: self.revision,
+                got: delta.revision,
+            });
+        }
         for row in &delta.retracted {
             if !self.rows.remove(row) {
                 return Err(self.inconsistent(format!("retracted absent row {row}")));
@@ -67,6 +77,7 @@ impl View {
             }
         }
         self.seq = delta.seq;
+        self.revision = delta.revision;
         Ok(())
     }
 
@@ -83,6 +94,7 @@ impl View {
 pub struct Delta {
     pub subscription: String,
     pub seq: u64,
+    pub revision: u64,
     pub inserted: BTreeSet<RowKey>,
     pub retracted: BTreeSet<RowKey>,
     /// When the frame arrived at the agent.
@@ -100,6 +112,9 @@ impl Delta {
             subscription: subscription_of(frame),
             seq: frame.value["seq"].as_u64().ok_or_else(|| {
                 Violation::Transport(format!("delta without seq: {}", frame.value))
+            })?,
+            revision: frame.value["revision"].as_u64().ok_or_else(|| {
+                Violation::Transport(format!("delta without revision: {}", frame.value))
             })?,
             inserted: rows("inserted")?,
             retracted: rows("retracted")?,
@@ -166,11 +181,15 @@ impl Agent {
             .execute(&format!(".subscribe {id} {query}"))
             .await?
             .complete()?;
+        let revision = snapshot.subscribed_revision.ok_or_else(|| {
+            Violation::Transport(format!("'.subscribe {id}' reply names no revision"))
+        })?;
         let view = View {
             id: id.to_string(),
             columns: snapshot.columns,
             rows: row_keys(&snapshot.rows),
             seq: 0,
+            revision,
         };
         self.views.insert(id.to_string(), view);
         Ok(&self.views[id])
@@ -184,6 +203,11 @@ impl Agent {
     /// Change notifications received so far.
     pub fn notices(&self) -> &[Frame] {
         &self.notices
+    }
+
+    /// The connection underneath, e.g. for its connection notices or epoch.
+    pub fn client(&self) -> &WsClient {
+        &self.client
     }
 
     /// Wait for the next delta of `id` and apply it to its view.
