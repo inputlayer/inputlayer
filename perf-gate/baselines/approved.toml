@@ -1,0 +1,6 @@
+# The baseline `make perf-gate` compares candidates with by default.
+#
+# Updating it is a reviewed change with a stated reason, like a policy
+# change: record the new commit and its calibration (A/A) run.
+commit = "e732cd5258c74d9247e99b2697a0ae080ccf9042"
+reason = "P00: main before any reactive-plan runtime change"

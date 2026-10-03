@@ -3,6 +3,9 @@
 # never enter the engine crate.
 [workspace]
 members = ["gateway", "ontology-client"]
+# The performance gate is its own workspace: bench-only dependencies stay out
+# of the engine build and the release image.
+exclude = ["perf-gate"]
 # Resolve dependencies to versions compatible with `rust-version`.
 resolver = "3"
 

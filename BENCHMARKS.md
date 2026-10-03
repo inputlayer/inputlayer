@@ -2,6 +2,8 @@
 
 InputLayer is a streaming reasoning layer for AI systems, built on Differential Dataflow. Its core advantages: Magic Sets for demand-driven recursive queries (up to 1,587x faster than full materialization), correct retraction through recursive fixpoints, and sub-50ms multi-hop deductive queries over knowledge graphs.
 
+These are Criterion in-process microbenchmarks (`cargo bench`): means, used for diagnosis and comparison with other systems. The acceptance check for latency and throughput regressions is the performance gate (`make perf-gate`, see [`perf-gate/README.md`](perf-gate/README.md)), which measures p50/p99 end to end over the WebSocket protocol.
+
 All numbers measured on AMD Ryzen 9 9950X (16 cores), 128 GB RAM, Ubuntu 24.04 LTS, Rust 1.91.1, release build with LTO. Criterion.rs, 10 samples, 15s measurement, 5s warmup.
 
 ---
