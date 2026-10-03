@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocketServer } from 'ws';
 import {
+  Connection,
   InputLayer,
   InternalError,
   QueryError,
@@ -313,6 +314,42 @@ describe('chunked results', () => {
     const [start, chunk] = stream([]);
     const kg = await kgOn([start, chunk, { type: 'error', message: 'Server shutting down' }]);
     await expect(kg.execute('?demo(X)')).rejects.toThrow(QueryError);
+  });
+
+  it('a streamed subscribe keeps its subscription', async () => {
+    engine = await ScriptedEngine.start();
+    const subscribed = { subscription: 's', generation: 2, revision: 7 };
+    const [start, ...rest] = stream([]);
+    engine.script([{ ...start, subscribed }, ...rest]);
+    const conn = new Connection({
+      url: engine.url,
+      username: 'admin',
+      password: 'admin',
+      autoReconnect: false,
+    });
+    await conn.connect();
+    try {
+      const result = await conn.execute('.subscribe s ?demo(X)');
+      expect(result.rows).toEqual([[1], [2], [3]]);
+      expect(result.subscribed).toEqual(subscribed);
+    } finally {
+      await conn.close();
+    }
+  });
+
+  it.each([
+    ['a missing chunk', [0], { row_count: 3, chunk_count: 2 }],
+    ['a repeated chunk', [0, 0], { row_count: 4, chunk_count: 2 }],
+    ['rows that do not add up', [0], { row_count: 3, chunk_count: 1 }],
+  ])('%s is not a result', async (_case, indexes, end) => {
+    const [start] = stream([]);
+    const chunks = indexes.map((chunk_index) => ({
+      type: 'result_chunk',
+      rows: [[1], [2]],
+      chunk_index,
+    }));
+    const kg = await kgOn([start, ...chunks, { type: 'result_end', ...end }]);
+    await expect(kg.execute('?demo(X)')).rejects.toBeInstanceOf(InternalError);
   });
 });
 

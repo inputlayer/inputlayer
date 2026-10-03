@@ -283,11 +283,18 @@ export class Connection {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const allRows: any[][] = [];
     const allProvenance: string[] = [];
+    let chunks = 0;
 
     while (true) {
       const response = await this.receiveMessage();
 
       if (response.type === 'result_chunk') {
+        if (response.chunk_index !== chunks) {
+          throw new InternalError(
+            `Streamed result chunk ${response.chunk_index} arrived, expected ${chunks}`,
+          );
+        }
+        chunks += 1;
         allRows.push(...response.rows);
         if (response.row_provenance) {
           allProvenance.push(...response.row_provenance);
@@ -296,6 +303,12 @@ export class Connection {
       }
 
       if (response.type === 'result_end') {
+        if (response.chunk_count !== chunks || response.row_count !== allRows.length) {
+          throw new InternalError(
+            `Incomplete streamed result: ${chunks} chunk(s) and ${allRows.length} row(s) ` +
+              `arrived, end announces ${response.chunk_count} and ${response.row_count}`,
+          );
+        }
         return {
           type: 'result',
           columns: start.columns,
@@ -310,6 +323,7 @@ export class Connection {
           proof_trees: start.proof_trees,
           timing_breakdown: start.timing_breakdown,
           errors: start.errors,
+          subscribed: start.subscribed,
         };
       }
 

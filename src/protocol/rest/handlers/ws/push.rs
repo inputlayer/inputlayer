@@ -11,16 +11,18 @@
 
 use axum::extract::ws::Message;
 use futures_util::Sink;
-use inputlayer_ws_protocol::{ServerFrame, SubscriptionPush};
+use inputlayer_ws_protocol::{Row, ServerFrame, SubscriptionPush};
+use serde_json::Value;
 use tracing::warn;
 
+use super::framing::FRAME_BUDGET;
 use super::outbound::Outbound;
 use super::stream::{self, Undeliverable};
 use crate::protocol::subscription::ConnectionSubscriptions;
 
-/// Deltas with more rows than this are encoded on the blocking pool, so a
-/// large delta never stalls a runtime worker.
-const INLINE_PUSH_ROWS: usize = 256;
+/// Bytes estimated for a JSON number: the longest an `i64`, `u64` or `f64`
+/// serializes to.
+const NUMBER_BYTES: usize = 24;
 
 /// Deliver `push`, which `access` allows or withholds for this reason.
 /// Returns `false` if the connection is dead.
@@ -59,17 +61,11 @@ pub(super) async fn deliver<S: Sink<Message> + Unpin>(
     sender.send_frame(&ServerFrame::Subscription(reset)).await
 }
 
-/// The frames of `push`, encoded off the runtime workers when large.
+/// The frames of `push`. A push estimated to fit one frame is encoded
+/// right here, so small deltas keep their latency; a larger one is streamed
+/// from the blocking pool, so it never stalls a runtime worker.
 async fn encode(push: SubscriptionPush) -> Result<Vec<String>, Undeliverable> {
-    let rows = match &push {
-        SubscriptionPush::SubscriptionDelta {
-            inserted,
-            retracted,
-            ..
-        } => inserted.len() + retracted.len(),
-        _ => 0,
-    };
-    if rows <= INLINE_PUSH_ROWS {
+    if estimated_bytes(&push) <= FRAME_BUDGET {
         return stream::push_frames(push);
     }
     tokio::task::spawn_blocking(move || stream::push_frames(push))
@@ -79,3 +75,45 @@ async fn encode(push: SubscriptionPush) -> Result<Vec<String>, Undeliverable> {
             Err("Internal server error".to_string())
         })
 }
+
+/// About how many bytes the rows of `push` serialize to, judged from its
+/// first row without serializing anything.
+fn estimated_bytes(push: &SubscriptionPush) -> usize {
+    let SubscriptionPush::SubscriptionDelta {
+        inserted,
+        retracted,
+        ..
+    } = push
+    else {
+        return 0;
+    };
+    let width = inserted.first().or(retracted.first()).map_or(0, row_width);
+    (inserted.len() + retracted.len()).saturating_mul(width)
+}
+
+fn row_width(row: &Row) -> usize {
+    row.iter()
+        .map(|value| value_width(value) + 1)
+        .sum::<usize>()
+        + 2
+}
+
+fn value_width(value: &Value) -> usize {
+    match value {
+        Value::Null | Value::Bool(_) => 5,
+        Value::Number(_) => NUMBER_BYTES,
+        Value::String(s) => s.len() + 2,
+        Value::Array(items) => items.iter().map(|v| value_width(v) + 1).sum::<usize>() + 2,
+        Value::Object(fields) => {
+            fields
+                .iter()
+                .map(|(k, v)| k.len() + 4 + value_width(v))
+                .sum::<usize>()
+                + 2
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests;
