@@ -151,16 +151,17 @@ jobs:
       - name: Install cargo-tarpaulin
         run: cargo install cargo-tarpaulin --locked
 
+      # Registry only: Cargo.lock is not committed, so the key never changes
+      # and a cached target/ grew until the runner ran out of disk.
       - name: Cache cargo
         uses: useblacksmith/cache@v5
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-coverage-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-coverage-v2-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-coverage-
+            ${{ runner.os }}-cargo-coverage-v2-
 
       - name: Generate coverage report
         run: make coverage
