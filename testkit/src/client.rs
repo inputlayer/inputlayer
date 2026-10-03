@@ -68,10 +68,14 @@ pub struct QueryResult {
     pub truncated: bool,
     /// Failed statements of a multi-statement program.
     pub errors: Vec<Value>,
+    /// When the result's last frame arrived.
+    pub at: Instant,
 }
 
 impl QueryResult {
-    fn from_header(header: &Value) -> Self {
+    fn from_header(header: &Frame) -> Self {
+        let at = header.at;
+        let header = &header.value;
         Self {
             columns: header["columns"]
                 .as_array()
@@ -88,13 +92,15 @@ impl QueryResult {
                 .unwrap_or_default(),
             truncated: header["truncated"].as_bool().unwrap_or_default(),
             errors: header["errors"].as_array().cloned().unwrap_or_default(),
+            at,
         }
     }
 
-    fn extend_rows(&mut self, frame: &Value) {
-        if let Some(rows) = frame["rows"].as_array() {
+    fn extend_rows(&mut self, frame: &Frame) {
+        if let Some(rows) = frame.value["rows"].as_array() {
             self.rows.extend(rows.iter().cloned());
         }
+        self.at = frame.at;
     }
 
     /// Fail unless the engine reported the whole result.
@@ -122,11 +128,19 @@ pub struct Commit {
 }
 
 /// An authenticated `/ws` connection.
+///
+/// Requests may be pipelined: [`Self::send_execute`] sends without waiting
+/// and [`Self::result`] reads replies in request order, which the engine
+/// guarantees. Pushes arriving meanwhile are kept for [`Self::next_push`].
 pub struct WsClient {
     sink: Sink,
     inbox: mpsc::UnboundedReceiver<Frame>,
     /// Pushes read while waiting for a reply, in arrival order.
     pushes: VecDeque<Frame>,
+    /// Replies read while waiting for a push, for requests still outstanding.
+    replies: VecDeque<Frame>,
+    /// Requests sent whose reply has not been consumed.
+    outstanding: usize,
     reader: JoinHandle<()>,
 }
 
@@ -166,6 +180,8 @@ impl WsClient {
             sink,
             inbox,
             pushes: VecDeque::new(),
+            replies: VecDeque::new(),
+            outstanding: 0,
             reader,
         };
         client
@@ -200,6 +216,9 @@ impl WsClient {
 
     /// Next reply frame; pushes read meanwhile are kept for [`Self::next_push`].
     async fn next_reply(&mut self) -> Checked<Frame> {
+        if let Some(frame) = self.replies.pop_front() {
+            return Ok(frame);
+        }
         loop {
             let frame = self.next_frame(FRAME_TIMEOUT, "a reply").await?;
             match role(&frame)? {
@@ -211,22 +230,42 @@ impl WsClient {
 
     /// Run `program`; returns its complete result or the engine's error.
     pub async fn execute(&mut self, program: &str) -> Checked<QueryResult> {
+        self.send_execute(program).await?;
+        self.result().await
+    }
+
+    /// Send `program` without waiting; read its reply with [`Self::result`].
+    pub async fn send_execute(&mut self, program: &str) -> Checked<()> {
         self.send(&json!({"type": "execute", "program": program}))
             .await?;
+        self.outstanding += 1;
+        Ok(())
+    }
+
+    /// The reply to the oldest request sent with [`Self::send_execute`]: its
+    /// complete result or the engine's error.
+    pub async fn result(&mut self) -> Checked<QueryResult> {
+        if self.outstanding == 0 {
+            return Err(Violation::Transport("no request outstanding".to_string()));
+        }
+        self.outstanding -= 1;
         let header = self.next_reply().await?;
         match header.kind() {
             "result" => {
-                let mut result = QueryResult::from_header(&header.value);
-                result.extend_rows(&header.value);
+                let mut result = QueryResult::from_header(&header);
+                result.extend_rows(&header);
                 Ok(result)
             }
             "result_start" => {
-                let mut result = QueryResult::from_header(&header.value);
+                let mut result = QueryResult::from_header(&header);
                 loop {
                     let frame = self.next_reply().await?;
                     match frame.kind() {
-                        "result_chunk" => result.extend_rows(&frame.value),
-                        "result_end" => return Ok(result),
+                        "result_chunk" => result.extend_rows(&frame),
+                        "result_end" => {
+                            result.at = frame.at;
+                            return Ok(result);
+                        }
                         _ => {
                             return Err(Violation::Transport(format!(
                                 "unexpected frame inside a streamed result: {}",
@@ -268,18 +307,29 @@ impl WsClient {
         self.execute(query).await?.complete()
     }
 
-    /// Next pushed message, waiting up to `timeout`.
+    /// Next pushed message, waiting up to `timeout`. A reply arriving
+    /// meanwhile is kept for [`Self::result`] while a request is outstanding,
+    /// and is a violation otherwise.
     pub async fn next_push(&mut self, timeout: Duration) -> Checked<Frame> {
         if let Some(frame) = self.pushes.pop_front() {
             return Ok(frame);
         }
-        let frame = self.next_frame(timeout, "a push").await?;
-        match role(&frame)? {
-            Role::Push => Ok(frame),
-            Role::Reply => Err(Violation::Transport(format!(
-                "unsolicited reply: {}",
-                frame.value
-            ))),
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let frame = self.next_frame(remaining, "a push").await?;
+            match role(&frame)? {
+                Role::Push => return Ok(frame),
+                Role::Reply if self.outstanding > 0 => {
+                    self.replies.push_back(frame);
+                }
+                Role::Reply => {
+                    return Err(Violation::Transport(format!(
+                        "unsolicited reply: {}",
+                        frame.value
+                    )))
+                }
+            }
         }
     }
 

@@ -9,6 +9,12 @@
 //! A connection is bound to the [`Principal`] it authenticated as. Revoking
 //! that credential closes the connection, and every outbound data frame is
 //! fenced by it (see the `outbound` module).
+//!
+//! Each connection is one loop that owns the socket's read half, the single
+//! writer, its subscriptions and its request `pipeline`. Requests run as
+//! pipeline tasks (see the `request` module), so a long query never holds up
+//! the connection's pushes; the pipeline releases replies in request order
+//! and keeps writes, KG switches and session changes in order.
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
@@ -26,14 +32,16 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn, Instrument};
 
 mod outbound;
+mod pipeline;
+mod request;
 
+use futures_util::FutureExt;
 use outbound::Outbound;
+use pipeline::{Access, Released, RequestPipeline, Startable};
+use request::{Job, Reply};
 
-use super::wire_value_to_json;
 use crate::auth::{Principal, Role, INTERNAL_KG};
-use crate::protocol::handler::{
-    PersistentNotification, ProgramError, ValidationError, VALIDATION_ERROR_PREFIX,
-};
+use crate::protocol::handler::{PersistentNotification, ValidationError};
 use crate::protocol::rest::dto::SessionQueryMetadataDto;
 use crate::protocol::rest::error::RestError;
 use crate::protocol::rest::{ClientIp, PreAuthSlots, WsSemaphore};
@@ -41,7 +49,6 @@ use crate::protocol::subscription::{ConnectionSubscriptions, Push};
 use crate::protocol::wire::{ErrorCode, StatementError};
 use crate::protocol::Handler;
 use crate::protocol::MAX_MESSAGE_SIZE;
-use crate::statement::{MetaCommand, Statement};
 
 /// Threshold in bytes: results whose single-message JSON exceeds this are
 /// streamed as `result_start` / `result_chunk` / `result_end` messages.
@@ -518,6 +525,8 @@ async fn handle_global_ws_connection(
     let mut request_seq: u64 = 0;
     let mut subscriptions =
         ConnectionSubscriptions::new(Arc::clone(&handler), Some(principal.clone()));
+    let mut requests: Requests =
+        RequestPipeline::new(handler.config().http.rate_limit.ws_max_in_flight_requests);
 
     // Replay missed notifications on reconnect (#39)
     if let Some(since_seq) = last_seq {
@@ -575,9 +584,10 @@ async fn handle_global_ws_connection(
     heartbeat_interval.tick().await; // consume the immediate first tick
 
     loop {
-        // Compute remaining idle time for this iteration
+        // Compute remaining idle time for this iteration; a connection with
+        // requests in progress is not idle.
         let idle_sleep: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> =
-            match idle_duration {
+            match idle_duration.filter(|_| requests.is_idle()) {
                 Some(dur) => {
                     let elapsed = last_activity.elapsed();
                     if elapsed >= dur {
@@ -627,38 +637,25 @@ async fn handle_global_ws_connection(
                     break;
                 }
             }
-            // Client message
-            msg = receiver.next() => {
+            // Client message, read only while the pipeline has room
+            msg = receiver.next(), if requests.has_capacity() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         last_activity = std::time::Instant::now();
                         request_seq = request_seq.saturating_add(1);
-
-                        if !rate.allow() {
-                            let err_msg = GlobalWsResponse::Error {
-                                message: format!("Rate limit exceeded ({max_msgs_per_sec} msgs/sec)"),
-                                validation_errors: None,
-                                code: None,
-                            };
-                            if let Ok(json) = serde_json::to_string(&err_msg) {
-                                let _ = sender.send(Message::Text(json)).await;
-                            }
-                            continue;
-                        }
+                        let (access, job) = if rate.allow() {
+                            Job::from_text(&text)
+                        } else {
+                            Job::immediate(request::error_response(format!(
+                                "Rate limit exceeded ({max_msgs_per_sec} msgs/sec)"
+                            )))
+                        };
                         let span = tracing::info_span!(
                             "ws_request",
                             request_id = request_seq,
                             msg_bytes = text.len()
                         );
-                        let send_ok = process_and_send_global_ws_message(
-                            &handler, &session_id, &text, &principal, &mut sender,
-                            &mut subscriptions,
-                        )
-                        .instrument(span)
-                        .await;
-                        if !send_ok {
-                            break;
-                        }
+                        requests.admit(access, (job, span));
                     }
                     Some(Ok(Message::Close(_))) => {
                         debug!(session_id = %session_id, "ws_close_frame_received");
@@ -679,6 +676,14 @@ async fn handle_global_ws_connection(
             _ = heartbeat_interval.tick() => {
                 if sender.send(Message::Ping(Vec::new())).await.is_err() {
                     break; // Connection dead
+                }
+            }
+            // A request's reply, in request order
+            released = requests.next_reply() => {
+                last_activity = std::time::Instant::now();
+                let frames = release_reply(&handler, &session_id, released, &mut subscriptions);
+                if !send_frames(&mut sender, frames).await {
+                    break;
                 }
             }
             // Standing-query evaluation finished
@@ -750,9 +755,18 @@ async fn handle_global_ws_connection(
                 }
             }
         }
+        start_requests(
+            &mut requests,
+            &handler,
+            &session_id,
+            &principal,
+            &mut subscriptions,
+        );
     }
 
-    // Stop standing queries before anything else is sent.
+    // Abort reads in progress, let a started write finish, then stop
+    // standing queries before anything else is sent.
+    requests.shutdown().await;
     drop(subscriptions);
     notify_if_revoked(&mut sender, &principal).await;
     // Send close frame before cleanup (prevents "connection reset without handshake" warnings)
@@ -772,6 +786,14 @@ async fn handle_global_ws_connection(
 /// Helper: serialize a `GlobalWsResponse` and send it. Returns `false` if the
 /// send fails (connection dead).
 async fn send_global_response(sender: &mut Outbound, response: &GlobalWsResponse) -> bool {
+    sender
+        .send(Message::Text(response_frame(response)))
+        .await
+        .is_ok()
+}
+
+/// Serialize `response` as one frame; an oversized one becomes an `error`.
+fn response_frame(response: &GlobalWsResponse) -> String {
     let json = match serde_json::to_string(response) {
         Ok(j) => j,
         Err(e) => {
@@ -788,7 +810,7 @@ async fn send_global_response(sender: &mut Outbound, response: &GlobalWsResponse
     };
     // Guard against oversized WS frames (shouldn't happen for streamed chunks,
     // but protects against non-streamed single messages)
-    let json = if json.len() > MAX_MESSAGE_SIZE {
+    if json.len() > MAX_MESSAGE_SIZE {
         warn!(
             size = json.len(),
             max = MAX_MESSAGE_SIZE,
@@ -807,153 +829,118 @@ async fn send_global_response(sender: &mut Outbound, response: &GlobalWsResponse
             .unwrap_or_else(|_| r#"{"type":"error","message":"Result too large"}"#.to_string())
     } else {
         json
-    };
-    sender.send(Message::Text(json)).await.is_ok()
+    }
 }
 
-/// Process a single global WebSocket message and send the response(s).
-/// Returns `true` if the connection is still alive, `false` if it should close.
-///
-/// For Execute messages, this may stream multiple messages (result_start /
-/// result_chunk / result_end) when the result is large. Non-execute messages
-/// always send a single response.
-async fn process_and_send_global_ws_message(
+/// The connection's requests: each job with its tracing span.
+type Requests = RequestPipeline<(Job, tracing::Span), Reply>;
+
+/// Start every request the pipeline's ordering barriers now allow. Work that
+/// computes runs as a pipeline task; connection-state changes happen here, on
+/// the loop that owns that state.
+fn start_requests(
+    requests: &mut Requests,
     handler: &Arc<Handler>,
     session_id: &str,
-    text: &str,
-    auth: &Principal,
-    sender: &mut Outbound,
+    principal: &Principal,
     subscriptions: &mut ConnectionSubscriptions,
-) -> bool {
-    let request: GlobalWsRequest = match serde_json::from_str(text) {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::debug!(error = %e, "Invalid GlobalWsRequest message");
-            return send_global_response(
-                sender,
-                &GlobalWsResponse::Error {
-                    message: "Invalid message format".to_string(),
-                    validation_errors: None,
-                    code: None,
-                },
-            )
-            .await;
-        }
-    };
-
-    match request {
-        GlobalWsRequest::Execute { program } => {
-            if let Some(command) = subscription_command(&program) {
-                return send_subscription_command(
-                    handler,
-                    session_id,
-                    command,
-                    subscriptions,
-                    sender,
-                )
-                .await;
+) {
+    while let Some(Startable {
+        ticket,
+        job: (job, span),
+    }) = requests.next_startable()
+    {
+        let _entered = span.enter();
+        match job {
+            Job::Immediate(response) => {
+                requests.complete(ticket, Reply::Frames(vec![response_frame(&response)]));
             }
-            let kg_before = handler
-                .session_manager()
-                .session_kg(&session_id.to_string())
-                .ok();
-            let alive = send_global_execute(handler, session_id, program, auth, sender).await;
-            // Subscriptions are scoped to the connection's KG: switching drops them.
-            if handler
-                .session_manager()
-                .session_kg(&session_id.to_string())
-                .ok()
-                != kg_before
-            {
-                subscriptions.clear();
+            Job::Execute { program } => {
+                let work = request::execute(
+                    Arc::clone(handler),
+                    session_id.to_string(),
+                    program,
+                    principal.clone(),
+                );
+                requests.spawn(ticket, work.map(Reply::Frames).in_current_span());
             }
-            alive
-        }
-        GlobalWsRequest::Ping => send_global_response(sender, &GlobalWsResponse::Pong).await,
-        // Login/Authenticate after already authenticated is a no-op
-        GlobalWsRequest::Login { .. } | GlobalWsRequest::Authenticate { .. } => {
-            send_global_response(
-                sender,
-                &GlobalWsResponse::Error {
-                    message: "Already authenticated".to_string(),
-                    validation_errors: None,
-                    code: None,
-                },
-            )
-            .await
+            Job::Subscribe { id, query } => {
+                let started = std::time::Instant::now();
+                let opening = handler
+                    .session_manager()
+                    .session_kg(&session_id.to_string())
+                    .and_then(|kg| subscriptions.begin_subscribe(&kg, &id, &query));
+                match opening {
+                    Ok(opening) => {
+                        let work = opening
+                            .run()
+                            .map(move |opened| Reply::Subscribed { opened, started });
+                        requests.spawn(ticket, work.in_current_span());
+                    }
+                    Err(message) => {
+                        let frame = response_frame(&request::error_response(message));
+                        requests.complete(ticket, Reply::Frames(vec![frame]));
+                    }
+                }
+            }
+            Job::Unsubscribe { id } => {
+                let response = match subscriptions.unsubscribe(&id) {
+                    Ok(()) => request::message_rows(
+                        vec!["message".to_string()],
+                        vec![vec![serde_json::Value::String(format!(
+                            "Unsubscribed '{id}'."
+                        ))]],
+                        std::time::Instant::now(),
+                    ),
+                    Err(message) => request::error_response(message),
+                };
+                requests.complete(ticket, Reply::Frames(vec![response_frame(&response)]));
+            }
         }
     }
 }
 
-/// Extract `.subscribe` / `.unsubscribe` from an Execute program.
-fn subscription_command(program: &str) -> Option<MetaCommand> {
-    let trimmed = program.trim();
-    if !trimmed.starts_with(".subscribe") && !trimmed.starts_with(".unsubscribe") {
-        return None;
-    }
-    match crate::statement::parse_statement(trimmed) {
-        Ok(Statement::Meta(
-            command @ (MetaCommand::Subscribe { .. } | MetaCommand::Unsubscribe(_)),
-        )) => Some(command),
-        _ => None,
-    }
-}
-
-/// Run `.subscribe` / `.unsubscribe` against this connection's subscriptions.
-async fn send_subscription_command(
-    handler: &Arc<Handler>,
+/// Apply a released request's effect on the connection; returns its frames.
+fn release_reply(
+    handler: &Handler,
     session_id: &str,
-    command: MetaCommand,
+    released: Released<Reply>,
     subscriptions: &mut ConnectionSubscriptions,
-    sender: &mut Outbound,
-) -> bool {
-    let start = std::time::Instant::now();
-    let outcome = match command {
-        MetaCommand::Subscribe { id, query } => {
-            match handler
-                .session_manager()
-                .session_kg(&session_id.to_string())
-            {
-                Ok(kg) => subscriptions
-                    .subscribe(&kg, &id, &query)
-                    .await
-                    .map(|snapshot| (snapshot.columns, snapshot.inserted)),
-                Err(e) => Err(e),
-            }
+) -> Vec<String> {
+    let frames = match released.reply {
+        Some(Reply::Frames(frames)) => frames,
+        Some(Reply::Subscribed { opened, started }) => {
+            let response = match subscriptions.finish_subscribe(opened) {
+                Ok(snapshot) => request::message_rows(snapshot.columns, snapshot.inserted, started),
+                Err(message) => request::error_response(message),
+            };
+            vec![response_frame(&response)]
         }
-        MetaCommand::Unsubscribe(id) => subscriptions.unsubscribe(&id).map(|()| {
-            let message = format!("Unsubscribed '{id}'.");
-            (
-                vec!["message".to_string()],
-                vec![vec![serde_json::Value::String(message)]],
-            )
-        }),
-        _ => Err("Not a subscription command".to_string()),
+        None => vec![response_frame(&request::error_response(
+            "Internal server error".to_string(),
+        ))],
     };
-    let response = match outcome {
-        Ok((columns, rows)) => GlobalWsResponse::Result {
-            columns,
-            row_count: rows.len(),
-            total_count: rows.len(),
-            rows,
-            // A subscription snapshot is complete by construction: a capped
-            // result fails the `.subscribe` instead.
-            truncated: false,
-            execution_time_ms: start.elapsed().as_millis() as u64,
-            row_provenance: Vec::new(),
-            metadata: None,
-            switched_kg: None,
-            proof_trees: None,
-            timing_breakdown: None,
-            errors: Vec::new(),
-        },
-        Err(message) => GlobalWsResponse::Error {
-            message,
-            validation_errors: None,
-            code: None,
-        },
-    };
-    send_global_response(sender, &response).await
+    if released.access == Access::Exclusive {
+        // Subscriptions are scoped to the connection's KG: switching drops them.
+        match handler
+            .session_manager()
+            .session_kg(&session_id.to_string())
+        {
+            Ok(kg) => subscriptions.retain_knowledge_graph(&kg),
+            Err(_) => subscriptions.clear(),
+        }
+    }
+    frames
+}
+
+/// Write `frames` in order; `false` if the connection is dead.
+async fn send_frames(sender: &mut Outbound, frames: Vec<String>) -> bool {
+    for frame in frames {
+        if sender.send(Message::Text(frame)).await.is_err() {
+            return false;
+        }
+    }
+    true
 }
 
 /// Send a subscription push; an oversized delta becomes a `subscription_error`.
@@ -1020,215 +1007,6 @@ fn log_preview(program: &str) -> String {
         .chars()
         .take(LOG_PREVIEW_CHARS)
         .collect()
-}
-
-/// Handle an Execute message on the global WebSocket.
-///
-/// For small results (< STREAMING_THRESHOLD bytes when serialized), sends a
-/// single `result` message. For large results, streams the data as:
-/// 1. `result_start` - schema, metadata, totals
-/// 2. `result_chunk` (×N) - batches of up to STREAMING_CHUNK_ROWS rows
-/// 3. `result_end` - row_count + chunk_count summary
-///
-/// Returns `true` if connection still alive, `false` to close.
-async fn send_global_execute(
-    handler: &Arc<Handler>,
-    session_id: &str,
-    program: String,
-    auth: &Principal,
-    sender: &mut Outbound,
-) -> bool {
-    let start = std::time::Instant::now();
-    let program_len = program.len();
-    let program_preview = log_preview(&program);
-    info!(
-        program_len,
-        program_preview = %program_preview,
-        "ws_execute_start"
-    );
-    let sid = session_id.to_string();
-    let result = handler
-        .execute_program_status(Some(&sid), None, program.clone(), Some(auth))
-        .await;
-    let elapsed = start.elapsed();
-    let slow_query_ms = handler.config().storage.performance.slow_query_log_ms;
-    if slow_query_ms > 0 && elapsed.as_millis() as u64 >= slow_query_ms {
-        warn!(
-            elapsed_ms = elapsed.as_millis() as u64,
-            threshold_ms = slow_query_ms,
-            program_preview = %program_preview,
-            "ws_slow_execute"
-        );
-    }
-    info!(
-        program_len,
-        elapsed_ms = elapsed.as_millis() as u64,
-        ok = result.is_ok(),
-        "ws_execute_end"
-    );
-
-    match result {
-        Ok(response) => {
-            let row_provenance: Vec<String> = response
-                .rows
-                .iter()
-                .map(|row| {
-                    row.provenance
-                        .as_ref()
-                        .map_or_else(|| "unknown".to_string(), std::string::ToString::to_string)
-                })
-                .collect();
-
-            let rows: Vec<Vec<serde_json::Value>> = response
-                .rows
-                .into_iter()
-                .map(|row| row.values.into_iter().map(wire_value_to_json).collect())
-                .collect();
-
-            let columns: Vec<String> = response.schema.iter().map(|c| c.name.clone()).collect();
-            let row_count = rows.len();
-
-            let metadata = response.metadata.map(|m| SessionQueryMetadataDto {
-                has_ephemeral: m.has_ephemeral,
-                ephemeral_sources: m.ephemeral_sources,
-                warnings: m.warnings,
-            });
-
-            // Build the single-message response to check its size
-            let single_response = GlobalWsResponse::Result {
-                columns: columns.clone(),
-                rows: rows.clone(),
-                row_count,
-                total_count: response.total_count,
-                truncated: response.truncated,
-                execution_time_ms: response.execution_time_ms,
-                row_provenance: row_provenance.clone(),
-                metadata: metadata.clone(),
-                switched_kg: response.switched_kg.clone(),
-                proof_trees: response.proof_trees.clone(),
-                timing_breakdown: response.timing_breakdown.clone(),
-                errors: response.errors.clone(),
-            };
-
-            // Check serialized size to decide: single message vs streaming
-            let single_json = match serde_json::to_string(&single_response) {
-                Ok(j) => j,
-                Err(e) => {
-                    tracing::error!(error = %e, "Failed to serialize result");
-                    return send_global_response(
-                        sender,
-                        &GlobalWsResponse::Error {
-                            message: "Internal server error".to_string(),
-                            validation_errors: None,
-                            code: None,
-                        },
-                    )
-                    .await;
-                }
-            };
-
-            if single_json.len() <= STREAMING_THRESHOLD {
-                // Small result: send as single message (backward compatible)
-                if single_json.len() > MAX_MESSAGE_SIZE {
-                    warn!(
-                        size = single_json.len(),
-                        max = MAX_MESSAGE_SIZE,
-                        "ws_result_too_large"
-                    );
-                    return send_global_response(
-                        sender,
-                        &GlobalWsResponse::Error {
-                            message: format!(
-                                "Result too large ({} bytes, max {})",
-                                single_json.len(),
-                                MAX_MESSAGE_SIZE
-                            ),
-                            validation_errors: None,
-                            code: None,
-                        },
-                    )
-                    .await;
-                }
-                sender.send(Message::Text(single_json)).await.is_ok()
-            } else {
-                // Large result: stream as chunks
-                info!(
-                    row_count,
-                    json_size = single_json.len(),
-                    "ws_streaming_result"
-                );
-                drop(single_json); // free memory
-
-                // 1. Send result_start header
-                let start_msg = GlobalWsResponse::ResultStart {
-                    columns,
-                    total_count: response.total_count,
-                    truncated: response.truncated,
-                    execution_time_ms: response.execution_time_ms,
-                    metadata,
-                    switched_kg: response.switched_kg,
-                    proof_trees: response.proof_trees,
-                    timing_breakdown: response.timing_breakdown,
-                    errors: response.errors,
-                };
-                if !send_global_response(sender, &start_msg).await {
-                    return false;
-                }
-
-                // 2. Send row chunks
-                let mut chunk_index: usize = 0;
-                let mut row_iter = rows.into_iter();
-                let mut prov_iter = row_provenance.into_iter();
-                loop {
-                    let chunk_rows: Vec<Vec<serde_json::Value>> =
-                        row_iter.by_ref().take(STREAMING_CHUNK_ROWS).collect();
-                    if chunk_rows.is_empty() {
-                        break;
-                    }
-                    let chunk_prov: Vec<String> =
-                        prov_iter.by_ref().take(chunk_rows.len()).collect();
-                    let chunk_msg = GlobalWsResponse::ResultChunk {
-                        rows: chunk_rows,
-                        row_provenance: chunk_prov,
-                        chunk_index,
-                    };
-                    if !send_global_response(sender, &chunk_msg).await {
-                        return false;
-                    }
-                    chunk_index += 1;
-                }
-
-                // 3. Send result_end
-                let end_msg = GlobalWsResponse::ResultEnd {
-                    row_count,
-                    chunk_count: chunk_index,
-                };
-                send_global_response(sender, &end_msg).await
-            }
-        }
-        Err(e) => {
-            let response = program_error_response(e);
-            send_global_response(sender, &response).await
-        }
-    }
-}
-
-/// The `error` frame for a failed program, unpacking parse errors.
-fn program_error_response(error: ProgramError) -> GlobalWsResponse {
-    if let Some(json_str) = error.message.strip_prefix(VALIDATION_ERROR_PREFIX) {
-        if let Ok(errors) = serde_json::from_str::<Vec<ValidationError>>(json_str) {
-            return GlobalWsResponse::Error {
-                message: format!("Program has {} parse error(s)", errors.len()),
-                validation_errors: Some(errors),
-                code: Some(ErrorCode::Validation),
-            };
-        }
-    }
-    GlobalWsResponse::Error {
-        message: error.message,
-        validation_errors: None,
-        code: error.code,
-    }
 }
 
 #[cfg(test)]
@@ -1446,37 +1224,6 @@ mod tests {
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("\"type\":\"error\""));
         assert!(!json.contains("validation_errors"));
-    }
-
-    #[test]
-    fn test_program_error_response_keeps_code() {
-        let resp = program_error_response(ProgramError {
-            message: "Rule 'x' not found.".to_string(),
-            code: Some(ErrorCode::NotFound),
-        });
-        let json = serde_json::to_string(&resp).unwrap();
-        assert!(json.contains("\"code\":\"not_found\""), "{json}");
-
-        let resp = program_error_response(ProgramError::from("Access denied".to_string()));
-        let json = serde_json::to_string(&resp).unwrap();
-        assert!(!json.contains("\"code\""), "{json}");
-    }
-
-    #[test]
-    fn test_program_error_response_parse_errors_are_validation() {
-        let errors = vec![ValidationError {
-            line: 1,
-            statement_index: 0,
-            error: "bad".to_string(),
-        }];
-        let message = format!(
-            "{VALIDATION_ERROR_PREFIX}{}",
-            serde_json::to_string(&errors).unwrap()
-        );
-        let resp = program_error_response(ProgramError::from(message));
-        let json = serde_json::to_string(&resp).unwrap();
-        assert!(json.contains("\"code\":\"validation\""), "{json}");
-        assert!(json.contains("\"validation_errors\""), "{json}");
     }
 
     // === Streaming result protocol tests ===

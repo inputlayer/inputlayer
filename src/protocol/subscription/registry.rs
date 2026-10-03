@@ -29,7 +29,8 @@ impl ChangeSet {
         Self::Relations(BTreeSet::from([name.to_string()]))
     }
 
-    fn merge(&mut self, other: &ChangeSet) {
+    /// Add `other` to this change.
+    pub fn merge(&mut self, other: &ChangeSet) {
         match (&mut *self, other) {
             (Self::Everything, _) => {}
             (_, Self::Everything) => *self = Self::Everything,
@@ -156,28 +157,43 @@ impl SubscriptionRegistry {
         Ok(())
     }
 
-    /// Register a subscription whose initial refresh already ran.
+    /// Register a subscription whose initial refresh already ran. `missed`
+    /// holds the changes committed while that refresh was in flight; if they
+    /// can affect the result, the returned evaluation brings it up to date.
     pub fn add(
         &mut self,
         id: &str,
         knowledge_graph: &str,
         view: Box<dyn StandingQuery>,
         dependencies: Dependencies,
-    ) -> Result<(), String> {
+        missed: Option<&ChangeSet>,
+    ) -> Result<Option<Dispatch>, String> {
         self.check_can_add(id)?;
         self.next_token += 1;
+        let token = self.next_token;
+        let stale = missed.is_some_and(|change| dependencies.is_affected_by(change));
+        let (view, dispatch) = if stale {
+            let dispatch = Dispatch {
+                id: id.to_string(),
+                token,
+                view,
+            };
+            (None, Some(dispatch))
+        } else {
+            (Some(view), None)
+        };
         self.entries.insert(
             id.to_string(),
             Entry {
-                token: self.next_token,
+                token,
                 knowledge_graph: knowledge_graph.to_string(),
                 seq: 0,
                 dependencies,
-                view: Some(view),
+                view,
                 pending: None,
             },
         );
-        Ok(())
+        Ok(dispatch)
     }
 
     /// Remove a subscription. Returns false if it did not exist.
@@ -190,6 +206,14 @@ impl SubscriptionRegistry {
         let count = self.entries.len();
         self.entries.clear();
         count
+    }
+
+    /// Remove every subscription not on `knowledge_graph`; returns how many.
+    pub fn retain_knowledge_graph(&mut self, knowledge_graph: &str) -> usize {
+        let before = self.entries.len();
+        self.entries
+            .retain(|_, entry| entry.knowledge_graph == knowledge_graph);
+        before - self.entries.len()
     }
 
     /// React to committed changes in `knowledge_graph`: returns evaluations to start.
@@ -312,7 +336,7 @@ mod tests {
     fn registry_with(script: Vec<Result<Refresh, String>>) -> SubscriptionRegistry {
         let mut registry = SubscriptionRegistry::new(4);
         registry
-            .add("s", "kg", Box::new(Scripted(script)), deps_on("a"))
+            .add("s", "kg", Box::new(Scripted(script)), deps_on("a"), None)
             .unwrap();
         registry
     }
@@ -424,7 +448,7 @@ mod tests {
             .remove(0);
         assert!(registry.remove("s"));
         registry
-            .add("s", "kg", Box::new(Scripted(vec![])), deps_on("a"))
+            .add("s", "kg", Box::new(Scripted(vec![])), deps_on("a"), None)
             .unwrap();
         let (push, follow_up) = complete(&mut registry, stale).await;
         assert!(push.is_none() && follow_up.is_none());
@@ -434,13 +458,72 @@ mod tests {
     fn test_registry_rejects_duplicates_and_enforces_limit() {
         let mut registry = SubscriptionRegistry::new(2);
         let view = || Box::new(Scripted(vec![])) as Box<dyn StandingQuery>;
-        registry.add("a", "kg", view(), deps_on("r")).unwrap();
-        assert!(registry.add("a", "kg", view(), deps_on("r")).is_err());
-        registry.add("b", "kg", view(), deps_on("r")).unwrap();
-        let err = registry.add("c", "kg", view(), deps_on("r")).unwrap_err();
+        registry.add("a", "kg", view(), deps_on("r"), None).unwrap();
+        assert!(registry.add("a", "kg", view(), deps_on("r"), None).is_err());
+        registry.add("b", "kg", view(), deps_on("r"), None).unwrap();
+        let err = registry
+            .add("c", "kg", view(), deps_on("r"), None)
+            .err()
+            .unwrap();
         assert!(err.contains("limit"), "{err}");
         assert_eq!(registry.clear(), 2);
         assert!(registry.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_registry_add_reevaluates_after_missed_relevant_change() {
+        let mut registry = SubscriptionRegistry::new(4);
+        let view = Box::new(Scripted(vec![Ok(refresh(&[7], &[], "a"))]));
+        let dispatch = registry
+            .add(
+                "s",
+                "kg",
+                view,
+                deps_on("a"),
+                Some(&ChangeSet::relation("a")),
+            )
+            .unwrap()
+            .expect("a change committed during the snapshot must be evaluated");
+        // In flight: further changes wait for the follow-up.
+        assert!(registry
+            .on_change("kg", &ChangeSet::relation("a"))
+            .is_empty());
+        let (push, follow_up) = complete(&mut registry, dispatch).await;
+        assert!(matches!(push, Some(Push::SubscriptionDelta { seq: 1, .. })));
+        assert!(follow_up.is_some());
+    }
+
+    #[test]
+    fn test_registry_add_ignores_missed_unrelated_change() {
+        let mut registry = SubscriptionRegistry::new(4);
+        let view = Box::new(Scripted(vec![]));
+        let dispatch = registry
+            .add(
+                "s",
+                "kg",
+                view,
+                deps_on("a"),
+                Some(&ChangeSet::relation("b")),
+            )
+            .unwrap();
+        assert!(dispatch.is_none());
+        assert_eq!(registry.on_change("kg", &ChangeSet::relation("a")).len(), 1);
+    }
+
+    #[test]
+    fn test_registry_retain_knowledge_graph() {
+        let mut registry = SubscriptionRegistry::new(4);
+        let view = || Box::new(Scripted(vec![])) as Box<dyn StandingQuery>;
+        registry
+            .add("a", "one", view(), deps_on("r"), None)
+            .unwrap();
+        registry
+            .add("b", "two", view(), deps_on("r"), None)
+            .unwrap();
+        assert_eq!(registry.retain_knowledge_graph("two"), 1);
+        assert_eq!(registry.len(), 1);
+        assert!(registry.on_change("one", &ChangeSet::Everything).is_empty());
+        assert_eq!(registry.on_change("two", &ChangeSet::Everything).len(), 1);
     }
 
     #[test]

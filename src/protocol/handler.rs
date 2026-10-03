@@ -5779,6 +5779,20 @@ fn parse_program(program: &str) -> Result<Vec<statement::Statement>, Vec<Validat
     }
 }
 
+/// Whether every statement of `program`, split the way it executes, is a
+/// query (`?...`): such a program reads its KG and session without changing
+/// either. Lexical, so it costs no parse: a `?` statement parses as a query
+/// or fails without effect.
+pub(crate) fn is_query_program(program: &str) -> bool {
+    let text = join_continuation_lines(&strip_comments(program));
+    let mut statements = text.lines().map(str::trim).filter(|line| !line.is_empty());
+    let mut any = false;
+    statements.all(|line| {
+        any = true;
+        line.starts_with('?')
+    }) && any
+}
+
 /// Whether a statement creates, switches to or drops the system KG.
 fn targets_internal_kg(stmt: &statement::Statement) -> bool {
     matches!(

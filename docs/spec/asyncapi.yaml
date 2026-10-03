@@ -39,6 +39,16 @@ info:
     6. Server may push change notifications (`persistent_update`, `rule_change`, ...) and, for `.subscribe`d queries, `subscription_delta` / `subscription_error`
     7. Client disconnects → Server auto-closes session
 
+    ## Pipelining
+
+    Clients may send requests without waiting for replies. Replies come back in
+    request order. Programs made only of queries run concurrently; any other
+    request (writes, rules, session changes, `.kg use`, `.subscribe`, ...) starts
+    after every earlier request has replied and finishes before any later one
+    starts. Pushes are delivered while requests run, between replies. At most
+    `http.rate_limit.ws_max_in_flight_requests` (default 16) requests are
+    unanswered at once; beyond that the server stops reading the connection.
+
     ## Raw Text Protocol
 
     The `execute` message accepts any valid IQL statement or meta command as raw text.

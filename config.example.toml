@@ -197,6 +197,11 @@ ws_max_messages_per_sec = 100
 # Maximum standing-query subscriptions (.subscribe) per WebSocket connection (0 = unlimited)
 ws_max_subscriptions = 64
 
+# Maximum requests per WebSocket connection admitted and not yet answered (at least 1).
+# Queries on one connection overlap up to this bound; writes, KG switches and session
+# changes still run one at a time, in order. Replies always come back in request order.
+ws_max_in_flight_requests = 16
+
 # Maximum HTTP requests per second per IP address (0 = unlimited, not recommended)
 per_ip_max_rps = 100
 

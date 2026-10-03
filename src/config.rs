@@ -478,6 +478,12 @@ pub struct RateLimitConfig {
     #[serde(default = "default_ws_max_subscriptions")]
     pub ws_max_subscriptions: usize,
 
+    /// Maximum requests per WebSocket connection admitted and not yet answered
+    /// (at least 1). Queries overlap up to this bound; at the bound the server
+    /// stops reading the connection until a reply goes out.
+    #[serde(default = "default_ws_max_in_flight_requests")]
+    pub ws_max_in_flight_requests: usize,
+
     /// Notification broadcast channel buffer size (per-subscriber queue depth)
     #[serde(default = "default_notification_buffer_size")]
     pub notification_buffer_size: usize,
@@ -641,6 +647,9 @@ fn default_ws_max_lifetime_secs() -> u64 {
 fn default_ws_max_subscriptions() -> usize {
     64
 }
+fn default_ws_max_in_flight_requests() -> usize {
+    16
+}
 fn default_notification_buffer_size() -> usize {
     4096
 }
@@ -659,6 +668,7 @@ impl Default for RateLimitConfig {
             ws_max_messages_per_sec: default_ws_max_messages_per_sec(),
             ws_max_lifetime_secs: default_ws_max_lifetime_secs(),
             ws_max_subscriptions: default_ws_max_subscriptions(),
+            ws_max_in_flight_requests: default_ws_max_in_flight_requests(),
             notification_buffer_size: default_notification_buffer_size(),
             per_ip_max_rps: default_per_ip_max_rps(),
             ws_max_preauth_per_ip: default_ws_max_preauth_per_ip(),
@@ -807,6 +817,12 @@ impl Config {
         if self.http.ws_auth_timeout_ms == 0 {
             tracing::warn!("ws_auth_timeout_ms = 0 is invalid, auto-correcting to 5000");
             self.http.ws_auth_timeout_ms = default_ws_auth_timeout_ms();
+        }
+
+        // ws_max_in_flight_requests=0 would never read a request
+        if self.http.rate_limit.ws_max_in_flight_requests == 0 {
+            tracing::warn!("ws_max_in_flight_requests = 0 is invalid, auto-correcting to 16");
+            self.http.rate_limit.ws_max_in_flight_requests = default_ws_max_in_flight_requests();
         }
 
         // persist buffer_size=0 would cause infinite flush loops
@@ -1245,6 +1261,7 @@ mod tests {
         assert_eq!(rl.ws_max_messages_per_sec, 100);
         assert_eq!(rl.ws_max_lifetime_secs, 86400);
         assert_eq!(rl.ws_max_subscriptions, 64);
+        assert_eq!(rl.ws_max_in_flight_requests, 16);
         assert_eq!(rl.per_ip_max_rps, 100);
     }
 
