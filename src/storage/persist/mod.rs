@@ -360,6 +360,46 @@ impl FilePersist {
         read_updates_parquet(&batch_ref.path)
     }
 
+    /// Flush a shard's buffer to a batch. Returns `false` if the shard does not exist.
+    fn flush_existing(&self, shard: &str) -> StorageResult<bool> {
+        let mut wal = self.wal.lock();
+        let mut shards = self.shards.write();
+        let Some(state) = shards.get_mut(shard) else {
+            return Ok(false);
+        };
+
+        if state.buffer.is_empty() {
+            return Ok(true);
+        }
+
+        // Step 1: Write buffer to batch file (atomic via temp+rename in write_batch)
+        let batch = Batch::new(state.buffer.clone());
+        let (batch_id, path) = self.write_batch(&state.buffer)?;
+
+        let batch_ref = BatchRef {
+            id: batch_id,
+            path: path.clone(),
+            lower: batch.lower,
+            upper: batch.upper,
+            len: batch.len(),
+        };
+
+        // Step 2: Update metadata and save atomically
+        state.meta.add_batch(batch_ref);
+        state.buffer.clear();
+
+        if let Err(e) = self.save_shard_meta(&state.meta) {
+            // Metadata save failed - clean up the orphaned batch file
+            let _ = fs::remove_file(&path);
+            return Err(e);
+        }
+
+        // Step 3: Remove WAL entries LAST (safe - metadata already points to batch)
+        wal.remove_shard_entries(shard)?;
+
+        Ok(true)
+    }
+
     /// Flush all dirty shards (shards with non-empty buffers).
     /// Used when WAL size exceeds the configured limit.
     fn flush_all(&self) -> StorageResult<()> {
@@ -373,7 +413,7 @@ impl FilePersist {
         };
 
         for shard_name in &dirty_shards {
-            self.flush(shard_name)?;
+            self.flush_existing(shard_name)?;
         }
 
         Ok(())
@@ -386,26 +426,18 @@ impl PersistBackend for FilePersist {
             return Ok(());
         }
 
-        // Handle WAL based on durability mode
-        match self.config.durability_mode {
-            DurabilityMode::Immediate => {
-                // Write to WAL with immediate sync (safest)
-                let mut wal = self.wal.lock();
-                wal.append_batch(shard, updates)?;
-            }
-            DurabilityMode::Batched => {
-                // Write to WAL without sync (faster, batched durability)
-                let mut wal = self.wal.lock();
-                wal.append_batch_buffered(shard, updates)?;
-            }
-            DurabilityMode::Async => {
-                // Skip WAL entirely for maximum speed (in-memory only until flush).
-                // Data WILL be lost on crash. Only use for ephemeral/reproducible data.
-            }
-        }
-
-        // Add to buffer
+        // WAL write and buffer push share one critical section, so a concurrent flush
+        // never drops a WAL entry whose update is not yet in its batch.
+        // Lock order everywhere: WAL, then shards.
         let should_flush = {
+            let mut wal = self.wal.lock();
+            match self.config.durability_mode {
+                DurabilityMode::Immediate => wal.append_batch(shard, updates)?,
+                DurabilityMode::Batched => wal.append_batch_buffered(shard, updates)?,
+                // No WAL: data is lost on crash. Only for ephemeral/reproducible data.
+                DurabilityMode::Async => {}
+            }
+
             let mut shards = self.shards.write();
             let state = shards
                 .entry(shard.to_string())
@@ -426,9 +458,9 @@ impl PersistBackend for FilePersist {
             state.buffer.len() >= self.config.buffer_size
         };
 
-        // Flush if buffer is full
+        // Flush if buffer is full; a concurrent delete_shard may have removed the shard.
         if should_flush {
-            self.flush(shard)?;
+            self.flush_existing(shard)?;
         } else if self.config.max_wal_size_bytes > 0 {
             // Check WAL size - force flush all dirty shards if WAL is too large
             let wal_size = self.wal.lock().file_size();
@@ -563,52 +595,20 @@ impl PersistBackend for FilePersist {
     }
 
     fn flush(&self, shard: &str) -> StorageResult<()> {
-        let mut shards = self.shards.write();
-        let state = shards
-            .get_mut(shard)
-            .ok_or_else(|| StorageError::Other(format!("Shard not found: {shard}")))?;
-
-        if state.buffer.is_empty() {
-            return Ok(());
+        if self.flush_existing(shard)? {
+            Ok(())
+        } else {
+            Err(StorageError::Other(format!("Shard not found: {shard}")))
         }
-
-        // Step 1: Write buffer to batch file (atomic via temp+rename in write_batch)
-        let batch = Batch::new(state.buffer.clone());
-        let (batch_id, path) = self.write_batch(&state.buffer)?;
-
-        let batch_ref = BatchRef {
-            id: batch_id,
-            path: path.clone(),
-            lower: batch.lower,
-            upper: batch.upper,
-            len: batch.len(),
-        };
-
-        // Step 2: Update metadata and save atomically
-        state.meta.add_batch(batch_ref);
-        state.buffer.clear();
-
-        if let Err(e) = self.save_shard_meta(&state.meta) {
-            // Metadata save failed - clean up the orphaned batch file
-            let _ = fs::remove_file(&path);
-            return Err(e);
-        }
-
-        // Step 3: Remove WAL entries LAST (safe - metadata already points to batch)
-        {
-            let mut wal = self.wal.lock();
-            wal.remove_shard_entries(shard)?;
-        }
-
-        Ok(())
     }
 
     fn delete_shard(&self, shard: &str) -> StorageResult<()> {
-        // Step 1: Remove from in-memory shard map (fast, under write lock)
-        let removed_state = {
-            let mut shards = self.shards.write();
-            shards.remove(shard)
-        }; // write lock released - other shards unblocked
+        // Hold the WAL lock throughout so a concurrent append cannot ack an
+        // entry that this delete then drops.
+        let mut wal = self.wal.lock();
+
+        // Step 1: Remove from in-memory shard map
+        let removed_state = self.shards.write().remove(shard);
 
         // Step 2: Delete batch files FIRST (crash-safe ordering)
         // If we crash here, metadata still references them but they're gone.
@@ -627,14 +627,9 @@ impl PersistBackend for FilePersist {
         }
 
         // Step 3: Selective WAL filter - remove only this shard's entries
-        // Other shards' WAL data is PRESERVED (no need to flush them)
-        {
-            let mut wal = self.wal.lock();
-            wal.remove_shard_entries(shard)?;
-        }
+        wal.remove_shard_entries(shard)?;
 
         // Step 4: Delete metadata file LAST (crash-safe ordering)
-        // After this, the shard is fully removed from disk.
         let meta_path = shard_meta_path(&self.config.path.join("shards"), shard);
         if meta_path.exists() {
             let _ = fs::remove_file(&meta_path);
@@ -726,6 +721,7 @@ fn write_shard_meta(shards_dir: &Path, meta: &ShardMeta) -> StorageResult<()> {
         let _ = fs::remove_file(&tmp_path);
         return Err(e.into());
     }
+    sync_directory(shards_dir);
 
     Ok(())
 }
@@ -817,6 +813,9 @@ fn write_updates_parquet(path: &Path, updates: &[Update]) -> StorageResult<()> {
 
     // Atomic rename (POSIX guarantees atomicity)
     fs::rename(&tmp_path, path)?;
+    if let Some(dir) = path.parent() {
+        sync_directory(dir);
+    }
 
     Ok(())
 }
