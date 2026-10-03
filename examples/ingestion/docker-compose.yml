@@ -1,18 +1,17 @@
 # Ingestion recipe: Postgres --(Debezium CDC)--> adapter --> InputLayer,
 # plus billing webhooks --> adapter --> InputLayer. Run ./demo.sh.
 #
-# The secrets below are demo values. Replace every one before exposing any port.
 x-demo-secrets: &demo-secrets
-  ENGINE_API_KEY: &engine-key ${INGEST_ENGINE_API_KEY:-ingest-demo-engine-key-do-not-reuse}
-  CDC_WEBHOOK_SECRET: &cdc-secret ${INGEST_CDC_WEBHOOK_SECRET:-whsec_aW5nZXN0LWRlbW8tY2RjLXNlY3JldC1kby1ub3QtcmV1c2U=}
-  WEBHOOK_SECRET_BILLING: ${INGEST_WEBHOOK_SECRET_BILLING:-whsec_aW5nZXN0LWRlbW8tYmlsbGluZy1zZWNyZXQtZG8tbm90LXJldXNl}
+  ENGINE_API_KEY: &engine-key ${INGEST_ENGINE_API_KEY:?Run ./demo.sh first}
+  CDC_WEBHOOK_SECRET: &cdc-secret ${INGEST_CDC_WEBHOOK_SECRET:?Run ./demo.sh first}
+  WEBHOOK_SECRET_BILLING: ${INGEST_WEBHOOK_SECRET_BILLING:?Run ./demo.sh first}
 
 services:
   inputlayer:
     image: ${INPUTLAYER_IMAGE:-ghcr.io/inputlayer/inputlayer:latest}
     restart: unless-stopped
     ports:
-      - "${INPUTLAYER_PORT:-8080}:8080"
+      - "127.0.0.1:${INPUTLAYER_PORT:-8080}:8080"
     environment:
       INPUTLAYER_BOOTSTRAP_API_KEY: *engine-key
       INPUTLAYER_HTTP__HOST: "0.0.0.0"
@@ -25,7 +24,7 @@ services:
     command: ["postgres", "-c", "wal_level=logical"]
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${INGEST_POSTGRES_PASSWORD:?Run ./demo.sh first}
       POSTGRES_DB: shop
     volumes:
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -40,7 +39,7 @@ services:
     image: inputlayer-ingest-adapter
     restart: unless-stopped
     ports:
-      - "${ADAPTER_PORT:-8090}:8090"
+      - "127.0.0.1:${ADAPTER_PORT:-8090}:8090"
     environment:
       <<: *demo-secrets
       ENGINE_URL: ws://inputlayer:8080/ws
@@ -59,7 +58,7 @@ services:
       CDC_WEBHOOK_SECRET: *cdc-secret
       POSTGRES_HOST: postgres
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${INGEST_POSTGRES_PASSWORD:?Run ./demo.sh first}
       POSTGRES_DB: shop
     volumes:
       - ./debezium/application.properties:/debezium/config/application.properties:ro
@@ -80,7 +79,7 @@ services:
       ENGINE_URL: ws://inputlayer:8080/ws
       ENGINE_KG: shop
       ADAPTER_URL: http://adapter:8090
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/shop
+      DATABASE_URL: postgresql://postgres:${INGEST_POSTGRES_PASSWORD:?Run ./demo.sh first}@postgres:5432/shop
     depends_on:
       adapter:
         condition: service_healthy

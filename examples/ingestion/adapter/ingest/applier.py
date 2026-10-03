@@ -3,9 +3,9 @@
 The applier is the single writer of the relations it owns: one adapter
 process per set of relations. For each batch it reads the stored revision of
 every key, drops changes at or below it (replays, late deliveries), and
-commits the rest with their new revisions as one engine transaction. Because
-revisions commit with the data, a retry after any failure, including a broken
-connection that leaves the outcome unknown, applies each change at most once.
+commits the rest with an engine-side revision check in one transaction. A
+retry after any failure, including a broken connection that leaves the outcome
+unknown, applies each change at most once.
 """
 
 from __future__ import annotations

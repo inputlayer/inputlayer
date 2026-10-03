@@ -48,11 +48,14 @@ def change_from_event(event: Any, tables: Mapping[str, Relation]) -> FactChange 
         raise MappingError(f"no relation is mapped for table {table}")
     revision = _revision(source["lsn"])
 
-    if op == _DELETE_OP:
-        before = _record(event, "before")
-        return FactChange(relation, relation.key_from(before), revision, row=None)
-    after = _record(event, "after")
-    return FactChange(relation, relation.key_from(after), revision, relation.row_from(after))
+    deleting = op == _DELETE_OP
+    record = _record(event, "before" if deleting else "after")
+    columns = relation.key if deleting else relation.column_names
+    for column in columns:
+        if record.get(column) == "__debezium_unavailable_value":
+            raise MappingError(f"{table}: unavailable value for '{column}'")
+    row = None if deleting else relation.row_from(record)
+    return FactChange(relation, relation.key_from(record), revision, row)
 
 
 def _record(event: Mapping[str, Any], field: str) -> Mapping[str, Any]:

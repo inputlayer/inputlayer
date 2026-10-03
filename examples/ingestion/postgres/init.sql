@@ -6,6 +6,8 @@ CREATE TABLE customers (
     tier text    NOT NULL
 );
 
+ALTER TABLE customers REPLICA IDENTITY FULL;
+
 INSERT INTO customers (id, name, tier) VALUES
     (1, 'Acme',    'enterprise'),
     (2, 'Globex',  'free'),

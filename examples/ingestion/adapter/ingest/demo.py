@@ -49,6 +49,14 @@ class Demo:
     async def collect(self) -> None:
         async for delta in self._watcher.deltas():
             await self._deltas.put(delta)
+        raise DemoFailure("watcher stopped before the self-check completed")
+
+    async def check(self) -> None:
+        async with asyncio.TaskGroup() as tasks:
+            collector = tasks.create_task(self.collect())
+            await self.run()
+            await self.expect_quiet()
+            collector.cancel()
 
     async def run(self) -> None:
         await self.step("billing webhook: payment.failed inv_100 for Acme (enterprise)")
@@ -181,12 +189,9 @@ async def main() -> None:
             raise DemoFailure("the demo needs a fresh stack: run ./demo.sh")
         db = await psycopg.AsyncConnection.connect(os.environ["DATABASE_URL"], autocommit=True)
         demo = Demo(http, watcher, db)
-        collector = asyncio.create_task(demo.collect())
         try:
-            await demo.run()
-            await demo.expect_quiet()
+            await demo.check()
         finally:
-            collector.cancel()
             await db.close()
             await watcher.close()
     print("\nall deltas matched: CDC and webhooks drive the standing query.", flush=True)

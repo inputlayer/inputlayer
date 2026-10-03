@@ -1,10 +1,7 @@
 """Render adapter changes as IQL programs. Pure functions, no I/O.
 
 A batch of changes becomes one program, which the engine commits as one
-transaction: the facts and their revision watermarks become visible together,
-so a crash or a failed statement never leaves data without its revision (or
-the reverse). Revision statements come last, so even an engine that applied
-statements one at a time would only advance a revision after its data.
+transaction: the facts and their revision watermarks become visible together.
 """
 
 from __future__ import annotations
@@ -54,16 +51,23 @@ def revision_query(change: FactChange) -> str:
 
 
 def apply_program(changes: list[FactChange]) -> str:
-    """One program that applies every change and records its revision."""
+    """One revision-conditional transaction for all changes."""
     statements = []
     for change in changes:
-        statements.append(_retract_key(change.relation, change.key))
-        if change.row is not None:
-            statements.append(_assert(change.relation.name, change.row))
-    for change in changes:
         relation, key = change.identity
-        statements.append(_retract_key(REVISIONS, (relation, key)))
-        statements.append(_assert(REVISIONS.name, (relation, key, change.revision)))
+        prefix = f"{REVISIONS.name}({literal(relation)}, {literal(key)}, "
+        initial = prefix + "-1)"
+        stored = prefix + "Revision)"
+        guard = f"{stored}, Revision < {change.revision}"
+        statements.append(f"+{initial}")
+        statements.append(f"-{initial} <- {stored}, Revision >= 0")
+        atom = _key_atom(change.relation, change.key)
+        statements.append(f"-{atom} <- {atom}, {guard}")
+        heads = [f"-{stored}"]
+        if change.row is not None:
+            heads.append(_assert(change.relation.name, change.row))
+        heads.append(_assert(REVISIONS.name, (relation, key, change.revision)))
+        statements.append(f"{', '.join(heads)} <- {guard}")
     return "\n".join(statements)
 
 
@@ -71,12 +75,10 @@ def _assert(relation: str, row: tuple[Value, ...]) -> str:
     return f"+{relation}(" + ", ".join(literal(v) for v in row) + ")"
 
 
-def _retract_key(relation: Relation, key: tuple[Value, ...]) -> str:
-    """Conditional delete of whatever fact holds `key`, whatever its other columns."""
+def _key_atom(relation: Relation, key: tuple[Value, ...]) -> str:
     keyed = dict(zip(relation.key, key, strict=True))
     args = ", ".join(
         literal(keyed[name]) if name in keyed else f"V{i}"
         for i, name in enumerate(relation.column_names)
     )
-    atom = f"{relation.name}({args})"
-    return f"-{atom} <- {atom}"
+    return f"{relation.name}({args})"

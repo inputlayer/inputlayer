@@ -99,21 +99,6 @@ def test_latest_per_key_keeps_highest_revision() -> None:
     assert latest_per_key([a2, b, a1]) == [a2, b]
 
 
-def test_apply_program_replaces_by_key_then_records_revisions() -> None:
-    upsert = FactChange(CUSTOMER, (1,), 10, (1, 'Ac"me\n', "enterprise"))
-    retract = FactChange(PAYMENT_ISSUE, ("inv_1",), 4, None)
-    assert iql.apply_program([upsert, retract]).splitlines() == [
-        "-customer(1, V1, V2) <- customer(1, V1, V2)",
-        '+customer(1, "Ac\\"me\\n", "enterprise")',
-        '-payment_issue("inv_1", V1, V2) <- payment_issue("inv_1", V1, V2)',
-        '-ingest_revision("customer", "[1]", V2) <- ingest_revision("customer", "[1]", V2)',
-        '+ingest_revision("customer", "[1]", 10)',
-        '-ingest_revision("payment_issue", "[\\"inv_1\\"]", V2)'
-        ' <- ingest_revision("payment_issue", "[\\"inv_1\\"]", V2)',
-        '+ingest_revision("payment_issue", "[\\"inv_1\\"]", 4)',
-    ]
-
-
 def test_schema_program_declares_owned_relations_and_revisions() -> None:
     assert iql.schema_program([CUSTOMER]).splitlines() == [
         "+customer(id: int, name: string, tier: string)",
@@ -144,3 +129,18 @@ def test_relation_validates_its_key() -> None:
         Relation("r", (("a", "int"),), key=("b",))
     with pytest.raises(ValueError):
         Relation("r", (("a", "decimal"),), key=("a",))
+
+
+@pytest.mark.parametrize("column", CUSTOMER.column_names)
+@pytest.mark.parametrize("op", ["r", "c", "u"])
+def test_debezium_rejects_unavailable_mapped_values(column: str, op: str) -> None:
+    row = {**ACME, column: "__debezium_unavailable_value"}
+    with pytest.raises(MappingError, match="unavailable value"):
+        debezium.changes_from_body([envelope(op, 10, after=row)], TABLES)
+
+
+def test_debezium_delete_rejects_unavailable_key() -> None:
+    with pytest.raises(MappingError, match="unavailable value"):
+        debezium.change_from_event(
+            envelope("d", 10, before={"id": "__debezium_unavailable_value"}), TABLES
+        )

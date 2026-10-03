@@ -14,14 +14,14 @@ SaaS -------------------------------------------POST /webhooks/billing--+
 
 ## Run it
 
-You need Docker with Compose v2.
+You need Docker with Compose v2 and OpenSSL.
 
 ```bash
 cd examples/ingestion
 ./demo.sh
 ```
 
-The script starts Postgres, InputLayer, the adapter and Debezium from scratch, then runs a self-checking scenario. A client subscribes to `?needs_attention(Id, Name, Invoice)`, which lists enterprise customers (from Postgres) with an unpaid invoice (from billing webhooks). The script then changes rows and sends webhooks, and asserts that the client receives exactly the expected deltas:
+The script generates fresh engine, webhook and database credentials in an ignored, owner-readable `.env` file, then starts Postgres, InputLayer, the adapter and Debezium from scratch, then runs a self-checking scenario. A client subscribes to `?needs_attention(Id, Name, Invoice)`, which lists enterprise customers (from Postgres) with an unpaid invoice (from billing webhooks). The script then changes rows and sends webhooks, and asserts that the client receives exactly the expected deltas:
 
 ```
 watching ?needs_attention(Id, Name, Invoice); snapshot: []
@@ -56,7 +56,7 @@ docker compose run --rm --no-deps demo python -m ingest.watch '?customer(Id, Nam
 docker compose down -v   # stop and delete everything
 ```
 
-The engine image defaults to `ghcr.io/inputlayer/inputlayer:latest`. To use another build, set `INPUTLAYER_IMAGE`. The adapter needs an engine that speaks WebSocket protocol 2 (request ids), and refuses older ones at connect time. `INPUTLAYER_PORT` and `ADAPTER_PORT` move the published ports.
+The engine image defaults to `ghcr.io/inputlayer/inputlayer:latest`. To use another build, set `INPUTLAYER_IMAGE`. The adapter needs an engine that speaks WebSocket protocol 2 (request ids), and refuses older ones at connect time. `INPUTLAYER_PORT` and `ADAPTER_PORT` move the published ports, which bind only to `127.0.0.1`.
 
 ## How changes become facts
 
@@ -70,16 +70,16 @@ Each adapter-fed relation has **key columns**, like a primary key. Every source 
 | Webhook type mapped as a retraction (`payment.succeeded`) | retract the fact for the key |
 | Webhook type with no mapping | ignored (200, nothing applied) |
 
-The adapter sends each change to the engine as a single program. The program retracts whatever fact holds the key, asserts the new one, and records the change's revision:
+The adapter sends each change to the engine as a single program. The program initializes a missing watermark to `-1`, then replaces data and advances the watermark only if the incoming revision is newer:
 
 ```iql
--customer(2, V1, V2) <- customer(2, V1, V2)
-+customer(2, "Globex Corp", "enterprise")
--ingest_revision("customer", "[2]", V2) <- ingest_revision("customer", "[2]", V2)
-+ingest_revision("customer", "[2]", 26405816)
++ingest_revision("customer", "[2]", -1)
+-ingest_revision("customer", "[2]", -1) <- ingest_revision("customer", "[2]", Revision), Revision >= 0
+-customer(2, V1, V2) <- customer(2, V1, V2), ingest_revision("customer", "[2]", Revision), Revision < 26405816
+-ingest_revision("customer", "[2]", Revision), +customer(2, "Globex Corp", "enterprise"), +ingest_revision("customer", "[2]", 26405816) <- ingest_revision("customer", "[2]", Revision), Revision < 26405816
 ```
 
-A program commits as one transaction (see [Programs Commit Together](core-concepts#programs-commit-together)). Subscribers therefore see the old and new row swap in one delta, and an update that leaves the row unchanged pushes nothing. Engines built before atomic programs commit each statement separately, so subscribers can see a transient retract followed by an insert.
+A program commits as one transaction (see [Programs Commit Together](core-concepts#programs-commit-together)). Subscribers therefore see the old and new row swap in one delta, and an update that leaves the row unchanged pushes nothing. This recipe requires an engine with atomic programs and commit-time validation of conditional reads.
 
 The mapping lives in one file, `adapter/ingest/mappings.py`. It names each relation's typed columns and key, the Postgres table that feeds it, and the webhook event types that set or retract it. The adapter declares those schemas when it starts. Relation columns are read from source fields of the same name.
 
@@ -91,7 +91,7 @@ Every delivery path here is at least once. Debezium resends anything it has not 
 - `ingest_revision(relation, key, revision)` stores the last applied revision per key, **in the same transaction as the data**. A change at or below the stored revision is skipped, which covers both replays and late, out-of-order events.
 - A retraction keeps its revision as a tombstone. A replayed older insert therefore cannot resurrect a deleted fact.
 
-Because the revision commits with the data, a crash or a broken connection at any point can never apply a change twice or lose one; the sender's retry decides. The adapter is the single writer of the relations it owns: run one adapter per set of relations, not several replicas against the same relations.
+The revision comparison runs inside the transaction and is validated at commit. An older in-flight request finishing after a reconnect cannot overwrite a newer revision; a sender can safely retry an unknown outcome. The adapter is the single writer of the relations it owns: run one adapter per set of relations, not several replicas against the same relations.
 
 ## Failure behavior
 
@@ -110,7 +110,7 @@ A `422` from `/cdc` stops the CDC stream at that event. This is fail closed: lat
 
 `debezium/application.properties` configures Debezium Server with Postgres's built-in `pgoutput` plugin and the HTTP sink:
 
-- Postgres needs `wal_level=logical`. The table needs a primary key; the default replica identity suffices, because deletes are applied by key.
+- Postgres needs `wal_level=logical`. The table needs a primary key and `REPLICA IDENTITY FULL`, as configured in `postgres/init.sql`, so unchanged TOASTed columns remain available. The adapter rejects Debezium's `__debezium_unavailable_value` placeholder in mapped fields instead of storing it as data.
 - Debezium snapshots existing rows on first start (`r` events), then streams changes. Its offsets live on the `debezium-data` volume and are committed after the adapter's 2xx reply. When a restart resends events, the adapter skips them.
 - An update that changes the primary key arrives as a delete of the old key and an insert of the new one.
 - Mapped columns must be `NOT NULL`: IQL facts have no null value. Map nullable columns to a separate relation, or give them a default in a view.
@@ -155,7 +155,7 @@ A client subscribes over the [WebSocket API](websocket-api#standing-queries) and
 
 ## Before production
 
-- Replace every demo secret in `docker-compose.yml`: the engine API key and both `whsec_` secrets.
+- Provision production credentials separately from the demo-generated `.env` file: the engine API key, both `whsec_` secrets and the database password.
 - Give the adapter an API key with write access to its knowledge graph only, not the bootstrap admin key (see [Authentication](authentication)).
 - Expose `/webhooks/*` to senders only through TLS. Keep `/cdc` on the private network.
 - Keep the Debezium offsets volume and the replication slot. A dropped slot loses changes made while it was gone.
