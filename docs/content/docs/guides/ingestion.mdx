@@ -97,6 +97,8 @@ The revision comparison runs inside the transaction and is validated at commit. 
 
 The adapter replies 2xx only after every change in the request is committed or was already applied.
 
+`applied` counts watermark advances reported by the engine's committed conditional updates; `skipped` counts the remaining input changes, including duplicates coalesced within a batch. The preliminary revision read only filters candidates and does not determine these counters.
+
 | Reply | Meaning | Sender |
 |---|---|---|
 | `200 {"applied": n, "skipped": m}` | committed, or already applied | moves on |

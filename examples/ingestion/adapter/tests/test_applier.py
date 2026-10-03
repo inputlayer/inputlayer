@@ -77,16 +77,19 @@ async def real_engine(tmp_path: Path) -> AsyncIterator[EngineSettings]:
     "old_delete,new_delete", [(False, False), (False, True), (True, False), (True, True)]
 )
 @pytest.mark.parametrize("seeded", [False, True])
-async def test_disconnected_write_cannot_overwrite_reconnected_revision(
+@pytest.mark.parametrize("disconnected_revision", [10, 12])
+async def test_disconnected_write_preserves_revision_order_and_committed_counts(
     real_engine: EngineSettings, relation: Relation, key: tuple,
     old_row: tuple, new_row: tuple, old_delete: bool, new_delete: bool, seeded: bool,
+    disconnected_revision: int, caplog: pytest.LogCaptureFixture,
 ) -> None:
     release = asyncio.Event()
     completed: asyncio.Future[dict] = asyncio.get_running_loop().create_future()
     pause_write = False
+    resume_on_next_write = False
     async with aiohttp.ClientSession() as http:
         async def proxy(request: web.Request) -> web.WebSocketResponse:
-            nonlocal pause_write
+            nonlocal pause_write, resume_on_next_write
             downstream = web.WebSocketResponse()
             await downstream.prepare(request)
             async with http.ws_connect(
@@ -100,8 +103,16 @@ async def test_disconnected_write_cannot_overwrite_reconnected_revision(
                     )
                     if paused:
                         pause_write = False
+                        resume_on_next_write = disconnected_revision > 11
                         await downstream.close()
                         await release.wait()
+                    elif (
+                        resume_on_next_write and frame["type"] == "execute"
+                        and not frame["program"].startswith("?")
+                    ):
+                        resume_on_next_write = False
+                        release.set()
+                        await asyncio.wait_for(asyncio.shield(completed), 5)
                     await upstream.send_json(frame)
                     while True:
                         reply = await upstream.receive_json()
@@ -128,20 +139,27 @@ async def test_disconnected_write_cannot_overwrite_reconnected_revision(
             await applier.declare(RELATIONS)
             if seeded:
                 assert await applier.apply([FactChange(relation, key, 9, old_row)]) == Outcome(1, 0)
-            older = FactChange(relation, key, 10, None if old_delete else old_row)
-            newer = FactChange(relation, key, 11, None if new_delete else new_row)
+            disconnected = FactChange(
+                relation, key, disconnected_revision, None if old_delete else old_row
+            )
+            reconnected = FactChange(relation, key, 11, None if new_delete else new_row)
             pause_write = True
             with pytest.raises(EngineUnavailable):
-                await asyncio.wait_for(applier.apply([older]), 5)
-            assert await applier.apply([newer]) == Outcome(1, 0)
+                await asyncio.wait_for(applier.apply([disconnected]), 5)
+            expected = Outcome(1, 0) if disconnected_revision < 11 else Outcome(0, 1)
+            with caplog.at_level("INFO", logger="ingest.applier"):
+                assert await applier.apply([reconnected]) == expected
+            assert f"applied={expected.applied} skipped={expected.skipped}" in caplog.messages[-1]
             release.set()
             reply = await asyncio.wait_for(completed, 5)
             assert reply["type"] == "result" and not reply.get("errors"), reply
-            stored = await auditor.execute(iql.revision_query(newer))
-            assert stored.rows == [[*newer.identity, 11]]
+            newest = reconnected if disconnected_revision < 11 else disconnected
+            stored = await auditor.execute(iql.revision_query(newest))
+            assert stored.rows == [[*newest.identity, newest.revision]]
             query = f"?{relation.name}(A, B, C)"
-            assert (await auditor.execute(query)).rows == ([] if new_delete else [list(new_row)])
-            assert await applier.apply([older, newer]) == Outcome(0, 2)
+            expected_rows = [] if newest.row is None else [list(newest.row)]
+            assert (await auditor.execute(query)).rows == expected_rows
+            assert await applier.apply([disconnected, reconnected]) == Outcome(0, 2)
         finally:
             release.set()
             await applier.close()
@@ -158,7 +176,9 @@ async def test_batch_replay_delete_and_recreate(real_engine: EngineSettings) -> 
             customer = FactChange(CUSTOMER, (1,), 0, (1, 'Ac"me\n', "enterprise"))
             payment = FactChange(PAYMENT_ISSUE, ("inv_1",), 0, ("inv_1", 1, 42))
             batch = [customer, payment]
-            assert await applier.apply(batch) == Outcome(2, 0)
+            assert await applier.apply([]) == Outcome(0, 0)
+            assert await applier.apply([customer, customer, payment]) == Outcome(2, 1)
+            assert await applier.apply(batch) == Outcome(0, 2)
             for change in batch:
                 stored = await auditor.execute(iql.revision_query(change))
                 assert stored.rows == [[*change.identity, 0]]
@@ -172,6 +192,9 @@ async def test_batch_replay_delete_and_recreate(real_engine: EngineSettings) -> 
                 stored = await auditor.execute(iql.revision_query(change))
                 assert stored.rows == [[*change.identity, 1]]
                 assert not (await auditor.execute(f"?{change.relation.name}(A, B, C)")).rows
+            absent = FactChange(PAYMENT_ISSUE, ("absent",), 1, None)
+            assert await applier.apply([*deleted, absent]) == Outcome(1, 2)
+            assert await applier.apply([absent]) == Outcome(0, 1)
             recreated = [FactChange(c.relation, c.key, 2, c.row) for c in batch]
             assert await applier.apply(recreated) == Outcome(2, 0)
             for change in recreated:
@@ -179,6 +202,9 @@ async def test_batch_replay_delete_and_recreate(real_engine: EngineSettings) -> 
                 assert stored.rows == [[*change.identity, 2]]
                 rows = (await auditor.execute(f"?{change.relation.name}(A, B, C)")).rows
                 assert rows == [list(change.row)]
+            unchanged = [FactChange(c.relation, c.key, 3, c.row) for c in batch]
+            assert await applier.apply(unchanged) == Outcome(2, 0)
+            assert await applier.apply([*unchanged, *recreated]) == Outcome(0, 4)
         finally:
             await applier.close()
             await auditor.close()

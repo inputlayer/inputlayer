@@ -46,11 +46,13 @@ class Applier:
     async def apply(self, changes: list[FactChange]) -> Outcome:
         started = time.perf_counter()
         latest = latest_per_key(changes)
+        applied = 0
         async with self._lock:
             fresh = [c for c in latest if c.revision > await self._stored_revision(c)]
             if fresh:
-                await self._execute(iql.apply_program(fresh))
-        outcome = Outcome(applied=len(fresh), skipped=len(changes) - len(fresh))
+                result = await self._execute(iql.apply_program(fresh))
+                applied = sum(row[0].startswith("Update: 1 deleted, ") for row in result.rows)
+        outcome = Outcome(applied=applied, skipped=len(changes) - applied)
         log.info(
             "applied=%d skipped=%d in %.1f ms",
             outcome.applied,
