@@ -1,0 +1,31 @@
+# ingress-nginx terminates TLS and proxies WebSocket upgrades out of the box.
+# The long timeouts let idle agent subscriptions stay open: the engine's own
+# http.ws_idle_timeout_ms (default 5 minutes) decides when they close.
+# Also set http.trusted_proxies in base/configmap.yaml to the controller's pod CIDR.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: inputlayer
+  labels:
+    app.kubernetes.io/name: inputlayer
+    app.kubernetes.io/component: engine
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - inputlayer.example.com
+      secretName: inputlayer-tls
+  rules:
+    - host: inputlayer.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: inputlayer
+                port:
+                  name: http

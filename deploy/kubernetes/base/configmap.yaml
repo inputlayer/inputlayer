@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: inputlayer-config
+  labels:
+    app.kubernetes.io/name: inputlayer
+    app.kubernetes.io/component: engine
+data:
+  # Mounted at /etc/inputlayer/config.toml and passed with --config.
+  #
+  # INPUTLAYER_* environment variables override this file. The engine image
+  # sets http.host, http.port, storage.data_dir, logging.level and
+  # storage.auto_create_knowledge_graphs as environment variables, so those
+  # keys are set in statefulset.yaml, not here.
+  config.toml: |
+    [storage.persist]
+    enabled = true
+    durability_mode = "immediate"
+
+    [storage.performance]
+    # 0 = one worker per CPU the process sees (the whole node when no CPU
+    # limit is set). Set it to the CPUs requested in statefulset.yaml.
+    num_threads = 0
+
+    [logging]
+    format = "json"
+
+    [http]
+    # Keep below terminationGracePeriodSeconds in statefulset.yaml.
+    shutdown_timeout_secs = 30
+    # Behind an Ingress every request arrives from the ingress controller.
+    # List the controller's pod CIDR here so per-IP rate limits and the
+    # pre-auth WebSocket cap apply to real clients, not to the controller.
+    # Empty: the client IP is always the TCP peer.
+    trusted_proxies = []

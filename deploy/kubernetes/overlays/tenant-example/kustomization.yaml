@@ -1,0 +1,29 @@
+# One overlay per tenant: copy this directory, then set the namespace, the
+# image tag and the public host. Apply with `kubectl apply -k <dir>`.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: inputlayer-acme
+
+resources:
+  - namespace.yaml
+  - ../../base
+
+components:
+  - ../../components/ingress
+
+images:
+  - name: ghcr.io/inputlayer/inputlayer
+    newTag: latest # pin a released version
+
+patches:
+  - target:
+      kind: Ingress
+      name: inputlayer
+    patch: |-
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: acme.inputlayer.example.com
+      - op: replace
+        path: /spec/rules/0/host
+        value: acme.inputlayer.example.com

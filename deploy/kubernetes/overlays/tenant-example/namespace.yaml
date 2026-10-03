@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: inputlayer-acme
+  labels:
+    # The engine runs non-root with no added capabilities.
+    pod-security.kubernetes.io/enforce: restricted
