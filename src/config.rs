@@ -496,6 +496,15 @@ pub struct RateLimitConfig {
     #[serde(default = "default_ws_max_in_flight_requests")]
     pub ws_max_in_flight_requests: usize,
 
+    /// Coalescing window of a standing query, in milliseconds: an idle view
+    /// waits this long after the first relevant commit before re-evaluating,
+    /// so commits within the window share one evaluation. Every delta is
+    /// delayed by up to this much. 0 (default) evaluates at once; commits that
+    /// land during an evaluation are always coalesced into one follow-up.
+    /// At most [`MAX_SUBSCRIPTION_COALESCE_MS`].
+    #[serde(default)]
+    pub subscription_coalesce_ms: u64,
+
     /// Notification broadcast channel buffer size (per-subscriber queue depth)
     #[serde(default = "default_notification_buffer_size")]
     pub notification_buffer_size: usize,
@@ -659,6 +668,10 @@ fn default_ws_max_messages_per_sec() -> u32 {
 fn default_ws_max_lifetime_secs() -> u64 {
     86400
 } // 24 hours
+/// Upper bound of `http.rate_limit.subscription_coalesce_ms`: the most a
+/// coalescing window may add to a delta's latency.
+pub const MAX_SUBSCRIPTION_COALESCE_MS: u64 = 100;
+
 fn default_ws_max_subscriptions() -> usize {
     64
 }
@@ -684,6 +697,7 @@ impl Default for RateLimitConfig {
             ws_max_lifetime_secs: default_ws_max_lifetime_secs(),
             ws_max_subscriptions: default_ws_max_subscriptions(),
             ws_max_in_flight_requests: default_ws_max_in_flight_requests(),
+            subscription_coalesce_ms: 0,
             notification_buffer_size: default_notification_buffer_size(),
             per_ip_max_rps: default_per_ip_max_rps(),
             ws_max_preauth_per_ip: default_ws_max_preauth_per_ip(),
@@ -826,6 +840,15 @@ impl Config {
                 "notification_buffer_size is very large, capping at 100000"
             );
             self.http.rate_limit.notification_buffer_size = 100_000;
+        }
+
+        // A longer window would trade too much delta latency for fewer evaluations
+        if self.http.rate_limit.subscription_coalesce_ms > MAX_SUBSCRIPTION_COALESCE_MS {
+            tracing::warn!(
+                value_ms = self.http.rate_limit.subscription_coalesce_ms,
+                "subscription_coalesce_ms exceeds {MAX_SUBSCRIPTION_COALESCE_MS}, capping"
+            );
+            self.http.rate_limit.subscription_coalesce_ms = MAX_SUBSCRIPTION_COALESCE_MS;
         }
 
         // ws_auth_timeout_ms=0 would reject every WebSocket client
@@ -1352,6 +1375,21 @@ mod tests {
         config.http.rate_limit.notification_buffer_size = 200_000;
         config.validate().unwrap();
         assert_eq!(config.http.rate_limit.notification_buffer_size, 100_000);
+    }
+
+    #[test]
+    fn test_validate_caps_subscription_coalesce_window() {
+        let mut config = Config::default();
+        assert_eq!(config.http.rate_limit.subscription_coalesce_ms, 0);
+        config.http.rate_limit.subscription_coalesce_ms = 5;
+        config.validate().unwrap();
+        assert_eq!(config.http.rate_limit.subscription_coalesce_ms, 5);
+        config.http.rate_limit.subscription_coalesce_ms = 10_000;
+        config.validate().unwrap();
+        assert_eq!(
+            config.http.rate_limit.subscription_coalesce_ms,
+            MAX_SUBSCRIPTION_COALESCE_MS
+        );
     }
 
     #[test]

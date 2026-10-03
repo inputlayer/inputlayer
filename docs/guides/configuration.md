@@ -176,6 +176,10 @@ ws_max_messages_per_sec = 1000
 # Maximum HTTP requests per second per IP address (0 = unlimited)
 per_ip_max_rps = 0
 
+# Coalescing window of a standing query in ms: commits within it share one
+# evaluation, and every delta waits up to this long (0 = evaluate at once, max 100)
+subscription_coalesce_ms = 0
+
 # Notification ring buffer size for reconnect replay
 notification_buffer_size = 4096
 ```

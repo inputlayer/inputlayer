@@ -194,8 +194,11 @@ pub struct Handler {
     timing_histograms: Arc<crate::execution::timing::TimingHistograms>,
     /// Teaching agent for guided onboarding.
     agent: Arc<crate::agent::AgentManager>,
-    /// Standing-query counters (evaluations, active subscriptions).
-    subscription_metrics: super::subscription::SubscriptionMetrics,
+    /// Standing-query counters (evaluations, active subscriptions, views).
+    subscription_metrics: Arc<super::subscription::SubscriptionMetrics>,
+    /// The worker owning the shared standing-query views, started by the
+    /// first subscription.
+    subscription_hub: std::sync::OnceLock<super::subscription::SubscriptionHub>,
     /// Login failure counters.
     login_throttle: Arc<crate::auth::LoginThrottle>,
     /// Caps concurrent argon2 verifications.
@@ -769,7 +772,8 @@ impl Handler {
             agent: Arc::new(crate::agent::AgentManager::new(
                 crate::agent::AgentConfig::default(),
             )),
-            subscription_metrics: super::subscription::SubscriptionMetrics::default(),
+            subscription_metrics: Arc::default(),
+            subscription_hub: std::sync::OnceLock::new(),
             login_throttle: Arc::default(),
             password_permits: Arc::new(tokio::sync::Semaphore::new((ncpu / 4).clamp(1, 4))),
             login_queue: Arc::new(tokio::sync::Semaphore::new(MAX_QUEUED_LOGINS)),
@@ -809,7 +813,8 @@ impl Handler {
             agent: Arc::new(crate::agent::AgentManager::new(
                 crate::agent::AgentConfig::default(),
             )),
-            subscription_metrics: super::subscription::SubscriptionMetrics::default(),
+            subscription_metrics: Arc::default(),
+            subscription_hub: std::sync::OnceLock::new(),
             login_throttle: Arc::default(),
             password_permits: Arc::new(tokio::sync::Semaphore::new((ncpu / 4).clamp(1, 4))),
             login_queue: Arc::new(tokio::sync::Semaphore::new(MAX_QUEUED_LOGINS)),
@@ -855,6 +860,20 @@ impl Handler {
     /// Standing-query counters.
     pub fn subscription_metrics(&self) -> &super::subscription::SubscriptionMetrics {
         &self.subscription_metrics
+    }
+
+    /// The worker owning the shared standing-query views, started on the
+    /// current runtime at the first call.
+    pub fn subscription_hub(&self) -> &super::subscription::SubscriptionHub {
+        self.subscription_hub.get_or_init(|| {
+            super::subscription::SubscriptionHub::spawn(
+                self.notifications.subscribe(),
+                Arc::clone(&self.subscription_metrics),
+                std::time::Duration::from_millis(
+                    self.config.http.rate_limit.subscription_coalesce_ms,
+                ),
+            )
+        })
     }
 
     /// Live change notifications from now on.
@@ -3727,6 +3746,25 @@ impl Handler {
         // later one is too late.
         control.finish().map_err(supervise::stop_error)?;
         settle_result(result, auth, single_statement)
+    }
+
+    /// Check that `auth` may run the query `goal` on `knowledge_graph`: the
+    /// check `execute_program` makes before running it.
+    pub fn authorize_query(
+        &self,
+        auth: Option<&crate::auth::Principal>,
+        knowledge_graph: &str,
+        goal: &crate::statement::QueryGoal,
+    ) -> Result<(), String> {
+        let identity = auth
+            .map(crate::auth::Principal::identity)
+            .transpose()
+            .map_err(String::from)?;
+        self.authorize_program(
+            identity.as_ref(),
+            Some(knowledge_graph),
+            &[statement::Statement::Query(goal.clone())],
+        )
     }
 
     /// Run the query `query` (`?body`) on `snapshot`, a snapshot of
