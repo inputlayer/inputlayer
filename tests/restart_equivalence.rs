@@ -2,7 +2,10 @@
 #![allow(clippy::unwrap_used)]
 
 use inputlayer::config::DurabilityMode;
-use inputlayer::storage::persist::{FilePersist, PersistBackend, PersistConfig, Update};
+use inputlayer::storage::persist::{
+    FilePersist, PersistBackend, PersistConfig, Transaction, Update,
+};
+use inputlayer::storage::StorageResult;
 use inputlayer::value::Tuple;
 use inputlayer::{Config, StorageEngine};
 use proptest::prelude::*;
@@ -10,6 +13,19 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tempfile::TempDir;
+
+/// Commit `updates` to `shard`, one transaction per run of equal times.
+fn commit(persist: &FilePersist, shard: &str, updates: &[Update]) -> StorageResult<()> {
+    for run in updates.chunk_by(|a, b| a.time == b.time) {
+        let mut txn = Transaction::new(run[0].time);
+        txn.facts(
+            shard,
+            run.iter().map(|u| (u.data.clone(), u.diff)).collect(),
+        );
+        persist.commit(txn)?;
+    }
+    Ok(())
+}
 
 const KG: &str = "default";
 
@@ -132,12 +148,12 @@ fn recovery_clamps_drifted_multiplicities() {
             ..Default::default()
         })
         .unwrap();
-        persist
-            .append(
-                "default:r",
-                &[Update::insert(t(1), 1_000), Update::delete(t(2), 1_000)],
-            )
-            .unwrap();
+        commit(
+            &persist,
+            "default:r",
+            &[Update::insert(t(1), 1_000), Update::delete(t(2), 1_000)],
+        )
+        .unwrap();
     }
     {
         let s = open(temp.path());

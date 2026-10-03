@@ -2,15 +2,20 @@
 //! and v1 data dirs migrate without loss.
 
 use inputlayer::config::DurabilityMode;
-use inputlayer::storage::persist::batch::Update;
 use inputlayer::storage::persist::{
-    consolidate_to_current, to_tuples, FilePersist, PersistBackend, PersistConfig,
+    consolidate_to_current, to_tuples, FilePersist, PersistBackend, PersistConfig, Transaction,
 };
 use inputlayer::value::{Tuple, Value};
 use inputlayer::{Config, StorageEngine};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
+
+fn insert(revision: u64, shard: &str, tuples: Vec<Tuple>) -> Transaction {
+    let mut txn = Transaction::new(revision);
+    txn.insert(shard, tuples);
+    txn
+}
 
 fn engine(dir: &Path) -> StorageEngine {
     let mut config = Config::default();
@@ -121,17 +126,16 @@ fn every_value_variant_survives_flush_compaction_and_restart() {
     // Null first: the first row must not decide the column type.
     let mut values = every_variant();
     values.rotate_left(7);
-    let updates: Vec<Update> = values
+    let tuples: Vec<Tuple> = values
         .iter()
         .enumerate()
-        .map(|(i, v)| Update::insert(t(vec![v.clone(), Value::Int32(i as i32)]), i as u64))
+        .map(|(i, v)| t(vec![v.clone(), Value::Int32(i as i32)]))
         .collect();
-    let expected: BTreeSet<Tuple> = updates.iter().map(|u| u.data.clone()).collect();
+    let expected: BTreeSet<Tuple> = tuples.iter().cloned().collect();
     assert_eq!(values[0], Value::Null);
     {
         let p = persist(path.clone());
-        p.ensure_shard("kg:mixed").unwrap();
-        p.append("kg:mixed", &updates).unwrap();
+        p.commit(insert(1, "kg:mixed", tuples)).unwrap();
         p.flush("kg:mixed").unwrap();
         assert_eq!(current(&p, "kg:mixed"), expected);
         p.compact("kg:mixed", 0).unwrap();
@@ -195,8 +199,7 @@ fn shards_differing_only_in_case_get_distinct_files() {
     {
         let p = persist(path.clone());
         for (shard, n) in [("kg:Edge", 1), ("kg:edge", 2)] {
-            p.ensure_shard(shard).unwrap();
-            p.append(shard, &[Update::insert(Tuple::from_pair(n, n), 1)])
+            p.commit(insert(1, shard, vec![Tuple::from_pair(n, n)]))
                 .unwrap();
             p.flush(shard).unwrap();
         }
@@ -333,8 +336,7 @@ fn duplicate_shard_meta_blocks_orphan_cleanup() {
     let path = temp.path().to_path_buf();
     {
         let p = persist(path.clone());
-        p.ensure_shard("kg:edge").unwrap();
-        p.append("kg:edge", &[Update::insert(Tuple::from_pair(1, 2), 1)])
+        p.commit(insert(1, "kg:edge", vec![Tuple::from_pair(1, 2)]))
             .unwrap();
         p.flush("kg:edge").unwrap();
     }

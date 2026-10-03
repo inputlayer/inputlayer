@@ -271,12 +271,15 @@ the lock is released automatically when its owner exits, even on a crash.
 
 ### "WAL corruption"
 
-**Cause**: Crash during write operation.
+**Cause**: Crash during write operation, or damage to the WAL file.
 
-**Solution**: InputLayer should recover automatically. If not:
-1. Check for `.wal` files in data directory
-2. Remove corrupt WAL files (will lose uncommitted data)
-3. Restart
+**Solution**: InputLayer recovers automatically to the last intact transaction. A
+write torn by a crash is dropped silently. If intact records follow damaged bytes,
+startup logs an error and saves them to `persist/wal/current.wal.<unix-ms>.corrupt`.
+
+If startup fails with "has a valid checksum but cannot be read", the WAL was written
+by an incompatible server version: start that version once to drain the WAL, then
+upgrade.
 
 ## Performance Issues
 
