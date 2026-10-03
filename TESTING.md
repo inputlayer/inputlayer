@@ -9,6 +9,7 @@ make test-all       # Full verification: build + unit + snapshot (~70s, all CPUs
 make test-fast      # Unit tests only (~30s)
 make test           # Unit + snapshot tests
 make e2e-test       # Snapshot tests only (parallel)
+make e2e-reactive   # Reactive agent path against real engine processes
 make test-affected  # Run only snapshots affected by uncommitted changes
 ```
 
@@ -60,6 +61,36 @@ Environment variables:
 | `INPUTLAYER_TEST_PORT` | 8080 | Server port for tests |
 | `INPUTLAYER_RESTART_INTERVAL` | 500 | Restart server every N tests (sequential mode) |
 
+## Reactive Agent Path (E2E)
+
+`make e2e-reactive` drives the supported agent path end to end: each test
+starts a real `inputlayer-server` process with its own data directory, agents
+subscribe to standing queries over `/ws`, and independent writer connections
+insert and retract facts and change rules. Agents must receive the exact
+added/retracted rows as `subscription_delta` pushes, with contiguous `seq`, and
+end equal to a fresh full query on another connection, without re-querying.
+Scenarios cover one subscriber, 64 subscribers, reconnect/resubscribe and
+crash-restart, unrelated writes, and write bursts.
+
+```bash
+make e2e-reactive                                   # release build, writes latency samples
+cargo test --test e2e_reactive                      # same scenarios, debug build
+```
+
+Defects tracked by the reactive plan run as **expected failures**
+(`tests/e2e_reactive/known_defects.rs`): capped results adopted as complete
+(S05), out-of-order and restart-cursor notification delivery (W04), and an
+oversized delta that advances the subscription without delivery (W05). Each
+asserts the correct contract; its own violation passes as `XFAIL`, any other
+violation fails, and a holding contract fails as `XPASS` so the marker is
+removed and the scenario becomes required when the plan item lands.
+
+Every writer->agent delivery is recorded as a raw sample (write sent, write
+acknowledged, delta arrived) in `target/e2e-reactive/<scenario>.jsonl`, schema
+`inputlayer.reactive.delta_latency.v1` (see `testkit/src/metrics.rs`). The
+harness lives in the test-only `testkit` crate (engine process, `/ws` agent
+client, fixtures, samples), shared with the benches.
+
 ## Server Tracing (Debug Logs to File)
 
 Enable structured server tracing logs (useful for diagnosing hangs/timeouts):
@@ -101,6 +132,7 @@ Source-to-category mapping:
 | `make test` | Unit + snapshot | Pre-commit check |
 | `make test-all` | Build + unit + snapshot + check | Full verification before merge |
 | `make test-affected` | Snapshot tests for changed files only | Fast E2E feedback |
+| `make e2e-reactive` | Reactive agent path against real engines, latency samples | Subscription or wire changes |
 
 ### Code Quality
 

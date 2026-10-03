@@ -55,6 +55,9 @@ cargo test                          # Unit tests
 ./scripts/run_snapshot_tests.sh     # Snapshot tests
 ```
 
+Changes to subscriptions, notifications or the WebSocket protocol also run
+`make e2e-reactive` (agents subscribed to a real engine; see `TESTING.md`).
+
 ---
 
 ## Key Principles (Must Read)
