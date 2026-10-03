@@ -2,15 +2,27 @@
 //! [`CredentialRegistry::load`](super::CredentialRegistry::load) indexes.
 //!
 //! `users` rows are `(username, password_hash, role)`; `api_keys` rows are
-//! `(label, key_hash, username)`. A row too short or not made of strings is
-//! not a credential and is ignored; a user whose role does not parse is
-//! skipped with a warning, so it cannot authenticate.
+//! `(label, key_hash, username)`, with `api_key_times(key_hash, field, at)`
+//! rows holding each key's `created_at`, `expires_at` and `last_used_at`. A
+//! row too short or not made of strings is not a credential and is ignored; a
+//! user whose role does not parse is skipped with a warning, so it cannot
+//! authenticate. When a time field has several rows the earliest creation and
+//! expiry and the latest use win, so a crash between writes can only leave a
+//! key stricter than intended.
+
+use std::collections::HashMap;
 
 use tracing::warn;
 
 use crate::value::RelationMap;
 
-use super::{ApiKeyRecord, UserRecord};
+use super::{ApiKeyRecord, ApiKeyTimes, UserRecord};
+
+pub(crate) const API_KEYS: &str = "api_keys";
+pub(crate) const API_KEY_TIMES: &str = "api_key_times";
+pub(crate) const CREATED_AT: &str = "created_at";
+pub(crate) const EXPIRES_AT: &str = "expires_at";
+pub(crate) const LAST_USED_AT: &str = "last_used_at";
 
 /// Every user and API key in `_internal`'s relations.
 pub fn stored_credentials(relations: &RelationMap) -> (Vec<UserRecord>, Vec<ApiKeyRecord>) {
@@ -27,14 +39,46 @@ pub fn stored_credentials(relations: &RelationMap) -> (Vec<UserRecord>, Vec<ApiK
             }
         })
         .collect();
-    let keys = string_rows(relations, "api_keys")
+    let times = key_times(relations);
+    let keys = string_rows(relations, API_KEYS)
         .map(|(label, key_hash, username)| ApiKeyRecord {
             label: label.to_string(),
             key_hash: key_hash.to_string(),
             username: username.to_string(),
+            times: times.get(key_hash).copied().unwrap_or_default(),
         })
         .collect();
     (users, keys)
+}
+
+/// Each key's times, by key hash.
+fn key_times(relations: &RelationMap) -> HashMap<&str, ApiKeyTimes> {
+    let mut times: HashMap<&str, ApiKeyTimes> = HashMap::new();
+    for tuple in relations.get(API_KEY_TIMES).into_iter().flatten() {
+        let [hash, field, at] = tuple.values() else {
+            continue;
+        };
+        let (Some(hash), Some(field), Some(at)) = (
+            hash.as_str(),
+            field.as_str(),
+            at.as_timestamp().and_then(|at| u64::try_from(at).ok()),
+        ) else {
+            continue;
+        };
+        let entry = times.entry(hash).or_default();
+        let (slot, keep_min) = match field {
+            CREATED_AT => (&mut entry.created_at, true),
+            EXPIRES_AT => (&mut entry.expires_at, true),
+            LAST_USED_AT => (&mut entry.last_used_at, false),
+            _ => continue,
+        };
+        *slot = Some(match *slot {
+            Some(current) if keep_min => current.min(at),
+            Some(current) => current.max(at),
+            None => at,
+        });
+    }
+    times
 }
 
 /// The first three columns of each row of `relation` that are all strings.

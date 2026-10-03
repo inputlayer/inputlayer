@@ -11,11 +11,13 @@ from inputlayer.auth import (
     compile_create_api_key,
     compile_create_user,
     compile_drop_user,
+    compile_expire_api_key,
     compile_list_api_keys,
     compile_list_users,
     compile_revoke_api_key,
     compile_set_password,
     compile_set_role,
+    parse_api_keys,
 )
 from inputlayer.connection import Connection
 from inputlayer.knowledge_graph import KnowledgeGraph
@@ -176,19 +178,20 @@ class InputLayer:
 
     # ── API key management ────────────────────────────────────────────
 
-    async def create_api_key(self, label: str) -> str:
-        """Create an API key. Returns the key string."""
-        result = await self._conn.execute(compile_create_api_key(label))
-        if result.rows and result.rows[0]:
-            return str(result.rows[0][0])
-        return ""
+    async def create_api_key(self, label: str, ttl: str | None = None) -> str:
+        """Create an API key, expiring ``ttl`` from now (e.g. ``"90d"``) or
+        never. Returns the key, which the server shows only once."""
+        result = await self._conn.execute(compile_create_api_key(label, ttl))
+        return str(result.rows[0][1])
 
     async def list_api_keys(self) -> list[ApiKeyInfo]:
         result = await self._conn.execute(compile_list_api_keys())
-        return [
-            ApiKeyInfo(label=row[0], created_at=str(row[1]) if len(row) > 1 else "")
-            for row in result.rows
-        ]
+        return parse_api_keys(result.columns, result.rows)
+
+    async def expire_api_key(self, label: str, ttl: str) -> None:
+        """Bring a key's expiry forward to ``ttl`` from now, e.g. the grace
+        period of a rotation. An expiry can only be brought forward."""
+        await self._conn.execute(compile_expire_api_key(label, ttl))
 
     async def revoke_api_key(self, label: str) -> None:
         await self._conn.execute(compile_revoke_api_key(label))

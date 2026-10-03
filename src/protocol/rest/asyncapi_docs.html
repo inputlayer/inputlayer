@@ -220,7 +220,7 @@
   <div class="msg-card-body">
     <p>A connection event, sent unprompted and never with an <code>id</code>. Every code but <code>notifications_missed</code> is followed by the server closing the connection.</p>
     <table class="field-table">
-      <tr><td>code</td><td>string</td><td><code>notifications_missed</code>, <code>slow_consumer</code>, <code>idle_timeout</code>, <code>lifetime_exceeded</code>, <code>auth_timeout</code>, <code>credential_revoked</code> or <code>server_shutdown</code></td></tr>
+      <tr><td>code</td><td>string</td><td><code>notifications_missed</code>, <code>slow_consumer</code>, <code>idle_timeout</code>, <code>lifetime_exceeded</code>, <code>auth_timeout</code>, <code>credential_revoked</code>, <code>credential_expired</code> or <code>server_shutdown</code></td></tr>
       <tr><td>message</td><td>string</td><td>Human-readable description</td></tr>
     </table>
     <pre><code>{"type": "notice", "code": "idle_timeout", "message": "Idle timeout"}</code></pre>

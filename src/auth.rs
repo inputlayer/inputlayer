@@ -13,12 +13,14 @@ use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 mod credentials;
-mod stored;
+mod principal;
+pub(crate) mod stored;
 
 pub use credentials::{
-    ApiKeyRecord, ApiKeyRejected, CredentialId, CredentialRegistry, CredentialRevoked,
-    PasswordCandidate, Principal, RevocationSignal, UserRecord,
+    ApiKeyInfo, ApiKeyRecord, ApiKeyRejected, ApiKeyTimes, CredentialRegistry, ExpireRejected,
+    KeyUsage, PasswordCandidate, UserRecord,
 };
+pub use principal::{CredentialEnded, CredentialId, EndSignal, Principal};
 pub use stored::stored_credentials;
 
 /// Name of the internal knowledge graph used for auth data.
@@ -522,9 +524,10 @@ fn authorize_kg_editor(stmt: &Statement) -> Result<(), String> {
             | MetaCommand::UserDrop(_)
             | MetaCommand::UserPassword { .. }
             | MetaCommand::UserRole { .. }
-            | MetaCommand::ApiKeyCreate(_)
+            | MetaCommand::ApiKeyCreate { .. }
             | MetaCommand::ApiKeyList
-            | MetaCommand::ApiKeyRevoke(_) => {
+            | MetaCommand::ApiKeyRevoke(_)
+            | MetaCommand::ApiKeyExpire { .. } => {
                 Err("Permission denied: only admins can perform this operation".to_string())
             }
         },
@@ -726,7 +729,10 @@ fn authorize_non_admin_meta(role: &Role, cmd: &MetaCommand) -> Result<(), String
         | MetaCommand::UserRole { .. } => {
             Err("Permission denied: only admins can manage users".to_string())
         }
-        MetaCommand::ApiKeyCreate(_) | MetaCommand::ApiKeyList | MetaCommand::ApiKeyRevoke(_) => {
+        MetaCommand::ApiKeyCreate { .. }
+        | MetaCommand::ApiKeyList
+        | MetaCommand::ApiKeyRevoke(_)
+        | MetaCommand::ApiKeyExpire { .. } => {
             Err("Permission denied: only admins can manage API keys".to_string())
         }
     }
@@ -822,6 +828,7 @@ mod tests {
             ".backup status",
             ".user list",
             ".apikey list",
+            ".apikey expire mykey 1h",
         ];
         for s in stmts {
             let stmt = parse_statement(s).unwrap();
@@ -859,6 +866,8 @@ mod tests {
             ".user list",
             ".user create bob pass editor",
             ".apikey create mykey",
+            ".apikey create mykey 30d",
+            ".apikey expire mykey 1h",
         ];
         for s in denied {
             let stmt = parse_statement(s).unwrap();
@@ -902,6 +911,7 @@ mod tests {
             ".backup status",
             ".user list",
             ".apikey list",
+            ".apikey expire mykey 0s",
         ];
         for s in denied {
             let stmt = parse_statement(s).unwrap();

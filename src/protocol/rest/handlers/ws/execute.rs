@@ -261,7 +261,9 @@ fn program_error_frame(id: Option<RequestId>, error: ProgramError) -> ServerFram
 /// secrets, so only their kind is kept.
 fn log_preview(program: &str) -> String {
     const SECRET_COMMANDS: [&str; 2] = ["user", "apikey"];
-    const SUBCOMMANDS: [&str; 6] = ["list", "create", "drop", "password", "role", "revoke"];
+    const SUBCOMMANDS: [&str; 7] = [
+        "list", "create", "drop", "password", "role", "revoke", "expire",
+    ];
     for line in program.lines() {
         let Some(meta) = line.trim_start().strip_prefix('.') else {
             continue;

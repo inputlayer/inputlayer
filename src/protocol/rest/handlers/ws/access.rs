@@ -107,7 +107,7 @@ mod tests {
             .handle_user_create("bob", "bob-pw", "editor")
             .unwrap();
         handler.handle_kg_acl_grant(KG, "bob", "viewer").unwrap();
-        let key = handler.create_api_key("bob-key", "bob").unwrap();
+        let key = handler.create_api_key("bob-key", "bob", None).unwrap();
         let bob = handler.authenticate_api_key(&key).unwrap();
         (handler, bob, tmp)
     }

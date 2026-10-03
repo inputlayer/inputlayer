@@ -419,8 +419,9 @@ The autodetector diffs your current Python models against the last migration's s
 | `set_role(username, role)` | Change a user's role |
 | `set_password(username, password)` | Change a user's password |
 | `list_users()` | List all users |
-| `create_api_key(label)` | Create an API key |
-| `list_api_keys()` | List active API keys |
+| `create_api_key(label, ttl=None)` | Create an API key, optionally expiring after `ttl` (e.g. `"90d"`) |
+| `list_api_keys()` | List API keys with owner, created/expires/last-used times and status |
+| `expire_api_key(label, ttl)` | Bring a key's expiry forward (rotation grace period) |
 | `revoke_api_key(label)` | Revoke an API key |
 | `on(event_type, ...)` | Register notification callback |
 | `notifications()` | Async iterator over events |

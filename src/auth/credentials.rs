@@ -1,4 +1,4 @@
-//! Live credentials and the sessions bound to them.
+//! Live credentials: the in-memory index of users and API keys.
 //!
 //! `_internal` stores users and API keys durably. [`CredentialRegistry`] is
 //! their in-memory index: loaded at startup, then updated by every credential
@@ -7,203 +7,24 @@
 //! generation of a user's password.
 //!
 //! Revoking a credential (`.apikey revoke`, `.user password`, `.user drop`)
-//! trips that credential's revocation flag before the command returns. Every
-//! session bound to it fails its next [`Principal::identity`] check, and every
-//! [`RevocationSignal`] taken from it completes. Other credentials, including
-//! other keys of the same user, are untouched.
+//! ends it before the command returns. An API key may also carry an expiry,
+//! which ends it once passed: sessions bound to it fail their checks from that
+//! instant, and [`CredentialRegistry::expire_due`] completes their signals.
+//! Other credentials, including other keys of the same user, are untouched.
 //!
-//! A check is one atomic load on state the session already holds, and a
-//! signal is a private one-shot channel per connection: no shared lock,
-//! lookup or storage access per request or per frame. The registry lock is
-//! taken only to authenticate and to mutate credentials; a credential's
-//! watcher list only to register a signal and to revoke.
+//! The registry lock is taken only to authenticate, to mutate credentials and
+//! by the periodic upkeep; never per request or per frame.
 
 use std::collections::HashMap;
 use std::fmt;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
-use std::task::{ready, Context, Poll};
+use std::time::Duration;
 
-use parking_lot::{Mutex, RwLock};
-use tokio::sync::oneshot;
+use parking_lot::RwLock;
+use tokio::sync::Notify;
 
-use super::{AuthIdentity, Role};
-
-/// Canonical identity of one credential. `generation` is unique per process
-/// and increases with every credential issued, so a replaced password or a
-/// re-created key label never shares an id with its predecessor.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum CredentialId {
-    /// One generation of a user's password.
-    Password { username: String, generation: u64 },
-    /// One API key, named by its label.
-    ApiKey { label: String, generation: u64 },
-}
-
-impl fmt::Display for CredentialId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Password {
-                username,
-                generation,
-            } => write!(f, "password:{username}#{generation}"),
-            Self::ApiKey { label, generation } => write!(f, "apikey:{label}#{generation}"),
-        }
-    }
-}
-
-/// The credential behind a principal was revoked.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CredentialRevoked;
-
-impl fmt::Display for CredentialRevoked {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("Access denied: credential revoked")
-    }
-}
-
-impl std::error::Error for CredentialRevoked {}
-
-impl From<CredentialRevoked> for String {
-    fn from(e: CredentialRevoked) -> Self {
-        e.to_string()
-    }
-}
-
-/// A user's current global role, shared by all of that user's credentials.
-#[derive(Debug)]
-struct RoleCell(AtomicU8);
-
-impl RoleCell {
-    fn new(role: Role) -> Arc<Self> {
-        Arc::new(Self(AtomicU8::new(role as u8)))
-    }
-
-    fn get(&self) -> Role {
-        match self.0.load(Ordering::Acquire) {
-            r if r == Role::Admin as u8 => Role::Admin,
-            r if r == Role::Editor as u8 => Role::Editor,
-            _ => Role::Viewer,
-        }
-    }
-
-    fn set(&self, role: Role) {
-        self.0.store(role as u8, Ordering::Release);
-    }
-}
-
-/// One issued credential. Revocation is one-way.
-#[derive(Debug)]
-struct Credential {
-    id: CredentialId,
-    username: String,
-    revoked: AtomicBool,
-    /// One sender per live [`RevocationSignal`].
-    watchers: Mutex<Vec<oneshot::Sender<()>>>,
-}
-
-impl Credential {
-    fn new(id: CredentialId, username: &str) -> Arc<Self> {
-        Arc::new(Self {
-            id,
-            username: username.to_string(),
-            revoked: AtomicBool::new(false),
-            watchers: Mutex::new(Vec::new()),
-        })
-    }
-
-    fn revoke(&self) {
-        self.revoked.store(true, Ordering::Release);
-        for watcher in self.watchers.lock().drain(..) {
-            let _ = watcher.send(());
-        }
-    }
-
-    fn watch(&self) -> RevocationSignal {
-        let (tx, rx) = oneshot::channel();
-        let mut watchers = self.watchers.lock();
-        // Checked under the lock `revoke` drains with, so no revocation is missed.
-        if self.is_revoked() {
-            let _ = tx.send(());
-        } else {
-            watchers.retain(|watcher| !watcher.is_closed());
-            watchers.push(tx);
-        }
-        RevocationSignal(Some(rx))
-    }
-
-    fn is_revoked(&self) -> bool {
-        self.revoked.load(Ordering::Acquire)
-    }
-}
-
-/// An authenticated session's binding to one credential.
-///
-/// Cheap to clone; clones share the credential's revocation state.
-#[derive(Debug, Clone)]
-pub struct Principal {
-    credential: Arc<Credential>,
-    role: Arc<RoleCell>,
-}
-
-impl Principal {
-    pub fn username(&self) -> &str {
-        &self.credential.username
-    }
-
-    pub fn credential(&self) -> &CredentialId {
-        &self.credential.id
-    }
-
-    /// The permissions this principal holds right now, as an immutable
-    /// snapshot for one request or one outbound message.
-    pub fn identity(&self) -> Result<AuthIdentity, CredentialRevoked> {
-        Ok(AuthIdentity {
-            role: self.role()?,
-            username: self.credential.username.clone(),
-        })
-    }
-
-    /// The user's current global role.
-    pub fn role(&self) -> Result<Role, CredentialRevoked> {
-        if self.is_revoked() {
-            return Err(CredentialRevoked);
-        }
-        Ok(self.role.get())
-    }
-
-    pub fn is_revoked(&self) -> bool {
-        self.credential.is_revoked()
-    }
-
-    /// A future that completes once the credential is revoked (immediately
-    /// if it already is). Take one per connection and poll it for its
-    /// lifetime: polling is lock-free, registering is not.
-    pub fn revocation(&self) -> RevocationSignal {
-        self.credential.watch()
-    }
-}
-
-/// Completes when its credential is revoked. See [`Principal::revocation`].
-/// Once complete it stays complete: polling it again is `Ready`.
-#[derive(Debug)]
-pub struct RevocationSignal(Option<oneshot::Receiver<()>>);
-
-impl Future for RevocationSignal {
-    type Output = ();
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-        let Some(receiver) = self.0.as_mut() else {
-            return Poll::Ready(());
-        };
-        // The sender is dropped only after sending, by `revoke`.
-        ready!(Pin::new(receiver).poll(cx)).ok();
-        self.0 = None;
-        Poll::Ready(())
-    }
-}
+use super::principal::{now_ms, Credential, CredentialEnded, CredentialId, Principal, RoleCell};
+use super::Role;
 
 /// A user as stored in `_internal.users`.
 #[derive(Debug, Clone)]
@@ -213,12 +34,39 @@ pub struct UserRecord {
     pub role: Role,
 }
 
-/// An API key as stored in `_internal.api_keys`.
+/// When an API key was created, expires and was last used, in Unix ms.
+/// `None` is unknown (`created_at`), never (`expires_at`) or not yet
+/// (`last_used_at`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ApiKeyTimes {
+    pub created_at: Option<u64>,
+    pub expires_at: Option<u64>,
+    pub last_used_at: Option<u64>,
+}
+
+/// An API key as stored in `_internal.api_keys` and `_internal.api_key_times`.
 #[derive(Debug, Clone)]
 pub struct ApiKeyRecord {
     pub label: String,
     pub key_hash: String,
     pub username: String,
+    pub times: ApiKeyTimes,
+}
+
+/// An API key as listed: everything but its hash.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApiKeyInfo {
+    pub label: String,
+    pub owner: String,
+    pub times: ApiKeyTimes,
+    pub expired: bool,
+}
+
+/// A key's last use, to persist.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyUsage {
+    pub key_hash: String,
+    pub last_used_at: u64,
 }
 
 /// A password login in progress: verify `password_hash` off the async
@@ -232,7 +80,7 @@ pub struct PasswordCandidate {
 impl PasswordCandidate {
     /// The principal for a verified password. Fails if the password was
     /// changed or the user dropped while it was being verified.
-    pub fn accept(self) -> Result<Principal, CredentialRevoked> {
+    pub fn accept(self) -> Result<Principal, CredentialEnded> {
         self.principal.identity()?;
         Ok(self.principal)
     }
@@ -242,6 +90,7 @@ impl PasswordCandidate {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApiKeyRejected {
     Unknown,
+    Expired,
     OwnerNotFound,
 }
 
@@ -249,9 +98,20 @@ impl fmt::Display for ApiKeyRejected {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::Unknown => "Invalid API key",
+            Self::Expired => "API key expired",
             Self::OwnerNotFound => "API key owner not found",
         })
     }
+}
+
+/// Why an API key's expiry was not changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExpireRejected {
+    Unknown,
+    /// It has already expired.
+    Expired,
+    /// It already expires at this earlier time (Unix ms).
+    ExpiresSooner(u64),
 }
 
 #[derive(Debug)]
@@ -264,6 +124,9 @@ struct User {
 #[derive(Debug)]
 struct ApiKey {
     credential: Arc<Credential>,
+    created_at: Option<u64>,
+    /// `last_used_at` as persisted; the credential holds the live value.
+    persisted_last_used_at: Option<u64>,
 }
 
 #[derive(Debug, Default)]
@@ -275,25 +138,23 @@ struct Credentials {
 }
 
 impl Credentials {
-    fn issue(&mut self, id: impl FnOnce(u64) -> CredentialId, username: &str) -> Arc<Credential> {
+    fn next_generation(&mut self) -> u64 {
         self.last_generation += 1;
-        Credential::new(id(self.last_generation), username)
+        self.last_generation
     }
 
     /// Add a user, or give an existing one a new password generation and
     /// role. The role cell is kept: sessions on the user's API keys share it.
     fn upsert_user(&mut self, record: UserRecord) {
         let username = record.username;
-        let password = self.issue(
-            |generation| CredentialId::Password {
-                username: username.clone(),
-                generation,
-            },
-            &username,
-        );
+        let id = CredentialId::Password {
+            username: username.clone(),
+            generation: self.next_generation(),
+        };
+        let password = Credential::new(id, &username, None, None);
         match self.users.get_mut(&username) {
             Some(user) => {
-                user.password.revoke();
+                user.password.end(CredentialEnded::Revoked);
                 user.password = password;
                 user.password_hash = record.password_hash;
                 user.role.set(record.role);
@@ -310,13 +171,18 @@ impl Credentials {
     }
 
     fn insert_key(&mut self, record: ApiKeyRecord) {
-        let label = record.label.clone();
-        let credential = self.issue(
-            |generation| CredentialId::ApiKey { label, generation },
-            &record.username,
-        );
-        if let Some(previous) = self.keys.insert(record.key_hash, ApiKey { credential }) {
-            previous.credential.revoke();
+        let id = CredentialId::ApiKey {
+            label: record.label,
+            generation: self.next_generation(),
+        };
+        let times = record.times;
+        let key = ApiKey {
+            credential: Credential::new(id, &record.username, times.expires_at, times.last_used_at),
+            created_at: times.created_at,
+            persisted_last_used_at: times.last_used_at,
+        };
+        if let Some(previous) = self.keys.insert(record.key_hash, key) {
+            previous.credential.end(CredentialEnded::Revoked);
         }
     }
 
@@ -326,11 +192,24 @@ impl Credentials {
         self.keys.retain(|_, key| {
             let hit = matches(&key.credential);
             if hit {
-                key.credential.revoke();
+                key.credential.end(CredentialEnded::Revoked);
             }
             !hit
         });
         before - self.keys.len()
+    }
+
+    fn key_labelled(&self, label: &str) -> Option<(&String, &ApiKey)> {
+        self.keys
+            .iter()
+            .find(|(_, key)| key_label(&key.credential) == label)
+    }
+}
+
+fn key_label(credential: &Credential) -> &str {
+    match &credential.id {
+        CredentialId::ApiKey { label, .. } => label,
+        CredentialId::Password { .. } => "",
     }
 }
 
@@ -338,6 +217,8 @@ impl Credentials {
 #[derive(Debug, Default)]
 pub struct CredentialRegistry {
     state: RwLock<Credentials>,
+    /// Woken when an API key's expiry is set or brought forward.
+    expiry_changed: Notify,
 }
 
 impl CredentialRegistry {
@@ -345,7 +226,7 @@ impl CredentialRegistry {
     pub fn load(&self, users: Vec<UserRecord>, keys: Vec<ApiKeyRecord>) {
         let mut state = self.state.write();
         for user in state.users.values() {
-            user.password.revoke();
+            user.password.end(CredentialEnded::Revoked);
         }
         state.revoke_keys(|_| true);
         state.users.clear();
@@ -355,6 +236,8 @@ impl CredentialRegistry {
         for key in keys {
             state.insert_key(key);
         }
+        drop(state);
+        self.expiry_changed.notify_one();
     }
 
     /// Start a password login. `None` for an unknown user; callers still
@@ -364,25 +247,26 @@ impl CredentialRegistry {
         let user = state.users.get(username)?;
         Some(PasswordCandidate {
             password_hash: user.password_hash.clone(),
-            principal: Principal {
-                credential: Arc::clone(&user.password),
-                role: Arc::clone(&user.role),
-            },
+            principal: Principal::new(Arc::clone(&user.password), Arc::clone(&user.role)),
         })
     }
 
-    /// Authenticate the API key whose SHA-256 is `key_hash`.
+    /// Authenticate the API key whose SHA-256 is `key_hash`, recording the use.
     pub fn authenticate_key(&self, key_hash: &str) -> Result<Principal, ApiKeyRejected> {
         let state = self.state.read();
         let key = state.keys.get(key_hash).ok_or(ApiKeyRejected::Unknown)?;
+        if key.credential.ended().is_some() {
+            return Err(ApiKeyRejected::Expired);
+        }
         let owner = state
             .users
             .get(&key.credential.username)
             .ok_or(ApiKeyRejected::OwnerNotFound)?;
-        Ok(Principal {
-            credential: Arc::clone(&key.credential),
-            role: Arc::clone(&owner.role),
-        })
+        key.credential.touch(now_ms());
+        Ok(Principal::new(
+            Arc::clone(&key.credential),
+            Arc::clone(&owner.role),
+        ))
     }
 
     /// Add a user, or replace one of the same name (revoking its password).
@@ -421,22 +305,122 @@ impl CredentialRegistry {
     pub fn remove_user(&self, username: &str) {
         let mut state = self.state.write();
         if let Some(user) = state.users.remove(username) {
-            user.password.revoke();
+            user.password.end(CredentialEnded::Revoked);
         }
         state.revoke_keys(|key| key.username == username);
     }
 
     /// Add an API key.
     pub fn put_key(&self, record: ApiKeyRecord) {
+        let expires = record.times.expires_at.is_some();
         self.state.write().insert_key(record);
+        if expires {
+            self.expiry_changed.notify_one();
+        }
     }
 
     /// Revoke the API key labelled `label`; `false` if there is none.
     pub fn revoke_key(&self, label: &str) -> bool {
         let mut state = self.state.write();
-        state.revoke_keys(
-            |key| matches!(&key.id, CredentialId::ApiKey { label: l, .. } if l == label),
-        ) > 0
+        state.revoke_keys(|key| key_label(key) == label) > 0
+    }
+
+    /// The hash and expiry of the live key labelled `label`, if `at` would
+    /// bring its expiry forward. Validates an [`Self::expire_key`] before
+    /// it is persisted.
+    pub fn check_expire_key(&self, label: &str, at: u64) -> Result<String, ExpireRejected> {
+        let state = self.state.read();
+        let (key_hash, key) = state.key_labelled(label).ok_or(ExpireRejected::Unknown)?;
+        if key.credential.ended().is_some() {
+            return Err(ExpireRejected::Expired);
+        }
+        match key.credential.expires_at() {
+            Some(current) if current < at => Err(ExpireRejected::ExpiresSooner(current)),
+            _ => Ok(key_hash.clone()),
+        }
+    }
+
+    /// Bring the expiry of the key whose hash is `key_hash` forward to `at`
+    /// (Unix ms). A later `at` than its current expiry changes nothing.
+    pub fn expire_key(&self, key_hash: &str, at: u64) {
+        if let Some(key) = self.state.read().keys.get(key_hash) {
+            key.credential.expire_at(at);
+        }
+        self.expiry_changed.notify_one();
+    }
+
+    /// Every API key, by label.
+    pub fn api_keys(&self) -> Vec<ApiKeyInfo> {
+        let state = self.state.read();
+        let mut keys: Vec<_> = state
+            .keys
+            .values()
+            .map(|key| ApiKeyInfo {
+                label: key_label(&key.credential).to_string(),
+                owner: key.credential.username.clone(),
+                times: ApiKeyTimes {
+                    created_at: key.created_at,
+                    expires_at: key.credential.expires_at(),
+                    last_used_at: key.credential.last_used_at(),
+                },
+                expired: key.credential.ended().is_some(),
+            })
+            .collect();
+        keys.sort_by(|a, b| a.label.cmp(&b.label));
+        keys
+    }
+
+    /// End every API key whose expiry has passed, completing its sessions'
+    /// signals. Returns the labels just expired and the time until the next
+    /// expiry, if any key has one to come.
+    pub fn expire_due(&self) -> (Vec<String>, Option<Duration>) {
+        let now = now_ms();
+        let state = self.state.read();
+        let mut expired = Vec::new();
+        let mut next = None;
+        for key in state.keys.values() {
+            let Some(at) = key.credential.expires_at() else {
+                continue;
+            };
+            if at > now {
+                next = Some(next.map_or(at, |next: u64| next.min(at)));
+            } else if key.credential.end(CredentialEnded::Expired) {
+                expired.push(key_label(&key.credential).to_string());
+            }
+        }
+        (expired, next.map(|at| Duration::from_millis(at - now)))
+    }
+
+    /// Wait until an API key's expiry is set or brought forward.
+    pub async fn expiry_changed(&self) {
+        self.expiry_changed.notified().await;
+    }
+
+    /// Key uses newer than what was last persisted.
+    pub fn unpersisted_usage(&self) -> Vec<KeyUsage> {
+        let state = self.state.read();
+        state
+            .keys
+            .iter()
+            .filter_map(|(key_hash, key)| {
+                let last_used_at = key.credential.last_used_at()?;
+                (Some(last_used_at) > key.persisted_last_used_at).then(|| KeyUsage {
+                    key_hash: key_hash.clone(),
+                    last_used_at,
+                })
+            })
+            .collect()
+    }
+
+    /// Record that `usage` was persisted.
+    pub fn usage_persisted(&self, usage: &[KeyUsage]) {
+        let mut state = self.state.write();
+        for used in usage {
+            if let Some(key) = state.keys.get_mut(&used.key_hash) {
+                key.persisted_last_used_at =
+                    key.persisted_last_used_at.max(Some(used.last_used_at));
+            }
+        }
     }
 }
 

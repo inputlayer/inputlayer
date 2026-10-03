@@ -251,6 +251,7 @@ operations:
       - `.kg list` / `.kg create <name>` / `.kg use <name>` / `.kg drop <name>` - KG management
       - `.kg acl list` / `.kg acl grant <kg> <user> <role>` / `.kg acl revoke <kg> <user>` - Access control
       - `.user list` / `.user create` / `.user drop` / `.user password` / `.user role` - User management
+      - `.apikey list` / `.apikey create <label> [<ttl>]` / `.apikey expire <label> <ttl>` / `.apikey revoke <label>` - API key management
       - `.rel` / `.rel <name>` / `.rel drop <name>` - List / describe / drop relations
       - `.rule list` / `.rule show <name>` / `.rule drop <name>` - Rule management
       - `.rule drop prefix <prefix>` - Drop rules by prefix
@@ -400,7 +401,8 @@ operations:
     description: |
       Sent unprompted, never as a reply and never with an `id`. All codes but
       `notifications_missed` and `replay_gap` are followed by the server closing the connection;
-      `credential_revoked` is the last frame of a revoked connection.
+      `credential_revoked` is the last frame of a revoked connection, and
+      `credential_expired` of one whose API key expired.
     messages:
       - $ref: '#/channels/ws/messages/notice'
 
@@ -610,6 +612,7 @@ components:
             - lifetime_exceeded
             - auth_timeout
             - credential_revoked
+            - credential_expired
             - server_shutdown
           description: |
             `notifications_missed`: the client read too slowly and change notifications

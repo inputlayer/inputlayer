@@ -63,7 +63,7 @@ mod tests {
     use axum::extract::ws::Message;
 
     use super::*;
-    use crate::auth::{ApiKeyRecord, CredentialRegistry, Role, UserRecord};
+    use crate::auth::{ApiKeyRecord, ApiKeyTimes, CredentialRegistry, Role, UserRecord};
 
     /// A sink that revokes the connection's key once it accepted `revoke_after` frames.
     struct RevokingSink {
@@ -120,6 +120,7 @@ mod tests {
                 label: "k".to_string(),
                 key_hash: "h".to_string(),
                 username: "bob".to_string(),
+                times: ApiKeyTimes::default(),
             }],
         );
         let principal = registry.authenticate_key("h").unwrap();

@@ -41,7 +41,7 @@ async fn handler_with_proof_fixture() -> (Arc<Handler>, String, tempfile::TempDi
         .await
         .expect("fixture setup failed");
     let key = handler
-        .create_api_key(KEY_LABEL, "bob")
+        .create_api_key(KEY_LABEL, "bob", None)
         .expect("key creation failed");
     (handler, key, tmp)
 }
@@ -91,7 +91,7 @@ async fn revocation_during_a_proof_withholds_it() {
         "the revocation must land while the proof runs"
     );
     match withheld {
-        Err(e) => assert_eq!(e, String::from(crate::auth::CredentialRevoked)),
+        Err(e) => assert_eq!(e, String::from(crate::auth::CredentialEnded::Revoked)),
         Ok(result) => panic!(
             "revoked mid-proof, yet {:?} proof trees were delivered",
             result.proof_trees.map(|trees| trees.len())

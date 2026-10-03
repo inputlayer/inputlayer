@@ -14,8 +14,10 @@ import {
   compileSetRole,
   compileListUsers,
   compileCreateApiKey,
+  compileExpireApiKey,
   compileListApiKeys,
   compileRevokeApiKey,
+  parseApiKeys,
 } from './auth.js';
 
 export interface InputLayerOptions {
@@ -177,21 +179,26 @@ export class InputLayer {
 
   // ── API key management ──────────────────────────────────────────
 
-  /** Create an API key. Returns the key string. */
-  async createApiKey(label: string): Promise<string> {
-    const result = await this.conn.execute(compileCreateApiKey(label));
-    if (result.rows.length > 0 && result.rows[0].length > 0) {
-      return String(result.rows[0][0]);
-    }
-    return '';
+  /**
+   * Create an API key, expiring `ttl` from now (e.g. `"90d"`) or never.
+   * Returns the key, which the server shows only once.
+   */
+  async createApiKey(label: string, ttl?: string): Promise<string> {
+    const result = await this.conn.execute(compileCreateApiKey(label, ttl));
+    return String(result.rows[0][1]);
   }
 
   async listApiKeys(): Promise<ApiKeyInfo[]> {
     const result = await this.conn.execute(compileListApiKeys());
-    return result.rows.map((row) => ({
-      label: String(row[0]),
-      createdAt: row.length > 1 ? String(row[1]) : '',
-    }));
+    return parseApiKeys(result.columns, result.rows);
+  }
+
+  /**
+   * Bring a key's expiry forward to `ttl` from now, e.g. the grace period of
+   * a rotation. An expiry can only be brought forward.
+   */
+  async expireApiKey(label: string, ttl: string): Promise<void> {
+    await this.conn.execute(compileExpireApiKey(label, ttl));
   }
 
   async revokeApiKey(label: string): Promise<void> {

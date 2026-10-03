@@ -111,9 +111,19 @@ pub enum MetaCommand {
     },
 
     // API key management commands
-    ApiKeyCreate(String), // label
+    /// `.apikey create <label> [<ttl>]`: a key that expires `ttl` from now.
+    ApiKeyCreate {
+        label: String,
+        ttl: Option<std::time::Duration>,
+    },
     ApiKeyList,
     ApiKeyRevoke(String), // label
+    /// `.apikey expire <label> <ttl>`: bring the key's expiry forward to
+    /// `ttl` from now.
+    ApiKeyExpire {
+        label: String,
+        ttl: std::time::Duration,
+    },
 
     // KG ACL management commands
     KgAclList(Option<String>), // .kg acl list [kg_name] - list ACLs (for specific KG or current)
@@ -158,8 +168,9 @@ impl MetaCommand {
             | Self::UserDrop(_)
             | Self::UserPassword { .. }
             | Self::UserRole { .. }
-            | Self::ApiKeyCreate(_)
+            | Self::ApiKeyCreate { .. }
             | Self::ApiKeyRevoke(_)
+            | Self::ApiKeyExpire { .. }
             | Self::KgAclGrant { .. }
             | Self::KgAclRevoke { .. } => true,
             Self::KgShow
@@ -284,9 +295,14 @@ fn format_meta_debug(cmd: &MetaCommand) -> String {
         MetaCommand::UserRole { username, role } => {
             format!("UserRole {{ username: {username:?}, role: {role:?} }}")
         }
-        MetaCommand::ApiKeyCreate(s) => format!("ApiKeyCreate({s:?})"),
+        MetaCommand::ApiKeyCreate { label, ttl } => {
+            format!("ApiKeyCreate {{ label: {label:?}, ttl: {ttl:?} }}")
+        }
         MetaCommand::ApiKeyList => "ApiKeyList".to_string(),
         MetaCommand::ApiKeyRevoke(s) => format!("ApiKeyRevoke({s:?})"),
+        MetaCommand::ApiKeyExpire { label, ttl } => {
+            format!("ApiKeyExpire {{ label: {label:?}, ttl: {ttl:?} }}")
+        }
         MetaCommand::KgAclList(kg) => format!("KgAclList({kg:?})"),
         MetaCommand::KgAclGrant {
             kg_name,
@@ -952,32 +968,59 @@ fn parse_user_command(parts: &[&str]) -> Result<MetaCommand, String> {
 }
 
 fn parse_apikey_command(parts: &[&str]) -> Result<MetaCommand, String> {
-    if parts.len() < 2 {
-        return Err(
-            "Usage: .apikey list | .apikey create <label> | .apikey revoke <label>".to_string(),
-        );
-    }
-    match parts[1].to_lowercase().as_str() {
-        "list" => Ok(MetaCommand::ApiKeyList),
-        "create" => {
-            if parts.len() < 3 {
-                Err("Usage: .apikey create <label>".to_string())
-            } else {
-                Ok(MetaCommand::ApiKeyCreate(parts[2].to_string()))
+    const USAGE: &str = "Usage: .apikey list | .apikey create <label> [<ttl>] | \
+         .apikey expire <label> <ttl> | .apikey revoke <label>";
+    let Some(sub) = parts.get(1) else {
+        return Err(USAGE.to_string());
+    };
+    match (sub.to_lowercase().as_str(), &parts[2..]) {
+        ("list", []) => Ok(MetaCommand::ApiKeyList),
+        ("create", [label]) => Ok(MetaCommand::ApiKeyCreate {
+            label: (*label).to_string(),
+            ttl: None,
+        }),
+        ("create", [label, ttl]) => {
+            let ttl = parse_ttl(ttl)?;
+            if ttl.is_zero() {
+                return Err("A new API key's TTL must be positive".to_string());
             }
+            Ok(MetaCommand::ApiKeyCreate {
+                label: (*label).to_string(),
+                ttl: Some(ttl),
+            })
         }
-        "revoke" => {
-            if parts.len() < 3 {
-                Err("Usage: .apikey revoke <label>".to_string())
-            } else {
-                Ok(MetaCommand::ApiKeyRevoke(parts[2].to_string()))
-            }
-        }
+        ("expire", [label, ttl]) => Ok(MetaCommand::ApiKeyExpire {
+            label: (*label).to_string(),
+            ttl: parse_ttl(ttl)?,
+        }),
+        ("revoke", [label]) => Ok(MetaCommand::ApiKeyRevoke((*label).to_string())),
+        ("list" | "create" | "expire" | "revoke", _) => Err(USAGE.to_string()),
         _ => Err(format!(
-            "Unknown apikey subcommand: '{}'. Use: list, create, revoke",
-            parts[1]
+            "Unknown apikey subcommand: '{sub}'. Use: list, create, expire, revoke"
         )),
     }
+}
+
+/// A TTL such as `500ms`, `30s`, `15m`, `24h` or `90d`.
+fn parse_ttl(text: &str) -> Result<std::time::Duration, String> {
+    let invalid = || format!("Invalid TTL '{text}': use a number and a unit: ms, s, m, h or d");
+    let split = text
+        .find(|c: char| !c.is_ascii_digit())
+        .ok_or_else(invalid)?;
+    let (number, unit) = text.split_at(split);
+    let number: u64 = number.parse().map_err(|_| invalid())?;
+    let unit_ms: u64 = match unit {
+        "ms" => 1,
+        "s" => 1_000,
+        "m" => 60_000,
+        "h" => 3_600_000,
+        "d" => 86_400_000,
+        _ => return Err(invalid()),
+    };
+    number
+        .checked_mul(unit_ms)
+        .map(std::time::Duration::from_millis)
+        .ok_or_else(invalid)
 }
 
 #[cfg(test)]
@@ -1473,11 +1516,63 @@ mod tests {
     #[test]
     fn test_parse_apikey_create() {
         let cmd = parse_meta_command(".apikey create my-key").unwrap();
-        if let MetaCommand::ApiKeyCreate(label) = cmd {
-            assert_eq!(label, "my-key");
-        } else {
-            panic!("Expected ApiKeyCreate");
+        assert_eq!(
+            cmd,
+            MetaCommand::ApiKeyCreate {
+                label: "my-key".to_string(),
+                ttl: None,
+            }
+        );
+        let cmd = parse_meta_command(".apikey create ci 90d").unwrap();
+        assert_eq!(
+            cmd,
+            MetaCommand::ApiKeyCreate {
+                label: "ci".to_string(),
+                ttl: Some(std::time::Duration::from_secs(90 * 86_400)),
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_apikey_expire() {
+        let cmd = parse_meta_command(".apikey expire old-key 24h").unwrap();
+        assert_eq!(
+            cmd,
+            MetaCommand::ApiKeyExpire {
+                label: "old-key".to_string(),
+                ttl: std::time::Duration::from_secs(86_400),
+            }
+        );
+        let cmd = parse_meta_command(".apikey expire old-key 0s").unwrap();
+        assert!(matches!(cmd, MetaCommand::ApiKeyExpire { ttl, .. } if ttl.is_zero()));
+    }
+
+    #[test]
+    fn test_parse_apikey_rejects_bad_ttls_and_arity() {
+        for bad in [
+            ".apikey create k 0s",
+            ".apikey create k 10",
+            ".apikey create k 10y",
+            ".apikey create k -5s",
+            ".apikey create k 99999999999999999999d",
+            ".apikey expire k",
+            ".apikey expire k soon",
+            ".apikey create k 1h extra",
+            ".apikey revoke",
+            ".apikey list all",
+        ] {
+            assert!(parse_meta_command(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn test_parse_ttl_units() {
+        let ms = |text| parse_ttl(text).unwrap().as_millis();
+        assert_eq!(ms("500ms"), 500);
+        assert_eq!(ms("30s"), 30_000);
+        assert_eq!(ms("15m"), 900_000);
+        assert_eq!(ms("2h"), 7_200_000);
+        assert_eq!(ms("1d"), 86_400_000);
     }
 
     #[test]

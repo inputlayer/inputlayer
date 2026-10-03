@@ -244,7 +244,7 @@ fn unknown_user_costs_as_much_as_known_user() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn parallel_bad_logins_do_not_stall_queries() {
     let (handler, _tmp) = handler(|c| c.storage.auto_create_knowledge_graphs = true);
-    let key = handler.create_api_key("latency", "admin").unwrap();
+    let key = handler.create_api_key("latency", "admin", None).unwrap();
     let admin = handler.authenticate_api_key(&key).unwrap();
     let query = || {
         let handler = Arc::clone(&handler);
