@@ -16,8 +16,9 @@ REGIME B - "asked something else" (behavior, the product premise):
   instructions).
 
 ENGINE PASS (--engine): the facts a correct extractor would emit for each
-  corrupted scenario go through the real InputLayer engine + rule pack;
-  verifies deterministic detection on the same corpus.
+  scenario - corrupted rows and controls - go through the real InputLayer
+  engine + rule pack (engine_replay.py); verifies deterministic detection
+  and zero control findings on the same corpus.
 
 Usage:
   ANTHROPIC_API_KEY=... python3 full_bench.py            # regimes A + B
@@ -29,7 +30,6 @@ import argparse
 import copy
 import json
 import re
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -38,6 +38,8 @@ import anthropic
 
 import os
 import subprocess
+
+from engine_replay import engine_pass
 
 
 def _subscription_token():
@@ -277,65 +279,8 @@ def run_scenario(client, sc):
 
 
 # ---- Engine pass ---------------------------------------------------------
-
-def engine_pass(scenarios, server, api_key):
-    """Run the whole corpus through ONE knowledge graph. Corpus entities,
-    fact ids, and before-events are already namespaced per scenario
-    (sid__x); constraint ids/attrs are namespaced here. Findings map back
-    to scenarios via the sid__ prefix on the finding's claim ids."""
-    sys.path.insert(0, str(REPO / "packages" / "inputlayer-py" / "src"))
-    from inputlayer.client_sync import InputLayerSync
-
-    pack = [(line.strip()) for line in
-            (VC_DIR / "rules" / "consistency-core.iql").read_text().splitlines()
-            if line.strip() and not line.strip().startswith("//")]
-    il = InputLayerSync(server, api_key=api_key)
-    il.connect()
-    try:
-        kg = il.knowledge_graph("fb_corpus", create=True)
-        for stmt in pack:
-            kg.execute(stmt)
-        flagged = [sc for sc in scenarios if not sc["control"]]
-        for sc in flagged:
-            sid = sc["id"]
-            for f in sc.get("facts", []):
-                cid, e, a, v = f["id"], f["entity"], f["attribute"], f["value"]
-                kg.execute(f'+claim[("{cid}", "{e}", "{a}", "{v}")]')
-                kg.execute(f'+claim_modality[("{cid}", "{f["modality"]}")]')
-                if "num" in f:
-                    kg.execute(f'+claim_num[("{cid}", "{e}", "{a}", {f["num"]})]')
-            for bid, a, b in sc.get("before", []):
-                kg.execute(f'+before_claim[("{bid}", "{a}", "{b}")]')
-            for a, b in sc.get("same_as", []):
-                kg.execute(f'+same_as[("{a}", "{b}")]')
-            for kid, ktype, attr, val in sc.get("constraints", []):
-                pk, pa = f"{sid}__{kid}", f"{sid}__{attr}"
-                if ktype in ("max_value", "min_value"):
-                    kg.execute(f'+constraint_num[("{pk}", "{ktype}", "{pa}", {val})]')
-                else:
-                    kg.execute(f'+constraint[("{pk}", "{ktype}", "{pa}", "{val}")]')
-            for rel, arg in sc.get("ontology", []):
-                # extractor-style ontology EXTENSION (never overrides seeds)
-                kg.execute(f'+{rel}[("{arg}",)]')
-        by_sid = {}
-        for row in kg.execute("?finding(K, Sev, C1, C2)").rows:
-            kind, _, c1, _ = row
-            sid = c1.split("__", 1)[0]
-            by_sid.setdefault(sid, set()).add(kind)
-        il.drop_knowledge_graph("fb_corpus")
-        return {
-            sc["id"]: {
-                "expected": sorted(sc["expect_kinds"]),
-                "found": sorted(by_sid.get(sc["id"], set())),
-                # EXACT match: the engine must fire exactly the expected
-                # kinds for this scenario - nothing missing, nothing extra.
-                "ok": set(by_sid.get(sc["id"], set()))
-                      == set(sc["expect_kinds"]),
-            }
-            for sc in flagged
-        }
-    finally:
-        il.close()
+# engine_replay.engine_pass: the corpus facts (controls included) through the
+# real rule pack - the same replay the CI gate (gate.py) scores.
 
 
 # ---- Reporting -------------------------------------------------------------
@@ -439,10 +384,11 @@ def summarize(data):
         ok = sum(1 for e in eng.values() if e["ok"])
         print()
         print("ENGINE PASS - InputLayer rules on the same corpus (correct facts)")
-        print(f"  Detected: {ok}/{len(eng)}")
+        print(f"  Exact (flagged: expected kinds; controls: none): "
+              f"{ok}/{len(eng)}")
         misses = [k for k, e in eng.items() if not e["ok"]]
         if misses:
-            print(f"  Missed: {', '.join(misses)}")
+            print(f"  Failed: {', '.join(misses)}")
 
 
 def main():

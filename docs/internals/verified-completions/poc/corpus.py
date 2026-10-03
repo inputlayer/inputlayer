@@ -1013,6 +1013,12 @@ def f_identity(n=100):
 
 
 def f_controls(n=102):
+    """Controls carry the facts a correct extractor emits, so the engine
+    replay checks them for real: a correction retracts the superseded fact
+    (`retractions`), a restatement repeats the same canonical value, and a
+    hedge/question/conditional enters with its non-asserted modality.
+    `expect_soft` lists the advisory tensions the control legitimately
+    raises; any hard finding on a control is a false alarm."""
     markers = ["Actually, scratch that -", "Correction:", "Update:", "No wait -",
                "I misspoke -", "Make that", "Let me fix that -", "Scrap that -",
                "On second thought -", "Small correction:"]
@@ -1020,61 +1026,97 @@ def f_controls(n=102):
     for i in range(n):
         sid = f"ctrl_{i:03d}"
         sub = ["correction", "restatement", "modality"][i % 3]
+        k = (i // 3) % 3
         d1, d2 = P(DATE_PAIRS, i)
+        before, ontology, retractions, expect_soft = [], [], [], []
+
+        def date(cid, day, modality="asserted"):
+            return _fact(sid, cid, "trip", "departure_date",
+                         f"2026-08-{day:02d}", modality, num=20260800 + day)
+
+        def venue(cid, city):
+            ontology.append(("functional", "venue_city"))
+            return _fact(sid, cid, "event", "venue_city", city.lower())
+
+        def budget(cid, usd):
+            return _fact(sid, cid, "trip", "total_price", f"{usd} USD",
+                         num=usd)
+
         if sub == "correction":
             m = P(markers, i)
-            k = (i // 3) % 3
             if k == 0:
                 s1, s2 = (f"We leave on August {_ord(d2)}.",
                           f"{m} we leave on August {_ord(d1)}.")
                 task = "Draft the booking summary for the travel agent."
+                facts = [date("c1", d2), date("c2", d1)]
             elif k == 1:
                 c1, c2 = P(CITIES, i), P(CITIES, i + 4)
                 s1, s2 = f"The venue is in {c1}.", f"{m} the venue is in {c2}."
                 task = "Write the directions email for attendees."
+                facts = [venue("c1", c1), venue("c2", c2)]
             else:
                 p1, p2 = 1000 + 250 * (i % 8), 1500 + 300 * (i % 8)
                 s1, s2 = f"The budget is {p1} USD.", f"{m} the budget is {p2} USD."
                 task = "Draft the trip cost plan."
+                facts = [budget("c1", p1), budget("c2", p2)]
+            retractions = [f"{sid}__c1"]
         elif sub == "restatement":
-            k = (i // 3) % 3
             if k == 0:
                 p = 1000 + 500 * (i % 7)
-                s1, s2 = (f"Budget's ${p // 1000}k.",
+                s1, s2 = (f"Budget's ${p / 1000:g}k.",
                           f"So with the {p} USD budget, what fits?")
                 task = "Draft the trip cost plan."
+                facts = [budget("c1", p), budget("c2", p)]
             elif k == 1:
                 s1, s2 = (f"We leave on August {_ord(d1)}.",
                           f"Departure on the {_ord(d1)} - anything left to prep?")
                 task = "Draft the booking summary for the travel agent."
+                facts = [date("c1", d1), date("c2", d1)]
             else:
                 c = P(CITIES, i)
                 s1, s2 = (f"The venue is in {c}.",
                           f"Since the venue's in {c}, let's book nearby hotels.")
                 task = "Write the directions email for attendees."
+                facts = [venue("c1", c), venue("c2", c)]
         else:
-            k = (i // 3) % 3
             if k == 0:
                 c1, c2 = P(CITY_PAIRS, i)
                 s1, s2 = (f"We fly out of {c1}.",
                           f"It might be {c2} we leave from, let me confirm.")
                 task = "Draft the departure-morning plan for the group."
+                facts = [_fact(sid, "c1", "trip", "departure_city", c1.lower()),
+                         _fact(sid, "c2", "trip", "departure_city", c2.lower(),
+                               modality="hedged")]
+                expect_soft = ["hedge_vs_assert"]
             elif k == 1:
                 s1, s2 = (f"We leave on August {_ord(d1)}.",
                           f"Would it be crazy to leave on the {_ord(d2)} instead?")
                 task = "Draft the booking summary for the travel agent."
+                facts = [date("c1", d1), date("c2", d2, modality="question")]
             else:
-                s1, s2 = (f"The demo is before the keynote.",
+                s1, s2 = ("The demo is before the keynote.",
                           "If the room isn't ready, the keynote goes first instead.")
                 task = "Draft the event schedule as a timeline."
+                # Only the asserted ordering becomes a before_claim; the
+                # conditional reversal stays an inert conditional claim.
+                before = [(f"{sid}__b1", f"{sid}__demo", f"{sid}__keynote")]
+                facts = [_fact(sid, "c2", "keynote", "before", f"{sid}__demo",
+                               modality="conditional")]
         pairs = [("user", s1), ("assistant", "Noted."), ("user", s2)]
-        out.append({
+        sc = {
             "id": sid, "family": "correction_control", "sub": sub,
             "control": True, "gap_turns": 0, "messages": _msgs(pairs),
             "clean_fix": {}, "task": task, "conflict": None,
-            "facts": [], "before": [], "constraints": [], "same_as": [],
+            "facts": facts, "before": before, "constraints": [], "same_as": [],
             "expect_kinds": [],
-        })
+        }
+        if ontology:
+            sc["ontology"] = sorted(set(ontology))
+        if retractions:
+            sc["retractions"] = retractions
+        if expect_soft:
+            sc["expect_soft"] = expect_soft
+        out.append(sc)
     return out
 
 

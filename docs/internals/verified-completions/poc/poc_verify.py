@@ -26,19 +26,23 @@ config the snapshot harness generates, or pass --server / --api-key.
 
 import argparse
 import json
+import multiprocessing
+import os
 import re
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 POC_DIR = Path(__file__).resolve().parent
 VC_DIR = POC_DIR.parent
 REPO = VC_DIR.parent.parent.parent
-PACK = VC_DIR / "rules" / "consistency-core.iql"
 LIFECYCLE_PROMPT = VC_DIR / "extraction" / "fact-lifecycle-prompt.md"
 CLAIM_SCHEMA = VC_DIR / "extraction" / "claim-schema.json"
 
-sys.path.insert(0, str(REPO / "packages" / "inputlayer-py" / "src"))
-from inputlayer.client_sync import InputLayerSync  # noqa: E402
+sys.path.insert(0, str(POC_DIR))
+from engine_replay import connect, esc, load_pack_statements  # noqa: E402
+from evaluator import (CONTROL, FLAG, Checkpoint, Expectation,  # noqa: E402
+                       Observation, Row, judge)
 
 MODALITIES = {"asserted", "negated", "hedged", "conditional", "opinion", "question"}
 CONSTRAINT_TYPES = {"forbid", "require", "max_value", "min_value", "persona"}
@@ -51,10 +55,7 @@ SEEDED_FUNCTIONAL = {
 }
 DATE_ATTRS_SUFFIX = "_date"
 DATE_ATTRS_EXTRA = {"check_in", "check_out"}
-
-
-def esc(s):
-    return str(s).replace('"', "'")
+WORKERS = min(4, os.cpu_count() or 1)
 
 
 def numeric_mirror(attribute, value):
@@ -226,26 +227,17 @@ class Session:
         violations = {row[0] for row in self.x("?violation(K, C, Kc)").rows}
         return hard, soft, violations
 
-    def claim_present(self, cid):
-        if cid in self.claims:
-            return len(self.x(f'?claim("{cid}", E, A, V)').rows) > 0
-        if cid in self.constraints:
-            return len(self.x(f'?constraint("{cid}", T, A, V)').rows) > 0
-        if cid in self.constraint_nums:
-            return len(self.x(f'?constraint_num("{cid}", T, A, N)').rows) > 0
-        return False
+    def present(self, ids):
+        """The ids among `ids` the ENGINE still holds as a claim, constraint
+        or ordering - asked of the graph, never of local bookkeeping, so a
+        retraction that did not reach the engine shows up as stale."""
+        queries = ('?claim("{}", E, A, V)', '?constraint("{}", T, A, V)',
+                   '?constraint_num("{}", T, A, N)', '?before_claim("{}", X, Y)')
+        return frozenset(i for i in ids
+                         if any(self.x(q.format(esc(i))).rows for q in queries))
 
     def drop(self):
         self.il.drop_knowledge_graph(self.kg.name)
-
-
-def load_pack_statements():
-    stmts = []
-    for line in PACK.read_text().splitlines():
-        line = line.strip()
-        if line and not line.startswith("//"):
-            stmts.append(line)
-    return stmts
 
 
 def extract_live(row, batch, prior_batches, current_date, model):
@@ -315,10 +307,21 @@ def extract_live(row, batch, prior_batches, current_date, model):
     }
 
 
+def batch_expectation(exp):
+    return Expectation(hard=frozenset(exp.get("hard", [])),
+                       soft=frozenset(exp.get("soft", [])),
+                       violations=frozenset(exp.get("violations", [])),
+                       must_absent=frozenset(exp.get("must_absent", [])),
+                       must_present=frozenset(exp.get("must_present", [])))
+
+
 def run_row(il, row, pack_statements, mode, current_date, model, verbose):
+    """Replay one benchmark row batch by batch; after each batch, observe
+    the engine and pair it with the batch's expectation (a checkpoint).
+    The verdict comes from the shared evaluator contract."""
     sess = Session(il, f"poc_{row['id'].lower()}", pack_statements)
-    result = {"id": row["id"], "status": row["status"], "title": row["title"],
-              "ok": True, "notes": [], "rejects": []}
+    notes, rejects, checkpoints = [], [], []
+    inserted = False
     try:
         for pair in row.get("setup_same_as", []):
             sess.x(f'+same_as[("{pair[0]}", "{pair[1]}")]')
@@ -336,60 +339,83 @@ def run_row(il, row, pack_statements, mode, current_date, model, verbose):
             for c in ext.get("claims", []):
                 if v.valid_claim(c, batch_msgs):
                     sess.insert_claim(c, origin)
+                    inserted = True
             for b in ext.get("before_claims", []):
                 if v.check_common(b, batch_msgs):
                     sess.insert_before(b)
+                    inserted = True
             for k in ext.get("constraints", []):
                 if v.valid_constraint(k, batch_msgs):
-                    if not sess.insert_constraint(k):
+                    if sess.insert_constraint(k):
+                        inserted = True
+                    else:
                         v.reject(k["id"], "numeric constraint with non-numeric value")
             for attr in v.valid_ontology(ext.get("ontology", {})):
                 sess.x(f'+functional[("{attr}",)]')
             for r in ext.get("retractions", []):
                 if not sess.retract(r):
-                    result["notes"].append(f"retraction target {r['target']!r} not found; nothing retracted")
-            result["rejects"].extend(v.rejects)
+                    notes.append(f"retraction target {r['target']!r} not found; nothing retracted")
+            rejects.extend(v.rejects)
 
+            exp = batch_expectation(batch.get("expect", {}))
             hard, soft, violations = sess.findings()
-            exp = batch.get("expect", {})
-            missing_hard = set(exp.get("hard", [])) - hard
-            missing_viol = set(exp.get("violations", [])) - violations
-            if missing_hard or missing_viol:
-                result["ok"] = False
-                result["notes"].append(
-                    f"missed findings: hard {sorted(missing_hard)} violations {sorted(missing_viol)} "
-                    f"(got hard {sorted(hard)}, violations {sorted(violations)})")
-            if row["status"] == "CONTROL":
-                extra = hard | violations
-                allowed = set(exp.get("hard", [])) | set(exp.get("violations", []))
-                if extra - allowed:
-                    result["ok"] = False
-                    result["notes"].append(f"FALSE ALARM: {sorted(extra - allowed)}")
-            else:
-                extra = (hard - set(exp.get("hard", []))) | (violations - set(exp.get("violations", [])))
-                if extra:
-                    result["notes"].append(f"extra findings (review): {sorted(extra)}")
-            missing_soft = set(exp.get("soft", [])) - soft
-            if missing_soft:
-                result["notes"].append(f"expected soft tension not seen: {sorted(missing_soft)}")
-            for cid in exp.get("must_absent", []):
-                if sess.claim_present(cid):
-                    result["ok"] = False
-                    result["notes"].append(f"retraction failed: {cid} still in the graph")
-            for cid in exp.get("must_present", []):
-                if not sess.claim_present(cid):
-                    result["ok"] = False
-                    result["notes"].append(f"over-retraction: {cid} missing from the graph")
-        if verbose:
-            tag = "PASS" if result["ok"] else "FAIL"
-            print(f"  {tag} {row['id']} ({row['status']}) {row['title']}")
-            for n in result["notes"]:
-                print(f"        note: {n}")
-            for rid, reason in result["rejects"]:
-                print(f"        validator dropped {rid}: {reason}")
+            checkpoints.append(Checkpoint(exp, Observation(
+                hard=frozenset(hard), soft=frozenset(soft),
+                violations=frozenset(violations),
+                present=sess.present(exp.must_absent | exp.must_present))))
     finally:
         sess.drop()
-    return result
+    verdict = judge(Row(
+        "benchmark", row["id"], row["family"],
+        CONTROL if row["status"] == "CONTROL" else FLAG,
+        any(cp.expect.must_absent or cp.expect.must_present
+            for cp in checkpoints),
+        tuple(checkpoints), inserted))
+    if verbose:
+        tag = "PASS" if verdict.ok else "FAIL"
+        print(f"  {tag} {row['id']} ({row['status']}) {row['title']}")
+        for cat, detail in verdict.problems:
+            print(f"        [{cat}] {detail}")
+        for n in notes:
+            print(f"        note: {n}")
+        for rid, reason in rejects:
+            print(f"        validator dropped {rid}: {reason}")
+    return {"id": row["id"], "status": row["status"], "title": row["title"],
+            "verdict": verdict, "ok": verdict.ok, "notes": notes,
+            "rejects": rejects}
+
+
+_worker = {}
+
+
+def _worker_init(server, api_key, opts):
+    _worker["il"] = connect(server, api_key)
+    _worker["pack"] = load_pack_statements()
+    _worker["opts"] = opts
+
+
+def _worker_row(row):
+    return run_row(_worker["il"], row, _worker["pack"], *_worker["opts"])
+
+
+def replay_benchmark(server, api_key, rows, mode="reference",
+                     current_date=None, model=None, verbose=False,
+                     workers=WORKERS):
+    """Run every scored row, each in its own KG, across `workers` processes
+    (one connection each: loading the pack into a fresh KG dominates the
+    cost, and rows are independent). Returns (results in row order,
+    declared gap ids)."""
+    gaps = [r["id"] for r in rows if r["status"] == "GAP" or not r["batches"]]
+    scored = [r for r in rows if r["id"] not in gaps]
+    opts = (mode, current_date, model, verbose)
+    # spawn, never fork: the parent may already hold the SDK's event-loop
+    # thread, and a forked copy of it deadlocks the child.
+    with ProcessPoolExecutor(max_workers=max(1, min(workers, len(scored))),
+                             mp_context=multiprocessing.get_context("spawn"),
+                             initializer=_worker_init,
+                             initargs=(server, api_key, opts)) as pool:
+        results = list(pool.map(_worker_row, scored))
+    return results, gaps
 
 
 def main():
@@ -421,22 +447,11 @@ def main():
     if not api_key:
         sys.exit("No InputLayer API key: pass --api-key or create .inputlayer-credentials.toml")
 
-    pack_statements = load_pack_statements()
     mode = "live" if args.live else "reference"
     current_date = bench["meta"]["current_date"]
 
-    il = InputLayerSync(args.server, api_key=api_key)
-    il.connect()
-    results, gaps = [], []
-    try:
-        for row in rows:
-            if row["status"] == "GAP" or not row["batches"]:
-                gaps.append(row)
-                continue
-            results.append(run_row(il, row, pack_statements, mode, current_date,
-                                   args.model, args.verbose))
-    finally:
-        il.close()
+    results, gaps = replay_benchmark(args.server, api_key, rows, mode,
+                                     current_date, args.model, args.verbose)
 
     flag_rows = [r for r in results if r["status"] in ("CORE", "NUM", "M3")]
     control_rows = [r for r in results if r["status"] == "CONTROL"]

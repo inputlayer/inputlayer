@@ -97,7 +97,8 @@ Benchmark corpus status (2026-08-14): v2.1 - 1,628 scenarios, 16
 families, multi-category labels, adversarially reviewed
 (introduction: poc/DATASET.md). Per-scenario verification ledger
 (poc/verify_each.py): structural axes 1,628/1,628, exact-match engine
-pass 1,526/1,526. Completed LLM behavior study at n=30/family on corpus
+pass 1,628/1,628 (controls replayed with real facts since 2026-10-03;
+CI-gated by poc/gate.py). Completed LLM behavior study at n=30/family on corpus
 v1 is the citable result (poc/README.md); the v2.1 LLM re-baseline
 continues in #95 with resume-until-verified tooling in-tree.
 
