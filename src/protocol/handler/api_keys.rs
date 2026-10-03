@@ -191,7 +191,7 @@ impl Handler {
         owner: &str,
         ttl: Option<Duration>,
     ) -> Result<(String, ApiKeyTimes), String> {
-        let storage = self.storage.read();
+        let storage = self.storage.write();
         let snapshot = storage
             .get_snapshot_for(auth::INTERNAL_KG)
             .map_err(|e| format!("Auth storage error: {e}"))?;
@@ -256,6 +256,7 @@ impl Handler {
     /// `.apikey expire`: bring a key's expiry forward to `ttl` from now. Its
     /// sessions end when that passes; a zero `ttl` ends them now.
     pub fn handle_apikey_expire(&self, label: &str, ttl: Duration) -> Result<QueryResult, String> {
+        let storage = self.storage.write();
         let at = now_ms().saturating_add(u64::try_from(ttl.as_millis()).unwrap_or(u64::MAX));
         let key_hash = self
             .credentials
@@ -268,7 +269,7 @@ impl Handler {
                      an expiry can only be brought forward"
                 ),
             })?;
-        replace_times(&self.storage.read(), EXPIRES_AT, &[(&key_hash, at)])
+        replace_times(&storage, EXPIRES_AT, &[(&key_hash, at)])
             .map_err(|e| format!("Failed to set API key expiry: {e}"))?;
         self.credentials.expire_key(&key_hash, at);
 
@@ -282,7 +283,7 @@ impl Handler {
 
     /// `.apikey revoke`: delete a key and end its sessions now.
     pub fn handle_apikey_revoke(&self, label: &str) -> Result<QueryResult, String> {
-        let storage = self.storage.read();
+        let storage = self.storage.write();
         let snapshot = storage
             .get_snapshot_for(auth::INTERNAL_KG)
             .map_err(|e| format!("Auth storage error: {e}"))?;

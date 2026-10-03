@@ -179,8 +179,21 @@ impl Credential {
     }
 
     /// Bring the expiry forward to `at`; a later `at` changes nothing.
+    /// Waits for any [`Self::admit`] in progress, like [`Self::end`].
     pub(super) fn expire_at(&self, at: u64) {
+        let _watchers = self.watchers.lock();
         self.expires_at.fetch_min(at, Ordering::AcqRel);
+    }
+
+    /// Run `enqueue` only while the credential is live, holding the lock
+    /// [`Self::end`] and [`Self::expire_at`] take: neither completes until
+    /// an `enqueue` already admitted has returned.
+    fn admit<T>(&self, enqueue: impl FnOnce() -> T) -> Result<T, CredentialEnded> {
+        let _watchers = self.watchers.lock();
+        match self.ended() {
+            Some(reason) => Err(reason),
+            None => Ok(enqueue()),
+        }
     }
 
     pub(super) fn last_used_at(&self) -> Option<u64> {
@@ -252,6 +265,14 @@ impl Principal {
     /// Why the credential no longer authorizes anything, if it doesn't.
     pub fn ended(&self) -> Option<CredentialEnded> {
         self.credential.ended()
+    }
+
+    /// Run `enqueue` only while the credential is live, atomically with
+    /// respect to revoking it or bringing its expiry forward: those wait
+    /// until an admitted `enqueue` returns. Keep `enqueue` short and
+    /// non-blocking.
+    pub(crate) fn admit<T>(&self, enqueue: impl FnOnce() -> T) -> Result<T, CredentialEnded> {
+        self.credential.admit(enqueue)
     }
 
     /// A future that completes once the credential is revoked or expired

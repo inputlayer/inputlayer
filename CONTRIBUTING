@@ -72,9 +72,12 @@ change: `make test-fast` (or the touched crate's `cargo test -p ...`) and the
 affected snapshot specs (`make test-affected`).
 
 Before every push to a PR, `make pre-pr` must pass. It runs formatting,
-clippy and the tests that apply to your changes since the branch left `main`
-in parallel: the workspace tests when a Rust input changed, plus the affected
-snapshot categories. Then it runs the performance gate. Attach the gate's
+and the checks that apply to changes since `PRE_PR_BASE` (default: the branch's
+merge base with `origin/main`) in parallel: Rust clippy, workspace tests and
+affected snapshots for Rust inputs; Python SDK tests for `packages/inputlayer-py/`;
+JS SDK tests and `tsc --noEmit` for `packages/inputlayer-js/`; and
+`make perf-gate-check` for `perf-gate/`. Formatting always runs. Then it runs
+the performance gate. Attach the gate's
 report (`target/perf-gate/latest/report.md`) to the PR:
 
 ```bash

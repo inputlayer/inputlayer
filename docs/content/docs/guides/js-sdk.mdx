@@ -74,6 +74,7 @@ const kg = il.knowledgeGraph("myapp");
 const graphs = await il.listKnowledgeGraphs();
 
 // Drop a knowledge graph and all its data
+await il.knowledgeGraph("default").execute(".kg use default");
 await il.dropKnowledgeGraph("myapp");
 ```
 
@@ -461,6 +462,10 @@ await kg.clearRule("reachable");
 ```
 
 ## Vector Search
+
+`vectorSearch()` forwards the legacy `top_k` / `within_radius` query syntax to
+the server. The current engine rejects these query forms with a typed
+`QueryError`; the SDK does not sort or truncate results locally.
 
 InputLayer supports HNSW indexes for approximate nearest-neighbor search over vector columns.
 

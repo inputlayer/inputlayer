@@ -97,7 +97,10 @@ describe.skipIf(SKIP)('Integration: Schema', () => {
   });
 
   afterAll(async () => {
-    try { await client.dropKnowledgeGraph(kg_name); } catch {}
+    try {
+      await client.knowledgeGraph('default').execute('.kg use default');
+      await client.dropKnowledgeGraph(kg_name);
+    } catch {}
     await client.close();
   });
 
@@ -140,7 +143,10 @@ describe.skipIf(SKIP)('Integration: Insert & Query', () => {
   });
 
   afterAll(async () => {
-    try { await client.dropKnowledgeGraph(kg_name); } catch {}
+    try {
+      await client.knowledgeGraph('default').execute('.kg use default');
+      await client.dropKnowledgeGraph(kg_name);
+    } catch {}
     await client.close();
   });
 
@@ -221,7 +227,10 @@ describe.skipIf(SKIP)('Integration: Joins', () => {
   });
 
   afterAll(async () => {
-    try { await client.dropKnowledgeGraph(kg_name); } catch {}
+    try {
+      await client.knowledgeGraph('default').execute('.kg use default');
+      await client.dropKnowledgeGraph(kg_name);
+    } catch {}
     await client.close();
   });
 
@@ -253,7 +262,10 @@ describe.skipIf(SKIP)('Integration: Aggregations', () => {
   });
 
   afterAll(async () => {
-    try { await client.dropKnowledgeGraph(kg_name); } catch {}
+    try {
+      await client.knowledgeGraph('default').execute('.kg use default');
+      await client.dropKnowledgeGraph(kg_name);
+    } catch {}
     await client.close();
   });
 
@@ -302,7 +314,10 @@ describe.skipIf(SKIP)('Integration: Rules', () => {
   });
 
   afterAll(async () => {
-    try { await client.dropKnowledgeGraph(kg_name); } catch {}
+    try {
+      await client.knowledgeGraph('default').execute('.kg use default');
+      await client.dropKnowledgeGraph(kg_name);
+    } catch {}
     await client.close();
   });
 
@@ -367,7 +382,10 @@ describe.skipIf(SKIP)('Integration: Delete', () => {
   });
 
   afterAll(async () => {
-    try { await client.dropKnowledgeGraph(kg_name); } catch {}
+    try {
+      await client.knowledgeGraph('default').execute('.kg use default');
+      await client.dropKnowledgeGraph(kg_name);
+    } catch {}
     await client.close();
   });
 
@@ -413,7 +431,10 @@ describe.skipIf(SKIP)('Integration: Sessions', () => {
   });
 
   afterAll(async () => {
-    try { await client.dropKnowledgeGraph(kg_name); } catch {}
+    try {
+      await client.knowledgeGraph('default').execute('.kg use default');
+      await client.dropKnowledgeGraph(kg_name);
+    } catch {}
     await client.close();
   });
 
@@ -454,31 +475,31 @@ describe.skipIf(SKIP)('Integration: Vector Search', () => {
   });
 
   afterAll(async () => {
-    try { await client.dropKnowledgeGraph(kg_name); } catch {}
+    try {
+      await client.knowledgeGraph('default').execute('.kg use default');
+      await client.dropKnowledgeGraph(kg_name);
+    } catch {}
     await client.close();
   });
 
-  it('top-k vector search', async () => {
+  it('top-k query rejection is typed', async () => {
     const kg = client.knowledgeGraph(kg_name);
-    const result = await kg.vectorSearch({
+    await expect(kg.vectorSearch({
       relation: Document,
       queryVec: [1.0, 0.0, 0.0],
       k: 3,
       metric: 'cosine',
-    });
-    expect(result.length).toBeGreaterThanOrEqual(1);
-    expect(result.length).toBeLessThanOrEqual(3);
+    })).rejects.toBeInstanceOf(QueryError);
   });
 
-  it('radius vector search', async () => {
+  it('radius query rejection is typed', async () => {
     const kg = client.knowledgeGraph(kg_name);
-    const result = await kg.vectorSearch({
+    await expect(kg.vectorSearch({
       relation: Document,
       queryVec: [1.0, 0.0, 0.0],
       radius: 0.5,
       metric: 'cosine',
-    });
-    expect(result.length).toBeGreaterThanOrEqual(1);
+    })).rejects.toBeInstanceOf(QueryError);
   });
 });
 
@@ -500,7 +521,10 @@ describe.skipIf(SKIP)('Integration: Indexes', () => {
   });
 
   afterAll(async () => {
-    try { await client.dropKnowledgeGraph(kg_name); } catch {}
+    try {
+      await client.knowledgeGraph('default').execute('.kg use default');
+      await client.dropKnowledgeGraph(kg_name);
+    } catch {}
     await client.close();
   });
 
@@ -540,7 +564,10 @@ describe.skipIf(SKIP)('Integration: ResultSet', () => {
   });
 
   afterAll(async () => {
-    try { await client.dropKnowledgeGraph(kg_name); } catch {}
+    try {
+      await client.knowledgeGraph('default').execute('.kg use default');
+      await client.dropKnowledgeGraph(kg_name);
+    } catch {}
     await client.close();
   });
 
@@ -601,7 +628,10 @@ describe.skipIf(SKIP)('Integration: Raw IQL', () => {
   });
 
   afterAll(async () => {
-    try { await client.dropKnowledgeGraph(kg_name); } catch {}
+    try {
+      await client.knowledgeGraph('default').execute('.kg use default');
+      await client.dropKnowledgeGraph(kg_name);
+    } catch {}
     await client.close();
   });
 
@@ -633,7 +663,10 @@ describe.skipIf(SKIP)('Integration: Multi-KG', () => {
   });
 
   afterAll(async () => {
-    try { await client.dropKnowledgeGraph(kg_name); } catch {}
+    try {
+      await client.knowledgeGraph('default').execute('.kg use default');
+      await client.dropKnowledgeGraph(kg_name);
+    } catch {}
     await client.close();
   });
 
@@ -664,7 +697,10 @@ describe.skipIf(SKIP)('Integration: Debug', () => {
   });
 
   afterAll(async () => {
-    try { await client.dropKnowledgeGraph(kg_name); } catch {}
+    try {
+      await client.knowledgeGraph('default').execute('.kg use default');
+      await client.dropKnowledgeGraph(kg_name);
+    } catch {}
     await client.close();
   });
 
@@ -687,7 +723,10 @@ describe.skipIf(SKIP)('Integration: Drop Relation', () => {
   });
 
   afterAll(async () => {
-    try { await client.dropKnowledgeGraph(kg_name); } catch {}
+    try {
+      await client.knowledgeGraph('default').execute('.kg use default');
+      await client.dropKnowledgeGraph(kg_name);
+    } catch {}
     await client.close();
   });
 
@@ -719,7 +758,10 @@ describe.skipIf(SKIP)('Integration: ACL', () => {
   });
 
   afterAll(async () => {
-    try { await client.dropKnowledgeGraph(kg_name); } catch {}
+    try {
+      await client.knowledgeGraph('default').execute('.kg use default');
+      await client.dropKnowledgeGraph(kg_name);
+    } catch {}
     await client.close();
   });
 
@@ -772,7 +814,10 @@ describe.skipIf(SKIP)('Integration: Engine failures', () => {
   });
 
   afterAll(async () => {
-    try { await client.dropKnowledgeGraph(kg_name); } catch {}
+    try {
+      await client.knowledgeGraph('default').execute('.kg use default');
+      await client.dropKnowledgeGraph(kg_name);
+    } catch {}
     await client.close();
   });
 
@@ -824,5 +869,16 @@ describe.skipIf(SKIP)('Integration: Engine failures', () => {
     const err = (await kg.load('seed.iql').catch((e: unknown) => e)) as QueryError;
     expect(err).toBeInstanceOf(QueryError);
     expect(err.code).toBe('unsupported');
+  });
+
+  it('dropping the current knowledge graph rejects without switching it', async () => {
+    const kg = client.knowledgeGraph(kg_name);
+    await kg.insert(Edge, { src: 900, dst: 901 });
+    await kg.execute(`.kg use ${kg_name}`);
+    const err = await client.dropKnowledgeGraph(kg_name).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(QueryError);
+    // Retrying before any KG command must still reject dropping the active graph.
+    await expect(client.dropKnowledgeGraph(kg_name)).rejects.toBeInstanceOf(QueryError);
+    expect((await kg.execute('?edge(900, Y)')).length).toBe(1);
   });
 });

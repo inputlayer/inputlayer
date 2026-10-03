@@ -406,9 +406,6 @@ export class KnowledgeGraph {
       }
     }
 
-    if (opts.k === undefined && opts.radius === undefined) {
-      throw new Error('Must specify either k or radius');
-    }
     const vecStr = `[${opts.queryVec.join(', ')}]`;
     const distFn: Record<string, string> = {
       cosine: 'cosine',
@@ -420,20 +417,22 @@ export class KnowledgeGraph {
 
     const colVars = cols.map((_, i) => `X${i}`).join(', ');
     const vecVar = `X${cols.indexOf(vecColumn)}`;
-    const parts = [`?${relName}(${colVars})`, `Dist = ${fnName}(${vecVar}, ${vecStr})`];
-    // The radius filter runs server-side; ordering and k are applied here
-    // because IQL orders only inside aggregate rule heads.
-    if (opts.radius !== undefined) parts.push(`Dist <= ${opts.radius}`);
+    const distAssign = `Dist = ${fnName}(${vecVar}, ${vecStr})`;
 
-    const result = await this.conn.execute(parts.join(', '));
-    const distIdx = result.columns.indexOf('Dist');
-    let rows = result.rows;
-    if (distIdx >= 0) rows = [...rows].sort((a, b) => a[distIdx] - b[distIdx]);
-    if (opts.k !== undefined) rows = rows.slice(0, opts.k);
+    let query: string;
+    if (opts.k !== undefined) {
+      query = `?top_k<${opts.k}, ${colVars}, Dist:asc> <- ${relName}(${colVars}), ${distAssign}`;
+    } else if (opts.radius !== undefined) {
+      query = `?within_radius<${opts.radius}, ${colVars}, Dist:asc> <- ${relName}(${colVars}), ${distAssign}`;
+    } else {
+      throw new Error('Must specify either k or radius');
+    }
+
+    const result = await this.conn.execute(query);
     return new ResultSet({
       columns: result.columns,
-      rows,
-      rowCount: rows.length,
+      rows: result.rows,
+      rowCount: result.row_count,
       totalCount: result.total_count,
       truncated: result.truncated,
       executionTimeMs: result.execution_time_ms,

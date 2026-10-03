@@ -395,6 +395,10 @@ mod proof_snapshot_tests;
 #[cfg(test)]
 mod revocation_tests;
 
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod credential_mutation_tests;
+
 /// Self-contained snapshot of Handler state for executing a single query on a blocking thread.
 /// All fields are `Arc`-wrapped (`Send + Sync`), allowing the job to be moved into
 /// `tokio::task::spawn_blocking` without holding any `!Send` lock guards across `.await` points.
@@ -1331,7 +1335,7 @@ impl Handler {
         let role = auth::Role::from_str(role_str)?;
 
         // Check user doesn't already exist
-        let storage = self.storage.read();
+        let storage = self.storage.write();
         let snapshot = storage
             .get_snapshot_for(auth::INTERNAL_KG)
             .map_err(|e| format!("Auth storage error: {e}"))?;
@@ -1377,7 +1381,7 @@ impl Handler {
             return Err("Cannot drop the 'admin' user".to_string());
         }
 
-        let storage = self.storage.read();
+        let storage = self.storage.write();
         let snapshot = storage
             .get_snapshot_for(auth::INTERNAL_KG)
             .map_err(|e| format!("Auth storage error: {e}"))?;
@@ -1440,7 +1444,7 @@ impl Handler {
         use crate::auth;
         use crate::value::Value;
 
-        let storage = self.storage.read();
+        let storage = self.storage.write();
         let snapshot = storage
             .get_snapshot_for(auth::INTERNAL_KG)
             .map_err(|e| format!("Auth storage error: {e}"))?;
@@ -1476,7 +1480,10 @@ impl Handler {
             .map_err(|e| format!("Failed to update password: {e}"))?;
         storage
             .insert_tuples_into(auth::INTERNAL_KG, "users", vec![new_tuple])
-            .map_err(|e| format!("Failed to update password: {e}"))?;
+            .map_err(|e| {
+                self.credentials.remove_user(username);
+                format!("Failed to update password: {e}")
+            })?;
         self.credentials.set_password(username, new_hash);
 
         tracing::info!(username, "audit_user_password_changed");
@@ -1495,7 +1502,7 @@ impl Handler {
             return Err("Cannot change the 'admin' user's role".to_string());
         }
 
-        let storage = self.storage.read();
+        let storage = self.storage.write();
         let snapshot = storage
             .get_snapshot_for(auth::INTERNAL_KG)
             .map_err(|e| format!("Auth storage error: {e}"))?;
@@ -1530,7 +1537,10 @@ impl Handler {
             .map_err(|e| format!("Failed to update role: {e}"))?;
         storage
             .insert_tuples_into(auth::INTERNAL_KG, "users", vec![new_tuple])
-            .map_err(|e| format!("Failed to update role: {e}"))?;
+            .map_err(|e| {
+                self.credentials.remove_user(username);
+                format!("Failed to update role: {e}")
+            })?;
         self.credentials.set_role(username, role);
 
         Ok(self.message_result(&format!("Role updated to '{new_role}' for '{username}'.")))

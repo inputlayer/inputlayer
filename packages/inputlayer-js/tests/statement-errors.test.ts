@@ -354,3 +354,28 @@ describe('KG switch', () => {
     expect(engine.sent).toEqual(['.kg use default']);
   });
 });
+
+
+describe('unchanged management and vector query paths', () => {
+  it('dropping the current KG surfaces the server error without switching', async () => {
+    engine = await ScriptedEngine.start();
+    client = new InputLayer({ url: engine.url, username: 'a', password: 'b', autoReconnect: false });
+    await client.connect();
+    engine.script([{ type: 'error', message: 'Cannot drop current knowledge graph', code: 'conflict' }]);
+    await expect(client.dropKnowledgeGraph('other')).rejects.toMatchObject({ code: 'conflict' });
+    engine.script([messages(['ok'])]);
+    await client.knowledgeGraph('other').execute('.status');
+    expect(engine.sent).toEqual(['.kg drop other', '.status']);
+  });
+
+  it.each([
+    [{ k: 2 }, '?top_k<2, X0, X1, Dist:asc> <- vectors(X0, X1), Dist = cosine(X1, [1, 0])'],
+    [{ radius: 0.5 }, '?within_radius<0.5, X0, X1, Dist:asc> <- vectors(X0, X1), Dist = cosine(X1, [1, 0])'],
+  ])('forwards vector selection to the server: %j', async (selection, query) => {
+    const vectors = relation('Vectors', { id: 'int', embedding: 'vector[2]' });
+    const kg = await kgOn([{ type: 'error', message: 'Unsupported query', code: 'validation' }]);
+    await expect(kg.vectorSearch({ relation: vectors, queryVec: [1, 0], ...selection }))
+      .rejects.toBeInstanceOf(QueryError);
+    expect(engine?.sent.at(-1)).toBe(query);
+  });
+});

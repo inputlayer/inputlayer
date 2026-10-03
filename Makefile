@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-tests perf-gate perf-gate-check secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-tests pre-pr-snapshots pre-pr-js perf-gate perf-gate-check secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -521,24 +521,39 @@ lint:
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
 	cargo clippy --all-features --test e2e_reactive -- -D warnings
 
-# Pre-PR gate: must pass before every push to a PR. Runs the fast checks in
-# parallel - formatting, clippy, and the tests that apply to the changes since
-# PRE_PR_BASE (workspace unit and integration tests when a Rust input changed,
-# the same inputs the CI fast gate filters on, plus the affected snapshot
-# categories) - then the performance gate against the approved baseline.
+# Pre-PR gate: affected fast checks run in parallel before every push to a PR,
+# then the same-host performance gate. Formatting always runs; PRE_PR_BASE
+# routes Rust inputs to lint, workspace tests and affected snapshots, SDK
+# inputs to their tests (plus JS type checking), and perf-gate/ to its checks.
 PRE_PR_BASE ?= $(shell git merge-base HEAD origin/main 2>/dev/null || echo HEAD)
-PRE_PR_RUST_INPUTS := src tests benches examples gateway ontology-client testkit docs/spec Cargo.toml '*/Cargo.toml' config.toml clippy.toml Makefile
+PRE_PR_RUST_INPUTS := src tests benches examples gateway ontology-client testkit docs/spec Cargo.toml Cargo.lock config.toml clippy.toml Makefile scripts/test-affected.sh scripts/run_snapshot_tests.sh
 pre-pr:
-	$(MAKE) --no-print-directory -j3 --output-sync=target fmt-check lint pre-pr-tests
+	@set -e; \
+	targets="fmt-check"; \
+	git rev-parse --verify "$(PRE_PR_BASE)^{commit}" >/dev/null; \
+	if ! git diff --quiet "$(PRE_PR_BASE)" -- $(PRE_PR_RUST_INPUTS); then \
+		targets="$$targets lint pre-pr-tests pre-pr-snapshots"; \
+	fi; \
+	if ! git diff --quiet "$(PRE_PR_BASE)" -- packages/inputlayer-py; then \
+		targets="$$targets python-test"; \
+	fi; \
+	if ! git diff --quiet "$(PRE_PR_BASE)" -- packages/inputlayer-js; then \
+		targets="$$targets pre-pr-js"; \
+	fi; \
+	if ! git diff --quiet "$(PRE_PR_BASE)" -- perf-gate; then \
+		targets="$$targets perf-gate-check"; \
+	fi; \
+	$(MAKE) --no-print-directory -j6 --output-sync=target $$targets
 	$(MAKE) --no-print-directory perf-gate
 
 pre-pr-tests:
-	@if git diff --quiet $(PRE_PR_BASE) -- $(PRE_PR_RUST_INPUTS); then \
-		echo "No Rust inputs changed since $(PRE_PR_BASE): skipping workspace tests."; \
-	else \
-		cargo test --workspace --all-features; \
-	fi
-	./scripts/test-affected.sh $(PRE_PR_BASE)
+	cargo test --workspace --all-features
+
+pre-pr-snapshots:
+	./scripts/test-affected.sh "$(PRE_PR_BASE)"
+
+pre-pr-js: js-test
+	cd packages/inputlayer-js && npm run typecheck
 
 # Performance gate: this tree's server vs the approved baseline, same host.
 # Mandatory before calling a PR done; see perf-gate/README.md.

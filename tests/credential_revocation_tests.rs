@@ -480,6 +480,77 @@ async fn revocation_fences_a_subscription_held_at_the_result_cap() {
     server.wait_for_active(0).await;
 }
 
+/// A completed `.why` proof must still pass the credential fence before output.
+/// Use the current-thread runtime so the thread-local trace subscriber also
+/// observes the server task, and revoke synchronously at its output boundary.
+#[tokio::test]
+async fn revocation_during_a_proof_withholds_it() {
+    use tracing::field::{Field, Visit};
+    use tracing_subscriber::prelude::*;
+
+    struct RevokeBeforeOutput(Arc<Handler>);
+
+    #[derive(Default)]
+    struct ExecutionEnd {
+        matched: bool,
+        succeeded: bool,
+    }
+
+    impl Visit for ExecutionEnd {
+        fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+            if field.name() == "message" {
+                self.matched = format!("{value:?}") == "ws_execute_end";
+            }
+        }
+
+        fn record_bool(&mut self, field: &Field, value: bool) {
+            if field.name() == "ok" {
+                self.succeeded = value;
+            }
+        }
+    }
+
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for RevokeBeforeOutput {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            let mut end = ExecutionEnd::default();
+            event.record(&mut end);
+            if end.matched {
+                assert!(end.succeeded, "proof evaluation failed before the fence");
+                self.0.handle_apikey_revoke("bob-why").unwrap();
+            }
+        }
+    }
+
+    let server = start_server().await;
+    server.write("+edge[(1, 2)]").await;
+    server.write("+path(X, Y) <- edge(X, Y)").await;
+    let proof = ".why full ?path(X, Y)";
+    let key = server.key("bob-why", "bob");
+    let principal = server.handler.authenticate_api_key(&key).unwrap();
+    let mut client = Client::connect(&server, Login::Key(&key)).await;
+
+    // Establish that this request produces a proof while the credential is live.
+    let result = client.execute(proof).await;
+    assert_eq!(result["type"], "result", "{result}");
+    assert_eq!(result["proof_trees"].as_array().unwrap().len(), 1);
+
+    // The event runs after evaluation but before any response frame is enqueued.
+    // Blocking there until revocation completes removes assumptions about proof
+    // duration, scheduling, and the time needed to persist the credential change.
+    let subscriber =
+        tracing_subscriber::registry().with(RevokeBeforeOutput(Arc::clone(&server.handler)));
+    let _guard = tracing::subscriber::set_default(subscriber);
+    client
+        .send(json!({"type": "execute", "program": proof}))
+        .await;
+    assert_revoked(&client.drain().await);
+    assert!(principal.is_revoked(), "output-boundary hook did not revoke");
+}
+
 /// Revoking a user's access to a knowledge graph stops its change
 /// notifications and subscription rows at once, although the connection's
 /// credential stays valid; a new grant lets them through again.
