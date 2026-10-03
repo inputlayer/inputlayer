@@ -1,10 +1,12 @@
 //! Judging a candidate against the baseline under a [`Policy`].
 //!
 //! The unit of replication is the round: each round yields one value per arm
-//! per metric (a percentile of that round's raw samples, or its rate). The
-//! estimate is the ratio of the arms' medians over rounds, expressed as a
-//! *cost* ratio (above 1.0 is worse for latency and throughput alike), with a
-//! bootstrap interval over rounds:
+//! per metric (a percentile of that round's raw samples, or its rate). Both
+//! arms of a round run back to back, so each round gives one paired *cost*
+//! ratio, candidate over baseline (above 1.0 is worse, for latency and
+//! throughput alike), and host drift between rounds cancels out. The estimate
+//! is the median of the per-round ratios, with its distribution-free
+//! (binomial order-statistic) confidence interval:
 //!
 //! - interval entirely within budget (`hi <= 1 + tolerance`): pass;
 //! - interval entirely beyond budget (`lo > 1 + tolerance`): fail;
@@ -19,7 +21,7 @@ use serde::Serialize;
 
 use crate::policy::{MetricKey, Policy, Stat};
 use crate::schema::{FixtureRun, RunRecord, SCHEMA};
-use crate::stats::{bootstrap_ratio_interval, median, percentile, relative_spread};
+use crate::stats::{median, median_interval, percentile, relative_spread};
 
 /// Outcome of a metric or of the whole gate, worst last.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -42,7 +44,9 @@ pub struct MetricVerdict {
     pub candidate: Vec<f64>,
     pub baseline_median: Option<f64>,
     pub candidate_median: Option<f64>,
-    /// Candidate cost relative to baseline; above 1.0 is worse.
+    /// Paired per-round cost ratios, candidate over baseline.
+    pub round_ratios: Vec<f64>,
+    /// Median of `round_ratios`; above 1.0 is worse.
     pub cost_ratio: Option<f64>,
     pub interval: Option<(f64, f64)>,
     pub tolerance: f64,
@@ -155,17 +159,20 @@ fn judge_metric(
     let tolerance = policy.tolerance_for(key);
     let (baseline, base_issue) = round_values(record, policy, key, "baseline");
     let (candidate, cand_issue) = round_values(record, policy, key, "candidate");
+    let round_ratios = paired_cost_ratios(key.stat, &baseline, &candidate);
+    let values = |rounds: &[(u32, f64)]| rounds.iter().map(|(_, v)| *v).collect::<Vec<_>>();
     let mut verdict = MetricVerdict {
         metric: key.to_string(),
         required,
         status: Status::Invalid,
         reason: String::new(),
-        baseline_median: median(&baseline),
-        candidate_median: median(&candidate),
-        baseline_spread: relative_spread(&baseline),
-        baseline,
-        candidate,
-        cost_ratio: None,
+        baseline_median: median(&values(&baseline)),
+        candidate_median: median(&values(&candidate)),
+        baseline_spread: relative_spread(&values(&baseline)),
+        baseline: values(&baseline),
+        candidate: values(&candidate),
+        cost_ratio: median(&round_ratios),
+        round_ratios,
         interval: None,
         tolerance,
     };
@@ -173,24 +180,21 @@ fn judge_metric(
         verdict.reason = issue;
         return verdict;
     }
-    // Cost ratio: latency candidate/baseline, throughput baseline/candidate.
-    let (numerator, denominator) = match key.stat {
-        Stat::Rate => (&verdict.baseline, &verdict.candidate),
-        Stat::P50 | Stat::P99 => (&verdict.candidate, &verdict.baseline),
-    };
-    let point = median(numerator)
-        .zip(median(denominator))
-        .filter(|(_, d)| *d > 0.0)
-        .map(|(n, d)| n / d);
-    let interval = bootstrap_ratio_interval(
-        numerator,
-        denominator,
-        policy.resamples,
-        policy.confidence,
-        seed_of(&verdict.metric),
-    );
-    let (Some(point), Some((lo, hi))) = (point, interval) else {
-        verdict.reason = "no usable values (zero baseline)".to_string();
+    if verdict.round_ratios.len() < policy.min_rounds {
+        verdict.reason = format!(
+            "{} paired rounds with a non-zero baseline, need {}",
+            verdict.round_ratios.len(),
+            policy.min_rounds
+        );
+        return verdict;
+    }
+    let interval = median_interval(&verdict.round_ratios, policy.confidence);
+    let (Some(point), Some((lo, hi))) = (verdict.cost_ratio, interval) else {
+        verdict.reason = format!(
+            "{} rounds cannot give a {:.0}% interval; add rounds",
+            verdict.round_ratios.len(),
+            policy.confidence * 100.0
+        );
         return verdict;
     };
     verdict.cost_ratio = Some(point);
@@ -212,13 +216,30 @@ fn judge_metric(
     verdict
 }
 
+/// Cost ratio of each round both arms completed: latency candidate over
+/// baseline, throughput baseline over candidate. Rounds with a zero
+/// denominator are dropped.
+fn paired_cost_ratios(stat: Stat, baseline: &[(u32, f64)], candidate: &[(u32, f64)]) -> Vec<f64> {
+    baseline
+        .iter()
+        .filter_map(|(round, base)| {
+            let (_, cand) = candidate.iter().find(|(r, _)| r == round)?;
+            let (num, den) = match stat {
+                Stat::Rate => (*base, *cand),
+                Stat::P50 | Stat::P99 => (*cand, *base),
+            };
+            (den > 0.0).then(|| num / den)
+        })
+        .collect()
+}
+
 /// Per-round values of `key` on `arm`, or why they cannot be used.
 fn round_values(
     record: &RunRecord,
     policy: &Policy,
     key: &MetricKey,
     arm: &str,
-) -> (Vec<f64>, Option<String>) {
+) -> (Vec<(u32, f64)>, Option<String>) {
     let runs: Vec<&FixtureRun> = record
         .runs
         .iter()
@@ -252,7 +273,7 @@ fn round_values(
             None => run.rates.get(&key.name).map(crate::schema::Rate::per_sec),
         };
         match value {
-            Some(v) => values.push(v),
+            Some(v) => values.push((run.round, v)),
             None => {
                 return (
                     values,
@@ -270,13 +291,6 @@ fn round_values(
         return (values, Some(issue));
     }
     (values, None)
-}
-
-/// Stable per-metric bootstrap seed (FNV-1a), so verdicts are reproducible.
-fn seed_of(text: &str) -> u64 {
-    text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
-    })
 }
 
 #[cfg(test)]

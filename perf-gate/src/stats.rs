@@ -1,4 +1,4 @@
-//! Percentiles, medians and the bootstrap confidence interval of a ratio.
+//! Percentiles, medians and the confidence interval of a median.
 
 /// Nearest-rank percentile (`q` in `0..=1`) of unsorted samples.
 pub fn percentile(samples: &[u64], q: f64) -> Option<f64> {
@@ -37,71 +37,30 @@ pub fn relative_spread(values: &[f64]) -> Option<f64> {
     Some((max - min) / center)
 }
 
-/// Deterministic SplitMix64; fixtures and resampling must not change when a
-/// dependency changes its generator.
-#[derive(Debug, Clone)]
-pub struct SplitMix64(u64);
-
-impl SplitMix64 {
-    pub fn new(seed: u64) -> Self {
-        Self(seed)
-    }
-
-    pub fn next_u64(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
-    }
-
-    /// Uniform in `0..bound` (`bound > 0`).
-    pub fn below(&mut self, bound: u64) -> u64 {
-        self.next_u64() % bound
-    }
-}
-
-/// Bootstrap interval of `median(numerator) / median(denominator)`.
-///
-/// Each side is resampled with replacement independently, `resamples` times;
-/// the interval is the central `confidence` share of the resulting ratios.
-pub fn bootstrap_ratio_interval(
-    numerator: &[f64],
-    denominator: &[f64],
-    resamples: usize,
-    confidence: f64,
-    seed: u64,
-) -> Option<(f64, f64)> {
-    if numerator.is_empty() || denominator.is_empty() || resamples == 0 {
-        return None;
-    }
-    let mut rng = SplitMix64::new(seed);
-    let mut ratios = Vec::with_capacity(resamples);
-    let mut num = vec![0.0; numerator.len()];
-    let mut den = vec![0.0; denominator.len()];
-    for _ in 0..resamples {
-        resample(numerator, &mut num, &mut rng);
-        resample(denominator, &mut den, &mut rng);
-        let (n, d) = (median(&num)?, median(&den)?);
-        if d > 0.0 {
-            ratios.push(n / d);
+/// Distribution-free confidence interval of the median of `values`: the
+/// order statistics `[x(k), x(n+1-k)]` with the largest `k` whose binomial
+/// coverage is at least `confidence`. `None` when even `[min, max]` covers
+/// less, i.e. too few values for that confidence.
+pub fn median_interval(values: &[f64], confidence: f64) -> Option<(f64, f64)> {
+    let n = values.len();
+    let mut sorted = values.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    // P(Binomial(n, 1/2) <= j), accumulated term by term.
+    let total = 2f64.powi(i32::try_from(n).ok()?);
+    let mut term = 1.0;
+    let mut below = 0.0;
+    let mut best = None;
+    for k in 1..=n.div_ceil(2) {
+        below += term / total;
+        term = term * (n - (k - 1)) as f64 / k as f64;
+        if 1.0 - 2.0 * below >= confidence {
+            best = Some(k);
+        } else {
+            break;
         }
     }
-    if ratios.is_empty() {
-        return None;
-    }
-    ratios.sort_by(f64::total_cmp);
-    let tail = (1.0 - confidence) / 2.0;
-    let last = ratios.len() - 1;
-    let lo = ratios[((tail * last as f64).floor() as usize).min(last)];
-    let hi = ratios[(((1.0 - tail) * last as f64).ceil() as usize).min(last)];
-    Some((lo, hi))
-}
-
-fn resample(source: &[f64], into: &mut [f64], rng: &mut SplitMix64) {
-    for slot in into.iter_mut() {
-        *slot = source[rng.below(source.len() as u64) as usize];
-    }
+    let k = best?;
+    Some((sorted[k - 1], sorted[n - k]))
 }
 
 #[cfg(test)]
@@ -126,28 +85,29 @@ mod tests {
     }
 
     #[test]
-    fn identical_sides_give_an_interval_around_one() {
-        let side = [100.0, 102.0, 98.0, 101.0, 99.0];
-        let (lo, hi) = bootstrap_ratio_interval(&side, &side, 2000, 0.95, 1).unwrap();
-        assert!(lo <= 1.0 && hi >= 1.0, "{lo}..{hi}");
-        assert!(hi < 1.05, "{hi}");
+    fn median_interval_uses_binomial_order_statistics() {
+        let six: Vec<f64> = (1..=6).map(f64::from).collect();
+        // n = 6: only [min, max] reaches 95% (96.9%).
+        assert_eq!(median_interval(&six, 0.95), Some((1.0, 6.0)));
+        let ten: Vec<f64> = (1..=10).map(f64::from).collect();
+        // n = 10: [x(2), x(9)] covers 97.9%, [x(3), x(8)] only 89.1%.
+        assert_eq!(median_interval(&ten, 0.95), Some((2.0, 9.0)));
+        assert_eq!(median_interval(&ten, 0.85), Some((3.0, 8.0)));
     }
 
     #[test]
-    fn shifted_side_moves_the_interval() {
-        let base = [100.0, 102.0, 98.0, 101.0, 99.0];
-        let slow: Vec<f64> = base.iter().map(|v| v * 1.3).collect();
-        let (lo, _) = bootstrap_ratio_interval(&slow, &base, 2000, 0.95, 1).unwrap();
-        assert!(lo > 1.2, "{lo}");
+    fn too_few_values_have_no_interval() {
+        // n = 5: [min, max] covers 93.75% < 95%.
+        assert_eq!(median_interval(&[1.0, 2.0, 3.0, 4.0, 5.0], 0.95), None);
+        assert_eq!(median_interval(&[], 0.95), None);
     }
 
     #[test]
-    fn bootstrap_is_deterministic() {
-        let a = [1.0, 2.0, 3.0, 4.0];
-        let b = [2.0, 2.5, 3.0, 3.5];
-        assert_eq!(
-            bootstrap_ratio_interval(&a, &b, 500, 0.95, 9),
-            bootstrap_ratio_interval(&a, &b, 500, 0.95, 9)
-        );
+    fn one_outlier_per_side_is_tolerated_at_ten_rounds() {
+        let mut values = vec![1.0, 1.01, 0.99, 1.0, 1.02, 0.98, 1.0, 1.01, 0.99, 9.0];
+        values.push(0.1);
+        values.remove(0);
+        let (lo, hi) = median_interval(&values, 0.95).unwrap();
+        assert!(lo >= 0.98 && hi <= 1.02, "{lo}..{hi}");
     }
 }

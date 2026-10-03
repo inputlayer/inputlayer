@@ -74,8 +74,8 @@ impl Profile {
             nodes: 2_500,
             edges: 10_000,
             subscribers: 1,
-            writes: 200,
-            interval_ms: 25,
+            writes: 150,
+            interval_ms: 20,
         };
         Self {
             name: "standard",
@@ -83,36 +83,36 @@ impl Profile {
                 nodes: 2_000,
                 edges: 4_000,
                 warmup: 50,
-                serial: 600,
+                serial: 400,
                 clients: 8,
-                per_client: 250,
+                per_client: 150,
             },
             bound_query: QueryParams {
                 nodes: 2_000,
                 edges: 4_000,
                 warmup: 10,
-                serial: 250,
+                serial: 150,
                 clients: 8,
-                per_client: 40,
+                per_client: 25,
             },
             insert: InsertParams {
-                single: 400,
+                single: 200,
                 writers: 4,
-                per_writer: 100,
-                batches: 30,
+                per_writer: 50,
+                batches: 20,
                 batch_size: 1_000,
             },
             delta_single: delta.clone(),
             delta_fanout: DeltaParams {
                 subscribers: 64,
                 writes: 100,
-                interval_ms: 100,
+                interval_ms: 80,
                 ..delta.clone()
             },
             interference: InterferenceParams {
                 delta: DeltaParams {
-                    writes: 150,
-                    interval_ms: 40,
+                    writes: 120,
+                    interval_ms: 30,
                     ..delta
                 },
                 slow_consumer_requests: 8,

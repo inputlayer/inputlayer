@@ -17,7 +17,7 @@ pub fn markdown(record: &RunRecord, policy: &Policy, verdict: &Verdict) -> Strin
     let _ = writeln!(
         out,
         "Policy **{}**: cost budget p50 +{:.0}%, p99 +{:.0}%, throughput -{:.0}%; \
-         {:.0}% bootstrap interval over rounds. {}\n",
+         {:.0}% interval of the median paired per-round ratio. {}\n",
         policy.status,
         policy.tolerance.p50 * 100.0,
         policy.tolerance.p99 * 100.0,

@@ -10,11 +10,13 @@
 status = "provisional"
 note = "Budgets are the plan's proposed ceilings, pending captain decision D1; tightening is always allowed."
 
-min_rounds = 5
+# Rounds are the unit of replication. At 95%, 6 rounds is the least that
+# gives a median interval at all ([min, max]); the default 10 tolerates one
+# outlier round on each side.
+min_rounds = 6
 min_samples_p50 = 20
 min_samples_p99 = 100
 confidence = 0.95
-resamples = 5000
 
 # The core matrix. Q = query, W = committed write, D = writer-to-agent delta.
 required = [

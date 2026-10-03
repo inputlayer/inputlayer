@@ -6,7 +6,7 @@
 #   --baseline-rev REV    baseline commit (default: perf-gate/baselines/approved.toml)
 #   --candidate-bin PATH  candidate server binary (default: build the working tree)
 #   --aa                  measure the baseline against itself (noise calibration)
-#   --rounds N            rounds per arm (default 6)
+#   --rounds N            rounds per arm (default 10)
 #   --profile NAME        standard (default) or quick (smoke only, never passes)
 #   --fixtures LIST       comma-separated fixture subset (default: all)
 #   --server-cpus LIST    pin servers with taskset -c LIST

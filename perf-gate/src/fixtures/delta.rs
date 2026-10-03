@@ -25,8 +25,8 @@ use crate::server::RunningServer;
 /// The standing query every agent subscribes to.
 pub const SUBSCRIPTION: &str = "?two_hop(1, Z)";
 
-/// Extra time agents get, after the last scheduled write, to see every delta.
-const DRAIN: Duration = Duration::from_secs(60);
+/// Time agents get, after the writer's last acknowledgement, to see every delta.
+const DRAIN: Duration = Duration::from_secs(30);
 
 /// Writes between a probe's insert and its retraction.
 pub const RETRACT_LAG: usize = 32;
@@ -125,18 +125,24 @@ impl DeltaKg {
     }
 }
 
-/// Collect the arrival instant of every event at one agent.
-pub fn spawn_agent(
-    mut agent: Client,
-    probes: Probes,
-    params: &DeltaParams,
-) -> JoinHandle<Result<Vec<Instant>>> {
-    let budget = Duration::from_millis(params.interval_ms) * params.writes as u32 + DRAIN;
-    tokio::spawn(async move {
-        tokio::time::timeout(budget, collect(&mut agent, probes))
-            .await
-            .with_context(|| format!("agent missed deltas within {budget:?}"))?
-    })
+/// Collect the arrival instant of every event at one agent; see [`drain`].
+pub fn spawn_agent(mut agent: Client, probes: Probes) -> JoinHandle<Result<Vec<Instant>>> {
+    tokio::spawn(async move { collect(&mut agent, probes).await })
+}
+
+/// Wait for every agent, once the writer is done. The deadline runs from
+/// the last write, so a slow writer never counts against the agents.
+pub async fn drain(mut agents: Vec<JoinHandle<Result<Vec<Instant>>>>) -> Result<Vec<Vec<Instant>>> {
+    let deadline = tokio::time::Instant::now() + DRAIN;
+    let mut arrivals = Vec::with_capacity(agents.len());
+    for index in 0..agents.len() {
+        let Ok(joined) = tokio::time::timeout_at(deadline, &mut agents[index]).await else {
+            agents.iter().for_each(JoinHandle::abort);
+            bail!("agent {index} missed deltas {DRAIN:?} after the last write");
+        };
+        arrivals.push(joined.context("agent task")??);
+    }
+    Ok(arrivals)
 }
 
 async fn collect(agent: &mut Client, probes: Probes) -> Result<Vec<Instant>> {
@@ -235,13 +241,10 @@ pub async fn run(server: &RunningServer, params: &DeltaParams) -> Result<Measure
     for index in 0..params.subscribers {
         let (agent, latency) = kg.subscribe(server, &format!("agent{index}")).await?;
         subscribe_us.push(latency);
-        agents.push(spawn_agent(agent, kg.probes, params));
+        agents.push(spawn_agent(agent, kg.probes));
     }
     let writes = write_schedule(&mut kg.writer, kg.probes, params).await?;
-    let mut arrivals = Vec::with_capacity(agents.len());
-    for agent in agents {
-        arrivals.push(agent.await.context("agent task")??);
-    }
+    let arrivals = drain(agents).await?;
     let (delta_us, last_agent_us) = delivery_latencies(&writes.event_sent(kg.probes), &arrivals);
 
     let mut measurement = Measurement::default();
