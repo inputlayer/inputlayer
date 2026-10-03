@@ -180,8 +180,8 @@ identity, classification, instruction, plus controls), the engine detects
 every planted contradiction with an exact finding-kind match - 1,526 of
 1,526, deterministically, zero false kinds - and its 102 controls raise
 no hard finding, with every correction retracting the value it replaces.
-CI gates both, plus the recorded-extraction benchmark, on every PR that
-touches the pack, the prompts or ingestion (poc/gate.py). In the completed behavioral
+A deterministic gate (poc/gate.py, `make vc-gate`) checks both, plus the
+recorded-extraction benchmark; CI runs it at every release checkpoint. In the completed behavioral
 study, corrupted prompts dropped a frontier model's sound outputs from 95%
 to 87%, and attaching the InputLayer finding restored 98% - with corrupted
 system prompts the standout (17% sound alone, 93% with the finding).
