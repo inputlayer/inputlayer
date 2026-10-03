@@ -888,47 +888,16 @@ impl Handler {
 
     /// Load every user and API key from `_internal` into the registry.
     fn load_credentials(&self) {
-        use crate::auth::{self, ApiKeyRecord, UserRecord};
+        use crate::auth;
 
-        let snapshot = match self.storage.read().get_snapshot_for(auth::INTERNAL_KG) {
-            Ok(snapshot) => snapshot,
-            Err(e) => {
-                warn!(error = %e, "auth_credentials_load_failed");
-                return;
+        let snapshot = self.storage.read().get_snapshot_for(auth::INTERNAL_KG);
+        match snapshot {
+            Ok(snapshot) => {
+                let (users, keys) = auth::stored_credentials(&snapshot.input_tuples);
+                self.credentials.load(users, keys);
             }
-        };
-        let rows = |relation: &str| {
-            snapshot
-                .input_tuples
-                .get(relation)
-                .into_iter()
-                .flatten()
-                .filter_map(|tuple| match tuple.values() {
-                    [a, b, c, ..] => Some((a.as_str()?, b.as_str()?, c.as_str()?)),
-                    _ => None,
-                })
-        };
-        let users = rows("users")
-            .filter_map(|(username, hash, role)| match role.parse() {
-                Ok(role) => Some(UserRecord {
-                    username: username.to_string(),
-                    password_hash: hash.to_string(),
-                    role,
-                }),
-                Err(e) => {
-                    warn!(username, error = %e, "auth_user_skipped");
-                    None
-                }
-            })
-            .collect();
-        let keys = rows("api_keys")
-            .map(|(label, key_hash, username)| ApiKeyRecord {
-                label: label.to_string(),
-                key_hash: key_hash.to_string(),
-                username: username.to_string(),
-            })
-            .collect();
-        self.credentials.load(users, keys);
+            Err(e) => warn!(error = %e, "auth_credentials_load_failed"),
+        }
     }
 
     /// Insert the bootstrap admin user and API key when `_internal` has no users.

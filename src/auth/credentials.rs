@@ -24,7 +24,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::task::{ready, Context, Poll};
 
 use parking_lot::{Mutex, RwLock};
 use tokio::sync::oneshot;
@@ -131,7 +131,7 @@ impl Credential {
             watchers.retain(|watcher| !watcher.is_closed());
             watchers.push(tx);
         }
-        RevocationSignal(rx)
+        RevocationSignal(Some(rx))
     }
 
     fn is_revoked(&self) -> bool {
@@ -187,15 +187,21 @@ impl Principal {
 }
 
 /// Completes when its credential is revoked. See [`Principal::revocation`].
+/// Once complete it stays complete: polling it again is `Ready`.
 #[derive(Debug)]
-pub struct RevocationSignal(oneshot::Receiver<()>);
+pub struct RevocationSignal(Option<oneshot::Receiver<()>>);
 
 impl Future for RevocationSignal {
     type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        let Some(receiver) = self.0.as_mut() else {
+            return Poll::Ready(());
+        };
         // The sender is dropped only after sending, by `revoke`.
-        Pin::new(&mut self.0).poll(cx).map(|_| ())
+        ready!(Pin::new(receiver).poll(cx)).ok();
+        self.0 = None;
+        Poll::Ready(())
     }
 }
 

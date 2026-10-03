@@ -13,11 +13,13 @@ use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 mod credentials;
+mod stored;
 
 pub use credentials::{
     ApiKeyRecord, ApiKeyRejected, CredentialId, CredentialRegistry, CredentialRevoked,
     PasswordCandidate, Principal, RevocationSignal, UserRecord,
 };
+pub use stored::stored_credentials;
 
 /// Name of the internal knowledge graph used for auth data.
 pub const INTERNAL_KG: &str = "_internal";
