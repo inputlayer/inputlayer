@@ -17,9 +17,8 @@ make bench-genbi    # Reactive agent benchmark on genbi-trust (needs GENBI_TRUST
 make oracle-test    # Differential correctness oracle only (~15s)
 ```
 
-`make pre-pr` compares against the merge base with `origin/main`, or an explicit
-`PRE_PR_BASE`. A missing, invalid, or `HEAD` base fails before any checks run.
-All Rust workspace members, including `ws-protocol`, route to Rust checks.
+See [CONTRIBUTING](CONTRIBUTING#pre-commit-checks) for `make pre-pr` routing, base selection
+and required pre-push checks.
 
 ## Test Tiers
 
@@ -215,7 +214,7 @@ Source-to-category mapping:
 | `make test` | Unit + snapshot | Broad local check before a PR |
 | `make test-all` | Build + unit + snapshot + check | Full verification before merge |
 | `make test-affected` | Snapshot tests for changed files only | Fast E2E feedback |
-| `make pre-pr` | fmt-check always; affected Rust lint/tests/snapshots, Python SDK tests, JS SDK tests/typecheck, and perf-gate-check in parallel; then `make perf-gate` | Before every push to a PR |
+| `make pre-pr` | [Pre-PR pipeline](CONTRIBUTING#pre-commit-checks) | Before every push to a PR |
 | `make perf-gate` | Paired latency/throughput gate over `/ws` vs the approved baseline | Every implementation PR (see `perf-gate/README.md`) |
 | `make perf-gate-check` | Clippy + unit tests of the gate tool | After changing `perf-gate/` |
 | `make e2e-reactive` | Reactive agent path against real engines, latency samples | Subscription or wire changes |

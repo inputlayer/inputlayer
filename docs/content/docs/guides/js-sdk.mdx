@@ -78,6 +78,9 @@ await il.knowledgeGraph("default").execute(".kg use default");
 await il.dropKnowledgeGraph("myapp");
 ```
 
+The server refuses to drop the session's current knowledge graph. Switch to
+another graph first, as above; `dropKnowledgeGraph()` does not switch for you.
+
 ## Defining Schemas
 
 Schemas are defined using the `relation()` function, which takes a name and a column type map. The name is automatically converted from CamelCase to snake_case for the underlying IQL representation.
@@ -382,6 +385,20 @@ If you need to drop down to raw IQL for something the OLM doesn't cover:
 ```typescript
 const result = await kg.execute("?employee(Id, Name, _, Salary, _), Salary > 100000");
 ```
+
+To execute a local IQL file in Node.js, read it explicitly and pass its contents
+to `kg.execute()`:
+
+```typescript
+import { readFile } from "node:fs/promises";
+
+await kg.execute(await readFile("seed.iql", "utf8"));
+```
+
+`kg.load(path, mode?)` sends the server-file `.load` command; it does not read a
+local file. The server currently supports that command only in its interactive
+client, so calling it through the SDK rejects with `QueryError` and code
+`unsupported`.
 
 ## Derived Relations (Rules)
 

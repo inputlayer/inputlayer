@@ -220,13 +220,9 @@ Each WebSocket session is bound to the credential it authenticated with: one API
 | `.user password <name> <password>` | the user's previous password |
 | `.user drop <name>` | the user's password and all of the user's API keys |
 
-A key's expiry passing ends its sessions the same way, from the expiry instant. A revoked or expired session receives no further results, notifications or subscription pushes. A request that was already running when the credential was revoked or expired has its reply withheld; writes it committed before then stay committed. The server stops the session's standing queries, sends one final message and closes the connection:
+A key's expiry passing ends its sessions the same way, from the expiry instant. Once a credential is revoked or expires, no further results, notifications or subscription pushes are admitted to the session's transport; frames admitted before then can still arrive afterward. A request still running at that point has its reply withheld; writes it already committed stay committed. The server stops the session's standing queries, sends a final [`credential_revoked` notice](websocket-api#notices) and closes the connection.
 
-```json
-{"type": "error", "message": "Credential revoked; reconnect with valid credentials"}
-```
-
-For an expired key the message is `Credential expired; reconnect with valid credentials`.
+For an expired key the notice is `credential_expired`, with the message `Credential expired; reconnect with valid credentials`.
 
 `.user role` takes effect on the next request of every live session of that user without closing them. REST requests check the API key on every request.
 

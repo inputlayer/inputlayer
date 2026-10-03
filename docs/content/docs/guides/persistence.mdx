@@ -141,8 +141,9 @@ does not match, holds no committed data. A transaction is therefore recovered
 completely or not at all, never in part. If a write or fsync fails, the record is cut
 back off the WAL before the error is returned, so a failed write is not recovered.
 One exception: if cutting the record back off also fails, the repair is held in memory
-and applied before the next write or at clean shutdown. A crash before that repair
-recovers the failed write.
+and retried before the next write, rewrite or clean shutdown. A crash before a
+successful repair can recover the failed write if its complete record remains
+in the WAL.
 
 A program's rule and schema changes are in the same record as its facts. Each
 knowledge graph also keeps its rules (`rules/catalog.json`) and persistent schemas

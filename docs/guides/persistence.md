@@ -136,13 +136,7 @@ one line, written with one append and, in `immediate` mode, one fsync:
 | `rule` | `{"kg":..,"name":..,"definition":..}`: every clause of one rule after the commit, in the rule catalog's JSON, or `null` when the commit removes the rule |
 | `schema` | `{"kg":..,"relation":..,"schema":..}`: the persistent schema of one relation after the commit, or `null` when the commit removes it |
 
-The trailing newline is the commit boundary. A record without it, or whose checksum
-does not match, holds no committed data. A transaction is therefore recovered
-completely or not at all, never in part. If a write or fsync fails, the record is cut
-back off the WAL before the error is returned, so a failed write is not recovered.
-One exception: if cutting the record back off also fails, the repair is held in memory
-and applied before the next write or at clean shutdown. A crash before that repair
-recovers the failed write.
+See the authoritative [WAL recovery and failed-write contract](../content/docs/guides/persistence.mdx#wal-record-format), including the limitation when rollback also fails.
 
 A program's rule and schema changes are in the same record as its facts. Each
 knowledge graph also keeps its rules (`rules/catalog.json`) and persistent schemas

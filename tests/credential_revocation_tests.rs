@@ -109,6 +109,115 @@ enum Login<'a> {
     Password(&'a str, &'a str),
 }
 
+/// A failed replacement must not let a persisted key attach to a newly
+/// published identity, including the sole admin recreated by bootstrap.
+#[tokio::test]
+async fn failed_replacement_keys_stay_revoked_over_ws_after_restart() {
+    use inputlayer::schema::SchemaType;
+    use inputlayer::{ColumnSchema, RelationSchema};
+
+    for username in ["bob", "admin"] {
+        for operation in ["password", "role"] {
+            let mut server = start_server().await;
+            if username == "admin" {
+                server.handler.handle_user_drop("bob").unwrap();
+            }
+            let key = server.key("old-key", username);
+            let mut victim = Client::connect(&server, Login::Key(&key)).await;
+            let mut admin =
+                Client::connect(&server, Login::Password("admin", ADMIN_PASSWORD)).await;
+            // Fault setup uses the real storage schema validator: deletion
+            // succeeds, but the replacement's three-column insert fails.
+            server
+                .handler
+                .get_storage()
+                .register_schema_in(
+                    INTERNAL_KG,
+                    RelationSchema::new("users")
+                        .with_column(ColumnSchema::new("name", SchemaType::String)),
+                )
+                .unwrap();
+            let argument = if operation == "password" {
+                "new-pw"
+            } else {
+                "admin"
+            };
+            admin
+                .send(json!({
+                    "type": "execute",
+                    "program": format!(".user {operation} {username} {argument}")
+                }))
+                .await;
+            if username == "admin" {
+                assert_revoked(&admin.drain().await);
+            } else {
+                let response = admin.recv().await.unwrap();
+                assert_eq!(response["type"], "error", "{response}");
+                assert!(response["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Insert rejected"));
+            }
+            let frames = victim.drain().await;
+            assert_revoked(&frames);
+            println!("{username} {operation}: active key session received {frames:?}");
+            drop(victim);
+            drop(admin);
+            server
+                .handler
+                .get_storage()
+                .remove_schema_in(INTERNAL_KG, "users")
+                .unwrap();
+
+            let config = server.handler.config().clone();
+            let temp = std::mem::replace(&mut server._tmp, TempDir::new().unwrap());
+            server.task.abort();
+            let _ = (&mut server.task).await;
+            server.handler.shutdown();
+            drop(server);
+
+            // Axum connection tasks finish asynchronously after their peers
+            // close; wait for them to release the data-directory lock.
+            let deadline = tokio::time::Instant::now() + TIMEOUT;
+            let handler = loop {
+                match Handler::from_config(config.clone()) {
+                    Ok(handler) => break Arc::new(handler),
+                    Err(error) if error.contains("is in use by another InputLayer process") => {
+                        assert!(tokio::time::Instant::now() < deadline, "{error}");
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                    Err(error) => panic!("restart failed: {error}"),
+                }
+            };
+            handler.bootstrap_auth();
+            let app = create_router(Arc::clone(&handler), &handler.config().http);
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .unwrap();
+            let addr = listener.local_addr().unwrap();
+            let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let restarted = Server {
+                handler,
+                addr,
+                task,
+                _tmp: temp,
+            };
+            let mut admin =
+                Client::connect(&restarted, Login::Password("admin", ADMIN_PASSWORD)).await;
+            if username == "bob" {
+                let result = admin.execute(".user create bob new-pw editor").await;
+                assert_eq!(result["type"], "result", "{result}");
+            }
+            let (_, response) = Client::try_connect(&restarted, KG, Login::Key(&key)).await;
+            assert_eq!(response["type"], "auth_error", "{response}");
+            println!("{username} {operation}: old key after restart and recreation: {response}");
+            let new_key = restarted.key("old-key", username);
+            let mut fresh = Client::connect(&restarted, Login::Key(&new_key)).await;
+            assert_eq!(fresh.execute("?d(X)").await["type"], "result");
+        }
+    }
+}
+
 struct Client {
     ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
 }
