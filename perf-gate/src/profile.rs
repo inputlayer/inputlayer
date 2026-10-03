@@ -14,6 +14,7 @@ pub struct Profile {
     pub insert: InsertParams,
     pub delta_single: DeltaParams,
     pub delta_fanout: DeltaParams,
+    pub delta_first: FirstDeltaParams,
     pub interference: InterferenceParams,
 }
 
@@ -48,6 +49,18 @@ pub struct DeltaParams {
     /// Even: each insert is followed by its retraction.
     pub writes: usize,
     pub interval_ms: u64,
+}
+
+/// Fresh agents, each timing its first write after subscribing and then a
+/// warm one.
+#[derive(Debug, Clone, Serialize)]
+pub struct FirstDeltaParams {
+    pub nodes: u64,
+    pub edges: usize,
+    /// Agents, one after another; each contributes one sample per series.
+    pub cycles: usize,
+    /// Agent quiet time before the warm write.
+    pub settle_ms: u64,
 }
 
 /// One probe subscriber while a long request loops on another connection and
@@ -109,6 +122,12 @@ impl Profile {
                 interval_ms: 80,
                 ..delta.clone()
             },
+            delta_first: FirstDeltaParams {
+                nodes: delta.nodes,
+                edges: delta.edges,
+                cycles: 40,
+                settle_ms: 100,
+            },
             interference: InterferenceParams {
                 delta: DeltaParams {
                     writes: 120,
@@ -136,6 +155,7 @@ impl Profile {
         profile.delta_single.writes /= 5;
         profile.delta_fanout.writes /= 5;
         profile.delta_fanout.subscribers /= 4;
+        profile.delta_first.cycles /= 4;
         profile.interference.delta.writes /= 5;
         profile
     }
