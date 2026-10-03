@@ -76,8 +76,9 @@ async fn encode(push: SubscriptionPush) -> Result<Vec<String>, Undeliverable> {
         })
 }
 
-/// About how many bytes the rows of `push` serialize to, judged from its
-/// first row without serializing anything.
+/// About how many bytes the rows of `push` serialize to, judged without
+/// serializing anything. Counting stops once past [`FRAME_BUDGET`], so the
+/// walk covers at most about one frame's worth of rows.
 fn estimated_bytes(push: &SubscriptionPush) -> usize {
     let SubscriptionPush::SubscriptionDelta {
         inserted,
@@ -87,8 +88,14 @@ fn estimated_bytes(push: &SubscriptionPush) -> usize {
     else {
         return 0;
     };
-    let width = inserted.first().or(retracted.first()).map_or(0, row_width);
-    (inserted.len() + retracted.len()).saturating_mul(width)
+    let mut total = 0;
+    for row in inserted.iter().chain(retracted) {
+        total += row_width(row);
+        if total > FRAME_BUDGET {
+            break;
+        }
+    }
+    total
 }
 
 fn row_width(row: &Row) -> usize {

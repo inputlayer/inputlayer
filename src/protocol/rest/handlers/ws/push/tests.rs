@@ -26,6 +26,18 @@ fn a_small_delta_of_many_rows_is_encoded_without_the_blocking_pool() {
 }
 
 #[test]
+fn a_wide_delta_behind_a_short_first_row_goes_to_the_blocking_pool() {
+    let rows: Vec<Row> = std::iter::once(vec![json!("")])
+        .chain((0..10_000).map(|_| vec![json!("x".repeat(1_000))]))
+        .collect();
+    let push = delta(rows);
+    // No Tokio runtime is running, so reaching the blocking pool panics.
+    let offloaded =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| encode(push).now_or_never()));
+    assert!(offloaded.is_err());
+}
+
+#[test]
 fn a_delta_too_large_for_one_frame_is_estimated_over_the_budget() {
     let rows: Vec<Row> = (0..2_000)
         .map(|i| vec![json!(i), json!("x".repeat(1_000))])
