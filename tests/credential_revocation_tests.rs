@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
-use inputlayer::auth::INTERNAL_KG;
+use inputlayer::auth::{CredentialEnded, INTERNAL_KG};
 use inputlayer::protocol::rest::create_router;
 use inputlayer::protocol::Handler;
 use inputlayer::Config;
@@ -194,10 +194,12 @@ async fn failed_replacement_keys_stay_revoked_over_ws_after_restart() {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let addr = listener.local_addr().unwrap();
             let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let upkeep = tokio::spawn(Arc::clone(&handler).credential_upkeep());
             let restarted = Server {
                 handler,
                 addr,
                 task,
+                upkeep,
                 tmp: temp,
             };
             let mut admin =
@@ -205,6 +207,10 @@ async fn failed_replacement_keys_stay_revoked_over_ws_after_restart() {
             if username == "bob" {
                 let result = admin.execute(".user create bob new-pw editor").await;
                 assert_eq!(result["type"], "result", "{result}");
+                let grant = admin
+                    .execute(&format!(".kg acl grant {KG} bob viewer"))
+                    .await;
+                assert_eq!(grant["type"], "result", "{grant}");
             }
             let (_, response) = Client::try_connect(&restarted, KG, Login::Key(&key)).await;
             assert_eq!(response["type"], "auth_error", "{response}");
@@ -655,8 +661,9 @@ async fn revocation_during_a_proof_withholds_it() {
         .send(json!({"type": "execute", "program": proof}))
         .await;
     assert_revoked(&client.drain().await);
-    assert!(
-        principal.is_revoked(),
+    assert_eq!(
+        principal.ended(),
+        Some(CredentialEnded::Revoked),
         "output-boundary hook did not revoke"
     );
 }

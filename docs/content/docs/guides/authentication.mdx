@@ -227,14 +227,16 @@ For an expired key the notice is `credential_expired`, with the message `Credent
 `.user role` takes effect on the next request of every live session of that user without closing them. REST requests check the API key on every request.
 
 If a password or role replacement deletes the old user but fails to insert its
-replacement, all of that user's live credentials are revoked. Recreating the
-user removes any orphaned API keys in the same transaction that creates the new
-user, before publishing credentials. This also applies to admin bootstrap after
-a restart: old keys cannot bind to the recreated account, and bootstrap does
-not issue an API key when recovering an existing internal auth graph, even if
-the old key rows have already been removed. Automatic key issuance happens only
-when the internal auth graph is first created. For recovery, log in with the
-bootstrap password and create a new key instead.
+replacement, all of that user's live credentials are revoked and the user's
+stored API keys and per-KG grants are deleted. Creating a user also removes any
+API keys or grants left under that username before publishing credentials, so
+a recreated user starts with no API keys and no grants. This also applies to
+admin bootstrap after a restart: old keys cannot bind to the recreated account.
+Bootstrap issues its API key only once per data directory: it records each key
+it issues in the internal auth graph and does not issue another once one is
+recorded, even after that key is revoked. A key is generated, saved to
+`credentials.toml` or printed only when bootstrap will issue it. For recovery,
+log in with the bootstrap password and create a new key instead.
 
 You can also set an API key for the CLI client via environment variable:
 
