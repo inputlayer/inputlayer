@@ -291,7 +291,7 @@
     <h4>subscription_error</h4>
   </div>
   <div class="msg-card-body">
-    <p>Re-evaluation of a standing query failed. The subscription stays registered with its last result.</p>
+    <p>Re-evaluation of a standing query failed, or the subscriber may no longer read the knowledge graph. The subscription stays registered; its next delta is relative to the last result it received.</p>
     <pre><code>{"type": "subscription_error", "subscription": "late", "generation": 1, "message": "Access denied"}</code></pre>
   </div>
 </div>

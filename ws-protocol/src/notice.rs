@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NoticeCode {
-    /// Notifications were dropped because the client read too slowly. Standing
-    /// queries re-evaluate; the connection stays open.
+    /// Notifications were dropped because the client read too slowly. The
+    /// connection stays open; subscription deltas are unaffected.
     NotificationsMissed,
     /// The reconnect cursor (`last_seq` with `epoch`) cannot be honoured: it
     /// belongs to another engine run, or notifications after it are no longer

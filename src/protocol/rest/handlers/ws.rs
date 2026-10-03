@@ -492,11 +492,13 @@ async fn handle_global_ws_connection(
                     break;
                 }
             }
-            // Standing-query evaluation finished
-            completion = subscriptions.next_completion() => {
-                if let Some(push) = subscriptions.on_completion(completion) {
-                    let access = kg_access.fence(&handler, &principal, &push);
-                    if !push::deliver(&mut sender, &mut subscriptions, push, access).await {
+            // A shared view published news for one of this connection's subscriptions
+            subscriber = subscriptions.next_delivery() => {
+                let push = subscriptions.deliver(subscriber, |kg| {
+                    kg_access.allows(&handler, &principal, kg)
+                });
+                if let Some(push) = push {
+                    if !push::deliver(&mut sender, &mut subscriptions, push).await {
                         break;
                     }
                 }
@@ -512,7 +514,6 @@ async fn handle_global_ws_connection(
                             Ok(kg) => kg,
                             Err(_) => break,
                         };
-                        subscriptions.on_notification(&notif);
                         if notification_visible(&notif, &session_kg, &principal)
                             && kg_access.allows(&handler, &principal, notif.knowledge_graph())
                             && !sender.send_frame(&ServerFrame::Notification(notif)).await
@@ -521,7 +522,6 @@ async fn handle_global_ws_connection(
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
-                        subscriptions.on_missed_notifications();
                         total_lagged += count;
                         if total_lagged > max_lag {
                             warn!(total_lagged, max_lag, "ws_slow_subscriber_disconnected");
@@ -747,7 +747,7 @@ fn release_reply(
                 let reply = execute::subscription_reply(
                     id.clone(),
                     snapshot.columns,
-                    snapshot.inserted,
+                    snapshot.rows,
                     Some(Subscribed {
                         subscription: subscription.clone(),
                         generation,

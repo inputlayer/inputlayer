@@ -301,7 +301,7 @@ Session rules are automatically included when querying:
 
 ## Notifications
 
-The server pushes notifications when persistent data changes in the session's knowledge graph. `kg_change` notifications for other knowledge graphs go to admin sessions only, and changes to the internal `_internal` knowledge graph are never sent. Replay on reconnect (`last_seq` with `epoch`) applies the same rules. Revoking a user's access to the knowledge graph (`.kg acl revoke`) stops its notifications and subscription deltas on live connections at once; a delta withheld this way ends its subscription with a [`subscription_reset`](#reset), so resubscribe once access is restored.
+The server pushes notifications when persistent data changes in the session's knowledge graph. `kg_change` notifications for other knowledge graphs go to admin sessions only, and changes to the internal `_internal` knowledge graph are never sent. Replay on reconnect (`last_seq` with `epoch`) applies the same rules. Revoking a user's access to the knowledge graph (`.kg acl revoke`) stops its notifications and subscription deltas on live connections at once; a delta withheld this way is replaced by a `subscription_error`. The subscription keeps the last result it received, so once access is restored its next delta is relative to that result and its `seq` continues without a gap.
 
 ### Persistent Update
 
@@ -411,7 +411,8 @@ A large snapshot is [streamed](#streaming-results) like any result, with `subscr
 - `seq` starts at 1 per subscription and increases by one per delta. A gap means a delta was lost: resubscribe. Unchanged results push nothing.
 - `revision` is the knowledge graph revision the result reaches with this delta; it increases with every delta. Coalesced commits produce one delta at the latest revision.
 - Triggers: inserts, deletes, rule add/drop/remove, and relation drop on any relation the query depends on (its body plus, transitively, the bodies of the persistent rules defining them). Writes to other relations cause no evaluation.
-- Coalescing: at most one evaluation runs per subscription. Commits that land meanwhile trigger one follow-up evaluation, so a burst produces few deltas and the last one always reflects the final state.
+- Sharing: subscriptions to the same query on the same knowledge graph share one evaluation and one result in memory, across connections and users, so a hundred agents watching one query cost the server about as much as one. Each subscriber's read access is checked when it subscribes and again before every push, so a shared result never reaches a subscriber who may not read the knowledge graph. The query text is compared exactly (after trimming): a differently spelled query, for example with other variable names, is evaluated separately.
+- Coalescing: at most one evaluation runs per shared query. Commits that land meanwhile trigger one follow-up evaluation, so a burst produces few deltas and the last one always reflects the final state. With `http.rate_limit.subscription_coalesce_ms` above 0 (default 0, at most 100), a query also waits that long after the first relevant commit before evaluating, so commits inside the window share one evaluation; each delta is then delayed by up to the window. A connection that reads slowly gets one combined delta for the commits it fell behind on, not a queue of them.
 - Evaluation runs off the connection's read loop and off the write path.
 
 ### Streamed Deltas
@@ -433,21 +434,21 @@ A delta whose frame would exceed 1 MiB arrives as one logical delta in several f
 
 ### Errors
 
-If re-evaluation fails (for example read access was revoked), the server pushes:
+If re-evaluation fails, or the subscriber may no longer read the knowledge graph (`.kg acl revoke`), the server pushes:
 
 ```json
 {"type": "subscription_error", "subscription": "late_orders", "generation": 3, "message": "Access denied"}
 ```
 
-The subscription stays registered; the next successful evaluation's delta is relative to the last good result.
+The subscription stays registered; its next delta is relative to the last result it received.
 
 A result cut at `storage.performance.max_result_rows` is incomplete, so it is never delivered as a snapshot or diffed into a delta. When a re-evaluation's result grows past the cap, the server pushes a `subscription_error` naming the cap and keeps the last complete result. Once the result fits again, the next delta is relative to that last complete result, so applying it restores the current set.
 
-`.subscribe` replies with an `error` when the id is taken, the per-connection limit is reached, the query uses `limit`/`offset`, the result exceeds `max_result_rows`, or the user lacks read access to the knowledge graph (the same check as a query).
+`.subscribe` replies with an `error` when the id is taken, the per-connection limit is reached, the query uses `limit`/`offset`, the result exceeds `max_result_rows` (also when another subscriber's evaluation of the same query is currently failing, with that error), or the user lacks read access to the knowledge graph (the same check as a query).
 
 ### Reset
 
-When the server cannot deliver a subscription's next change whole (a row larger than the 16 MiB message limit, or read access to the knowledge graph was revoked), it removes the subscription and pushes:
+When the server cannot deliver a subscription's next change whole (a row larger than the 16 MiB message limit), it removes the subscription and pushes:
 
 ```json
 {"type": "subscription_reset", "subscription": "late_orders", "generation": 3,
@@ -519,7 +520,7 @@ The server announces connection events with a `notice`, never with an `error`:
 
 | `code` | Meaning |
 |---|---|
-| `notifications_missed` | The client read too slowly and change notifications were dropped; standing queries re-evaluate. The connection stays open. |
+| `notifications_missed` | The client read too slowly and change notifications were dropped. The connection stays open; subscription deltas are unaffected. |
 | `replay_gap` | The reconnect cursor (`last_seq` with `epoch`) could not be honoured: it is from another engine run, names no epoch, or notifications after it are no longer retained. Nothing was replayed; re-read the state you track. The connection stays open. |
 | `slow_consumer` | Too many notifications were dropped; the connection closes. |
 | `idle_timeout` | No request within `http.ws_idle_timeout_ms`; the connection closes. |

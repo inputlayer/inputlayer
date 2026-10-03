@@ -2,9 +2,8 @@
 //!
 //! When a delta is sent, the server's view of its subscription has already
 //! moved to the delta's revision. A delta that cannot reach the client
-//! completely (one of its rows fits no frame, or the client may no longer
-//! read its knowledge graph) would therefore leave the client silently
-//! behind. Instead the subscription is removed and the client gets a
+//! completely (one of its rows fits no frame) would therefore leave the
+//! client silently behind. Instead the subscription is removed and the client gets a
 //! `subscription_reset`: the rows it holds for the subscription are no longer
 //! maintained, and it must subscribe again for a fresh snapshot. Nothing more
 //! is pushed for that registration.
@@ -23,23 +22,17 @@ use crate::protocol::subscription::ConnectionSubscriptions;
 /// Bytes estimated for a JSON float: the longest an `f64` serializes to.
 const FLOAT_BYTES: usize = 24;
 
-/// Deliver `push`, which `access` allows or withholds for this reason.
-/// Returns `false` if the connection is dead.
+/// Deliver `push`. Returns `false` if the connection is dead.
 pub(super) async fn deliver<S: Sink<Message> + Unpin>(
     sender: &mut Outbound<S>,
     subscriptions: &mut ConnectionSubscriptions,
     push: SubscriptionPush,
-    access: Result<(), Undeliverable>,
 ) -> bool {
     let (subscription, generation) = {
         let (subscription, generation) = push.subscription();
         (subscription.to_string(), generation)
     };
-    let frames = match access {
-        Ok(()) => encode(push).await,
-        Err(withheld) => Err(withheld),
-    };
-    let reason = match frames {
+    let reason = match encode(push).await {
         Ok(frames) => {
             for frame in frames {
                 if sender.send(Message::Text(frame)).await.is_err() {

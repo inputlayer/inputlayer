@@ -1,157 +1,173 @@
-//! Drives a connection's [`SubscriptionRegistry`] from the WebSocket loop.
+//! A WebSocket connection's subscriptions.
 //!
-//! Evaluations run as tasks in a [`JoinSet`], so neither the read loop nor the
-//! write path waits on them. Dropping this value (disconnect) aborts them and
-//! releases the subscriptions.
+//! Each `.subscribe` is authorized for the connection's principal, then
+//! attaches to the shared view of its query through the server's
+//! [`SubscriptionHub`]; identical queries on one knowledge graph share one
+//! evaluation, whoever subscribes. The connection keeps what is its own: the
+//! subscription names and generations, the delta numbering, and each
+//! subscriber's last delivered result. Its WS loop awaits
+//! [`ConnectionSubscriptions::next_delivery`] and turns each wake-up into a
+//! push with [`ConnectionSubscriptions::deliver`]. Dropping this value
+//! (disconnect) detaches every subscriber.
 //!
-//! A `.subscribe` evaluates its initial snapshot off the loop too:
-//! [`ConnectionSubscriptions::begin_subscribe`] returns an [`Opening`] to run
-//! anywhere, and [`ConnectionSubscriptions::finish_subscribe`] registers its
-//! result. Commits landing in between are caught by the revision handoff at
-//! registration, not by watching notifications.
+//! Attaching waits for the view's first evaluation when the view is new, so
+//! it runs off the loop: [`ConnectionSubscriptions::begin_subscribe`] returns
+//! an [`Opening`] to run anywhere, and
+//! [`ConnectionSubscriptions::finish_subscribe`] registers its result. A
+//! subscriber attached but never registered (the opening was dropped, or
+//! registration failed) is detached again.
 
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use futures_util::FutureExt;
-use tokio::task::JoinSet;
-use tracing::{debug, warn};
+use tokio::sync::mpsc;
+use tracing::debug;
 
 use inputlayer_ws_protocol::SubscriptionPush;
 
 use crate::auth::Principal;
-use crate::protocol::handler::Notification;
 use crate::protocol::Handler;
 
-use super::{
-    ChangeSet, Completion, Dispatch, ReevaluatingQuery, Refresh, StandingQuery,
-    SubscriptionRegistry,
-};
-
-/// A subscription's initial snapshot, evaluated off the connection loop.
-pub struct Opening {
-    id: String,
-    knowledge_graph: String,
-    view: Box<dyn StandingQuery>,
-}
-
-/// An evaluated [`Opening`], handed back to
-/// [`ConnectionSubscriptions::finish_subscribe`].
-pub struct Opened {
-    id: String,
-    knowledge_graph: String,
-    view: Box<dyn StandingQuery>,
-    snapshot: Result<Refresh, String>,
-}
-
-impl Opening {
-    /// Evaluate the initial snapshot, turning a panic into an error.
-    pub async fn run(self) -> Opened {
-        let Opening {
-            id,
-            knowledge_graph,
-            mut view,
-        } = self;
-        let snapshot = std::panic::AssertUnwindSafe(view.refresh())
-            .catch_unwind()
-            .await
-            .unwrap_or_else(|_| Err("Internal error while evaluating subscription".to_string()));
-        Opened {
-            id,
-            knowledge_graph,
-            view,
-            snapshot,
-        }
-    }
-}
+use super::publication::{Doorbell, SubscriberId};
+use super::views::{Attachment, ViewKey};
+use super::{ReevaluatingQuery, Snapshot, StandingQuery, Subscriber, SubscriptionHub};
 
 /// Subscriptions owned by one WebSocket connection.
 pub struct ConnectionSubscriptions {
     handler: Arc<Handler>,
     auth: Option<Principal>,
-    registry: SubscriptionRegistry,
-    in_flight: JoinSet<Completion>,
+    /// Maximum subscriptions (0 = unlimited).
+    limit: usize,
+    next_generation: u64,
+    names: BTreeMap<String, SubscriberId>,
+    subscribers: HashMap<SubscriberId, Subscriber>,
+    mailbox: mpsc::UnboundedSender<SubscriberId>,
+    wake_ups: mpsc::UnboundedReceiver<SubscriberId>,
 }
 
 impl ConnectionSubscriptions {
     /// Empty set, limited by `http.rate_limit.ws_max_subscriptions`.
     pub fn new(handler: Arc<Handler>, auth: Option<Principal>) -> Self {
         let limit = handler.config().http.rate_limit.ws_max_subscriptions;
+        let (mailbox, wake_ups) = mpsc::unbounded_channel();
         Self {
             handler,
             auth,
-            registry: SubscriptionRegistry::new(limit),
-            in_flight: JoinSet::new(),
+            limit,
+            next_generation: 0,
+            names: BTreeMap::new(),
+            subscribers: HashMap::new(),
+            mailbox,
+            wake_ups,
         }
     }
 
-    /// Start registering `id` for `query` on `knowledge_graph`. Run the
-    /// returned [`Opening`] anywhere, then pass its result to
-    /// [`Self::finish_subscribe`].
+    /// Number of subscriptions.
+    pub fn len(&self) -> usize {
+        self.names.len()
+    }
+
+    /// True when nothing is subscribed.
+    pub fn is_empty(&self) -> bool {
+        self.names.is_empty()
+    }
+
+    /// Start registering `id` for `query` on `knowledge_graph`, as the
+    /// connection's principal. Run the returned [`Opening`] anywhere, then pass
+    /// its result to [`Self::finish_subscribe`].
     pub fn begin_subscribe(
         &mut self,
         knowledge_graph: &str,
         id: &str,
         query: &str,
     ) -> Result<Opening, String> {
-        self.registry.check_can_add(id)?;
-        let view = ReevaluatingQuery::new(
-            Arc::clone(&self.handler),
-            knowledge_graph,
-            query,
-            self.auth.clone(),
-        )?;
-        self.handler.subscription_metrics().record_evaluation();
-        Ok(Opening {
-            id: id.to_string(),
+        self.check_can_add(id)?;
+        let view = ReevaluatingQuery::new(Arc::clone(&self.handler), knowledge_graph, query)?;
+        self.handler
+            .authorize_query(self.auth.as_ref(), knowledge_graph, view.goal())?;
+        let key = ViewKey {
             knowledge_graph: knowledge_graph.to_string(),
-            view: Box::new(view),
-        })
+            query: query.trim().to_string(),
+        };
+        Ok(self.opening(key, id, Box::new(view)))
     }
 
-    /// Register an evaluated [`Opening`]; returns its initial snapshot and the
-    /// subscription's generation.
-    ///
-    /// The snapshot is the query's answer at its revision. A commit published
-    /// after that revision but announced before the subscription existed would
-    /// reach no one, so registration compares the knowledge graph's current
-    /// revision and re-evaluates at once when it moved on.
-    pub fn finish_subscribe(&mut self, opened: Opened) -> Result<(Refresh, u64), String> {
+    /// An [`Opening`] attaching `id` to the view of `key`, created from `view`
+    /// if there is none.
+    fn opening(&self, key: ViewKey, id: &str, view: Box<dyn StandingQuery>) -> Opening {
+        let hub = self.hub().clone();
+        let doorbell = Doorbell::new(hub.next_subscriber_id(), self.mailbox.clone());
+        Opening {
+            id: id.to_string(),
+            key,
+            view,
+            attached: Attached {
+                hub,
+                doorbell,
+                kept: false,
+            },
+        }
+    }
+
+    /// Register an [`Opened`] subscription; returns its initial snapshot and
+    /// generation.
+    pub fn finish_subscribe(&mut self, opened: Opened) -> Result<(Snapshot, u64), String> {
         let Opened {
             id,
-            knowledge_graph,
-            view,
-            snapshot,
+            key,
+            attached,
+            attachment,
         } = opened;
-        let snapshot = snapshot?;
-        let generation =
-            self.registry
-                .add(&id, &knowledge_graph, view, snapshot.dependencies.clone())?;
+        let attachment = attachment?;
+        // Checked again: another `.subscribe` may have taken the name meanwhile.
+        self.check_can_add(&id)?;
+        self.next_generation += 1;
+        let generation = self.next_generation;
+        let snapshot = Snapshot::of(&attachment);
+        let doorbell = attached.keep();
+        let subscriber = doorbell.id();
+        self.names.insert(id.clone(), subscriber);
+        self.subscribers.insert(
+            subscriber,
+            Subscriber::new(&id, generation, &key.knowledge_graph, doorbell, &attachment),
+        );
         self.handler.subscription_metrics().add_active(1);
         debug!(
             subscription = id,
-            kg = knowledge_graph,
+            kg = key.knowledge_graph,
             generation,
             revision = snapshot.revision,
             "subscription_added"
         );
-        let moved_on = self
-            .handler
-            .get_storage()
-            .get_snapshot_for(&knowledge_graph)
-            .map_or(true, |current| current.revision > snapshot.revision);
-        if moved_on {
-            if let Some(dispatch) = self.registry.invalidate(&id) {
-                self.start(dispatch);
-            }
-        }
         Ok((snapshot, generation))
+    }
+
+    /// Fail if `id` is taken or the limit is reached.
+    fn check_can_add(&self, id: &str) -> Result<(), String> {
+        if self.names.contains_key(id) {
+            return Err(format!(
+                "Subscription '{id}' already exists on this connection. \
+                 Use .unsubscribe {id} first or pick another id."
+            ));
+        }
+        if self.limit > 0 && self.names.len() >= self.limit {
+            return Err(format!(
+                "Subscription limit reached ({} per connection, see \
+                 http.rate_limit.ws_max_subscriptions). Unsubscribe from one first.",
+                self.limit
+            ));
+        }
+        Ok(())
     }
 
     /// Remove `id`; errors if it is not registered.
     pub fn unsubscribe(&mut self, id: &str) -> Result<(), String> {
-        if !self.registry.remove(id) {
-            return Err(format!("No subscription '{id}' on this connection."));
-        }
+        let subscriber = self
+            .names
+            .remove(id)
+            .ok_or_else(|| format!("No subscription '{id}' on this connection."))?;
+        self.subscribers.remove(&subscriber);
+        self.hub().detach(subscriber);
         self.handler.subscription_metrics().remove_active(1);
         Ok(())
     }
@@ -160,98 +176,136 @@ impl ConnectionSubscriptions {
     /// delivered; a newer registration under the same id stays. Returns
     /// whether it was registered.
     pub fn reset(&mut self, id: &str, generation: u64) -> bool {
-        let removed = self.registry.remove_generation(id, generation);
-        if removed {
-            self.handler.subscription_metrics().remove_active(1);
-        }
-        removed
+        let current = self
+            .names
+            .get(id)
+            .and_then(|subscriber| self.subscribers.get(subscriber))
+            .is_some_and(|subscriber| subscriber.generation() == generation);
+        current && self.unsubscribe(id).is_ok()
     }
 
     /// Remove every subscription.
     pub fn clear(&mut self) {
-        let removed = self.registry.clear() as u64;
-        self.handler.subscription_metrics().remove_active(removed);
+        self.remove_where(|_| true);
     }
 
     /// Remove every subscription not on `knowledge_graph`: subscriptions are
     /// scoped to the connection's KG, so switching drops them.
     pub fn retain_knowledge_graph(&mut self, knowledge_graph: &str) {
-        let removed = self.registry.retain_knowledge_graph(knowledge_graph) as u64;
-        self.handler.subscription_metrics().remove_active(removed);
+        self.remove_where(|subscriber| subscriber.knowledge_graph() != knowledge_graph);
     }
 
-    /// Feed a persistent-change notification.
-    pub fn on_notification(&mut self, notification: &Notification) {
-        if self.registry.is_empty() {
+    fn remove_where(&mut self, remove: impl Fn(&Subscriber) -> bool) {
+        let gone: Vec<SubscriberId> = self
+            .subscribers
+            .values()
+            .filter(|subscriber| remove(subscriber))
+            .map(Subscriber::id)
+            .collect();
+        if gone.is_empty() {
             return;
         }
-        let (knowledge_graph, change) = change_of(notification);
-        for dispatch in self.registry.on_change(knowledge_graph, &change) {
-            self.start(dispatch);
-        }
-    }
-
-    /// Notifications were lost (broadcast lag): re-check everything.
-    pub fn on_missed_notifications(&mut self) {
-        for dispatch in self.registry.on_unknown_changes() {
-            self.start(dispatch);
-        }
-    }
-
-    /// Wait for the next finished evaluation. Pending forever when none run.
-    pub async fn next_completion(&mut self) -> Completion {
-        loop {
-            match self.in_flight.join_next().await {
-                Some(Ok(completion)) => return completion,
-                Some(Err(e)) => warn!(error = %e, "subscription_task_failed"),
-                None => std::future::pending::<()>().await,
+        let hub = self.hub().clone();
+        for subscriber in &gone {
+            if let Some(removed) = self.subscribers.remove(subscriber) {
+                self.names.remove(removed.name());
             }
+            hub.detach(*subscriber);
+        }
+        self.handler
+            .subscription_metrics()
+            .remove_active(gone.len() as u64);
+    }
+
+    /// Wait until a subscriber has news. Pending forever while none does.
+    pub async fn next_delivery(&mut self) -> SubscriberId {
+        match self.wake_ups.recv().await {
+            Some(subscriber) => subscriber,
+            // Unreachable: `self.mailbox` keeps the channel open.
+            None => std::future::pending().await,
         }
     }
 
-    /// Accept a finished evaluation; returns the message to push, if any.
-    pub fn on_completion(&mut self, completion: Completion) -> Option<SubscriptionPush> {
-        let (push, follow_up) = self.registry.on_complete(completion);
-        if let Some(dispatch) = follow_up {
-            self.start(dispatch);
-        }
-        push
+    /// The push for `subscriber`'s wake-up, if any. `readable` tells whether
+    /// this connection may currently read a knowledge graph.
+    pub fn deliver(
+        &mut self,
+        subscriber: SubscriberId,
+        readable: impl FnOnce(&str) -> bool,
+    ) -> Option<SubscriptionPush> {
+        // A wake-up for a subscriber already removed is stale.
+        self.subscribers.get_mut(&subscriber)?.deliver(readable)
     }
 
-    fn start(&mut self, dispatch: Dispatch) {
-        // Counted here, synchronously, so callers observe it in order with pushes.
-        self.handler.subscription_metrics().record_evaluation();
-        self.in_flight.spawn(dispatch.run());
-    }
-}
-
-/// The knowledge graph a notification is about and what it changed there.
-pub fn change_of(notification: &Notification) -> (&str, ChangeSet) {
-    match notification {
-        Notification::PersistentUpdate {
-            knowledge_graph,
-            relation,
-            ..
-        } => (knowledge_graph, ChangeSet::relation(relation)),
-        Notification::RuleChange {
-            knowledge_graph,
-            rule_name,
-            ..
-        } => (knowledge_graph, ChangeSet::relation(rule_name)),
-        Notification::SchemaChange {
-            knowledge_graph,
-            entity,
-            ..
-        } => (knowledge_graph, ChangeSet::relation(entity)),
-        Notification::KgChange {
-            knowledge_graph, ..
-        } => (knowledge_graph, ChangeSet::Everything),
+    fn hub(&self) -> &SubscriptionHub {
+        self.handler.subscription_hub()
     }
 }
 
 impl Drop for ConnectionSubscriptions {
     fn drop(&mut self) {
         self.clear();
+    }
+}
+
+/// A subscription's attachment to its shared view, evaluated off the
+/// connection loop when the view is new.
+pub struct Opening {
+    id: String,
+    key: ViewKey,
+    view: Box<dyn StandingQuery>,
+    attached: Attached,
+}
+
+/// A run [`Opening`], handed back to [`ConnectionSubscriptions::finish_subscribe`].
+pub struct Opened {
+    id: String,
+    key: ViewKey,
+    attached: Attached,
+    attachment: Result<Attachment, String>,
+}
+
+impl Opening {
+    /// Attach to the view, waiting for its first result if it is new.
+    pub async fn run(self) -> Opened {
+        let Opening {
+            id,
+            key,
+            view,
+            attached,
+        } = self;
+        let attachment = attached
+            .hub
+            .attach(key.clone(), Arc::clone(&attached.doorbell), view)
+            .await;
+        Opened {
+            id,
+            key,
+            attached,
+            attachment,
+        }
+    }
+}
+
+/// A subscriber the hub may hold: detached when dropped unless kept.
+struct Attached {
+    hub: SubscriptionHub,
+    doorbell: Arc<Doorbell>,
+    kept: bool,
+}
+
+impl Attached {
+    fn keep(mut self) -> Arc<Doorbell> {
+        self.kept = true;
+        Arc::clone(&self.doorbell)
+    }
+}
+
+impl Drop for Attached {
+    fn drop(&mut self) {
+        if !self.kept {
+            self.hub.detach(self.doorbell.id());
+        }
     }
 }
 

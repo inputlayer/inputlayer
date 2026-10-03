@@ -4,20 +4,21 @@
 //! Bound queries go through Magic Sets, so a re-run touches only the relevant
 //! slice of the KG. Each evaluation pins the KG's current snapshot and runs
 //! the query on it through the normal query path ([`Handler::query_snapshot`]),
-//! which runs on the blocking pool under the query semaphore and re-checks the
-//! subscriber's credential and read permission every time.
+//! which runs on the blocking pool under the query semaphore.
+//!
+//! The evaluation runs for no one in particular: its rows depend only on the
+//! knowledge graph and the query. Whoever receives them is authorized
+//! separately, when subscribing and before each delivery.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 
-use crate::auth::Principal;
 use crate::protocol::rest::handlers::wire_value_to_json;
 use crate::protocol::Handler;
 use crate::statement::{parse_query, QueryGoal};
 
-use super::{Dependencies, Refresh, Row, StandingQuery};
+use super::{Dependencies, Refresh, ResultSet, Row, StandingQuery};
 
 /// A standing query kept current by full re-evaluation.
 pub struct ReevaluatingQuery {
@@ -25,21 +26,14 @@ pub struct ReevaluatingQuery {
     knowledge_graph: String,
     query: String,
     goal: QueryGoal,
-    auth: Option<Principal>,
     columns: Vec<String>,
-    /// Current result, keyed by the row's canonical JSON for a deterministic,
-    /// set-semantics comparison.
-    current: BTreeMap<String, Row>,
+    /// The last complete result.
+    current: Arc<ResultSet>,
 }
 
 impl ReevaluatingQuery {
-    /// Prepare `query` (`?body`) on `knowledge_graph`, evaluated as `auth`.
-    pub fn new(
-        handler: Arc<Handler>,
-        knowledge_graph: &str,
-        query: &str,
-        auth: Option<Principal>,
-    ) -> Result<Self, String> {
+    /// Prepare `query` (`?body`) on `knowledge_graph`.
+    pub fn new(handler: Arc<Handler>, knowledge_graph: &str, query: &str) -> Result<Self, String> {
         let body = query
             .trim()
             .strip_prefix('?')
@@ -56,10 +50,14 @@ impl ReevaluatingQuery {
             knowledge_graph: knowledge_graph.to_string(),
             query: query.trim().to_string(),
             goal,
-            auth,
             columns: Vec::new(),
-            current: BTreeMap::new(),
+            current: Arc::default(),
         })
+    }
+
+    /// The parsed query.
+    pub fn goal(&self) -> &QueryGoal {
+        &self.goal
     }
 
     async fn evaluate(&mut self) -> Result<Refresh, String> {
@@ -75,12 +73,7 @@ impl ReevaluatingQuery {
 
         let result = self
             .handler
-            .query_snapshot(
-                &self.knowledge_graph,
-                snapshot,
-                &self.query,
-                self.auth.as_ref(),
-            )
+            .query_snapshot(&self.knowledge_graph, snapshot, &self.query, None)
             .await?;
         // A capped result is not the result set: adopting it would announce
         // every cut row as retracted. Fail before touching state, so the last
@@ -93,23 +86,23 @@ impl ReevaluatingQuery {
         if !result.schema.is_empty() {
             self.columns = result.schema.into_iter().map(|c| c.name).collect();
         }
-        let next: BTreeMap<String, Row> = result
-            .rows
-            .into_iter()
-            .map(|row| {
-                let row: Row = row.values.into_iter().map(wire_value_to_json).collect();
-                (serde_json::Value::from(row.clone()).to_string(), row)
-            })
-            .collect();
-        let inserted = difference(&next, &self.current);
-        let retracted = difference(&self.current, &next);
-        self.current = next;
+        let next: Arc<ResultSet> = Arc::new(
+            result
+                .rows
+                .into_iter()
+                .map(|row| -> Row { row.values.into_iter().map(wire_value_to_json).collect() })
+                .collect(),
+        );
+        let inserted = next.difference(&self.current);
+        let retracted = self.current.difference(&next);
+        self.current = Arc::clone(&next);
         Ok(Refresh {
             columns: self.columns.clone(),
             inserted,
             retracted,
             dependencies,
             revision,
+            result: next,
         })
     }
 }
@@ -120,14 +113,6 @@ fn incomplete_result_error(max_result_rows: usize) -> String {
         "Subscription result exceeds storage.performance.max_result_rows \
          ({max_result_rows}); no complete result to deliver. Narrow the query."
     )
-}
-
-/// Rows of `a` missing from `b`, in key order.
-fn difference(a: &BTreeMap<String, Row>, b: &BTreeMap<String, Row>) -> Vec<Row> {
-    a.iter()
-        .filter(|(key, _)| !b.contains_key(*key))
-        .map(|(_, row)| row.clone())
-        .collect()
 }
 
 impl StandingQuery for ReevaluatingQuery {

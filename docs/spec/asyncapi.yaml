@@ -472,8 +472,7 @@ operations:
     summary: The server ended a subscription it could not keep current
     description: |
       The subscription's next change could not be delivered whole (a row larger than
-      any frame, or read access to its knowledge graph was revoked), so the server
-      removed the subscription. Discard its rows, including a streamed delta in
+      any frame), so the server removed the subscription. Discard its rows, including a streamed delta in
       progress, and subscribe again for a fresh snapshot. Nothing more is pushed for
       this generation.
     messages:
@@ -496,10 +495,11 @@ operations:
     action: receive
     channel:
       $ref: '#/channels/ws'
-    summary: Standing query re-evaluation failed
+    summary: Standing query re-evaluation failed or was denied
     description: |
-      The subscription stays registered and keeps its last complete result;
-      the next delta is relative to it. A result cut at `max_result_rows` is
+      The subscription stays registered and keeps the last result it received;
+      the next delta is relative to it. A result cut at `max_result_rows`, and
+      a result the subscriber may no longer read (`.kg acl revoke`), are
       reported this way instead of being delivered.
     messages:
       - $ref: '#/channels/ws/messages/subscription_error'
@@ -734,7 +734,7 @@ components:
             - server_shutdown
           description: |
             `notifications_missed`: the client read too slowly and change notifications
-            were dropped; standing queries re-evaluate and the connection stays open.
+            were dropped; the connection stays open and subscription deltas are unaffected.
             `replay_gap`: the reconnect cursor could not be honoured and nothing was
             replayed; re-read the state you track. The connection stays open.
             Every other code is followed by the server closing the connection.

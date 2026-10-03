@@ -5,184 +5,14 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::collections::{BTreeSet, VecDeque};
+mod harness;
+mod sharing;
+
+use std::collections::BTreeSet;
 use std::sync::Arc;
-use std::time::Duration;
 
-use futures_util::{SinkExt, StreamExt};
-use inputlayer::protocol::rest::create_router;
-use inputlayer::protocol::Handler;
-use inputlayer::Config;
+use harness::{admin, rows, start_server, start_server_with, Client, Server, KG};
 use serde_json::{json, Value};
-use tempfile::TempDir;
-use tokio::net::TcpStream;
-use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream, WebSocketStream};
-
-const KG: &str = "subs";
-const PASSWORD: &str = "standing-query-test-pw";
-const TIMEOUT: Duration = Duration::from_secs(20);
-
-struct Server {
-    handler: Arc<Handler>,
-    addr: std::net::SocketAddr,
-    task: tokio::task::JoinHandle<()>,
-    _tmp: TempDir,
-}
-
-impl Drop for Server {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
-}
-
-async fn start_server(max_subscriptions: usize) -> Server {
-    start_server_with(max_subscriptions, |_| {}).await
-}
-
-async fn start_server_with(
-    max_subscriptions: usize,
-    configure: impl FnOnce(&mut Config),
-) -> Server {
-    let tmp = TempDir::new().unwrap();
-    let mut config = Config::default();
-    config.storage.data_dir = tmp.path().join("data");
-    config.http.auth.bootstrap_admin_password = Some(PASSWORD.to_string());
-    config.http.auth.credentials_file = Some(tmp.path().join("credentials.toml"));
-    config.http.rate_limit.ws_max_subscriptions = max_subscriptions;
-    config.http.rate_limit.ws_max_messages_per_sec = 0;
-    config.http.gui.enabled = false;
-    configure(&mut config);
-    let handler = Arc::new(Handler::from_config(config).unwrap());
-    handler.bootstrap_auth();
-    handler.get_storage().create_knowledge_graph(KG).unwrap();
-    let app = create_router(Arc::clone(&handler), &handler.config().http);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let task = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    Server {
-        handler,
-        addr,
-        task,
-        _tmp: tmp,
-    }
-}
-
-impl Server {
-    /// Commit a persistent change as another client would.
-    async fn write(&self, program: &str) {
-        self.handler
-            .execute_program(None, Some(KG.to_string()), program.to_string(), None)
-            .await
-            .unwrap_or_else(|e| panic!("write {program:?} failed: {e}"));
-    }
-
-    fn evaluations(&self) -> u64 {
-        self.handler.subscription_metrics().evaluations()
-    }
-
-    async fn wait_for_active(&self, expected: u64) {
-        let deadline = tokio::time::Instant::now() + TIMEOUT;
-        while self.handler.subscription_metrics().active() != expected {
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "active subscriptions stuck at {}, expected {expected}",
-                self.handler.subscription_metrics().active()
-            );
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    }
-}
-
-struct Client {
-    ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
-    /// Subscription pushes received while waiting for a reply.
-    pushes: VecDeque<Value>,
-}
-
-impl Client {
-    async fn connect(server: &Server) -> Self {
-        let url = format!("ws://{}/ws?kg={KG}", server.addr);
-        let (ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
-        let mut client = Self {
-            ws,
-            pushes: VecDeque::new(),
-        };
-        client
-            .send(json!({"type": "login", "username": "admin", "password": PASSWORD}))
-            .await;
-        let reply = client.recv().await;
-        assert_eq!(reply["type"], "authenticated", "{reply}");
-        client
-    }
-
-    async fn send(&mut self, value: Value) {
-        self.ws
-            .send(Message::Text(value.to_string()))
-            .await
-            .unwrap();
-    }
-
-    async fn recv(&mut self) -> Value {
-        loop {
-            let msg = tokio::time::timeout(TIMEOUT, self.ws.next())
-                .await
-                .expect("timed out waiting for a message")
-                .expect("connection closed")
-                .unwrap();
-            if let Message::Text(text) = msg {
-                return serde_json::from_str(&text).unwrap();
-            }
-        }
-    }
-
-    /// Run a program; returns its `result` or `error` reply.
-    async fn execute(&mut self, program: &str) -> Value {
-        self.send(json!({"type": "execute", "program": program}))
-            .await;
-        loop {
-            let msg = self.recv().await;
-            match msg["type"].as_str() {
-                Some("result" | "error") => return msg,
-                Some("subscription_delta" | "subscription_error") => self.pushes.push_back(msg),
-                _ => {}
-            }
-        }
-    }
-
-    async fn next_push(&mut self) -> Value {
-        if let Some(push) = self.pushes.pop_front() {
-            return push;
-        }
-        loop {
-            let msg = self.recv().await;
-            if msg["type"]
-                .as_str()
-                .is_some_and(|t| t.starts_with("subscription_"))
-            {
-                return msg;
-            }
-        }
-    }
-
-    /// Next push for `subscription`, failing on a push for any other.
-    async fn next_push_for(&mut self, subscription: &str) -> Value {
-        let push = self.next_push().await;
-        assert_eq!(push["subscription"], subscription, "unexpected push {push}");
-        push
-    }
-
-    async fn subscribe(&mut self, id: &str, query: &str) -> Value {
-        let reply = self.execute(&format!(".subscribe {id} {query}")).await;
-        assert_eq!(reply["type"], "result", "subscribe failed: {reply}");
-        reply
-    }
-}
-
-fn rows(value: &Value) -> Vec<Value> {
-    value.as_array().unwrap().clone()
-}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_subscribe_returns_snapshot_and_insert_produces_delta() {
@@ -411,14 +241,6 @@ async fn test_limit_duplicates_and_invalid_queries_are_errors() {
     server.wait_for_active(1).await;
 }
 
-async fn admin(server: &Server, program: &str) {
-    server
-        .handler
-        .execute_program(None, None, program.to_string(), None)
-        .await
-        .unwrap_or_else(|e| panic!("{program:?} failed: {e}"));
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn test_read_access_is_checked_on_subscribe_and_every_evaluation() {
     let server = start_server(64).await;
@@ -426,17 +248,7 @@ async fn test_read_access_is_checked_on_subscribe_and_every_evaluation() {
     admin(&server, ".user create mallory pw12345678 viewer").await;
     admin(&server, &format!(".kg acl grant {KG} mallory viewer")).await;
 
-    let url = format!("ws://{}/ws?kg={KG}", server.addr);
-    let (ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
-    let mut client = Client {
-        ws,
-        pushes: VecDeque::new(),
-    };
-    client
-        .send(json!({"type": "login", "username": "mallory", "password": "pw12345678"}))
-        .await;
-    let reply = client.recv().await;
-    assert_eq!(reply["type"], "authenticated", "{reply}");
+    let mut client = Client::connect_as(&server, KG, "mallory", "pw12345678").await;
     let snapshot = client.subscribe("s", "?a(X)").await;
     assert_eq!(rows(&snapshot["rows"]), vec![json!([1])]);
 
