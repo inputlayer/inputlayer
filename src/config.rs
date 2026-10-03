@@ -238,8 +238,9 @@ pub struct PerformanceConfig {
     #[serde(default = "default_max_string_value_bytes")]
     pub max_string_value_bytes: usize,
 
-    /// Maximum number of result rows returned by a query. 0 = no limit.
-    #[serde(default)]
+    /// Maximum rows in a query's final result; larger results are cut and
+    /// flagged `truncated`. Intermediate relations are never cut. 0 = no limit.
+    #[serde(default = "default_max_result_rows")]
     pub max_result_rows: usize,
 
     /// Slow query warning threshold in milliseconds. Queries exceeding this
@@ -498,6 +499,9 @@ fn default_max_query_size_bytes() -> usize {
 fn default_max_insert_tuples() -> usize {
     10_000
 }
+fn default_max_result_rows() -> usize {
+    100_000
+}
 fn default_max_string_value_bytes() -> usize {
     65_536 // 64 KB
 }
@@ -607,14 +611,13 @@ impl Config {
     /// Seed of default values, built THROUGH serde so the field-level serde
     /// defaults are authoritative for omitted keys - exactly the values a
     /// config that omits those keys received before seeding existed. The
-    /// hand-written Default impls diverge on several flags
-    /// (enable_join_planning, max_result_rows, gui.enabled, ...) and must
-    /// not leak into merged configs.
+    /// hand-written Default impls diverge on several flags (e.g.
+    /// gui.enabled) and must not leak into merged configs.
     fn seed() -> Self {
         // Every nested config struct appears as an explicit empty section:
         // `#[serde(default)]` on a struct-typed FIELD falls back to the
         // hand-written Default impl, which diverges from the field-level
-        // defaults inside that struct (e.g. max_result_rows 100000 vs 0).
+        // defaults inside that struct (e.g. gui.enabled true vs false).
         // An empty section forces field-level defaults throughout.
         let minimal = serde_json::json!({
             "storage": {
@@ -796,7 +799,7 @@ impl Config {
                     max_query_size_bytes: 1_048_576,
                     max_insert_tuples: 10_000,
                     max_string_value_bytes: 65_536,
-                    max_result_rows: 100_000,
+                    max_result_rows: default_max_result_rows(),
                     slow_query_log_ms: 5000,
                     max_query_cost: 0,
                     timing_mode: crate::execution::TimingMode::default(),
@@ -830,7 +833,7 @@ impl Default for PerformanceConfig {
             max_query_size_bytes: default_max_query_size_bytes(),
             max_insert_tuples: default_max_insert_tuples(),
             max_string_value_bytes: default_max_string_value_bytes(),
-            max_result_rows: 100_000, // match Config::default()
+            max_result_rows: default_max_result_rows(),
             slow_query_log_ms: default_slow_query_log_ms(),
             max_query_cost: 0, // 0 = unlimited
             timing_mode: crate::execution::TimingMode::default(),
@@ -963,7 +966,7 @@ mod tests {
             let config = Config::load().expect("no-file load");
             assert!(config.optimization.enable_join_planning);
             assert!(config.optimization.enable_sip_rewriting);
-            assert_eq!(config.storage.performance.max_result_rows, 0);
+            assert_eq!(config.storage.performance.max_result_rows, 100_000);
             assert!(!config.http.enabled);
             Ok(())
         });

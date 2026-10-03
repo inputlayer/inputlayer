@@ -6,7 +6,7 @@
 //! Dataflow propagates only changes between iterations, so evaluation is
 //! semi-naive across the whole SCC.
 
-use super::{format_panic_payload, is_query_cancelled, signal_query_cancel, CodeGenerator, Iter};
+use super::{format_panic_payload, is_query_cancelled, CodeGenerator, Iter};
 use crate::boolean_specialization::SemiringType;
 use crate::ir::IRNode;
 use crate::semiring_types::{BooleanDiff, DiffType};
@@ -120,7 +120,6 @@ impl CodeGenerator {
             Arc::new(plans.iter().map(|_| Mutex::new(HashMap::new())).collect());
         let results_clone = Arc::clone(&results);
         let input_data = self.input_tuples.clone();
-        let result_limit = self.max_result_rows;
 
         catch_unwind(AssertUnwindSafe(|| {
             timely::execute_directly(move |worker| {
@@ -184,9 +183,6 @@ impl CodeGenerator {
                             .inspect(move |(data, _time, diff)| {
                                 let mut guard = results_ref[idx].lock();
                                 *guard.entry(data.clone()).or_insert(0) += diff.to_count();
-                                if result_limit > 0 && guard.len() > result_limit {
-                                    signal_query_cancel();
-                                }
                             })
                             .probe_with(&probe);
                     }
@@ -209,23 +205,17 @@ impl CodeGenerator {
         })?;
 
         let mut out: HashMap<String, Vec<Tuple>> = HashMap::new();
-        let mut hit_limit = false;
         for ((name, _), counts) in members.iter().zip(results.iter()) {
-            let mut tuples: Vec<Tuple> = counts
+            let tuples: Vec<Tuple> = counts
                 .lock()
                 .iter()
                 .filter(|(_, &count)| count > 0)
                 .map(|(t, _)| t.clone())
                 .collect();
-            if result_limit > 0 && tuples.len() >= result_limit {
-                tuples.truncate(result_limit);
-                hit_limit = true;
-            }
             out.insert(name.clone(), tuples);
         }
 
-        // A self-triggered cancel (row limit) still returns results.
-        if is_query_cancelled() && !hit_limit {
+        if is_query_cancelled() {
             return Err("Query cancelled due to timeout".to_string());
         }
 
