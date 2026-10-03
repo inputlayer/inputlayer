@@ -34,9 +34,9 @@ pub async fn run(server: &RunningServer, params: &InterferenceParams) -> Result<
     let long = tokio::spawn(loop_long_request(long_client, expected, Arc::clone(&stop)));
 
     let (probe, _) = kg.subscribe(server, "probe").await?;
-    let probe = delta::spawn_agent(probe, kg.probes, &params.delta);
+    let probe = delta::spawn_agent(probe, kg.probes);
     let writes = delta::write_schedule(&mut kg.writer, kg.probes, &params.delta).await?;
-    let arrivals = probe.await.context("probe task")??;
+    let arrivals = delta::drain(vec![probe]).await?.remove(0);
     stop.store(true, Ordering::Relaxed);
     let long_us = long.await.context("long request task")??;
     drop(slow);

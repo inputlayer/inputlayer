@@ -18,9 +18,8 @@ pub struct Policy {
     pub min_samples_p50: usize,
     /// Fewer samples in a round than this make that round's p99 invalid.
     pub min_samples_p99: usize,
-    /// Two-sided bootstrap confidence level, e.g. 0.95.
+    /// Two-sided confidence level of the median interval, e.g. 0.95.
     pub confidence: f64,
-    pub resamples: usize,
     pub tolerance: Tolerance,
     /// Metrics that must be present, valid and within budget.
     pub required: Vec<String>,
@@ -49,8 +48,8 @@ impl Policy {
         if !(0.5..1.0).contains(&self.confidence) {
             bail!("confidence must be in [0.5, 1)");
         }
-        if self.min_rounds < 2 || self.resamples < 100 {
-            bail!("need min_rounds >= 2 and resamples >= 100");
+        if self.min_rounds < 2 {
+            bail!("need min_rounds >= 2");
         }
         let t = self.tolerance;
         if [t.p50, t.p99, t.rate]

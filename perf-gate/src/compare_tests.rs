@@ -2,17 +2,16 @@ use super::*;
 use crate::policy::Tolerance;
 use crate::schema::{Arm, Environment, Rate, Workload};
 
-const ROUNDS: u32 = 6;
+const ROUNDS: u32 = 10;
 
 fn policy() -> Policy {
     Policy {
         status: "test".into(),
         note: String::new(),
-        min_rounds: 5,
+        min_rounds: 6,
         min_samples_p50: 20,
         min_samples_p99: 200,
         confidence: 0.95,
-        resamples: 2000,
         tolerance: Tolerance {
             p50: 0.05,
             p99: 0.10,

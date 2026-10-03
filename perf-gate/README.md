@@ -9,7 +9,7 @@ is unchanged. Being test-only or off the hot path is a statement in the
 record, not an exemption.
 
 ```bash
-make perf-gate                          # candidate = working tree, ~15 min
+make perf-gate                          # candidate = working tree, ~12 min on a quiet host
 make perf-gate PERF_GATE_ARGS="--aa"    # baseline vs itself: host noise check
 scripts/perf-gate.sh --help             # all options
 ```
@@ -46,13 +46,13 @@ The report lands in `target/perf-gate/latest/report.md`. Next to it are
 
 | Fixture | Workload (profile `standard`) | Series / rates |
 |---|---|---|
-| `cheap_query` | `?edge(1, Y)` on 2K nodes / 4K edges: 600 serial, then 8 clients x 250 | `latency_us`, `concurrent_latency_us`, `queries_per_sec` |
-| `bound_query` | warm `?reach(1, Y)` (transitive closure, Magic Sets), same graph: 250 serial, 8 x 40 | same |
-| `insert_single` | 400 durable `+event(i, i)` serial, then 4 writers x 100 | `ack_us`, `concurrent_ack_us`, `facts_per_sec`, `concurrent_facts_per_sec` |
-| `insert_batch` | 30 durable batches of 1,000 facts | `ack_us`, `facts_per_sec` |
-| `delta_single` | 1 agent subscribed to `?two_hop(1, Z)` on 2.5K nodes / 10K edges; an external writer, open loop, every 25 ms, 200 writes | `delta_us` (writer send to delta at agent), `last_agent_us`, `ack_us`, `subscribe_us` |
-| `delta_fanout` | 64 agents on the same query, a write every 100 ms, 100 writes | same |
-| `interference` | 1 probe agent while another connection loops a long join (`?two_hop(X, Z), edge(Z, X)`) and a slow consumer stops reading with large results pending; a write every 40 ms, 150 writes | `delta_us`, `ack_us`, `long_request_us` |
+| `cheap_query` | `?edge(1, Y)` on 2K nodes / 4K edges: 400 serial, then 8 clients x 150 | `latency_us`, `concurrent_latency_us`, `queries_per_sec` |
+| `bound_query` | warm `?reach(1, Y)` (transitive closure, Magic Sets), same graph: 150 serial, 8 x 25 | same |
+| `insert_single` | 200 durable `+event(i, i)` serial, then 4 writers x 50 | `ack_us`, `concurrent_ack_us`, `facts_per_sec`, `concurrent_facts_per_sec` |
+| `insert_batch` | 20 durable batches of 1,000 facts | `ack_us`, `facts_per_sec` |
+| `delta_single` | 1 agent subscribed to `?two_hop(1, Z)` on 2.5K nodes / 10K edges; an external writer, open loop, every 20 ms, 150 writes | `delta_us` (writer send to delta at agent), `last_agent_us`, `ack_us`, `subscribe_us` |
+| `delta_fanout` | 64 agents on the same query, a write every 80 ms, 100 writes | same |
+| `interference` | 1 probe agent while another connection loops a long join (`?two_hop(X, Z), edge(Z, X)`) and a slow consumer stops reading with large results pending; a write every 30 ms, 120 writes | `delta_us`, `ack_us`, `long_request_us` |
 
 Each fixture also records `server_peak_rss_kb`.
 
@@ -70,10 +70,15 @@ p99 and therefore never passes.
 
 The policy lives in `policy.toml`. The unit of replication is the round:
 each round contributes one value per arm and metric, either a nearest-rank
-percentile of that round's raw samples or that round's rate. The estimate is
-the **cost ratio** of the arms' medians over the rounds. Above 1.0 is worse,
-for latency and throughput alike. A bootstrap interval is computed over the
-rounds.
+percentile of that round's raw samples or that round's rate. Both arms of a
+round run back to back, so each round yields one **paired cost ratio**,
+candidate over baseline. Above 1.0 is worse, for latency and throughput
+alike. Drift on the host between rounds cancels out of the ratio. The
+estimate is the median of the per-round ratios. Its interval is the exact,
+distribution-free 95% confidence interval of a median: binomial order
+statistics, with no resampling. At least 6 rounds are needed for an interval
+to exist at all. The default of 10 rounds tolerates one outlier round on each
+side.
 
 | Status | Meaning | Exit |
 |---|---|---|

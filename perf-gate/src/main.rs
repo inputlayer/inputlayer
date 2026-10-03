@@ -65,7 +65,7 @@ struct RunArgs {
     #[arg(long, default_value = "standard")]
     profile: String,
     /// Rounds per arm.
-    #[arg(long, default_value_t = 6)]
+    #[arg(long, default_value_t = 10)]
     rounds: u32,
     /// Comma-separated fixture subset (default: all).
     #[arg(long, value_delimiter = ',')]
