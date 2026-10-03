@@ -90,6 +90,29 @@ async fn a_retry_failing_the_same_way_answers_only_its_waiters() {
 }
 
 #[tokio::test]
+async fn a_commit_failing_the_same_way_still_reaches_every_subscriber() {
+    let mut registry = ViewRegistry::new(Duration::ZERO);
+    let capped = || Err("capped".to_string());
+    let (attachment, mut mailbox) = live(
+        &mut registry,
+        "?a(X)",
+        1,
+        vec![ok(&[1], "a"), capped(), capped()],
+    )
+    .await;
+    let d = registry.on_change(KG, &change("a"), now()).remove(0);
+    complete(&mut registry, d).await;
+    assert!(rang(&mut mailbox));
+    let failed = latest(&attachment);
+
+    let d = registry.on_change(KG, &change("a"), now()).remove(0);
+    complete(&mut registry, d).await;
+    let again = latest(&attachment);
+    assert_eq!(again.number, failed.number + 1, "each relevant commit reports the error");
+    assert!(matches!(&again.outcome, Outcome::Failed(m) if m == "capped"));
+}
+
+#[tokio::test]
 async fn a_failed_retry_answers_its_waiters_with_the_new_error() {
     let mut registry = ViewRegistry::new(Duration::ZERO);
     let steps = vec![

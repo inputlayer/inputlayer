@@ -1,23 +1,20 @@
-//! Shared views: one evaluation per distinct standing query, however many
-//! subscribers it has.
+//! Shared views: one evaluation per distinct standing query, however many subscribers it has.
 //!
-//! A view is keyed by its knowledge graph and query text ([`ViewKey`]). Keys
-//! are compared in full: a hash collision never hands one query's rows to another.
+//! A view is keyed by its knowledge graph and query text ([`ViewKey`]). Keys are compared in
+//! full: a hash collision never hands one query's rows to another.
 //!
-//! Each view is either *idle* (its [`StandingQuery`] is parked here) or *in
-//! flight* (handed out in a [`Dispatch`], back in a [`Completion`]): at most
-//! one evaluation per view. Changes that arrive while in flight are kept and
-//! checked against the *new* dependency set on completion, so a burst of
-//! commits costs one follow-up evaluation and the final state is never lost.
-//! With a coalescing window, an idle view waits up to that window after the
-//! first relevant change before evaluating; the window never restarts, so a
-//! change is evaluated at most one window (plus an evaluation in flight)
-//! after it is seen.
+//! Each view is either *idle* (its [`StandingQuery`] is parked here) or *in flight* (handed
+//! out in a [`Dispatch`], back in a [`Completion`]): at most one evaluation per view. Changes
+//! that arrive while in flight are kept and checked against the *new* dependency set on
+//! completion, so a burst of commits costs one follow-up evaluation and the final state is
+//! never lost. With a coalescing window, an idle view waits up to that window after the first
+//! relevant change before evaluating; the window never restarts, so a change is evaluated at
+//! most one window (plus an evaluation in flight) after it is seen.
 //!
-//! A completed refresh that changed, newly failed or recovered the result is
-//! the view's next [`Publication`], and every subscriber's doorbell rings. A
-//! subscriber joining a view without a current result (first evaluation, or a
-//! failed refresh) waits for the next evaluation, started at once if idle.
+//! A completed refresh that changed, failed or recovered the result is the view's next
+//! [`Publication`], and every subscriber's doorbell rings. A subscriber joining a view without
+//! a current result (first evaluation, or a failed refresh) waits for the next evaluation,
+//! started at once if idle; such a retry failing as before is no news to the others.
 
 use std::collections::hash_map::RandomState;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -34,14 +31,13 @@ pub use evaluation::{Completion, Dispatch};
 
 /// Identity of a shared view: what its result is a function of.
 ///
-/// Rules: a refresh reads the knowledge graph's current persistent rules; a
-/// rule change that may affect a view retires its key
-/// ([`ViewRegistry::on_rule_change`]), so later subscribers start a new view.
+/// Rules: a refresh reads the knowledge graph's current persistent rules; a rule change
+/// that may affect a view retires its key ([`ViewRegistry::on_rule_change`]): later
+/// subscribers start a new view.
 ///
-/// Visibility: authorization is per knowledge graph and checked for every
-/// subscriber when it subscribes and before every push, so all readers of a
-/// view may see all its rows. Row- or relation-level authorization would make
-/// rows depend on who asks: it must then join this key, evaluated as that scope.
+/// Visibility: authorization is per knowledge graph and checked for every subscriber when it
+/// subscribes and before every push, so all readers of a view may see all its rows. Row- or
+/// relation-level authorization would make rows depend on who asks: it must join this key.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ViewKey {
     pub knowledge_graph: String,
@@ -108,6 +104,8 @@ struct View {
     pending: Option<Pending>,
     /// When an idle view's coalesced refresh starts.
     due: Option<Instant>,
+    /// The evaluation in flight only retries a failed view for new subscribers.
+    retry: bool,
     /// `None` until the first result.
     live: Option<Live>,
     /// Waiting for the next result, as there is no current one.
@@ -186,8 +184,8 @@ impl<S: BuildHasher + Default> ViewRegistry<S> {
         self.views.is_empty()
     }
 
-    /// Attach `doorbell`'s subscriber to the view of `key`, creating it (with
-    /// the query `create` builds) if there is none.
+    /// Attach `doorbell`'s subscriber to the view of `key`, creating it (with the query
+    /// `create` builds) if there is none.
     pub fn attach(
         &mut self,
         key: ViewKey,
@@ -206,6 +204,7 @@ impl<S: BuildHasher + Default> ViewRegistry<S> {
                     }
                     _ => {
                         view.waiting.push(doorbell);
+                        view.retry = view.due.is_none() && view.query.is_some();
                         if let Some(due) = view.due.take() {
                             self.schedule.remove(&(due, id));
                         }
@@ -229,6 +228,7 @@ impl<S: BuildHasher + Default> ViewRegistry<S> {
                 dependencies: Dependencies::default(),
                 pending: None,
                 due: None,
+                retry: false,
                 live: None,
                 waiting: vec![doorbell],
                 subscribers: BTreeMap::new(),
@@ -241,8 +241,8 @@ impl<S: BuildHasher + Default> ViewRegistry<S> {
         }))
     }
 
-    /// Detach a subscriber. Returns the view it left when that view is now
-    /// gone: an evaluation still running for it is wasted work.
+    /// Detach a subscriber. Returns the view it left when that view is now gone: an
+    /// evaluation still running for it is wasted work.
     pub fn detach(&mut self, subscriber: SubscriberId) -> Option<ViewId> {
         let id = self.subscribers.remove(&subscriber)?;
         let view = self.views.get_mut(&id)?;
@@ -316,9 +316,9 @@ impl<S: BuildHasher + Default> ViewRegistry<S> {
         dispatches
     }
 
-    /// React to committed changes in `knowledge_graph` that may include rule
-    /// changes. A view they may affect keeps its subscribers, which get its
-    /// refresh, but takes no new ones: they start a view of the new rules.
+    /// React to committed changes in `knowledge_graph` that may include rule changes. A view
+    /// they may affect keeps its subscribers, which get its refresh, but takes no new ones:
+    /// they start a view of the new rules.
     pub fn on_rule_change(
         &mut self,
         knowledge_graph: &str,
@@ -367,9 +367,8 @@ impl<S: BuildHasher + Default> ViewRegistry<S> {
         dispatches
     }
 
-    /// Accept a finished evaluation: publish its outcome to the view's
-    /// subscribers, answer those waiting for it, and return a follow-up
-    /// evaluation for changes seen meanwhile.
+    /// Accept a finished evaluation: publish its outcome to the view's subscribers, answer
+    /// those waiting for it, and return a follow-up evaluation for changes seen meanwhile.
     pub fn on_complete(&mut self, completion: Completion, now: Instant) -> Completed {
         let Completion {
             view: id,
@@ -381,6 +380,7 @@ impl<S: BuildHasher + Default> ViewRegistry<S> {
             return Completed::default();
         };
         view.query = Some(query);
+        let retry = std::mem::take(&mut view.retry);
         let failure = result.as_ref().err().cloned();
         let mut initial_rows = None;
         let gone = match result {
@@ -388,7 +388,7 @@ impl<S: BuildHasher + Default> ViewRegistry<S> {
                 initial_rows = Some(start(view, refresh));
                 Vec::new()
             }
-            result => publish(view, result),
+            result => publish(view, result, retry),
         };
         let replies = view.release_waiting(failure, initial_rows);
         for (subscriber, reply) in &replies {
@@ -448,17 +448,17 @@ fn start(view: &mut View, refresh: Refresh) -> Arc<Vec<Row>> {
 }
 
 /// Publish a refresh's news and ring every subscriber; returns those whose connection is gone.
-fn publish(view: &mut View, result: Result<Refresh, String>) -> Vec<SubscriberId> {
+fn publish(view: &mut View, result: Result<Refresh, String>, retry: bool) -> Vec<SubscriberId> {
     let Some(live) = &mut view.live else {
         return Vec::new();
     };
-    let latest = &live.latest;
-    let number = latest.number + 1;
+    let last = &live.latest;
+    let number = last.number + 1;
     let publication = match result {
         Ok(refresh) => {
             let unchanged = refresh.is_unchanged();
             view.dependencies = refresh.dependencies;
-            if unchanged && !matches!(latest.outcome, Outcome::Failed(_)) {
+            if unchanged && !matches!(last.outcome, Outcome::Failed(_)) {
                 return Vec::new();
             }
             Publication {
@@ -468,19 +468,19 @@ fn publish(view: &mut View, result: Result<Refresh, String>) -> Vec<SubscriberId
                 columns: refresh.columns,
                 result: refresh.result,
                 outcome: Outcome::Delta {
-                    base: latest.result_number,
+                    base: last.result_number,
                     inserted: refresh.inserted,
                     retracted: refresh.retracted,
                 },
             }
         }
-        Err(e) if matches!(&latest.outcome, Outcome::Failed(f) if *f == e) => return Vec::new(),
+        Err(e) if retry && matches!(&last.outcome, Outcome::Failed(f) if *f == e) => return vec![],
         Err(message) => Publication {
             number,
-            revision: latest.revision,
-            result_number: latest.result_number,
-            columns: latest.columns.clone(),
-            result: Arc::clone(&latest.result),
+            revision: last.revision,
+            result_number: last.result_number,
+            columns: last.columns.clone(),
+            result: Arc::clone(&last.result),
             outcome: Outcome::Failed(message),
         },
     };
