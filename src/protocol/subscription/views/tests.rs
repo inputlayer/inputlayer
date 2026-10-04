@@ -122,7 +122,10 @@ async fn distinct_queries_and_graphs_get_their_own_views() {
         query: "?a(X)".to_string(),
     };
     assert!(matches!(
-        registry.attach(other_graph, doorbell_3, 0, || Scripted::boxed([ok(&[], "a")])),
+        registry.attach(other_graph, doorbell_3, 0, || Scripted::boxed([ok(
+            &[],
+            "a"
+        )])),
         Attach::Waiting(Some(_))
     ));
     assert_eq!(registry.len(), 3);
@@ -425,8 +428,13 @@ async fn detaching_a_scheduled_view_unschedules_it() {
 #[tokio::test]
 async fn a_view_older_than_the_graph_refreshes_for_a_new_subscriber_without_news() {
     let mut registry = ViewRegistry::new(Duration::ZERO);
-    let (first, mut mailbox_1) =
-        live(&mut registry, "?a(X)", 1, vec![ok(&[1], "a"), ok(&[1], "a")]).await;
+    let (first, mut mailbox_1) = live(
+        &mut registry,
+        "?a(X)",
+        1,
+        vec![ok(&[1], "a"), ok(&[1], "a")],
+    )
+    .await;
     assert_eq!(latest(&first).revision, 1);
 
     // The graph moved on outside the view: a subscriber at revision 2 waits.

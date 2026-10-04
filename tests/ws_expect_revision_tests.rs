@@ -332,7 +332,10 @@ async fn a_refused_decider_that_reads_again_can_commit() {
             .await;
         assert_eq!(reply["type"], "result", "{reply}");
         let again = decider.subscribe(name, query).await;
-        assert!(again > seen, "{name}: read again at {again}, first at {seen}");
+        assert!(
+            again > seen,
+            "{name}: read again at {again}, first at {seen}"
+        );
         let reply = decider.request("d", decide(again)).await;
         assert_eq!(reply["type"], "result", "{name}: {reply}");
         let reply = decider

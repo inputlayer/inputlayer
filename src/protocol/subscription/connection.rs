@@ -88,7 +88,9 @@ impl ConnectionSubscriptions {
             .authorize_query(self.auth.as_ref(), knowledge_graph, view.goal())?;
         // A view not refreshed since is still exact now, but must say so: a
         // client may expect the revision its snapshot reports.
-        let revision = view.current_snapshot().map_or(0, |snapshot| snapshot.revision);
+        let revision = view
+            .current_snapshot()
+            .map_or(0, |snapshot| snapshot.revision);
         let key = ViewKey {
             knowledge_graph: knowledge_graph.to_string(),
             query: query.trim().to_string(),

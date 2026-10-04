@@ -49,9 +49,9 @@ impl Fixture {
     fn join(&mut self, id: SubscriberId) -> Subscriber {
         let (bell, mailbox) = doorbell(id);
         self.mailboxes.push(mailbox);
-        let Attach::Attached(attachment) = self
-            .registry
-            .attach(key(), Arc::clone(&bell), 0, || Scripted::boxed([]))
+        let Attach::Attached(attachment) =
+            self.registry
+                .attach(key(), Arc::clone(&bell), 0, || Scripted::boxed([]))
         else {
             panic!("joins the live view");
         };
@@ -99,7 +99,9 @@ fn error(push: Option<SubscriptionPush>) -> String {
 async fn snapshot_lists_the_result_for_creator_and_joiner() {
     let (mut fixture, _) = Fixture::new(vec![ok(&[3, 1, 2])]).await;
     let (bell, _mailbox) = doorbell(9);
-    let Attach::Attached(attachment) = fixture.registry.attach(key(), bell, 0, || Scripted::boxed([]))
+    let Attach::Attached(attachment) = fixture
+        .registry
+        .attach(key(), bell, 0, || Scripted::boxed([]))
     else {
         panic!("joins");
     };
