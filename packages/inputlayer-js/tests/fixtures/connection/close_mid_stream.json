@@ -1,0 +1,57 @@
+{
+  "name": "close_mid_stream",
+  "about": "The connection closes inside a streamed result: every pending call fails with ConnectionLostError; a write may have committed, a query did not.",
+  "calls": [
+    "?a(X)",
+    "+b(1)"
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 2
+      }
+    },
+    {
+      "send": {
+        "type": "result_start",
+        "id": "$r0",
+        "columns": [
+          "x"
+        ],
+        "total_count": 0,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    },
+    {
+      "send": {
+        "type": "result_chunk",
+        "id": "$r0",
+        "rows": [
+          [
+            1
+          ]
+        ],
+        "chunk_index": 0
+      }
+    },
+    {
+      "close": true
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "error": "ConnectionLostError",
+        "code": "closed",
+        "mayHaveCommitted": false
+      },
+      {
+        "error": "ConnectionLostError",
+        "code": "closed",
+        "mayHaveCommitted": true
+      }
+    ]
+  }
+}

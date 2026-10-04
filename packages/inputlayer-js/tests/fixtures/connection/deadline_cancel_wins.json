@@ -1,0 +1,45 @@
+{
+  "name": "deadline_cancel_wins",
+  "about": "The deadline's cancel reaches the engine before the engine's own deadline, so it answers cancelled: the caller, who never aborted, still gets DeadlineExceededError.",
+  "options": {
+    "timeoutMs": 50,
+    "timeoutGraceMs": 100
+  },
+  "calls": [
+    "?slow(X)"
+  ],
+  "server": [
+    {
+      "await": {
+        "cancel": 0
+      }
+    },
+    {
+      "send": {
+        "type": "error",
+        "id": "$r0",
+        "code": "cancelled",
+        "message": "Request cancelled before it began committing; nothing was applied"
+      }
+    },
+    {
+      "send": {
+        "type": "cancel_ack",
+        "id": "$c0",
+        "target": "$r0",
+        "outcome": "cancelled"
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "error": "DeadlineExceededError",
+        "code": "deadline_exceeded"
+      }
+    ],
+    "stats": {
+      "staleReplies": 0
+    }
+  }
+}

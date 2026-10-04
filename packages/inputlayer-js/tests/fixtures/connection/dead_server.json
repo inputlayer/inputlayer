@@ -1,0 +1,29 @@
+{
+  "name": "dead_server",
+  "about": "Past the deadline the server answers neither the call nor the transport ping: the call fails locally at the deadline plus grace (a write with OutcomeUnknownError) instead of hanging, as the probe drops the connection.",
+  "options": {
+    "timeoutMs": 50,
+    "timeoutGraceMs": 100
+  },
+  "calls": [
+    "+a(1)"
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 1
+      }
+    },
+    {
+      "stall": true
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "error": "OutcomeUnknownError",
+        "code": "outcome_unknown"
+      }
+    ]
+  }
+}

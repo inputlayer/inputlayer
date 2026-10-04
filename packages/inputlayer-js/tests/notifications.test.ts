@@ -90,4 +90,12 @@ describe('NotificationDispatcher', () => {
     dispatcher.dispatch({ type: 'persistent_update', seq: 2, timestampMs: Date.now() });
     expect(count).toBe(1); // Not called again
   });
+
+  it('restarts lastSeq with a new epoch', () => {
+    const dispatcher = new NotificationDispatcher();
+    dispatcher.dispatch({ type: 'persistent_update', seq: 1000, timestampMs: 0 }, 'e1');
+    expect(dispatcher.lastSeq).toBe(1000);
+    dispatcher.dispatch({ type: 'persistent_update', seq: 1, timestampMs: 0 }, 'e2');
+    expect(dispatcher.lastSeq).toBe(1);
+  });
 });

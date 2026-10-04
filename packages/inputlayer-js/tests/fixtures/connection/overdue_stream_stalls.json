@@ -1,0 +1,66 @@
+{
+  "name": "overdue_stream_stalls",
+  "about": "A reply that stops streaming past the deadline fails locally once a grace period passes with no further part; its later end is dropped as one stale reply and the connection stays usable.",
+  "options": {
+    "timeoutMs": 50,
+    "timeoutGraceMs": 100
+  },
+  "calls": [
+    "?big(X)"
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 1
+      }
+    },
+    {
+      "send": {
+        "type": "result_start",
+        "id": "$r0",
+        "columns": [
+          "x"
+        ],
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    },
+    {
+      "send": {
+        "type": "result_chunk",
+        "id": "$r0",
+        "rows": [
+          [
+            1
+          ]
+        ],
+        "chunk_index": 0
+      }
+    },
+    {
+      "sleep": 300
+    },
+    {
+      "send": {
+        "type": "result_end",
+        "id": "$r0",
+        "row_count": 1,
+        "chunk_count": 1
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "error": "DeadlineExceededError",
+        "code": "deadline_exceeded"
+      }
+    ],
+    "connected": true,
+    "stats": {
+      "staleReplies": 1
+    }
+  }
+}

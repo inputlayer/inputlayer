@@ -1,0 +1,107 @@
+{
+  "name": "overdue_stream_completes",
+  "about": "A reply that keeps streaming past the deadline is not failed locally: each part re-arms the grace period, so the call waits for result_end and returns the rows.",
+  "options": {
+    "timeoutMs": 50,
+    "timeoutGraceMs": 100
+  },
+  "calls": [
+    "?big(X)"
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 1
+      }
+    },
+    {
+      "send": {
+        "type": "result_start",
+        "id": "$r0",
+        "columns": [
+          "x"
+        ],
+        "total_count": 3,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    },
+    {
+      "sleep": 60
+    },
+    {
+      "send": {
+        "type": "result_chunk",
+        "id": "$r0",
+        "rows": [
+          [
+            1
+          ]
+        ],
+        "chunk_index": 0
+      }
+    },
+    {
+      "sleep": 60
+    },
+    {
+      "send": {
+        "type": "result_chunk",
+        "id": "$r0",
+        "rows": [
+          [
+            2
+          ]
+        ],
+        "chunk_index": 1
+      }
+    },
+    {
+      "sleep": 60
+    },
+    {
+      "send": {
+        "type": "result_chunk",
+        "id": "$r0",
+        "rows": [
+          [
+            3
+          ]
+        ],
+        "chunk_index": 2
+      }
+    },
+    {
+      "sleep": 60
+    },
+    {
+      "send": {
+        "type": "result_end",
+        "id": "$r0",
+        "row_count": 3,
+        "chunk_count": 3
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "rows": [
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      }
+    ],
+    "stats": {
+      "staleReplies": 0
+    }
+  }
+}

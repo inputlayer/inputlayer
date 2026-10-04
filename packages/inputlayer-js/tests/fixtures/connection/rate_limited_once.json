@@ -1,0 +1,57 @@
+{
+  "name": "rate_limited_once",
+  "about": "rate_limited means nothing ran: the call is resent once, under a new id, after the rate window.",
+  "calls": [
+    "?a(X)"
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 1
+      }
+    },
+    {
+      "send": {
+        "type": "error",
+        "id": "$r0",
+        "code": "rate_limited",
+        "message": "Rate limit exceeded"
+      }
+    },
+    {
+      "await": {
+        "executes": 2
+      }
+    },
+    {
+      "send": {
+        "type": "result",
+        "id": "$r0",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            1
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "rows": [
+          [
+            1
+          ]
+        ]
+      }
+    ]
+  }
+}

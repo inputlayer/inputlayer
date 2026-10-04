@@ -30,6 +30,15 @@ export interface ExecuteMessage {
   type: 'execute';
   id?: string;
   program: string;
+  /** Milliseconds the request may take from its arrival (queueing, admission, computation); capped by the engine's query timeout. */
+  timeout_ms?: number;
+}
+
+/** Cancel the unanswered request `target`; answered by `cancel_ack` after the target's own reply. */
+export interface CancelMessage {
+  type: 'cancel';
+  id?: string;
+  target: string;
 }
 
 export interface PingMessage {
@@ -41,6 +50,7 @@ export type ClientMessage =
   | LoginMessage
   | AuthenticateMessage
   | ExecuteMessage
+  | CancelMessage
   | PingMessage;
 
 // ── Server -> Client messages ───────────────────────────────────────
@@ -184,6 +194,18 @@ export interface PongResponse {
   id?: string;
 }
 
+/**
+ * What a `cancel` did: `cancelled` (the target stopped before committing and
+ * replies `cancelled`), `too_late` (it finished or began committing; its reply
+ * reports what it did) or `not_found` (no unanswered request has that id).
+ */
+export interface CancelAckResponse {
+  type: 'cancel_ack';
+  id?: string;
+  target: string;
+  outcome: 'cancelled' | 'too_late' | 'not_found';
+}
+
 /** A connection event. The server closes the connection after every one but `notifications_missed` and `replay_gap`. */
 export type NoticeCode =
   | 'notifications_missed'
@@ -193,6 +215,7 @@ export type NoticeCode =
   | 'lifetime_exceeded'
   | 'auth_timeout'
   | 'credential_revoked'
+  | 'credential_expired'
   | 'server_shutdown';
 
 /** A connection event announced by the server; never a reply. */
@@ -301,6 +324,7 @@ export type ServerMessage =
   | ResultChunkResponse
   | ResultEndResponse
   | PongResponse
+  | CancelAckResponse
   | NoticeResponse
   | NotificationResponse
   | SubscriptionDeltaResponse
@@ -373,6 +397,9 @@ export function deserializeMessage(data: string): ServerMessage {
   }
   if (type === 'pong') {
     return obj as PongResponse;
+  }
+  if (type === 'cancel_ack') {
+    return obj as CancelAckResponse;
   }
   if (type === 'notice') {
     return obj as NoticeResponse;

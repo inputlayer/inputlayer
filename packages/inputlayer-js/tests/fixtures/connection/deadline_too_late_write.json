@@ -1,0 +1,56 @@
+{
+  "name": "deadline_too_late_write",
+  "about": "A write past its deadline was already committing: cancel is too_late and the committed result is returned.",
+  "options": {
+    "timeoutMs": 50,
+    "timeoutGraceMs": 50
+  },
+  "calls": [
+    "+a(1)"
+  ],
+  "server": [
+    {
+      "await": {
+        "cancel": 0
+      }
+    },
+    {
+      "send": {
+        "type": "result",
+        "id": "$r0",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            "Inserted 1 fact(s) into 'a'."
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    },
+    {
+      "send": {
+        "type": "cancel_ack",
+        "id": "$c0",
+        "target": "$r0",
+        "outcome": "too_late"
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "rows": [
+          [
+            "Inserted 1 fact(s) into 'a'."
+          ]
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "name": "malformed_frames",
+  "about": "Text that is not JSON and a frame of an unknown type are counted and skipped; the connection keeps working.",
+  "calls": [
+    "?a(X)"
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 1
+      }
+    },
+    {
+      "raw": "{not json"
+    },
+    {
+      "send": {
+        "type": "from_the_future",
+        "id": "$r0"
+      }
+    },
+    {
+      "send": {
+        "type": "result",
+        "id": "$r0",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            1
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "rows": [
+          [
+            1
+          ]
+        ]
+      }
+    ],
+    "stats": {
+      "malformedFrames": 2
+    }
+  }
+}

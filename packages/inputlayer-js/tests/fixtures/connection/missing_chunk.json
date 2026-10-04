@@ -1,0 +1,108 @@
+{
+  "name": "missing_chunk",
+  "about": "A streamed result whose chunk 1 never arrives fails typed; its remaining frames are dropped and the next call reads its own reply.",
+  "calls": [
+    "?a(X)",
+    "?b(X)"
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 2
+      }
+    },
+    {
+      "send": {
+        "type": "result_start",
+        "id": "$r0",
+        "columns": [
+          "x"
+        ],
+        "total_count": 0,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    },
+    {
+      "send": {
+        "type": "result_chunk",
+        "id": "$r0",
+        "rows": [
+          [
+            1
+          ]
+        ],
+        "chunk_index": 0
+      }
+    },
+    {
+      "send": {
+        "type": "result_chunk",
+        "id": "$r0",
+        "rows": [
+          [
+            3
+          ]
+        ],
+        "chunk_index": 2
+      }
+    },
+    {
+      "send": {
+        "type": "result_chunk",
+        "id": "$r0",
+        "rows": [
+          [
+            4
+          ]
+        ],
+        "chunk_index": 3
+      }
+    },
+    {
+      "send": {
+        "type": "result_end",
+        "id": "$r0",
+        "row_count": 3,
+        "chunk_count": 3
+      }
+    },
+    {
+      "send": {
+        "type": "result",
+        "id": "$r1",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            9
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "error": "InternalError"
+      },
+      {
+        "rows": [
+          [
+            9
+          ]
+        ]
+      }
+    ],
+    "stats": {
+      "staleReplies": 0
+    }
+  }
+}

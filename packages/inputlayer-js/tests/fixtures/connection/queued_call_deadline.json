@@ -1,0 +1,73 @@
+{
+  "name": "queued_call_deadline",
+  "about": "A call's deadline runs while it waits to be sent: queued behind the in-flight bound past its deadline, it fails with DeadlineExceededError and is never sent.",
+  "options": {
+    "maxInFlight": 1,
+    "timeoutMs": 100,
+    "timeoutGraceMs": 100
+  },
+  "calls": [
+    "?a(X)",
+    "?b(X)"
+  ],
+  "server": [
+    {
+      "await": {
+        "cancel": 0
+      }
+    },
+    {
+      "sleep": 20
+    },
+    {
+      "send": {
+        "type": "result",
+        "id": "$r0",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            1
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    },
+    {
+      "send": {
+        "type": "cancel_ack",
+        "id": "$c0",
+        "target": "$r0",
+        "outcome": "too_late"
+      }
+    },
+    {
+      "sleep": 50
+    },
+    {
+      "assert": {
+        "executes": 1
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "rows": [
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "error": "DeadlineExceededError",
+        "code": "deadline_exceeded"
+      }
+    ]
+  }
+}

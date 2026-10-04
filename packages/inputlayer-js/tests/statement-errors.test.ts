@@ -10,6 +10,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocketServer } from 'ws';
 import {
+  AuthenticationError,
   Connection,
   InputLayer,
   InternalError,
@@ -46,13 +47,21 @@ function messages(rows: string[], errors: Frame[] = [], extra: Frame = {}): Fram
   };
 }
 
-const ON_DEFAULT = messages(['Switched to knowledge graph: default'], [], {
-  switched_kg: 'default',
-});
+const PUSHES = new Set(['notice', 'persistent_update', 'rule_change', 'kg_change', 'schema_change']);
 
-/** A server whose replies to successive `execute`s are scripted. */
+/**
+ * A server whose replies to successive `execute`s are scripted. Like the
+ * engine it echoes each request's `id` on the frames answering it, answers
+ * `ping`, and refuses to bind a connection to a graph it does not have.
+ */
 class ScriptedEngine {
   readonly sent: string[] = [];
+  /** The `kg` each connection asked to be bound to (`undefined`: none). */
+  readonly bound: Array<string | undefined> = [];
+  /** Graphs a connection may bind to. */
+  readonly graphs = new Set(['default', 'other']);
+  /** Runs on each executed program before it is answered. */
+  onProgram?: (program: string) => void;
   private readonly server: WebSocketServer;
   private replies: Frame[][] = [];
 
@@ -64,26 +73,40 @@ class ScriptedEngine {
 
   private constructor() {
     this.server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
-    this.server.on('connection', (socket) => {
+    this.server.on('connection', (socket, request) => {
+      const kg = new URL(request.url ?? '/', 'ws://x').searchParams.get('kg') ?? undefined;
+      this.bound.push(kg);
       socket.on('message', (data) => {
         const msg = JSON.parse(String(data));
         if (msg.type === 'login') {
+          if (kg !== undefined && !this.graphs.has(kg)) {
+            socket.send(JSON.stringify({ type: 'auth_error', id: msg.id, message: `Knowledge graph '${kg}' not found` }));
+            socket.close();
+            return;
+          }
           socket.send(
             JSON.stringify({
               type: 'authenticated',
+              id: msg.id,
               session_id: 's',
-              knowledge_graph: 'other',
+              knowledge_graph: kg ?? 'other',
               version: 'test',
               role: 'admin',
-              protocol_version: 2,
+              protocol_version: 3,
               stream_epoch: '00112233aabbccdd',
             }),
           );
           return;
         }
+        if (msg.type === 'ping') {
+          socket.send(JSON.stringify({ type: 'pong', id: msg.id }));
+          return;
+        }
         this.sent.push(msg.program);
+        this.onProgram?.(msg.program);
         for (const frame of this.replies.shift() ?? []) {
-          socket.send(JSON.stringify(frame));
+          const reply = PUSHES.has(String(frame.type)) ? frame : { ...frame, id: msg.id };
+          socket.send(JSON.stringify(reply));
         }
       });
     });
@@ -117,8 +140,7 @@ async function kgOn(...replies: Frame[][]): Promise<KnowledgeGraph> {
     autoReconnect: false,
   });
   await client.connect();
-  // The session starts on "other": the first call switches to "default".
-  engine.script([ON_DEFAULT], ...replies);
+  engine.script(...replies);
   return client.knowledgeGraph('default');
 }
 
@@ -236,15 +258,15 @@ describe('statement errors', () => {
           { switched_kg: 'elsewhere' },
         ),
       ],
-      [ON_DEFAULT],
       [messages(['ok'])],
     );
     await expect(kg.execute('.kg use elsewhere\n.rel drop x')).rejects.toBeInstanceOf(
       StatementFailedError,
     );
-    // The session is on "elsewhere" now, so the next call switches back.
+    // The connection is on "elsewhere" now: a reconnect re-opens it there.
+    expect(kg.connection.currentKg).toBe('elsewhere');
     await kg.execute('.status');
-    expect(engine?.sent.slice(-2)).toEqual(['.kg use default', '.status']);
+    expect(engine?.sent.slice(-1)).toEqual(['.status']);
   });
 
   it('load sends the server .load command and rejects when the engine refuses it', async () => {
@@ -362,38 +384,70 @@ describe('insert count', () => {
   });
 });
 
-describe('KG switch', () => {
-  it('creates a missing KG on not_found', async () => {
+describe('KG binding', () => {
+  it("binds the handle's own connection to its graph, never with .kg use", async () => {
+    const kg = await kgOn([messages(["Inserted 1 fact(s) into 'demo'."])]);
+    expect(await kg.insert(Demo, { x: 1 })).toEqual({ count: 1 });
+    expect(engine?.bound).toEqual([undefined, 'default']);
+    expect(engine?.sent).toEqual(['+demo(1)']);
+  });
+
+  it('creates a missing graph through the client connection, then binds', async () => {
     engine = await ScriptedEngine.start();
+    engine.graphs.delete('default');
     client = new InputLayer({ url: engine.url, username: 'a', password: 'b', autoReconnect: false });
     await client.connect();
     engine.script(
-      [{ type: 'error', message: 'Knowledge graph not found', code: 'not_found' }],
-      [messages(["Knowledge graph 'default' created."])],
-      [ON_DEFAULT],
+      [messages(["Knowledge graph 'default' created.", 'Switched to knowledge graph: default'], [],
+        { switched_kg: 'default' })],
+      [messages(['Switched to knowledge graph: other'], [], { switched_kg: 'other' })],
       [messages(["Inserted 1 fact(s) into 'demo'."])],
     );
-    const kg = client.knowledgeGraph('default');
-    expect(await kg.insert(Demo, { x: 1 })).toEqual({ count: 1 });
-    expect(engine.sent.slice(0, 3)).toEqual([
-      '.kg use default',
-      '.kg create default',
-      '.kg use default',
-    ]);
+    const graphs = engine.graphs;
+    engine.onProgram = (program) => {
+      if (program === '.kg create default') graphs.add('default');
+    };
+    expect(await client.knowledgeGraph('default').insert(Demo, { x: 1 })).toEqual({ count: 1 });
+        // `.kg create` moves the creating session too: the client connection
+    // switches back, so the new graph can later be dropped.
+    expect(engine.sent).toEqual(['.kg create default', '.kg use other', '+demo(1)']);
+    expect(engine.bound).toEqual([undefined, 'default', 'default']);
   });
 
-  it('other switch failures reject', async () => {
+  it('concurrent creations each switch the client connection back to its own graph', async () => {
     engine = await ScriptedEngine.start();
     client = new InputLayer({ url: engine.url, username: 'a', password: 'b', autoReconnect: false });
     await client.connect();
-    engine.script([{ type: 'error', message: 'Permission denied', code: 'validation' }]);
+    const graphs = engine.graphs;
+    engine.onProgram = (program) => {
+      const [, verb, name] = /^\.kg (create|use) (\w+)$/.exec(program) ?? [];
+      if (verb === 'create') graphs.add(name);
+      engine!.script([
+        name
+          ? messages([`Switched to knowledge graph: ${name}`], [], { switched_kg: name })
+          : messages(["Inserted 1 fact(s) into 'demo'."]),
+      ]);
+    };
+    await Promise.all(['a', 'b', 'c'].map((kg) => client!.knowledgeGraph(kg).insert(Demo, { x: 1 })));
+    const switches = engine.sent.filter((p) => p.startsWith('.kg'));
+    expect(switches.filter((_, i) => i % 2 === 0).sort()).toEqual(['.kg create a', '.kg create b', '.kg create c']);
+    expect(switches.filter((_, i) => i % 2 === 1)).toEqual(['.kg use other', '.kg use other', '.kg use other']);
+  });
+
+  it('an existing graph that refuses the binding is not created', async () => {
+    engine = await ScriptedEngine.start();
+    engine.graphs.delete('default');
+    client = new InputLayer({ url: engine.url, username: 'a', password: 'b', autoReconnect: false });
+    await client.connect();
+    engine.script([
+      { type: 'error', code: 'conflict', message: 'Create failed: Knowledge graph already exists: default' },
+    ]);
     await expect(client.knowledgeGraph('default').insert(Demo, { x: 1 })).rejects.toBeInstanceOf(
-      QueryError,
+      AuthenticationError,
     );
-    expect(engine.sent).toEqual(['.kg use default']);
+    expect(engine.sent).toEqual(['.kg create default']);
   });
 });
-
 
 describe('durability outcomes', () => {
   for (const [code, errorType] of [
@@ -414,15 +468,13 @@ describe('durability outcomes', () => {
                 { type: 'result_chunk', rows: [[1]], chunk_index: 0 },
                 { type: 'result_end', row_count: 1, chunk_count: 1 },
               ];
-        const kg = await kgOn(frames, ...(shape === 'error' ? [] : [[ON_DEFAULT]]), [messages(['ok'])]);
+        const kg = await kgOn(frames, [messages(['ok'])]);
         const error = await kg.execute('+demo(1)\n+demo(2)').catch((e: unknown) => e);
         expect(error).toBeInstanceOf(errorType);
         expect(error).not.toBeInstanceOf(StatementFailedError);
         expect((error as QueryError).code).toBe(code);
-        await kg.execute('.status');
-        if (shape !== 'error') {
-          expect(engine?.sent.slice(-2)).toEqual(['.kg use default', '.status']);
-        }
+        // The replies were drained: the next call reads its own.
+        expect((await kg.execute('.status')).toTuples()).toEqual([['ok']]);
       });
     }
   }
