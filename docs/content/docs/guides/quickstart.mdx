@@ -18,8 +18,19 @@ cargo build --release
 ```bash
 # Start the server
 ./target/release/inputlayer-server
+```
 
-# In another terminal, start the client
+On first boot the server creates an `admin` user and an admin API key, and saves both to `./data/credentials.toml`:
+
+```toml
+admin_password = "..."
+api_key = "..."
+```
+
+The client authenticates with the API key, from `--api-key` or the `INPUTLAYER_API_KEY` environment variable. In another terminal:
+
+```bash
+export INPUTLAYER_API_KEY=$(sed -n 's/^api_key = "\(.*\)"/\1/p' data/credentials.toml)
 ./target/release/inputlayer-client
 ```
 
@@ -32,6 +43,8 @@ Server status: healthy
 Authenticated as: admin
 Current knowledge graph: default
 ```
+
+Running the [Docker image](installation#option-3-docker) instead? Read the same file with `docker exec inputlayer cat /var/lib/inputlayer/data/credentials.toml`.
 
 ## 3. Add Some Data
 
@@ -99,7 +112,39 @@ Output:
 
 *2 rows*
 
-## 7. Use Aggregation
+## 7. Watch the Conclusion Change
+
+`senior` is not a stored list: it is derived from `person` and stays current as the facts change. Bob turns 30, and Charlie leaves:
+
+```iql
+-person("bob", 25)
++person("bob", 30)
+-person("charlie", 35)
+```
+
+Output:
+```
+Deleted 1 facts from 'person'.
+Inserted 1 fact(s) into 'person'.
+Deleted 1 facts from 'person'.
+```
+
+```iql
+?senior(X)
+```
+
+Output:
+
+| X |
+|---|
+| "alice" |
+| "bob" |
+
+*2 rows*
+
+Bob is now derived as a senior and Charlie's conclusion is retracted, with no rule re-run by hand. An agent does not even poll for this: a [standing query](websocket-api) pushes each change as it happens.
+
+## 8. Use Aggregation
 
 ```iql
 +average_age(avg<Age>) <- person(_, Age)

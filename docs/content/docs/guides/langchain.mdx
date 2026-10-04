@@ -42,12 +42,13 @@ Connect to InputLayer, register the schema, and create the vector store:
 
 ```python
 import asyncio
+import os
 from inputlayer import InputLayer
 from inputlayer.integrations.langchain import InputLayerVectorStore
 from langchain_openai import OpenAIEmbeddings
 
 async def main():
-    async with InputLayer("ws://localhost:8080/ws", username="admin", password="admin") as il:
+    async with InputLayer("ws://localhost:8080/ws", api_key=os.environ["INPUTLAYER_API_KEY"]) as il:
         kg = il.knowledge_graph("docs")
         await kg.define(Chunk)
 

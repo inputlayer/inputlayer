@@ -108,7 +108,7 @@ After connecting to `ws://host:port/ws`, the first message must be an auth reque
 {
   "type": "login",
   "username": "admin",
-  "password": "admin"
+  "password": "<the admin password>"
 }
 ```
 
@@ -256,14 +256,19 @@ inputlayer-client
 ## Python SDK Authentication
 
 ```python
+import os
 from inputlayer import InputLayer
 
-# Username/password
-async with InputLayer("ws://localhost:8080/ws", username="admin", password="admin") as il:
+# API key
+async with InputLayer("ws://localhost:8080/ws", api_key=os.environ["INPUTLAYER_API_KEY"]) as il:
     ...
 
-# API key
-async with InputLayer("ws://localhost:8080/ws", api_key="your-key") as il:
+# Username/password
+async with InputLayer(
+    "ws://localhost:8080/ws",
+    username=os.environ["INPUTLAYER_USER"],
+    password=os.environ["INPUTLAYER_PASSWORD"],
+) as il:
     ...
 ```
 

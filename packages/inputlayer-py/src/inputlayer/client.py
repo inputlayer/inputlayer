@@ -29,7 +29,7 @@ class InputLayer:
 
     Usage::
 
-        async with InputLayer("ws://localhost:8080/ws", username="admin", password="admin") as il:
+        async with InputLayer("ws://localhost:8080/ws", api_key=os.environ["INPUTLAYER_API_KEY"]) as il:
             kg = il.knowledge_graph("default")
             await kg.define(Employee)
             await kg.insert(

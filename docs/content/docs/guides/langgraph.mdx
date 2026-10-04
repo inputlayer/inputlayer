@@ -10,13 +10,15 @@ This guide walks through the integration from install to resumable agents with s
 
 You need two things to run any example in this guide.
 
-1. **A running InputLayer server.** The fastest way is Docker:
+1. **A running InputLayer server and its API key.** The fastest way is Docker:
 
    ```bash
-   docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer:latest
+   docker run -d --name inputlayer -p 8080:8080 ghcr.io/inputlayer/inputlayer
+   until curl -sf http://localhost:8080/health > /dev/null; do sleep 1; done   # first boot
+   export INPUTLAYER_API_KEY=$(docker exec inputlayer sed -n 's/^api_key = "\(.*\)"/\1/p' /var/lib/inputlayer/data/credentials.toml)
    ```
 
-   The server listens for WebSocket connections at `ws://localhost:8080/ws`.
+   The server listens for WebSocket connections at `ws://localhost:8080/ws`; the examples read the key from `INPUTLAYER_API_KEY` ([Credentials](installation#credentials)).
 
 2. **Python 3.10 or newer.** Check with `python --version`.
 
@@ -42,6 +44,7 @@ The smallest useful program. It stores a fact, writes a rule, and lets a kg_rout
 
 ```python
 import asyncio
+import os
 from inputlayer import InputLayer
 from inputlayer.integrations.langgraph import InputLayerState, kg_router
 from langgraph.graph import END, START, StateGraph
@@ -72,7 +75,7 @@ app = graph.compile()
 
 async def main():
     async with InputLayer("ws://localhost:8080/ws",
-                          username="admin", password="admin") as il:
+                          api_key=os.environ["INPUTLAYER_API_KEY"]) as il:
         kg = il.knowledge_graph("qs_langgraph")
         await kg.execute("+is_question(x: string)")
         await kg.execute("+is_greeting(x: string)")
@@ -206,6 +209,7 @@ The router skips branches that raise `QueryError` (bad query, unknown relation).
 Here's a minimal reasoning loop. The graph repeatedly gathers facts, and rules decide when there's enough to answer:
 
 ```python
+import os
 from inputlayer import InputLayer
 from inputlayer.integrations.langgraph import InputLayerState, kg_node, kg_router
 from langgraph.graph import END, StateGraph
@@ -233,7 +237,7 @@ graph.set_entry_point("gather")
 graph.add_edge("answer", END)
 app = graph.compile()
 
-async with InputLayer("ws://localhost:8080/ws", username="admin", password="admin") as il:
+async with InputLayer("ws://localhost:8080/ws", api_key=os.environ["INPUTLAYER_API_KEY"]) as il:
     kg = il.knowledge_graph("research")
     # ... define schema and rules ...
     result = await app.ainvoke({"kg": kg, "question": "...", "iteration": 0})
@@ -461,6 +465,7 @@ Real agents usually need both. The checkpointer keeps the graph resumable across
 Wire both up and you get a durable, stateful chat agent in about thirty lines:
 
 ```python
+import os
 from typing import TypedDict, Any
 from inputlayer import InputLayer
 from inputlayer.integrations.langgraph import (
@@ -481,7 +486,7 @@ async def respond(state):
     return {"response": "..."}
 
 async with InputLayer("ws://localhost:8080/ws",
-                      username="admin", password="admin") as il:
+                      api_key=os.environ["INPUTLAYER_API_KEY"]) as il:
     kg = il.knowledge_graph("chat_agent")
     memory = InputLayerMemory(kg=kg)
     checkpointer = InputLayerCheckpointer(kg=kg)

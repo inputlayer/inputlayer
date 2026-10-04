@@ -73,7 +73,7 @@ export interface InputLayerOptions {
  *   active: "bool",
  * });
  *
- * const il = new InputLayer({ url: "ws://localhost:8080/ws", username: "admin", password: "admin" });
+ * const il = new InputLayer({ url: "ws://localhost:8080/ws", apiKey: process.env.INPUTLAYER_API_KEY });
  * await il.connect();
  *
  * const kg = il.knowledgeGraph("default");

@@ -134,9 +134,11 @@ docker run -d \
   --name inputlayer \
   -p 8080:8080 \
   -v inputlayer-data:/var/lib/inputlayer/data \
-  -e INPUTLAYER_ADMIN_PASSWORD=changeme \
+  -e INPUTLAYER_ADMIN_PASSWORD \
   inputlayer:latest
 ```
+
+`-e INPUTLAYER_ADMIN_PASSWORD` passes the admin password from your shell's environment (set it from your secret store, not on the command line). Without it, the first boot generates the password and an admin API key and saves them to `/var/lib/inputlayer/data/credentials.toml` (see [Credentials](installation#credentials)).
 
 The image includes a built-in `HEALTHCHECK` that polls `/health` every 10 seconds:
 
@@ -154,7 +156,7 @@ The image runs as a non-root `inputlayer` user with the following defaults:
 | Binary | `/usr/local/bin/inputlayer-server` |
 | Backup tool | `/usr/local/bin/inputlayer-backup` ([Backup and Restore](backup)) |
 | Data volume | `/var/lib/inputlayer/data` |
-| GUI assets | `/var/lib/inputlayer/gui/dist/` |
+| GUI assets | `/var/lib/inputlayer/gui/dist/`, served at `/` (`INPUTLAYER_HTTP__GUI__ENABLED=false` turns it off) |
 | Exposed port | `8080` |
 | User | `inputlayer`, uid/gid `999` (non-root) |
 

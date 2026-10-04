@@ -21,12 +21,13 @@ Then install the tarball in your project under the name `inputlayer`, so the imp
 npm install inputlayer@file:/path/to/inputlayer/packages/inputlayer-js/inputlayer-js-dev-0.1.1.tgz
 ```
 
-Requirements: Node.js 18+ (or any runtime with WebSocket support) and a running InputLayer server (`docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer`).
+Requirements: Node.js 18+ (or any runtime with WebSocket support) and a running InputLayer server with its admin API key exported as `INPUTLAYER_API_KEY` ([Get Started](../../README.md#get-started) shows both in three commands).
 
 ## Quick start
 
 One rule: an order needs a carrier check when its shipment is late, the tool policy says `auto`, and no kill switch is set. Flip the kill switch and the conclusion is retracted; lift it and the conclusion is back.
 
+<!-- quickstart:typescript (run by .github/workflows/quickstart.yml) -->
 ```typescript
 import { InputLayer, relation, from, AND } from "inputlayer";
 

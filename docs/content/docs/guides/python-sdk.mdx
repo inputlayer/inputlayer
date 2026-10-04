@@ -22,23 +22,28 @@ The package also installs the `il migration` commands for managing schema migrat
 
 ## Connecting
 
-The `InputLayer` client manages a WebSocket connection with automatic reconnection. You can authenticate with username/password or API keys.
+The `InputLayer` client manages a WebSocket connection with automatic reconnection. It authenticates with an API key or a username and password. The examples read secrets from the environment: `INPUTLAYER_API_KEY` holds a key (on first boot the server writes the admin key to `credentials.toml` in its data directory; see [Installation](installation#credentials)), never a literal in code.
 
 ```python
 import asyncio
+import os
 from inputlayer import InputLayer
 
 async def main():
-    async with InputLayer("ws://localhost:8080/ws", username="admin", password="admin") as il:
+    async with InputLayer("ws://localhost:8080/ws", api_key=os.environ["INPUTLAYER_API_KEY"]) as il:
         print(f"Connected to InputLayer {il.server_version}")
 
 asyncio.run(main())
 ```
 
-If you prefer API key authentication:
+To sign in as a user instead:
 
 ```python
-async with InputLayer("ws://localhost:8080/ws", api_key="il_key_abc123") as il:
+async with InputLayer(
+    "ws://localhost:8080/ws",
+    username=os.environ["INPUTLAYER_USER"],
+    password=os.environ["INPUTLAYER_PASSWORD"],
+) as il:
     ...
 ```
 
@@ -47,8 +52,7 @@ The client accepts a few optional parameters for connection resilience:
 ```python
 il = InputLayer(
     "ws://localhost:8080/ws",
-    username="admin",
-    password="admin",
+    api_key=os.environ["INPUTLAYER_API_KEY"],
     auto_reconnect=True,         # reconnect on disconnect (default: True)
     reconnect_delay=1.0,         # first backoff in seconds, doubling to 30 with jitter (default: 1.0)
     max_reconnect_attempts=10,   # give up after N failures (default: 10)
@@ -79,9 +83,10 @@ async def recreate_session_rules(event):
 If you're working in a script, notebook, or anywhere async isn't practical, use `InputLayerSync` instead. It wraps the async client and exposes the same API, just without `await`:
 
 ```python
+import os
 from inputlayer import InputLayerSync
 
-with InputLayerSync("ws://localhost:8080/ws", username="admin", password="admin") as il:
+with InputLayerSync("ws://localhost:8080/ws", api_key=os.environ["INPUTLAYER_API_KEY"]) as il:
     kg = il.knowledge_graph("myapp")
     kg.define(Employee)
     result = kg.query(Employee)
