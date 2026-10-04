@@ -274,3 +274,20 @@ fn the_documented_example_runs() {
     assert_eq!(messages(&result), ["Update: 0 deleted, 1 inserted."]);
     assert_eq!(trees(&result).len(), 1);
 }
+
+#[test]
+fn a_failed_proof_fails_its_statement_and_keeps_the_writes() {
+    let (handler, _tmp) = handler_with_fixture();
+    let result = run(&handler, &claim_then(".why ?need(S, T), X > 1"));
+
+    assert_eq!(messages(&result)[0], "Update: 0 deleted, 1 inserted.");
+    assert_eq!(result.errors.len(), 1, "{:?}", result.errors);
+    assert_eq!(result.errors[0].index, 1);
+    assert!(
+        result.errors[0].message.starts_with("Why error: "),
+        "{:?}",
+        result.errors
+    );
+    assert!(result.proof_trees.is_none());
+    assert_eq!(attempts(&handler), 1, "the claim stays committed");
+}
