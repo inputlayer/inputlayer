@@ -514,6 +514,40 @@ pub async fn start_http_server(
         });
     }
 
+    // Unload knowledge graphs nobody used for the configured idle time
+    let idle_secs = handler.config().storage.unload_idle_after_secs;
+    if idle_secs > 0 {
+        let unload_handler = Arc::clone(&handler);
+        let mut unload_shutdown = shutdown_tx.subscribe();
+        tokio::spawn(async move {
+            let idle = std::time::Duration::from_secs(idle_secs);
+            // Check a few times per idle period, at least once a minute.
+            let mut interval = tokio::time::interval((idle / 4).clamp(
+                std::time::Duration::from_secs(1),
+                std::time::Duration::from_secs(60),
+            ));
+            interval.tick().await;
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        let h = Arc::clone(&unload_handler);
+                        let result = tokio::task::spawn_blocking(move || {
+                            h.get_storage().unload_idle_knowledge_graphs(idle)
+                        })
+                        .await;
+                        if let Err(e) = result {
+                            warn!(error = %e, "kg_unload_task_panicked");
+                        }
+                    }
+                    _ = unload_shutdown.changed() => {
+                        info!("kg_unload_shutdown");
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
 
     println!("HTTP server listening on: http://{addr}");

@@ -1,16 +1,19 @@
 //! Online checkpoints: a consistent backup of a running engine.
 //!
-//! [`StorageEngine::capture_checkpoint`] takes every knowledge graph's read
-//! lock at once. Every commit assigns its revision and applies its changes
+//! [`StorageEngine::capture_checkpoint`] takes every loaded knowledge graph's
+//! read lock at once. Every commit assigns its revision and applies its changes
 //! under its knowledge graph's write lock, so with all read locks held no
 //! commit is in flight: every revision assigned so far is fully applied (or
 //! failed and applied nothing), and the newest one names the checkpoint.
 //! Knowledge graph creation waits for the capture too, so a graph created
-//! meanwhile cannot hold a commit the checkpoint misses.
+//! meanwhile cannot hold a commit the checkpoint misses. A knowledge graph
+//! that is not loaded is held unloaded until the capture has read it from
+//! disk, so no commit reaches it meanwhile.
 //!
-//! The capture only clones shared references (see [`Checkpoint`]), so it holds
-//! off commits for O(knowledge graphs + relations) work. Queries read
-//! published snapshots and do not take these locks.
+//! The capture of loaded knowledge graphs only clones shared references (see
+//! [`Checkpoint`]), so it holds off commits for O(knowledge graphs +
+//! relations) work. Queries read published snapshots and do not take these
+//! locks.
 //!
 //! [`StorageEngine::start_checkpoint_export`] then writes the checkpoint on
 //! one background thread with no engine lock held. One export runs at a time;
@@ -107,24 +110,42 @@ impl Drop for CheckpointExports {
 impl StorageEngine {
     /// Capture every knowledge graph's committed state at one revision; see
     /// the module documentation for why it is consistent.
-    pub fn capture_checkpoint(&self) -> Checkpoint {
+    ///
+    /// # Errors
+    /// Reading a knowledge graph that is not loaded failed.
+    pub fn capture_checkpoint(&self) -> BackupResult<Checkpoint> {
         let start = Instant::now();
-        let _no_new_kgs = self.kg_set.write();
-        let handles: Vec<_> = self
-            .knowledge_graphs
+        let no_new_kgs = self.kg_set.write();
+        let slots = self.slots();
+        // Held slots neither load, unload nor drop their knowledge graph.
+        let (loaded, dormant): (Vec<_>, Vec<_>) = slots
             .iter()
-            .map(|entry| Arc::clone(entry.value()))
-            .collect();
+            .map(|(name, slot)| (name, slot.hold()))
+            .partition(|(_, held)| held.graph().is_some());
+        let handles: Vec<_> = loaded.iter().filter_map(|(_, held)| held.graph()).collect();
         // Writers each take one KG lock, so read locks in any order cannot deadlock.
         let guards: Vec<_> = handles.iter().map(|kg| kg.read()).collect();
         let revision = self.logical_time.load(Ordering::SeqCst).saturating_sub(1);
         let mut knowledge_graphs: Vec<KgCheckpoint> = guards
             .iter()
-            .filter(|kg| !kg.dropped)
+            .filter(|kg| kg.retired.is_none())
             .map(|kg| capture_kg(kg))
             .collect();
         drop(guards);
+        drop(loaded);
+        drop(no_new_kgs);
         let capture_time = start.elapsed();
+
+        // A knowledge graph that is not loaded takes no commit while its slot
+        // is held, so what its files hold is its state at `revision`. It is
+        // read for the checkpoint only, not kept loaded, and released as soon
+        // as it is read: commits it takes after that are past `revision`.
+        for (name, held) in dormant {
+            if let Some(on_disk) = held.dormant() {
+                let kg = self.load_graph(name, on_disk, held.created_at())?;
+                knowledge_graphs.push(capture_kg(&kg));
+            }
+        }
 
         knowledge_graphs.sort_by(|a, b| a.name.cmp(&b.name));
         for kg in &mut knowledge_graphs {
@@ -140,9 +161,10 @@ impl StorageEngine {
             knowledge_graphs = checkpoint.knowledge_graphs.len(),
             tuples = checkpoint.tuple_count(),
             capture_us = capture_time.as_micros() as u64,
+            elapsed_ms = start.elapsed().as_millis() as u64,
             "checkpoint_captured"
         );
-        checkpoint
+        Ok(checkpoint)
     }
 
     /// Where an export named `name` (or a time-derived name) goes: inside
@@ -174,7 +196,13 @@ impl StorageEngine {
         }
         let export = Export::claim(dest, &self.config.storage.data_dir)?;
         let dir = export.dir().to_path_buf();
-        let checkpoint = self.capture_checkpoint();
+        let checkpoint = match self.capture_checkpoint() {
+            Ok(checkpoint) => checkpoint,
+            Err(e) => {
+                export.abandon()?;
+                return Err(e);
+            }
+        };
         let (revision, capture_time) = (checkpoint.revision, checkpoint.capture_time);
         let (done_tx, done) = mpsc::channel();
 

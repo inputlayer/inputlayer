@@ -79,6 +79,26 @@ impl RelationStore {
         Self::default()
     }
 
+    /// A store of `relations`, each of distinct tuples, with their indexes
+    /// built in parallel (used when loading).
+    pub fn from_relations(relations: Vec<(String, Vec<Tuple>)>) -> Self {
+        use rayon::prelude::*;
+        let built: Vec<(String, Relation, TupleIndex)> = relations
+            .into_par_iter()
+            .map(|(name, tuples)| {
+                let tuples = Relation::from(tuples);
+                let index = TupleIndex::build(&tuples);
+                (name, tuples, index)
+            })
+            .collect();
+        let mut store = Self::new();
+        for (name, tuples, index) in built {
+            store.indexes.insert(name.clone(), index);
+            store.relations.insert(name, tuples);
+        }
+        store
+    }
+
     /// All relations. Cloning the map shares tuples.
     pub fn relations(&self) -> &RelationMap {
         &self.relations

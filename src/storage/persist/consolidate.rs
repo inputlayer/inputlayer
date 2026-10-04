@@ -6,6 +6,10 @@
 
 use super::batch::Update;
 use crate::value::Tuple;
+use rayon::slice::ParallelSliceMut;
+
+/// Updates from which [`consolidate_to_current`] sorts in parallel.
+const PARALLEL_SORT_MIN: usize = 64 * 1024;
 
 /// Consolidate updates in place: sum diffs for identical (data, time) pairs.
 ///
@@ -69,14 +73,21 @@ pub fn consolidate(updates: &mut Vec<Update>) {
 /// Consolidate updates, ignoring timestamps (for "current state" queries).
 ///
 /// This variant consolidates purely by data, useful when you want the
-/// current state regardless of when updates occurred.
+/// current state regardless of when updates occurred. Each remaining update
+/// keeps the time of one of the updates merged into it.
 pub fn consolidate_to_current(updates: &mut Vec<Update>) {
     if updates.is_empty() {
         return;
     }
 
-    // Sort by data only
-    updates.sort_by(|a, b| a.data.cmp(&b.data));
+    // Sort by data only, in place: a shard being loaded can hold millions,
+    // and a stable sort would allocate a buffer as large again. Updates with
+    // equal data merge into one whose time is unspecified.
+    if updates.len() >= PARALLEL_SORT_MIN {
+        updates.par_sort_unstable_by(|a, b| a.data.cmp(&b.data));
+    } else {
+        updates.sort_unstable_by(|a, b| a.data.cmp(&b.data));
+    }
 
     // Merge adjacent updates with same data by summing diffs
     let mut write_idx = 0;
@@ -89,8 +100,9 @@ pub fn consolidate_to_current(updates: &mut Vec<Update>) {
             if updates[write_idx].diff != 0 {
                 write_idx += 1;
             }
-            // Copy the current read element to the write position
-            updates[write_idx] = updates[read_idx].clone();
+            // Move the current read element to the write position; what it
+            // swaps out lies behind the read position and is never read again.
+            updates.swap(write_idx, read_idx);
         }
     }
 
@@ -110,6 +122,15 @@ pub fn to_tuples(updates: &[Update]) -> Vec<Tuple> {
         .iter()
         .filter(|u| u.diff > 0)
         .map(|u| u.data.clone())
+        .collect()
+}
+
+/// [`to_tuples`], consuming the updates instead of copying their tuples.
+pub fn into_tuples(updates: Vec<Update>) -> Vec<Tuple> {
+    updates
+        .into_iter()
+        .filter(|u| u.diff > 0)
+        .map(|u| u.data)
         .collect()
 }
 

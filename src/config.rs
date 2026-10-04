@@ -77,6 +77,17 @@ pub struct StorageConfig {
     #[serde(default = "default_max_knowledge_graphs")]
     pub max_knowledge_graphs: usize,
 
+    /// Most knowledge graphs held in memory at once (0 = no limit). Knowledge
+    /// graphs load on first use; past this many, loading one unloads the least
+    /// recently used ones that nothing is using.
+    #[serde(default)]
+    pub max_loaded_knowledge_graphs: usize,
+
+    /// Unload a knowledge graph nothing has used for this many seconds
+    /// (0 = never). It loads again on its next use.
+    #[serde(default)]
+    pub unload_idle_after_secs: u64,
+
     /// Directory that online checkpoint exports (`.backup`) are written
     /// into, one subdirectory each. Must lie outside `data_dir`. Unset
     /// disables `.backup`.
@@ -987,6 +998,8 @@ impl Config {
                     timing_mode: crate::execution::TimingMode::default(),
                 },
                 max_knowledge_graphs: 1000,
+                max_loaded_knowledge_graphs: 0,
+                unload_idle_after_secs: 0,
                 backup_dir: None,
             },
             optimization: OptimizationConfig::default(),

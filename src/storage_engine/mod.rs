@@ -42,12 +42,14 @@ mod program_commit;
 #[cfg(test)]
 mod program_commit_tests;
 mod relation_store;
+mod residency;
 mod snapshot;
 mod vector_index;
 mod write_program;
 pub use catalog_change::{CatalogChange, CatalogOutcome};
 pub use checkpoint::{CheckpointExport, ExportStatus};
 pub use relation_store::RelationStore;
+pub use residency::{KgPin, KgSummary};
 pub use snapshot::{CachedRun, KnowledgeGraphSnapshot, PersistentRules};
 pub use write_program::{
     CommitError, FactChange, FactCount, ProgramCommit, RelationChange, StagedChanges,
@@ -63,12 +65,11 @@ use crate::schema::catalog::SCHEMA_CATALOG_FILE;
 use crate::schema::{RelationSchema, SchemaCatalog, ValidationEngine};
 use crate::statement::RuleDef;
 use crate::storage::persist::{
-    consolidate_to_current, set_semantics_corrections, to_tuples, CatalogRecord, FilePersist,
-    PersistBackend, PersistConfig, Transaction, Update,
+    CatalogRecord, FilePersist, PersistBackend, PersistConfig, Transaction,
 };
 use crate::storage::{
-    DataDirLock, DropTombstones, KnowledgeGraphMetadata, KnowledgeGraphsMetadata,
-    RelationTombstone, StorageError, StorageResult,
+    DataDirLock, DropTombstones, KnowledgeGraphInfo, KnowledgeGraphMetadata,
+    KnowledgeGraphsMetadata, RelationTombstone, StorageError, StorageResult,
 };
 use crate::value::{Relation, Tuple};
 use arc_swap::ArcSwap;
@@ -79,7 +80,7 @@ use rayon::prelude::*;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{info, warn};
@@ -172,10 +173,17 @@ fn delete_kg_files(persist: &FilePersist, name: &str, data_dir: &Path, kgs: &[St
 /// Storage Engine - manages multiple knowledge graphs
 ///
 /// Uses `DashMap` for concurrent access to knowledge graphs without global locks.
+/// Knowledge graphs load on first use; see the `residency` module.
 pub struct StorageEngine {
     config: Config,
-    /// Knowledge graphs with lock-free concurrent access
-    knowledge_graphs: DashMap<String, Arc<RwLock<KnowledgeGraph>>>,
+    /// Every knowledge graph, loaded or dormant, by name.
+    knowledge_graphs: DashMap<String, Arc<residency::KgSlot>>,
+    /// How many knowledge graphs are loaded.
+    loaded: AtomicUsize,
+    /// Knowledge graph loads and unloads since the engine started.
+    residency_counts: residency::Counts,
+    /// Start of the engine clock that knowledge graph access times count on.
+    clock: Instant,
     current_kg: Option<String>,
     /// DD-native persist backend
     persist: Arc<FilePersist>,
@@ -190,7 +198,7 @@ pub struct StorageEngine {
     kg_drops_in_flight: parking_lot::Mutex<HashSet<String>>,
     /// Held shared to add a KG to `knowledge_graphs`, exclusively by a
     /// checkpoint capture, so no KG appears while one is taken. Never taken
-    /// by reads or commits.
+    /// by reads, commits or activation.
     kg_set: RwLock<()>,
     /// The online checkpoint export slot.
     checkpoint_exports: checkpoint::CheckpointExports,
@@ -227,8 +235,9 @@ pub struct KnowledgeGraph {
     max_query_cost: u64,
     /// Optimizer passes for every engine this KG builds
     optimization: crate::OptimizationConfig,
-    /// Set by drop under the write lock; writers holding a stale handle bail
-    dropped: bool,
+    /// Set under the write lock when the KG is dropped or unloaded; writers
+    /// holding the stale handle bail or retry
+    retired: Option<residency::Retired>,
 }
 
 impl StorageEngine {
@@ -260,11 +269,20 @@ impl StorageEngine {
             durability_mode: config.storage.persist.durability_mode,
             max_wal_size_bytes: config.storage.persist.max_wal_size_bytes,
         };
+        let persist_start = Instant::now();
         let persist = Arc::new(FilePersist::new(persist_config)?);
+        info!(
+            shards = persist.list_shards()?.len(),
+            elapsed_ms = persist_start.elapsed().as_millis() as u64,
+            "persist_open_complete"
+        );
 
         let mut engine = StorageEngine {
             config,
             knowledge_graphs: DashMap::new(),
+            loaded: AtomicUsize::new(0),
+            residency_counts: residency::Counts::default(),
+            clock: Instant::now(),
             current_kg: None,
             persist,
             logical_time: AtomicU64::new(1),
@@ -276,8 +294,8 @@ impl StorageEngine {
             _data_dir_lock: data_dir_lock,
         };
 
-        // Load existing knowledge graphs from persist layer
-        engine.load_all_knowledge_graphs()?;
+        // Register the knowledge graphs on disk; each loads on first use
+        engine.register_knowledge_graphs()?;
 
         // Create default knowledge graph if it doesn't exist
         let default_db = engine.config.storage.default_knowledge_graph.clone();
@@ -344,13 +362,16 @@ impl StorageEngine {
                 kg.max_query_cost = self.config.storage.performance.max_query_cost;
                 kg.set_optimization(self.config.optimization.clone());
 
-                vacant.insert(Arc::new(RwLock::new(kg)));
+                vacant.insert(Arc::new(residency::KgSlot::loaded(kg, self.clock_now())));
+                self.loaded.fetch_add(1, Ordering::AcqRel);
             }
         }
         drop(adding);
 
         if let Err(e) = self.save_knowledge_graphs_metadata() {
-            self.knowledge_graphs.remove(name);
+            if let Some((_, slot)) = self.knowledge_graphs.remove(name) {
+                self.retire_dropped(&slot);
+            }
             return Err(e);
         }
 
@@ -399,8 +420,8 @@ impl StorageEngine {
 
         // Remove from the DashMap, then mark dropped under the KG lock: this
         // waits for in-flight writes, and writers still holding a handle bail.
-        if let Some((_, db)) = self.knowledge_graphs.remove(name) {
-            db.write().dropped = true;
+        if let Some((_, slot)) = self.knowledge_graphs.remove(name) {
+            self.retire_dropped(&slot);
         }
 
         // The tombstone outranks a stale listing, so a failure here is benign.
@@ -713,26 +734,6 @@ impl StorageEngine {
         Ok((db.snapshot(), db.rule_catalog.detached()))
     }
 
-    /// Clone a KG handle without holding the `DashMap` shard lock.
-    fn kg_handle(&self, kg: &str) -> StorageResult<Arc<RwLock<KnowledgeGraph>>> {
-        self.knowledge_graphs
-            .get(kg)
-            .map(|entry| Arc::clone(entry.value()))
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))
-    }
-
-    /// Write-lock a KG handle, failing if the KG was dropped while waiting.
-    fn lock_live<'a>(
-        db: &'a RwLock<KnowledgeGraph>,
-        kg: &str,
-    ) -> StorageResult<parking_lot::RwLockWriteGuard<'a, KnowledgeGraph>> {
-        let db = db.write();
-        if db.dropped {
-            return Err(StorageError::KnowledgeGraphNotFound(kg.to_string()));
-        }
-        Ok(db)
-    }
-
     fn tombstones_path(&self) -> PathBuf {
         self.config.storage.data_dir.join("metadata/dropping.json")
     }
@@ -799,10 +800,7 @@ impl StorageEngine {
     /// Returns binary tuples (i32, i32) for backward compatibility.
     /// For arbitrary arity results, use `execute_query_tuples_on` instead.
     pub fn execute_query_on(&self, kg: &str, program: &str) -> StorageResult<Vec<(i32, i32)>> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         // Get snapshot atomically - O(1), no lock needed
         let snapshot = {
@@ -829,10 +827,7 @@ impl StorageEngine {
 
     /// Execute an IQL query on a specific knowledge graph, returning arbitrary arity tuples
     pub fn execute_query_tuples_on(&self, kg: &str, program: &str) -> StorageResult<Vec<Tuple>> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         // Get snapshot atomically - O(1), no lock needed
         let snapshot = {
@@ -854,10 +849,7 @@ impl StorageEngine {
         kg: &str,
         program: &str,
     ) -> StorageResult<crate::pipeline_trace::PipelineTrace> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         let snapshot = {
             let db_guard = db.read();
@@ -892,10 +884,7 @@ impl StorageEngine {
         Arc<KnowledgeGraphSnapshot>,
         std::collections::HashMap<String, String>, // index_name -> metric
     )> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         let db_guard = db.read();
         Ok((db_guard.snapshot(), db_guard.index_metrics()))
@@ -1057,8 +1046,7 @@ impl StorageEngine {
     /// nothing changed, returns the error and the relation stays.
     pub fn drop_relation_in(&self, kg: &str, name: &str) -> StorageResult<()> {
         self.persist.check_writable()?;
-        let db = self.kg_handle(kg)?;
-        let mut db = Self::lock_live(&db, kg)?;
+        let mut db = self.lock_kg(kg)?;
         if !db.has_relation(name) {
             return Err(StorageError::Other(format!(
                 "Failed to drop relation: Relation '{name}' not found."
@@ -1140,8 +1128,7 @@ impl StorageEngine {
         kg: &str,
         prefix: &str,
     ) -> StorageResult<Vec<(String, usize)>> {
-        let db = self.kg_handle(kg)?;
-        let mut db = Self::lock_live(&db, kg)?;
+        let mut db = self.lock_kg(kg)?;
         let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
         db.clear_relations_by_prefix(prefix, time, &self.persist, kg)
     }
@@ -1158,10 +1145,7 @@ impl StorageEngine {
 
     /// List all rules in a specific knowledge graph
     pub fn list_rules_in(&self, kg: &str) -> StorageResult<Vec<String>> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         let db = db.read();
         Ok(db.list_rules())
@@ -1179,10 +1163,7 @@ impl StorageEngine {
 
     /// Describe a rule in a specific knowledge graph
     pub fn describe_rule_in(&self, kg: &str, name: &str) -> StorageResult<Option<String>> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         let db = db.read();
         Ok(db.describe_rule(name))
@@ -1243,10 +1224,7 @@ impl StorageEngine {
 
     /// Get the number of clauses in a rule (specific knowledge graph)
     pub fn rule_count_in(&self, kg: &str, name: &str) -> StorageResult<Option<usize>> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         let db = db.read();
         Ok(db.rule_count(name))
@@ -1265,10 +1243,7 @@ impl StorageEngine {
 
     /// Get the arity (number of arguments) of a rule/view (specific knowledge graph)
     pub fn rule_arity_in(&self, kg: &str, name: &str) -> StorageResult<Option<usize>> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         let db = db.read();
         Ok(db.rule_arity(name))
@@ -1303,10 +1278,7 @@ impl StorageEngine {
 
     /// Get schema for a relation in a specific knowledge graph
     pub fn get_schema_in(&self, kg: &str, relation: &str) -> StorageResult<Option<RelationSchema>> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         let db = db.read();
         Ok(db.get_schema(relation).cloned())
@@ -1324,10 +1296,7 @@ impl StorageEngine {
 
     /// Check if a schema exists for a relation in a specific knowledge graph
     pub fn has_schema_in(&self, kg: &str, relation: &str) -> StorageResult<bool> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         let db = db.read();
         Ok(db.has_schema(relation))
@@ -1363,10 +1332,7 @@ impl StorageEngine {
     where
         F: FnOnce(&KnowledgeGraph) -> Result<T, String>,
     {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
         let db = db.read();
         f(&db).map_err(StorageError::Other)
     }
@@ -1377,11 +1343,7 @@ impl StorageEngine {
         F: FnOnce(&mut KnowledgeGraph) -> Result<T, String>,
     {
         self.persist.check_writable()?;
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
-        let mut db = db.write();
+        let mut db = self.lock_kg(kg)?;
         f(&mut db).map_err(StorageError::Other)
     }
 
@@ -1397,10 +1359,7 @@ impl StorageEngine {
 
     /// List all schemas in a specific knowledge graph
     pub fn list_schemas_in(&self, kg: &str) -> StorageResult<Vec<String>> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         let db = db.read();
         Ok(db
@@ -1420,10 +1379,7 @@ impl StorageEngine {
         relation: &str,
         tuples: &[Tuple],
     ) -> StorageResult<()> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         let db = db.read();
         db.validate_tuples(relation, tuples)
@@ -1475,10 +1431,7 @@ impl StorageEngine {
         kg: &str,
         program: &str,
     ) -> StorageResult<Vec<(i32, i32)>> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         // Get snapshot atomically - O(1), no lock needed
         let snapshot = {
@@ -1509,10 +1462,7 @@ impl StorageEngine {
     /// query execution. Callers can release the storage lock after obtaining
     /// the snapshot and run DD computations without holding any locks.
     pub fn get_snapshot_for(&self, kg: &str) -> StorageResult<Arc<KnowledgeGraphSnapshot>> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         let db_guard = db.read();
         Ok(db_guard.snapshot())
@@ -1526,10 +1476,7 @@ impl StorageEngine {
         kg: &str,
         program: &str,
     ) -> StorageResult<Vec<Tuple>> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         // Get snapshot atomically - O(1), no lock needed
         let snapshot = {
@@ -1560,10 +1507,7 @@ impl StorageEngine {
         program: &str,
         session_facts: Vec<(String, Tuple)>,
     ) -> StorageResult<Vec<Tuple>> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         // Get snapshot atomically - O(1), no lock needed
         let snapshot = {
@@ -1590,10 +1534,7 @@ impl StorageEngine {
 
     /// List all relations in a specific knowledge graph
     pub fn list_relations_in(&self, kg: &str) -> StorageResult<Vec<String>> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         let db = db.read();
         let relations: Vec<String> = db.metadata.relations.keys().cloned().collect();
@@ -1612,10 +1553,7 @@ impl StorageEngine {
 
     /// Describe a relation in a specific knowledge graph
     pub fn describe_relation_in(&self, kg: &str, name: &str) -> StorageResult<Option<String>> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         let db = db.read();
         if let Some(rel_meta) = db.metadata.relations.get(name) {
@@ -1646,10 +1584,7 @@ impl StorageEngine {
         kg: &str,
         name: &str,
     ) -> StorageResult<Option<(Vec<String>, usize)>> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         let db = db.read();
         if let Some(rel_meta) = db.metadata.relations.get(name) {
@@ -1670,10 +1605,7 @@ impl StorageEngine {
         &self,
         kg: &str,
     ) -> StorageResult<Vec<(String, Vec<String>, usize)>> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         let db = db.read();
         let relations: Vec<(String, Vec<String>, usize)> = db
@@ -1700,10 +1632,7 @@ impl StorageEngine {
         &self,
         kg: &str,
     ) -> StorageResult<Vec<(String, Vec<(String, String)>, usize)>> {
-        let db = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let db = self.kg_handle(kg)?;
 
         let db = db.read();
         let relations: Vec<(String, Vec<(String, String)>, usize)> = db
@@ -1729,16 +1658,23 @@ impl StorageEngine {
         Ok(relations)
     }
 
-    /// Load all knowledge graphs from persist layer
+    /// Register the knowledge graphs on disk, each dormant until first use
+    /// (see the `residency` module), and finish what a crash interrupted.
+    /// Reads metadata only: the KG listing, shard metadata and catalog
+    /// revisions.
     ///
     /// Recovery process:
     /// 1. Discover knowledge graphs from metadata
     /// 2. Finish tombstoned drops; their KGs and relations are never loaded
     /// 3. Assign each shard to the longest KG name prefixing it
-    /// 4. Consolidate each shard's updates to get current state
-    /// 5. Populate in-memory `IQLEngine`
-    fn load_all_knowledge_graphs(&mut self) -> StorageResult<()> {
-        let mut kg_names: HashSet<String> = HashSet::new();
+    /// 4. Continue revisions above every committed one
+    /// 5. Hand each KG the rule and schema changes the WAL holds for it, which
+    ///    its activation applies; discard those of KGs that no longer exist
+    /// 6. Load each KG with an unfinished relation drop, and scrub the relation
+    fn register_knowledge_graphs(&mut self) -> StorageResult<()> {
+        let register_start = Instant::now();
+        let mut listed: std::collections::HashMap<String, KnowledgeGraphInfo> =
+            std::collections::HashMap::new();
         let metadata_path = self
             .config
             .storage
@@ -1746,9 +1682,15 @@ impl StorageEngine {
             .join("metadata/knowledge_graphs.json");
         if metadata_path.exists() {
             if let Ok(metadata) = KnowledgeGraphsMetadata::load(&metadata_path) {
-                kg_names.extend(metadata.knowledge_graphs.into_iter().map(|kg| kg.name));
+                listed.extend(
+                    metadata
+                        .knowledge_graphs
+                        .into_iter()
+                        .map(|kg| (kg.name.clone(), kg)),
+                );
             }
         }
+        let mut kg_names: HashSet<String> = listed.keys().cloned().collect();
 
         let tombstones = DropTombstones::load(&self.tombstones_path())?;
         let mut pending = tombstones.clone();
@@ -1788,10 +1730,10 @@ impl StorageEngine {
         // Metadata is missing or stale when no listed KG claims a shard, or the
         // claimed relation contains ':' (a legacy colon KG). Infer the KG as
         // everything before the last ':'.
-        let listed = naming::ShardOwners::new(kg_names.iter().map(String::as_str));
+        let owners = naming::ShardOwners::new(kg_names.iter().map(String::as_str));
         let inferred: HashSet<String> = shard_names
             .iter()
-            .filter(|shard| listed.owner(shard).is_none_or(|(_, rel)| rel.contains(':')))
+            .filter(|shard| owners.owner(shard).is_none_or(|(_, rel)| rel.contains(':')))
             .filter_map(|shard| shard.rsplit_once(':').map(|(kg, _)| kg.to_string()))
             .filter(|kg| !kg_names.contains(kg) && !tombstones.knowledge_graphs.contains(kg))
             .collect();
@@ -1819,57 +1761,88 @@ impl StorageEngine {
         }
         report_invalid_names(&kg_names, &kg_shards);
 
-        // Load each knowledge graph
-        let total_kgs = kg_names.len();
-        let load_start = std::time::Instant::now();
-        let mut corrections = Vec::new();
-        for (i, kg_name) in kg_names.into_iter().enumerate() {
-            let kg_dir = self.config.storage.data_dir.join(&kg_name);
-            fs::create_dir_all(&kg_dir)?;
-
-            let shards = kg_shards.remove(&kg_name).unwrap_or_default();
-            let kg = self.load_knowledge_graph_from_persist(
-                &kg_name,
-                kg_dir,
-                &shards,
-                &mut corrections,
-            )?;
-            self.knowledge_graphs
-                .insert(kg_name, Arc::new(RwLock::new(kg)));
-
-            if total_kgs >= 10 && (i + 1) % 10 == 0 {
-                tracing::info!(loaded = i + 1, total = total_kgs, "kg_load_progress");
-            }
+        // The WAL's rule and schema changes, by KG.
+        let recovered = self.persist.take_recovered_catalog();
+        let wal_revision = recovered.iter().map(|r| r.revision).max().unwrap_or(0);
+        let mut kg_catalogs: std::collections::HashMap<String, Vec<CatalogRecord>> =
+            std::collections::HashMap::new();
+        for record in recovered {
+            kg_catalogs
+                .entry(record.kg.clone())
+                .or_default()
+                .push(record);
         }
-        tracing::info!(
-            knowledge_graphs = total_kgs,
-            elapsed_ms = load_start.elapsed().as_millis() as u64,
-            "kg_load_complete"
+
+        // Each KG's catalog revision, without loading its rules: a later
+        // commit to it must get a higher revision.
+        let names: Vec<String> = kg_names.into_iter().collect();
+        let data_dir = &self.config.storage.data_dir;
+        let catalogs: Vec<(u64, usize)> = names
+            .par_iter()
+            .map(|kg| residency::catalog_revision(&data_dir.join(kg)))
+            .collect();
+        let now = self.clock_now();
+        let mut catalog_revision = 0;
+        for (kg, (revision, rules)) in names.into_iter().zip(catalogs) {
+            catalog_revision = catalog_revision.max(revision);
+            let info = listed.remove(&kg);
+            let listing = residency::Listing {
+                created_at: info
+                    .as_ref()
+                    .map(|info| info.created_at.clone())
+                    .filter(|created_at| !created_at.is_empty()),
+                summary: KgSummary {
+                    relations: info.as_ref().map_or(0, |info| info.relations_count),
+                    tuples: info.as_ref().map_or(0, |info| info.total_tuples),
+                    rules,
+                    loaded: false,
+                },
+            };
+            let dormant = residency::Dormant {
+                shards: kg_shards.remove(&kg).unwrap_or_default(),
+                revision: None,
+                catalog: kg_catalogs.remove(&kg).unwrap_or_default(),
+            };
+            self.knowledge_graphs.insert(
+                kg,
+                Arc::new(residency::KgSlot::dormant(dormant, listing, now)),
+            );
+        }
+        info!(
+            knowledge_graphs = self.knowledge_graphs.len(),
+            shards = shard_names.len(),
+            elapsed_ms = register_start.elapsed().as_millis() as u64,
+            "kg_register_complete"
         );
 
-        let replayed = self.replay_catalog(&self.persist.take_recovered_catalog())?;
+        // A later KG of the same name must not replay these.
+        for kg in kg_catalogs.keys() {
+            warn!(kg = %kg, "catalog_replay_discarded_unknown_kg");
+            self.persist.forget_catalog(kg)?;
+        }
 
-        // Update logical time to be after all loaded data and catalog changes
-        let max_time = self.find_max_logical_time()?.max(replayed);
+        // Revisions continue above every committed one: the shards' frontiers,
+        // the catalog files, and the catalog changes the WAL holds.
+        let max_time = self
+            .persist
+            .max_upper()
+            .max(catalog_revision)
+            .max(wal_revision);
         self.logical_time.store(max_time + 1, Ordering::SeqCst);
 
-        // Clamp shards whose multiplicities drifted from set membership
-        if !corrections.is_empty() {
-            let mut txn = Transaction::new(self.logical_time.fetch_add(1, Ordering::SeqCst));
-            for (shard, fixes) in corrections {
-                tracing::warn!(shard = %shard, tuples = fixes.len(), "persist_multiplicity_clamped");
-                txn.facts(shard, fixes.into_iter().map(|u| (u.data, u.diff)).collect());
-            }
-            self.persist.commit(txn)?;
-        }
+        // Pending relation drops are known before any KG loads.
+        self.has_relation_tombstones
+            .store(!tombstones.relations.is_empty(), Ordering::Release);
+        *self.tombstones.get_mut() = tombstones.clone();
 
         // A drop may have crashed before its schema and rule removal was
         // saved. Scrub even when the shard delete failed; the tombstone
         // stays until the shard is gone too.
         for t in &tombstones.relations {
-            let scrubbed = match self.knowledge_graphs.get(&t.kg) {
-                Some(db) => db.write().scrub_dropped_relation(&t.relation),
-                None => Ok(()),
+            let scrubbed = match self.lock_kg(&t.kg) {
+                Ok(mut db) => db.scrub_dropped_relation(&t.relation),
+                Err(StorageError::KnowledgeGraphNotFound(_)) => Ok(()),
+                Err(e) => Err(e.to_string()),
             };
             match scrubbed {
                 Ok(()) => {
@@ -1890,156 +1863,11 @@ impl StorageEngine {
                     .clone_from(&tombstones.knowledge_graphs);
             }
         }
-        self.has_relation_tombstones
-            .store(!tombstones.relations.is_empty(), Ordering::Release);
-        *self.tombstones.get_mut() = tombstones;
         if let Err(e) = self.update_tombstones(|t| *t = pending) {
             warn!(error = %e, "drop_tombstones_save_failed");
         }
 
         Ok(())
-    }
-
-    /// Load a single knowledge graph from persist layer
-    fn load_knowledge_graph_from_persist(
-        &self,
-        name: &str,
-        data_dir: PathBuf,
-        shards: &[(String, String)],
-        corrections: &mut Vec<(String, Vec<Update>)>,
-    ) -> StorageResult<KnowledgeGraph> {
-        let mut store = RelationStore::new();
-        let mut metadata = KnowledgeGraphMetadata::new(name.to_string());
-
-        for (shard_name, relation) in shards {
-            // Get shard info to determine since frontier
-            let info = self.persist.shard_info(shard_name)?;
-
-            // Read and consolidate updates
-            let mut updates = self.persist.read(shard_name, info.since)?;
-            consolidate_to_current(&mut updates);
-
-            // Extract current tuples (positive multiplicities only)
-            let tuples = to_tuples(&updates);
-            let fixes = set_semantics_corrections(&updates, 0);
-            if !fixes.is_empty() {
-                corrections.push((shard_name.clone(), fixes));
-            }
-
-            if !tuples.is_empty() {
-                // Infer schema from first tuple
-                let arity = tuples.first().map_or(2, super::value::Tuple::arity);
-                let schema: Vec<String> = (0..arity).map(|i| format!("col{i}")).collect();
-                let tuple_count = tuples.len();
-
-                // Update metadata with relation info
-                metadata.add_relation(relation.clone(), schema, tuple_count);
-
-                store.set(relation, tuples);
-            }
-        }
-
-        // Load view catalog (will load existing views if present)
-        let rule_catalog = RuleCatalog::new(data_dir.clone())
-            .map_err(|e| StorageError::Other(format!("Failed to load view catalog: {e}")))?;
-
-        // Load schema catalog (will load existing schemas if present)
-        let schema_path = data_dir.join(SCHEMA_CATALOG_FILE);
-        let schema_catalog = if schema_path.exists() {
-            SchemaCatalog::load(&schema_path).unwrap_or_else(|e| {
-                eprintln!(
-                    "Warning: Failed to load schema catalog for '{name}': {e}. Creating empty catalog."
-                );
-                SchemaCatalog::new()
-            })
-        } else {
-            SchemaCatalog::new()
-        };
-
-        // Create initial snapshot from loaded data
-        let num_workers = self.config.storage.performance.num_threads;
-        let mut initial = KnowledgeGraphSnapshot::new_with_workers(
-            store.relations().clone(),
-            rule_catalog.all_rules(),
-            num_workers,
-        );
-        initial.optimization = self.config.optimization.clone();
-        let snapshot = ArcSwap::from_pointee(initial);
-
-        let mut kg = KnowledgeGraph {
-            name: name.to_string(),
-            store,
-            metadata,
-            data_dir,
-            rule_catalog,
-            schema_catalog,
-            snapshot,
-            incremental: None,
-            auto_materialize: false,
-            indexes: IndexManager::new(),
-            num_workers,
-            max_result_rows: self.config.storage.performance.max_result_rows,
-            max_query_cost: self.config.storage.performance.max_query_cost,
-            optimization: self.config.optimization.clone(),
-            dropped: false,
-        };
-        kg.restore_indexes();
-        if !kg.indexes.is_empty() {
-            kg.publish_snapshot();
-        }
-        Ok(kg)
-    }
-
-    /// Apply the rule and schema changes recovered from the WAL over each
-    /// KG's catalog files, and save the files. Changes of KGs that no longer
-    /// exist are discarded. Returns the newest catalog revision of any KG.
-    ///
-    /// # Errors
-    /// Discarding the changes of a missing KG from the WAL failed.
-    fn replay_catalog(&self, records: &[CatalogRecord]) -> StorageResult<u64> {
-        let kgs: std::collections::BTreeSet<&str> = records.iter().map(|r| r.kg.as_str()).collect();
-        for kg in kgs {
-            let Some(db) = self.knowledge_graphs.get(kg) else {
-                warn!(kg = %kg, "catalog_replay_discarded_unknown_kg");
-                self.persist.forget_catalog(kg)?;
-                continue;
-            };
-            let mut db = db.write();
-            match db.replay_catalog(records.iter().filter(|r| r.kg == kg)) {
-                Ok(Some(revision)) => {
-                    if let Err(e) = self.persist.catalog_saved(kg, revision) {
-                        warn!(kg = %kg, error = %e, "catalog_wal_prune_failed");
-                    }
-                }
-                Ok(None) => {}
-                // Memory has the changes and the WAL keeps them.
-                Err(e) => warn!(kg = %kg, error = %e, "catalog_replay_save_failed"),
-            }
-            db.publish_snapshot();
-        }
-        Ok(self
-            .knowledge_graphs
-            .iter()
-            .map(|db| {
-                let db = db.read();
-                db.rule_catalog.revision().max(db.schema_catalog.revision())
-            })
-            .max()
-            .unwrap_or(0))
-    }
-
-    /// Find the maximum logical time across all shards
-    fn find_max_logical_time(&self) -> StorageResult<u64> {
-        let mut max_time = 0u64;
-
-        for shard_name in self.persist.list_shards()? {
-            let info = self.persist.shard_info(&shard_name)?;
-            if info.upper > max_time {
-                max_time = info.upper;
-            }
-        }
-
-        Ok(max_time)
     }
 
     /// Save system-wide knowledge graphs metadata
@@ -2055,19 +1883,18 @@ impl StorageEngine {
             return Err(e.into());
         }
 
+        let now = Utc::now().to_rfc3339();
         let knowledge_graphs: Vec<_> = self
-            .knowledge_graphs
-            .iter()
-            .map(|entry| {
-                let name = entry.key();
-                let kg_lock = entry.value();
-                let kg = kg_lock.read();
-                crate::storage::metadata::KnowledgeGraphInfo {
-                    name: name.clone(),
-                    created_at: kg.metadata.created_at.clone(),
-                    last_accessed: Utc::now().to_rfc3339(),
-                    relations_count: kg.metadata.relations.len(),
-                    total_tuples: kg.metadata.total_tuples(),
+            .slots()
+            .into_iter()
+            .map(|(name, slot)| {
+                let listing = slot.listing();
+                KnowledgeGraphInfo {
+                    name,
+                    created_at: listing.created_at.unwrap_or_else(|| now.clone()),
+                    last_accessed: now.clone(),
+                    relations_count: listing.summary.relations,
+                    total_tuples: listing.summary.tuples,
                 }
             })
             .collect();
@@ -2114,10 +1941,7 @@ impl StorageEngine {
             .par_iter()
             .map(|(kg, program)| {
                 // Get knowledge graph
-                let kg_lock = self
-                    .knowledge_graphs
-                    .get(*kg)
-                    .ok_or_else(|| StorageError::KnowledgeGraphNotFound((*kg).to_string()))?;
+                let kg_lock = self.kg_handle(kg)?;
 
                 // Get snapshot atomically - O(1)
                 let snapshot = {
@@ -2179,10 +2003,7 @@ impl StorageEngine {
         programs: Vec<&str>,
     ) -> StorageResult<Vec<Vec<(i32, i32)>>> {
         // Get knowledge graph
-        let kg_lock = self
-            .knowledge_graphs
-            .get(kg)
-            .ok_or_else(|| StorageError::KnowledgeGraphNotFound(kg.to_string()))?;
+        let kg_lock = self.kg_handle(kg)?;
 
         // Get snapshot atomically - O(1), data is already Arc-wrapped for sharing
         let snapshot = {
@@ -2279,8 +2100,77 @@ impl KnowledgeGraph {
             max_result_rows: 0,
             max_query_cost: 0,
             optimization: crate::OptimizationConfig::default(),
-            dropped: false,
+            retired: None,
         }
+    }
+
+    /// A knowledge graph loaded from disk: `relations` are its consolidated
+    /// facts, and its catalogs and vector indexes are read from `data_dir`.
+    /// Its first snapshot gets `revision` when given (a reload of the state
+    /// that revision named), else the next one.
+    fn from_disk(
+        engine: &StorageEngine,
+        name: &str,
+        data_dir: PathBuf,
+        metadata: KnowledgeGraphMetadata,
+        relations: Vec<(String, Vec<Tuple>)>,
+        revision: Option<u64>,
+    ) -> StorageResult<Self> {
+        let store = RelationStore::from_relations(relations);
+
+        // Load view catalog (will load existing views if present)
+        let rule_catalog = RuleCatalog::new(data_dir.clone())
+            .map_err(|e| StorageError::Other(format!("Failed to load view catalog: {e}")))?;
+
+        // Load schema catalog (will load existing schemas if present)
+        let schema_path = data_dir.join(SCHEMA_CATALOG_FILE);
+        let schema_catalog = if schema_path.exists() {
+            SchemaCatalog::load(&schema_path).unwrap_or_else(|e| {
+                eprintln!(
+                    "Warning: Failed to load schema catalog for '{name}': {e}. Creating empty catalog."
+                );
+                SchemaCatalog::new()
+            })
+        } else {
+            SchemaCatalog::new()
+        };
+
+        // Create initial snapshot from loaded data
+        let performance = &engine.config.storage.performance;
+        let mut initial = KnowledgeGraphSnapshot::new_with_workers(
+            store.relations().clone(),
+            rule_catalog.all_rules(),
+            performance.num_threads,
+        );
+        initial.optimization = engine.config.optimization.clone();
+        initial.max_result_rows = performance.max_result_rows;
+        initial.max_query_cost = performance.max_query_cost;
+        if let Some(revision) = revision {
+            initial.revision = revision;
+        }
+
+        let mut kg = KnowledgeGraph {
+            name: name.to_string(),
+            store,
+            metadata,
+            data_dir,
+            rule_catalog,
+            schema_catalog,
+            snapshot: ArcSwap::from_pointee(initial),
+            incremental: None,
+            auto_materialize: false,
+            indexes: IndexManager::new(),
+            num_workers: performance.num_threads,
+            max_result_rows: performance.max_result_rows,
+            max_query_cost: performance.max_query_cost,
+            optimization: engine.config.optimization.clone(),
+            retired: None,
+        };
+        kg.restore_indexes();
+        if !kg.indexes.is_empty() {
+            kg.publish_snapshot();
+        }
+        Ok(kg)
     }
 
     /// Set the optimizer passes for this KG's engines and published snapshots.
@@ -2791,6 +2681,7 @@ fn format_rule(rule: &crate::ast::Rule) -> String {
 mod tests {
     use super::*;
     use crate::config::Config;
+    use parking_lot::lock_api::ArcRwLockWriteGuard;
     use tempfile::TempDir;
 
     #[test]
@@ -2833,9 +2724,10 @@ mod tests {
         storage.drop_knowledge_graph("x").unwrap();
         storage.create_knowledge_graph("x").unwrap();
 
-        assert!(StorageEngine::lock_live(&stale, "x").is_err());
-        let live = storage.kg_handle("x").unwrap();
-        assert!(StorageEngine::lock_live(&live, "x").is_ok());
+        assert_eq!(stale.read().retired, Some(residency::Retired::Dropped));
+        let live = storage.lock_kg("x").unwrap();
+        assert!(live.retired.is_none());
+        assert!(!Arc::ptr_eq(&stale, ArcRwLockWriteGuard::rwlock(&live)));
     }
 
     fn relation_tuples(storage: &StorageEngine, kg: &str, rel: &str) -> Option<HashSet<Tuple>> {
@@ -3477,8 +3369,7 @@ mod tests {
         // Debug: print the combined program
         {
             let kg = storage
-                .knowledge_graphs
-                .get("default")
+                .kg_handle("default")
                 .expect("default KG should exist");
             let kg = kg.read();
             let rule_defs = kg.rule_catalog.all_rules();
@@ -3543,7 +3434,7 @@ mod tests {
 
         // Enable IncrementalEngine for shadow writes
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let mut kg = kg.write();
             kg.enable_incremental().unwrap();
         }
@@ -3562,8 +3453,7 @@ mod tests {
 
         // Access the KG's IncrementalEngine and verify it received the data
         let kg = storage
-            .knowledge_graphs
-            .get("default")
+            .kg_handle("default")
             .expect("default KG should exist");
         let kg = kg.read();
         let dd = kg
@@ -3591,7 +3481,7 @@ mod tests {
 
         // Enable IncrementalEngine
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let mut kg = kg.write();
             kg.enable_incremental().unwrap();
         }
@@ -3611,7 +3501,7 @@ mod tests {
             .unwrap();
 
         // Verify IncrementalEngine has exactly 3 tuples (not 4 with duplicate)
-        let kg = storage.knowledge_graphs.get("default").expect("default KG");
+        let kg = storage.kg_handle("default").expect("default KG");
         let kg = kg.read();
         let dd = kg.incremental().unwrap();
 
@@ -3635,7 +3525,7 @@ mod tests {
 
         // Enable IncrementalEngine
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let mut kg = kg.write();
             kg.enable_incremental().unwrap();
         }
@@ -3653,7 +3543,7 @@ mod tests {
         storage.delete_tuple("rel", &t2).unwrap();
 
         // Verify IncrementalEngine reflects the delete
-        let kg = storage.knowledge_graphs.get("default").expect("default KG");
+        let kg = storage.kg_handle("default").expect("default KG");
         let kg = kg.read();
         let dd = kg.incremental().unwrap();
 
@@ -3678,7 +3568,7 @@ mod tests {
 
         // Enable IncrementalEngine
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let mut kg = kg.write();
             kg.enable_incremental().unwrap();
         }
@@ -3687,7 +3577,7 @@ mod tests {
         storage.insert("edge", vec![(1, 2), (2, 3)]).unwrap();
 
         // Verify IncrementalEngine received the data
-        let kg = storage.knowledge_graphs.get("default").expect("default KG");
+        let kg = storage.kg_handle("default").expect("default KG");
         let kg = kg.read();
         let dd = kg
             .incremental()
@@ -3714,7 +3604,7 @@ mod tests {
         storage.use_knowledge_graph("default").unwrap();
 
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let mut kg = kg.write();
             kg.enable_incremental().unwrap();
         }
@@ -3732,7 +3622,7 @@ mod tests {
             .unwrap();
 
         // Read from HashMap (via snapshot) and from DD arrangement
-        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = storage.kg_handle("default").unwrap();
         let kg = kg.read();
 
         // HashMap state
@@ -3764,7 +3654,7 @@ mod tests {
         storage.use_knowledge_graph("default").unwrap();
 
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let mut kg = kg.write();
             kg.enable_incremental().unwrap();
         }
@@ -3803,7 +3693,7 @@ mod tests {
             .unwrap();
 
         // Verify parity
-        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = storage.kg_handle("default").unwrap();
         let kg = kg.read();
         let hashmap_tuples = &kg.store.get("data").unwrap().to_vec();
         let dd = kg.incremental().unwrap();
@@ -3835,7 +3725,7 @@ mod tests {
         storage.use_knowledge_graph("default").unwrap();
 
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let mut kg = kg.write();
             kg.enable_incremental().unwrap();
         }
@@ -3862,7 +3752,7 @@ mod tests {
         storage.insert_tuples("mixed", vec![t5.clone()]).unwrap();
 
         // Verify parity
-        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = storage.kg_handle("default").unwrap();
         let kg = kg.read();
         let hashmap_tuples = &kg.store.get("mixed").unwrap().to_vec();
         let dd = kg.incremental().unwrap();
@@ -3890,7 +3780,7 @@ mod tests {
         storage.use_knowledge_graph("default").unwrap();
 
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let mut kg = kg.write();
             kg.enable_incremental().unwrap();
         }
@@ -3918,7 +3808,7 @@ mod tests {
             .unwrap();
 
         // Verify parity for each relation
-        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = storage.kg_handle("default").unwrap();
         let kg = kg.read();
         let dd = kg.incremental().unwrap();
 
@@ -3948,7 +3838,7 @@ mod tests {
         storage.use_knowledge_graph("default").unwrap();
 
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let mut kg = kg.write();
             kg.enable_incremental().unwrap();
         }
@@ -3962,7 +3852,7 @@ mod tests {
             .unwrap();
 
         // DD's max_write_time should be >= time_before (the time used for this insert)
-        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = storage.kg_handle("default").unwrap();
         let kg = kg.read();
         let dd = kg.incremental().unwrap();
 
@@ -4009,13 +3899,13 @@ mod tests {
 
         // NOW enable IncrementalEngine  -  should replay existing data
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let mut kg = kg.write();
             kg.enable_incremental().unwrap();
         }
 
         // Verify IncrementalEngine has all pre-existing data
-        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = storage.kg_handle("default").unwrap();
         let kg = kg.read();
         let dd = kg.incremental().unwrap();
 
@@ -4050,13 +3940,13 @@ mod tests {
 
         // Enable DD (triggers replay)
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let mut kg = kg.write();
             kg.enable_incremental().unwrap();
         }
 
         // Verify exact parity between DD and HashMap
-        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = storage.kg_handle("default").unwrap();
         let kg = kg.read();
         let hashmap_tuples = &kg.store.get("data").unwrap().to_vec();
         let dd = kg.incremental().unwrap();
@@ -4095,7 +3985,7 @@ mod tests {
 
         // Enable DD (triggers replay)
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let mut kg = kg.write();
             kg.enable_incremental().unwrap();
         }
@@ -4112,7 +4002,7 @@ mod tests {
             .unwrap();
 
         // Verify DD has ALL data (replayed + new)
-        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = storage.kg_handle("default").unwrap();
         let kg = kg.read();
         let dd = kg.incremental().unwrap();
         let mut dd_tuples = dd.read_relation_consistent("items").unwrap();
@@ -4149,13 +4039,13 @@ mod tests {
 
         // Enable DD (should replay legacy data)
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let mut kg = kg.write();
             kg.enable_incremental().unwrap();
         }
 
         // Verify DD has the replayed data
-        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = storage.kg_handle("default").unwrap();
         let kg = kg.read();
         let dd = kg.incremental().unwrap();
         let dd_tuples = dd.read_relation_consistent("edge").unwrap();
@@ -4189,13 +4079,13 @@ mod tests {
 
             // Enable IncrementalEngine  -  should replay persisted data
             {
-                let kg = storage.knowledge_graphs.get("default").unwrap();
+                let kg = storage.kg_handle("default").unwrap();
                 let mut kg = kg.write();
                 kg.enable_incremental().unwrap();
             }
 
             // Verify DD has the persisted data
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let kg = kg.read();
             let dd = kg.incremental().unwrap();
             let dd_tuples = dd.read_relation_consistent("edge").unwrap();
@@ -4257,7 +4147,7 @@ mod tests {
 
         // Enable IncrementalEngine
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let mut kg = kg.write();
             kg.enable_incremental().unwrap();
         }
@@ -4279,7 +4169,7 @@ mod tests {
 
         // Materialize the derived relation (uses the new method that also publishes snapshot)
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let kg = kg.read();
 
             // Simulate materializing path with some tuples
@@ -4293,7 +4183,7 @@ mod tests {
         }
 
         // Get the updated snapshot
-        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = storage.kg_handle("default").unwrap();
         let kg = kg.read();
         let snapshot = kg.snapshot();
 
@@ -4323,7 +4213,7 @@ mod tests {
 
         // Enable IncrementalEngine
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let mut kg = kg.write();
             kg.enable_incremental().unwrap();
         }
@@ -4341,7 +4231,7 @@ mod tests {
 
         // Materialize (uses the new method that also publishes snapshot)
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let kg = kg.read();
             kg.materialize_derived_relation(
                 "path",
@@ -4352,7 +4242,7 @@ mod tests {
 
         // Verify materialized
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let kg = kg.read();
             let snapshot = kg.snapshot();
             assert!(snapshot.is_materialized("path"));
@@ -4369,7 +4259,7 @@ mod tests {
 
         // Verify no longer materialized (invalidated)
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let kg = kg.read();
             let snapshot = kg.snapshot();
             assert!(
@@ -4388,7 +4278,7 @@ mod tests {
 
         // Enable IncrementalEngine
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let mut kg = kg.write();
             kg.enable_incremental().unwrap();
         }
@@ -4411,7 +4301,7 @@ mod tests {
         // Materialize with DIFFERENT data than what the rule would produce
         // This proves the query uses cached data, not the rule
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let kg = kg.read();
             kg.materialize_derived_relation(
                 "path",
@@ -4444,7 +4334,7 @@ mod tests {
 
         // Enable IncrementalEngine
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let mut kg = kg.write();
             kg.enable_incremental().unwrap();
         }
@@ -4458,7 +4348,7 @@ mod tests {
 
         // Check stats - 2 rules, 0 materialized, 2 invalid
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let kg = kg.read();
             let dd = kg.incremental().unwrap();
             let (total, materialized, invalid) = dd.get_derived_stats().unwrap();
@@ -4469,7 +4359,7 @@ mod tests {
 
         // Materialize one
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let kg = kg.read();
             let dd = kg.incremental().unwrap();
             dd.set_materialized("derived1", vec![]).unwrap();
@@ -4477,7 +4367,7 @@ mod tests {
 
         // Check stats - 2 rules, 1 materialized, 1 invalid
         {
-            let kg = storage.knowledge_graphs.get("default").unwrap();
+            let kg = storage.kg_handle("default").unwrap();
             let kg = kg.read();
             let dd = kg.incremental().unwrap();
             let (total, materialized, invalid) = dd.get_derived_stats().unwrap();
@@ -6112,7 +6002,7 @@ mod incremental_scc_tests {
         config.storage.data_dir = temp.path().to_path_buf();
         let mut storage = StorageEngine::new(config).unwrap();
         storage.use_knowledge_graph("default").unwrap();
-        let kg = storage.knowledge_graphs.get("default").unwrap();
+        let kg = storage.kg_handle("default").unwrap();
         kg.write().enable_incremental().unwrap();
         drop(kg);
         storage

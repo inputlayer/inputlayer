@@ -78,7 +78,7 @@ fn export_during_writes_restores_one_consistent_revision() {
     // Each step commits tick(i) to `a`, then tock(i) to `b`: in any
     // consistent cut, tock(i) implies tick(i). Every commit takes the next
     // revision, so the cut at revision R holds exactly R - base of them.
-    let base = engine.capture_checkpoint().revision;
+    let base = engine.capture_checkpoint().unwrap().revision;
     let stop = Arc::new(AtomicBool::new(false));
     let steps = Arc::new(AtomicU64::new(0));
     let writer = {
@@ -130,7 +130,7 @@ fn export_during_writes_restores_one_consistent_revision() {
 
     // The restored engine continues after the exported revision.
     restored.insert_tuples_into("a", "tick", ints([k])).unwrap();
-    assert!(restored.capture_checkpoint().revision > revision);
+    assert!(restored.capture_checkpoint().unwrap().revision > revision);
 }
 
 #[test]
@@ -140,24 +140,24 @@ fn checkpoint_revision_names_the_newest_commit() {
     engine.create_knowledge_graph("a").unwrap();
     engine.insert_tuples_into("a", "x", ints([1])).unwrap();
 
-    let first = engine.capture_checkpoint().revision;
+    let first = engine.capture_checkpoint().unwrap().revision;
     assert_eq!(
-        engine.capture_checkpoint().revision,
+        engine.capture_checkpoint().unwrap().revision,
         first,
         "no commit, same revision"
     );
     engine.insert_tuples_into("a", "x", ints([2])).unwrap();
-    assert_eq!(engine.capture_checkpoint().revision, first + 1);
+    assert_eq!(engine.capture_checkpoint().unwrap().revision, first + 1);
     // An insert that changes nothing commits nothing.
     engine.insert_tuples_into("a", "x", ints([2])).unwrap();
-    assert_eq!(engine.capture_checkpoint().revision, first + 1);
+    assert_eq!(engine.capture_checkpoint().unwrap().revision, first + 1);
 }
 
 #[test]
 fn cancelled_export_removes_what_it_wrote() {
     let temp = TempDir::new().unwrap();
     let engine = engine_with_bulk(temp.path(), 4, 100);
-    let checkpoint = engine.capture_checkpoint();
+    let checkpoint = engine.capture_checkpoint().unwrap();
     let dest = temp.path().join("backups/cancelled");
 
     let export = Export::claim(&dest, &temp.path().join("data")).unwrap();
@@ -330,7 +330,7 @@ fn capture_stays_live_under_kg_churn_and_writes() {
         std::thread::spawn(move || {
             let mut last = 0;
             for _ in 0..300 {
-                let checkpoint = engine.capture_checkpoint();
+                let checkpoint = engine.capture_checkpoint().unwrap();
                 assert!(checkpoint.revision >= last, "revision went backwards");
                 last = checkpoint.revision;
             }
@@ -379,7 +379,7 @@ fn measure_capture_cost_and_hot_path_latency_during_exports() {
         .unwrap();
 
     let mut captures: Vec<Duration> = (0..50)
-        .map(|_| engine.capture_checkpoint().capture_time)
+        .map(|_| engine.capture_checkpoint().unwrap().capture_time)
         .collect();
     println!(
         "capture (51 KGs, 1001 relations, 501k facts): p50 {:?} max {:?}",

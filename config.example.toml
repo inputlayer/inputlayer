@@ -20,6 +20,13 @@ default_knowledge_graph = "default"
 # Set to true for development, false for production
 auto_create_knowledge_graphs = false
 
+# Knowledge graphs load into memory on first use. Most held at once
+# (0 = no limit); past it, loading one unloads the least recently used idle ones.
+max_loaded_knowledge_graphs = 0
+
+# Unload a knowledge graph unused for this many seconds (0 = never)
+unload_idle_after_secs = 0
+
 [storage.persistence]
 # Storage format options:
 # - "parquet": Columnar format, excellent compression (10x smaller than CSV)
