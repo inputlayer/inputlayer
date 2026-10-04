@@ -59,11 +59,14 @@ export class ColumnProxy {
   readonly relation: string;
   readonly name: string;
   readonly refAlias?: string;
+  /** All columns of the relation, in order, when the proxy came from its definition. */
+  readonly relationColumns?: readonly string[];
 
-  constructor(relation: string, name: string, refAlias?: string) {
+  constructor(relation: string, name: string, refAlias?: string, relationColumns?: readonly string[]) {
     this.relation = relation;
     this.name = name;
     this.refAlias = refAlias;
+    this.relationColumns = relationColumns;
   }
 
   toAst(): Column {
@@ -121,11 +124,11 @@ export class ColumnProxy {
   // ── Membership ──────────────────────────────────────────────────
 
   in(other: ColumnProxy): InExpr {
-    return inExpr(this.toAst(), other.toAst());
+    return inExpr(this.toAst(), other.toAst(), other.relationColumns);
   }
 
   notIn(other: ColumnProxy): NegatedIn {
-    return negatedIn(this.toAst(), other.toAst());
+    return negatedIn(this.toAst(), other.toAst(), other.relationColumns);
   }
 
   // ── Ordering ────────────────────────────────────────────────────
@@ -192,15 +195,17 @@ export function NOT(operand: BoolExpr): Not {
 export class RelationProxy {
   readonly relationName: string;
   readonly refAlias?: string;
+  readonly columns?: readonly string[];
 
-  constructor(relationName: string, refAlias?: string) {
+  constructor(relationName: string, refAlias?: string, columns?: readonly string[]) {
     this.relationName = relationName;
     this.refAlias = refAlias;
+    this.columns = columns;
   }
 
   /** Get a ColumnProxy for the named column. */
   col(name: string): ColumnProxy {
-    return new ColumnProxy(this.relationName, name, this.refAlias);
+    return new ColumnProxy(this.relationName, name, this.refAlias, this.columns);
   }
 }
 
@@ -220,6 +225,11 @@ export class RelationRef {
 
   /** Get a ColumnProxy for the named column. */
   col(name: string): ColumnProxy {
-    return new ColumnProxy(this.relationName, name, this.alias);
+    return new ColumnProxy(
+      this.relationName,
+      name,
+      this.alias,
+      this.schema.columns.map((c) => c.name),
+    );
   }
 }

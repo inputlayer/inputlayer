@@ -1,0 +1,63 @@
+{
+  "description": "Meta commands the SDKs send and the replies they parse. The JS SDK renders `commands` from its command table and must produce `text` exactly (the Python SDK is planned to do the same); a live test sends every command to the engine (in order, so each one has the state it needs) and expects `rejected` to fail. Replies are copied from the engine and pin the SDK parsers.",
+  "commands": [
+    { "name": "session_list", "args": [], "text": ".session" },
+    { "name": "session_drop", "args": [2], "text": ".session drop 2" },
+    { "name": "session_drop", "args": ["hop"], "text": ".session drop hop" },
+    { "name": "session_clear", "args": [], "text": ".session clear" },
+    { "name": "rule_list", "args": [], "text": ".rule list" },
+    { "name": "rule_def", "args": ["reach"], "text": ".rule def reach" },
+    { "name": "subscribe", "args": ["s1", "?reach(1, X)"], "text": ".subscribe s1 ?reach(1, X)" },
+    { "name": "unsubscribe", "args": ["s1"], "text": ".unsubscribe s1" },
+    { "name": "why", "args": ["il_sdk_why(X, Y) <- edge(X, Y)"], "text": ".why il_sdk_why(X, Y) <- edge(X, Y)" },
+    { "name": "why", "args": ["il_sdk_why(X, Y) <- edge(X, Y)", true], "text": ".why full il_sdk_why(X, Y) <- edge(X, Y)" },
+    { "name": "why_not", "args": ["reach(3, 1)"], "text": ".why_not reach(3, 1)" },
+    { "name": "rule_remove", "args": ["reach", 2], "text": ".rule remove reach 2" },
+    { "name": "rule_clear", "args": ["reach"], "text": ".rule clear reach" },
+    { "name": "rule_drop", "args": ["reach"], "text": ".rule drop reach" },
+    { "name": "rule_drop_prefix", "args": ["il_tmp_"], "text": ".rule drop prefix il_tmp_" }
+  ],
+  "setup": [
+    "+edge[(1, 2), (2, 3)]",
+    "+reach(X, Y) <- edge(X, Y)",
+    "+reach(X, Z) <- reach(X, Y), edge(Y, Z)",
+    "+il_tmp_a(X) <- edge(X, _)",
+    "hop(X, Y) <- edge(X, Y)",
+    "hop(X, Y) <- edge(Y, X)",
+    "hop2(X) <- edge(X, _)"
+  ],
+  "rejected": [
+    { "text": ".session list", "why": "listing is `.session` with no subcommand" },
+    { "text": ".session remove hop 1", "why": "a session clause is dropped by position: `.session drop <n>`" }
+  ],
+  "replies": {
+    "session_list": [
+      {
+        "rows": [["No session data defined."]],
+        "rules": []
+      },
+      {
+        "rows": [
+          ["Session facts (1):"],
+          ["  sf((5))"],
+          ["Session rules (2):"],
+          ["  1. hop(X, Y) <- edge(X, Y)"],
+          ["  2. hop(X, Y) <- edge(Y, X)"]
+        ],
+        "rules": ["hop(X, Y) <- edge(X, Y)", "hop(X, Y) <- edge(Y, X)"]
+      }
+    ],
+    "rule_list": [
+      {
+        "rows": [["Rules:"], ["  reach (2 clause(s))"]],
+        "rules": [{ "name": "reach", "clause_count": 2 }]
+      }
+    ],
+    "rule_def": [
+      {
+        "rows": [["Rule: reach\nClauses:\n  1. reach(X, Y) <- edge(X, Y)\n  2. reach(X, Z) <- reach(X, Y), edge(Y, Z)\n"]],
+        "clauses": ["reach(X, Y) <- edge(X, Y)", "reach(X, Z) <- reach(X, Y), edge(Y, Z)"]
+      }
+    ]
+  }
+}

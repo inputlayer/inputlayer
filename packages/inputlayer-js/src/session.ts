@@ -7,6 +7,7 @@ import type { RelationDef } from './relation.js';
 import type { Fact } from './types.js';
 import type { RuleClause } from './compiler.js';
 import { compileInsert, compileBulkInsert, compileRule } from './compiler.js';
+import { meta, sessionRules } from './meta.js';
 
 /**
  * Manage session-scoped (ephemeral) data.
@@ -47,23 +48,34 @@ export class Session {
     }
   }
 
-  /** List session rules. */
+  /** List session rules, one clause per entry, in definition order. */
   async listRules(): Promise<string[]> {
-    const result = await this.conn.execute('.session list');
-    return result.rows.length > 0 ? result.rows.map((row) => String(row[0])) : [];
+    const result = await this.conn.execute(meta.sessionList());
+    return sessionRules(result.rows);
   }
 
-  /** Drop a session rule by name, or a specific clause by index. */
+  /** Drop a session rule by name, or one of its clauses by index (1-based). */
   async dropRule(name: string, index?: number): Promise<void> {
-    if (index !== undefined) {
-      await this.conn.execute(`.session remove ${name} ${index}`);
-    } else {
-      await this.conn.execute(`.session drop ${name}`);
+    if (index === undefined) {
+      await this.conn.execute(meta.sessionDrop(name));
+      return;
     }
+    // The engine drops a clause by its position among all session rules,
+    // so find that position.
+    const positions: number[] = [];
+    (await this.listRules()).forEach((rule, i) => {
+      if (rule.split('(', 1)[0].trim() === name) positions.push(i + 1);
+    });
+    if (!Number.isInteger(index) || index < 1 || index > positions.length) {
+      throw new RangeError(
+        `Session rule '${name}' has ${positions.length} clause(s); index ${index} is out of range`,
+      );
+    }
+    await this.conn.execute(meta.sessionDrop(positions[index - 1]));
   }
 
   /** Clear all session facts and rules. */
   async clear(): Promise<void> {
-    await this.conn.execute('.session clear');
+    await this.conn.execute(meta.sessionClear());
   }
 }

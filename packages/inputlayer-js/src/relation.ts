@@ -50,7 +50,7 @@ export class RelationDef {
           `Available: ${this.columns.join(', ')}`,
       );
     }
-    return new ColumnProxy(this.relationName, name);
+    return new ColumnProxy(this.relationName, name, undefined, this.columns);
   }
 
   /**
@@ -109,6 +109,10 @@ export function compileValue(value: unknown): string {
   }
   if (value instanceof Timestamp) {
     return String(value.ms);
+  }
+  if (value instanceof Date) {
+    // Timestamps are stored as int Unix milliseconds.
+    return String(value.getTime());
   }
   if (typeof value === 'number') {
     if (Number.isInteger(value)) {

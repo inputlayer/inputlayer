@@ -49,7 +49,7 @@ export class Timestamp {
   }
 }
 
-/** Column definition for a relation schema. */
+/** Column definition for a relation schema. A `timestamp` column is declared as `int` and holds Unix milliseconds. */
 export interface ColumnDef {
   name: string;
   type: IQLType;
@@ -79,6 +79,7 @@ export type FieldValue =
   | boolean
   | null
   | Timestamp
+  | Date
   | Vector
   | VectorInt8;
 

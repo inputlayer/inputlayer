@@ -13,6 +13,8 @@ import {
 } from '../src/compiler';
 import { count, sum, avg, topK } from '../src/aggregations';
 import { AND, OR } from '../src/proxy';
+import { from } from '../src/derived';
+import { Timestamp } from '../src/types';
 
 const Employee = relation('Employee', {
   id: 'int',
@@ -32,6 +34,19 @@ describe('compileSchema', () => {
     expect(compileSchema(Employee)).toBe(
       '+employee(id: int, name: string, department: string, salary: float, active: bool)',
     );
+  });
+});
+
+describe('compileSchema timestamp', () => {
+  const Event = relation('Event', { id: 'int', occurredAt: 'timestamp' });
+
+  it('declares a timestamp column as int', () => {
+    expect(compileSchema(Event)).toBe('+event(id: int, occurredAt: int)');
+  });
+
+  it('writes Timestamp and Date values as Unix milliseconds', () => {
+    expect(compileInsert(Event, { id: 1, occurredAt: new Timestamp(1704067200000) })).toBe('+event(1, 1704067200000)');
+    expect(compileInsert(Event, { id: 2, occurredAt: new Date(1704153600000) })).toBe('+event(2, 1704153600000)');
   });
 });
 
@@ -262,6 +277,37 @@ describe('compileQuery', () => {
   });
 });
 
+describe('count() without a column', () => {
+  it('counts the first variable of the first atom', () => {
+    const plan = compileQueryPlan({
+      select: [Employee.col('department').toAst(), count()],
+      join: [Employee],
+    });
+    expect(plan.programs).toEqual([
+      'il_sdk_agg(Department, count<Id>) <- employee(Id, Name, Department, Salary, Active)\n' +
+        '?il_sdk_agg(Department, Count)',
+    ]);
+    expect(plan.outputs.map((o) => o.label)).toEqual(['Department', 'Count']);
+  });
+
+  it('counts the first column of the first joined relation', () => {
+    const plan = compileQueryPlan({
+      select: [count()],
+      join: [Department, Employee],
+      on: Employee.col('department').eq(Department.col('name')),
+    });
+    expect(plan.programs[0]).toMatch(/^il_sdk_agg\(count<Department>\) <- department\(Department, Budget\), employee/);
+  });
+
+  it('never emits count<> in a rule head', () => {
+    const rule = compileRule('dept_size', ['department', 'n'], {
+      relations: [{ name: 'employee', def: Employee }],
+      selectMap: { department: Employee.col('department').toAst(), n: count() },
+    });
+    expect(rule).toBe('+dept_size(Department, count<Id>) <- employee(Id, _, Department, _, _)');
+  });
+});
+
 describe('resultColumnIndexes', () => {
   const plan = compileQueryPlan({
     select: [Employee.col('salary').toAst(), Employee.col('name').toAst()],
@@ -309,5 +355,88 @@ describe('compileRule', () => {
       false,
     );
     expect(result).toBe('reachable(Src, Dst) <- edge(Src, Dst)');
+  });
+});
+
+describe('in / notIn', () => {
+  const Manager = relation('Manager', { employeeId: 'int', since: 'int' });
+
+  it('compiles in() to an atom of the target relation', () => {
+    const iql = compileConditionalDelete(Employee, Employee.col('id').in(Manager.col('employeeId')));
+    expect(iql).toBe(
+      '-employee(X0, X1, X2, X3, X4) <- employee(X0, X1, X2, X3, X4), manager(X0, _)',
+    );
+  });
+
+  it('compiles notIn() to a negated atom', () => {
+    const iql = compileConditionalDelete(Employee, Employee.col('id').notIn(Manager.col('employeeId')));
+    expect(iql).toBe(
+      '-employee(X0, X1, X2, X3, X4) <- employee(X0, X1, X2, X3, X4), !manager(X0, _)',
+    );
+  });
+
+  it('places the variable at the target column and works through refs()', () => {
+    const [m] = Manager.refs(1);
+    const iql = compileConditionalDelete(Employee, Employee.col('id').in(m.col('since')));
+    expect(iql).toContain('manager(_, X0)');
+  });
+
+  it('binds the source column in a rule when it is not selected', () => {
+    const rule = compileRule(
+      'unmanaged',
+      ['name'],
+      from(Employee)
+        .where((e) => e.col('id').notIn(Manager.col('employeeId')))
+        .select({ name: Employee.col('name') }),
+    );
+    expect(rule).toBe('+unmanaged(Name) <- employee(Id, Name, _, _, _), !manager(Id, _)');
+  });
+
+  it('compiles in() on columns from a from().where() callback', () => {
+    const rule = compileRule(
+      'managed',
+      ['name'],
+      from(Employee, Manager)
+        .where((e, m) => e.col('id').in(m.col('employeeId')))
+        .select({ name: Employee.col('name') }),
+    );
+    expect(rule).toContain('manager(Id, _)');
+  });
+
+  it('compiles in() in a query to a positive atom', () => {
+    expect(
+      compileQuery({
+        select: [Employee.col('name').toAst()],
+        join: [Employee],
+        where: Employee.col('id').in(Manager.col('employeeId')),
+      }),
+    ).toBe('?employee(Id, Name, Department, Salary, Active), manager(Id, _)');
+  });
+
+  it('rejects a target column the target relation does not have', () => {
+    const [m] = Manager.refs(1);
+    expect(() =>
+      compileConditionalDelete(Employee, Employee.col('id').in(m.col('employeId'))),
+    ).toThrow(/'employeId' does not exist on relation 'manager'/);
+    expect(() =>
+      compileRule(
+        'managed',
+        ['name'],
+        from(Employee, Manager)
+          .where((e, mm) => e.col('id').notIn(mm.col('employeId')))
+          .select({ name: Employee.col('name') }),
+      ),
+    ).toThrow(/does not exist/);
+  });
+
+  it('rejects a target column with no relation definition', () => {
+    const target = { _tag: 'Column', relation: 'manager', name: 'employeeId' } as const;
+    expect(() =>
+      compileConditionalDelete(Employee, {
+        _tag: 'InExpr',
+        column: Employee.col('id').toAst(),
+        targetColumn: target,
+      } as never),
+    ).toThrow(/relation definition/);
   });
 });
