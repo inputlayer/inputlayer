@@ -26,7 +26,7 @@ import {
   isMatchExpr,
   column as astColumn,
 } from './ast.js';
-import { columnToVariable } from './naming.js';
+import { columnToVariable, snakeToCamel } from './naming.js';
 import { RelationDef, compileValue, resolveRelationName, getColumns, getColumnTypes } from './relation.js';
 import { RelationRef } from './proxy.js';
 import type { ColumnProxy } from './proxy.js';
@@ -93,6 +93,15 @@ class VarEnv {
       varName = `${varName}_${this.counter}`;
     }
     this.map.set(root, varName);
+    return varName;
+  }
+
+  /** A variable named after `base` that no column uses yet. */
+  fresh(base: string): string {
+    const used = new Set(this.map.values());
+    let varName = base;
+    for (let n = 2; used.has(varName); n++) varName = `${base}_${n}`;
+    this.map.set(`__fresh__.${varName}`, varName);
     return varName;
   }
 
@@ -380,230 +389,361 @@ export interface QueryOptions {
   computed?: Record<string, Expr>;
 }
 
+/** One result column: the name the caller sees and the IQL variable that carries it. */
+export interface QueryOutput {
+  label: string;
+  variable: string;
+}
+
+/**
+ * A compiled query: the IQL programs to run and how to shape the engine's
+ * rows into the result the caller asked for.
+ *
+ * An IQL query has no head, so the engine returns every variable the query
+ * binds. The SDK picks the selected columns out of those rows.
+ */
+export interface QueryPlan {
+  /** IQL programs to execute; several when an OR condition splits the query. */
+  programs: string[];
+  /** Result columns, in select order. */
+  outputs: QueryOutput[];
+  /**
+   * Variables of the query's first atom, in order. The engine names result
+   * columns after that relation's schema when the query binds no other
+   * variable, and the columns are then these variables by position. Empty
+   * for an aggregate query, whose columns are always named by variable.
+   */
+  goalVars: string[];
+  /** Variables of every relation atom; rows from OR branches are deduplicated on them. */
+  rowVars: string[];
+  /** Ordering and pagination applied after an OR split merges its branches. */
+  merge?: {
+    order?: { variable: string; descending: boolean };
+    limit?: number;
+    offset?: number;
+  };
+}
+
+/**
+ * Name of the program-local rule an aggregate query evaluates. A rule
+ * defined in the same program as a query lives only for that request, so
+ * nothing is left in the session.
+ */
+const AGG_RULE = 'il_sdk_agg';
+/** Program-local rule holding the union of an OR split, aggregated by AGG_RULE. */
+const AGG_SOURCE_RULE = 'il_sdk_agg_src';
+
 /**
  * Compile a query to IQL.
- * Returns a single string, or an array of strings if OR conditions require splitting.
+ * Returns a single program, or an array of programs if OR conditions require splitting.
  */
 export function compileQuery(opts: QueryOptions): string | string[] {
-  const env = new VarEnv();
+  const { programs } = compileQueryPlan(opts);
+  return programs.length === 1 ? programs[0] : programs;
+}
 
-  const allRelations: ResolvedRelation[] = [];
-  if (opts.join) {
-    for (const r of opts.join) {
-      if (r instanceof RelationDef) {
-        allRelations.push({ name: r.relationName, def: r, alias: undefined });
-      } else {
-        allRelations.push({
-          name: r.relationName,
-          def: {
-            relationName: r.relationName,
-            columns: r.schema.columns.map((c) => c.name),
-            columnTypes: {},
-          } as unknown as RelationDef,
-          alias: r.alias,
-        });
-      }
+/** Compile a query to the programs to run and the shape of its result. */
+export function compileQueryPlan(opts: QueryOptions): QueryPlan {
+  const env = new VarEnv();
+  const relations = resolveRelations(opts.join ?? []);
+
+  // Selecting a whole relation joins it.
+  for (const s of opts.select) {
+    if (s instanceof RelationDef && !relations.some((r) => r.name === s.relationName && r.alias === undefined)) {
+      relations.push({ name: s.relationName, def: s, alias: undefined });
     }
   }
-
-  // Process join conditions first
-  if (opts.on) {
-    processJoinCondition(opts.on, env);
+  if (relations.length === 0) {
+    throw new Error('A query needs at least one relation: select a relation or pass it in join.');
   }
 
-  // Process where conditions
+  // Join conditions first, so unified columns share a variable. Their
+  // other comparisons (e1.id != e2.id) filter like a where condition.
+  let onParts: string[] = [];
+  if (opts.on) {
+    if (hasOr(opts.on)) {
+      throw new Error('OR is not supported in a join condition; put it in where');
+    }
+    processJoinCondition(opts.on, env);
+    onParts = compileBoolExpr(opts.on, env).filter((p) => p !== '');
+  }
+
   let whereParts: string[] = [];
   let orBranches: string[][] | undefined;
   if (opts.where) {
     if (hasOr(opts.where)) {
-      orBranches = compileOrBranches(opts.where, env);
+      orBranches = compileOrBranches(opts.where, env).map((b) => b.filter((p) => p !== ''));
     } else {
       whereParts = compileBoolExpr(opts.where, env).filter((p) => p !== '');
     }
   }
 
-  const hasAgg = opts.select.some((s) => isAggExpr(s as Expr));
   const computed = opts.computed ?? {};
-  const hasComputedAgg = Object.values(computed).some((v) => isAggExpr(v as Expr));
+  const isAgg =
+    opts.select.some((s) => !(s instanceof RelationDef) && isAggExpr(s)) ||
+    Object.values(computed).some((v) => isAggExpr(v));
 
-  if (hasAgg || hasComputedAgg) {
-    return compileAggQuery(
-      opts.select,
-      env,
-      allRelations,
-      whereParts,
-      orBranches,
-      opts.orderBy,
-      opts.limit,
-      opts.offset,
-      computed,
+  const order = resolveOrder(opts.orderBy);
+  if (order !== undefined && !isAgg) {
+    // The engine sorts on a variable of the query's first atom only.
+    const i = relations.findIndex(
+      (r) => r.name === order.column.relation && r.alias === order.column.refAlias,
     );
+    if (i > 0) relations.unshift(...relations.splice(i, 1));
   }
 
-  // Simple query (no aggregations)
-  const headParts: string[] = [];
-  const bodyAtoms: string[] = [];
+  // Every column of every atom gets a variable, so the rows the engine
+  // returns always line up with the atoms.
+  const atomVars = relations.map(({ name, def, alias }) =>
+    def.columns.map((col) => env.getVar(astColumn(name, col, alias))),
+  );
+  const rowVars = [...new Set(atomVars.flat())];
+  const atoms = relations.map((r, i) => `${r.name}(${atomVars[i].join(', ')})`);
 
-  // Handle full relation selects
-  const fullRelations: ResolvedRelation[] = [];
-  for (const s of opts.select) {
-    if (s instanceof RelationDef) {
-      fullRelations.push({ name: s.relationName, def: s, alias: undefined });
-    }
-  }
-
-  if (fullRelations.length > 0) {
-    for (const { name, def, alias } of fullRelations) {
-      for (const col of def.columns) {
-        const astCol = astColumn(name, col, alias);
-        headParts.push(env.getVar(astCol));
-      }
-      if (!allRelations.some((r) => r.name === name && r.alias === alias)) {
-        allRelations.push({ name, def, alias });
-      }
-    }
-  }
-
-  // Add individual selected columns to head
-  for (const s of opts.select) {
-    if (!(s instanceof RelationDef) && isColumn(s as Expr)) {
-      headParts.push(env.getVar(s as Column));
-    } else if (!(s instanceof RelationDef) && !isColumn(s as Expr) && '_tag' in (s as Expr)) {
-      headParts.push(compileExpr(s as Expr, env));
-    }
-  }
-
-  // Add computed columns
-  for (const [, expr] of Object.entries(computed)) {
-    headParts.push(compileExpr(expr, env));
-  }
-
-  // Handle order_by
-  if (opts.orderBy !== undefined) {
-    if (isOrderedColumn(opts.orderBy)) {
-      const orderVar = compileExpr(opts.orderBy.column, env);
-      const suffix = opts.orderBy.descending ? ':desc' : ':asc';
-      for (let i = 0; i < headParts.length; i++) {
-        if (headParts[i] === orderVar) {
-          headParts[i] = `${orderVar}${suffix}`;
-          break;
-        }
-      }
-    } else if (isColumn(opts.orderBy)) {
-      const orderVar = env.getVar(opts.orderBy);
-      for (let i = 0; i < headParts.length; i++) {
-        if (headParts[i] === orderVar) {
-          headParts[i] = `${orderVar}:asc`;
-          break;
-        }
-      }
-    }
-  }
-
-  // Build body atoms for each relation
-  for (const { name, def, alias } of allRelations) {
-    const cols = def.columns;
-    const atomParts = cols.map((col) => {
-      const astCol = astColumn(name, col, alias);
-      return env.lookup(astCol) ?? '_';
-    });
-    bodyAtoms.push(`${name}(${atomParts.join(', ')})`);
-  }
-
-  // Combine body
-  const allBody = [...bodyAtoms, ...whereParts];
-  if (opts.limit !== undefined) {
-    if (opts.offset !== undefined) {
-      allBody.push(`limit(${opts.limit}, ${opts.offset})`);
-    } else {
-      allBody.push(`limit(${opts.limit})`);
-    }
-  }
-
-  const headStr = headParts.join(', ');
-
-  if (orBranches !== undefined) {
-    return orBranches.map((branchParts) => {
-      const filtered = branchParts.filter((p) => p !== '');
-      const branchBody = [...bodyAtoms, ...filtered];
-      if (opts.limit !== undefined) {
-        if (opts.offset !== undefined) {
-          branchBody.push(`limit(${opts.limit}, ${opts.offset})`);
-        } else {
-          branchBody.push(`limit(${opts.limit})`);
-        }
-      }
-      return `?${headStr} <- ${branchBody.join(', ')}`;
-    });
-  }
-
-  if (allBody.length > 0) {
-    return `?${headStr} <- ${allBody.join(', ')}`;
-  }
-  return `?${headStr}`;
+  const shape = {
+    env,
+    relations,
+    atomVars,
+    atoms,
+    rowVars,
+    whereParts: [...onParts, ...whereParts],
+    orBranches: orBranches?.map((branch) => [...onParts, ...branch]),
+    order,
+    limit: opts.limit,
+    offset: opts.offset,
+  };
+  return isAgg
+    ? compileAggPlan(shape, opts.select, computed)
+    : compilePlainPlan(shape, opts.select, computed);
 }
 
-function compileAggQuery(
+interface QueryShape {
+  env: VarEnv;
+  relations: ResolvedRelation[];
+  atomVars: string[][];
+  atoms: string[];
+  rowVars: string[];
+  whereParts: string[];
+  orBranches: string[][] | undefined;
+  order: { column: Column; descending: boolean } | undefined;
+  limit: number | undefined;
+  offset: number | undefined;
+}
+
+function resolveOrder(orderBy: Expr | undefined): { column: Column; descending: boolean } | undefined {
+  if (orderBy === undefined) return undefined;
+  if (isOrderedColumn(orderBy) && isColumn(orderBy.column)) {
+    return { column: orderBy.column, descending: orderBy.descending };
+  }
+  if (isColumn(orderBy)) {
+    return { column: orderBy, descending: false };
+  }
+  throw new TypeError('orderBy must be a column, optionally with .asc() or .desc()');
+}
+
+function limitAtom(limit: number | undefined, offset: number | undefined): string[] {
+  if (limit === undefined) return [];
+  return [offset !== undefined ? `limit(${limit}, ${offset})` : `limit(${limit})`];
+}
+
+/** Give each label a unique name, suffixing repeats with _2, _3, ... */
+function uniqueLabels(outputs: QueryOutput[]): QueryOutput[] {
+  const seen = new Set<string>();
+  return outputs.map((o) => {
+    let label = o.label;
+    for (let n = 2; seen.has(label); n++) label = `${o.label}_${n}`;
+    seen.add(label);
+    return { ...o, label };
+  });
+}
+
+function compilePlainPlan(
+  shape: QueryShape,
   select: Array<RelationDef | Expr>,
-  env: VarEnv,
-  allRelations: ResolvedRelation[],
-  whereParts: string[],
-  orBranches: string[][] | undefined,
-  orderBy: Expr | undefined,
-  limit: number | undefined,
-  offset: number | undefined,
   computed: Record<string, Expr>,
-): string {
-  const headParts: string[] = [];
-  const aggParts: string[] = [];
+): QueryPlan {
+  const { env, relations, atomVars, atoms, order } = shape;
+  const outputs: QueryOutput[] = [];
+  const bindings: string[] = [];
 
   for (const s of select) {
     if (s instanceof RelationDef) {
       for (const col of s.columns) {
-        const astCol = astColumn(s.relationName, col);
-        headParts.push(env.getVar(astCol));
+        outputs.push({ label: col, variable: env.getVar(astColumn(s.relationName, col)) });
       }
-    } else if (isAggExpr(s as Expr)) {
-      aggParts.push(compileExpr(s as Expr, env));
-    } else if (isColumn(s as Expr)) {
-      headParts.push(env.getVar(s as Column));
+    } else if (isColumn(s)) {
+      const v = env.getVar(s);
+      outputs.push({ label: v, variable: v });
+    } else {
+      const v = env.fresh('Expr');
+      bindings.push(`${v} = ${compileExpr(s, env)}`);
+      outputs.push({ label: v, variable: v });
     }
   }
+  for (const [alias, expr] of Object.entries(computed)) {
+    const label = columnToVariable(alias);
+    const v = env.fresh(label);
+    bindings.push(`${v} = ${compileExpr(expr, env)}`);
+    outputs.push({ label, variable: v });
+  }
 
-  for (const [, expr] of Object.entries(computed)) {
+  // The ordered column's relation was moved first, so its variable is in
+  // the first atom, where the engine reads :asc/:desc annotations.
+  let orderVar: string | undefined;
+  const goal = [...atomVars[0]];
+  if (order !== undefined) {
+    orderVar = env.getVar(order.column);
+    const i = goal.indexOf(orderVar);
+    if (i < 0) {
+      throw new Error(`orderBy column ${order.column.name} is not in a joined relation`);
+    }
+    goal[i] = `${orderVar}${order.descending ? ':desc' : ':asc'}`;
+  }
+  const head = [`${relations[0].name}(${goal.join(', ')})`, ...atoms.slice(1), ...bindings];
+
+  const plan = {
+    outputs: uniqueLabels(outputs),
+    goalVars: atomVars[0],
+    rowVars: shape.rowVars,
+  };
+
+  if (shape.orBranches === undefined) {
+    const body = [...head, ...shape.whereParts, ...limitAtom(shape.limit, shape.offset)];
+    return { ...plan, programs: [`?${body.join(', ')}`] };
+  }
+
+  // Each branch returns its own first limit + offset rows in order; the
+  // merged union is then sorted and paginated client-side.
+  const branchLimit = shape.limit !== undefined ? shape.limit + (shape.offset ?? 0) : undefined;
+  const programs = shape.orBranches.map(
+    (branch) => `?${[...head, ...branch, ...limitAtom(branchLimit, undefined)].join(', ')}`,
+  );
+  return {
+    ...plan,
+    programs,
+    merge: {
+      order: orderVar !== undefined ? { variable: orderVar, descending: order!.descending } : undefined,
+      limit: shape.limit,
+      offset: shape.offset,
+    },
+  };
+}
+
+/** Result variables an aggregate contributes to the rule head, in order. */
+function aggOutputVars(agg: AggExpr, env: VarEnv): string[] {
+  const varOf = (e: Expr): string => (isColumn(e) ? env.getVar(e) : 'Value');
+  if (agg.orderColumn !== undefined) {
+    // top_k, top_k_threshold, within_radius: one column per passthrough, then the ordered column.
+    return [...agg.passthrough.map(varOf), varOf(agg.orderColumn)];
+  }
+  const fn = snakeToCamel(agg.func);
+  return [agg.column !== undefined ? `${fn}${varOf(agg.column)}` : fn];
+}
+
+function compileAggPlan(
+  shape: QueryShape,
+  select: Array<RelationDef | Expr>,
+  computed: Record<string, Expr>,
+): QueryPlan {
+  const { env, atoms, order } = shape;
+  const head: string[] = [];
+  const outputs: QueryOutput[] = [];
+  const bindings: string[] = [];
+  const boundVars: string[] = [];
+
+  for (const s of select) {
+    if (s instanceof RelationDef) {
+      for (const col of s.columns) {
+        const v = env.getVar(astColumn(s.relationName, col));
+        head.push(v);
+        outputs.push({ label: col, variable: v });
+      }
+    } else if (isAggExpr(s)) {
+      head.push(compileAggExpr(s, env));
+      for (const v of aggOutputVars(s, env)) outputs.push({ label: v, variable: v });
+    } else if (isColumn(s)) {
+      const v = env.getVar(s);
+      head.push(v);
+      outputs.push({ label: v, variable: v });
+    } else {
+      const v = env.fresh('Expr');
+      bindings.push(`${v} = ${compileExpr(s, env)}`);
+      boundVars.push(v);
+      head.push(v);
+      outputs.push({ label: v, variable: v });
+    }
+  }
+  for (const [alias, expr] of Object.entries(computed)) {
+    const label = columnToVariable(alias);
     if (isAggExpr(expr)) {
-      aggParts.push(compileExpr(expr, env));
+      head.push(compileAggExpr(expr, env));
+      const vars = aggOutputVars(expr, env);
+      for (const v of vars) outputs.push({ label: vars.length === 1 ? label : v, variable: v });
     } else {
-      headParts.push(compileExpr(expr, env));
+      const v = env.fresh(label);
+      bindings.push(`${v} = ${compileExpr(expr, env)}`);
+      boundVars.push(v);
+      head.push(v);
+      outputs.push({ label, variable: v });
     }
   }
 
-  const bodyAtoms: string[] = [];
-  for (const { name, def, alias } of allRelations) {
-    const cols = def.columns;
-    const atomParts = cols.map((col) => {
-      const astCol = astColumn(name, col, alias);
-      return env.lookup(astCol) ?? '_';
-    });
-    bodyAtoms.push(`${name}(${atomParts.join(', ')})`);
-  }
-
-  const allBody = [...bodyAtoms, ...whereParts];
-  if (limit !== undefined) {
-    if (offset !== undefined) {
-      allBody.push(`limit(${limit}, ${offset})`);
-    } else {
-      allBody.push(`limit(${limit})`);
+  // The query atom names the rule's columns; they only need to be distinct.
+  const used = new Set<string>();
+  const queryVars = outputs.map((o) => {
+    let v = o.variable;
+    for (let n = 2; used.has(v); n++) v = `${o.variable}_${n}`;
+    used.add(v);
+    return v;
+  });
+  const queryArgs = [...queryVars];
+  if (order !== undefined) {
+    const orderVar = env.getVar(order.column);
+    const i = outputs.findIndex((o) => o.variable === orderVar);
+    if (i < 0) {
+      throw new Error(`In an aggregate query, orderBy must be a selected column (${order.column.name} is not)`);
     }
+    queryArgs[i] = `${queryVars[i]}${order.descending ? ':desc' : ':asc'}`;
   }
 
-  const allHead = [...headParts, ...aggParts];
-  const headStr = allHead.join(', ');
-
-  if (allBody.length > 0) {
-    return `?${headStr} <- ${allBody.join(', ')}`;
+  let rules: string[];
+  if (shape.orBranches === undefined) {
+    const body = [...atoms, ...bindings, ...shape.whereParts];
+    rules = [`${AGG_RULE}(${head.join(', ')}) <- ${body.join(', ')}`];
+  } else {
+    // Aggregate over the union of the branches: collect it in a source rule first.
+    const src = `${AGG_SOURCE_RULE}(${[...shape.rowVars, ...boundVars].join(', ')})`;
+    rules = [
+      ...shape.orBranches.map((branch) => `${src} <- ${[...atoms, ...bindings, ...branch].join(', ')}`),
+      `${AGG_RULE}(${head.join(', ')}) <- ${src}`,
+    ];
   }
-  return `?${headStr}`;
+  const query = `?${[`${AGG_RULE}(${queryArgs.join(', ')})`, ...limitAtom(shape.limit, shape.offset)].join(', ')}`;
+
+  return {
+    programs: [[...rules, query].join('\n')],
+    outputs: uniqueLabels(outputs.map((o, i) => ({ label: o.label, variable: queryVars[i] }))),
+    goalVars: [],
+    rowVars: [],
+  };
+}
+
+/**
+ * Indexes of `variables` in an engine result. Columns are named by variable,
+ * except that a query binding nothing beyond its first atom gets the
+ * relation's schema column names; those columns are the first atom's
+ * variables by position.
+ */
+export function resultColumnIndexes(plan: QueryPlan, columns: string[], variables: string[]): number[] {
+  const { goalVars } = plan;
+  const byName = goalVars.length === 0 || goalVars.every((v, i) => columns[i] === v);
+  return variables.map((v) => {
+    const i = byName ? columns.indexOf(v) : goalVars.indexOf(v);
+    if (i < 0) {
+      throw new Error(`Query result has no column for ${v} (columns: ${columns.join(', ')})`);
+    }
+    return i;
+  });
 }
 
 // ── Rule compilation ────────────────────────────────────────────────

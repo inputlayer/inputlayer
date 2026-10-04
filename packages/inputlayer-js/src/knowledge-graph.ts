@@ -16,8 +16,11 @@ import {
   compileDelete,
   compileConditionalDelete,
   compileQuery,
+  compileQueryPlan,
+  resultColumnIndexes,
   compileRule,
   type QueryOptions,
+  type QueryPlan,
   type RuleClause,
 } from './compiler.js';
 import { InternalError, QueryError } from './errors.js';
@@ -316,27 +319,18 @@ export class KnowledgeGraph {
    */
   async query(opts: QueryOptions): Promise<ResultSet> {
     await this.ensureKg();
-    const iql = compileQuery(opts);
+    const plan = compileQueryPlan(opts);
+    const columns = plan.outputs.map((o) => o.label);
+    const outputVars = plan.outputs.map((o) => o.variable);
 
-    if (Array.isArray(iql)) {
-      // OR split -> execute each and union
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const allRows: any[][] = [];
-      let columns: string[] = [];
-      for (const q of iql) {
-        const result = await this.conn.execute(q);
-        if (columns.length === 0) {
-          columns = result.columns;
-        }
-        allRows.push(...result.rows);
-      }
-      return new ResultSet({ columns, rows: allRows });
+    if (plan.programs.length > 1) {
+      return new ResultSet({ columns, rows: await this.queryBranches(plan, outputVars) });
     }
 
-    const result = await this.conn.execute(iql);
+    const result = await this.conn.execute(plan.programs[0]);
     const rs = new ResultSet({
-      columns: result.columns,
-      rows: result.rows,
+      columns,
+      rows: projectRows(plan, result.columns, result.rows, outputVars),
       rowCount: result.row_count,
       totalCount: result.total_count,
       truncated: result.truncated,
@@ -350,6 +344,36 @@ export class KnowledgeGraph {
       rs.warnings = result.metadata.warnings ?? [];
     }
     return rs;
+  }
+
+  /** Run each branch of an OR split, then merge: union, order, paginate. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async queryBranches(plan: QueryPlan, outputVars: string[]): Promise<any[][]> {
+    const merge = plan.merge ?? {};
+    const orderVars = merge.order ? [merge.order.variable] : [];
+    // Each row carries its outputs, then the atom variables that identify
+    // it, then the sort key.
+    const vars = [...outputVars, ...plan.rowVars, ...orderVars];
+    const idEnd = outputVars.length + plan.rowVars.length;
+    const seen = new Set<string>();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const merged: any[][] = [];
+    for (const program of plan.programs) {
+      const result = await this.conn.execute(program);
+      for (const row of projectRows(plan, result.columns, result.rows, vars)) {
+        const key = JSON.stringify(row.slice(outputVars.length, idEnd));
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(row);
+      }
+    }
+    if (merge.order) {
+      const sign = merge.order.descending ? -1 : 1;
+      merged.sort((a, b) => sign * compareValues(a[idEnd], b[idEnd]));
+    }
+    const start = merge.offset ?? 0;
+    const end = merge.limit !== undefined ? start + merge.limit : undefined;
+    return merged.slice(start, end).map((row) => row.slice(0, outputVars.length));
   }
 
   /**
@@ -715,4 +739,30 @@ function insertedCount(result: ResultResponse): number {
     count += Number(match[1]);
   }
   return count;
+}
+
+/** Pick `vars` out of engine rows, in order. */
+function projectRows(
+  plan: QueryPlan,
+  columns: string[],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  rows: any[][],
+  vars: string[],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any[][] {
+  if (rows.length === 0) return rows;
+  const idx = resultColumnIndexes(plan, columns, vars);
+  if (idx.length === rows[0].length && idx.every((c, i) => c === i)) return rows;
+  return rows.map((row) => idx.map((c) => row[c]));
+}
+
+/** Order engine values: nulls last, numbers and strings by value, anything else by text. */
+function compareValues(a: unknown, b: unknown): number {
+  if (a === b) return 0;
+  if (a === null || a === undefined) return 1;
+  if (b === null || b === undefined) return -1;
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  const sa = typeof a === 'string' ? a : JSON.stringify(a);
+  const sb = typeof b === 'string' ? b : JSON.stringify(b);
+  return sa < sb ? -1 : sa > sb ? 1 : 0;
 }
