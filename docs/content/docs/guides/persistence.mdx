@@ -162,6 +162,9 @@ failure: recovery may include or discard that transaction.
   them. After each append the server checks that the file it wrote is still the
   one at `wal/current.wal`. If it is not, that commit returns `OutcomeUnknown`:
   the record is in the detached file, which is recovered only if it is put back.
+  The same check runs before the server reopens, reads or rewrites the file, so
+  a WAL file removed or replaced between writes is refused the same way rather
+  than replaced by a fresh, empty one.
   Every later write is refused with `StoreReadOnly` until restart. The server
   does not recreate the directory, because writes acknowledged earlier may have
   been lost with it.
