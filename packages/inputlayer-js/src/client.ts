@@ -50,7 +50,7 @@ export interface InputLayerOptions {
   epoch?: string;
   /** Deadline of a call without its own `timeoutMs` (default: 30 000; 0 for none) */
   defaultTimeoutMs?: number;
-  /** Wait past a deadline before cancelling and probing the server (default: 2 000) */
+  /** Wait past a deadline, after cancelling, before failing the call locally (default: 2 000) */
   timeoutGraceMs?: number;
   /** Ping an otherwise silent connection this often so it is never idle-closed (default: 20 000; 0 disables) */
   keepaliveMs?: number;

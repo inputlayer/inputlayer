@@ -173,7 +173,8 @@ interface Call {
   stream?: Stream;
   deadline?: ReturnType<typeof setTimeout>;
   cancelId?: string;
-  cancelled: boolean;
+  /** What sent the call's `cancel`: its deadline or its signal. */
+  cancelledBy?: 'deadline' | 'signal';
   retried: boolean;
   settled: boolean;
 }
@@ -497,7 +498,6 @@ export class Connection {
         signal: opts.signal,
         resolve,
         reject: (error) => reject(withIql(error, program)),
-        cancelled: false,
         retried: false,
         settled: false,
       };
@@ -540,7 +540,7 @@ export class Connection {
     call.deadline = undefined;
     if (call.id && this.inFlight.get(call.id) === call) {
       // The engine's own deadline answers now; cancel in case it does not.
-      this.sendCancel(call);
+      this.sendCancel(call, 'deadline');
       this.probeServer();
       call.deadline = setTimeout(() => this.overdue(call), this.timeoutGraceMs);
       return;
@@ -574,12 +574,12 @@ export class Connection {
       call.reject(new CancelledError('Cancelled before it was sent'));
       return;
     }
-    if (call.id && this.inFlight.get(call.id) === call) this.sendCancel(call);
+    if (call.id && this.inFlight.get(call.id) === call) this.sendCancel(call, 'signal');
   }
 
-  private sendCancel(call: Call): void {
-    if (call.cancelled || !call.id) return;
-    call.cancelled = true;
+  private sendCancel(call: Call, by: 'deadline' | 'signal'): void {
+    if (call.cancelledBy || !call.id) return;
+    call.cancelledBy = by;
     const id = this.newId('c');
     call.cancelId = id;
     // The ack follows the target's own reply, which settles the call.
@@ -664,11 +664,15 @@ export class Connection {
         this.finish(call, () => this.accept(msg));
         return;
       case 'error':
-        if (msg.code === 'rate_limited' && !call.retried && !call.cancelled) {
+        if (msg.code === 'rate_limited' && !call.retried && !call.cancelledBy) {
           this.retryLater(call, id);
           return;
         }
         this.finish(call, () => {
+          // The deadline's own cancel can reach the engine before its deadline does.
+          if (msg.code === 'cancelled' && call.cancelledBy === 'deadline') {
+            throw new DeadlineExceededError(msg.message);
+          }
           throw queryError(msg);
         });
         return;

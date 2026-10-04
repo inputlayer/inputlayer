@@ -223,6 +223,7 @@ describe('connection fixtures', () => {
         'close_mid_stream',
         'dead_server',
         'deadline_cancel',
+        'deadline_cancel_wins',
         'duplicate_id_rejection',
         'in_flight_bound',
         'interleaved_streams',
@@ -578,6 +579,25 @@ describe('reconnect', () => {
     server!.last.socket.close();
     await reconnected;
     expect(gaps.map((g) => g.code)).toEqual(['no_cursor']);
+  });
+
+  it('a handle call during a reconnect fails at its deadline', async () => {
+    server = await MockServer.start();
+    const il = new sdk.InputLayer({ url: server.url, username: 'u', password: 'p',
+      reconnectDelay: 5, keepaliveMs: 0 });
+    const kg = il.knowledgeGraph('shop');
+    try {
+      await kg.connection.connect();
+      const disconnected = new Promise((resolve) => kg.connection.events.addEventListener('disconnected', resolve));
+      server.last.socket.close();
+      await disconnected;
+      const started = Date.now();
+      const error = await kg.execute('?a(X)', { timeoutMs: 200 }).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(sdk.DeadlineExceededError);
+      expect(Date.now() - started).toBeLessThan(1500);
+    } finally {
+      await il.close();
+    }
   });
 
   it('a new engine run drops the old cursor', async () => {

@@ -196,16 +196,10 @@ export class KnowledgeGraph {
     return this.conn;
   }
 
-  /** Open the handle's connection on first use, creating the knowledge graph if missing. */
-  private ensureKg(): Promise<void> {
-    return this.conn.connect();
-  }
-
   // ── Schema ──────────────────────────────────────────────────────
 
   /** Deploy schema definitions. Idempotent. */
   async define(...relations: RelationDef[]): Promise<void> {
-    await this.ensureKg();
     for (const rel of relations) {
       const iql = compileSchema(rel);
       await this.conn.execute(iql);
@@ -214,7 +208,6 @@ export class KnowledgeGraph {
 
   /** List all relations in this KG. */
   async relations(): Promise<RelationInfo[]> {
-    await this.ensureKg();
     const result = await this.conn.execute('.rel');
     return result.rows.map((row) => ({
       name: String(row[0]),
@@ -224,7 +217,6 @@ export class KnowledgeGraph {
 
   /** Describe a relation's schema. */
   async describe(relation: RelationDef | string): Promise<RelationDescription> {
-    await this.ensureKg();
     const name = typeof relation === 'string' ? relation : relation.relationName;
     const result = await this.conn.execute(`.rel ${name}`);
     const columns = result.rows.map((row) => ({
@@ -236,7 +228,6 @@ export class KnowledgeGraph {
 
   /** Drop a relation and all its data. */
   async dropRelation(relation: RelationDef | string): Promise<void> {
-    await this.ensureKg();
     const name = typeof relation === 'string' ? relation : relation.relationName;
     await this.conn.execute(`.rel drop ${name}`);
   }
@@ -245,7 +236,6 @@ export class KnowledgeGraph {
 
   /** Insert facts into the knowledge graph. */
   async insert(rel: RelationDef, facts: Fact | Fact[]): Promise<InsertResult> {
-    await this.ensureKg();
     const factList = Array.isArray(facts) ? facts : [facts];
     if (factList.length === 0) return { count: 0 };
 
@@ -269,7 +259,6 @@ export class KnowledgeGraph {
    * @param factsOrCondition - Either specific facts to delete, or a BoolExpr condition
    */
   async delete(rel: RelationDef, factsOrCondition: Fact | Fact[] | BoolExpr): Promise<DeleteResult> {
-    await this.ensureKg();
     // Check if it's a BoolExpr (has _tag property)
     if (
       typeof factsOrCondition === 'object' &&
@@ -313,7 +302,6 @@ export class KnowledgeGraph {
    * });
    */
   async query(opts: QueryOptions): Promise<ResultSet> {
-    await this.ensureKg();
     const plan = compileQueryPlan(opts);
     const columns = plan.outputs.map((o) => o.label);
     const outputVars = plan.outputs.map((o) => o.variable);
@@ -403,7 +391,6 @@ export class KnowledgeGraph {
     radius?: number;
     metric?: 'cosine' | 'euclidean' | 'manhattan' | 'dot_product';
   }): Promise<ResultSet> {
-    await this.ensureKg();
     const rel = opts.relation;
     const relName = rel.relationName;
     const cols = rel.columns;
@@ -464,7 +451,6 @@ export class KnowledgeGraph {
     headColumns: string[],
     clauses: RuleClause[],
   ): Promise<void> {
-    await this.ensureKg();
     for (const clause of clauses) {
       const iql = compileRule(headName, headColumns, clause, true);
       await this.conn.execute(iql);
@@ -473,27 +459,23 @@ export class KnowledgeGraph {
 
   /** List all rules in this KG. */
   async listRules(): Promise<RuleInfo[]> {
-    await this.ensureKg();
     const result = await this.conn.execute(meta.ruleList());
     return ruleList(result.rows);
   }
 
   /** Get the IQL clauses of a rule, in order. */
   async ruleDefinition(name: string): Promise<string[]> {
-    await this.ensureKg();
     const result = await this.conn.execute(meta.ruleDef(name));
     return ruleClauses(result.rows);
   }
 
   /** Drop all clauses of a rule. */
   async dropRule(name: string): Promise<void> {
-    await this.ensureKg();
     await this.conn.execute(meta.ruleDrop(name));
   }
 
   /** Remove a specific clause from a rule (1-based index). */
   async dropRuleClause(name: string, index: number): Promise<void> {
-    await this.ensureKg();
     await this.conn.execute(meta.ruleRemove(name, index));
   }
 
@@ -511,13 +493,11 @@ export class KnowledgeGraph {
 
   /** Clear a rule's materialized data. */
   async clearRule(name: string): Promise<void> {
-    await this.ensureKg();
     await this.conn.execute(meta.ruleClear(name));
   }
 
   /** Drop all rules whose names start with prefix. */
   async dropRulesByPrefix(prefix: string): Promise<void> {
-    await this.ensureKg();
     await this.conn.execute(meta.ruleDropPrefix(prefix));
   }
 
@@ -525,13 +505,11 @@ export class KnowledgeGraph {
 
   /** Create an HNSW vector index. */
   async createIndex(index: HnswIndex): Promise<void> {
-    await this.ensureKg();
     await this.conn.execute(index.toIQL());
   }
 
   /** List all indexes. */
   async listIndexes(): Promise<IndexInfo[]> {
-    await this.ensureKg();
     const result = await this.conn.execute('.index list');
     return result.rows.map((row) => ({
       name: String(row[0]),
@@ -544,7 +522,6 @@ export class KnowledgeGraph {
 
   /** Get statistics for an index. */
   async indexStats(name: string): Promise<IndexStats> {
-    await this.ensureKg();
     const result = await this.conn.execute(`.index stats ${name}`);
     const row = result.rows[0] ?? [name, 0, 0, 0];
     return {
@@ -557,13 +534,11 @@ export class KnowledgeGraph {
 
   /** Drop an index. */
   async dropIndex(name: string): Promise<void> {
-    await this.ensureKg();
     await this.conn.execute(`.index drop ${name}`);
   }
 
   /** Rebuild an index. */
   async rebuildIndex(name: string): Promise<void> {
-    await this.ensureKg();
     await this.conn.execute(`.index rebuild ${name}`);
   }
 
@@ -594,7 +569,6 @@ export class KnowledgeGraph {
 
   /** Show the query plan without executing. */
   async debug(opts: QueryOptions): Promise<DebugResult> {
-    await this.ensureKg();
     const iql = compileQueryPlan(opts).debug;
     const result = await this.conn.execute(`.debug ${iql}`);
     const planText = result.rows.map((row) => String(row[0])).join('\n');
@@ -607,7 +581,6 @@ export class KnowledgeGraph {
    * Each result row has a corresponding proof tree explaining its derivation.
    */
   async why(opts: QueryOptions & { full?: boolean }): Promise<WhyResult> {
-    await this.ensureKg();
     const plan = compileQueryPlan(opts);
     const result = await this.conn.execute(meta.why(plan.why.statement, opts.full));
     // The rule's columns are its head variables by position.
@@ -638,7 +611,6 @@ export class KnowledgeGraph {
    * Returns a structured explanation with the specific blocker for each rule.
    */
   async whyNot(relation: RelationDef, fact: Fact): Promise<WhyNotResult> {
-    await this.ensureKg();
     const relName = relation.relationName;
     const cols = relation.columns;
     const vals = cols
@@ -658,13 +630,11 @@ export class KnowledgeGraph {
 
   /** Trigger storage compaction. */
   async compact(): Promise<void> {
-    await this.ensureKg();
     await this.conn.execute('.compact');
   }
 
   /** Get server status. */
   async status(): Promise<ServerStatus> {
-    await this.ensureKg();
     const result = await this.conn.execute('.status');
     const row = result.rows[0] ?? ['unknown', 'unknown'];
     return {
@@ -680,7 +650,6 @@ export class KnowledgeGraph {
    * the WebSocket this rejects with `QueryError` (code `unsupported`).
    */
   async load(path: string, mode?: string): Promise<void> {
-    await this.ensureKg();
     let cmd = `.load ${path}`;
     if (mode) cmd += ` ${mode}`;
     await this.conn.execute(cmd);
@@ -688,7 +657,6 @@ export class KnowledgeGraph {
 
   /** Clear all relations matching a prefix. */
   async clearPrefix(prefix: string): Promise<ClearResult> {
-    await this.ensureKg();
     const result = await this.conn.execute(`.clear prefix ${prefix}`);
     const details: Array<[string, number]> = result.rows
       .filter((row) => row.length > 1)
@@ -702,7 +670,6 @@ export class KnowledgeGraph {
 
   /** Execute raw IQL. `timeoutMs` and `signal` bound and cancel the call. */
   async execute(iql: string, opts?: ExecuteOptions): Promise<ResultSet> {
-    await this.ensureKg();
     const result = await this.conn.execute(iql, opts);
     return new ResultSet({
       columns: result.columns,
