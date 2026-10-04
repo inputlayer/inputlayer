@@ -192,6 +192,8 @@ await kg.insert(Employee, [
 
 The insert method returns an `InsertResult` whose `count` is the number of facts the engine newly stored; re-inserting an existing fact counts 0. This is a behaviour change: earlier SDK versions returned the number of facts sent.
 
+Every write (inserts, deletes, programs, claims, rules and session facts) sends its values as [parameters](/docs/guides/websocket-api#parameters), beside the program text: the program reads `+employee($p0, $p1, $p2, $p3, $p4)` and the engine binds the values without parsing them, so no value can change what the program does. This needs an engine speaking protocol 4; an older one is refused before anything is sent.
+
 ## Deleting Data
 
 Delete specific facts or use a condition to remove matching rows:
@@ -411,6 +413,14 @@ If you need to drop down to raw IQL for something the OLM doesn't cover:
 
 ```typescript
 const result = await kg.execute("?employee(Id, Name, _, Salary, _), Salary > 100000");
+```
+
+Pass every value you did not write yourself as a parameter rather than splicing it into the text:
+
+```typescript
+await kg.execute("+employee($id, $name, $dept, $salary, $active)", {
+  params: { id: 7, name: userInput, dept: "eng", salary: { float: 100000 }, active: true },
+});
 ```
 
 To execute a local IQL file in Node.js, read it explicitly and pass its contents
