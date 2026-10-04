@@ -488,6 +488,11 @@ class KnowledgeGraph:
             elif isinstance(v, AggExpr):
                 ast_computed[k] = v
                 _add_agg_relations(v)
+            elif isinstance(v, OrderedColumn):
+                raise CompileError(
+                    f"{k}= is a sort direction, not a computed column",
+                    hint=f"to sort, pass order_by= instead of {k}=",
+                )
             elif isinstance(v, Expr):
                 ast_computed[k] = v
             else:
