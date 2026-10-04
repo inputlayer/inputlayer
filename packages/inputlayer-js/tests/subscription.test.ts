@@ -487,7 +487,21 @@ describe('watch and on', () => {
     engine!.delta(5, 9, [[7, 7]]);
     expect((await live.next()).value).toEqual({ rows: [{ a: 1, b: 1 }, { a: 2, b: 2 }], revision: 2, verified: false, reason: 'seq_gap' });
     expect((await live.next()).value).toEqual({ rows: [{ a: 2, b: 2 }], revision: 3, verified: true });
-    await live.return();
+    await live.return!();
+    await waitFor(() => engine!.programs.some((p) => p.startsWith('.unsubscribe')));
+  });
+
+  it('watch closes while idle: return() ends a pending next()', async () => {
+    const kg = await graph();
+    const live = kg.watch(E);
+    expect((await live.next()).value).toEqual({ rows: [], revision: 1, verified: true });
+    const pending = live.next();
+    const closed = await Promise.race([
+      live.return!().then(() => 'closed'),
+      new Promise((resolve) => setTimeout(() => resolve('hung'), 1000)),
+    ]);
+    expect(closed).toBe('closed');
+    expect(await pending).toEqual({ value: undefined, done: true });
     await waitFor(() => engine!.programs.some((p) => p.startsWith('.unsubscribe')));
   });
 

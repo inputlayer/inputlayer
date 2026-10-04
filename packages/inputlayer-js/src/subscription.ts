@@ -699,22 +699,34 @@ function refusal(error: Error): Error {
 
 // ── Levels and callbacks ────────────────────────────────────────────
 
-/** The whole current result each time it changes; see `KnowledgeGraph.watch`. */
-export async function* watchChanges<T>(sub: Subscription<T>): AsyncGenerator<Live<T>, void, undefined> {
+/**
+ * The whole current result each time it changes; see `KnowledgeGraph.watch`.
+ * Not an async generator: its `return()` would wait for the next change.
+ */
+export function watchChanges<T>(sub: Subscription<T>): AsyncIterableIterator<Live<T>> {
   const rows = new Map<string, T>();
-  try {
-    for await (const change of sub) {
+  return {
+    [Symbol.asyncIterator]() {
+      return this;
+    },
+    async next(): Promise<IteratorResult<Live<T>>> {
+      const { value: change, done } = await sub.next();
+      if (done) return { value: undefined, done: true };
       if (change.kind === 'unverified') {
-        yield { rows: [...rows.values()], revision: change.revision, verified: false, reason: change.reason };
-        continue;
+        return {
+          value: { rows: [...rows.values()], revision: change.revision, verified: false, reason: change.reason },
+          done: false,
+        };
       }
       for (const row of change.retracted) rows.delete(JSON.stringify(row));
       for (const row of change.inserted) rows.set(JSON.stringify(row), row);
-      yield { rows: [...rows.values()], revision: change.revision, verified: true };
-    }
-  } finally {
-    await sub.close();
-  }
+      return { value: { rows: [...rows.values()], revision: change.revision, verified: true }, done: false };
+    },
+    async return(): Promise<IteratorResult<Live<T>>> {
+      await sub.close();
+      return { value: undefined, done: true };
+    },
+  };
 }
 
 /** Feed every change of `sub` to `callback`, one at a time. */

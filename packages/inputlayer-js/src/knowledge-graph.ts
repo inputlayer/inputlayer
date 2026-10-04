@@ -542,7 +542,7 @@ export class KnowledgeGraph {
    * `unverified` event) until the fresh result arrives: act on nothing new
    * meanwhile. Coalesced commits are seen as one change.
    */
-  watch<T = Row>(target: SubscriptionTarget, opts?: SubscribeOptions): AsyncGenerator<Live<T>, void, undefined> {
+  watch<T = Row>(target: SubscriptionTarget, opts?: SubscribeOptions): AsyncIterableIterator<Live<T>> {
     return watchChanges(this.subscribe<T>(target, opts));
   }
 

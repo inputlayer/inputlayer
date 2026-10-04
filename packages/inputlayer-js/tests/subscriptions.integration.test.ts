@@ -507,7 +507,10 @@ describe.skipIf(SKIP)('Live: subscriptions', () => {
     await waitFor(() => seen.length === 2);
     expect(seen.map((c) => c.kind)).toEqual(['snapshot', 'delta']);
     expect(seen[1].inserted).toEqual([{ a: 2, b: 2 }]);
-    await levels.return();
+    // Close while idle: a next() waiting on a quiet result ends at once.
+    const idle = levels.next();
+    await levels.return!();
+    expect(await idle).toEqual({ value: undefined, done: true });
     await handle.close();
   });
 });
