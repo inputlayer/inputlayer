@@ -18,8 +18,6 @@ interface QueryResultsPanelProps {
   error: StructuredError | null
   isExecuting: boolean
   activeQuery: string
-  sidebarOpen?: boolean
-  onStartExample?: () => void
 }
 
 /** Detect if query is purely a mutation (insert/delete/meta, no query lines) */
@@ -93,7 +91,7 @@ function compareValues(a: string | number | boolean | null, b: string | number |
 
 const PAGE_SIZE = 200
 
-export function QueryResultsPanel({ result, error, isExecuting, activeQuery, sidebarOpen, onStartExample }: QueryResultsPanelProps) {
+export function QueryResultsPanel({ result, error, isExecuting, activeQuery }: QueryResultsPanelProps) {
   const [copied, setCopied] = useState(false)
   const [sort, setSort] = useState<SortState | null>(null)
   const [page, setPage] = useState(0)
@@ -225,7 +223,7 @@ export function QueryResultsPanel({ result, error, isExecuting, activeQuery, sid
   }
 
   if (!result) {
-    return <WelcomePanel sidebarOpen={sidebarOpen} onStartExample={onStartExample} />
+    return <WelcomePanel />
   }
 
   // Compute row provenance breakdown
@@ -569,7 +567,7 @@ function ResultTable({
 
 // --- Welcome Panel (shown when no query has been run yet) ---
 
-function WelcomePanel({ sidebarOpen, onStartExample }: { sidebarOpen?: boolean; onStartExample?: () => void }) {
+function WelcomePanel() {
   return (
     <div className="flex h-full items-center justify-center bg-muted/20 overflow-auto">
       <div className="max-w-md px-4 py-8 text-center">
@@ -577,18 +575,9 @@ function WelcomePanel({ sidebarOpen, onStartExample }: { sidebarOpen?: boolean; 
         <p className="mt-2 text-sm text-muted-foreground">
           The live knowledge graph for AI agents: conclusions from facts and rules, kept current as facts change, with the reasons behind each one.
         </p>
-        {sidebarOpen ? (
-          <p className="mt-4 text-sm text-muted-foreground">
-            Pick a learning journey from the sidebar to get started.
-          </p>
-        ) : (
-          <button
-            onClick={() => onStartExample?.()}
-            className="mt-6 inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            Let&apos;s get started
-          </button>
-        )}
+        <p className="mt-4 text-sm text-muted-foreground">
+          Write a query in the editor and press Cmd+Enter to run it.
+        </p>
       </div>
     </div>
   )

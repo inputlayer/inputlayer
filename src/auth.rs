@@ -535,11 +535,6 @@ fn authorize_kg_editor(stmt: &Statement) -> Result<(), String> {
             | MetaCommand::Status
             | MetaCommand::Help
             | MetaCommand::Quit => Ok(()),
-            // Agent commands
-            MetaCommand::AgentMessage(_)
-            | MetaCommand::AgentStart(_)
-            | MetaCommand::AgentSetup(_)
-            | MetaCommand::AgentExamples => Ok(()),
             // System administration (admin only, should not reach per-KG check)
             MetaCommand::Compact
             | MetaCommand::Backup(_)
@@ -601,11 +596,6 @@ fn authorize_kg_viewer(stmt: &Statement) -> Result<(), String> {
             | MetaCommand::SessionClear
             | MetaCommand::SessionDrop(_)
             | MetaCommand::SessionDropName(_) => Ok(()),
-            // Agent commands (read-only interaction)
-            MetaCommand::AgentMessage(_)
-            | MetaCommand::AgentStart(_)
-            | MetaCommand::AgentSetup(_)
-            | MetaCommand::AgentExamples => Ok(()),
             _ => {
                 Err("Permission denied: you have viewer access to this knowledge graph".to_string())
             }
@@ -735,12 +725,6 @@ fn authorize_non_admin_meta(role: &Role, cmd: &MetaCommand) -> Result<(), String
         | MetaCommand::Status
         | MetaCommand::Help
         | MetaCommand::Quit => Ok(()),
-
-        // Agent commands - all roles
-        MetaCommand::AgentMessage(_)
-        | MetaCommand::AgentStart(_)
-        | MetaCommand::AgentSetup(_)
-        | MetaCommand::AgentExamples => Ok(()),
 
         // System administration - admin only
         MetaCommand::Compact => Err("Permission denied: only admins can compact".to_string()),
