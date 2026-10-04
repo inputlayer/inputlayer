@@ -58,7 +58,7 @@ fn key_times_survive_a_restart() {
     let handler = open(tmp.path());
     let before = now_ms();
     let created = handler
-        .handle_apikey_create("ci", "admin", Some(Duration::from_secs(3_600)))
+        .handle_apikey_create("ci", "admin", Some(Duration::from_secs(3_600)), None)
         .unwrap();
     let key = created.rows[0].values[1].as_str().unwrap().to_string();
     let WireValue::Timestamp(expires_at) = created.rows[0].values[2] else {

@@ -304,6 +304,7 @@ fn store_bootstrap_key(storage: &StorageEngine, key: &str) -> Result<(), String>
             created_at: Some(now_ms()),
             ..auth::ApiKeyTimes::default()
         },
+        scope: None,
     };
     let mut changes = vec![FactChange::Insert {
         relation: auth::stored::BOOTSTRAP_KEYS.to_string(),
@@ -328,6 +329,93 @@ fn user_exists(snapshot: &KnowledgeGraphSnapshot, username: &str) -> bool {
         .into_iter()
         .flatten()
         .any(|t| t.values().first().and_then(Value::as_str) == Some(username))
+}
+
+/// `kg_acl_relations(kg, username, relations)`: the relations a `writer` or
+/// `decider` grant in `kg_acls` may write, as `auth::decode_relations` reads
+/// them. A `writer` grant with no row writes every relation.
+const KG_ACL_RELATIONS: &str = "kg_acl_relations";
+
+/// The access a `kg_acls` grant of `role` gives `username` on `kg_name`. A
+/// writer or decider grant whose relations do not read back as exactly one
+/// list gives no access, rather than more than was granted.
+fn kg_access_from_acl(
+    snapshot: &KnowledgeGraphSnapshot,
+    kg_name: &str,
+    username: &str,
+    role: crate::auth::KgRole,
+) -> Option<crate::auth::KgAccess> {
+    use crate::auth::{self, KgAccess, KgRole};
+
+    if !matches!(role, KgRole::Writer | KgRole::Decider) {
+        return Some(role.into());
+    }
+    let mut rows = snapshot
+        .input_tuples
+        .get(KG_ACL_RELATIONS)
+        .into_iter()
+        .flatten()
+        .filter(|tuple| {
+            let values = tuple.values();
+            values.first().and_then(Value::as_str) == Some(kg_name)
+                && values.get(1).and_then(Value::as_str) == Some(username)
+        });
+    match (rows.next(), rows.next()) {
+        (None, _) => Some(role.into()),
+        (Some(row), None) => {
+            let stored = row.values().get(2).and_then(Value::as_str)?;
+            KgAccess::new(role, auth::decode_relations(stored).ok()?).ok()
+        }
+        (Some(_), Some(_)) => None,
+    }
+}
+
+/// Deletions of every `kg_acls` and `kg_acl_relations` row whose KG and user
+/// `matches` selects; empty when there is none.
+fn acl_grant_deletes(
+    snapshot: &KnowledgeGraphSnapshot,
+    matches: impl Fn(&str, &str) -> bool,
+) -> Vec<crate::storage_engine::FactChange> {
+    ["kg_acls", KG_ACL_RELATIONS]
+        .into_iter()
+        .filter_map(|relation| {
+            let tuples: Vec<Tuple> = snapshot
+                .input_tuples
+                .get(relation)
+                .into_iter()
+                .flatten()
+                .filter(|tuple| match tuple.values() {
+                    [kg, user, ..] => kg
+                        .as_str()
+                        .zip(user.as_str())
+                        .is_some_and(|(kg, user)| matches(kg, user)),
+                    _ => false,
+                })
+                .cloned()
+                .collect();
+            (!tuples.is_empty()).then(|| crate::storage_engine::FactChange::Delete {
+                relation: relation.to_string(),
+                tuples,
+            })
+        })
+        .collect()
+}
+
+/// Apply `changes` to `_internal` as one commit: all of them or none.
+fn commit_internal(
+    storage: &StorageEngine,
+    changes: Vec<crate::storage_engine::FactChange>,
+) -> Result<(), crate::storage::StorageError> {
+    use crate::storage_engine::{StagedChanges, WriteProgram};
+
+    storage
+        .commit_program(
+            crate::auth::INTERNAL_KG,
+            WriteProgram::single(StagedChanges::Facts(changes)),
+            None,
+        )
+        .map(drop)
+        .map_err(|e| e.into_storage_error())
 }
 
 /// Current epoch milliseconds.
@@ -491,6 +579,10 @@ mod revocation_tests;
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod credential_mutation_tests;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod scoped_roles_tests;
 
 /// Self-contained snapshot of Handler state for executing a single query on a blocking thread.
 /// All fields are `Arc`-wrapped (`Send + Sync`), allowing the job to be moved into
@@ -1098,10 +1190,7 @@ impl Handler {
     ) -> Result<SessionId, String> {
         let auth = principal.identity()?;
         // Admins skip per-KG checks
-        if auth.role != crate::auth::Role::Admin
-            && self
-                .get_kg_role_for_user(knowledge_graph, &auth.username, &auth.role)
-                .is_none()
+        if auth.role != crate::auth::Role::Admin && self.kg_access(knowledge_graph, &auth).is_none()
         {
             return Err("Access denied".to_string());
         }
@@ -1619,20 +1708,11 @@ impl Handler {
                 },
             ),
         )?;
-        let grants: Vec<Tuple> = snapshot
-            .input_tuples
-            .get("kg_acls")
-            .into_iter()
-            .flatten()
-            .filter(|t| t.values().get(1).and_then(Value::as_str) == Some(username))
-            .cloned()
-            .collect();
+        let grants = acl_grant_deletes(&snapshot, |_, user| user == username);
         if !grants.is_empty() {
-            settle(
-                storage
-                    .delete_tuples_from(auth::INTERNAL_KG, "kg_acls", grants)
-                    .map(|_| self.kg_acls_changed()),
-            )?;
+            let deleted = commit_internal(storage, grants);
+            self.kg_acls_changed();
+            settle(deleted)?;
         }
         deferred.map_or(Ok(()), |error| Err(error.into()))
     }
@@ -1815,7 +1895,7 @@ impl Handler {
 
     // ── KG ACL management ─────────────────────────────────────────────────
 
-    /// Get a user's effective KG role for a specific knowledge graph.
+    /// Get a user's effective access to a specific knowledge graph.
     /// Admins are implicitly owners of all KGs.
     /// Returns None if the user has no access.
     pub fn get_kg_role_for_user(
@@ -1823,12 +1903,12 @@ impl Handler {
         kg_name: &str,
         username: &str,
         global_role: &crate::auth::Role,
-    ) -> Option<crate::auth::KgRole> {
+    ) -> Option<crate::auth::KgAccess> {
         use crate::auth;
 
         // Admins are implicit owners of all KGs
         if *global_role == auth::Role::Admin {
-            return Some(auth::KgRole::Owner);
+            return Some(auth::KgRole::Owner.into());
         }
 
         let storage = self.storage.read();
@@ -1848,13 +1928,32 @@ impl Handler {
                     (vals[0].as_str(), vals[1].as_str(), vals[2].as_str())
                 {
                     if kg == kg_name && user == username {
-                        return role.parse::<auth::KgRole>().ok();
+                        let role = role.parse::<auth::KgRole>().ok()?;
+                        return kg_access_from_acl(&snapshot, kg_name, username, role);
                     }
                 }
             }
         }
 
         None
+    }
+
+    /// The access `identity` has to `kg_name` right now: its user's, narrowed
+    /// to its key's scope when it has one. A scoped key has no access to any
+    /// other KG.
+    pub fn kg_access(
+        &self,
+        kg_name: &str,
+        identity: &crate::auth::AuthIdentity,
+    ) -> Option<crate::auth::KgAccess> {
+        let Some(key) = &identity.key_scope else {
+            return self.get_kg_role_for_user(kg_name, &identity.username, &identity.role);
+        };
+        if key.scope.kg != kg_name {
+            return None;
+        }
+        self.get_kg_role_for_user(kg_name, &identity.username, &key.owner_role)
+            .map(|own| own.meet(&key.scope.access))
     }
 
     /// List ACL entries for a knowledge graph.
@@ -1877,7 +1976,14 @@ impl Handler {
                     (vals[0].as_str(), vals[1].as_str(), vals[2].as_str())
                 {
                     if kg == kg_name {
-                        entries.push(format!("  {user}: {role}"));
+                        let access = role
+                            .parse()
+                            .ok()
+                            .and_then(|role| kg_access_from_acl(&snapshot, kg, user, role));
+                        match access {
+                            Some(access) => entries.push(format!("  {user}: {access}")),
+                            None => entries.push(format!("  {user}: {role} (unreadable grant)")),
+                        }
                     }
                 }
             }
@@ -1902,14 +2008,26 @@ impl Handler {
         username: &str,
         role: &str,
     ) -> Result<String, ProgramError> {
-        use crate::auth;
-        use crate::Tuple;
-        use crate::Value;
+        self.grant_kg_access(kg_name, username, role, None)
+    }
 
-        // Validate role
-        let _kg_role: auth::KgRole = role
-            .parse()
-            .map_err(|_| format!("Invalid KG role '{role}'. Valid: owner, editor, viewer"))?;
+    /// Grant a user `role` on a knowledge graph, limited to `relations` for a
+    /// `writer` or `decider`. Replaces the user's previous grant on it in one
+    /// commit, so no reader ever sees the new role with the old relations.
+    pub fn grant_kg_access(
+        &self,
+        kg_name: &str,
+        username: &str,
+        role: &str,
+        relations: Option<&[String]>,
+    ) -> Result<String, ProgramError> {
+        use crate::auth;
+        use crate::storage_engine::FactChange;
+
+        let kg_role: auth::KgRole = role.parse().map_err(|_| {
+            format!("Invalid KG role '{role}'. Valid: owner, editor, writer, decider, viewer")
+        })?;
+        let access = auth::KgAccess::new(kg_role, relations.map(<[String]>::to_vec))?;
 
         let _credential_writes = self.credential_writes.lock();
         let storage = self.storage.read();
@@ -1926,42 +2044,34 @@ impl Handler {
             return Err(format!("User '{username}' not found").into());
         }
 
-        // Remove existing ACL for this user+kg (if any)
-
-        let empty_vec = crate::value::Relation::new();
-        let acls = snapshot.input_tuples.get("kg_acls").unwrap_or(&empty_vec);
-
-        let mut to_remove = Vec::new();
-        for tuple in acls {
-            let vals = tuple.values();
-            if vals.len() >= 3 {
-                if let (Some(kg), Some(user)) = (vals[0].as_str(), vals[1].as_str()) {
-                    if kg == kg_name && user == username {
-                        to_remove.push(tuple.clone());
-                    }
-                }
-            }
+        // Replace any existing grant for this user+kg.
+        let mut changes =
+            acl_grant_deletes(&snapshot, |kg, user| kg == kg_name && user == username);
+        if let Some(granted) = access.relations() {
+            changes.push(FactChange::Insert {
+                relation: KG_ACL_RELATIONS.to_string(),
+                tuples: vec![Tuple::new(vec![
+                    Value::string(kg_name),
+                    Value::string(username),
+                    Value::string(&auth::encode_relations(Some(granted))),
+                ])],
+            });
         }
-
-        if !to_remove.is_empty() {
-            let removed = storage.delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove);
-            self.kg_acls_changed();
-            removed.map_err(ProgramError::from)?;
-        }
-
-        // Insert new ACL entry
-        let tuple = Tuple::new(vec![
-            Value::String(kg_name.to_string().into()),
-            Value::String(username.to_string().into()),
-            Value::String(role.to_lowercase().into()),
-        ]);
-        let granted = storage.insert_tuples_into(auth::INTERNAL_KG, "kg_acls", vec![tuple]);
+        changes.push(FactChange::Insert {
+            relation: "kg_acls".to_string(),
+            tuples: vec![Tuple::new(vec![
+                Value::string(kg_name),
+                Value::string(username),
+                Value::string(&kg_role.to_string()),
+            ])],
+        });
+        let granted = commit_internal(&storage, changes);
         self.kg_acls_changed();
-        granted.map_err(ProgramError::from)?;
+        granted?;
 
-        tracing::info!(kg = kg_name, user = username, role, "audit_kg_acl_granted");
+        tracing::info!(kg = kg_name, user = username, access = %access, "audit_kg_acl_granted");
         Ok(format!(
-            "Granted '{role}' access on '{kg_name}' to '{username}'."
+            "Granted '{access}' access on '{kg_name}' to '{username}'."
         ))
     }
 
@@ -1989,57 +2099,46 @@ impl Handler {
             .get_snapshot_for(auth::INTERNAL_KG)
             .map_err(ProgramError::from)?;
 
-        let empty_vec = crate::value::Relation::new();
-        let acls = snapshot.input_tuples.get("kg_acls").unwrap_or(&empty_vec);
-
-        let mut to_remove = Vec::new();
-        for tuple in acls {
-            let vals = tuple.values();
-            if vals.len() >= 3 {
-                if let (Some(kg), Some(user)) = (vals[0].as_str(), vals[1].as_str()) {
-                    if kg == kg_name && user == username {
-                        to_remove.push(tuple.clone());
-                    }
-                }
-            }
-        }
-
-        if to_remove.is_empty() {
+        let changes = acl_grant_deletes(&snapshot, |kg, user| kg == kg_name && user == username);
+        if !changes.iter().any(|change| change.relation() == "kg_acls") {
             return Err(format!("No ACL entry found for user '{username}' on '{kg_name}'").into());
         }
 
-        let revoked = storage.delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove);
+        let revoked = commit_internal(&storage, changes);
         self.kg_acls_changed();
-        revoked.map_err(ProgramError::from)?;
+        revoked?;
 
         tracing::info!(kg = kg_name, user = username, "audit_kg_acl_revoked");
         Ok(format!("Revoked access on '{kg_name}' from '{username}'."))
     }
 
-    /// Remove all ACL entries for a dropped knowledge graph.
+    /// Remove all ACL entries for a dropped knowledge graph, and revoke the
+    /// API keys scoped to it: a KG created later under the same name grants
+    /// nothing from before.
     fn cleanup_kg_acls(&self, kg_name: &str) -> Result<(), ProgramError> {
         use crate::auth;
 
+        let _credential_writes = self.credential_writes.lock();
         let storage = self.storage.read();
         let snapshot = storage.get_snapshot_for(auth::INTERNAL_KG)?;
+        let scoped_here =
+            |key: &auth::ApiKeyRecord| key.scope.as_ref().is_some_and(|scope| scope.kg == kg_name);
+        for label in api_keys::delete_api_keys(&storage, &snapshot, scoped_here)? {
+            self.credentials.revoke_key(&label);
+            info!(label, kg = kg_name, "audit_apikey_revoked");
+        }
 
-        let empty_vec = crate::value::Relation::new();
-        let acls = snapshot.input_tuples.get("kg_acls").unwrap_or(&empty_vec);
-
-        let to_remove: Vec<_> = acls
-            .iter()
-            .filter(|t| {
-                t.values()
-                    .first()
-                    .and_then(|v| v.as_str())
-                    .is_some_and(|k| k == kg_name)
-            })
-            .cloned()
-            .collect();
-
-        if !to_remove.is_empty() {
-            let count = to_remove.len();
-            let removed = storage.delete_tuples_from(auth::INTERNAL_KG, "kg_acls", to_remove);
+        let changes = acl_grant_deletes(&snapshot, |kg, _| kg == kg_name);
+        if !changes.is_empty() {
+            let count: usize = changes
+                .iter()
+                .filter(|change| change.relation() == "kg_acls")
+                .map(|change| match change {
+                    crate::storage_engine::FactChange::Delete { tuples, .. } => tuples.len(),
+                    crate::storage_engine::FactChange::Insert { .. } => 0,
+                })
+                .sum();
+            let removed = commit_internal(&storage, changes);
             self.kg_acls_changed();
             removed?;
             tracing::info!(kg = kg_name, count, "audit_kg_acls_cleaned_up");
@@ -4276,10 +4375,10 @@ impl Handler {
                     MetaCommand::UserRole { username, role } => {
                         return self.handle_user_role(username, role);
                     }
-                    MetaCommand::ApiKeyCreate { label, ttl } => {
+                    MetaCommand::ApiKeyCreate { label, ttl, scope } => {
                         let owner = effective_auth
                             .map_or_else(|| "admin".to_string(), |a| a.username.clone());
-                        return self.handle_apikey_create(label, &owner, *ttl);
+                        return self.handle_apikey_create(label, &owner, *ttl, scope.clone());
                     }
                     MetaCommand::ApiKeyList => {
                         return Ok(self.handle_apikey_list());
@@ -4305,9 +4404,10 @@ impl Handler {
                         ref kg_name,
                         ref username,
                         ref role,
+                        ref relations,
                     } => {
                         return self
-                            .handle_kg_acl_grant(kg_name, username, role)
+                            .grant_kg_access(kg_name, username, role, relations.as_deref())
                             .map(|msg| self.message_result(&msg));
                     }
                     MetaCommand::KgAclRevoke {
@@ -4480,8 +4580,14 @@ impl Handler {
             if kg == INTERNAL_KG {
                 return Err(internal_kg_denied());
             }
-            self.get_kg_role_for_user(kg, &identity.username, &identity.role)
-                .ok_or_else(|| "Access denied".to_string())
+            self.kg_access(kg, identity)
+                .ok_or_else(|| match &identity.key_scope {
+                    Some(key) if key.scope.kg != kg => format!(
+                        "Access denied: this API key is scoped to knowledge graph '{}'",
+                        key.scope.kg
+                    ),
+                    _ => "Access denied".to_string(),
+                })
         };
 
         if statements.is_empty() {
@@ -4495,6 +4601,15 @@ impl Handler {
         for stmt in statements {
             if let Some(identity) = non_admin {
                 auth::authorize_statement(&identity.role, stmt)?;
+                if let (Some(key), Statement::Meta(MetaCommand::KgCreate(_))) =
+                    (&identity.key_scope, stmt)
+                {
+                    return Err(format!(
+                        "Permission denied: this API key is scoped to knowledge graph '{}' \
+                         and cannot create one",
+                        key.scope.kg
+                    ));
+                }
             }
             if targets_internal_kg(stmt) {
                 return Err(internal_kg_denied());
@@ -4523,7 +4638,7 @@ impl Handler {
                     _ => kgs.iter().map(String::as_str).collect(),
                 };
                 for kg in targets {
-                    auth::authorize_kg_operation(&kg_role(kg, identity)?, stmt)?;
+                    auth::authorize_kg_operation(&kg_role(kg, identity)?, kg, stmt)?;
                 }
             }
             if let Statement::Meta(MetaCommand::KgUse(name) | MetaCommand::KgCreate(name)) = stmt {

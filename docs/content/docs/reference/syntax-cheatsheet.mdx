@@ -64,12 +64,16 @@ Meta commands start with `.` and control the system:
 .user role <name> <role>               Change role
 
 .apikey create <label> [<ttl>]   Create API key (ttl e.g. 90d)
+.apikey create <label> [<ttl>] role <role> on <kg> [relations <r>, ...]
+                                 Create a key limited to one KG and role
 .apikey list                     List API keys
 .apikey expire <label> <ttl>     Expire API key after ttl
 .apikey revoke <label>           Revoke API key
 
 .kg acl list [<kg>]              List ACLs
 .kg acl grant <kg> <user> <role> Grant access
+.kg acl grant <kg> <user> <role> relations <r>, ...
+                                 Grant writer/decider on listed relations
 .kg acl revoke <kg> <user>       Revoke access
 
 .debug <query>     Show query plan without executing

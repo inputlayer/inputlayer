@@ -417,11 +417,12 @@ Commands that control the REPL environment.
 .user password <name> <password>       // Change password
 .user role <name> <role>               // Change role
 .apikey create <label> [<ttl>]  // Create API key, optionally expiring after ttl (e.g. 90d)
+.apikey create <label> [<ttl>] role <role> on <kg> [relations <r>, ...]  // Key limited to one KG and role
 .apikey list                    // List API keys with created/expires/last-used times
 .apikey expire <label> <ttl>    // Bring a key's expiry forward (rotation grace period)
 .apikey revoke <label>          // Revoke API key
 .kg acl list [<kg>]     // List ACLs
-.kg acl grant <kg> <user> <role>  // Grant access
+.kg acl grant <kg> <user> <role> [relations <r>, ...]  // Grant access; relations limit writer/decider
 .kg acl revoke <kg> <user>        // Revoke access
 ```
 

@@ -115,7 +115,7 @@ async fn session_scoped_ws_route_is_gone() {
     let server = start_server().await;
     let key = server
         .handler
-        .handle_apikey_create("probe", "admin", None)
+        .handle_apikey_create("probe", "admin", None, None)
         .unwrap();
     let api_key = key.rows[0].values[1].as_str().unwrap().to_string();
     let session_id = server.handler.create_session(KG).unwrap();

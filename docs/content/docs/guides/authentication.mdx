@@ -70,9 +70,17 @@ Control which users can access which knowledge graphs.
 .kg acl grant mydb alice viewer
 .kg acl grant mydb alice editor
 .kg acl grant mydb alice owner
+.kg acl grant mydb ingest writer
+.kg acl grant mydb ops writer relations kill_switch, tool_policy
+.kg acl grant mydb agent decider relations attempt, decision
 ```
 
-The user must exist; granting access to an unknown user is rejected.
+The user must exist; granting access to an unknown user is rejected. A new
+grant replaces the user's previous grant on that knowledge graph, relations
+included.
+
+`relations` limits a `writer` to the listed relations; a `decider` needs the
+list, because it writes nothing else. Only `writer` and `decider` take one.
 
 ### Revoke Access
 
@@ -91,10 +99,40 @@ The user must exist; granting access to an unknown user is rejected.
 | Level | Capabilities |
 |-------|-------------|
 | `viewer` | Query data, list relations and rules |
+| `decider` | Everything `viewer` can, plus insert/delete facts in its granted relations only |
+| `writer` | Everything `viewer` can, plus insert/delete facts in every relation, or in its granted relations |
 | `editor` | Insert/delete facts, create/modify rules, manage indexes |
 | `owner` | Drop knowledge graphs, manage ACLs for this KG |
 
-Permissions are cumulative - `editor` includes `viewer`, `owner` includes `editor`.
+Permissions are cumulative - `decider` includes `viewer`, `writer` includes
+`decider`, `editor` includes `writer`, `owner` includes `editor`.
+
+### Fact-writing roles
+
+`writer` and `decider` write facts and never change policy. A program from one
+of them is refused before anything commits if any statement would:
+
+- write a relation outside its granted relations (inserts, deletes, and both
+  sides of an update such as a guarded claim);
+- register, edit or drop a rule, or declare a schema;
+- drop a relation (`.rel drop`, `-name`), clear a prefix, load a file or
+  change an ontology;
+- drop the knowledge graph or change its access list.
+
+The refusal names what is missing, for example `Permission denied: the decider
+role on 'shop' has no write grant for relation 'kill_switch'`, or `Permission
+denied: dropping a relation needs the editor role on 'shop'`. Queries, `.why`,
+subscriptions, session rules and session facts are allowed: they change
+nothing stored.
+
+Give an agent that records claims and decisions a `decider` grant on exactly
+those relations, and give the relations that hold policy switches (a kill
+switch, a tool policy) to an operator's `writer` grant. Rules, schema and drops
+stay with `editor` keys used to deploy.
+
+> **Warning**: A `writer` without a relations list can delete any fact, including a kill
+> switch or a policy row. Use a relations list, or a `decider`, for any
+> credential a model or an agent holds.
 
 ## WebSocket Authentication
 
@@ -161,9 +199,21 @@ API keys provide machine-to-machine authentication without passwords.
 ```
 .apikey create my-service-key
 .apikey create ci-deploy 90d
+.apikey create ingest role writer on shop
+.apikey create agent-1 30d role decider on shop relations attempt, decision
 ```
 
 The reply holds the key itself. It is shown only once; the server stores only its hash. An optional TTL makes the key expire that long after creation: a number and a unit, `ms`, `s`, `m`, `h` or `d` (for example `30s`, `15m`, `24h`, `90d`). Without one the key never expires.
+
+A key without a role authenticates as its owner, with all of the owner's
+rights; created by an admin, it is an admin key. `role <role> on <kg>` creates
+a key limited to one knowledge graph and one role there: `editor`, `writer`,
+`decider` or `viewer`, with `relations` as for [grants](#grant-access). The
+key may use no other knowledge graph, cannot create one, and runs no admin
+command even when its owner is an admin. A scope only narrows: the key never
+does more than its owner may do on that graph. Dropping the knowledge graph
+revokes the keys scoped to it, so a graph created later under the same name
+grants them nothing.
 
 ### List API Keys
 
@@ -179,6 +229,7 @@ The reply holds the key itself. It is shown only once; the server stores only it
 | `expires_at` | when it expires; null if it never does |
 | `last_used_at` | the last authentication with it; null if never used |
 | `status` | `active` or `expired` |
+| `scope` | the key's role, knowledge graph and relations, for example `decider on shop (relations attempt, decision)`; null for a key without a role |
 
 Timestamps are Unix milliseconds. `last_used_at` is updated at most once per second per key, in memory, and persisted once a minute and at shutdown, so after a crash it can be up to a minute old. A REST request counts as a use; a WebSocket connection counts once, when it authenticates. Use it to find stale keys.
 
@@ -278,6 +329,6 @@ async with InputLayer(
 2. **Use TLS** via a reverse proxy (see [Deployment](deployment)) - credentials are sent in plaintext over WebSocket
 3. **Create per-user accounts** rather than sharing the admin account
 4. **Use API keys** for automated services and CI/CD pipelines
-5. **Grant minimum required permissions** - use `viewer` access for dashboards, `editor` for ETL jobs
+5. **Grant minimum required permissions** - use `viewer` access for dashboards, `writer` for ETL jobs, `decider` with a relations list for agents, and `editor` only to deploy rules and schema; hand services keys created with a role, never admin keys
 6. **Bind to localhost** when using a reverse proxy: set `host = "127.0.0.1"` in config
 7. **Give API keys a TTL** and [rotate](#rotate-api-key) them before it passes; revoke keys whose `last_used_at` shows they are unused

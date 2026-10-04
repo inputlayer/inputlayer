@@ -111,10 +111,12 @@ pub enum MetaCommand {
     },
 
     // API key management commands
-    /// `.apikey create <label> [<ttl>]`: a key that expires `ttl` from now.
+    /// `.apikey create <label> [<ttl>] [role <role> on <kg> [relations <r>, ...]]`:
+    /// a key that expires `ttl` from now, limited to `scope` when given.
     ApiKeyCreate {
         label: String,
         ttl: Option<std::time::Duration>,
+        scope: Option<crate::auth::KeyScope>,
     },
     ApiKeyList,
     ApiKeyRevoke(String), // label
@@ -131,7 +133,9 @@ pub enum MetaCommand {
         kg_name: String,
         username: String,
         role: String,
-    }, // .kg acl grant <kg> <user> <role>
+        /// The relations a `writer` or `decider` may write.
+        relations: Option<Vec<String>>,
+    }, // .kg acl grant <kg> <user> <role> [relations <r>, ...]
     KgAclRevoke {
         kg_name: String,
         username: String,
@@ -295,8 +299,8 @@ fn format_meta_debug(cmd: &MetaCommand) -> String {
         MetaCommand::UserRole { username, role } => {
             format!("UserRole {{ username: {username:?}, role: {role:?} }}")
         }
-        MetaCommand::ApiKeyCreate { label, ttl } => {
-            format!("ApiKeyCreate {{ label: {label:?}, ttl: {ttl:?} }}")
+        MetaCommand::ApiKeyCreate { label, ttl, scope } => {
+            format!("ApiKeyCreate {{ label: {label:?}, ttl: {ttl:?}, scope: {scope:?} }}")
         }
         MetaCommand::ApiKeyList => "ApiKeyList".to_string(),
         MetaCommand::ApiKeyRevoke(s) => format!("ApiKeyRevoke({s:?})"),
@@ -308,7 +312,11 @@ fn format_meta_debug(cmd: &MetaCommand) -> String {
             kg_name,
             username,
             role,
-        } => format!("KgAclGrant {{ kg: {kg_name:?}, user: {username:?}, role: {role:?} }}"),
+            relations,
+        } => format!(
+            "KgAclGrant {{ kg: {kg_name:?}, user: {username:?}, role: {role:?}, \
+             relations: {relations:?} }}"
+        ),
         MetaCommand::KgAclRevoke { kg_name, username } => {
             format!("KgAclRevoke {{ kg: {kg_name:?}, user: {username:?} }}")
         }
@@ -507,10 +515,14 @@ fn parse_kg_acl_command(parts: &[&str]) -> Result<MetaCommand, String> {
     // .kg acl → error (need subcommand)
     // .kg acl list → list ACLs for current KG
     // .kg acl list <kg> → list ACLs for specific KG
-    // .kg acl grant <kg> <user> <role> → grant access
+    // .kg acl grant <kg> <user> <role> [relations <r>, ...] → grant access
     // .kg acl revoke <kg> <user> → revoke access
     if parts.len() < 3 {
-        return Err("Usage: .kg acl list [kg_name] | .kg acl grant <kg> <user> <role> | .kg acl revoke <kg> <user>".to_string());
+        return Err(
+            "Usage: .kg acl list [kg_name] | .kg acl grant <kg> <user> <role> \
+             [relations <r>, ...] | .kg acl revoke <kg> <user>"
+                .to_string(),
+        );
     }
     match parts[2].to_lowercase().as_str() {
         "list" => {
@@ -522,15 +534,24 @@ fn parse_kg_acl_command(parts: &[&str]) -> Result<MetaCommand, String> {
             Ok(MetaCommand::KgAclList(kg))
         }
         "grant" => {
+            const USAGE: &str =
+                "Usage: .kg acl grant <kg_name> <username> <role> [relations <r>, ...]";
             if parts.len() < 6 {
-                Err("Usage: .kg acl grant <kg_name> <username> <role>".to_string())
-            } else {
-                Ok(MetaCommand::KgAclGrant {
-                    kg_name: parts[3].to_string(),
-                    username: parts[4].to_string(),
-                    role: parts[5].to_string(),
-                })
+                return Err(USAGE.to_string());
             }
+            let relations = match &parts[6..] {
+                [] => None,
+                [keyword, rest @ ..] if keyword.eq_ignore_ascii_case("relations") => {
+                    Some(parse_relation_list(rest)?)
+                }
+                _ => return Err(USAGE.to_string()),
+            };
+            Ok(MetaCommand::KgAclGrant {
+                kg_name: parts[3].to_string(),
+                username: parts[4].to_string(),
+                role: parts[5].to_string(),
+                relations,
+            })
         }
         "revoke" => {
             if parts.len() < 5 {
@@ -967,26 +988,70 @@ fn parse_user_command(parts: &[&str]) -> Result<MetaCommand, String> {
     }
 }
 
+/// A relation list such as `a, b` or `a b`, from its whitespace-split parts.
+fn parse_relation_list(parts: &[&str]) -> Result<Vec<String>, String> {
+    let relations: Vec<String> = parts
+        .iter()
+        .flat_map(|part| part.split(','))
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect();
+    if relations.is_empty() {
+        return Err("'relations' needs at least one relation name".to_string());
+    }
+    Ok(relations)
+}
+
+/// A key's `role <role> on <kg> [relations <r>, ...]` scope.
+fn parse_key_scope(parts: &[&str]) -> Result<crate::auth::KeyScope, String> {
+    use crate::auth::{KeyScope, KgAccess};
+    let [role, on, kg, rest @ ..] = parts else {
+        return Err("Usage: role <role> on <kg> [relations <r>, ...]".to_string());
+    };
+    if !on.eq_ignore_ascii_case("on") {
+        return Err("Usage: role <role> on <kg> [relations <r>, ...]".to_string());
+    }
+    let relations = match rest {
+        [] => None,
+        [keyword, rest @ ..] if keyword.eq_ignore_ascii_case("relations") => {
+            Some(parse_relation_list(rest)?)
+        }
+        _ => return Err("Usage: role <role> on <kg> [relations <r>, ...]".to_string()),
+    };
+    KeyScope::new(kg, KgAccess::new(role.parse()?, relations)?)
+}
+
 fn parse_apikey_command(parts: &[&str]) -> Result<MetaCommand, String> {
-    const USAGE: &str = "Usage: .apikey list | .apikey create <label> [<ttl>] | \
+    const USAGE: &str = "Usage: .apikey list | \
+         .apikey create <label> [<ttl>] [role <role> on <kg> [relations <r>, ...]] | \
          .apikey expire <label> <ttl> | .apikey revoke <label>";
     let Some(sub) = parts.get(1) else {
         return Err(USAGE.to_string());
     };
     match (sub.to_lowercase().as_str(), &parts[2..]) {
         ("list", []) => Ok(MetaCommand::ApiKeyList),
-        ("create", [label]) => Ok(MetaCommand::ApiKeyCreate {
-            label: (*label).to_string(),
-            ttl: None,
-        }),
-        ("create", [label, ttl]) => {
-            let ttl = parse_ttl(ttl)?;
-            if ttl.is_zero() {
-                return Err("A new API key's TTL must be positive".to_string());
-            }
+        ("create", [label, rest @ ..]) => {
+            let (ttl, rest) = match rest {
+                [ttl, rest @ ..] if !ttl.eq_ignore_ascii_case("role") => {
+                    let ttl = parse_ttl(ttl)?;
+                    if ttl.is_zero() {
+                        return Err("A new API key's TTL must be positive".to_string());
+                    }
+                    (Some(ttl), rest)
+                }
+                rest => (None, rest),
+            };
+            let scope = match rest {
+                [] => None,
+                [keyword, rest @ ..] if keyword.eq_ignore_ascii_case("role") => {
+                    Some(parse_key_scope(rest)?)
+                }
+                _ => return Err(USAGE.to_string()),
+            };
             Ok(MetaCommand::ApiKeyCreate {
                 label: (*label).to_string(),
-                ttl: Some(ttl),
+                ttl,
+                scope,
             })
         }
         ("expire", [label, ttl]) => Ok(MetaCommand::ApiKeyExpire {
@@ -1080,14 +1145,25 @@ mod tests {
             kg_name,
             username,
             role,
+            relations,
         } = cmd
         {
             assert_eq!(kg_name, "mykg");
             assert_eq!(username, "alice");
             assert_eq!(role, "editor");
+            assert_eq!(relations, None);
         } else {
             panic!("Expected KgAclGrant");
         }
+        let cmd =
+            parse_meta_command(".kg acl grant shop agent decider relations attempt, decision")
+                .unwrap();
+        assert!(matches!(
+            cmd,
+            MetaCommand::KgAclGrant { relations: Some(ref r), .. } if r == &["attempt", "decision"]
+        ));
+        assert!(parse_meta_command(".kg acl grant shop agent decider attempt").is_err());
+        assert!(parse_meta_command(".kg acl grant shop agent decider relations").is_err());
     }
 
     #[test]
@@ -1521,6 +1597,7 @@ mod tests {
             MetaCommand::ApiKeyCreate {
                 label: "my-key".to_string(),
                 ttl: None,
+                scope: None,
             }
         );
         let cmd = parse_meta_command(".apikey create ci 90d").unwrap();
@@ -1529,8 +1606,58 @@ mod tests {
             MetaCommand::ApiKeyCreate {
                 label: "ci".to_string(),
                 ttl: Some(std::time::Duration::from_secs(90 * 86_400)),
+                scope: None,
             }
         );
+    }
+
+    #[test]
+    fn test_parse_apikey_create_with_role() {
+        use crate::auth::{KeyScope, KgAccess, KgRole};
+        let decider = KeyScope::new(
+            "shop",
+            KgAccess::new(
+                KgRole::Decider,
+                Some(vec!["attempt".to_string(), "decision".to_string()]),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        for text in [
+            ".apikey create agent role decider on shop relations attempt, decision",
+            ".apikey create agent role decider on shop relations attempt,decision",
+            ".apikey create agent ROLE Decider ON shop RELATIONS attempt decision",
+        ] {
+            assert_eq!(
+                parse_meta_command(text).unwrap(),
+                MetaCommand::ApiKeyCreate {
+                    label: "agent".to_string(),
+                    ttl: None,
+                    scope: Some(decider.clone()),
+                },
+                "{text}"
+            );
+        }
+        assert_eq!(
+            parse_meta_command(".apikey create ops 30d role writer on shop").unwrap(),
+            MetaCommand::ApiKeyCreate {
+                label: "ops".to_string(),
+                ttl: Some(std::time::Duration::from_secs(30 * 86_400)),
+                scope: Some(KeyScope::new("shop", KgRole::Writer.into()).unwrap()),
+            }
+        );
+        for bad in [
+            ".apikey create agent role decider on shop",
+            ".apikey create agent role owner on shop",
+            ".apikey create agent role editor on shop relations a",
+            ".apikey create agent role writer shop",
+            ".apikey create agent role writer on shop relations",
+            ".apikey create agent role writer on _internal",
+            ".apikey create agent 1d 2d",
+            ".apikey create agent role superuser on shop",
+        ] {
+            assert!(parse_meta_command(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

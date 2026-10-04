@@ -21,7 +21,7 @@ use std::task::{ready, Context, Poll};
 use parking_lot::Mutex;
 use tokio::sync::oneshot;
 
-use super::{AuthIdentity, Role};
+use super::{AuthIdentity, KeyScope, Role, ScopedKey};
 
 /// Wall-clock time in Unix milliseconds.
 pub(super) fn now_ms() -> u64 {
@@ -120,6 +120,8 @@ pub(super) struct Credential {
     expires_at: AtomicU64,
     /// Unix ms of the last authentication with it; 0 if never.
     last_used_at: AtomicU64,
+    /// An API key's scope: the one KG it may use and its access there.
+    scope: Option<Arc<KeyScope>>,
     /// One sender per live [`EndSignal`].
     watchers: Mutex<Vec<oneshot::Sender<()>>>,
 }
@@ -130,6 +132,7 @@ impl Credential {
         username: &str,
         expires_at: Option<u64>,
         last_used_at: Option<u64>,
+        scope: Option<KeyScope>,
     ) -> Arc<Self> {
         Arc::new(Self {
             id,
@@ -137,6 +140,7 @@ impl Credential {
             state: AtomicU8::new(LIVE),
             expires_at: AtomicU64::new(expires_at.unwrap_or(NEVER)),
             last_used_at: AtomicU64::new(last_used_at.unwrap_or(0)),
+            scope: scope.map(Arc::new),
             watchers: Mutex::new(Vec::new()),
         })
     }
@@ -196,6 +200,10 @@ impl Credential {
         }
     }
 
+    pub(super) fn scope(&self) -> Option<&KeyScope> {
+        self.scope.as_deref()
+    }
+
     pub(super) fn last_used_at(&self) -> Option<u64> {
         Some(self.last_used_at.load(Ordering::Relaxed)).filter(|&at| at != 0)
     }
@@ -251,15 +259,29 @@ impl Principal {
         Ok(AuthIdentity {
             role: self.role()?,
             username: self.credential.username.clone(),
+            key_scope: self.credential.scope.clone().map(|scope| ScopedKey {
+                scope,
+                owner_role: self.role.get(),
+            }),
         })
     }
 
-    /// The user's current global role.
+    /// The user's current global role. A scoped API key never acts as an
+    /// admin: its owner's admin role counts as editor, so its scope, not the
+    /// owner's implicit ownership of every KG, decides what it may do.
     pub fn role(&self) -> Result<Role, CredentialEnded> {
         match self.ended() {
             Some(reason) => Err(reason),
-            None => Ok(self.role.get()),
+            None => Ok(match self.role.get() {
+                Role::Admin if self.credential.scope.is_some() => Role::Editor,
+                role => role,
+            }),
         }
+    }
+
+    /// For a scoped API key, its owner's own global role; `None` otherwise.
+    pub fn key_owner_role(&self) -> Option<Role> {
+        self.credential.scope.as_ref().map(|_| self.role.get())
     }
 
     /// Why the credential no longer authorizes anything, if it doesn't.

@@ -257,6 +257,7 @@ mod tests {
                 key_hash: "h".to_string(),
                 username: "bob".to_string(),
                 times: ApiKeyTimes::default(),
+                scope: None,
             }],
         );
         registry.authenticate_key("h").unwrap()

@@ -22,7 +22,7 @@ use parking_lot::RwLock;
 use tokio::sync::Notify;
 
 use super::principal::{now_ms, Credential, CredentialEnded, CredentialId, Principal, RoleCell};
-use super::Role;
+use super::{KeyScope, Role};
 
 /// A user as stored in `_internal.users`.
 #[derive(Debug, Clone)]
@@ -42,13 +42,17 @@ pub struct ApiKeyTimes {
     pub last_used_at: Option<u64>,
 }
 
-/// An API key as stored in `_internal.api_keys` and `_internal.api_key_times`.
+/// An API key as stored in `_internal.api_keys`, `_internal.api_key_times`
+/// and `_internal.api_key_scopes`.
 #[derive(Debug, Clone)]
 pub struct ApiKeyRecord {
     pub label: String,
     pub key_hash: String,
     pub username: String,
     pub times: ApiKeyTimes,
+    /// The one KG the key may use and its access there; `None` acts with its
+    /// owner's full rights.
+    pub scope: Option<KeyScope>,
 }
 
 /// An API key as listed: everything but its hash.
@@ -58,6 +62,7 @@ pub struct ApiKeyInfo {
     pub owner: String,
     pub times: ApiKeyTimes,
     pub expired: bool,
+    pub scope: Option<KeyScope>,
 }
 
 /// A key's last use, to persist.
@@ -149,7 +154,7 @@ impl Credentials {
             username: username.clone(),
             generation: self.next_generation(),
         };
-        let password = Credential::new(id, &username, None, None);
+        let password = Credential::new(id, &username, None, None, None);
         match self.users.get_mut(&username) {
             Some(user) => {
                 user.password.end(CredentialEnded::Revoked);
@@ -175,7 +180,13 @@ impl Credentials {
         };
         let times = record.times;
         let key = ApiKey {
-            credential: Credential::new(id, &record.username, times.expires_at, times.last_used_at),
+            credential: Credential::new(
+                id,
+                &record.username,
+                times.expires_at,
+                times.last_used_at,
+                record.scope,
+            ),
             created_at: times.created_at,
             persisted_last_used_at: times.last_used_at,
         };
@@ -362,6 +373,7 @@ impl CredentialRegistry {
                     last_used_at: key.credential.last_used_at(),
                 },
                 expired: key.credential.ended().is_some(),
+                scope: key.credential.scope().cloned(),
             })
             .collect();
         keys.sort_by(|a, b| a.label.cmp(&b.label));

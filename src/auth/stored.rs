@@ -4,9 +4,14 @@
 //! `users` rows are `(username, password_hash, role)`; `api_keys` rows are
 //! `(label, key_hash, username)`, with `api_key_times(key_hash, field, at)`
 //! rows holding each key's `created_at`, `expires_at` and `last_used_at`. A
-//! row too short or not made of strings is not a credential and is ignored; a
-//! user whose role does not parse is skipped with a warning, so it cannot
-//! authenticate. When a time field has several rows the earliest creation and
+//! key created with a role is a `scoped_api_keys(label, key_hash, username)`
+//! row instead, with one `api_key_scopes(key_hash, kg, role, relations)` row
+//! (`relations` as [`decode_relations`] reads it): a server from before scopes
+//! reads only `api_keys`, so it never mistakes a scoped key for an unscoped
+//! one. A row too short or not made of strings is not a credential and is
+//! ignored; a user whose role does not parse is skipped with a warning, so it
+//! cannot authenticate, and so is a key whose scope rows do not decode to
+//! exactly one scope, or a scoped key with none. When a time field has several rows the earliest creation and
 //! expiry and the latest use win, so a crash between writes can only leave a
 //! key stricter than intended.
 
@@ -14,12 +19,14 @@ use std::collections::HashMap;
 
 use tracing::warn;
 
-use crate::value::RelationMap;
+use crate::value::{RelationMap, Value};
 
-use super::{ApiKeyRecord, ApiKeyTimes, UserRecord};
+use super::{decode_relations, ApiKeyRecord, ApiKeyTimes, KeyScope, KgAccess, UserRecord};
 
 pub(crate) const API_KEYS: &str = "api_keys";
 pub(crate) const API_KEY_TIMES: &str = "api_key_times";
+pub(crate) const SCOPED_API_KEYS: &str = "scoped_api_keys";
+pub(crate) const API_KEY_SCOPES: &str = "api_key_scopes";
 pub(crate) const CREATED_AT: &str = "created_at";
 pub(crate) const EXPIRES_AT: &str = "expires_at";
 pub(crate) const LAST_USED_AT: &str = "last_used_at";
@@ -45,15 +52,61 @@ pub fn stored_credentials(relations: &RelationMap) -> (Vec<UserRecord>, Vec<ApiK
         })
         .collect();
     let times = key_times(relations);
+    let mut scopes = key_scopes(relations);
     let keys = string_rows(relations, API_KEYS)
-        .map(|(label, key_hash, username)| ApiKeyRecord {
-            label: label.to_string(),
-            key_hash: key_hash.to_string(),
-            username: username.to_string(),
-            times: times.get(key_hash).copied().unwrap_or_default(),
+        .map(|row| (row, false))
+        .chain(string_rows(relations, SCOPED_API_KEYS).map(|row| (row, true)))
+        .filter_map(|((label, key_hash, username), scoped)| {
+            let scope = match scopes.remove(key_hash) {
+                None if scoped => {
+                    warn!(label, error = "scope missing", "auth_api_key_skipped");
+                    return None;
+                }
+                None => None,
+                Some(Ok(scope)) => Some(scope),
+                Some(Err(error)) => {
+                    warn!(label, error = %error, "auth_api_key_skipped");
+                    return None;
+                }
+            };
+            Some(ApiKeyRecord {
+                label: label.to_string(),
+                key_hash: key_hash.to_string(),
+                username: username.to_string(),
+                times: times.get(key_hash).copied().unwrap_or_default(),
+                scope,
+            })
         })
         .collect();
     (users, keys)
+}
+
+/// Each scoped key's scope, by key hash, or why it is unusable.
+fn key_scopes(relations: &RelationMap) -> HashMap<&str, Result<KeyScope, String>> {
+    let mut scopes: HashMap<&str, Result<KeyScope, String>> = HashMap::new();
+    for tuple in relations.get(API_KEY_SCOPES).into_iter().flatten() {
+        let values = tuple.values();
+        let Some(hash) = values.first().and_then(Value::as_str) else {
+            continue;
+        };
+        // A row naming a key but not readable as a scope makes that key
+        // unusable: read as unscoped, it would act with its owner's rights.
+        let scope = match values {
+            [_, kg, role, stored] => match (kg.as_str(), role.as_str(), stored.as_str()) {
+                (Some(kg), Some(role), Some(stored)) => role
+                    .parse()
+                    .and_then(|role| KgAccess::new(role, decode_relations(stored)?))
+                    .and_then(|access| KeyScope::new(kg, access)),
+                _ => Err("malformed scope row".to_string()),
+            },
+            _ => Err("malformed scope row".to_string()),
+        };
+        let entry = scopes.entry(hash).or_insert_with(|| scope.clone());
+        if entry.as_ref().ok() != scope.as_ref().ok() {
+            *entry = Err("several scopes stored".to_string());
+        }
+    }
+    scopes
 }
 
 /// Each key's times, by key hash.
@@ -184,6 +237,61 @@ mod tests {
         assert_eq!(
             keys.iter().map(|k| k.label.as_str()).collect::<Vec<_>>(),
             ["k"]
+        );
+    }
+
+    #[test]
+    fn scoped_keys_decode_and_unreadable_scopes_disable_their_key() {
+        use crate::auth::KgRole;
+        let relations = RelationMap::from([
+            (
+                "api_keys".to_string(),
+                Relation::from(vec![
+                    strings(&["plain", "sha-p", "admin"]),
+                    strings(&["ops", "sha-o", "admin"]),
+                ]),
+            ),
+            (
+                SCOPED_API_KEYS.to_string(),
+                Relation::from(vec![
+                    strings(&["agent", "sha-a", "admin"]),
+                    strings(&["twice", "sha-t", "admin"]),
+                    strings(&["bad-role", "sha-b", "admin"]),
+                    strings(&["short", "sha-s", "admin"]),
+                    strings(&["unscoped", "sha-u", "admin"]),
+                ]),
+            ),
+            (
+                API_KEY_SCOPES.to_string(),
+                Relation::from(vec![
+                    strings(&["sha-a", "shop", "decider", "attempt,decision"]),
+                    strings(&["sha-o", "shop", "writer", "*"]),
+                    strings(&["sha-t", "shop", "decider", "attempt"]),
+                    strings(&["sha-t", "shop", "writer", "*"]),
+                    strings(&["sha-b", "shop", "superuser", "*"]),
+                    strings(&["sha-s", "shop", "writer"]),
+                ]),
+            ),
+        ]);
+        let (_, keys) = stored_credentials(&relations);
+        let scopes: Vec<_> = keys
+            .iter()
+            .map(|k| (k.label.as_str(), k.scope.as_ref().map(ToString::to_string)))
+            .collect();
+        assert_eq!(
+            scopes,
+            [
+                ("plain", None),
+                ("ops", Some("writer on shop".to_string())),
+                (
+                    "agent",
+                    Some("decider on shop (relations attempt, decision)".to_string())
+                ),
+            ]
+        );
+        assert_eq!(
+            keys[2].scope.as_ref().map(|s| s.access.role()),
+            Some(KgRole::Decider)
         );
     }
 

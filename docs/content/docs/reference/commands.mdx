@@ -74,16 +74,18 @@ List access control entries for a knowledge graph. If no name is given, lists AC
 .kg acl list analytics
 ```
 
-### `.kg acl grant <kg> <user> <role>`
+### `.kg acl grant <kg> <user> <role> [relations <r>, ...]`
 
-Grant a user access to a knowledge graph with a specific role. The user must exist.
+Grant a user access to a knowledge graph with a specific role. The user must exist. A new grant replaces the user's previous grant on that knowledge graph.
 
 ```
 .kg acl grant analytics alice viewer
 .kg acl grant shared_data bob editor
+.kg acl grant shop ingest writer
+.kg acl grant shop agent decider relations attempt, decision
 ```
 
-**KG Roles:** `owner`, `editor`, `viewer`
+**KG Roles:** `owner`, `editor`, `writer`, `decider`, `viewer`. `writer` and `decider` write facts only, never rules, schema or drops; `relations` limits a `writer` to those relations, and a `decider` requires it. See [Authentication](../guides/authentication#fact-writing-roles).
 
 ### `.kg acl revoke <kg> <user>`
 
