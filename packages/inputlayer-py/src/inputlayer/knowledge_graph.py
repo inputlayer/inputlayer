@@ -497,9 +497,17 @@ class KnowledgeGraph:
                 ast_computed[k] = v
             else:
                 # A keyword names a computed column; a value is not one.
+                is_column = any(
+                    k in Relation._get_columns(r.relation_cls if isinstance(r, RelationRef) else r)
+                    for r in relations
+                )
                 raise CompileError(
                     f"{k}={v!r} is not an expression: keyword arguments name computed columns",
-                    hint=f"to filter on a value, pass where=lambda r: r.{k} == {v!r}",
+                    hint=(
+                        f"to filter on a value, pass where=lambda r: r.{k} == {v!r}"
+                        if is_column
+                        else "to filter, pass where=; to sort, pass order_by="
+                    ),
                 )
 
         proxies = [

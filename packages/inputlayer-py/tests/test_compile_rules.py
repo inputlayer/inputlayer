@@ -402,3 +402,15 @@ class TestKeywordArguments:
         assert "order=" in str(exc.value)
         assert "order_by=" in (exc.value.hint or "")
         kg._execute.assert_not_awaited()
+
+    @pytest.mark.parametrize("method", ["query", "why", "debug"])
+    async def test_a_value_keyword_naming_no_column_gets_a_generic_hint(self, method) -> None:
+        kg = KnowledgeGraph("default", MagicMock())
+        kg._execute = AsyncMock()
+        with pytest.raises(CompileError) as exc:
+            await getattr(kg, method)(Employee, order="desc")
+        assert "order='desc'" in str(exc.value)
+        hint = exc.value.hint or ""
+        assert "r.order" not in hint
+        assert "where=" in hint and "order_by=" in hint
+        kg._execute.assert_not_awaited()
