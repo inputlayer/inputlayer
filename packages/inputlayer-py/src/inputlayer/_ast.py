@@ -115,6 +115,8 @@ class InExpr(BoolExpr):
     """Membership test: Column appears in another relation."""
     column: Expr
     target_column: Expr
+    #: Every column of the target relation, in order (R-IN needs the atom's arity).
+    target_columns: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -122,6 +124,7 @@ class NegatedIn(BoolExpr):
     """Negated membership test."""
     column: Expr
     target_column: Expr
+    target_columns: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -130,3 +133,5 @@ class MatchExpr(BoolExpr):
     relation: str
     bindings: dict[str, Expr]  # target_col -> source expr
     negated: bool = False
+    #: Every column of the relation, in order; unbound ones become ``_``.
+    columns: tuple[str, ...] | None = None

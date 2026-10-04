@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
+from inputlayer._literal import escape_string
 from inputlayer.migrations.errors import execute_checked
 
 
@@ -71,10 +72,4 @@ class MigrationRecorder:
 
 def _escape(value: str) -> str:
     """Escape a string for interpolation into an IQL string literal."""
-    return (
-        value.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")
-    )
+    return escape_string(value)

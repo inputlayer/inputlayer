@@ -36,11 +36,13 @@ class ColumnProxy:
         *,
         ref_alias: str | None = None,
         relation_cls: type | None = None,
+        relation_columns: tuple[str, ...] | None = None,
     ) -> None:
         self._relation = relation
         self._name = name
         self._ref_alias = ref_alias
         self._relation_cls = relation_cls
+        self._relation_columns = relation_columns
 
     @property
     def relation_cls(self) -> type | None:
@@ -66,6 +68,14 @@ class ColumnProxy:
 
     def _to_ast(self) -> AstColumn:
         return AstColumn(self._relation, self._name, self._ref_alias)
+
+    def _columns(self) -> tuple[str, ...] | None:
+        """Every column of this column's relation, in order, when known."""
+        if self._relation_columns is not None:
+            return self._relation_columns
+        if self._relation_cls is not None:
+            return tuple(self._relation_cls.model_fields)  # type: ignore[attr-defined]
+        return None
 
     # ── Comparison operators → BoolExpr ───────────────────────────────
 
@@ -129,7 +139,7 @@ class ColumnProxy:
 
     def in_(self, other: ColumnProxy) -> InExpr:
         """Test if this column's value appears in another relation's column."""
-        return InExpr(self._to_ast(), other._to_ast())
+        return InExpr(self._to_ast(), other._to_ast(), other._columns())
 
     # ── Ordering ──────────────────────────────────────────────────────
 
@@ -152,7 +162,9 @@ class ColumnProxy:
         for target_col, source_col_name in on.items():
             # source_col_name refers to a column on self's relation
             bindings[target_col] = AstColumn(self._relation, source_col_name, self._ref_alias)
-        return MatchExpr(rel_name, bindings, negated=False)
+        return MatchExpr(
+            rel_name, bindings, negated=False, columns=tuple(RelBase._get_columns(relation))
+        )
 
     def __repr__(self) -> str:
         if self._ref_alias:
@@ -164,11 +176,16 @@ class _NegatedColumnProxy(ColumnProxy):
     """Wrapper returned by ~col to flip .in_() to NegatedIn."""
 
     def __init__(self, inner: ColumnProxy) -> None:
-        super().__init__(inner._relation, inner._name, ref_alias=inner._ref_alias)
+        super().__init__(
+            inner._relation,
+            inner._name,
+            ref_alias=inner._ref_alias,
+            relation_columns=inner._columns(),
+        )
         self._inner = inner
 
     def in_(self, other: ColumnProxy) -> NegatedIn:  # type: ignore[override]
-        return NegatedIn(self._inner._to_ast(), other._to_ast())
+        return NegatedIn(self._inner._to_ast(), other._to_ast(), other._columns())
 
     def matches(  # type: ignore[override]
         self, relation: type[Relation], on: dict[str, str]
@@ -179,20 +196,31 @@ class _NegatedColumnProxy(ColumnProxy):
         bindings = {}
         for target_col, source_col_name in on.items():
             bindings[target_col] = AstColumn(self._relation, source_col_name, self._ref_alias)
-        return MatchExpr(rel_name, bindings, negated=True)
+        return MatchExpr(
+            rel_name, bindings, negated=True, columns=tuple(RelBase._get_columns(relation))
+        )
 
 
 class RelationProxy:
     """Proxy object passed to where/on lambdas. Attribute access returns ColumnProxy."""
 
-    def __init__(self, relation_name: str, *, ref_alias: str | None = None) -> None:
+    def __init__(
+        self,
+        relation_name: str,
+        *,
+        ref_alias: str | None = None,
+        columns: tuple[str, ...] | None = None,
+    ) -> None:
         self._relation_name = relation_name
         self._ref_alias = ref_alias
+        self._columns = columns
 
     def __getattr__(self, name: str) -> ColumnProxy:
         if name.startswith("_"):
             raise AttributeError(name)
-        return ColumnProxy(self._relation_name, name, ref_alias=self._ref_alias)
+        return ColumnProxy(
+            self._relation_name, name, ref_alias=self._ref_alias, relation_columns=self._columns
+        )
 
     def __repr__(self) -> str:
         if self._ref_alias:
@@ -225,7 +253,12 @@ class RelationRef:
     def __getattr__(self, name: str) -> ColumnProxy:
         if name.startswith("_"):
             raise AttributeError(name)
-        return ColumnProxy(self._relation_name, name, ref_alias=self._alias)
+        return ColumnProxy(
+            self._relation_name,
+            name,
+            ref_alias=self._alias,
+            relation_columns=tuple(self._relation_cls.model_fields),
+        )
 
     def __repr__(self) -> str:
         return f"RelationRef({self._relation_name} as {self._alias})"

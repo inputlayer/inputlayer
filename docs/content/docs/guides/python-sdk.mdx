@@ -159,7 +159,7 @@ for col in desc.columns:
 | `bool` | `bool` | Boolean |
 | `Vector[N]` | `vector(N)` | N-dimensional float32 vector |
 | `VectorInt8[N]` | `vector_int8(N)` | N-dimensional int8 quantized vector |
-| `Timestamp` | `timestamp` | Unix epoch milliseconds |
+| `Timestamp`, `datetime` | `int` | Unix epoch milliseconds; a `datetime` is written as milliseconds (a naive one as UTC) and read back as a UTC `datetime` |
 
 ### Custom Relation Names
 

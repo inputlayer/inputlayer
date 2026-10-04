@@ -98,8 +98,10 @@ class TestCompileValue:
     def test_bool_false(self):
         assert compile_value(False) == "false"
 
-    def test_none(self):
-        assert compile_value(None) == "null"
+    def test_none_is_refused(self):
+        # IQL has no null literal; the engine would read `null` as an unquoted atom.
+        with pytest.raises(CompileError, match="no null"):
+            compile_value(None)
 
     def test_vector(self):
         assert compile_value([1.0, 2.0, 3.0]) == "[1.0, 2.0, 3.0]"
@@ -112,7 +114,7 @@ class TestCompileValue:
         assert compile_value(ts) == "1704067200000"
 
     def test_unsupported(self):
-        with pytest.raises(TypeError):
+        with pytest.raises(CompileError):
             compile_value({"a": 1})
 
 
@@ -128,11 +130,13 @@ class TestCompileSchema:
 
     def test_vector_type(self):
         result = compile_schema(Document)
-        assert result == "+document(id: int, title: string, embedding: vector[128])"
+        # The engine's schema parser reads vector(N), not vector[N].
+        assert result == "+document(id: int, title: string, embedding: vector(128))"
 
     def test_timestamp_type(self):
+        # R-TYPE: the engine has no timestamp schema type; Unix ms in an int column.
         result = compile_schema(Event)
-        assert result == "+event(id: int, name: string, ts: timestamp)"
+        assert result == "+event(id: int, name: string, ts: int)"
 
     def test_simple_relation(self):
         result = compile_schema(Edge)
@@ -384,10 +388,11 @@ class TestCompileQuery:
         )
         assert plan.labels == ["name", "name_2"]
 
-    def test_negation(self):
+    def test_negated_comparison_flips_its_operator(self):
+        # IQL negates atoms only; `!(Active = false)` is a parse error.
         cond = Not(Comparison("=", _emp("active"), Literal(False)))
         result = compile_query(Employee, relations=[Employee], where_condition=cond)
-        assert result == f"?{EMP_ATOM}, !(Active = false)"
+        assert result == f"?{EMP_ATOM}, Active != false"
 
     def test_computed_column_is_a_binding_after_the_atoms(self):
         plan = compile_query_plan(

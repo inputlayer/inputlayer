@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from inputlayer.types import schema_type
+
 
 @dataclass(frozen=True)
 class CreateRelation:
@@ -14,7 +16,7 @@ class CreateRelation:
     columns: list[tuple[str, str]]  # [(col_name, iql_type), ...]
 
     def forward_commands(self) -> list[str]:
-        parts = ", ".join(f"{col}: {tp}" for col, tp in self.columns)
+        parts = ", ".join(f"{col}: {schema_type(tp)}" for col, tp in self.columns)
         return [f"+{self.name}({parts})"]
 
     def backward_commands(self) -> list[str]:
@@ -42,7 +44,7 @@ class DropRelation:
         return [f".rel drop {self.name}"]
 
     def backward_commands(self) -> list[str]:
-        parts = ", ".join(f"{col}: {tp}" for col, tp in self.columns)
+        parts = ", ".join(f"{col}: {schema_type(tp)}" for col, tp in self.columns)
         return [f"+{self.name}({parts})"]
 
     def describe(self) -> str:

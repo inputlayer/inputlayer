@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from inputlayer.compiler import compile_insert, compile_rule
+from inputlayer import _meta
+from inputlayer.compiler import compile_insert, compile_rule_clause
 from inputlayer.relation import Relation
 
 if TYPE_CHECKING:
@@ -43,7 +44,7 @@ class Session:
             head_name = Relation._resolve_name(target)
             head_columns = Relation._get_columns(target)
             for clause in target.rules:
-                iql = compile_rule(
+                compiled = compile_rule_clause(
                     head_name,
                     head_columns,
                     clause.select_map,
@@ -51,12 +52,14 @@ class Session:
                     clause.condition,
                     persistent=False,
                 )
-                await self._conn.execute(iql)
+                # Constants a negated atom binds through are session facts too.
+                for statement in (*compiled.constants, compiled.clause):
+                    await self._conn.execute(statement)
 
     async def list_rules(self) -> list[str]:
-        """List session rules."""
-        result = await self._conn.execute(".session list")
-        return [row[0] for row in result.rows] if result.rows else []
+        """List session rules, one clause per entry, in definition order."""
+        result = await self._conn.execute(_meta.session_list())
+        return _meta.session_rules(result.rows)
 
     async def drop_rule(
         self,
@@ -64,14 +67,26 @@ class Session:
         *,
         index: int | None = None,
     ) -> None:
-        """Drop a session rule by name, or a specific clause by index."""
-        if name and index is not None:
-            await self._conn.execute(f".session remove {name} {index}")
-        elif name:
-            await self._conn.execute(f".session drop {name}")
-        else:
+        """Drop a session rule by name, or one of its clauses by index (1-based)."""
+        if not name:
             raise ValueError("Must provide rule name")
+        if index is None:
+            await self._conn.execute(_meta.session_drop(name))
+            return
+        # The engine drops a clause by its position among all session
+        # rules, so find that position.
+        positions = [
+            i
+            for i, rule in enumerate(await self.list_rules(), start=1)
+            if rule.split("(", 1)[0].strip() == name
+        ]
+        if not 1 <= index <= len(positions):
+            raise IndexError(
+                f"Session rule {name!r} has {len(positions)} clause(s); "
+                f"index {index} is out of range"
+            )
+        await self._conn.execute(_meta.session_drop(positions[index - 1]))
 
     async def clear(self) -> None:
         """Clear all session facts and rules."""
-        await self._conn.execute(".session clear")
+        await self._conn.execute(_meta.session_clear())

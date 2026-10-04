@@ -51,8 +51,10 @@ class _FromBase:
     def _build_proxy_args(self) -> list[RelationProxy]:
         """Build proxy objects matching the From(...) arguments."""
         proxies = []
-        for rn, _cls, alias in self._relations:
-            proxies.append(RelationProxy(rn, ref_alias=alias))
+        for rn, cls, alias in self._relations:
+            proxies.append(
+                RelationProxy(rn, ref_alias=alias, columns=tuple(Relation._get_columns(cls)))
+            )
         return proxies
 
 

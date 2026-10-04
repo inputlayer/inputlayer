@@ -31,6 +31,7 @@ from inputlayer import (
     InputLayer,
     KnowledgeGraph,
     Relation,
+    Timestamp,
     Vector,
     avg,
     count,
@@ -63,16 +64,13 @@ class Department(Relation):
     budget: float
 
 
-# The guide's Document also has `created_at: Timestamp`, which no query
-# example reads, and a dimensioned `Vector[384]`; the SDK declares those as
-# `timestamp` and `vector[N]`, which the engine's schema parser rejects
-# (column types are the next compile-path change), so Document keeps an
-# undimensioned vector and leaves the timestamp out.
+# The guide's Document, with 3 dimensions instead of 384 so the vectors stay short.
 class Document(Relation):
     id: int
     title: str
     content: str
-    embedding: Vector
+    embedding: Vector[3]
+    created_at: Timestamp
 
 
 class Edge(Relation):
@@ -145,8 +143,10 @@ async def kg(il: InputLayer) -> AsyncIterator[KnowledgeGraph]:
         Department(name="hr", budget=300000.0),
     ])
     await graph.insert([
-        Document(id=1, title="same", content="a", embedding=[1.0, 0.0, 0.0]),
-        Document(id=2, title="orthogonal", content="b", embedding=[0.0, 1.0, 0.0]),
+        Document(id=1, title="same", content="a", embedding=[1.0, 0.0, 0.0], created_at=NOW),
+        Document(
+            id=2, title="orthogonal", content="b", embedding=[0.0, 1.0, 0.0], created_at=NOW
+        ),
     ])
     await graph.insert([Edge(src=1, dst=2), Edge(src=2, dst=3), Edge(src=3, dst=4)])
     await graph.insert([
