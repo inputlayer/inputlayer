@@ -106,10 +106,11 @@ max_query_memory_bytes = 4294967296
 
 # Most heap bytes all queries running at once may hold together; a query
 # that grows while they hold more is refused with `resource_exhausted`, so
-# concurrent queries never push the server past its memory. Unset: half the
-# container's memory limit (cgroup), or no limit outside a memory-limited
-# container. 0 = unlimited. Size the server's memory for this plus the graph
-# budgets below plus the server itself.
+# concurrent queries never push the server past its memory. Unset: 60% of
+# the container's memory limit (cgroup), or no limit outside a
+# memory-limited container. 0 = unlimited. Keep it at most 0.6 x the
+# server's memory, the per-query limit at most this, and the graph budgets
+# below summed at most this.
 # max_total_query_memory_bytes = 8589934592
 
 # Memory budget of each knowledge graph's stored facts, estimated from their

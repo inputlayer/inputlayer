@@ -40,6 +40,19 @@ pub(crate) fn stop_error(stop: Stop) -> ProgramError {
     }
 }
 
+/// The code of a computation that failed with `code`, unless the request's
+/// computation went over a memory limit: then it failed for that, with
+/// `resource_exhausted`, even after the request began committing.
+pub(crate) fn computation_failure_code(code: ErrorCode) -> ErrorCode {
+    let over_memory = crate::code_generator::current_request_control()
+        .is_some_and(|c| c.memory_exceeded().is_some());
+    if over_memory {
+        ErrorCode::ResourceExhausted
+    } else {
+        code
+    }
+}
+
 /// Run `job` on the blocking pool under `control`, holding one of
 /// `permits` while it computes. `job` sees `control` as the thread's request
 /// control, so the evaluator's cooperative checks and the commit boundary

@@ -2527,7 +2527,10 @@ impl QueryJob {
                                 Ok(qr) => return Ok(QueryResult { errors, ..qr }),
                                 Err(e) => {
                                     storage = self.storage.read();
-                                    fail!(ErrorCode::Validation, format!("{label}: {e}"));
+                                    fail!(
+                                        supervise::computation_failure_code(ErrorCode::Validation),
+                                        format!("{label}: {e}")
+                                    );
                                 }
                             }
                         }
@@ -3309,7 +3312,10 @@ impl QueryJob {
                 }
                 Err(e) => {
                     stmt_index = index;
-                    fail!(ErrorCode::Validation, format!("{label}: {e}"));
+                    fail!(
+                        supervise::computation_failure_code(ErrorCode::Validation),
+                        format!("{label}: {e}")
+                    );
                 }
             }
             return Ok(QueryResult {
@@ -3448,16 +3454,10 @@ impl QueryJob {
         };
         let (results, timing_breakdown) = match executed {
             Ok(executed) => executed,
-            Err(e) => {
-                let over_memory = crate::code_generator::current_request_control()
-                    .is_some_and(|c| c.memory_exceeded().is_some());
-                let code = if over_memory {
-                    ErrorCode::ResourceExhausted
-                } else {
-                    ErrorCode::Validation
-                };
-                fail_query!(code, format!("Query execution failed: {e}"))
-            }
+            Err(e) => fail_query!(
+                supervise::computation_failure_code(ErrorCode::Validation),
+                format!("Query execution failed: {e}")
+            ),
         };
         let row_capped = crate::last_result_truncated();
         let query_exec_ms = query_exec_start.elapsed().as_millis() as u64;

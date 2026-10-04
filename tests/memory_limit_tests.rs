@@ -222,6 +222,23 @@ async fn a_runaway_query_after_a_commit_in_the_same_program_is_still_refused() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_proof_after_a_commit_is_refused_as_resource_exhausted() {
+    let server = start_server(|config| {
+        config.storage.performance.max_query_memory_bytes = 32 << 20;
+        config.storage.performance.query_timeout_ms = 0;
+    })
+    .await;
+    server.write(&edges(0, NODES)).await;
+    server
+        .write("+reach(X, Y) <- edge(X, Y)\n+reach(X, Z) <- reach(X, Y), edge(Y, Z)")
+        .await;
+    let mut client = Client::connect(&server).await;
+
+    let reply = client.execute("why", ".compact\n.why ?reach(X, Y)").await;
+    assert_query_exhausted(&reply, 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_query_under_the_limit_is_unaffected() {
     let server = start_server(|config| {
         config.storage.performance.max_query_memory_bytes = 32 << 20;

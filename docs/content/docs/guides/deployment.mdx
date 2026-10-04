@@ -583,24 +583,29 @@ Three limits keep the server inside that memory and refuse work with
 - `max_total_query_memory_bytes` bounds the working sets of **all queries
   running at once**. Up to about three quarters of the CPUs run queries
   concurrently; a query that grows while they hold this much is stopped, so
-  concurrency can never push the server past its memory. Unset, it is half
-  the container's memory limit (its cgroup), or no limit when the server
-  runs outside a memory-limited container: set it explicitly there.
+  concurrency can never push the server past its memory. Unset, it is 60%
+  of the container's memory limit (its cgroup), or no limit when the server
+  runs outside a memory-limited container: set it explicitly there. The
+  server logs the budget it uses at startup (`query_memory_limits`).
 
 The sizing rule that keeps the process inside its memory limit is:
 
 ```
-max_total_query_memory_bytes
-  + (graphs at full budget) × max_graph_memory_bytes
-  + server overhead (about 0.5 GB)
-  ≤ memory limit
+max_total_query_memory_bytes ≤ 0.6 × memory limit
+max_query_memory_bytes ≤ max_total_query_memory_bytes
+sum of the graphs' max_graph_memory_bytes ≤ max_total_query_memory_bytes
 ```
 
+The remaining 40% of the memory limit is headroom: the allocator holds more
+resident memory than the bytes it hands out, and the server itself needs
+some.
+
 For example, a 32 GB host with the configuration above gives 16 GiB to
-queries (two whole-graph queries at 8 GiB at once) and holds up to three
-graphs at their full 4 GiB budget. The Kubernetes base manifests size the
-same way for their 4Gi pod: 2 GiB for queries (derived from the pod's limit),
-`max_query_memory_bytes` 1 GiB and `max_graph_memory_bytes` 512 MiB.
+queries (two whole-graph queries at 8 GiB at once) and holds up to four
+graphs at their full 4 GiB budget. The Kubernetes base manifests follow the
+same rule for their 8Gi pod: about 4.8 GiB for queries (derived from the
+pod's limit), `max_query_memory_bytes` 2 GiB and `max_graph_memory_bytes`
+1 GiB, so up to four graphs at their full budget.
 
 ### CPU
 

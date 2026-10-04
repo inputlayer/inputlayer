@@ -41,9 +41,14 @@ pub fn thread_net_bytes() -> i64 {
 /// The memory limit of the container the process runs in: its cgroup's
 /// (v2, else v1) limit, if one is set.
 pub fn container_memory_limit() -> Option<u64> {
-    let read = |path| std::fs::read_to_string(path).ok();
-    let text = read("/sys/fs/cgroup/memory.max")
-        .or_else(|| read("/sys/fs/cgroup/memory/memory.limit_in_bytes"))?;
+    cgroup_memory_limit(std::path::Path::new("/sys/fs/cgroup"))
+}
+
+/// The memory limit the cgroup filesystem mounted at `root` sets (v2, else
+/// v1), if any.
+pub fn cgroup_memory_limit(root: &std::path::Path) -> Option<u64> {
+    let read = |path: &str| std::fs::read_to_string(root.join(path)).ok();
+    let text = read("memory.max").or_else(|| read("memory/memory.limit_in_bytes"))?;
     // v2 says `max` when unlimited, v1 a number near 2^63.
     let limit: u64 = text.trim().parse().ok()?;
     (limit < 1 << 60).then_some(limit)

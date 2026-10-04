@@ -274,9 +274,9 @@ pub struct PerformanceConfig {
     /// Most heap bytes the computations of all requests in flight may hold
     /// together. A query that grows while they hold more is stopped and
     /// refused with `resource_exhausted`, so concurrent queries never push
-    /// the server past its container. Unset: half the container's memory
-    /// limit (cgroup), the other half left to the knowledge graphs' stored
-    /// facts and the server; no limit outside a memory-limited container.
+    /// the server past its container. Unset: 60% of the container's memory
+    /// limit (cgroup), the other 40% left as headroom for allocator overhead
+    /// and the server itself; no limit outside a memory-limited container.
     /// 0 = no limit.
     #[serde(default)]
     pub max_total_query_memory_bytes: Option<u64>,
@@ -1046,9 +1046,14 @@ impl PerformanceConfig {
     /// The budget of all requests' computations together, in bytes; 0 = no
     /// limit. See [`Self::max_total_query_memory_bytes`].
     pub fn total_query_memory_bytes(&self) -> u64 {
-        self.max_total_query_memory_bytes.unwrap_or_else(|| {
-            crate::execution::memory::container_memory_limit().map_or(0, |limit| limit / 2)
-        })
+        self.total_query_memory_bytes_within(crate::execution::memory::container_memory_limit())
+    }
+
+    /// [`Self::total_query_memory_bytes`] in a container limited to
+    /// `container_limit` bytes, if limited.
+    pub fn total_query_memory_bytes_within(&self, container_limit: Option<u64>) -> u64 {
+        self.max_total_query_memory_bytes
+            .unwrap_or_else(|| container_limit.map_or(0, |limit| limit / 5 * 3))
     }
 }
 
@@ -1068,7 +1073,7 @@ impl Default for PerformanceConfig {
             max_query_cost: 0, // 0 = unlimited
             max_query_memory_bytes: default_max_query_memory_bytes(),
             max_graph_memory_bytes: 0,          // 0 = unlimited
-            max_total_query_memory_bytes: None, // half the container's limit
+            max_total_query_memory_bytes: None, // 60% of the container's limit
             timing_mode: crate::execution::TimingMode::default(),
         }
     }
@@ -1127,6 +1132,43 @@ impl Default for AuthConfig {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    /// Unset, the query memory budget is 60% of the memory limit the
+    /// process's cgroup sets (v2 or v1), and no limit without one; a
+    /// configured budget wins.
+    #[test]
+    fn test_total_query_memory_defaults_to_60_percent_of_the_cgroup_limit() {
+        use crate::execution::memory::cgroup_memory_limit;
+        let budget = |root: &std::path::Path| {
+            PerformanceConfig::default().total_query_memory_bytes_within(cgroup_memory_limit(root))
+        };
+
+        let v2 = tempfile::TempDir::new().unwrap();
+        std::fs::write(v2.path().join("memory.max"), "8589934592\n").unwrap();
+        assert_eq!(budget(v2.path()), 8589934592 / 5 * 3);
+
+        let v1 = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(v1.path().join("memory")).unwrap();
+        let limit_file = v1.path().join("memory/memory.limit_in_bytes");
+        std::fs::write(&limit_file, "1073741824\n").unwrap();
+        assert_eq!(budget(v1.path()), 1073741824 / 5 * 3);
+        std::fs::write(&limit_file, "9223372036854771712\n").unwrap();
+        assert_eq!(budget(v1.path()), 0, "v1 unlimited");
+
+        std::fs::write(v2.path().join("memory.max"), "max\n").unwrap();
+        assert_eq!(budget(v2.path()), 0, "v2 unlimited");
+        let none = tempfile::TempDir::new().unwrap();
+        assert_eq!(budget(none.path()), 0, "no cgroup");
+
+        let configured = PerformanceConfig {
+            max_total_query_memory_bytes: Some(1 << 20),
+            ..PerformanceConfig::default()
+        };
+        assert_eq!(
+            configured.total_query_memory_bytes_within(Some(8 << 30)),
+            1 << 20
+        );
+    }
 
     #[test]
     fn test_non_config_env_vars_are_ignored() {
