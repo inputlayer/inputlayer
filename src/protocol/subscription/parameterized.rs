@@ -443,6 +443,8 @@ pub struct Family {
 /// A family's verdict under one set of rules.
 struct Judged {
     rules: Arc<PersistentRules>,
+    /// The revision of the snapshot judged.
+    revision: u64,
     /// Whether a parameter binds an atom that reads a recursive relation.
     binds_recursion: bool,
 }
@@ -479,26 +481,46 @@ impl Family {
     }
 
     /// Whether, under `snapshot`'s rules, a parameter binds an atom that
-    /// reads a recursive relation. The first call under new rules starts the
-    /// costs over and stops sharing, without counting a failure.
+    /// reads a recursive relation. The first call under newer rules starts
+    /// the costs over and stops sharing, without counting a failure; a
+    /// snapshot older than the judged rules changes nothing.
     fn binds_recursion(&self, snapshot: &KnowledgeGraphSnapshot) -> bool {
         let rules = snapshot.persistent_rules();
-        if let Some(judged) = &*self.judged.load() {
-            if Arc::ptr_eq(&judged.rules, rules) {
-                return judged.binds_recursion;
+        let mut current = self.judged.load_full();
+        let mut binds = None;
+        let verdict = loop {
+            if let Some(judged) = &current {
+                if Arc::ptr_eq(&judged.rules, rules) {
+                    return judged.binds_recursion;
+                }
+                if judged.revision > snapshot.revision {
+                    return binds_recursion(&self.shape, &snapshot.rules);
+                }
             }
-        }
-        let binds = binds_recursion(&self.shape, &snapshot.rules);
-        self.judged.store(Some(Arc::new(Judged {
-            rules: Arc::clone(rules),
-            binds_recursion: binds,
-        })));
+            let verdict =
+                *binds.get_or_insert_with(|| binds_recursion(&self.shape, &snapshot.rules));
+            let next = Arc::new(Judged {
+                rules: Arc::clone(rules),
+                revision: snapshot.revision,
+                binds_recursion: verdict,
+            });
+            let previous = self.judged.compare_and_swap(&current, Some(next));
+            let won = match (&*previous, &current) {
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            };
+            if won {
+                break verdict;
+            }
+            current = arc_swap::Guard::into_inner(previous);
+        };
         self.sharing.store(false, Ordering::Relaxed);
         self.own_cost_us.store(0, Ordering::Relaxed);
         self.shared_cost_us.store(0, Ordering::Relaxed);
         self.own_since_stop.store(0, Ordering::Relaxed);
         self.stops.store(0, Ordering::Relaxed);
-        binds
+        verdict
     }
 
     /// The round to read for a view that must see `snapshot`: the latest

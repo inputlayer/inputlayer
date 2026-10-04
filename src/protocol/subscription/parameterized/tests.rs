@@ -514,11 +514,24 @@ mod rounds {
         assert!(!family.shares());
         // A probe of a snapshot from before the change is judged without a
         // cost measured under its rules.
-        Family::probe(&family, before);
+        Family::probe(&family, Arc::clone(&before));
         probed(&family).await;
         assert!(!family.shares(), "no own cost to compare the round with");
         assert_eq!(family.stops.load(Ordering::Relaxed), 0, "not a failure");
         assert_eq!(family.shared_cost_us.load(Ordering::Relaxed), 0);
+
+        // Nor against a cost measured under the new rules, which the old
+        // snapshot does not set back.
+        family.own_cost_us.store(1_000_000_000, Ordering::Relaxed);
+        Family::probe(&family, before);
+        probed(&family).await;
+        assert!(!family.shares(), "the round's rules are no longer judged");
+        assert_eq!(family.stops.load(Ordering::Relaxed), 0);
+        assert_eq!(family.shared_cost_us.load(Ordering::Relaxed), 0);
+        let now = views[0].own.current_snapshot().unwrap();
+        let judged = family.judged.load_full().unwrap();
+        assert!(Arc::ptr_eq(&judged.rules, now.persistent_rules()));
+        assert_eq!(family.own_cost_us.load(Ordering::Relaxed), 1_000_000_000);
     }
 
     #[tokio::test(flavor = "multi_thread")]
