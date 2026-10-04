@@ -7,8 +7,10 @@ from typing import Any, ClassVar, get_type_hints
 from pydantic import BaseModel, ConfigDict
 from pydantic._internal._model_construction import ModelMetaclass
 
+from inputlayer._ast import Expr, MatchExpr
 from inputlayer._naming import camel_to_snake
-from inputlayer._proxy import ColumnProxy, RelationRef
+from inputlayer._proxy import ColumnProxy, RelationRef, _wrap
+from inputlayer.exceptions import CompileError
 
 
 class _RelationMeta(ModelMetaclass):
@@ -82,6 +84,35 @@ class Relation(BaseModel, metaclass=_RelationMeta):
         target = relation_cls or cls
         hints = get_type_hints(target)
         return {k: hints[k] for k in target.model_fields}
+
+    # ── Existence checks ──────────────────────────────────────────────
+
+    @classmethod
+    def any(cls, **bindings: Any) -> MatchExpr:
+        """A row of this relation exists whose columns equal *bindings*.
+
+        Unbound columns match anything. A binding is a value or a column of
+        another atom in the same body; ``~R.any(...)`` is true when no such
+        row exists. Works in rule and query conditions, conditional deletes
+        and guards (``program().when()``, ``claim(when=, unless=)``)::
+
+            From(ToolPolicy).where(
+                lambda t: (t.mode == "auto") & ~KillSwitch.any(tool=t.tool)
+            )
+            await kg.claim(attempt, when=[CheckNeeded.any(order="ORD-1")],
+                           unless=Attempt.any(order="ORD-1"))
+        """
+        columns = cls._get_columns()
+        bound: dict[str, Expr] = {}
+        for col, value in bindings.items():
+            if col not in columns:
+                raise CompileError(
+                    f"any(): relation {_resolve_name(cls)} has no column {col}",
+                    hint=f"its columns are {', '.join(columns)}",
+                )
+            if value is not None:
+                bound[col] = _wrap(value)
+        return MatchExpr(_resolve_name(cls), bound, columns=tuple(columns))
 
     # ── Self-join support ─────────────────────────────────────────────
 

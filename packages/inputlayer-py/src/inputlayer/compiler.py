@@ -64,6 +64,9 @@ class _VarEnv:
         self._map: dict[str, str] = {}  # "relation.col" or "alias.col" → Var
         self._counter = 0
         self._parent: dict[str, str] = {}  # Union-find parent
+        #: Columns some expression refers to: an ``any()`` atom gives them a
+        #: variable instead of ``_``.
+        self._referenced: set[str] = set()
 
     def _find(self, key: str) -> str:
         """Find root of union-find set."""
@@ -97,10 +100,15 @@ class _VarEnv:
         """Unify two columns to the same IQL variable (join condition)."""
         key_a = f"{col_a.ref_alias or col_a.relation}.{col_a.name}"
         key_b = f"{col_b.ref_alias or col_b.relation}.{col_b.name}"
+        # Keep a variable either side already has, so text compiled before
+        # the unification still names the same variable.
+        before = self._map.get(self._find(key_a)) or self._map.get(self._find(key_b))
         self._union(key_a, key_b)
         root = self._find(key_a)
-        if root in self._map:
-            return self._map[root]
+        existing = self._map.get(root) or before
+        if existing is not None:
+            self._map[root] = existing
+            return existing
         var = column_to_variable(col_a.name)
         used_vars = set(self._map.values())
         if var in used_vars:
@@ -118,6 +126,13 @@ class _VarEnv:
             var = f"{base}_{self._counter}"
         self._map[f"\0{var}"] = var
         return var
+
+    def reference(self, keys: set[str]) -> None:
+        """Mark columns (``relation.col`` or ``alias.col``) as referenced."""
+        self._referenced |= keys
+
+    def is_referenced(self, col: AstColumn) -> bool:
+        return f"{col.ref_alias or col.relation}.{col.name}" in self._referenced
 
     def lookup(self, col: AstColumn) -> str | None:
         """Look up existing variable for a column without creating one."""
@@ -238,7 +253,7 @@ def _compile_parts(expr: BoolExpr, env: _VarEnv) -> list[_Part]:
     if isinstance(expr, NegatedIn):
         return [_compile_in(expr, env, negated=True)]
     if isinstance(expr, MatchExpr):
-        return [_compile_match(expr, env)]
+        return _compile_match(expr, env)
     raise TypeError(f"Cannot compile boolean expression: {expr!r}")
 
 
@@ -330,20 +345,37 @@ def _compile_in(expr: InExpr | NegatedIn, env: _VarEnv, *, negated: bool) -> _At
     return _Atom(target.relation, terms, negated)
 
 
-def _compile_match(match: MatchExpr, env: _VarEnv) -> _Atom:
-    """Compile a MatchExpr to an atom of its relation, ``_`` in unbound columns."""
+def _compile_match(match: MatchExpr, env: _VarEnv) -> list[_Part]:
+    """Compile a MatchExpr (``R.any()``, ``matches()``) to an atom of its relation.
+
+    A bound column takes its value (a literal, or the variable of the column
+    it is bound to); an unbound column some expression refers to takes a
+    variable, the rest ``_``. A literal or expression bound to a referenced
+    column becomes a variable and an equality after the atom.
+    """
     columns = match.columns if match.columns is not None else tuple(match.bindings)
     unknown = [c for c in match.bindings if c not in columns]
     if unknown:
         raise CompileError(
-            f"matches(): relation {match.relation} has no column {', '.join(unknown)}",
+            f"any(): relation {match.relation} has no column {', '.join(unknown)}",
             hint=f"its columns are {', '.join(columns)}",
         )
-    terms = tuple(
-        _term(match.bindings[c], env, "matches()") if c in match.bindings else ("wild", None)
-        for c in columns
-    )
-    return _Atom(match.relation, terms, match.negated)
+    terms: list[tuple[str, Any]] = []
+    extra: list[_Part] = []
+    for c in columns:
+        own = AstColumn(match.relation, c, match.alias)
+        b = match.bindings.get(c)
+        if b is None:
+            terms.append(("var", env.get_var(own)) if env.is_referenced(own) else ("wild", None))
+        elif isinstance(b, AstColumn):
+            terms.append(("var", env.unify(b, own)))
+        elif isinstance(b, Literal) and not env.is_referenced(own):
+            terms.append(("const", b.value))
+        else:
+            var = env.get_var(own)
+            extra.append(f"{var} = {compile_expr(b, env)}")
+            terms.append(("var", var))
+    return [_Atom(match.relation, tuple(terms), match.negated), *extra]
 
 
 def compile_or_branches(expr: BoolExpr, env: _VarEnv) -> list[list[str]]:
@@ -378,18 +410,22 @@ def _compile_branches(expr: BoolExpr, env: _VarEnv) -> list[list[_Part]]:
 # request; a persistent view writes it as a persistent row in the program
 # that defines the view (rows are never deleted: other views may share them).
 
-#: The constant relation per literal type.
-_CONST_RELATIONS = {str: "il_const_s", bool: "il_const_b", int: "il_const_i", float: "il_const_f"}
+#: Read path and views: the constant relations, ``il_const_<t>``.
+CONST_PREFIX = "il_const_"
+#: Write path: a persistent row staged before a guard and deleted last,
+#: ``il_txn_const_<t>`` (an update body cannot see session facts).
+TXN_CONST_PREFIX = "il_txn_const_"
+
+#: The constant relation suffix per literal type.
+_CONST_SUFFIXES = {str: "s", bool: "b", int: "i", float: "f"}
 
 
-def _const_relation(value: Any) -> str:
-    from datetime import datetime
-
+def _const_relation(value: Any, prefix: str = CONST_PREFIX) -> str:
     if isinstance(value, datetime):
-        return _CONST_RELATIONS[int]
-    for tp, name in _CONST_RELATIONS.items():
+        return f"{prefix}{_CONST_SUFFIXES[int]}"
+    for tp, suffix in _CONST_SUFFIXES.items():
         if isinstance(value, tp):
-            return name
+            return f"{prefix}{suffix}"
     raise CompileError(
         f"A negated atom cannot be bound through the constant {value!r}",
         hint="test a column of a joined relation instead",
@@ -413,6 +449,7 @@ def _bind_negations(
     *,
     canonical: bool,
     constants_allowed: bool = True,
+    const_prefix: str = CONST_PREFIX,
 ) -> _Body:
     """Check every negated atom against the positive atoms and bind constants (R-NEG).
 
@@ -455,7 +492,7 @@ def _bind_negations(
                 hint="test a column of the deleted relation in the negated atom",
             )
         value = p.terms[at][1]
-        relation = _const_relation(value)
+        relation = _const_relation(value, const_prefix)
         var = env.fresh("K")
         variables.append(var)
         literal = encode_literal(value)
@@ -471,6 +508,235 @@ def _bind_negations(
     if canonical:
         return _Body([*positives, *negatives, *comparisons], constants, variables)
     return _Body(ordered, constants, variables)
+
+
+# ── Bodies with any() atoms (R-NEG) ──────────────────────────────────
+
+
+class _BodyContext:
+    """Per-body state of the normalization: fresh aliases for any() atoms."""
+
+    def __init__(self) -> None:
+        self._n = 0
+
+    def alias(self) -> str:
+        """A key for an atom's own columns that no relation or other atom uses."""
+        self._n += 1
+        return f"il_any_{self._n}"
+
+
+def _flatten_and(expr: BoolExpr) -> list[BoolExpr]:
+    """The conjuncts of an AND tree, in order."""
+    if isinstance(expr, And):
+        return _flatten_and(expr.left) + _flatten_and(expr.right)
+    return [expr]
+
+
+def _dnf(expr: BoolExpr) -> list[list[BoolExpr]]:
+    """The branches of a ``push_not`` result, each a list of conjuncts."""
+    if isinstance(expr, Or):
+        return _dnf(expr.left) + _dnf(expr.right)
+    if isinstance(expr, And):
+        return [left + right for left in _dnf(expr.left) for right in _dnf(expr.right)]
+    return [[expr]]
+
+
+def _atom_key(col: AstColumn) -> str:
+    return col.ref_alias or col.relation
+
+
+def _column_keys(nodes: Sequence[Any]) -> set[str]:
+    """``relation.column`` keys of every column an expression tree refers to."""
+    out: set[str] = set()
+
+    def visit(n: Any) -> None:
+        if n is None:
+            return
+        if isinstance(n, AstColumn):
+            out.add(f"{_atom_key(n)}.{n.name}")
+        elif isinstance(n, MatchExpr):
+            for b in n.bindings.values():
+                visit(b)
+        elif isinstance(n, (Comparison, And, Or, Arithmetic)):
+            visit(n.left)
+            visit(n.right)
+        elif isinstance(n, Not):
+            visit(n.operand)
+        elif isinstance(n, (InExpr, NegatedIn)):
+            visit(n.column)
+            visit(n.target_column)
+        elif isinstance(n, FuncCall):
+            for a in n.args:
+                visit(a)
+        elif isinstance(n, OrderedColumn):
+            visit(n.column)
+        elif isinstance(n, AggExpr):
+            visit(n.column)
+            visit(n.order_column)
+            for a in n.passthrough:
+                visit(a)
+
+    for n in nodes:
+        visit(n)
+    return out
+
+
+def _normalize_body(
+    conjuncts: list[BoolExpr],
+    context_keys: set[str],
+    ctx: _BodyContext,
+    *,
+    guard: bool = False,
+) -> list[BoolExpr]:
+    """Prepare a body's conjuncts (``push_not`` results) for compilation (R-NEG).
+
+    - Each any() atom gets a key for its own columns: a positive atom of a
+      relation the body does not otherwise use keeps the relation's name, so
+      ``R.col`` refers to its columns; a negated atom always gets a fresh one.
+    - A negated atom bound only to constants is made to share a variable
+      with a positive atom's column already equal to the constant: one an
+      equality of the body pins, or one a positive any() atom binds to the
+      same constant (which then binds a variable to it). Each rewrite keeps
+      the body's meaning. Otherwise ``_bind_negations`` binds the constant
+      through a constant row.
+    - A negated atom bound to a column no positive atom has is refused.
+
+    *context_keys* are the keys of the body's relation atoms. A *guard* has
+    none: its conditions may only use columns of its positive any() atoms.
+    """
+    positive_keys = set(context_keys)
+    out: list[BoolExpr] = []
+    for c in conjuncts:
+        if isinstance(c, MatchExpr) and not c.negated:
+            alias = ctx.alias() if c.relation in positive_keys else None
+            positive_keys.add(alias or c.relation)
+            out.append(replace(c, alias=alias))
+        elif isinstance(c, MatchExpr):
+            out.append(replace(c, alias=ctx.alias()))
+        else:
+            out.append(c)
+
+    for i, c in enumerate(list(out)):
+        if not isinstance(c, MatchExpr) or not c.negated:
+            continue
+        for col, b in c.bindings.items():
+            if isinstance(b, AstColumn):
+                if _atom_key(b) not in positive_keys:
+                    raise CompileError(
+                        f"~{c.relation}.any(): column {col} is bound to {b.qualified}, "
+                        "which no positive atom of this body has",
+                        hint="bind it to a column of a relation the body joins, or to a value",
+                    )
+            elif not isinstance(b, Literal):
+                raise CompileError(
+                    f"~{c.relation}.any(): column {col} is bound to an expression",
+                    hint="bind a negated column to a value or to a column of a positive atom",
+                )
+        if any(isinstance(b, AstColumn) for b in c.bindings.values()):
+            continue
+        if not c.bindings:
+            raise CompileError(
+                f"~{c.relation}.any() binds no column, so it shares no variable "
+                "with a positive atom",
+                hint="bind at least one column to a value or to a column of a positive atom",
+            )
+        col, lit = next(iter(c.bindings.items()))
+        assert isinstance(lit, Literal)
+        shared = _shared_column(lit, out, positive_keys)
+        if shared is not None:
+            out[i] = replace(c, bindings={**c.bindings, col: shared})
+
+    if guard:
+        for c in out:
+            if isinstance(c, MatchExpr):
+                continue
+            if isinstance(c, Or):
+                raise CompileError(
+                    "A guard cannot hold OR", hint="write one guarded program per alternative"
+                )
+            for key in _column_keys([c]):
+                if key.rsplit(".", 1)[0] not in positive_keys:
+                    raise CompileError(
+                        f"Guard condition uses column {key}, which no positive any() of "
+                        "the guard binds",
+                        hint="add Relation.any(...) for that relation to the guard",
+                    )
+    return out
+
+
+def _shared_column(
+    lit: Literal, out: list[BoolExpr], positive_keys: set[str]
+) -> AstColumn | None:
+    """A column of a positive atom equal to *lit*, adding to *out* what makes it so."""
+    text = encode_literal(lit.value)
+    # An equality already pins a positive column to the constant.
+    for c in out:
+        if not isinstance(c, Comparison) or c.op != "=":
+            continue
+        for a, b in ((c.left, c.right), (c.right, c.left)):
+            if (
+                isinstance(a, AstColumn)
+                and isinstance(b, Literal)
+                and encode_literal(b.value) == text
+                and _atom_key(a) in positive_keys
+            ):
+                return a
+    # A positive any() atom carries the constant: bind a variable to it there.
+    for j, p in enumerate(out):
+        if not isinstance(p, MatchExpr) or p.negated:
+            continue
+        for col, b in p.bindings.items():
+            if not isinstance(b, Literal) or encode_literal(b.value) != text:
+                continue
+            out[j] = replace(p, bindings={k: v for k, v in p.bindings.items() if k != col})
+            own = AstColumn(p.relation, col, p.alias)
+            out.append(Comparison("=", own, b))
+            return own
+    return None
+
+
+def _compile_conjuncts(conjuncts: list[BoolExpr], env: _VarEnv) -> list[_Part]:
+    return [p for c in conjuncts for p in _compile_parts(c, env)]
+
+
+@dataclass(frozen=True)
+class CompiledGuard:
+    """A compiled write guard: its body and the constant rows staged around it."""
+
+    #: Body text; empty when there is no condition.
+    body: str
+    #: Rows to insert before the guard and delete after it
+    #: (``il_txn_const_<t>(<literal>)``).
+    const_rows: tuple[str, ...] = ()
+
+
+def compile_guard(conditions: Sequence[BoolExpr]) -> CompiledGuard:
+    """Compile guard conditions (``when``, ``unless``) to an update body.
+
+    Conditions are ``R.any()``/``~R.any()`` atoms and comparisons over the
+    columns of those atoms. The body is canonical: positive atoms, negated
+    atoms, then comparisons and equalities. A negated atom linked to the body
+    by a constant only binds it through a staged ``il_txn_const_<t>`` row
+    (F17: an update body cannot see a session fact).
+    """
+    env = _VarEnv()
+    conjuncts = _normalize_body(
+        [c for cond in conditions for c in _flatten_and(push_not(cond))],
+        set(),
+        _BodyContext(),
+        guard=True,
+    )
+    env.reference(_column_keys(conjuncts))
+    for c in conjuncts:
+        _process_join_condition(c, env)
+    body = _bind_negations(
+        _compile_conjuncts(conjuncts, env),
+        set(),
+        env,
+        canonical=True,
+        const_prefix=TXN_CONST_PREFIX,
+    )
+    return CompiledGuard(", ".join(body.literals), tuple(body.constants))
 
 
 # ── Schema compilation ────────────────────────────────────────────────
@@ -583,8 +849,14 @@ def compile_conditional_delete(
         raise CompileError(
             "OR is not supported in a conditional delete", hint="delete once per branch"
         )
+    conjuncts = _normalize_body(_flatten_and(condition), {name}, _BodyContext())
+    env.reference(_column_keys(conjuncts))
     body = _bind_negations(
-        _compile_parts(condition, env), set(vars_), env, canonical=False, constants_allowed=False
+        _compile_conjuncts(conjuncts, env),
+        set(vars_),
+        env,
+        canonical=False,
+        constants_allowed=False,
     )
     return f"{head} <- {', '.join([body_rel, *body.literals])}"
 
@@ -787,22 +1059,37 @@ def compile_query_plan(
 
     # Join conditions first, so unified columns share a variable; their
     # other comparisons (a.id != b.id) filter like a where condition.
-    on_parts: list[_Part] = []
+    on_conjuncts: list[BoolExpr] = []
     if on_condition is not None:
         on_condition = push_not(on_condition)
         if _has_or(on_condition):
             raise CompileError("OR is not supported in a join condition", hint="put it in where=")
         _process_join_condition(on_condition, env)
-        on_parts = _compile_parts(on_condition, env)
+        on_conjuncts = _flatten_and(on_condition)
 
+    # Each body (one, or one per OR branch) is normalized for any() atoms.
+    ctx = _BodyContext()
+    context_keys = {alias or rn for rn, _, alias in rels}
+    where_branches = _dnf(push_not(where_condition)) if where_condition is not None else [[]]
+    bodies = [_normalize_body(on_conjuncts + b, context_keys, ctx) for b in where_branches]
+    env.reference(
+        _column_keys(
+            [
+                *(c for b in bodies for c in b),
+                *(s for s in select if isinstance(s, Expr)),
+                *(computed or {}).values(),
+                order_by,
+            ]
+        )
+    )
     where_parts: list[_Part] = []
     branch_parts: list[list[_Part]] | None = None
-    if where_condition is not None:
-        where_condition = push_not(where_condition)
-        if _has_or(where_condition):
-            branch_parts = [on_parts + b for b in _compile_branches(where_condition, env)]
-        else:
-            where_parts = _compile_parts(where_condition, env)
+    if len(bodies) > 1:
+        branch_parts = [_compile_conjuncts(b, env) for b in bodies]
+    else:
+        for c in bodies[0]:
+            _process_join_condition(c, env)
+        where_parts = _compile_conjuncts(bodies[0], env)
 
     computed = computed or {}
     is_agg = any(isinstance(s, AggExpr) for s in select) or any(
@@ -835,7 +1122,7 @@ def compile_query_plan(
         constants.extend(c for c in body.constants if c not in constants)
         return body
 
-    conditions = finish(on_parts + where_parts)
+    conditions = finish(where_parts)
     branches = (
         [finish(b).literals for b in branch_parts] if branch_parts is not None else None
     )
@@ -1096,10 +1383,14 @@ def _is_datetime(shape: _Shape, expr: Expr) -> bool:
         return False
     for rn, cls, alias in shape.relations:
         if rn == expr.relation and alias == expr.ref_alias:
-            tp = Relation._get_column_types(cls).get(expr.name)
-            members = get_args(tp) if get_origin(tp) in (Union, types.UnionType) else (tp,)
-            return any(isinstance(m, type) and issubclass(m, datetime) for m in members)
+            return _is_datetime_type(Relation._get_column_types(cls).get(expr.name))
     return False
+
+
+def _is_datetime_type(tp: Any) -> bool:
+    """Whether a column annotation is ``datetime`` (or an optional one)."""
+    members = get_args(tp) if get_origin(tp) in (Union, types.UnionType) else (tp,)
+    return any(isinstance(m, type) and issubclass(m, datetime) for m in members)
 
 
 def _resolve_order(order_by: Expr | None) -> tuple[AstColumn, bool] | None:
@@ -1287,9 +1578,19 @@ def compile_rule_clause(
                 hint="write one clause per branch",
             )
 
+    conjuncts = (
+        _normalize_body(
+            _flatten_and(condition),
+            {alias or rn for rn, _, alias in body_relations},
+            _BodyContext(),
+        )
+        if condition is not None
+        else []
+    )
+    env.reference(_column_keys([*conjuncts, *select_map.values()]))
     # Process condition first for join unification
-    if condition:
-        _process_join_condition(condition, env)
+    for c in conjuncts:
+        _process_join_condition(c, env)
 
     # count() without a column counts the first column of the first body relation.
     count_var: str | None = None
@@ -1318,7 +1619,7 @@ def compile_rule_clause(
     # condition-only columns while the condition referenced an unbound
     # variable - which the engine accepts and silently satisfies, deriving
     # wrong results (e.g. a tier == "gold" filter matching every row).
-    cond_parts = _compile_parts(condition, env) if condition else []
+    cond_parts = _compile_conjuncts(conjuncts, env)
 
     # Build body atoms
     body_atoms: list[str] = []

@@ -14,7 +14,7 @@ A rules engine, made live: a conclusion is retracted when its facts stop support
 
 **Where it sits.** Facts arrive from your CDC feed and webhooks through a small adapter you run ([recipe shipped](docs/content/docs/guides/ingestion.mdx) for Debezium Server and signed webhooks), with per-key revisions, so a late or replayed event never overwrites a newer one. InputLayer is not in your tool's call path: your agent claims the action in InputLayer, the claim is recorded only if the rules hold at that instant, and your handler or Temporal runs the tool only if the claim won, with the claim as its idempotency key. If a supporting fact changes afterwards, the need is retracted and the running work is cancelled; an effect that already landed is yours to compensate, as it is today. How stale is too stale is a rule too: guard the claim on a source health lease that your adapter renews, and a tool is refused once its source has gone quiet. It is one node today: facts are durable in its write-ahead log, a restart resumes from it and the adapter's revisions make a replayed feed safe, and while it is unreachable no claim can win, so gated tools wait rather than run unchecked.
 
-> **The upcoming SDK.** `subscribe()` and `claim()` are phase 1 of the new Python and TypeScript SDK: in progress, not merged yet. The code below is the file that phase's CI will execute. [What runs today](#what-runs-today) is right after it.
+> **The upcoming SDK.** `subscribe()` and `claim()` are phase 1 of the new Python and TypeScript SDK: merged on main in both SDKs, not in a release yet. The code below is the file that phase's CI will execute. [What runs today](#what-runs-today) is right after it.
 
 ```python
 async def main() -> None:

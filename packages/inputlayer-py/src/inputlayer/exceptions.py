@@ -285,3 +285,30 @@ class SubscriptionRejected(InputLayerError):
         self.message = message
         self.reason = reason
         self.query = query
+
+
+class PreconditionFailed(QueryError):
+    """A guarded program's guard did not hold at commit, so nothing was applied.
+
+    Re-read the state before retrying: the intent is stale. ``iql`` is the
+    program that was sent; ``result`` the engine's reply.
+    """
+
+    def __init__(self, iql: str, result: ResultResponse) -> None:
+        super().__init__(
+            "Precondition failed: the program guard did not hold, nothing was applied",
+            query=iql,
+            code="validation",
+        )
+        self.iql = iql
+        self.result = result
+
+
+class Conflict(QueryError):
+    """The engine could not evaluate a conditional write against a stable state
+    (concurrent commits kept changing what its guard reads). Nothing was
+    applied; retry with backoff. ``iql`` is the program that was sent."""
+
+    def __init__(self, message: str, *, iql: str) -> None:
+        super().__init__(message, query=iql, code="conflict")
+        self.iql = iql

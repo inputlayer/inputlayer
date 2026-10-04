@@ -30,7 +30,7 @@ import pytest
 import pytest_asyncio
 
 from inputlayer import Derived, From, InputLayer, KnowledgeGraph, Relation, Timestamp, Vector
-from inputlayer._ast import Literal, MatchExpr
+from inputlayer._ast import BoolExpr
 from inputlayer._literal import I64_MAX, I64_MIN
 from inputlayer.aggregations import min_
 from inputlayer.exceptions import CompileError, QueryError
@@ -122,9 +122,8 @@ async def kg(il: InputLayer) -> AsyncIterator[KnowledgeGraph]:
         await il.drop_knowledge_graph(KG_NAME)
 
 
-def _not_killed(tool: str) -> MatchExpr:
-    # The negated atom `~KillSwitch.any(tool="...")` compiles to (P1-I adds the surface).
-    return MatchExpr("kill_switch", {"tool": Literal(tool)}, negated=True, columns=("tool",))
+def _not_killed(tool: str) -> BoolExpr:
+    return ~KillSwitch.any(tool=tool)
 
 
 # ── R-META ────────────────────────────────────────────────────────────
