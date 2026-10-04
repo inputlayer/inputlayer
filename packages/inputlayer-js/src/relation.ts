@@ -153,6 +153,9 @@ export function any<T extends ColumnTypes>(
   return anyExpr(rel.relationName, rel.columns, rel.columnTypes, bound);
 }
 
+const I64_MIN = -(2 ** 63);
+const I64_LIMIT = 2 ** 63;
+
 /** Compile a value to its IQL literal representation. */
 export function compileValue(value: unknown): string {
   if (value === null || value === undefined) {
@@ -162,15 +165,30 @@ export function compileValue(value: unknown): string {
     return value ? 'true' : 'false';
   }
   if (value instanceof Timestamp) {
-    return String(value.ms);
+    return compileValue(value.ms);
   }
   if (value instanceof Date) {
     // Timestamps are stored as int Unix milliseconds.
-    return String(value.getTime());
+    return compileValue(value.getTime());
   }
   if (typeof value === 'number') {
+    // IQL has no literal for NaN or the infinities: written bare they parse
+    // as variables, so a retract keyed on NaN would match every row.
+    if (!Number.isFinite(value)) {
+      throw new CompileError(
+        `IQL has no literal for ${value}: it does not support infinity or NaN`,
+        'use a finite number, or leave the value out',
+      );
+    }
     if (Number.isInteger(value)) {
-      return String(value);
+      if (value < I64_MIN || value >= I64_LIMIT) {
+        throw new CompileError(
+          `Integer ${value} does not fit the engine's 64-bit integers`,
+          'keep integers within the signed 64-bit range, or store it as a string',
+        );
+      }
+      // Exact digits: String(2 ** 63 - 1024) rounds to a number past the range.
+      return BigInt(value).toString();
     }
     return String(value);
   }

@@ -116,6 +116,42 @@ describe('any() in queries', () => {
   });
 });
 
+describe('non-finite numbers', () => {
+  // NaN and the infinities have no IQL literal; written bare they parse as
+  // variables, so a retract keyed on NaN once deleted every row.
+  const Scored = relation('Attempt', { order: 'int', tool: 'string', score: 'float' });
+  const refusing = () => {
+    const sent: string[] = [];
+    const conn = { execute: async (iql: string) => { sent.push(iql); return { columns: [], rows: [] }; } };
+    return { sent, kg: new KnowledgeGraph('kg', conn as unknown as Connection) };
+  };
+
+  it('kg.retract(Attempt, {order: NaN}) raises CompileError and sends nothing', async () => {
+    const { sent, kg } = refusing();
+    await expect(kg.retract(Attempt, { order: NaN })).rejects.toThrow(CompileError);
+    await expect(kg.retract(Scored, { order: Number('x') })).rejects.toThrow(/no literal for NaN/);
+    expect(sent).toEqual([]);
+  });
+
+  it.each([NaN, Infinity, -Infinity])('refuses %s on every write and query path', async (bad) => {
+    const { sent, kg } = refusing();
+    const row = { order: 1, tool: 't', score: bad };
+    await expect(kg.insert(Scored, row)).rejects.toThrow(CompileError);
+    await expect(kg.insert(Scored, [row])).rejects.toThrow(CompileError);
+    await expect(kg.delete(Scored, row)).rejects.toThrow(CompileError);
+    await expect(kg.delete(Scored, [row])).rejects.toThrow(CompileError);
+    await expect(kg.delete(Scored, Scored.col('score').gt(bad))).rejects.toThrow(CompileError);
+    await expect(kg.retract(Scored, { score: bad })).rejects.toThrow(CompileError);
+    await expect(kg.claim(Scored, row, { key: ['order'] })).rejects.toThrow(CompileError);
+    await expect(kg.query({ select: [Scored], where: Scored.col('score').eq(bad) })).rejects.toThrow(CompileError);
+    await expect(
+      kg.query({ select: [Shipment], where: NOT(any(Scored, { score: bad })) }),
+    ).rejects.toThrow(CompileError);
+    await expect(kg.program().insert(Scored, row).commit()).rejects.toThrow(CompileError);
+    expect(sent).toEqual([]);
+  });
+});
+
 describe('debug() and why()', () => {
   it('refuse a query whose NOT(any()) binds only constants, without contacting the engine', async () => {
     const sent: string[] = [];
