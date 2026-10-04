@@ -7,9 +7,12 @@ import {
   compileDelete,
   compileConditionalDelete,
   compileQuery,
+  compileQueryPlan,
+  resultColumnIndexes,
   compileRule,
 } from '../src/compiler';
-import { count, sum, avg } from '../src/aggregations';
+import { count, sum, avg, topK } from '../src/aggregations';
+import { AND, OR } from '../src/proxy';
 
 const Employee = relation('Employee', {
   id: 'int',
@@ -90,84 +93,191 @@ describe('compileConditionalDelete', () => {
 });
 
 describe('compileQuery', () => {
+  // The engine rejects `<-` in a query, so a query is always `?atom, body...`.
+
   it('compiles a simple full-relation query', () => {
-    const result = compileQuery({ select: [Employee], join: [Employee] });
-    expect(result).toBe(
-      '?Id, Name, Department, Salary, Active <- employee(Id, Name, Department, Salary, Active)',
+    expect(compileQuery({ select: [Employee] })).toBe(
+      '?employee(Id, Name, Department, Salary, Active)',
+    );
+    expect(compileQuery({ select: [Employee], join: [Employee] })).toBe(
+      '?employee(Id, Name, Department, Salary, Active)',
     );
   });
 
-  it('compiles a query with column selection', () => {
-    const result = compileQuery({
+  it('compiles a query with column selection and a where filter', () => {
+    const plan = compileQueryPlan({
       select: [Employee.col('name').toAst(), Employee.col('salary').toAst()],
-      join: [Employee],
-    });
-    // Should select just Name, Salary from employee
-    expect(result).toContain('Name');
-    expect(result).toContain('Salary');
-    expect(result).toContain('employee(');
-  });
-
-  it('compiles a query with where filter', () => {
-    const result = compileQuery({
-      select: [Employee],
       join: [Employee],
       where: Employee.col('department').eq('eng'),
     });
-    expect(result).toContain('Department = "eng"');
+    expect(plan.programs).toEqual([
+      '?employee(Id, Name, Department, Salary, Active), Department = "eng"',
+    ]);
+    expect(plan.outputs).toEqual([
+      { label: 'Name', variable: 'Name' },
+      { label: 'Salary', variable: 'Salary' },
+    ]);
   });
 
   it('compiles a query with join', () => {
-    const result = compileQuery({
-      select: [Employee.col('name').toAst(), Department.col('budget').toAst()],
-      join: [Employee, Department],
-      on: Employee.col('department').eq(Department.col('name')),
+    expect(
+      compileQuery({
+        select: [Employee.col('name').toAst(), Department.col('budget').toAst()],
+        join: [Employee, Department],
+        on: Employee.col('department').eq(Department.col('name')),
+      }),
+    ).toBe('?employee(Id, Name, Department, Salary, Active), department(Department, Budget)');
+  });
+
+  it('keeps non-equality join conditions as filters', () => {
+    const [e1, e2] = Employee.refs(2);
+    expect(
+      compileQuery({
+        select: [e1.col('name').toAst(), e2.col('name').toAst()],
+        join: [e1, e2],
+        on: AND(e1.col('department').eq(e2.col('department')), e1.col('id').ne(e2.col('id'))),
+      }),
+    ).toBe(
+      '?employee(Id, Name, Department, Salary, Active), ' +
+        'employee(Id_1, Name_2, Department, Salary_3, Active_4), Id != Id_1',
+    );
+  });
+
+  it('binds computed columns in the body', () => {
+    const plan = compileQueryPlan({
+      select: [Employee.col('name').toAst()],
+      join: [Employee],
+      computed: { bonus: Employee.col('salary').mul(0.1) },
     });
-    // Should have shared variable for the join
-    expect(result).toContain('employee(');
-    expect(result).toContain('department(');
+    expect(plan.programs).toEqual(['?employee(Id, Name, Department, Salary, Active), Bonus = Salary * 0.1']);
+    expect(plan.outputs.map((o) => o.label)).toEqual(['Name', 'Bonus']);
   });
 
   it('compiles a query with limit', () => {
-    const result = compileQuery({
-      select: [Employee],
-      join: [Employee],
-      limit: 10,
-    });
-    expect(result).toContain('limit(10)');
+    expect(compileQuery({ select: [Employee], join: [Employee], limit: 10 })).toBe(
+      '?employee(Id, Name, Department, Salary, Active), limit(10)',
+    );
   });
 
   it('compiles a query with limit and offset', () => {
-    const result = compileQuery({
-      select: [Employee],
-      join: [Employee],
-      limit: 10,
-      offset: 5,
-    });
-    expect(result).toContain('limit(10, 5)');
+    expect(compileQuery({ select: [Employee], join: [Employee], limit: 10, offset: 5 })).toBe(
+      '?employee(Id, Name, Department, Salary, Active), limit(10, 5)',
+    );
   });
 
-  it('compiles a query with order by', () => {
-    const result = compileQuery({
-      select: [Employee],
+  it('compiles a query with order by as a sort annotation in the first atom', () => {
+    expect(
+      compileQuery({ select: [Employee], join: [Employee], orderBy: Employee.col('salary').desc() }),
+    ).toBe('?employee(Id, Name, Department, Salary:desc, Active)');
+  });
+
+  it("moves the ordered column's relation first", () => {
+    expect(
+      compileQuery({
+        select: [Employee.col('name').toAst()],
+        join: [Employee, Department],
+        on: Employee.col('department').eq(Department.col('name')),
+        orderBy: Department.col('budget').desc(),
+        limit: 2,
+      }),
+    ).toBe('?department(Department, Budget:desc), employee(Id, Name, Department, Salary, Active), limit(2)');
+  });
+
+  it('splits OR into branches merged client-side', () => {
+    const plan = compileQueryPlan({
+      select: [Employee.col('name').toAst()],
       join: [Employee],
+      where: OR(Employee.col('department').eq('hr'), Employee.col('salary').gt(115000)),
       orderBy: Employee.col('salary').desc(),
+      limit: 3,
+      offset: 1,
     });
-    expect(result).toContain('Salary:desc');
+    expect(plan.programs).toEqual([
+      '?employee(Id, Name, Department, Salary:desc, Active), Department = "hr", limit(4)',
+      '?employee(Id, Name, Department, Salary:desc, Active), Salary > 115000, limit(4)',
+    ]);
+    expect(plan.page).toEqual({ order: { variable: 'Salary', descending: true }, limit: 3, offset: 1 });
   });
 
-  it('compiles an aggregation query', () => {
-    const result = compileQuery({
+  it('compiles an aggregation query to a program-local rule', () => {
+    const plan = compileQueryPlan({
       select: [
         Employee.col('department').toAst(),
         count(Employee.col('id')),
         avg(Employee.col('salary')),
       ],
       join: [Employee],
+      orderBy: Employee.col('department').asc(),
+      limit: 5,
     });
-    expect(result).toContain('count<');
-    expect(result).toContain('avg<');
-    expect(result).toContain('Department');
+    expect(plan.programs).toEqual([
+      'il_sdk_agg(Department, count<Id>, avg<Salary>) <- employee(Id, Name, Department, Salary, Active)\n' +
+        '?il_sdk_agg(Department:asc, CountId, AvgSalary), limit(5)',
+    ]);
+    expect(plan.outputs.map((o) => o.label)).toEqual(['Department', 'CountId', 'AvgSalary']);
+    expect(plan.debug).toBe(
+      'il_sdk_agg(Department, count<Id>, avg<Salary>) <- employee(Id, Name, Department, Salary, Active)',
+    );
+  });
+
+  it('gives each aggregate of the same column its own result column', () => {
+    const plan = compileQueryPlan({
+      select: [avg(Employee.col('salary')), sum(Employee.col('salary'))],
+      join: [Employee],
+    });
+    expect(plan.outputs.map((o) => o.variable)).toEqual(['AvgSalary', 'SumSalary']);
+  });
+
+  it('expands topK into its passthrough and ordered columns', () => {
+    const plan = compileQueryPlan({
+      select: [
+        Employee.col('department').toAst(),
+        topK({ k: 3, passthrough: [Employee.col('name')], orderBy: Employee.col('salary'), desc: true }),
+      ],
+      join: [Employee],
+    });
+    expect(plan.programs).toEqual([
+      'il_sdk_agg(Department, top_k<3, Name, Salary:desc>) <- employee(Id, Name, Department, Salary, Active)\n' +
+        '?il_sdk_agg(Department, Name, Salary)',
+    ]);
+  });
+
+  it('aggregates over the union of OR branches', () => {
+    expect(
+      compileQuery({
+        select: [count(Employee.col('id'))],
+        join: [Employee],
+        where: OR(Employee.col('department').eq('hr'), Employee.col('salary').gt(115000)),
+      }),
+    ).toBe(
+      'il_sdk_agg_src(Id, Name, Department, Salary, Active) <- employee(Id, Name, Department, Salary, Active), Department = "hr"\n' +
+        'il_sdk_agg_src(Id, Name, Department, Salary, Active) <- employee(Id, Name, Department, Salary, Active), Salary > 115000\n' +
+        'il_sdk_agg(count<Id>) <- il_sdk_agg_src(Id, Name, Department, Salary, Active)\n' +
+        '?il_sdk_agg(CountId)',
+    );
+  });
+
+  it('rejects a query without a relation', () => {
+    expect(() => compileQuery({ select: [Employee.col('name').toAst()] })).toThrow(/at least one relation/);
+  });
+});
+
+describe('resultColumnIndexes', () => {
+  const plan = compileQueryPlan({
+    select: [Employee.col('salary').toAst(), Employee.col('name').toAst()],
+    join: [Employee],
+  });
+
+  it('maps schema-named columns by position in the first atom', () => {
+    expect(
+      resultColumnIndexes(plan, ['id', 'name', 'department', 'salary', 'active'], ['Salary', 'Name']),
+    ).toEqual([3, 1]);
+  });
+
+  it('maps variable-named columns by name', () => {
+    expect(
+      resultColumnIndexes(plan, ['Id', 'Name', 'Department', 'Salary', 'Active', 'Bonus'], ['Bonus', 'Name']),
+    ).toEqual([5, 1]);
   });
 });
 

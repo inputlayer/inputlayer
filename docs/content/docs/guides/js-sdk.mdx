@@ -317,7 +317,9 @@ const result = await kg.query({
 });
 ```
 
-For more specialized aggregation, `topK` lets you find the top entries per group:
+Each aggregate gets its own result column, named after the function and the column: `CountId`, `AvgSalary` and `MaxSalary` above.
+
+For more specialized aggregation, `topK` lets you find the top entries per group. The selected columns are the groups; the columns to keep from each top entry go in `passthrough`:
 
 ```typescript
 import { topK } from "inputlayer";
@@ -326,12 +328,16 @@ import { topK } from "inputlayer";
 const result = await kg.query({
   select: [
     Employee.col("department").toAst(),
-    Employee.col("name").toAst(),
-    Employee.col("salary").toAst(),
-    topK({ k: 3, orderBy: Employee.col("salary"), desc: true }),
+    topK({
+      k: 3,
+      passthrough: [Employee.col("name")],
+      orderBy: Employee.col("salary"),
+      desc: true,
+    }),
   ],
   join: [Employee],
 });
+// Columns: Department, Name, Salary
 ```
 
 ### Working with Results
@@ -627,18 +633,18 @@ Int8 variants: `fn.cosineInt8`, `fn.euclideanInt8`, `fn.manhattanInt8`, `fn.dotI
 For working with timestamp columns:
 
 ```typescript
-import { Timestamp } from "inputlayer";
+import { relation } from "inputlayer";
 import * as fn from "inputlayer/functions";
+
+// Timestamps are Unix milliseconds.
+const Reading = relation("Reading", { sensorId: "int", value: "float", timestamp: "int" });
+const Article = relation("Article", { title: "string", publishedAt: "int" });
 
 // Rows from the last hour
 const result = await kg.query({
-  select: [SensorReading],
-  join: [SensorReading],
-  where: fn.withinLast(
-    SensorReading.col("timestamp"),
-    fn.timeNow(),
-    3600000,
-  ),
+  select: [Reading],
+  join: [Reading],
+  where: Reading.col("timestamp").gt(fn.timeSub(fn.timeNow(), 3600000)),
 });
 
 // Time-decayed scoring

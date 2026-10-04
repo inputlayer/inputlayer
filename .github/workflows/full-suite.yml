@@ -236,6 +236,45 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  js-sdk-live:
+    name: JS SDK query examples (live server)
+    needs: gate
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: useblacksmith/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/release
+          key: ${{ runner.os }}-cargo-js-live-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-js-live-
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run the JS SDK guide's query examples against a live server
+        run: make js-test-live
+
+      - name: Upload server log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inputlayer-js-live-server-log
+          path: /tmp/il_js_live_server.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   # Lint and unit-test the performance gate tool only: measuring needs a
   # quiet same-host runner, not a shared one (perf-gate/README.md).
   perf-gate-tool:

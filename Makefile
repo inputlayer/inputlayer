@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test js-test-live front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -427,6 +427,34 @@ vc-gate:
 # Tier 5: JS/TS SDK tests (inputlayer-js package)
 js-test:
 	cd packages/inputlayer-js && npm ci --ignore-scripts && npm test
+
+# js-test-live runs every query example in the JS SDK guide
+# (docs/content/docs/guides/js-sdk.mdx) against a live server, so a query
+# form the engine rejects fails here rather than in a user's hands.
+JS_LIVE_PORT ?= 8091
+js-test-live:
+	@cargo build --release --bin inputlayer-server
+	@cd packages/inputlayer-js && npm ci --ignore-scripts
+	@DATA_DIR=$$(mktemp -d -t il-js-live-XXXXXX); \
+	INPUTLAYER_ADMIN_PASSWORD=admin ./target/release/inputlayer-server \
+		--host 127.0.0.1 --data-dir $$DATA_DIR --port $(JS_LIVE_PORT) \
+		> /tmp/il_js_live_server.log 2>&1 & \
+	SERVER_PID=$$!; \
+	for i in $$(seq 1 40); do \
+		if curl -sf http://127.0.0.1:$(JS_LIVE_PORT)/health > /dev/null 2>&1; then break; fi; \
+		sleep 0.5; \
+	done; \
+	cd packages/inputlayer-js && \
+		INPUTLAYER_TEST_SERVER=ws://127.0.0.1:$(JS_LIVE_PORT)/ws \
+		INPUTLAYER_TEST_USER=admin \
+		INPUTLAYER_TEST_PASSWORD=admin \
+		npx vitest run tests/docs-queries.integration.test.ts; \
+	TEST_EXIT=$$?; \
+	cd - > /dev/null; \
+	kill $$SERVER_PID 2>/dev/null || true; \
+	wait $$SERVER_PID 2>/dev/null || true; \
+	rm -rf $$DATA_DIR; \
+	exit $$TEST_EXIT
 
 # Coverage & Static Analysis
 

@@ -15,9 +15,11 @@ import {
   compileBulkInsert,
   compileDelete,
   compileConditionalDelete,
-  compileQuery,
+  compileQueryPlan,
+  resultColumnIndexes,
   compileRule,
   type QueryOptions,
+  type QueryPlan,
   type RuleClause,
 } from './compiler.js';
 import { InternalError, QueryError } from './errors.js';
@@ -316,32 +318,26 @@ export class KnowledgeGraph {
    */
   async query(opts: QueryOptions): Promise<ResultSet> {
     await this.ensureKg();
-    const iql = compileQuery(opts);
+    const plan = compileQueryPlan(opts);
+    const columns = plan.outputs.map((o) => o.label);
+    const outputVars = plan.outputs.map((o) => o.variable);
 
-    if (Array.isArray(iql)) {
-      // OR split -> execute each and union
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const allRows: any[][] = [];
-      let columns: string[] = [];
-      for (const q of iql) {
-        const result = await this.conn.execute(q);
-        if (columns.length === 0) {
-          columns = result.columns;
-        }
-        allRows.push(...result.rows);
-      }
-      return new ResultSet({ columns, rows: allRows });
+    if (plan.programs.length > 1) {
+      return new ResultSet({ columns, rows: await this.queryBranches(plan, outputVars) });
     }
 
-    const result = await this.conn.execute(iql);
+    const result = await this.conn.execute(plan.programs[0]);
+    // The engine paginates only with a limit; an offset alone is applied here.
+    const skip = plan.page.limit === undefined ? (plan.page.offset ?? 0) : 0;
+    const rows = projectRows(plan, result.columns, result.rows, outputVars).slice(skip);
     const rs = new ResultSet({
-      columns: result.columns,
-      rows: result.rows,
-      rowCount: result.row_count,
+      columns,
+      rows,
+      rowCount: skip > 0 ? rows.length : result.row_count,
       totalCount: result.total_count,
       truncated: result.truncated,
       executionTimeMs: result.execution_time_ms,
-      rowProvenance: result.row_provenance,
+      rowProvenance: result.row_provenance?.slice(skip),
       timingBreakdown: result.timing_breakdown,
     });
     if (result.metadata) {
@@ -350,6 +346,30 @@ export class KnowledgeGraph {
       rs.warnings = result.metadata.warnings ?? [];
     }
     return rs;
+  }
+
+  /** Run each branch of an OR split, then merge: union, order, paginate. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async queryBranches(plan: QueryPlan, outputVars: string[]): Promise<any[][]> {
+    const { order } = plan.page;
+    const orderVars = order ? [order.variable] : [];
+    // Each row carries its outputs, then the atom variables that identify
+    // it, then the sort key.
+    const vars = [...outputVars, ...plan.rowVars, ...orderVars];
+    const idEnd = outputVars.length + plan.rowVars.length;
+    const seen = new Set<string>();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const merged: any[][] = [];
+    for (const program of plan.programs) {
+      const result = await this.conn.execute(program);
+      for (const row of projectRows(plan, result.columns, result.rows, vars)) {
+        const key = JSON.stringify(row.slice(outputVars.length, idEnd));
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(row);
+      }
+    }
+    return pageOf(plan, merged, (row) => row[idEnd]).map((row) => row.slice(0, outputVars.length));
   }
 
   /**
@@ -582,10 +602,7 @@ export class KnowledgeGraph {
   /** Show the query plan without executing. */
   async debug(opts: QueryOptions): Promise<DebugResult> {
     await this.ensureKg();
-    let iql = compileQuery(opts);
-    if (Array.isArray(iql)) {
-      iql = iql[0];
-    }
+    const iql = compileQueryPlan(opts).debug;
     const result = await this.conn.execute(`.debug ${iql}`);
     const planText = result.rows.map((row) => String(row[0])).join('\n');
     return { iql, plan: planText };
@@ -598,24 +615,30 @@ export class KnowledgeGraph {
    */
   async why(opts: QueryOptions & { full?: boolean }): Promise<WhyResult> {
     await this.ensureKg();
-    let iql = compileQuery(opts);
-    if (Array.isArray(iql)) {
-      iql = iql[0];
-    }
-    const cmd = opts.full ? `.why full ${iql}` : `.why ${iql}`;
+    const plan = compileQueryPlan(opts);
+    const cmd = opts.full ? `.why full ${plan.why.statement}` : `.why ${plan.why.statement}`;
     const result = await this.conn.execute(cmd);
+    // The rule's columns are its head variables by position.
+    const at = (v: string) => plan.why.columns.indexOf(v);
+    const outputIdx = plan.outputs.map((o) => at(o.variable));
+    const orderIdx = plan.page.order ? at(plan.page.order.variable) : -1;
+    const proofs = (result.proof_trees ?? []) as ProofTree[];
+    const derived = pageOf(
+      plan,
+      result.rows.map((row, i) => ({ row, proof: proofs[i], provenance: result.row_provenance?.[i] })),
+      (d) => d.row[orderIdx],
+    );
     const resultSet = new ResultSet({
-      columns: result.columns,
-      rows: result.rows,
-      rowCount: result.row_count,
+      columns: plan.outputs.map((o) => o.label),
+      rows: derived.map((d) => outputIdx.map((c) => d.row[c])),
+      rowCount: derived.length,
       totalCount: result.total_count,
       truncated: result.truncated,
       executionTimeMs: result.execution_time_ms,
-      rowProvenance: result.row_provenance,
+      rowProvenance: result.row_provenance ? derived.map((d) => d.provenance as string) : undefined,
       timingBreakdown: result.timing_breakdown,
     });
-    const proofTrees: ProofTree[] = (result.proof_trees ?? []) as ProofTree[];
-    return { results: resultSet, proofTrees };
+    return { results: resultSet, proofTrees: derived.map((d) => d.proof).filter((p) => p !== undefined) };
   }
 
   /** Explain why a specific fact was NOT derived.
@@ -715,4 +738,41 @@ function insertedCount(result: ResultResponse): number {
     count += Number(match[1]);
   }
   return count;
+}
+
+/** Pick `vars` out of engine rows, in order. */
+function projectRows(
+  plan: QueryPlan,
+  columns: string[],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  rows: any[][],
+  vars: string[],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any[][] {
+  if (rows.length === 0) return rows;
+  const idx = resultColumnIndexes(plan, columns, vars);
+  if (idx.length === rows[0].length && idx.every((c, i) => c === i)) return rows;
+  return rows.map((row) => idx.map((c) => row[c]));
+}
+
+/** Apply the plan's ordering and pagination to `items`, sorting on `key`. */
+function pageOf<T>(plan: QueryPlan, items: T[], key: (item: T) => unknown): T[] {
+  const { order, limit, offset } = plan.page;
+  if (order) {
+    const sign = order.descending ? -1 : 1;
+    items = [...items].sort((a, b) => sign * compareValues(key(a), key(b)));
+  }
+  const start = offset ?? 0;
+  return items.slice(start, limit !== undefined ? start + limit : undefined);
+}
+
+/** Order engine values: nulls last, numbers and strings by value, anything else by text. */
+function compareValues(a: unknown, b: unknown): number {
+  if (a === b) return 0;
+  if (a === null || a === undefined) return 1;
+  if (b === null || b === undefined) return -1;
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  const sa = typeof a === 'string' ? a : JSON.stringify(a);
+  const sb = typeof b === 'string' ? b : JSON.stringify(b);
+  return sa < sb ? -1 : sa > sb ? 1 : 0;
 }
