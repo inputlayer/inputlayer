@@ -378,3 +378,39 @@ class TestLiterals:
         await kg.vector_search(Doc, [1.0, 0.0], radius=0.5)
         (iql,), _ = kg._execute.await_args
         assert iql == "?doc(Id, Embedding), Dist = cosine(Embedding, [1.0, 0.0]), Dist <= 0.5"
+
+
+class TestKeywordArguments:
+    """A keyword argument names a computed column; a plain value is an error."""
+
+    @pytest.mark.parametrize("method", ["query", "why", "debug"])
+    async def test_a_value_keyword_is_a_compile_error_naming_where(self, method) -> None:
+        kg = KnowledgeGraph("default", MagicMock())
+        kg._execute = AsyncMock()
+        with pytest.raises(CompileError) as exc:
+            await getattr(kg, method)(Employee, department="eng")
+        assert "department='eng'" in str(exc.value)
+        assert "where=lambda r: r.department == 'eng'" in (exc.value.hint or "")
+        kg._execute.assert_not_awaited()
+
+    @pytest.mark.parametrize("method", ["query", "why", "debug"])
+    async def test_a_sort_keyword_is_a_compile_error_naming_order_by(self, method) -> None:
+        kg = KnowledgeGraph("default", MagicMock())
+        kg._execute = AsyncMock()
+        with pytest.raises(CompileError) as exc:
+            await getattr(kg, method)(Employee, order=Employee.id.desc())
+        assert "order=" in str(exc.value)
+        assert "order_by=" in (exc.value.hint or "")
+        kg._execute.assert_not_awaited()
+
+    @pytest.mark.parametrize("method", ["query", "why", "debug"])
+    async def test_a_value_keyword_naming_no_column_gets_a_generic_hint(self, method) -> None:
+        kg = KnowledgeGraph("default", MagicMock())
+        kg._execute = AsyncMock()
+        with pytest.raises(CompileError) as exc:
+            await getattr(kg, method)(Employee, order="desc")
+        assert "order='desc'" in str(exc.value)
+        hint = exc.value.hint or ""
+        assert "r.order" not in hint
+        assert "where=" in hint and "order_by=" in hint
+        kg._execute.assert_not_awaited()
