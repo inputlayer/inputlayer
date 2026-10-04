@@ -142,11 +142,11 @@ afterEach(async () => {
 
 const E = relation('E', { a: 'int', b: 'int' });
 
-async function graph(opts: { autoReconnect?: boolean } = {}): Promise<KnowledgeGraph> {
+async function graph(opts: { autoReconnect?: boolean; timeoutGraceMs?: number } = {}): Promise<KnowledgeGraph> {
   engine = await Engine.start();
   il = new InputLayer({
     url: engine.url, username: 'u', password: 'p', keepaliveMs: 0,
-    reconnectDelay: 0.01, autoReconnect: opts.autoReconnect ?? false,
+    reconnectDelay: 0.01, autoReconnect: opts.autoReconnect ?? false, timeoutGraceMs: opts.timeoutGraceMs,
   });
   return il.knowledgeGraph('kg');
 }
@@ -320,6 +320,35 @@ describe('subscribe', () => {
     expect(kinds(events)).toEqual(['unverified:connection_lost', 'resync']);
     expect(events[1]).toMatchObject({ inserted: [{ a: 2, b: 2 }], retracted: [{ a: 1, b: 1 }], revision: 4 });
     expect(engine!.sub.socket).toBe(engine!.sockets[1]);
+    await sub.close();
+  });
+
+  it('a connection lost before the first snapshot reopens on the new connection', async () => {
+    const kg = await graph({ autoReconnect: true });
+    engine!.hold = true;
+    engine!.snapshot = () => ({ columns: ['a', 'b'], rows: [[1, 1]], revision: 3 });
+    const sub = kg.subscribe(E);
+    const first = take(sub, 1);
+    await waitFor(() => engine!.programs.some((p) => p.startsWith(`.subscribe ${sub.id}`)));
+    engine!.hold = false;
+    engine!.sockets[0].terminate();
+    const [snapshot] = await first;
+    expect(snapshot).toMatchObject({ kind: 'snapshot', inserted: [{ a: 1, b: 1 }], revision: 3, verified: true });
+    expect(engine!.sub.socket).toBe(engine!.sockets[1]);
+    await sub.close();
+  });
+
+  it('a .subscribe reply lost past its deadline is retried after unsubscribing the id', async () => {
+    const kg = await graph({ timeoutGraceMs: 20 });
+    engine!.hold = true;
+    const sub = kg.subscribe(E, { timeoutMs: 50 });
+    const first = take(sub, 1);
+    await waitFor(() => engine!.programs.some((p) => p.startsWith(`.subscribe ${sub.id}`)));
+    // The first .subscribe is never answered; the retry is.
+    engine!.hold = false;
+    expect(kinds(await first)).toEqual(['snapshot']);
+    const programs = engine!.programs.filter((p) => p.includes(sub.id)).map((p) => p.split(' ')[0]);
+    expect(programs).toEqual(['.subscribe', '.unsubscribe', '.subscribe']);
     await sub.close();
   });
 

@@ -40,6 +40,7 @@ import {
   DeadlineExceededError,
   InputLayerError,
   InternalError,
+  OutcomeUnknownError,
   QueryError,
   RateLimitedError,
   StatementFailedError,
@@ -374,10 +375,11 @@ export class Subscription<T = Row> implements AsyncIterableIterator<Change<T>> {
     this.conn.events.addEventListener('closed', this.onClosed);
     try {
       await this.checkPersistent();
-      await this.open('snapshot');
     } catch (e) {
       this.fail(e as Error);
+      return;
     }
+    await this.openWithBackoff('snapshot');
   }
 
   /** Session rules are invisible to subscriptions: the engine would never push. */
@@ -409,6 +411,7 @@ export class Subscription<T = Row> implements AsyncIterableIterator<Change<T>> {
       reply = await this.conn.execute(meta.subscribe(this.id, this.shape.query), { timeoutMs: this.timeoutMs });
     } catch (e) {
       route.close();
+      if (transient(e) && !(e instanceof ConnectionLostError)) this.registered = true;
       throw refusal(e as Error);
     }
     if (this.state === 'closed') {
@@ -440,54 +443,56 @@ export class Subscription<T = Row> implements AsyncIterableIterator<Change<T>> {
     route.setGeneration(subscribed.generation);
   }
 
-  /** Reopen with backoff until it works, is refused, or the subscription ends. */
+  /** Reopen with backoff after the result stopped being verified. */
   private reopen(): void {
     if (this.reopening || this.state !== 'unverified') return;
     this.reopening = true;
-    void (async () => {
-      let delay = RESUBSCRIBE_DELAY_MS;
+    void this.openWithBackoff('resync').finally(() => {
+      this.reopening = false;
+    });
+  }
+
+  /** Open with backoff until it works, is refused, or the subscription ends. */
+  private async openWithBackoff(kind: 'snapshot' | 'resync'): Promise<void> {
+    const state: State = kind === 'snapshot' ? 'opening' : 'unverified';
+    let delay = RESUBSCRIBE_DELAY_MS;
+    for (;;) {
+      if (this.state !== state) return;
       try {
-        for (;;) {
-          if (this.state !== 'unverified') return;
-          try {
-            await this.unsubscribing;
-            if (this.registered) {
-              await this.conn.execute(meta.unsubscribe(this.id), { timeoutMs: this.timeoutMs }).catch((e) => {
-                if (transient(e)) throw e;
-                // Already gone on the server (reset, or a new connection).
-              });
-              this.registered = false;
-            }
-            await this.open('resync');
-            if ((this.state as State) === 'live') this._stats.resubscribes += 1;
-            return;
-          } catch (e) {
-            if (this.state !== 'unverified') return;
-            if (e instanceof ConnectionError && !(e instanceof ConnectionLostError)) {
-              // Closed for good (reconnecting is off, or gave up).
-              this.fail(new ConnectionLostError(`Connection lost: ${e.message}`, 'closed'));
-              return;
-            }
-            if (!transient(e)) {
-              this.fail(refusal(e as Error));
-              return;
-            }
-          }
-          // Full jitter in [delay/2, delay], ended early by close().
-          await new Promise<void>((resolve) => {
-            const timer = setTimeout(resolve, delay * (0.5 + Math.random() / 2));
-            this.wake = () => {
-              clearTimeout(timer);
-              resolve();
-            };
+        await this.unsubscribing;
+        if (this.registered) {
+          await this.conn.execute(meta.unsubscribe(this.id), { timeoutMs: this.timeoutMs }).catch((e) => {
+            if (transient(e)) throw e;
+            // Already gone on the server (reset, or a new connection).
           });
-          this.wake = undefined;
-          delay = Math.min(delay * 2, MAX_RESUBSCRIBE_DELAY_MS);
+          this.registered = false;
         }
-      } finally {
-        this.reopening = false;
+        await this.open(kind);
+        if (kind === 'resync' && (this.state as State) === 'live') this._stats.resubscribes += 1;
+        return;
+      } catch (e) {
+        if (this.state !== state) return;
+        if (e instanceof ConnectionError && !(e instanceof ConnectionLostError)) {
+          // Closed for good (reconnecting is off, or gave up).
+          this.fail(new ConnectionLostError(`Connection lost: ${e.message}`, 'closed'));
+          return;
+        }
+        if (!transient(e)) {
+          this.fail(refusal(e as Error));
+          return;
+        }
       }
-    })();
+      // Full jitter in [delay/2, delay], ended early by close().
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, delay * (0.5 + Math.random() / 2));
+        this.wake = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+      });
+      this.wake = undefined;
+      delay = Math.min(delay * 2, MAX_RESUBSCRIBE_DELAY_MS);
+    }
   }
 
   // ── Pushes ────────────────────────────────────────────────────────
@@ -581,7 +586,7 @@ export class Subscription<T = Row> implements AsyncIterableIterator<Change<T>> {
   private unverified(reason: UnverifiedReason, message?: string, registered = this.registered): void {
     if (this.state !== 'live') {
       // Already unverified, or still opening (a failed open is retried or reported).
-      if (reason === 'connection_lost' && this.state === 'unverified') this.registered = false;
+      if (reason === 'connection_lost' && this.state !== 'closed') this.registered = false;
       return;
     }
     this.state = 'unverified';
@@ -669,6 +674,7 @@ function transient(error: unknown): boolean {
   return (
     error instanceof ConnectionLostError ||
     error instanceof DeadlineExceededError ||
+    error instanceof OutcomeUnknownError ||
     error instanceof CancelledError ||
     error instanceof RateLimitedError ||
     error instanceof InternalError
