@@ -117,9 +117,10 @@ impl WriteRun {
 }
 
 impl QueryJob {
-    /// Commit the statements queued in `run` to `kg` as one transaction, fill
-    /// their message rows in `messages` and return the counts of its fact
-    /// statements.
+    /// Commit the statements queued in `run` to `kg` as one transaction and
+    /// fill their message rows in `messages`. Returns the snapshot the
+    /// program committed against (see [`ProgramCommit::base`]) and the counts
+    /// of its fact statements.
     ///
     /// A program whose staging read the KG is staged again, up to
     /// [`MAX_STAGE_ATTEMPTS`] times with a short random pause, if a concurrent
@@ -130,7 +131,7 @@ impl QueryJob {
         kg: &str,
         run: &mut WriteRun,
         messages: &mut [String],
-    ) -> Result<Vec<StatementCounts>, RunFailure> {
+    ) -> Result<(Arc<KnowledgeGraphSnapshot>, Vec<StatementCounts>), RunFailure> {
         let commit = match self.commit_queued(storage, kg, &run.queued) {
             Ok(commit) => commit,
             Err(mut failure) => {
@@ -187,7 +188,7 @@ impl QueryJob {
                 change.inserted + change.deleted,
             );
         }
-        Ok(counts)
+        Ok((commit.base, counts))
     }
 
     /// Stage `queued` and commit it, re-staging while it goes stale.
@@ -202,6 +203,8 @@ impl QueryJob {
         loop {
             attempts += 1;
             let program = self.stage(storage, kg, queued)?;
+            #[cfg(test)]
+            super::test_hook::run(super::test_hook::Point::Commit);
             match storage.commit_program(kg, program, control.as_deref()) {
                 Ok(commit) => return Ok(commit),
                 Err(CommitError::Stale) if attempts < MAX_STAGE_ATTEMPTS => {

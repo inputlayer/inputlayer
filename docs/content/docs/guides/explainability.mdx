@@ -98,6 +98,40 @@ The blocker identifies the exact body predicate that prevented derivation:
 - **Head unification failed** - the rule head pattern doesn't match the target
 - **HNSW not in top-k** - the target wasn't in the nearest neighbor results
 
+## Proofs of a Guarded Write
+
+A `.why`, `.why full` or `.why_not` may be the last statement of a program that
+writes. It is then evaluated on the snapshot the program's writes committed
+against: the knowledge graph just before the program's changes, on which
+everything the program's conditional statements read was checked to still
+hold. If a concurrent write changed what they read, the program is staged again
+and the proof follows it to the new snapshot. Later writes, including the
+program's own, never change the proof.
+
+This is what a claim needs. A claim guarded on a candidate withdraws the
+candidate by succeeding, so a `.why` sent after it explains a row that is gone.
+In the same program, the proof explains the state the guard passed on:
+
+```iql
++attempt(session: string, tool: string, id: string)
++need[("s1", "carrier_check")]
++eligible(S, T) <- need(S, T), !attempt(S, T, _)
+
+-attempt("", "", ""), +attempt(S, T, "a-1") <- eligible(S, T), S = "s1", T = "carrier_check"
+.why ?eligible("s1", "carrier_check")
+```
+
+The reply keeps one message row per write statement (`Update: 0 deleted, 1
+inserted.` when the claim won) and carries the proof in `proof_trees`. When the
+claim is refused, the guard found no eligible row, so the proof is empty. Each
+proof tree's `revision` names the snapshot it was evaluated on.
+
+The proof must be the program's last statement, and the program cannot also
+hold a query; either is rejected with code `unsupported` before anything runs.
+The proof runs after the commit, so a proof that fails reports its own error
+while the program's writes stay committed. Like every `.why`, it reads
+persistent facts and rules only, not the request's session facts and rules.
+
 ## SDK Usage
 
 ### Python

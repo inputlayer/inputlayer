@@ -901,6 +901,15 @@ impl StorageEngine {
         Ok((db_guard.snapshot(), db_guard.index_metrics()))
     }
 
+    /// The vector-index metrics of `kg` (index name to metric), for a proof
+    /// evaluated on a snapshot the caller already holds.
+    pub fn index_metrics_on(
+        &self,
+        kg: &str,
+    ) -> StorageResult<std::collections::HashMap<String, String>> {
+        Ok(self.kg_handle(kg)?.read().index_metrics())
+    }
+
     /// Save a specific knowledge graph to disk (flush persist buffers)
     pub fn save_knowledge_graph(&self, name: &str) -> StorageResult<()> {
         self.persist.check_writable()?;

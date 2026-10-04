@@ -337,12 +337,15 @@ pub struct RelationChange {
 }
 
 /// A committed write program.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct ProgramCommit {
     /// Per staged statement, in program order.
     pub statements: Vec<StatementOutcome>,
     /// Relations whose contents changed, in first-touch order.
     pub relations: Vec<RelationChange>,
+    /// The snapshot the program committed against: the KG as published just
+    /// before its changes, on which its reads were validated to still hold.
+    pub base: Arc<KnowledgeGraphSnapshot>,
 }
 
 /// Why a write program was not committed. In every case but

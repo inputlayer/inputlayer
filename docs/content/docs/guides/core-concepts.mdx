@@ -110,13 +110,16 @@ Commit outcomes and crash recovery follow the
 
 A program that writes may also hold statements that affect only the request
 (session facts and rules, type declarations, a query; the query runs after the
-commit). Any other command cannot join the transaction: switching, creating or
-dropping knowledge graphs, `.rel drop`, `.clear prefix`, index, user, access,
-ontology and subscription commands, `.compact`, and commands that inspect state
-(`.kg`, `.rel`, `.rule list`, `.status`, `.why` and the like). A program that
-mixes one of them with writes is rejected with code `unsupported` before any
-statement runs; send the command as a separate request. A program without writes
-runs its statements in order, each on its own.
+commit). It may end with a proof (`.why`, `.why full`, `.why_not`) instead of a
+query: the proof is evaluated on the snapshot the writes committed against (see
+[Proofs of a Guarded Write](explainability#proofs-of-a-guarded-write)). Any
+other command cannot join the transaction: switching, creating or dropping
+knowledge graphs, `.rel drop`, `.clear prefix`, index, user, access, ontology
+and subscription commands, `.compact`, and commands that inspect state (`.kg`,
+`.rel`, `.rule list`, `.status` and the like). A program that mixes one of them
+with writes, or holds a proof that is not its last statement, is rejected with
+code `unsupported` before any statement runs; send the command as a separate
+request. A program without writes runs its statements in order, each on its own.
 
 ## Deletion Patterns
 
