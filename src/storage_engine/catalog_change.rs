@@ -104,6 +104,7 @@ impl CatalogChange {
     }
 
     fn apply_rule_change(&self, rules: &mut RuleCatalog) -> StorageResult<CatalogOutcome> {
+        self.check_not_negated(rules)?;
         let failed =
             |action: &str, e: String| StorageError::Other(format!("Failed to {action}: {e}"));
         match self {
@@ -134,6 +135,40 @@ impl CatalogChange {
                 unreachable!("schema change applied as a rule change")
             }
         }
+    }
+
+    /// Refuse a change that leaves a rule with no clauses while a rule it
+    /// does not also remove negates it: that rule would fail open.
+    fn check_not_negated(&self, rules: &RuleCatalog) -> StorageResult<()> {
+        let has_clauses = |name: &str| rules.rule_count(name).is_some_and(|n| n > 0);
+        let emptied: Vec<String> = match self {
+            Self::DropRule(name) | Self::ClearRule(name) if has_clauses(name) => {
+                vec![name.clone()]
+            }
+            Self::DropRulesByPrefix(prefix) if !prefix.is_empty() => rules
+                .list()
+                .into_iter()
+                .filter(|name| name.starts_with(prefix.as_str()) && has_clauses(name))
+                .collect(),
+            Self::RemoveRuleClause { name, index: 0 } if rules.rule_count(name) == Some(1) => {
+                vec![name.clone()]
+            }
+            _ => Vec::new(),
+        };
+        for name in &emptied {
+            let negating: Vec<String> = rules
+                .rules_negating(name)
+                .into_iter()
+                .filter(|rule| !emptied.contains(rule))
+                .collect();
+            if !negating.is_empty() {
+                return Err(StorageError::RuleNegated {
+                    rule: name.clone(),
+                    rules: negating,
+                });
+            }
+        }
+        Ok(())
     }
 
     fn apply_schema_change(

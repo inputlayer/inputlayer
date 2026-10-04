@@ -151,6 +151,37 @@ async fn dropping_a_negated_relation_is_a_conflict_and_the_rule_stays_closed() {
 }
 
 #[tokio::test]
+async fn dropping_a_negated_rule_is_a_conflict_and_the_rule_stays_closed() {
+    let (handler, _tmp) = handler();
+    run(
+        &handler,
+        "+order(\"O1\", \"T1\")\n+blocklist(\"T1\")\n\
+         +blocked(T) <- blocklist(T)\n\
+         +allowed(O) <- order(O, T), !blocked(T)",
+    )
+    .await
+    .expect("setup");
+    assert_eq!(count(&handler, "?allowed(O)").await, 0);
+
+    for command in [
+        "-blocked",
+        ".rule drop blocked",
+        ".rule clear blocked",
+        ".rule remove blocked 1",
+        ".rule drop prefix bl",
+    ] {
+        let err = run(&handler, command).await.expect_err(command);
+        assert_eq!(err.code, Some(ErrorCode::Conflict), "{command}: {err:?}");
+        assert!(err.message.contains("allowed"), "{command}: {err:?}");
+        assert_eq!(count(&handler, "?allowed(O)").await, 0, "{command}");
+    }
+
+    run(&handler, ".rule drop allowed\n.rule drop blocked")
+        .await
+        .expect("dependents first");
+}
+
+#[tokio::test]
 async fn statements_of_a_program_without_writes_fail_independently() {
     let (handler, _tmp) = handler();
     let result = run(&handler, "?a(X)\n.rel drop missing\n.index drop missing")

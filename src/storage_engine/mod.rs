@@ -3107,6 +3107,74 @@ mod tests {
     }
 
     #[test]
+    fn test_rule_removal_refused_while_a_rule_negates_it() {
+        let temp = TempDir::new().unwrap();
+        let storage = StorageEngine::new(create_test_config(temp.path().to_path_buf())).unwrap();
+        let register = |text: &str| {
+            storage
+                .register_rule_in(
+                    "default",
+                    &crate::statement::parse_rule_definition(text).unwrap(),
+                )
+                .unwrap();
+        };
+        let refused = |err: StorageError, rule: &str, negating: &[&str]| {
+            assert!(
+                matches!(&err, StorageError::RuleNegated { rule: r, rules }
+                    if r == rule && rules == negating),
+                "{err}"
+            );
+        };
+        register("p_blocked(T) <- blocklist(T)");
+        register("p_allowed(O) <- order(O, T), !p_blocked(T)");
+        register("mid(T) <- blocklist(T)");
+        register("guard(O) <- order(O, T), !mid(T)");
+
+        refused(
+            storage.drop_rule_in("default", "p_blocked").unwrap_err(),
+            "p_blocked",
+            &["p_allowed"],
+        );
+        refused(
+            storage.clear_rule_in("default", "p_blocked").unwrap_err(),
+            "p_blocked",
+            &["p_allowed"],
+        );
+        refused(
+            storage
+                .remove_rule_clause_in("default", "p_blocked", 0)
+                .unwrap_err(),
+            "p_blocked",
+            &["p_allowed"],
+        );
+        refused(
+            storage
+                .drop_rules_by_prefix_in("default", "mi")
+                .unwrap_err(),
+            "mid",
+            &["guard"],
+        );
+        assert_eq!(
+            storage.list_rules_in("default").unwrap(),
+            ["guard", "mid", "p_allowed", "p_blocked"]
+        );
+
+        // Removing a clause that is not the last one leaves the rule.
+        register("mid(T) <- extra(T)");
+        assert!(!storage.remove_rule_clause_in("default", "mid", 1).unwrap());
+
+        // A prefix drop that removes the negating rule too is not blocked.
+        assert_eq!(
+            storage.drop_rules_by_prefix_in("default", "p_").unwrap(),
+            ["p_allowed", "p_blocked"]
+        );
+        storage.drop_rule_in("default", "guard").unwrap();
+        storage.clear_rule_in("default", "mid").unwrap();
+        storage.drop_rule_in("default", "mid").unwrap();
+        assert!(storage.list_rules_in("default").unwrap().is_empty());
+    }
+
+    #[test]
     fn test_rel_drop_without_shard_skips_tombstone() {
         let temp = TempDir::new().unwrap();
         let storage = StorageEngine::new(create_test_config(temp.path().to_path_buf())).unwrap();

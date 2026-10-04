@@ -73,6 +73,9 @@ impl CatalogStatement {
     /// The code and message reporting that this statement failed with `error`.
     pub fn failure(&self, error: &StorageError) -> StageError {
         let (code, message) = match self {
+            _ if matches!(error, StorageError::RuleNegated { .. }) => {
+                (ErrorCode::Conflict, error.to_string())
+            }
             Self::Schema(decl) => (
                 storage_error_code(error, ErrorCode::Validation),
                 format!("Failed to register schema for '{}': {error}", decl.name),

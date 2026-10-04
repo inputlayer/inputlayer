@@ -109,6 +109,21 @@ pub enum StorageError {
         rules: Vec<String>,
     },
 
+    /// A rule a registered rule negates: removing its clauses would let that
+    /// rule derive the rows it blocks.
+    #[error(
+        "Cannot remove rule '{rule}': rule(s) {} negate it or a rule that reads it, \
+         so removing it would make them derive the rows it blocks. Drop or redefine those \
+         rules first, or remove them together.",
+        rules.join(", ")
+    )]
+    RuleNegated {
+        /// The rule that was to be removed or cleared
+        rule: String,
+        /// The rules that negate it, directly or through other rules
+        rules: Vec<String>,
+    },
+
     /// A WAL write failed and could not be undone on disk, so a restart may still
     /// recover its transaction: the commit's outcome is unknown, not failed.
     #[error(
