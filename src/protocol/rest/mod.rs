@@ -613,7 +613,7 @@ mod tests {
     fn make_handler_with_api_key() -> (Arc<Handler>, String, tempfile::TempDir) {
         let (handler, tmp) = make_handler();
         let result = handler
-            .handle_apikey_create("test-key", "admin", None)
+            .handle_apikey_create("test-key", "admin", None, None)
             .unwrap();
         let api_key = result.rows[0].values[1].as_str().unwrap().to_string();
         (handler, api_key, tmp)
@@ -766,7 +766,7 @@ mod tests {
         let (handler, _key1, _tmp) = make_handler_with_api_key();
         // Create a second key
         let result = handler
-            .handle_apikey_create("key-2", "admin", None)
+            .handle_apikey_create("key-2", "admin", None, None)
             .unwrap();
         let key2 = result.rows[0].values[1].as_str().unwrap().to_string();
 

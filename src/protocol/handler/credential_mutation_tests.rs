@@ -222,7 +222,9 @@ fn access_cannot_be_given_to_an_unknown_user() {
     let key = handler.create_api_key("alice-key", "alice", None).unwrap();
     assert!(handler.authenticate_api_key(&key).is_ok());
     assert_eq!(
-        handler.get_kg_role_for_user("finance", "alice", &Role::Viewer),
+        handler
+            .get_kg_role_for_user("finance", "alice", &Role::Viewer)
+            .map(|access| access.role()),
         Some(crate::auth::KgRole::Viewer)
     );
 }

@@ -153,7 +153,8 @@ Manage API keys for machine-to-machine auth:
 | Command | Description |
 |---------|-------------|
 | `.apikey create <label> [<ttl>]` | Create a new API key, optionally expiring after `<ttl>` (`30s`, `15m`, `24h`, `90d`) |
-| `.apikey list` | List all API keys with their owner, created, expiry and last-used times and status |
+| `.apikey create <label> [<ttl>] role <role> on <kg> [relations <r>, ...]` | Create a key limited to one knowledge graph and role (`editor`, `writer`, `decider`, `viewer`) |
+| `.apikey list` | List all API keys with their owner, created, expiry and last-used times, status and scope |
 | `.apikey expire <label> <ttl>` | Bring a key's expiry forward to `<ttl>` from now, e.g. a rotation grace period |
 | `.apikey revoke <label>` | Revoke an API key |
 
@@ -164,7 +165,7 @@ Manage per-knowledge-graph access:
 | Command | Description |
 |---------|-------------|
 | `.kg acl list [<kg>]` | List ACLs for a knowledge graph |
-| `.kg acl grant <kg> <user> <role>` | Grant access (`owner`, `editor`, `viewer`) |
+| `.kg acl grant <kg> <user> <role> [relations <r>, ...]` | Grant access (`owner`, `editor`, `writer`, `decider`, `viewer`); `relations` limits a `writer` or `decider` to those relations |
 | `.kg acl revoke <kg> <user>` | Revoke access |
 
 ### System Commands

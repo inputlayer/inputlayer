@@ -5,7 +5,7 @@
 //! `.kg acl revoke`, and its user's role with `.user role`. Looking the
 //! access list up per frame would scan it, so each connection caches its
 //! answer per knowledge graph and asks again only when the handler's
-//! access-list generation or the user's role moved: two atomic loads per
+//! access-list generation or the user's role moved: a few atomic loads per
 //! frame while nothing changes. Subscription pushes ask before their delta is built
 //! (see [`crate::protocol::subscription::Subscriber::deliver`]).
 
@@ -17,6 +17,8 @@ use crate::protocol::Handler;
 struct Answer {
     generation: u64,
     role: Role,
+    /// A scoped key's owner's role, which its access also follows.
+    owner_role: Option<Role>,
     knowledge_graph: String,
     readable: bool,
 }
@@ -41,20 +43,23 @@ impl KgReadAccess {
         let Ok(role) = principal.role() else {
             return false;
         };
+        let owner_role = principal.key_owner_role();
         if let Some(last) = &self.last {
             if last.generation == generation
                 && last.role == role
+                && last.owner_role == owner_role
                 && last.knowledge_graph == knowledge_graph
             {
                 return last.readable;
             }
         }
-        let readable = handler
-            .get_kg_role_for_user(knowledge_graph, principal.username(), &role)
-            .is_some();
+        let readable = principal
+            .identity()
+            .is_ok_and(|identity| handler.kg_access(knowledge_graph, &identity).is_some());
         self.last = Some(Answer {
             generation,
             role,
+            owner_role,
             knowledge_graph: knowledge_graph.to_string(),
             readable,
         });

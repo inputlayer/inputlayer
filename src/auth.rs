@@ -12,10 +12,14 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
+mod access;
 mod credentials;
 mod principal;
 pub(crate) mod stored;
 
+pub use access::KeyScope;
+pub use access::KgAccess;
+pub(crate) use access::{decode_relations, encode_relations};
 pub use credentials::{
     ApiKeyInfo, ApiKeyRecord, ApiKeyRejected, ApiKeyTimes, CredentialRegistry, ExpireRejected,
     KeyUsage, PasswordCandidate, UserRecord,
@@ -66,6 +70,17 @@ impl FromStr for Role {
 pub struct AuthIdentity {
     pub username: String,
     pub role: Role,
+    /// The scoped API key acting, if it is one. `role` is then never admin.
+    pub key_scope: Option<ScopedKey>,
+}
+
+/// A scoped API key acting: it may use only its scope's KG, with at most its
+/// scope's access and at most its owner's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopedKey {
+    pub scope: std::sync::Arc<KeyScope>,
+    /// The owner's own global role.
+    pub owner_role: Role,
 }
 
 // ── Password Hashing (argon2id) ─────────────────────────────────────────────
@@ -403,6 +418,11 @@ pub enum KgRole {
     Owner,
     /// Write access: read, write, schema modifications
     Editor,
+    /// Fact writes only, in every relation or in granted relations; never
+    /// rules, schema or drops
+    Writer,
+    /// Fact writes only in granted relations (claims and decisions)
+    Decider,
     /// Read-only access: queries only
     Viewer,
 }
@@ -412,6 +432,8 @@ impl fmt::Display for KgRole {
         match self {
             KgRole::Owner => write!(f, "owner"),
             KgRole::Editor => write!(f, "editor"),
+            KgRole::Writer => write!(f, "writer"),
+            KgRole::Decider => write!(f, "decider"),
             KgRole::Viewer => write!(f, "viewer"),
         }
     }
@@ -424,20 +446,23 @@ impl FromStr for KgRole {
         match s.to_lowercase().as_str() {
             "owner" => Ok(KgRole::Owner),
             "editor" => Ok(KgRole::Editor),
+            "writer" => Ok(KgRole::Writer),
+            "decider" => Ok(KgRole::Decider),
             "viewer" => Ok(KgRole::Viewer),
             _ => Err(format!(
-                "Unknown KG role '{s}'. Valid roles: owner, editor, viewer"
+                "Unknown KG role '{s}'. Valid roles: owner, editor, writer, decider, viewer"
             )),
         }
     }
 }
 
-/// Check whether a KG role permits a given statement on that KG.
+/// Check whether `access` to the KG `kg` permits a given statement on it.
 /// Called AFTER the global `authorize_statement()` check passes.
-pub fn authorize_kg_operation(kg_role: &KgRole, stmt: &Statement) -> Result<(), String> {
-    match kg_role {
+pub fn authorize_kg_operation(access: &KgAccess, kg: &str, stmt: &Statement) -> Result<(), String> {
+    match access.role() {
         KgRole::Owner => Ok(()), // Owner can do everything on their KG
         KgRole::Editor => authorize_kg_editor(stmt),
+        KgRole::Writer | KgRole::Decider => access::authorize_fact_writer(access, kg, stmt),
         KgRole::Viewer => authorize_kg_viewer(stmt),
     }
 }
@@ -952,7 +977,7 @@ mod tests {
         for s in stmts {
             let stmt = parse_statement(s).unwrap();
             assert!(
-                authorize_kg_operation(&KgRole::Owner, &stmt).is_ok(),
+                authorize_kg_operation(&KgRole::Owner.into(), "test", &stmt).is_ok(),
                 "KG Owner should be allowed: {s}"
             );
         }
@@ -965,7 +990,7 @@ mod tests {
         for s in denied {
             let stmt = parse_statement(s).unwrap();
             assert!(
-                authorize_kg_operation(&KgRole::Editor, &stmt).is_err(),
+                authorize_kg_operation(&KgRole::Editor.into(), "test", &stmt).is_err(),
                 "KG Editor should be denied: {s}"
             );
         }
@@ -978,7 +1003,7 @@ mod tests {
         for s in allowed {
             let stmt = parse_statement(s).unwrap();
             assert!(
-                authorize_kg_operation(&KgRole::Editor, &stmt).is_ok(),
+                authorize_kg_operation(&KgRole::Editor.into(), "test", &stmt).is_ok(),
                 "KG Editor should be allowed: {s}"
             );
         }
@@ -991,7 +1016,7 @@ mod tests {
         for s in denied {
             let stmt = parse_statement(s).unwrap();
             assert!(
-                authorize_kg_operation(&KgRole::Viewer, &stmt).is_err(),
+                authorize_kg_operation(&KgRole::Viewer.into(), "test", &stmt).is_err(),
                 "KG Viewer should be denied: {s}"
             );
         }
@@ -1004,10 +1029,106 @@ mod tests {
         for s in allowed {
             let stmt = parse_statement(s).unwrap();
             assert!(
-                authorize_kg_operation(&KgRole::Viewer, &stmt).is_ok(),
+                authorize_kg_operation(&KgRole::Viewer.into(), "test", &stmt).is_ok(),
                 "KG Viewer should be allowed: {s}"
             );
         }
+    }
+
+    fn decider() -> KgAccess {
+        KgAccess::new(
+            KgRole::Decider,
+            Some(vec!["attempt".to_string(), "decision".to_string()]),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_fact_writers_write_only_granted_facts() {
+        use crate::statement::parse_statement;
+        let writer = KgAccess::new(KgRole::Writer, None).unwrap();
+        let allowed = [
+            "?kill_switch(X)",
+            "+attempt(\"s-1\", 1)",
+            "-attempt(\"s-1\", 1)",
+            "-attempt(S, N) <- attempt(S, N), N > 3",
+            "-attempt(\"\", -1), +attempt(\"s-1\", 2) <- lease(\"s-1\")",
+            "+decision[(\"d-1\", \"ship\")]",
+            "eligible(X) <- order(X)",
+            ".rel",
+            ".rule",
+            ".kg acl list",
+            ".session",
+        ];
+        for s in allowed {
+            let stmt = parse_statement(s).unwrap();
+            for access in [&writer, &decider()] {
+                assert!(
+                    authorize_kg_operation(access, "shop", &stmt).is_ok(),
+                    "{access} should be allowed: {s}"
+                );
+            }
+        }
+        // The review's bypasses with an agent key, each refused naming what
+        // is missing.
+        let decider_denied = [
+            (
+                "-kill_switch(\"carrier_check\")",
+                "no write grant for relation 'kill_switch'",
+            ),
+            (
+                "+kill_switch(\"x\")",
+                "no write grant for relation 'kill_switch'",
+            ),
+            (
+                "-attempt(\"\", -1), +kill_switch(\"x\") <- order(\"o\")",
+                "no write grant for relation 'kill_switch'",
+            ),
+            (
+                "-kill_switch(X), +attempt(X, 1) <- kill_switch(X)",
+                "no write grant for relation 'kill_switch'",
+            ),
+        ];
+        for (s, why) in decider_denied {
+            let stmt = parse_statement(s).unwrap();
+            let err = authorize_kg_operation(&decider(), "shop", &stmt).unwrap_err();
+            assert!(err.contains(why), "{s}: {err}");
+            assert!(err.contains("decider role on 'shop'"), "{s}: {err}");
+            assert!(
+                authorize_kg_operation(&writer, "shop", &stmt).is_ok(),
+                "{s}"
+            );
+        }
+        let policy = [
+            (
+                "+check_needed(O, S) <- shipment(O, S)",
+                "registering a rule",
+            ),
+            (".rel drop kill_switch", "dropping a relation"),
+            ("-kill_switch", "dropping a relation or rule"),
+            (".rule drop eligible", "changing a rule"),
+            (".rule clear eligible", "changing a rule"),
+            ("+attempt(session: string, n: int)", "declaring a schema"),
+            (".clear prefix kill", "clearing relations"),
+            (".kg drop shop", "only owners"),
+            (".kg acl grant shop bob owner", "only owners"),
+            (".compact", "editor role"),
+        ];
+        for (s, why) in policy {
+            let stmt = parse_statement(s).unwrap();
+            for access in [&writer, &decider()] {
+                let err = authorize_kg_operation(access, "shop", &stmt).unwrap_err();
+                assert!(err.contains(why), "{access} {s}: {err}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_kg_role_parses_fact_writer_roles() {
+        assert_eq!(KgRole::from_str("writer").unwrap(), KgRole::Writer);
+        assert_eq!(KgRole::from_str("Decider").unwrap(), KgRole::Decider);
+        assert_eq!(KgRole::Writer.to_string(), "writer");
+        assert_eq!(KgRole::Decider.to_string(), "decider");
     }
 
     #[test]

@@ -3,10 +3,14 @@
 //!
 //! A key is stored as `api_keys(label, key_hash, owner)` plus rows in
 //! `api_key_times(key_hash, field, at)`, one per `created_at`, `expires_at`
-//! and `last_used_at`. Every write is ordered so a crash can only leave a key
-//! stricter than intended, never laxer: times are written before the key,
-//! a replacement time before the row it replaces is deleted, and when a field
-//! has several rows the earliest expiry and the latest use win.
+//! and `last_used_at`. A key created with a role is a
+//! `scoped_api_keys(label, key_hash, owner)` row instead, with one
+//! `api_key_scopes(key_hash, kg, role, relations)` row (see
+//! [`crate::auth::stored`]). A new key's rows are
+//! one commit. Every later write is ordered so a crash can only leave a key
+//! stricter than intended, never laxer: a replacement time is written before
+//! the row it replaces is deleted, a key is deleted before its scope, and
+//! when a field has several rows the earliest expiry and the latest use win.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,13 +18,15 @@ use std::time::Duration;
 use tracing::{info, warn};
 
 use super::{now_ms, user_exists, Handler, ProgramError};
-use crate::auth::{self, ApiKeyRecord, ApiKeyTimes, ExpireRejected, KeyUsage};
+use crate::auth::{self, ApiKeyRecord, ApiKeyTimes, ExpireRejected, KeyScope, KeyUsage};
 use crate::protocol::wire::{ColumnDef, QueryResult, WireDataType, WireTuple, WireValue};
 use crate::storage::StorageError;
 use crate::storage_engine::{FactChange, KnowledgeGraphSnapshot, StorageEngine};
 use crate::value::{Tuple, Value};
 
-use crate::auth::stored::{API_KEYS, API_KEY_TIMES, CREATED_AT, EXPIRES_AT, LAST_USED_AT};
+use crate::auth::stored::{
+    API_KEYS, API_KEY_SCOPES, API_KEY_TIMES, CREATED_AT, EXPIRES_AT, LAST_USED_AT, SCOPED_API_KEYS,
+};
 
 /// How often key uses are persisted: at most one `_internal` write per
 /// interval, however many requests the keys served.
@@ -32,6 +38,15 @@ fn time_row(key_hash: &str, field: &str, at: u64) -> Tuple {
         Value::string(field),
         Value::timestamp(i64::try_from(at).unwrap_or(i64::MAX)),
     ])
+}
+
+/// The relation that holds `record`'s key row.
+fn key_relation(record: &ApiKeyRecord) -> &'static str {
+    if record.scope.is_some() {
+        SCOPED_API_KEYS
+    } else {
+        API_KEYS
+    }
 }
 
 fn key_row(record: &ApiKeyRecord) -> Tuple {
@@ -70,34 +85,46 @@ fn initial_time_rows(record: &ApiKeyRecord) -> Vec<Tuple> {
     .collect()
 }
 
-/// A new key's rows as changes for a write program: its times, then the key.
-pub(super) fn api_key_inserts(record: &ApiKeyRecord) -> [FactChange; 2] {
+/// A new key's rows as changes for a write program: its times and scope,
+/// then the key.
+pub(super) fn api_key_inserts(record: &ApiKeyRecord) -> Vec<FactChange> {
+    let scope_rows: Vec<Tuple> = record
+        .scope
+        .iter()
+        .map(|scope| {
+            Tuple::new(vec![
+                Value::string(&record.key_hash),
+                Value::string(&scope.kg),
+                Value::string(&scope.access.role().to_string()),
+                Value::string(&auth::encode_relations(scope.access.relations())),
+            ])
+        })
+        .collect();
     [
-        FactChange::Insert {
-            relation: API_KEY_TIMES.to_string(),
-            tuples: initial_time_rows(record),
-        },
-        FactChange::Insert {
-            relation: API_KEYS.to_string(),
-            tuples: vec![key_row(record)],
-        },
+        (API_KEY_TIMES, initial_time_rows(record)),
+        (API_KEY_SCOPES, scope_rows),
+        (key_relation(record), vec![key_row(record)]),
     ]
+    .into_iter()
+    .filter(|(_, tuples)| !tuples.is_empty())
+    .map(|(relation, tuples)| FactChange::Insert {
+        relation: relation.to_string(),
+        tuples,
+    })
+    .collect()
 }
 
-/// Persist a new key: its times first, so a crash never leaves it without
-/// its expiry.
+/// Persist a new key with its times and scope, as one commit: a key is
+/// never stored without its expiry or its scope.
 pub(super) fn store_api_key(
     storage: &StorageEngine,
     record: &ApiKeyRecord,
 ) -> Result<(), StorageError> {
-    storage.insert_tuples_into(auth::INTERNAL_KG, API_KEY_TIMES, initial_time_rows(record))?;
-    storage
-        .insert_tuples_into(auth::INTERNAL_KG, API_KEYS, vec![key_row(record)])
-        .map(drop)
+    super::commit_internal(storage, api_key_inserts(record))
 }
 
-/// Delete the stored keys `matches` selects, then their times. Returns the
-/// labels of the deleted keys.
+/// Delete the stored keys `matches` selects, then their times and scopes.
+/// Returns the labels of the deleted keys.
 pub(super) fn delete_api_keys(
     storage: &StorageEngine,
     snapshot: &KnowledgeGraphSnapshot,
@@ -107,25 +134,37 @@ pub(super) fn delete_api_keys(
         .into_iter()
         .filter(matches)
         .collect();
-    let keys = doomed.iter().map(key_row).collect();
-    storage.delete_tuples_from(auth::INTERNAL_KG, API_KEYS, keys)?;
-    let times = snapshot
-        .input_tuples
-        .get(API_KEY_TIMES)
-        .into_iter()
-        .flatten()
-        .filter(|tuple| {
-            let hash = tuple.values().first().and_then(Value::as_str);
-            doomed.iter().any(|key| hash == Some(key.key_hash.as_str()))
-        })
-        .cloned()
-        .collect();
-    // The keys are gone; their times are only clutter now, unless the
-    // cleanup's outcome is unknown.
-    match storage.delete_tuples_from(auth::INTERNAL_KG, API_KEY_TIMES, times) {
-        Err(e @ StorageError::OutcomeUnknown { .. }) => return Err(e),
-        Err(e) => warn!(error = %e, "apikey_times_cleanup_failed"),
-        Ok(_) => {}
+    for relation in [API_KEYS, SCOPED_API_KEYS] {
+        let keys: Vec<Tuple> = doomed
+            .iter()
+            .filter(|key| key_relation(key) == relation)
+            .map(key_row)
+            .collect();
+        if !keys.is_empty() {
+            storage.delete_tuples_from(auth::INTERNAL_KG, relation, keys)?;
+        }
+    }
+    let owned_rows = |relation: &str| -> Vec<Tuple> {
+        snapshot
+            .input_tuples
+            .get(relation)
+            .into_iter()
+            .flatten()
+            .filter(|tuple| {
+                let hash = tuple.values().first().and_then(Value::as_str);
+                doomed.iter().any(|key| hash == Some(key.key_hash.as_str()))
+            })
+            .cloned()
+            .collect()
+    };
+    // The keys are gone; their times and scopes are only clutter now, unless
+    // the cleanup's outcome is unknown.
+    for relation in [API_KEY_TIMES, API_KEY_SCOPES] {
+        match storage.delete_tuples_from(auth::INTERNAL_KG, relation, owned_rows(relation)) {
+            Err(e @ StorageError::OutcomeUnknown { .. }) => return Err(e),
+            Err(e) => warn!(relation, error = %e, "apikey_rows_cleanup_failed"),
+            Ok(_) => {}
+        }
     }
     Ok(doomed.into_iter().map(|key| key.label).collect())
 }
@@ -170,8 +209,9 @@ impl Handler {
         label: &str,
         owner: &str,
         ttl: Option<Duration>,
+        scope: Option<KeyScope>,
     ) -> Result<QueryResult, ProgramError> {
-        let (plaintext_key, times) = self.create_api_key_with_times(label, owner, ttl)?;
+        let (plaintext_key, times) = self.create_api_key_with_times(label, owner, ttl, scope)?;
         let row = WireTuple {
             values: vec![
                 WireValue::String(label.to_string()),
@@ -196,7 +236,7 @@ impl Handler {
         owner: &str,
         ttl: Option<Duration>,
     ) -> Result<String, ProgramError> {
-        self.create_api_key_with_times(label, owner, ttl)
+        self.create_api_key_with_times(label, owner, ttl, None)
             .map(|(key, _)| key)
     }
 
@@ -205,9 +245,15 @@ impl Handler {
         label: &str,
         owner: &str,
         ttl: Option<Duration>,
+        scope: Option<KeyScope>,
     ) -> Result<(String, ApiKeyTimes), ProgramError> {
         let _credential_writes = self.credential_writes.lock();
         let storage = self.storage.read();
+        if let Some(scope) = &scope {
+            storage
+                .get_snapshot_for(&scope.kg)
+                .map_err(|_| format!("Knowledge graph '{}' not found", scope.kg))?;
+        }
         let snapshot = storage.get_snapshot_for(auth::INTERNAL_KG)?;
         if !user_exists(&snapshot, owner) {
             return Err(format!("User '{owner}' not found").into());
@@ -231,12 +277,14 @@ impl Handler {
                 expires_at: ttl_ms.map(|ttl| created_at.saturating_add(ttl)),
                 last_used_at: None,
             },
+            scope,
         };
         store_api_key(&storage, &record)?;
         let times = record.times;
+        let scope = record.scope.as_ref().map(ToString::to_string);
         self.credentials.put_key(record);
 
-        info!(label, owner, expires_at = ?times.expires_at, "audit_apikey_created");
+        info!(label, owner, expires_at = ?times.expires_at, scope, "audit_apikey_created");
         Ok((plaintext_key, times))
     }
 
@@ -255,6 +303,9 @@ impl Handler {
                     timestamp(key.times.expires_at),
                     timestamp(key.times.last_used_at),
                     WireValue::String(if key.expired { "expired" } else { "active" }.to_string()),
+                    key.scope.map_or(WireValue::Null, |scope| {
+                        WireValue::String(scope.to_string())
+                    }),
                 ],
                 provenance: None,
             })
@@ -266,6 +317,7 @@ impl Handler {
             column(EXPIRES_AT, WireDataType::Timestamp),
             column(LAST_USED_AT, WireDataType::Timestamp),
             column("status", WireDataType::String),
+            column("scope", WireDataType::String),
         ];
         QueryResult::new(rows, schema, 0)
     }

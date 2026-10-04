@@ -19,6 +19,7 @@ fn key(label: &str, owner: &str) -> ApiKeyRecord {
         key_hash: format!("sha-{label}"),
         username: owner.to_string(),
         times: ApiKeyTimes::default(),
+        scope: None,
     }
 }
 
