@@ -56,7 +56,8 @@ enum Command {
     Genbi(genbi::GenbiArgs),
     /// Measure standing-query cost as sessions grow (voice-agent pack).
     Sessions(sessions::SessionsArgs),
-    /// Absolute numbers from a run file (a baseline table), not a verdict.
+    /// Absolute numbers from a run file (a baseline table), not a verdict;
+    /// exit 3 when a fixture run failed.
     Summary(SummaryArgs),
 }
 
@@ -124,7 +125,7 @@ fn main() -> ExitCode {
         Command::Compare(args) => compare(&args),
         Command::Genbi(args) => genbi::run(&args),
         Command::Sessions(args) => sessions::run(&args),
-        Command::Summary(args) => summarize(&args).map(|()| ExitCode::SUCCESS),
+        Command::Summary(args) => summarize(&args),
     };
     result.unwrap_or_else(|e| {
         eprintln!("perf-gate: {e:#}");
@@ -226,13 +227,15 @@ fn compare(args: &CompareArgs) -> Result<ExitCode> {
     }))
 }
 
-fn summarize(args: &SummaryArgs) -> Result<()> {
+/// Exit 0, or 3 when a fixture run failed (it is listed, not summarized).
+fn summarize(args: &SummaryArgs) -> Result<ExitCode> {
     let text = std::fs::read_to_string(&args.run)
         .with_context(|| format!("read {}", args.run.display()))?;
     let record: RunRecord =
         serde_json::from_str(&text).with_context(|| format!("parse {}", args.run.display()))?;
     print!("{}", summary::markdown(&record, &args.arms));
-    Ok(())
+    let failed = record.runs.iter().any(|run| run.error.is_some());
+    Ok(ExitCode::from(if failed { 3 } else { 0 }))
 }
 
 /// Resolves on SIGINT or SIGTERM.

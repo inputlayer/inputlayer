@@ -12,7 +12,8 @@
 #                   connection) and copy its results back
 #   Everything else goes to scripts/perf-gate.sh: --aa, --rounds N,
 #   --baseline-rev REV, --fixtures LIST, --profile NAME, --server-cpus LIST,
-#   --gate-cpus LIST. A working tree is never measured, only commits.
+#   --gate-cpus LIST, --no-verdict. A working tree is never measured, only
+#   commits: commit first (uncommitted changes get a warning).
 #
 # The run follows the host's rules (~/README-bench.txt): one benchmark at a
 # time (a lock, and a refusal while any inputlayer-server is running), the
@@ -24,7 +25,8 @@
 # The run is detached on the host, so a dropped connection does not stop it;
 # rerun with --attach STAMP to collect it. Results land in
 # target/perf-gate/remote/<stamp>/ (run.json, report.md, verdict.json,
-# bench.txt, gate.log); target/perf-gate/remote/latest points there.
+# summary.md, bench.txt, gate.log); target/perf-gate/remote/latest points
+# there.
 #
 # Exit status: the gate's (0 pass, 1 fail, 2 inconclusive, 3 invalid),
 # 4 when the host is busy, or another non-zero status on a setup error.
@@ -48,8 +50,8 @@ while [ $# -gt 0 ]; do
             # Resolved here, so the host measures exactly this commit.
             GATE_ARGS+=("$1" "$(git rev-parse --verify "$2^{commit}")"); shift 2 ;;
         --rounds|--profile|--fixtures|--server-cpus|--gate-cpus) GATE_ARGS+=("$1" "$2"); shift 2 ;;
-        --aa) GATE_ARGS+=("$1"); shift ;;
-        -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+        --aa|--no-verdict) GATE_ARGS+=("$1"); shift ;;
+        -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
         *) echo "perf-gate-remote: unknown option $1" >&2; exit 3 ;;
     esac
 done
@@ -64,6 +66,9 @@ if [ -z "$ATTACH" ]; then
         if [ "$arg" = --baseline-rev ]; then BASELINE_GIVEN=1; fi
     done
     STAMP=$(date -u +%Y%m%dT%H%M%SZ)-${SHA:0:8}
+    if [ "$REV" = HEAD ] && [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+        echo "perf-gate-remote: warning: measuring HEAD $SHA; uncommitted changes are not measured" >&2
+    fi
 
     echo "=== $HOST: fetch $SHA ==="
     if ! "${SSH[@]}" "cd $DIR && git fetch -q origin && git cat-file -e $SHA^{commit}" 2>/dev/null; then
@@ -171,7 +176,7 @@ scp -q "$HOST:$STATE/$STAMP.bench.txt" "$OUT/bench.txt"
 scp -q "$HOST:$STATE/$STAMP.log" "$OUT/gate.log"
 RUN_DIR=$(sed -n 's/^run dir: //p' "$OUT/bench.txt")
 if [ -n "$RUN_DIR" ]; then
-    for f in run.json report.md verdict.json; do
+    for f in run.json report.md verdict.json summary.md; do
         scp -q "$HOST:$RUN_DIR/$f" "$OUT/$f" 2> /dev/null || true
     done
 fi
