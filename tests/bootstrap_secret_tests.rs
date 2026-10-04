@@ -127,24 +127,6 @@ fn short_supplied_secret_refuses_startup() {
 }
 
 #[test]
-fn short_configured_password_overridden_by_env_is_ignored_with_a_warning() {
-    let tmp = TempDir::new().unwrap();
-    std::fs::write(
-        tmp.path().join("config.toml"),
-        "[http.auth]\nbootstrap_admin_password = \"admin\"\n",
-    )
-    .unwrap();
-    let stderr = boot(
-        tmp.path(),
-        &[("INPUTLAYER_ADMIN_PASSWORD", "a-strong-enough-secret")],
-    );
-    assert!(
-        stderr.contains("WARNING: http.auth.bootstrap_admin_password"),
-        "{stderr}"
-    );
-}
-
-#[test]
 fn short_supplied_secret_is_ignored_with_a_warning_once_admin_exists() {
     for var in ["INPUTLAYER_ADMIN_PASSWORD", "INPUTLAYER_BOOTSTRAP_API_KEY"] {
         let tmp = TempDir::new().unwrap();

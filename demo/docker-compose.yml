@@ -7,9 +7,7 @@ services:
       - inputlayer-data:/var/lib/inputlayer/data
     environment:
       INPUTLAYER_ADMIN_PASSWORD: ${INPUTLAYER_ADMIN_PASSWORD:?Set INPUTLAYER_ADMIN_PASSWORD in .env}
-      # Optional: passed through only when set; otherwise the engine
-      # generates a key on first boot and saves it to credentials.toml.
-      INPUTLAYER_BOOTSTRAP_API_KEY:
+      INPUTLAYER_BOOTSTRAP_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:-}
       INPUTLAYER_HTTP__HOST: "0.0.0.0"
       INPUTLAYER_HTTP__PORT: "8080"
       INPUTLAYER_HTTP__CORS_ALLOW_ALL: "false"

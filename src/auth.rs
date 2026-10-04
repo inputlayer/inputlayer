@@ -112,8 +112,9 @@ fn supplied_secret(source: &'static str, value: Option<String>) -> Option<(&'sta
 /// `http.auth.bootstrap_admin_password`) and `INPUTLAYER_BOOTSTRAP_API_KEY`.
 /// `bootstrap` is `None` when the admin user already exists, else whether
 /// bootstrap issues an API key. Blank values count as unset. `Err` naming
-/// the setting when a value bootstrap would store is shorter than
-/// [`MIN_PASSWORD_CHARS`]; a short value it ignores only draws a warning.
+/// the setting when a supplied admin password on first boot, or a key
+/// bootstrap would store, is shorter than [`MIN_PASSWORD_CHARS`]; a short
+/// value it ignores only draws a warning.
 pub fn bootstrap_secrets(
     configured: Option<&str>,
     bootstrap: Option<bool>,
@@ -136,11 +137,6 @@ pub fn bootstrap_secrets(
         Some(_) => (true, ""),
         None => unused("the admin user already exists"),
     };
-    let config_use = if env_password.is_some() && bootstrap.is_some() {
-        unused("INPUTLAYER_ADMIN_PASSWORD overrides it")
-    } else {
-        password_use
-    };
     let key_use = match bootstrap {
         Some(true) => (true, ""),
         Some(false) => unused("bootstrap already issued an API key for this data directory"),
@@ -148,7 +144,7 @@ pub fn bootstrap_secrets(
     };
     let supplied = [
         (&env_password, password_use),
-        (&config_password, config_use),
+        (&config_password, password_use),
         (&api_key, key_use),
     ];
     let weak = supplied.iter().filter_map(|(secret, usage)| {
