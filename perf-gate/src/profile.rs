@@ -160,7 +160,7 @@ impl EngineParams {
                 clients: 8,
                 per_client: 100,
             },
-            // Closure of about 30K rows, under the default 100K result cap.
+            // A closure of 11,785 rows, under the default 100K result cap.
             unbound_query: QueryParams {
                 nodes: 200,
                 edges: 300,

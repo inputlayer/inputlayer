@@ -13,6 +13,8 @@ make e2e-reactive   # Reactive agent path against real engine processes
 make test-affected  # Run only snapshots affected by uncommitted changes
 make pre-pr         # Before every push to a PR: formatting and affected component checks in parallel, then perf-gate
 make perf-gate      # Performance gate: this tree vs the approved baseline (same host)
+make perf-gate-remote     # The same gate for HEAD on the benchmark host (heavy runs go there)
+make bench-engine-remote  # Engine suite on the benchmark host: absolute numbers, not judged
 make bench-genbi    # Reactive agent benchmark on genbi-trust (needs GENBI_TRUST_DIR)
 make oracle-test    # Differential correctness oracle only (~15s)
 ```
@@ -97,7 +99,10 @@ both on this host in interleaved rounds, and checks query latency,
 durable-write throughput and writer-to-subscribed-agent delta latency against
 the budgets in `perf-gate/policy.toml`. Only a PASS is acceptable. Attach
 `target/perf-gate/latest/report.md` to the PR. Method, fixtures and runner
-requirements are in [`perf-gate/README.md`](perf-gate/README.md). The
+requirements are in [`perf-gate/README.md`](perf-gate/README.md). Heavy
+perf runs go to the dedicated benchmark host, not to a shared development
+box: `make perf-gate-remote` runs the gate there for a commit, and
+`make pre-pr PRE_PR_PERF=perf-gate-remote` makes the pre-PR gate do so. The
 Criterion benches in `benches/` are diagnostic only.
 
 ## Reactive Agent Path (E2E)
@@ -222,6 +227,8 @@ Source-to-category mapping:
 | `make test-affected` | Snapshot tests for changed files only | Fast E2E feedback |
 | `make pre-pr` | [Pre-PR pipeline](CONTRIBUTING#pre-commit-checks) | Before every push to a PR |
 | `make perf-gate` | Paired latency/throughput gate over `/ws` vs the approved baseline | Every implementation PR (see `perf-gate/README.md`) |
+| `make perf-gate-remote` | The same gate for a commit on the benchmark host | Instead of `make perf-gate` on a shared development box |
+| `make bench-engine-remote` | Engine suite (rules, closure, deletes and updates, claims, `.why`, sessions, memory, recovery, WAL share) on the benchmark host | Release checkpoints and engine baselines |
 | `make perf-gate-check` | Clippy + unit tests of the gate tool | After changing `perf-gate/` |
 | `make pre-pr-selftest` | Behavioural tests of `make pre-pr` routing (`scripts/test_pre_pr.py`) | After changing `Makefile` or `scripts/` |
 | `make e2e-reactive` | Reactive agent path against real engines, latency samples | Subscription or wire changes |

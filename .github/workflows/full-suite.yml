@@ -358,7 +358,9 @@ jobs:
   # so the runner's speed cancels out of the paired ratios. FAIL or
   # INVALID fails the checkpoint; INCONCLUSIVE is retried once with more
   # rounds, then reported as a warning (scripts/perf-gate-ci.sh,
-  # perf-gate/README.md).
+  # perf-gate/README.md). The checkpoint's heavy runs (the gate and the
+  # engine suite) also go to the dedicated benchmark host:
+  # make perf-gate-remote / make bench-engine-remote (perf-gate/README.md).
   perf-gate:
     name: Performance gate
     needs: gate
