@@ -2,9 +2,9 @@
 //! published baseline table. `compare` judges ratios between two arms; this
 //! reports each metric's level instead.
 //!
-//! Every value is the median over rounds of that round's statistic (a
-//! nearest-rank percentile of its samples, its rate, or its gauge), with the
-//! range of the per-round values beside it.
+//! Every value is the median over runs (one per round and arm) of that run's
+//! statistic (a nearest-rank percentile of its samples, its rate, or its
+//! gauge), with the range of the per-run values beside it.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -63,7 +63,7 @@ pub fn markdown(record: &RunRecord, arms: &[String]) -> String {
     let mut out = header(record, &selected);
     let _ = writeln!(
         out,
-        "| fixture | latency series | p50 | p99 | p50 range over rounds | rounds | samples |"
+        "| fixture | latency series | p50 | p99 | p50 range over runs | runs | samples |"
     );
     let _ = writeln!(out, "|---|---|---|---|---|---|---|");
     for ((fixture, name), values) in &series {
@@ -80,7 +80,7 @@ pub fn markdown(record: &RunRecord, arms: &[String]) -> String {
     let _ = writeln!(out);
     let _ = writeln!(
         out,
-        "| fixture | rate | per second | range over rounds | rounds |"
+        "| fixture | rate | per second | range over runs | runs |"
     );
     let _ = writeln!(out, "|---|---|---|---|---|");
     for ((fixture, name), values) in &rates {
@@ -93,10 +93,7 @@ pub fn markdown(record: &RunRecord, arms: &[String]) -> String {
         );
     }
     let _ = writeln!(out);
-    let _ = writeln!(
-        out,
-        "| fixture | gauge | value | range over rounds | rounds |"
-    );
+    let _ = writeln!(out, "| fixture | gauge | value | range over runs | runs |");
     let _ = writeln!(out, "|---|---|---|---|---|");
     for ((fixture, name), values) in &gauges {
         let _ = writeln!(
