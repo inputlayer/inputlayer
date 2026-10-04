@@ -999,9 +999,10 @@ async fn test_proof_tree_aggregation_via_handler() {
     );
 }
 
-/// Test that .agent start returns the first step and .agent next advances.
+/// `.agent` is refused as an unknown meta command: the teaching agent was
+/// removed and the engine makes no model call.
 #[tokio::test]
-async fn test_agent_scripted_steps() {
+async fn test_agent_command_is_unknown() {
     use inputlayer::protocol::Handler;
     use inputlayer::Config;
 
@@ -1011,31 +1012,19 @@ async fn test_agent_scripted_steps() {
     config.storage.auto_create_knowledge_graphs = true;
     let handler = Handler::from_config(config).expect("handler");
 
-    // Start the flights lesson
-    let result = handler
-        .query_program(None, ".agent start flights".into())
-        .await
-        .expect("agent start should succeed");
-    assert!(!result.rows.is_empty());
-    let first_msg = format!("{}", result.rows[0].values[0]);
-    assert!(
-        first_msg.contains("direct_flight"),
-        "first step should mention inserting a flight"
-    );
-    assert!(
-        first_msg.contains("```iql"),
-        "first step should have iql code block"
-    );
-
-    // Advance to next step
-    let result = handler
-        .query_program(None, ".agent next".into())
-        .await
-        .expect("agent next should succeed");
-    assert!(!result.rows.is_empty());
-    let second_msg = format!("{}", result.rows[0].values[0]);
-    assert!(
-        second_msg.contains("direct_flight"),
-        "second step should add more flights"
-    );
+    for program in [
+        ".agent",
+        ".agent examples",
+        ".agent start flights",
+        ".agent next",
+    ] {
+        let err = handler
+            .query_program(None, program.into())
+            .await
+            .expect_err("agent commands no longer exist");
+        assert!(
+            err.contains("Unknown meta command: .agent"),
+            "{program}: unexpected error {err}"
+        );
+    }
 }

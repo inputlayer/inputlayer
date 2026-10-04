@@ -97,9 +97,6 @@
 //! | `recursion` | Recursion detection & stratification |
 //! | `storage_engine` | Multi-knowledge-graph persistence |
 
-// Teaching agent (Claude-powered onboarding)
-pub mod agent;
-
 // AST and IR modules (consolidated from crates/)
 pub mod ast;
 pub mod derived_relations; // Derived relation materialization

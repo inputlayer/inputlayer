@@ -70,12 +70,6 @@ pub enum MetaCommand {
     },
     Unsubscribe(String), // .unsubscribe <id>
 
-    // Teaching agent commands
-    AgentMessage(String), // .agent <message> - send message to teaching agent
-    AgentStart(String),   // .agent start <example_id> - start a teaching example
-    AgentSetup(String),   // .agent setup <example_id> - get setup IQL for an example
-    AgentExamples,        // .agent examples - list available examples
-
     // Ontology lifecycle (engine-owned; il and the Studio delegate here).
     // Handled asynchronously at the execute_program level because install
     // fetches from the registry; inside a multi-statement program they are
@@ -195,10 +189,6 @@ impl MetaCommand {
             | Self::WhyNot(_)
             | Self::Subscribe { .. }
             | Self::Unsubscribe(_)
-            | Self::AgentMessage(_)
-            | Self::AgentStart(_)
-            | Self::AgentSetup(_)
-            | Self::AgentExamples
             | Self::Help
             | Self::Quit
             | Self::UserList
@@ -276,10 +266,6 @@ fn format_meta_debug(cmd: &MetaCommand) -> String {
             format!("Subscribe {{ id: {id:?}, query: {query:?} }}")
         }
         MetaCommand::Unsubscribe(id) => format!("Unsubscribe({id:?})"),
-        MetaCommand::AgentMessage(s) => format!("AgentMessage({s:?})"),
-        MetaCommand::AgentStart(s) => format!("AgentStart({s:?})"),
-        MetaCommand::AgentSetup(s) => format!("AgentSetup({s:?})"),
-        MetaCommand::AgentExamples => "AgentExamples".to_string(),
         MetaCommand::OntologyInstall(s) => format!("OntologyInstall({s:?})"),
         MetaCommand::OntologyRemove(s) => format!("OntologyRemove({s:?})"),
         MetaCommand::OntologyUpgrade(s) => format!("OntologyUpgrade({s:?})"),
@@ -417,18 +403,6 @@ pub fn parse_meta_command(input: &str) -> Result<MetaCommand, String> {
             [_, id] => Ok(MetaCommand::Unsubscribe(parse_subscription_id(id)?)),
             _ => Err("Usage: .unsubscribe <id>".to_string()),
         },
-        "agent" => {
-            let rest = input.strip_prefix("agent").unwrap_or("").trim().to_string();
-            if rest.is_empty() || rest == "examples" {
-                Ok(MetaCommand::AgentExamples)
-            } else if let Some(example_id) = rest.strip_prefix("start ") {
-                Ok(MetaCommand::AgentStart(example_id.trim().to_string()))
-            } else if let Some(example_id) = rest.strip_prefix("setup ") {
-                Ok(MetaCommand::AgentSetup(example_id.trim().to_string()))
-            } else {
-                Ok(MetaCommand::AgentMessage(rest))
-            }
-        }
         "help" | "?" => Ok(MetaCommand::Help),
         "quit" | "exit" | "q" => Ok(MetaCommand::Quit),
         "ontology" => parse_ontology_command(&parts),
@@ -1169,6 +1143,21 @@ mod tests {
         let result = parse_meta_command(".view");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Unknown meta command"));
+    }
+
+    #[test]
+    fn test_parse_agent_not_found() {
+        // The teaching agent was removed: the engine makes no model call
+        for input in [
+            ".agent",
+            ".agent examples",
+            ".agent start flights",
+            ".agent hi",
+        ] {
+            let result = parse_meta_command(input);
+            assert!(result.is_err(), "{input} should not parse");
+            assert!(result.unwrap_err().contains("Unknown meta command: .agent"));
+        }
     }
 
     #[test]

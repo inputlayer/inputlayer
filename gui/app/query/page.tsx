@@ -1,7 +1,6 @@
 "use client"
 
-import { useState, useCallback, useMemo, useEffect, Suspense } from "react"
-import { useSearchParams } from "next/navigation"
+import { useState, useCallback, useMemo } from "react"
 import { AppShell } from "@/components/app-shell"
 import { QueryEditorPanel } from "@/components/query-editor-panel"
 import { QueryResultsPanel } from "@/components/query-results-panel"
@@ -36,31 +35,12 @@ function useSidebarOpen() {
 }
 
 export default function QueryPage() {
-  return (
-    <Suspense>
-      <QueryPageInner />
-    </Suspense>
-  )
-}
-
-function QueryPageInner() {
-  const { selectedKnowledgeGraph, executeQuery, setEditorContent, cancelCurrentQuery, executeInternalQuery, loadExample } = useIQLStore()
+  const { selectedKnowledgeGraph, executeQuery, setEditorContent, cancelCurrentQuery } = useIQLStore()
   const [queryResult, setQueryResult] = useState<QueryResult | null>(null)
   const [isExecuting, setIsExecuting] = useState(false)
   const [error, setError] = useState<StructuredError | null>(null)
   const [activeQuery, setActiveQuery] = useState("")
   const [sidebarOpen, toggleSidebar] = useSidebarOpen()
-  const [pendingExample, setPendingExample] = useState<string | null>(null)
-  const searchParams = useSearchParams()
-
-  // Handle ?example=XXX URL parameter
-  useEffect(() => {
-    const exampleId = searchParams.get("example")
-    if (exampleId && selectedKnowledgeGraph) {
-      // Start the agent for this example
-      executeInternalQuery(`.agent start ${exampleId}`).catch(() => {})
-    }
-  }, [searchParams, selectedKnowledgeGraph, executeInternalQuery])
 
   const handleExecuteQuery = useCallback(
     async (query: string) => {
@@ -147,10 +127,6 @@ function QueryPageInner() {
                 error={error}
                 isExecuting={isExecuting}
                 activeQuery={activeQuery}
-                sidebarOpen={sidebarOpen}
-                onStartExample={() => {
-                  if (!sidebarOpen) toggleSidebar()
-                }}
               />
             </ResizablePanel>
           </ResizablePanelGroup>
@@ -161,8 +137,6 @@ function QueryPageInner() {
             <QuerySidebar
               onSelectQuery={handleExecuteQuery}
               onLoadQuery={setEditorContent}
-              pendingExample={pendingExample}
-              onPendingExampleHandled={() => setPendingExample(null)}
             />
           </aside>
         )}

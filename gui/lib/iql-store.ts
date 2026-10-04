@@ -1038,7 +1038,6 @@ export const useIQLStore = create<IQLStore>((set, get) => ({
 // ${example.description}
 //
 // Knowledge graph "${kgName}" is ready with data and rules loaded.
-// Follow the Learn panel on the right for a guided walkthrough.
 // Paste suggested queries here and press Cmd+Enter to run them.
 `
 

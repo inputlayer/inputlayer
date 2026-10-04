@@ -134,8 +134,8 @@ impl From<String> for ProgramError {
 
 /// Whether `stmt`, the only statement of its program, changes state in the
 /// intercepts of `run_execute_program` rather than in the program executor:
-/// ontology, user, key and access management, the agent, and (on a session)
-/// session state.
+/// ontology, user, key and access management, and (on a session) session
+/// state.
 fn intercepted_mutation(stmt: &statement::Statement, on_session: bool) -> bool {
     use statement::Statement;
     match stmt {
@@ -153,8 +153,6 @@ fn intercepted_mutation(stmt: &statement::Statement, on_session: bool) -> bool {
                 | MetaCommand::ApiKeyExpire { .. }
                 | MetaCommand::KgAclGrant { .. }
                 | MetaCommand::KgAclRevoke { .. }
-                | MetaCommand::AgentMessage(_)
-                | MetaCommand::AgentStart(_)
                 | MetaCommand::SessionClear
                 | MetaCommand::SessionDrop(_)
                 | MetaCommand::SessionDropName(_)
@@ -192,8 +190,6 @@ pub struct Handler {
     query_semaphore: Arc<tokio::sync::Semaphore>,
     /// Accumulated timing histogram buckets for Prometheus export.
     timing_histograms: Arc<crate::execution::timing::TimingHistograms>,
-    /// Teaching agent for guided onboarding.
-    agent: Arc<crate::agent::AgentManager>,
     /// Standing-query counters (evaluations, active subscriptions, views).
     subscription_metrics: Arc<super::subscription::SubscriptionMetrics>,
     /// The worker owning the shared standing-query views, started by the
@@ -890,9 +886,6 @@ impl Handler {
             notifications,
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
-            agent: Arc::new(crate::agent::AgentManager::new(
-                crate::agent::AgentConfig::default(),
-            )),
             subscription_metrics: Arc::default(),
             subscription_hub: std::sync::OnceLock::new(),
             login_throttle: Arc::default(),
@@ -932,9 +925,6 @@ impl Handler {
             notifications,
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
-            agent: Arc::new(crate::agent::AgentManager::new(
-                crate::agent::AgentConfig::default(),
-            )),
             subscription_metrics: Arc::default(),
             subscription_hub: std::sync::OnceLock::new(),
             login_throttle: Arc::default(),
@@ -2147,82 +2137,6 @@ impl Handler {
         index_commands::rebuild(&self.storage.read(), kg, name)
     }
 
-    /// Process an agent message asynchronously.
-    ///
-    /// Called from the WebSocket handler for `.agent` commands.
-    pub async fn agent_query(
-        &self,
-        session_id: &str,
-        command: &str,
-        kg_context: &str,
-    ) -> Result<crate::agent::AgentResponse, String> {
-        let trimmed = command.trim();
-
-        if trimmed == "examples" || trimmed.is_empty() {
-            // List examples
-            let examples = crate::agent::examples::all_examples();
-            let list = examples
-                .iter()
-                .map(|ex| format!("- **{}** ({}): {}", ex.name, ex.category, ex.description))
-                .collect::<Vec<_>>()
-                .join("\n");
-            return Ok(crate::agent::AgentResponse {
-                content: format!(
-                    "Available examples:\n\n{list}\n\nUse `.agent start <id>` to begin."
-                ),
-                suggested_query: None,
-                done: true,
-            });
-        }
-
-        if let Some(example_id) = trimmed.strip_prefix("start ") {
-            let example_id = example_id.trim();
-            let session_key = self
-                .agent
-                .get_or_create_session(session_id, example_id)
-                .await;
-            return self
-                .agent
-                .start_example(&session_key, example_id, kg_context)
-                .await;
-        }
-
-        // Advance to next step in scripted lesson
-        if trimmed == "next" {
-            let sessions = self.agent.sessions.read().await;
-            let session_key = sessions.keys().find(|k| k.starts_with(session_id)).cloned();
-            drop(sessions);
-            if let Some(key) = session_key {
-                return self.agent.next_step(&key).await;
-            }
-            return Ok(crate::agent::AgentResponse {
-                content: "No active lesson.".to_string(),
-                suggested_query: None,
-                done: true,
-            });
-        }
-
-        // Regular message - continue conversation (use Claude if available)
-        let sessions = self.agent.sessions.read().await;
-        let session_key = sessions.keys().find(|k| k.starts_with(session_id)).cloned();
-        drop(sessions);
-
-        let session_key = match session_key {
-            Some(k) => k,
-            None => {
-                return Ok(crate::agent::AgentResponse {
-                    content: "No active example. Start one with `.agent start <example_id>` or see available examples with `.agent examples`.".to_string(),
-                    suggested_query: None,
-                    done: true,
-                });
-            }
-        };
-
-        self.agent
-            .process_message(&session_key, trimmed, kg_context)
-            .await
-    }
-
     /// Execute an IQL program and return results.
     pub async fn query_program(
         &self,
@@ -2244,103 +2158,6 @@ impl Handler {
         statements: Option<Vec<statement::Statement>>,
         control: &Arc<RequestControl>,
     ) -> Result<QueryResult, ProgramError> {
-        // Intercept .agent commands - these need async context for Claude API calls
-        let trimmed = program.trim();
-        if trimmed.starts_with(".agent ") || trimmed == ".agent" {
-            let agent_cmd = trimmed.strip_prefix(".agent").unwrap_or("").trim();
-
-            // .agent setup <id> - return setup IQL for an example (for KG seeding)
-            if let Some(example_id) = agent_cmd.strip_prefix("setup ") {
-                let example_id = example_id.trim();
-                let setup = crate::agent::examples::get_example(example_id)
-                    .map(|ex| {
-                        ex.steps
-                            .iter()
-                            .map(|s| s.iql)
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    })
-                    .unwrap_or_default();
-                return Ok(QueryResult {
-                    rows: vec![WireTuple::new(vec![WireValue::String(setup)])],
-                    schema: vec![ColumnDef::string("setup")],
-                    total_count: 1,
-                    truncated: false,
-                    execution_time_ms: 0,
-                    metadata: None,
-                    switched_kg: None,
-                    proof_trees: None,
-                    timing_breakdown: None,
-                    errors: Vec::new(),
-                    statements: Vec::new(),
-                });
-            }
-
-            let session_id = "default"; // TODO: use actual WS session ID
-            let kg_name = knowledge_graph.as_deref().unwrap_or("default");
-            let kg_context = {
-                let storage = self.storage.read();
-                let mut ctx = format!("Knowledge graph: {kg_name}\n");
-
-                // Include relations with schemas and row counts
-                if let Ok(relations) = storage.list_relations_with_typed_metadata_in(kg_name) {
-                    if !relations.is_empty() {
-                        ctx.push_str("Relations:\n");
-                        let mut sorted = relations;
-                        sorted.sort_by(|a, b| a.0.cmp(&b.0));
-                        for (name, typed_cols, count) in &sorted {
-                            let cols = typed_cols
-                                .iter()
-                                .map(|(n, t)| format!("{n}: {t}"))
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            ctx.push_str(&format!("  {name}({cols}) - {count} tuples\n"));
-                        }
-                    }
-                }
-
-                // Include rule names
-                if let Ok(rules) = storage.list_rules_in(kg_name) {
-                    if !rules.is_empty() {
-                        ctx.push_str(&format!("Rules: {}\n", rules.join(", ")));
-                    }
-                }
-
-                ctx
-            };
-
-            let response = self.agent_query(session_id, agent_cmd, &kg_context).await?;
-
-            let mut rows = vec![WireTuple::new(vec![WireValue::String(
-                response.content.clone(),
-            )])];
-            if let Some(ref sq) = response.suggested_query {
-                rows.push(WireTuple::new(vec![WireValue::String(format!(
-                    "suggested_query:{sq}"
-                ))]));
-            }
-            if response.done {
-                rows.push(WireTuple::new(vec![WireValue::String(
-                    "done:true".to_string(),
-                )]));
-            }
-
-            let total_count = rows.len();
-            return Ok(QueryResult {
-                rows,
-                schema: vec![ColumnDef::string("agent_response")],
-                total_count,
-                truncated: false,
-                execution_time_ms: 0,
-                metadata: None,
-                switched_kg: None,
-                proof_trees: None,
-                timing_breakdown: None,
-                errors: Vec::new(),
-                statements: Vec::new(),
-            });
-        }
-
         self.run_job(
             self.make_query_job(),
             knowledge_graph,
@@ -3061,53 +2878,6 @@ impl QueryJob {
                                     // === Why Not (negative explanation) command ===
                                     MetaCommand::WhyNot(input) => {
                                         run_proof!(kg, Proof::WhyNot(input));
-                                    }
-
-                                    // === Agent commands ===
-                                    MetaCommand::AgentExamples => {
-                                        let examples = crate::agent::examples::all_examples();
-                                        let rows: Vec<WireTuple> = examples
-                                            .iter()
-                                            .map(|ex| {
-                                                WireTuple::new(vec![
-                                                    WireValue::String(ex.id.to_string()),
-                                                    WireValue::String(ex.name.to_string()),
-                                                    WireValue::String(ex.category.to_string()),
-                                                    WireValue::String(ex.description.to_string()),
-                                                    WireValue::String(ex.difficulty.to_string()),
-                                                ])
-                                            })
-                                            .collect();
-                                        let total_count = rows.len();
-                                        drop(storage);
-                                        return Ok(QueryResult {
-                                            rows,
-                                            schema: vec![
-                                                ColumnDef::string("id"),
-                                                ColumnDef::string("name"),
-                                                ColumnDef::string("category"),
-                                                ColumnDef::string("description"),
-                                                ColumnDef::string("difficulty"),
-                                            ],
-                                            total_count,
-                                            truncated: false,
-                                            execution_time_ms: start.elapsed().as_millis() as u64,
-                                            metadata: None,
-                                            switched_kg: None,
-                                            proof_trees: None,
-                                            timing_breakdown: None,
-                                            errors,
-                                            statements: Vec::new(),
-                                        });
-                                    }
-                                    MetaCommand::AgentStart(_)
-                                    | MetaCommand::AgentMessage(_)
-                                    | MetaCommand::AgentSetup(_) => {
-                                        // Agent commands are handled async via query_program
-                                        fail!(
-                                            ErrorCode::Unsupported,
-                                            "Agent commands require async context. Use the GUI chat panel.".to_string()
-                                        );
                                     }
 
                                     // === Index commands ===
