@@ -1,115 +1,211 @@
-# InputLayer
-
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-Elastic%202.0-blue.svg)](./LICENSE)
 
-**The live knowledge graph for AI agents.**
+*The live rules engine for AI agents*
 
-### Models think. InputLayer knows.
+# Take the rules out of your prompts.
 
-A fact changes. InputLayer derives what it means for your agent, without another prompt.
+**Your agents act on what's true now.** Declare your facts and rules once. InputLayer keeps every conclusion current as facts change, tells your agents what changed, and records an agent's action only while the rules allow it, so the tool runs only then.
 
-InputLayer applies your rules as facts change, updating what your agent should say or do, even while other work continues. Keep your models and framework; connect them to current results and evidence.
+A rules engine, made live: a conclusion is retracted when its facts stop supporting it, the exact change is pushed to every subscribed agent, and any row can be explained with a proof, on request. The model proposes; the rules decide.
 
-<sub>"Knows" means accepted facts plus rule-derived conclusions; source freshness and delivery still apply.</sub>
+**Replaces:** the trigger service and the crons that re-check data for changes (a check that waits on time keeps a one-line clock writer); the precomputed eligibility flags you cache and invalidate; the business rules you wrote into system prompts and tool handlers (and the eligibility logic that ended up in OPA policies); the "already handled" rows and `claimed_by` columns that keep two agents from doing the same work (TTL locks too, once `WorkQueue` leases ship in phase 3).<br>
+**Keeps:** your models and gateway, LangGraph, MCP tool servers, Zep, pgvector, Redis for plain lookups, your systems of record, Debezium/Kafka and webhooks (they feed InputLayer), OPA for who may call, NeMo for content safety, Temporal for durable effects (its workflow id becomes the claim key), LangSmith/OTel.
 
-Self-hosted, source-available under the Elastic License 2.0. Rust engine with Python and JS SDKs.
+**Where it sits.** Facts arrive from your CDC feed and webhooks through a small adapter you run ([recipe shipped](docs/content/docs/guides/ingestion.mdx) for Debezium Server and signed webhooks), with per-key revisions, so a late or replayed event never overwrites a newer one. InputLayer is not in your tool's call path: your agent claims the action in InputLayer, the claim is recorded only if the rules hold at that instant, and your handler or Temporal runs the tool only if the claim won, with the claim as its idempotency key. If a supporting fact changes afterwards, the need is retracted and the running work is cancelled; an effect that already landed is yours to compensate, as it is today. How stale is too stale is a rule too: guard the claim on a source health lease that your adapter renews, and a tool is refused once its source has gone quiet. It is one node today: facts are durable in its write-ahead log, a restart resumes from it and the adapter's revisions make a replayed feed safe, and while it is unreachable no claim can win, so gated tools wait rather than run unchecked.
 
-> Decision models judge. Language models think. InputLayer knows.
+> **The upcoming SDK.** `subscribe()` and `claim()` are phase 1 of the new Python and TypeScript SDK: in progress, not merged yet. The code below is the file that phase's CI will execute. [What runs today](#what-runs-today) is right after it.
 
----
-
-## Separate Knowing from Thinking
-
-Every turn, agents ask the model things the system already knows: is this order late, is this customer eligible, what else is affected. With InputLayer, facts and rules live outside the prompt, so the agent is not limited by the context window. Facts stream in, your rules derive the answers, and only the answers enter the prompt.
-
-- **Current, exact answers.** A fact changes and the affected conclusions update, including the ones that stop being true, with the facts and rules behind each.
-- **Not limited by the context window.** Facts and rules live outside the prompt; only the derived answers go in.
-- **A deterministic fast path.** A small intent model picks which known question was asked; the engine answers it exactly from live facts, with no generative model on that path. Open questions still go to the LLM.
-- **Fits the stack you have.** [LangGraph](https://inputlayer.ai/docs/guides/langgraph/) memory, state and checkpointer; [LangChain](https://inputlayer.ai/docs/guides/langchain/) tool and retriever; an OpenAI-compatible [fact-checking gateway](https://inputlayer.ai/docs/guides/verified-completions/); and change triggers your agent can wake on.
-
-```iql
-// rules, written once
-+late(O) <- shipment(O,S), eta(S,T), promised(O,P), T > P
-+can_offer(O,C) <- late(O), customer(O,C), eligible(C, "expedite")
+```python
+async def main() -> None:
+    url, key = os.environ.get("INPUTLAYER_URL", "ws://localhost:8080/ws"), os.environ["INPUTLAYER_API_KEY"]
+    async with InputLayer(url, api_key=key) as il:
+        kg = il.knowledge_graph("support"); running = {}
+        await kg.define(Shipment, Eta, Promised, ToolPolicy, KillSwitch, Attempt); await kg.define_rules(CheckNeeded)
+        async for change in kg.subscribe(CheckNeeded):     # the engine wakes the agent: replaces the trigger service and the re-check cron
+            for row in change.retracted:                   # first: a need vanished (back on time, killed, re-shipped): stop it and free it
+                if entry := running.pop(row.order, None):
+                    task, attempt = entry; task.cancel(); await kg.retract(attempt)
+            for row in change.inserted:                    # then: a need appeared: claim it once, then act
+                c = await kg.claim(Attempt(order=row.order, tool="carrier_check", attempt=uuid.uuid4().hex[:8]),
+                                   when=[CheckNeeded.any(order=row.order)], unless=Attempt.any(order=row.order, tool="carrier_check"))
+                if c.won: running[row.order] = (asyncio.create_task(carrier_check(row.shipment)), c.holder)   # the claim: replaces the "already handled" row
 ```
 
 ```python
-# agent: told what changed, no re-reading
-for change in kg.watch("?can_offer(O, C)"):
-    for row in change.added:   offer(row)
-    for row in change.removed: withdraw(row)
+import asyncio, os, uuid
+from inputlayer import InputLayer, Relation, Derived, From
+
+class Shipment(Relation):   order: str; shipment: str
+class Eta(Relation):        shipment: str; due: str
+class Promised(Relation):   order: str; due: str
+class ToolPolicy(Relation): tool: str; mode: str          # policy as facts, deployed with the rules, flipped by operators:
+class KillSwitch(Relation): tool: str                     #   replaces "only auto-check when..." prose in the prompt
+class Attempt(Relation):    order: str; tool: str; attempt: str
+
+class CheckNeeded(Derived):                                # the rule: replaces the precomputed needs_check flag and the cron that rebuilt it
+    order: str; shipment: str
+    rules = [From(Shipment, Eta, Promised, ToolPolicy)
+             .where(lambda s, e, p, t: (e.shipment == s.shipment) & (p.order == s.order) & (e.due > p.due)
+                                     & (t.tool == "carrier_check") & (t.mode == "auto") & ~KillSwitch.any(tool=t.tool))
+             .select(order=Shipment.order, shipment=Shipment.shipment)]
+
+async def carrier_check(shipment: str) -> None:            # the tool; a real one calls the carrier API with an idempotency key
+    await asyncio.sleep(3); print(f"checked {shipment}")
+
+asyncio.run(main())
 ```
 
-The SDK form shown is the upcoming release; standing queries run over the [WebSocket API](https://inputlayer.ai/docs/guides/websocket-api/) today.
+*No model in this loop, on purpose: it shows the gate. Where a model proposes an action and the same gate decides, see the [agent-loop guide](#the-agent-loop-with-a-model).*
 
-**Example.** "Where's order 4821, can it still make Friday?" A small intent model maps it to `ask_status(4821)`; the engine answers "due Thursday" from live facts and a template speaks it. The carrier update lands mid-sentence: the old answer is withdrawn and the agent says "Correction: Friday". Only open questions go to the LLM.
-
-**Why now.** Your data stack went live years ago: nightly ETL became change data capture, cron jobs became event-driven services, full refreshes became incremental views. Your agents are the last batch jobs left.
+<sub>Self-hosted, single node. Measured today for tens of concurrent agent sessions per knowledge graph; a change that lifts this is in progress (draft): https://github.com/inputlayer/inputlayer/pull/232. Python and TypeScript SDKs; subscriptions and claims ship with the next release, standing queries run over WebSocket today. A knowledge graph here is the facts and rule-derived conclusions of one domain, not a memory store. Source-available under the Elastic License 2.0.</sub>
 
 ---
 
-## Quick Example
+## What runs today
 
-Connecting flights - define direct routes as facts, let InputLayer derive all reachable destinations:
+The same rule and the same world on today's Python SDK, installed [from source](#sdks). The rule, the writes and the derivation run now; what the SDK does not have yet is the push (`subscribe()`) and the claim, so the agent's view is read with `query()` here and watched over the WebSocket API below.
+
+```python
+import asyncio, os
+from inputlayer import InputLayer, Relation, Derived, From
+
+class Shipment(Relation):   order: str; shipment: str
+class Eta(Relation):        shipment: str; due: str
+class Promised(Relation):   order: str; due: str
+class ToolPolicy(Relation): tool: str; mode: str
+class KillSwitch(Relation): tool: str
+
+class CheckNeeded(Derived):            # the rule: late, policy says auto, no kill switch
+    order: str; shipment: str
+    rules = [From(Shipment, Eta, Promised, ToolPolicy)
+             .where(lambda s, e, p, t: (e.shipment == s.shipment) & (p.order == s.order) & (e.due > p.due)
+                                     & (t.tool == "carrier_check") & (t.mode == "auto") & ~t.tool.in_(KillSwitch.tool))
+             .select(order=Shipment.order, shipment=Shipment.shipment)]
+
+async def main() -> None:
+    url = os.environ.get("INPUTLAYER_URL", "ws://localhost:8080/ws")
+    async with InputLayer(url, username="admin", password=os.environ["INPUTLAYER_ADMIN_PASSWORD"]) as il:
+        kg = il.knowledge_graph("support")
+        await kg.define(Shipment, Eta, Promised, ToolPolicy, KillSwitch)
+        await kg.define_rules(CheckNeeded)
+        await kg.insert([Shipment(order="ORD-4821", shipment="S-77")])
+        await kg.insert([Promised(order="ORD-4821", due="2026-10-08")])
+        await kg.insert([ToolPolicy(tool="carrier_check", mode="auto")])
+        await kg.insert([Eta(shipment="S-77", due="2026-10-10")])      # late
+        print("late:", [(r.order, r.shipment) for r in await kg.query(CheckNeeded)])
+        await kg.insert([KillSwitch(tool="carrier_check")])           # kill switch: the need is retracted
+        print("killed:", list(await kg.query(CheckNeeded)))
+        await kg.delete(KillSwitch(tool="carrier_check"))
+        print("restored:", [(r.order, r.shipment) for r in await kg.query(CheckNeeded)])
+
+asyncio.run(main())
+```
+
+```
+late: [('ORD-4821', 'S-77')]
+killed: []
+restored: [('ORD-4821', 'S-77')]
+```
+
+An agent subscribed over the [WebSocket API](https://inputlayer.ai/docs/guides/websocket-api/) gets the snapshot and then each change as a `subscription_delta` frame, including the row that stopped being true:
 
 ```iql
-// Facts: direct flight routes
-+direct_flight[("New York", "London"), ("London", "Paris"), ("Paris", "Tokyo"), ("Tokyo", "Sydney")]
-
-// Rules: you can reach a destination directly, or through connections
-+can_reach(A, B) <- direct_flight(A, B)
-+can_reach(A, C) <- direct_flight(A, B), can_reach(B, C)
-
-// Query: where can you fly from New York?
-?can_reach("New York", Dest)
+.subscribe needs ?check_needed(Order, Shipment)
+// snapshot: [["ORD-4821", "S-77"]]
++kill_switch("carrier_check")
+// subscription_delta  inserted: []                       retracted: [["ORD-4821", "S-77"]]
+-kill_switch("carrier_check")
+// subscription_delta  inserted: [["ORD-4821", "S-77"]]   retracted: []
 ```
 
-```
-┌────────────┬──────────┐
-│ New York   │ Dest     │
-├────────────┼──────────┤
-│ "New York" │ "London" │
-│ "New York" │ "Paris"  │
-│ "New York" │ "Tokyo"  │
-│ "New York" │ "Sydney" │
-└────────────┴──────────┘
-4 rows
-```
+And `.why` returns the proof for the row the agent acted on (the engine's proof tree, abridged):
 
-Four facts, two rules, and the engine derived every reachable destination - including connections through intermediate cities.
+```iql
+.why ?check_needed("ORD-4821", S)
+// [rule] check_needed(Order, Shipment) <- shipment(Order, Shipment), eta(Shipment, Due), promised(Order, Due_1),
+//          tool_policy(Tool, Mode), !kill_switch(Tool), Due > Due_1, Tool = "carrier_check", Mode = "auto"
+//   [base] shipment("ORD-4821", "S-77")
+//   [base] eta("S-77", "2026-10-10")
+//   [base] promised("ORD-4821", "2026-10-08")
+//   [base] tool_policy("carrier_check", "auto")
+//   [negation] no kill_switch("carrier_check")
+```
 
 ---
 
-## What Makes It Different
+## What it does
 
-### Rules + vector search in one query
+1. **Told what changed, including what stopped being true.** When a fact changes, the conclusions that stop holding are retracted and the new ones pushed to every subscribed agent as exact deltas, with a proof on request. This replaces the trigger service, the re-check crons and the flags you invalidate by hand.
+2. **No duplicate starts, no action the rules do not support when it commits.** One agent's claim per need, checked at commit against the live policy view; twenty connections racing one claim gave one winner and no errors. The effect runs outside the engine with the claim key as its idempotency key. In the reference architecture a model's output never authorizes an action by itself. This replaces the policy in your prompts and handlers and the "already handled" rows.
+3. **Cancellation derived from state, not left to the model.** The need leaves the view when the facts or the policy stop supporting it, and the same loop that started the work cancels it.
+4. **Scope, then sharing.** Measured today for tens of concurrent sessions per tenant knowledge graph with per-session subscriptions; many agents asking the same question share one evaluation (64-subscriber fan-out p99 13.8 ms); per-session questions fan out from one subscription per process until the engine-side change lands.
 
-A shopper asks for printer ink. In embedding space, every ink cartridge looks the same. But only specific models fit their printer - that's a structured fact, not a similarity score. InputLayer evaluates compatibility rules and ranks by cosine distance in a single query.
+Rules, transactions, standing queries and proofs live in one engine, with one transaction boundary; the comparable stack takes several systems.
 
-### Correct conclusion retraction
+## How it recovers
 
-An entity is cleared from a sanctions list. Every flag derived through it retracts - but only if no second ownership path still supports it. InputLayer tracks every derivation path independently and only retracts when all paths are gone.
+- **Durable.** Writes go to a write-ahead log; on restart the engine reloads its batch files and replays the log's committed transactions ([persistence](https://inputlayer.ai/docs/guides/persistence/)). Back it up like any database ([backup](docs/content/docs/guides/backup.mdx)).
+- **Single writer.** One engine per data directory, one replica; never scale it out ([deployment](https://inputlayer.ai/docs/guides/deployment/)). There is no high availability today.
+- **Replays are safe.** The ingestion adapter stores the last applied revision per key in the same transaction as the data, so a replayed or late event is skipped and a replayed insert cannot resurrect a retracted fact ([ingestion](docs/content/docs/guides/ingestion.mdx)).
+- **Unreachable means wait.** While the engine is down no claim can win, so a tool gated by a claim waits instead of running unchecked. A subscriber that reconnects gets a fresh snapshot and continues from the exact current answer.
 
-### Incremental updates
+## Where it sits beside models
 
-One fact changes in a 2,000-node graph with 400,000 derived relationships. InputLayer updates only the affected derivations in **6.83ms**. Full recompute: 11.3 seconds. **1,652x faster.**
+> Decision models judge. Language models think. InputLayer knows.
 
-### Provenance
+"Knows" means accepted facts plus rule-derived conclusions; source freshness and delivery still apply.
 
-Run `.why` on any result and get a structured proof tree showing which facts and which rules produced it. Run `.why_not` to see exactly which condition blocked a derivation.
+## What you delete
 
-```iql
-.why ?can_reach("New York", "Sydney")
-// [rule] can_reach (clause 1): can_reach(A, C) <- direct_flight(A, B), can_reach(B, C)
-//   [base] direct_flight("New York", "London")
-//   [rule] can_reach (clause 1): ...
-//     [base] direct_flight("London", "Paris")
-//     [rule] can_reach (clause 1): ...
-//       [base] direct_flight("Paris", "Tokyo")
-//       [rule] can_reach (clause 0): can_reach(A, B) <- direct_flight(A, B)
-//         [base] direct_flight("Tokyo", "Sydney")
+- **The trigger service and the re-check cron.** Before: a service maps change events to agents, and a cron recomputes "is anything late, eligible, pending" every few minutes. After: the agent subscribes to the view; an unchanged answer pushes nothing. The CDC feed stays and writes facts. Boundary: views do not read the clock, so a check that waits on time (an SLA that expires at 48 hours) keeps a one-line clock writer whose fact the rule reads.
+- **The precomputed flags and their invalidation.** Before: a `needs_check` flag in Redis or a column, plus a handler per upstream event to delete it. After: a rule. A conclusion is retracted only when every path that supported it is gone; nothing to invalidate two hops away.
+- **The policy in your prompts and tool handlers.** Before: "only auto-check when the customer allows it" in the system prompt and `if not eligible: raise` in the handler. After: policy as facts and rules, enforced where the action is recorded: the claim commits only while the policy holds. OPA still decides who may call; eligibility logic that lives in Rego only because OPA was the only policy box is a candidate to move.
+- **The "already handled" rows.** Before: a `claimed_by` column or a "processed" row checked by hand. After: `claim()` returns who won, checked at commit against the live view. Temporal keeps the durable effect, keyed by the claim. Phase-1 claims do not expire; leases for crashed holders come with `WorkQueue` in phase 3.
+
+## Before and after
+
+The "before" is the stack a good team ships today: an agent framework, Postgres with pgvector, deterministic tool guardrails before each call, tracing, and webhooks and CDC or a reactive database for change.
+
+| Concern | Best-practice stack today | With InputLayer in the loop |
+|---|---|---|
+| Where "is this order late?" is decided | A SQL view or a server function decides it once, too; what differs is liveness: the agent re-queries or re-runs it each turn | In the engine, as a rule the engine keeps current; the answer is a row the agent is pushed when it changes |
+| How the agent learns a fact changed | With Postgres plus webhooks: an event names a table row and the agent re-queries and re-reasons; with a reactive database: the query re-runs and the new result is pushed | A delta names the derived rows that entered and left the conclusion, so the agent knows which of its own actions the change invalidates |
+| What happens when a fact is corrected | Materialize emits retractions and Convex re-pushes the result, so the data layer knows; nothing connects the retraction to what the agent already did | The retraction withdraws the agent's own derived work: the need disappears and the running tool is cancelled |
+| N agents watching one question (Postgres plus webhooks or CDC) | N queries per change, or a cache the team builds and invalidates | One evaluation shared across subscribers of the same question; per-session questions fan out from one subscription per process, scope as stated above |
+| Reconnect, missed event (Postgres plus webhooks or CDC) | Replay from an event log if there is one; otherwise a full re-read and a duplicate-suppression layer | Snapshot, deltas, and a fresh snapshot on reconnect; the same loop |
+| "May this tool run?" | Deterministic guardrails before the call (tool guardrails, LangGraph interrupts, Cedar, OPA): per-call policy over the request | Policy over live derived state (tool policy, kill switch, source health, consent), checked at commit by the claim, with cancellation derived when it changes mid-run |
+| Why did the agent do that? | Traces of prompts and spans, plus policy decision logs | A proof over facts and rules for the derived row the agent acted on (`.why`), beside the traces |
+| What goes | | The trigger service and re-check crons, the precomputed flags and their invalidation, the policy in prompts and handlers, the "already handled" rows |
+| What stays | the framework, the model, the vector store, Postgres as system of record, the tracing | all of it; InputLayer holds the live conclusions the agent acts on |
+
+## The agent loop with a model
+
+*Upcoming, phase 3 of the new SDK: `watch_context()`, `actions.schema()` and `act()` are designed, not built.* The model reads a compact window rendered from the derived views, proposes actions against a schema generated at that revision, and every proposal goes through the same gate as the hero's claim. A refusal comes back as data with the failing condition, for the next turn.
+
+```python
+async def agent_loop(kg, sid, model):
+    async for ctx in kg.watch_context(session=sid, include=[Claim, ToolReady, Work, Speech], budget=1500):
+        if not ctx.verified:                        # connection lost or resubscribing: do nothing on a stale view
+            continue
+        if not ctx.changes:                         # nothing new since the last turn
+            continue
+        decision = await model.decide(ctx.render(), tools=kg.actions.schema(session=sid, at=ctx.revision))
+        for action in kg.actions.parse(decision):
+            out = await kg.act(action, session=sid)
+            if out.refused:
+                ctx.note(out)                       # "refund refused: source billing stale" lands in the next window
+        # consequences arrive as the next ctx: the deltas the actions and the world produced
 ```
+
+## Proof points
+
+Lab measurements on a shared 32-vCPU host, not a benchmark rig:
+
+- **Writer to delta:** 2 to 7 ms p50 for one shared question at 64 subscribers; about 25 ms p50 per session with the full reference rule pack at ten sessions.
+- **Shared questions:** 64-subscriber fan-out, p99 13.8 ms.
+- **The race:** twenty connections racing one guarded insert: one winner, nineteen no-ops, no errors.
+- **Recursive queries** (a recursive-query result, not an agent-latency figure): after inserting 100 edges into a 2,000-node graph with transitive-closure rules, the bound query `?reach(1, Y)` answers in **6.83 ms** against **11.3 s** for a full recompute, **1,652x** ([BENCHMARKS.md](BENCHMARKS.md)).
 
 ---
 
@@ -130,22 +226,6 @@ Open [http://localhost:8080](http://localhost:8080) for the interactive GUI, or 
 
 See the [Quick Start Guide](https://inputlayer.ai/docs/guides/quickstart/) to load a sample and watch conclusions change as facts do.
 
----
-
-## Ontologies, Ready to Go
-
-InputLayer ships ready-made ontologies for common use cases in the [ontology registry](https://github.com/inputlayer/ontology-registry) — rule packs you install into a running engine with one command, Helm-style. The first is **`consistency-core` (Verified Completions)**: logical-consistency verification for AI conversations — contradictions, timeline cycles, identity mix-ups, and policy violations, every finding backed by verbatim quoted spans and a proof tree, validated against a 1,628-scenario adversarial corpus.
-
-```bash
-il search                                      # browse the registry
-il install consistency-core --kg mychat --create   # sha256-verified, one atomic deploy
-il list --kg mychat                            # what's installed, pinned by version+digest
-```
-
-The `il` CLI builds with the engine (`cargo build --bin il`) and talks to the server over the same WebSocket API as every other client. It also carries schema migrations - `il migration generate / apply / revert / status` - with language-neutral JSON migration files (see the [migrations guide](https://inputlayer.ai/docs/guides/migrations/)). The design keeps one hard rule: the LLM only ever writes *data* — the rules are human-written, reviewed in the registry, and frozen at load. See `docs/internals/verified-completions/` for the rule pack's design, benchmark corpus, and extraction contract.
-
----
-
 ## SDKs
 
 The SDKs are not on PyPI or npm yet; install them from a source checkout of this repository.
@@ -157,14 +237,6 @@ pip install ./inputlayer/packages/inputlayer-py
 # extras: pip install "./inputlayer/packages/inputlayer-py[pandas,langchain,langgraph]"
 ```
 
-```python
-from inputlayer import InputLayer
-
-async with InputLayer() as il:
-    kg = il.knowledge_graph("default")
-    result = await kg.query(CanReach)
-```
-
 **TypeScript** (Node.js 18+):
 ```bash
 # build and pack the SDK from the checkout
@@ -173,15 +245,67 @@ async with InputLayer() as il:
 npm install inputlayer@file:/path/to/inputlayer/packages/inputlayer-js/inputlayer-js-dev-0.1.1.tgz
 ```
 
-See [Python SDK docs](https://inputlayer.ai/docs/guides/python-sdk/) and [TypeScript SDK docs](https://inputlayer.ai/docs/guides/js-sdk/).
+See the [Python SDK](packages/inputlayer-py/README.md) and [TypeScript SDK](packages/inputlayer-js/README.md) READMEs and the [Python](https://inputlayer.ai/docs/guides/python-sdk/) and [TypeScript](https://inputlayer.ai/docs/guides/js-sdk/) guides. Both fit the stack you have: [LangGraph](https://inputlayer.ai/docs/guides/langgraph/) memory, state and checkpointer; [LangChain](https://inputlayer.ai/docs/guides/langchain/) tool and retriever; and an OpenAI-compatible [fact-checking gateway](https://inputlayer.ai/docs/guides/verified-completions/).
 
----
+## Under the hood: IQL
 
-## Flagship Guide
+The SDKs compile to IQL, InputLayer's rule language; you can also write it directly. Connecting flights: direct routes as facts, reachable destinations derived:
 
-**[How to build a voice agent that knows](https://inputlayer.ai/blog/building-a-voice-agent-that-knows/)** - a voice pipeline with InputLayer at its heart: facts and rules in a live knowledge graph, known questions answered without a model, and an agent that corrects itself mid-sentence when the world changes.
+```iql
+// Facts: direct flight routes
++direct_flight[("New York", "London"), ("London", "Paris"), ("Paris", "Tokyo"), ("Tokyo", "Sydney")]
 
-Keep your LLM, your vector store for documents and your systems of record; InputLayer is the live knowledge graph between your data and your agent's decisions.
+// Rules: you can reach a destination directly, or through connections
++can_reach(A, B) <- direct_flight(A, B)
++can_reach(A, C) <- direct_flight(A, B), can_reach(B, C)
+
+// Query: where can you fly from New York?
+?can_reach("New York", Dest)
+```
+
+```
+┌────────────┬──────────┐
+│ New York   │ Dest     │
+├────────────┼──────────┤
+│ "New York" │ "London" │
+│ "New York" │ "Paris"  │
+│ "New York" │ "Sydney" │
+│ "New York" │ "Tokyo"  │
+└────────────┴──────────┘
+4 rows
+```
+
+`.why` shows which facts and rules produced a row; `.why_not` shows which condition blocked one ([explainability](https://inputlayer.ai/docs/guides/explainability/)):
+
+```iql
+.why ?can_reach("New York", "Sydney")
+// [rule] can_reach(A, C) <- direct_flight(A, B), can_reach(B, C)
+//   [base] direct_flight("New York", "London")
+//   [rule] can_reach(A, C) <- direct_flight(A, B), can_reach(B, C)
+//     [base] direct_flight("London", "Paris")
+//     [rule] can_reach(A, C) <- direct_flight(A, B), can_reach(B, C)
+//       [base] direct_flight("Paris", "Tokyo")
+//       [rule] can_reach(A, B) <- direct_flight(A, B)
+//         [base] direct_flight("Tokyo", "Sydney")
+```
+
+The same engine evaluates rules and vector similarity in one query ([vectors](https://inputlayer.ai/docs/guides/vectors/)): "similar, and compatible with this printer" is a join, not a post-filter. Recursion, stratified negation and aggregation are in the rule language ([recursion](https://inputlayer.ai/docs/guides/recursion/)).
+
+## Ontologies, ready to go
+
+InputLayer ships ready-made rule packs in the [ontology registry](https://github.com/inputlayer/ontology-registry), installed into a running engine with one command. The first is **`consistency-core` (Verified Completions)**: logical-consistency checks for AI conversations (contradictions, timeline cycles, identity mix-ups and policy violations), every finding backed by verbatim quoted spans and a proof tree, validated against a 1,628-scenario adversarial corpus.
+
+```bash
+il search                                      # browse the registry
+il install consistency-core --kg mychat --create   # sha256-verified, one atomic deploy
+il list --kg mychat                            # what's installed, pinned by version+digest
+```
+
+The `il` CLI builds with the engine (`cargo build --bin il`) and talks to the server over the same WebSocket API as every other client. It also carries schema migrations (`il migration generate / apply / revert / status`) with language-neutral JSON migration files (see the [migrations guide](https://inputlayer.ai/docs/guides/migrations/)). The rule pack's rules are human-written, reviewed in the registry and frozen at load; the LLM only ever writes data. See `docs/internals/verified-completions/` for the pack's design, benchmark corpus and extraction contract.
+
+## Who it is for
+
+InputLayer fits when your agent works over structured facts that change, when its decisions chain through several conditions, when acting on a stale answer costs something, and when the agent lives long enough for the world to change under it. It is not for document chat or one-shot Q&A, it is not a vector database replacement, and it is not a hosted platform.
 
 ---
 
@@ -193,12 +317,14 @@ Keep your LLM, your vector store for documents and your systems of record; Input
 
 - [Quick Start](https://inputlayer.ai/docs/guides/quickstart/)
 - [Core Concepts](https://inputlayer.ai/docs/guides/core-concepts/)
+- [WebSocket API and standing queries](https://inputlayer.ai/docs/guides/websocket-api/)
+- [Ingestion: Postgres CDC and webhooks](docs/content/docs/guides/ingestion.mdx)
 - [Explainability (.why / .why_not)](https://inputlayer.ai/docs/guides/explainability/)
+- [Persistence](https://inputlayer.ai/docs/guides/persistence/) and [Deployment](https://inputlayer.ai/docs/guides/deployment/)
 - [Vector Search](https://inputlayer.ai/docs/guides/vectors/)
 - [Recursion](https://inputlayer.ai/docs/guides/recursion/)
 - [Python SDK](https://inputlayer.ai/docs/guides/python-sdk/)
 - [TypeScript SDK](https://inputlayer.ai/docs/guides/js-sdk/)
-- [WebSocket API Docs](https://inputlayer.ai/docs/guides/configuration/)
 
 ## Contributing
 

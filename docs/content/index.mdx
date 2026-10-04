@@ -4,9 +4,11 @@ title: InputLayer Documentation
 
 # InputLayer
 
-**The live knowledge graph for AI agents.** Models think. InputLayer knows.
+*The live rules engine for AI agents.* Take the rules out of your prompts.
 
-A fact changes. InputLayer derives what it means for your agent, without another prompt. You write facts as they change and declare the reasoning as rules - compatibility, ownership, access policies - and the engine derives what follows. Facts and rules live outside the prompt, so your agent is not limited by the context window: when a fact changes, only the affected conclusions are recomputed, a conclusion that stops being true is withdrawn, and every result traces back to the rules and facts that produced it.
+**Your agents act on what's true now.** You write facts as they change and declare the reasoning as rules - compatibility, ownership, access policies - and the engine derives what follows. Facts and rules live outside the prompt, so your agent is not limited by the context window: when a fact changes, only the affected conclusions are recomputed, a conclusion that stops being true is withdrawn, and every result traces back to the rules and facts that produced it. A knowledge graph is what the engine holds: the facts and rule-derived conclusions of one domain.
+
+For what InputLayer replaces in an agent stack, what it keeps and where it sits, see the [project README](https://github.com/inputlayer/inputlayer#readme).
 
 These docs cover the mechanism: facts, rules, queries, and the [standing queries](/docs/guides/websocket-api) (subscriptions) that push changes to your agent.
 
