@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from inputlayer.compiler import compile_bulk_insert, compile_insert, compile_rule
+from inputlayer.compiler import compile_insert, compile_rule
 from inputlayer.relation import Relation
 
 if TYPE_CHECKING:
@@ -23,14 +23,14 @@ class Session:
         self._conn = connection
 
     async def insert(self, facts: Relation | list[Relation]) -> None:
-        """Insert ephemeral session facts (no + prefix)."""
-        if isinstance(facts, list):
-            if not facts:
-                return
-            iql = compile_bulk_insert(type(facts[0]), facts, persistent=False)
-        else:
-            iql = compile_insert(facts, persistent=False)
-        await self._conn.execute(iql)
+        """Insert ephemeral session facts (no + prefix), in one program.
+
+        The engine has no bulk form for session facts, so each fact is its
+        own statement.
+        """
+        batch = facts if isinstance(facts, list) else [facts]
+        if batch:
+            await self._conn.execute("\n".join(compile_insert(f, persistent=False) for f in batch))
 
     async def define_rules(self, *targets: type[Derived]) -> None:
         """Define session-scoped rules (no + prefix)."""

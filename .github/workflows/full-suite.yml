@@ -291,6 +291,51 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  python-sdk-live:
+    name: Python SDK query examples (live server)
+    needs: gate
+    if: ${{ !inputs.perf_gate_only }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: useblacksmith/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/release
+          key: ${{ runner.os }}-cargo-py-sdk-live-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-py-sdk-live-
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Run the Python SDK guide's query examples against a live server
+        run: make python-sdk-live
+
+      - name: Upload server log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inputlayer-py-sdk-live-server-log
+          path: /tmp/il_py_sdk_live_server.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   # Lint and unit-test the performance gate tool.
   perf-gate-tool:
     name: Performance gate tool

@@ -232,7 +232,7 @@ engineers = await kg.query(
 
 ### Selecting Specific Columns
 
-Instead of fetching full rows, you can select just the columns you need:
+Instead of fetching full rows, you can select just the columns you need. The result has exactly those columns, in that order, and like every query result it is a set: two employees with the same name and salary give one row.
 
 ```python
 result = await kg.query(
@@ -290,6 +290,8 @@ for row in result:
 
 ### Ordering and Pagination
 
+Ordering and pagination run in the engine, so a page is exact however large the result.
+
 ```python
 # Top 10 highest paid
 result = await kg.query(
@@ -323,8 +325,10 @@ result = await kg.query(
     join=[Employee],
 )
 for row in result:
-    print(f"{row.department}: {row.count} employees, avg ${row.avg}")
+    print(f"{row.department}: {row.count_id} employees, avg ${row.avg_salary}")
 ```
+
+Result columns are named after what you select: a column by its name (`row.department`), a computed column by its keyword, and an aggregate as `<function>_<column>` (`count_id`, `avg_salary`, `max_salary`; `count()` without a column is `count`). A repeated name gets a `_2` suffix. Pass an aggregate as a keyword to name it yourself: `kg.query(Employee.department, n=count(Employee.id), join=[Employee])`.
 
 For more specialized aggregation, `top_k` lets you find the top entries per group:
 
@@ -333,11 +337,14 @@ from inputlayer import top_k
 
 # Top 3 highest-paid employees per department
 result = await kg.query(
-    Employee.department, Employee.name, Employee.salary,
+    Employee.department,
+    top_k(3, Employee.name, order_by=Employee.salary, desc=True),
     join=[Employee],
-    top_k(3, Employee.department, order_by=Employee.salary, desc=True),
 )
+# columns: department, name, salary
 ```
+
+The columns you select beside `top_k` are the groups; the columns passed to `top_k` before `order_by` are kept for each of the top rows.
 
 ### Working with Results
 
@@ -368,7 +375,7 @@ df = result.to_df()           # pandas DataFrame (requires pandas)
 
 ### Query Plans
 
-To understand how a query will execute without running it, use `debug()`:
+To understand how a query will execute without running it, use `debug()`. It takes the same arguments as `query()`, and so does `why()`, which returns the query's rows with a proof tree for each:
 
 ```python
 plan = await kg.debug(
@@ -621,7 +628,7 @@ from inputlayer import functions as fn
 # Rows from the last hour
 result = await kg.query(
     SensorReading,
-    where=lambda r: fn.within_last(r.timestamp, fn.time_now(), 3600000),
+    where=lambda r: r.timestamp > fn.time_sub(fn.time_now(), 3600000),
 )
 
 # Time-decayed scoring
@@ -775,10 +782,6 @@ This is a large topic with its own dedicated guide. See [Migrations](migrations)
 ## Known Limitations
 
 A few rough edges to be aware of in the current pre-alpha SDK:
-
-- **Aggregates are session rules under the hood**. `kg.query(count(Employee.id))` works by registering a temporary session rule and querying it. The rule is best-effort dropped after the call, so if your process dies between rule registration and cleanup the rule lingers until the WebSocket session ends. This is invisible to application code but worth knowing if you read server logs.
-
-- **`order_by` and `offset` are applied client-side** for plain queries. IQL only supports ordering inside aggregate heads (`top_k`, `within_radius`, etc.), so the SDK sorts and slices the result rows in Python after they come back. This is fine for typical result sizes but is not appropriate for streaming over millions of rows.
 
 - **`kg.relations()` only sees relations after data exists**. The server's `.rel` listing surfaces a relation only after at least one row has been inserted; defining the schema is not enough. If you need a registry of declared schemas that's independent of data, track them in your application code.
 

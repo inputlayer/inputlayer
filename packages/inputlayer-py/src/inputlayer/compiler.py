@@ -6,6 +6,7 @@ taking Python objects and returning IQL strings.
 
 from __future__ import annotations
 
+import operator
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -30,6 +31,7 @@ from inputlayer._ast import (
     Column as AstColumn,
 )
 from inputlayer._naming import column_to_variable
+from inputlayer.exceptions import CompileError, InternalError
 from inputlayer.types import Timestamp, python_type_to_iql
 
 if TYPE_CHECKING:
@@ -126,6 +128,16 @@ class _VarEnv:
         self._map[root] = var
         return var
 
+    def fresh(self, base: str) -> str:
+        """A variable named *base* (suffixed on collision) bound to no column."""
+        used = set(self._map.values())
+        var = base
+        while var in used:
+            self._counter += 1
+            var = f"{base}_{self._counter}"
+        self._map[f"\0{var}"] = var
+        return var
+
     def lookup(self, col: AstColumn) -> str | None:
         """Look up existing variable for a column without creating one."""
         key = f"{col.ref_alias or col.relation}.{col.name}"
@@ -155,8 +167,12 @@ def compile_expr(expr: Expr, env: _VarEnv) -> str:
     raise TypeError(f"Cannot compile expression: {expr!r}")
 
 
-def _compile_agg_expr(agg: AggExpr, env: _VarEnv) -> str:
-    """Compile an aggregation expression to IQL syntax."""
+def _compile_agg_expr(agg: AggExpr, env: _VarEnv, *, count_var: str | None = None) -> str:
+    """Compile an aggregation expression to IQL syntax.
+
+    ``count()`` without a column counts *count_var*, a variable of the
+    body: the engine rejects ``count<>`` (fix-report item 5).
+    """
     func = agg.func
     parts: list[str] = []
 
@@ -175,6 +191,12 @@ def _compile_agg_expr(agg: AggExpr, env: _VarEnv) -> str:
         parts.append(f"{order_var}{suffix}")
     elif agg.column is not None:
         parts.append(compile_expr(agg.column, env))
+    elif count_var is not None:
+        parts.append(count_var)
+    else:
+        raise CompileError(
+            f"{agg.func}() needs a column here", hint=f"pass one, as in {agg.func}(Employee.id)"
+        )
 
     inner = ", ".join(parts)
     return f"{func}<{inner}>"
@@ -376,6 +398,95 @@ def compile_conditional_delete(
 
 
 # ── Query compilation ─────────────────────────────────────────────────
+#
+# One SDK call is one program (R-ONE). An IQL query has no head: the
+# engine returns every variable the query binds, in order of first
+# appearance (the atoms' variables, then the bindings'), and names the
+# columns after the first relation's schema or after the variables
+# depending on the width. The SDK therefore binds every column of every
+# atom to a variable, predicts that order, and picks the selected columns
+# out of the rows by position (R-QUERY); it never reads the engine's
+# column names.
+
+#: Program-local rule an aggregate or union query evaluates. A rule sent in
+#: the same program as its query lasts only for that request, so nothing is
+#: left in the session (R-AGG).
+QUERY_RULE = "il_q"
+#: Program-local rule holding the union of an OR split that QUERY_RULE aggregates.
+QUERY_SOURCE_RULE = "il_q_src"
+
+
+@dataclass(frozen=True)
+class QueryOutput:
+    """One result column: the label the caller sees and the variable carrying it."""
+
+    label: str
+    variable: str
+
+
+@dataclass(frozen=True)
+class QueryPlan:
+    """A compiled query: the one program to send and how to shape its reply.
+
+    ``columns`` are the variables the engine returns, by position. The
+    SDK applies ``skip`` (an offset without a limit, which the engine does
+    not paginate) and, when ``dedupe`` is set, removes repeated rows of a
+    projection: IQL is set-valued, and a projection of distinct tuples can
+    repeat.
+    """
+
+    program: str
+    columns: tuple[str, ...]
+    outputs: tuple[QueryOutput, ...]
+    #: The one statement ``.debug`` takes.
+    debug: str
+    #: The rule ``.why`` takes, and the variable of each of its result
+    #: columns by position. ``.why`` ignores ordering and pagination, so
+    #: the SDK applies ``order``, ``offset`` and ``limit`` to its rows.
+    why: str
+    why_columns: tuple[str, ...]
+    order: tuple[str, bool] | None
+    limit: int | None
+    offset: int | None
+    skip: int
+    dedupe: bool
+
+    @property
+    def labels(self) -> list[str]:
+        return [o.label for o in self.outputs]
+
+    def shape(self, rows: list[list[Any]]) -> list[list[Any]]:
+        """Pick the selected columns out of the engine's rows, by position."""
+        rows = rows[self.skip :] if self.skip else rows
+        if rows and len(rows[0]) != len(self.columns):
+            raise InternalError(
+                f"The engine returned {len(rows[0])} columns for a query binding "
+                f"{len(self.columns)} variables ({', '.join(self.columns)}): {self.program}"
+            )
+        idx = [self.columns.index(o.variable) for o in self.outputs]
+        if idx != list(range(len(self.columns))):
+            if len(idx) == 1:
+                rows = [[row[idx[0]]] for row in rows]
+            else:
+                pick = operator.itemgetter(*idx)
+                rows = [list(pick(row)) for row in rows]
+        if self.dedupe:
+            rows = _distinct(rows)
+        return rows
+
+    def shape_why(self, rows: list[list[Any]]) -> list[int]:
+        """Indexes of the ``.why`` rows the query returns, ordered and paginated."""
+        picked = list(range(len(rows)))
+        if self.order is not None:
+            order_var, descending = self.order
+            at = self.why_columns.index(order_var)
+            picked = _sorted_by(picked, lambda i: rows[i][at], descending=descending)
+        start = self.offset or 0
+        end = start + self.limit if self.limit is not None else None
+        return picked[start:end]
+
+    def project_why(self, row: list[Any]) -> list[Any]:
+        return [row[self.why_columns.index(o.variable)] for o in self.outputs]
 
 
 def compile_query(
@@ -387,112 +498,410 @@ def compile_query(
     limit: int | None = None,
     offset: int | None = None,
     computed: dict[str, Expr] | None = None,
-) -> str | list[str]:
-    """Compile a query to IQL.
+) -> str:
+    """Compile a query to the one IQL program the SDK sends for it."""
+    return compile_query_plan(
+        *select,
+        relations=relations,
+        on_condition=on_condition,
+        where_condition=where_condition,
+        order_by=order_by,
+        limit=limit,
+        offset=offset,
+        computed=computed,
+    ).program
 
-    Returns a single string, or a list of strings if OR conditions require splitting.
-    """
+
+@dataclass
+class _Shape:
+    """What every query form shares: the atoms and the conditions."""
+
+    env: _VarEnv
+    relations: list[tuple[str, type[Relation], str | None]]
+    atom_vars: list[list[str]]
+    atoms: list[str]
+    row_vars: list[str]
+    conditions: list[str]
+    branches: list[list[str]] | None
+    order: tuple[AstColumn, bool] | None
+    limit: int | None
+    offset: int | None
+
+    @property
+    def skip(self) -> int:
+        # The engine paginates only with a limit; an offset alone is the SDK's.
+        return (self.offset or 0) if self.limit is None else 0
+
+    def first_branch(self) -> list[str]:
+        return self.branches[0] if self.branches is not None else self.conditions
+
+
+def compile_query_plan(
+    *select: type[Relation] | Expr,
+    relations: list[type[Relation] | Any] | None = None,
+    on_condition: BoolExpr | None = None,
+    where_condition: BoolExpr | None = None,
+    order_by: Expr | None = None,
+    limit: int | None = None,
+    offset: int | None = None,
+    computed: dict[str, Expr] | None = None,
+) -> QueryPlan:
+    """Compile a query to the program to send and the shape of its result."""
     from inputlayer._proxy import RelationRef
     from inputlayer.relation import Relation
 
     env = _VarEnv()
-
-    # Determine which relations are involved
-    all_relations: list[tuple[str, type[Relation], str | None]] = []  # (name, cls, alias)
-
-    if relations:
-        for r in relations:
-            if isinstance(r, RelationRef):
-                all_relations.append((r.relation_name, r.relation_cls, r.alias))
-            elif isinstance(r, type) and issubclass(r, Relation):
-                all_relations.append((Relation._resolve_name(r), r, None))
-
-    # Process join conditions first to set up unification
-    if on_condition:
-        _process_join_condition(on_condition, env)
-
-    # Process where conditions
-    where_parts: list[str] = []
-    or_branches: list[list[str]] | None = None
-    if where_condition:
-        if _has_or(where_condition):
-            or_branches = compile_or_branches(where_condition, env)
-        else:
-            where_parts = compile_bool_expr(where_condition, env)
-            where_parts = [p for p in where_parts if p]
-
-    # Build the head (select) and body
-    has_agg = any(isinstance(s, AggExpr) for s in select)
-    computed = computed or {}
-    has_computed_agg = any(isinstance(v, AggExpr) for v in computed.values())
-
-    if has_agg or has_computed_agg:
-        return _compile_agg_query(
-            select, env, all_relations, where_parts, or_branches,
-            order_by, limit, offset, computed,
+    rels: list[tuple[str, type[Relation], str | None]] = []
+    for r in relations or []:
+        if isinstance(r, RelationRef):
+            rels.append((r.relation_name, r.relation_cls, r.alias))
+        elif isinstance(r, type) and issubclass(r, Relation):
+            rels.append((Relation._resolve_name(r), r, None))
+    # Selecting a whole relation joins it.
+    for s in select:
+        if isinstance(s, type) and issubclass(s, Relation):
+            name = Relation._resolve_name(s)
+            if not any(rn == name and alias is None for rn, _, alias in rels):
+                rels.append((name, s, None))
+    if not rels:
+        raise CompileError(
+            "A query needs at least one relation",
+            hint="select a relation or pass it in join=",
         )
 
-    # Simple query (no aggregations)
-    body_atoms: list[str] = []
+    # Join conditions first, so unified columns share a variable; their
+    # other comparisons (a.id != b.id) filter like a where condition.
+    on_parts: list[str] = []
+    if on_condition is not None:
+        if _has_or(on_condition):
+            raise CompileError("OR is not supported in a join condition", hint="put it in where=")
+        _process_join_condition(on_condition, env)
+        on_parts = [p for p in compile_bool_expr(on_condition, env) if p]
 
-    # NOTE: order_by is intentionally not compiled into the query body.
-    # IQL only supports ordering inside aggregate heads (top_k, etc.),
-    # so for plain queries the SDK applies ``order_by`` client-side
-    # in ``KnowledgeGraph.query`` after the rows come back. The
-    # ``order_by`` parameter is preserved purely so the call site can
-    # apply it.
-    _ = order_by  # consumed by the caller, not the compiler
-
-    # Build body atoms for each relation. We always project the full
-    # relation - the engine returns schema column names for plain
-    # projections and variable names when computed expressions are
-    # present, and there is no separate "head" projection in IQL.
-    for rn, cls, alias in all_relations:
-        cols = Relation._get_columns(cls)
-        atom_parts = []
-        for col in cols:
-            ast_col = AstColumn(rn, col, alias)
-            var = env.lookup(ast_col)
-            if var is not None:
-                atom_parts.append(var)
-            else:
-                # Materialize a fresh variable so the column is bound
-                # and can appear in subsequent body filters / computeds.
-                atom_parts.append(env.get_var(ast_col))
-        body_atoms.append(f"{rn}({', '.join(atom_parts)})")
-
-    # Computed columns become body bindings: Var = expr
-    computed_body: list[str] = []
-    for alias_name, expr in computed.items():
-        compiled = compile_expr(expr, env)
-        var_name = column_to_variable(alias_name)
-        computed_body.append(f"{var_name} = {compiled}")
-
-    # Combine body
-    all_body = body_atoms + computed_body + where_parts
-    if limit is not None:
-        if offset is not None:
-            all_body.append(f"limit({limit}, {offset})")
+    where_parts: list[str] = []
+    branches: list[list[str]] | None = None
+    if where_condition is not None:
+        if _has_or(where_condition):
+            branches = [
+                on_parts + [p for p in branch if p]
+                for branch in compile_or_branches(where_condition, env)
+            ]
         else:
-            all_body.append(f"limit({limit})")
+            where_parts = [p for p in compile_bool_expr(where_condition, env) if p]
 
-    if or_branches is not None:
-        # Multiple queries for OR
-        queries = []
-        for branch_parts in or_branches:
-            branch_parts = [p for p in branch_parts if p]
-            branch_body = body_atoms + computed_body + branch_parts
-            if limit is not None:
-                if offset is not None:
-                    branch_body.append(f"limit({limit}, {offset})")
-                else:
-                    branch_body.append(f"limit({limit})")
-            queries.append(f"?{', '.join(branch_body)}")
-        return queries
+    computed = computed or {}
+    is_agg = any(isinstance(s, AggExpr) for s in select) or any(
+        isinstance(v, AggExpr) for v in computed.values()
+    )
 
-    if all_body:
-        return f"?{', '.join(all_body)}"
-    return "?"
+    order = _resolve_order(order_by)
+    if order is not None and not is_agg:
+        # The engine reads sort annotations on the first atom only (R-SORT);
+        # the ordered relation moves first, which leaves the answer unchanged.
+        col = order[0]
+        for i, (rn, _, alias) in enumerate(rels):
+            if rn == col.relation and alias == col.ref_alias:
+                rels.insert(0, rels.pop(i))
+                break
+
+    # Every column of every atom gets a variable, so the engine's rows
+    # always line up with the atoms.
+    atom_vars = [
+        [env.get_var(AstColumn(rn, col, alias)) for col in Relation._get_columns(cls)]
+        for rn, cls, alias in rels
+    ]
+    shape = _Shape(
+        env=env,
+        relations=rels,
+        atom_vars=atom_vars,
+        atoms=[f"{rn}({', '.join(vs)})" for (rn, _, _), vs in zip(rels, atom_vars, strict=True)],
+        row_vars=_unique(v for vs in atom_vars for v in vs),
+        conditions=on_parts + where_parts,
+        branches=branches,
+        order=order,
+        limit=limit,
+        offset=offset,
+    )
+    if is_agg:
+        return _compile_agg_plan(shape, select, computed)
+    return _compile_plain_plan(shape, select, computed)
+
+
+def _compile_plain_plan(
+    shape: _Shape, select: tuple[Any, ...], computed: dict[str, Expr]
+) -> QueryPlan:
+    from inputlayer.relation import Relation
+
+    env = shape.env
+    outputs: list[QueryOutput] = []
+    bindings: list[str] = []
+    bound_vars: list[str] = []
+
+    def bind(label: str, expr: Expr) -> None:
+        var = env.fresh(column_to_variable(label))
+        bindings.append(f"{var} = {compile_expr(expr, env)}")
+        bound_vars.append(var)
+        outputs.append(QueryOutput(label, var))
+
+    for s in select:
+        if isinstance(s, type) and issubclass(s, Relation):
+            rn = Relation._resolve_name(s)
+            for col in Relation._get_columns(s):
+                outputs.append(QueryOutput(col, env.get_var(AstColumn(rn, col))))
+        elif isinstance(s, AstColumn):
+            outputs.append(QueryOutput(s.name, env.get_var(s)))
+        else:
+            bind("expr", s)
+    for alias, expr in computed.items():
+        bind(alias, expr)
+
+    order_var: str | None = None
+    if shape.order is not None:
+        order_var = env.lookup(shape.order[0])
+        if order_var is None or order_var not in shape.atom_vars[0]:
+            raise CompileError(
+                f"order_by column {shape.order[0].name} is not in a joined relation",
+                hint="order by a column of a relation in join=",
+            )
+
+    outputs = _unique_labels(outputs)
+    out_vars = [o.variable for o in outputs]
+    # A projection that leaves out a column of some atom can repeat rows.
+    lossy = not set(shape.row_vars) <= set(out_vars)
+    all_vars = shape.row_vars + bound_vars
+    why_columns = _unique([*out_vars, *shape.row_vars])
+    why = (
+        f"{QUERY_RULE}({', '.join(why_columns)}) <- "
+        f"{', '.join([*shape.atoms, *bindings, *shape.first_branch()])}"
+    )
+    def plan(program: str, columns: list[str], debug: str) -> QueryPlan:
+        return QueryPlan(
+            program=program,
+            columns=tuple(columns),
+            outputs=tuple(outputs),
+            debug=debug,
+            why=why,
+            why_columns=tuple(why_columns),
+            order=(order_var, shape.order[1]) if order_var and shape.order else None,
+            limit=shape.limit,
+            offset=shape.offset,
+            skip=shape.skip,
+            dedupe=lossy,
+        )
+
+    def annotate(vars_: list[str]) -> list[str]:
+        if order_var is None or shape.order is None:
+            return list(vars_)
+        suffix = ":desc" if shape.order[1] else ":asc"
+        return [f"{v}{suffix}" if v == order_var else v for v in vars_]
+
+    paged = shape.limit is not None or shape.offset is not None
+    if shape.branches is None and not (lossy and paged):
+        # The plain form: one ``?`` query with the sort on its first atom.
+        first = f"{shape.relations[0][0]}({', '.join(annotate(shape.atom_vars[0]))})"
+        body = [first, *shape.atoms[1:], *bindings, *shape.conditions]
+        program = "?" + ", ".join(body + _limit_atom(shape.limit, shape.offset))
+        return plan(program, all_vars, program)
+
+    # An OR split, or a page of a projection: a program-local rule collects
+    # the rows (the union of the branches; the distinct projected rows), so
+    # the engine deduplicates, orders and paginates them in one program.
+    head = _unique([*out_vars, *([order_var] if order_var else [])]) if lossy else all_vars
+    head_text = f"{QUERY_RULE}({', '.join(head)})"
+    clauses = [
+        f"{head_text} <- {', '.join([*shape.atoms, *bindings, *branch])}"
+        for branch in (shape.branches if shape.branches is not None else [shape.conditions])
+    ]
+    query = f"?{QUERY_RULE}({', '.join(annotate(head))})"
+    program = "\n".join([*clauses, ", ".join([query, *_limit_atom(shape.limit, shape.offset)])])
+    debug = "?" + ", ".join([*shape.atoms, *bindings, *shape.first_branch()])
+    return plan(program, head, debug)
+
+
+def _compile_agg_plan(
+    shape: _Shape, select: tuple[Any, ...], computed: dict[str, Expr]
+) -> QueryPlan:
+    from inputlayer.relation import Relation
+
+    env = shape.env
+    # count() without a column counts the first variable of the first atom.
+    count_var = shape.atom_vars[0][0]
+    head: list[str] = []
+    # (label, the body variable the column carries, or None for an aggregate value)
+    outputs: list[tuple[str, str | None]] = []
+    bindings: list[str] = []
+    bound_vars: list[str] = []
+
+    def bind(label: str, expr: Expr) -> None:
+        var = env.fresh(column_to_variable(label))
+        bindings.append(f"{var} = {compile_expr(expr, env)}")
+        bound_vars.append(var)
+        head.append(var)
+        outputs.append((label, var))
+
+    def aggregate(agg: AggExpr, label: str | None) -> None:
+        head.append(_compile_agg_expr(agg, env, count_var=count_var))
+        cols = _agg_outputs(agg, env)
+        if label is not None and len(cols) == 1:
+            cols = [(label, cols[0][1])]
+        outputs.extend(cols)
+
+    for s in select:
+        if isinstance(s, type) and issubclass(s, Relation):
+            rn = Relation._resolve_name(s)
+            for col in Relation._get_columns(s):
+                var = env.get_var(AstColumn(rn, col))
+                head.append(var)
+                outputs.append((col, var))
+        elif isinstance(s, AggExpr):
+            aggregate(s, None)
+        elif isinstance(s, AstColumn):
+            var = env.get_var(s)
+            head.append(var)
+            outputs.append((s.name, var))
+        else:
+            bind("expr", s)
+    for alias, expr in computed.items():
+        if isinstance(expr, AggExpr):
+            aggregate(expr, alias)
+        else:
+            bind(alias, expr)
+
+    labelled = _unique_labels([QueryOutput(label, var or "") for label, var in outputs])
+    # Every position of the query atom is a fresh variable: a repeated one
+    # would join those columns as equal and drop groups (fix-report item 1).
+    query_vars = _unique_names([column_to_variable(o.label) for o in labelled])
+
+    query_args = list(query_vars)
+    order: tuple[str, bool] | None = None
+    if shape.order is not None:
+        order_col, descending = shape.order
+        order_var = env.lookup(order_col)
+        at = next((i for i, (_, var) in enumerate(outputs) if var and var == order_var), None)
+        if at is None:
+            raise CompileError(
+                "In an aggregate query, order_by must be a selected column "
+                f"({order_col.name} is not)",
+                hint="select the column, or order by a grouping column",
+            )
+        query_args[at] = f"{query_vars[at]}{':desc' if descending else ':asc'}"
+        order = (query_vars[at], descending)
+
+    head_text = f"{QUERY_RULE}({', '.join(head)})"
+    explain = f"{head_text} <- {', '.join([*shape.atoms, *bindings, *shape.first_branch()])}"
+    if shape.branches is None:
+        rules = [explain]
+    else:
+        # Aggregate over the union of the branches, collected first.
+        src = f"{QUERY_SOURCE_RULE}({', '.join([*shape.row_vars, *bound_vars])})"
+        rules = [
+            f"{src} <- {', '.join([*shape.atoms, *bindings, *branch])}"
+            for branch in shape.branches
+        ]
+        rules.append(f"{head_text} <- {src}")
+    query = ", ".join(
+        [f"?{QUERY_RULE}({', '.join(query_args)})", *_limit_atom(shape.limit, shape.offset)]
+    )
+    return QueryPlan(
+        program="\n".join([*rules, query]),
+        columns=tuple(query_vars),
+        outputs=tuple(
+            QueryOutput(o.label, v) for o, v in zip(labelled, query_vars, strict=True)
+        ),
+        debug=explain,
+        why=explain,
+        why_columns=tuple(query_vars),
+        order=order,
+        limit=shape.limit,
+        offset=shape.offset,
+        skip=shape.skip,
+        dedupe=False,
+    )
+
+
+def _agg_outputs(agg: AggExpr, env: _VarEnv) -> list[tuple[str, str | None]]:
+    """Result columns an aggregate contributes: (label, carried variable)."""
+
+    def column(expr: Expr) -> tuple[str, str | None]:
+        if isinstance(expr, AstColumn):
+            return expr.name, env.get_var(expr)
+        return "expr", None
+
+    if agg.order_column is not None:
+        # top_k, top_k_threshold, within_radius: the passthrough columns,
+        # then the ordered column.
+        return [column(p) for p in agg.passthrough] + [column(agg.order_column)]
+    if isinstance(agg.column, AstColumn):
+        return [(f"{agg.func}_{agg.column.name}", None)]
+    return [(agg.func, None)]
+
+
+def _resolve_order(order_by: Expr | None) -> tuple[AstColumn, bool] | None:
+
+    if order_by is None:
+        return None
+    if isinstance(order_by, OrderedColumn) and isinstance(order_by.column, AstColumn):
+        return order_by.column, order_by.descending
+    if isinstance(order_by, AstColumn):
+        return order_by, False
+    raise CompileError(
+        "order_by must be a column", hint="pass a column, optionally with .asc() or .desc()"
+    )
+
+
+def _limit_atom(limit: int | None, offset: int | None) -> list[str]:
+    if limit is None:
+        return []
+    return [f"limit({limit}, {offset})" if offset else f"limit({limit})"]
+
+
+def _unique(items: Any) -> list[str]:
+    return list(dict.fromkeys(items))
+
+
+def _unique_names(names: list[str]) -> list[str]:
+    """Suffix repeats with _2, _3, ... so every name is distinct."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for name in names:
+        candidate, n = name, 2
+        while candidate in seen:
+            candidate, n = f"{name}_{n}", n + 1
+        seen.add(candidate)
+        out.append(candidate)
+    return out
+
+
+def _unique_labels(outputs: list[QueryOutput]) -> list[QueryOutput]:
+    labels = _unique_names([o.label for o in outputs])
+    return [QueryOutput(label, o.variable) for label, o in zip(labels, outputs, strict=True)]
+
+
+def _distinct(rows: list[list[Any]]) -> list[list[Any]]:
+    """Rows without repeats, in first-seen order."""
+    seen: set[Any] = set()
+    out: list[list[Any]] = []
+    for row in rows:
+        try:
+            key: Any = tuple(row)
+            hash(key)
+        except TypeError:  # a vector value is a list
+            key = repr(row)
+        if key not in seen:
+            seen.add(key)
+            out.append(row)
+    return out
+
+
+def _sorted_by(items: list[int], key: Any, *, descending: bool) -> list[int]:
+    """Sort by engine value, nulls last in either direction."""
+    present = [i for i in items if key(i) is not None]
+    missing = [i for i in items if key(i) is None]
+    try:
+        present.sort(key=key, reverse=descending)
+    except TypeError:
+        present.sort(key=lambda i: repr(key(i)), reverse=descending)
+    return present + missing
 
 
 def _process_join_condition(condition: BoolExpr, env: _VarEnv) -> None:
@@ -521,122 +930,6 @@ def _has_or(expr: BoolExpr) -> bool:
     return False
 
 
-@dataclass(frozen=True)
-class AggCompiled:
-    """Compiled aggregate query that needs a temporary session rule.
-
-    IQL only permits aggregates inside rule heads, so the SDK registers a
-    short-lived rule and then queries it. ``setup`` contains the rule
-    definition (one statement) and ``query`` is the trailing ``?`` query.
-    The caller is expected to execute ``setup`` before ``query`` and may
-    optionally drop the rule afterwards.
-
-    ``head_columns`` lists the head variable names in the order they
-    appear in the rule head, which lets the caller present a stable
-    column projection regardless of how the engine names them.
-    """
-
-    setup: str
-    query: str
-    rule_name: str
-    head_columns: list[str]
-
-
-def _compile_agg_query(
-    select: tuple,
-    env: _VarEnv,
-    all_relations: list[tuple[str, type, str | None]],
-    where_parts: list[str],
-    or_branches: list[list[str]] | None,
-    order_by: Expr | None,
-    limit: int | None,
-    offset: int | None,
-    computed: dict[str, Expr],
-) -> AggCompiled:
-    """Compile a query with aggregation into a (rule, query) pair."""
-    import secrets
-
-    from inputlayer.relation import Relation
-
-    head_parts: list[str] = []
-    agg_parts: list[str] = []
-    head_column_names: list[str] = []
-
-    # Separate grouping keys from aggregations
-    for s in select:
-        if isinstance(s, AggExpr):
-            compiled = compile_expr(s, env)
-            agg_parts.append(compiled)
-            head_column_names.append(_agg_label(s))
-        elif isinstance(s, AstColumn):
-            var = env.get_var(s)
-            head_parts.append(var)
-            head_column_names.append(var)
-        elif isinstance(s, type) and issubclass(s, Relation):
-            rn = Relation._resolve_name(s)
-            cols = Relation._get_columns(s)
-            for col in cols:
-                ast_col = AstColumn(rn, col)
-                var = env.get_var(ast_col)
-                head_parts.append(var)
-                head_column_names.append(var)
-
-    for alias_name, expr in computed.items():
-        compiled = compile_expr(expr, env)
-        if isinstance(expr, AggExpr):
-            agg_parts.append(compiled)
-        else:
-            head_parts.append(compiled)
-        head_column_names.append(column_to_variable(alias_name))
-
-    # Build body
-    body_atoms: list[str] = []
-    for rn, cls, alias in all_relations:
-        cols = Relation._get_columns(cls)
-        atom_parts = []
-        for col in cols:
-            ast_col = AstColumn(rn, col, alias)
-            var = env.lookup(ast_col)
-            if var is not None:
-                atom_parts.append(var)
-            else:
-                atom_parts.append(env.get_var(ast_col))
-        body_atoms.append(f"{rn}({', '.join(atom_parts)})")
-
-    all_body = body_atoms + where_parts
-    if limit is not None:
-        if offset is not None:
-            all_body.append(f"limit({limit}, {offset})")
-        else:
-            all_body.append(f"limit({limit})")
-
-    all_head = head_parts + agg_parts
-    head_str = ", ".join(all_head)
-
-    # Aggregates can only live inside a rule head, so register a
-    # uniquely-named session rule and query it. The rule name has no
-    # leading underscore because the IQL parser rejects ``?_relation(...)``
-    # queries.
-    rule_name = f"il_agg_{secrets.token_hex(4)}"
-    setup = f"{rule_name}({head_str}) <- {', '.join(all_body)}"
-    query_args = ", ".join(head_column_names)
-    query = f"?{rule_name}({query_args})"
-
-    return AggCompiled(
-        setup=setup,
-        query=query,
-        rule_name=rule_name,
-        head_columns=head_column_names,
-    )
-
-
-def _agg_label(agg: AggExpr) -> str:
-    """Pick a deterministic projection name for an aggregate expression."""
-    if agg.column is not None and isinstance(agg.column, AstColumn):
-        return column_to_variable(agg.column.name)
-    return agg.func.capitalize()
-
-
 # ── Rule compilation ──────────────────────────────────────────────────
 
 
@@ -662,11 +955,22 @@ def compile_rule(
     if condition:
         _process_join_condition(condition, env)
 
+    # count() without a column counts the first column of the first body relation.
+    count_var: str | None = None
+    if body_relations and any(
+        isinstance(e, AggExpr) and e.column is None and e.order_column is None
+        for e in select_map.values()
+    ):
+        rn, cls, alias = body_relations[0]
+        count_var = env.get_var(AstColumn(rn, Relation._get_columns(cls)[0], alias))
+
     # Build head
     head_parts = []
     for col in head_columns:
         expr = select_map.get(col)
-        if expr is not None:
+        if isinstance(expr, AggExpr):
+            head_parts.append(_compile_agg_expr(expr, env, count_var=count_var))
+        elif expr is not None:
             compiled = compile_expr(expr, env)
             head_parts.append(compiled)
         else:

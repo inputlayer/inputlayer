@@ -174,3 +174,14 @@ class IndexNotFoundError(InputLayerError):
 
 class InternalError(InputLayerError):
     """An unexpected internal error occurred."""
+
+
+class CompileError(InputLayerError, ValueError):
+    """The SDK cannot compile a call into IQL; nothing was sent.
+
+    ``hint`` names the fix when there is one.
+    """
+
+    def __init__(self, message: str, *, hint: str | None = None) -> None:
+        super().__init__(f"{message} ({hint})" if hint else message)
+        self.hint = hint
