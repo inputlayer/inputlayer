@@ -6,13 +6,18 @@ The SDK connects over WebSocket, so you get persistent connections, live notific
 
 ## Installation
 
-```bash
-npm install inputlayer
+The SDK is not published to npm yet. Build and pack it from a source checkout of the repository:
 
-# or with your preferred package manager
-pnpm add inputlayer
-yarn add inputlayer
-bun add inputlayer
+```bash
+git clone https://github.com/inputlayer/inputlayer.git
+cd inputlayer/packages/inputlayer-js
+npm ci && npm run build && npm pack   # writes inputlayer-js-dev-<version>.tgz
+```
+
+Then install the tarball in your project under the name `inputlayer`, so the imports below resolve:
+
+```bash
+npm install inputlayer@file:/path/to/inputlayer/packages/inputlayer-js/inputlayer-js-dev-0.1.1.tgz
 ```
 
 Requirements: Node.js 18+ (or any runtime with WebSocket support) and a running InputLayer server.

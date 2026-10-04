@@ -28,15 +28,7 @@ cargo --version
 
 ## Installation Options
 
-### Option 1: Install from crates.io (Recommended)
-
-```bash
-cargo install inputlayer --bin inputlayer-client
-```
-
-This installs the `inputlayer-client` binary to `~/.cargo/bin/`.
-
-### Option 2: Build from Source
+### Option 1: Build from Source
 
 ```bash
 # Clone the repository
@@ -50,7 +42,7 @@ cargo build --release
 ./target/release/inputlayer-client
 ```
 
-### Option 3: Run without Installing
+### Option 2: Run without Installing
 
 For quick testing without installing:
 
@@ -127,8 +119,10 @@ The data directory contains:
 
 To interact with InputLayer from Python (no IQL required):
 
+The SDK is not on PyPI yet; install it from a source checkout:
+
 ```bash
-pip install inputlayer
+pip install ./packages/inputlayer-py
 ```
 
 See the [Python SDK Guide](python-sdk.md) for full documentation.

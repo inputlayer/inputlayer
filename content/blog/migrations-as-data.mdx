@@ -101,7 +101,9 @@ Both are exactly the failure modes we test: the loader refuses duplicate or malf
 ## Try it
 
 ```bash
-pip install inputlayer-client-dev
+# from a source checkout (the SDK is not on PyPI yet)
+git clone https://github.com/inputlayer/inputlayer.git
+pip install ./inputlayer/packages/inputlayer-py
 il migration generate --models yourapp.models
 il migration apply --url ws://localhost:8080/ws --kg dev
 ```

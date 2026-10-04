@@ -29,7 +29,9 @@ curl -sf http://localhost:8080/health && echo "server is up"
 ## Installation
 
 ```bash
-pip install inputlayer-client-dev[langgraph]
+# from a source checkout (the SDK is not on PyPI yet)
+git clone https://github.com/inputlayer/inputlayer.git
+pip install "./inputlayer/packages/inputlayer-py[langgraph]"
 ```
 
 This pulls in `langgraph` and `langchain-core` alongside the InputLayer SDK.

@@ -7,13 +7,16 @@ Write Python. No query syntax required. The OLM compiles typed Python classes in
 ## Installation
 
 ```bash
-pip install inputlayer-client-dev
+# from the root of an InputLayer source checkout
+pip install ./packages/inputlayer-py
 
 # With extras
-pip install inputlayer-client-dev[pandas]      # DataFrame support
-pip install inputlayer-client-dev[langchain]   # LangChain integration
-pip install inputlayer-client-dev[all]         # everything
+pip install "./packages/inputlayer-py[pandas]"      # DataFrame support
+pip install "./packages/inputlayer-py[langchain]"   # LangChain integration
+pip install "./packages/inputlayer-py[all]"         # everything
 ```
+
+The package is not published to PyPI yet, so install it from a source checkout.
 
 Requirements: Python 3.10+ and a running InputLayer server.
 
@@ -185,7 +188,7 @@ def on_update(event):
 ## LangChain Integration
 
 ```bash
-pip install inputlayer-client-dev[langchain]
+pip install "./packages/inputlayer-py[langchain]"
 ```
 
 The full integration guide lives at [docs/guides/langchain](../../docs/content/docs/guides/langchain.mdx). Highlights:
@@ -284,7 +287,7 @@ Requires a running InputLayer server and optionally LM Studio (or any OpenAI-com
 Install the langgraph extra:
 
 ```bash
-pip install inputlayer-client-dev[langgraph]
+pip install "./packages/inputlayer-py[langgraph]"
 ```
 
 The LangGraph integration provides:
