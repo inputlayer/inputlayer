@@ -757,6 +757,7 @@ impl ProofSnapshot {
             ),
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         })
     }
 
@@ -809,6 +810,7 @@ impl ProofSnapshot {
             timing_breakdown: proof_timing(timing_mode, start, query_us, "explanation", explain_us),
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         })
     }
 }
@@ -1517,6 +1519,7 @@ impl Handler {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         })
     }
 
@@ -2273,6 +2276,7 @@ impl Handler {
                     timing_breakdown: None,
                     errors: Vec::new(),
                     statements: Vec::new(),
+                    revision: None,
                 });
             }
 
@@ -2338,6 +2342,7 @@ impl Handler {
                 timing_breakdown: None,
                 errors: Vec::new(),
                 statements: Vec::new(),
+                revision: None,
             });
         }
 
@@ -3098,6 +3103,7 @@ impl QueryJob {
                                             timing_breakdown: None,
                                             errors,
                                             statements: Vec::new(),
+                                            revision: None,
                                         });
                                     }
                                     MetaCommand::AgentStart(_)
@@ -3328,12 +3334,15 @@ impl QueryJob {
         // Counts of the fact statements committed below.
         let mut statement_counts = Vec::new();
         let mut committed = None;
+        // The revision the program's writes committed at, if they did.
+        let mut revision = None;
         if !write_run.is_empty() {
             if errors.is_empty() {
                 match self.commit_write_run(&storage, &kg_name, &mut write_run, &mut messages) {
-                    Ok((base, counts)) => {
+                    Ok((base, counts, committed_at)) => {
                         committed = Some(base);
                         statement_counts = counts;
+                        revision = Some(committed_at);
                     }
                     Err(failure) => {
                         stmt_index = failure.index;
@@ -3390,6 +3399,7 @@ impl QueryJob {
                 errors,
                 statements: statement_counts,
                 execution_time_ms: start.elapsed().as_millis() as u64,
+                revision,
                 ..Handler::messages_result(messages)
             });
         }
@@ -3410,6 +3420,7 @@ impl QueryJob {
                 errors,
                 statements: statement_counts,
                 execution_time_ms: start.elapsed().as_millis() as u64,
+                revision,
                 ..Handler::messages_result(messages)
             });
         }
@@ -3432,6 +3443,7 @@ impl QueryJob {
                             errors,
                             statements: statement_counts,
                             execution_time_ms: start.elapsed().as_millis() as u64,
+                            revision,
                             ..Handler::messages_result(messages)
                         });
                     }
@@ -3626,6 +3638,7 @@ impl QueryJob {
             timing_breakdown,
             errors,
             statements: statement_counts,
+            revision,
         })
     }
 }
@@ -3915,6 +3928,7 @@ impl Handler {
             timing_breakdown,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         })
     }
 
@@ -4555,6 +4569,7 @@ impl Handler {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         }
     }
 
@@ -4648,6 +4663,7 @@ impl Handler {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         }
     }
 
@@ -5277,6 +5293,7 @@ impl Handler {
             timing_breakdown: None,
             errors: Vec::new(),
             statements: Vec::new(),
+            revision: None,
         })
     }
 

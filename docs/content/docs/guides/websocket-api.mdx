@@ -156,6 +156,12 @@ Writes of facts are idempotent: inserting a fact that is present, or deleting on
 }
 ```
 
+The reply to a program whose writes to facts, schemas or rules committed also carries `revision`: the knowledge graph revision the program's changes are visible at, the same revision [standing-query pushes](#standing-queries) carry. A delta at that revision or later reflects them. A write that changed nothing (inserting a fact that is present, for example) names the current revision, which already holds its effect. Queries without writes, programs whose writes were rolled back, and session-scoped facts and rules carry no `revision`. Like push revisions, it is comparable only within one knowledge graph and one `stream_epoch`.
+
+```json
+{"type": "result", "columns": ["message"], "rows": [["Inserted 1 fact(s) into 'eta'."]], "revision": 1731, "errors": []}
+```
+
 ### Error Response
 
 ```json

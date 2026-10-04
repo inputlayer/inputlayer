@@ -57,6 +57,41 @@ async fn test_snapshot_and_deltas_name_strictly_increasing_revisions() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_write_reply_names_the_revision_its_push_carries() {
+    let server = start_server(64).await;
+    let mut subscriber = Client::connect(&server).await;
+    let snapshot = subscriber.subscribe("n", "?n(X)").await;
+    let subscribed_at = snapshot["subscribed"]["revision"].as_u64().unwrap();
+    let mut writer = Client::connect(&server).await;
+
+    let reply = writer.execute("+n(1)\n+other(1)").await;
+    assert_eq!(reply["type"], "result", "{reply}");
+    let committed = reply["revision"].as_u64().expect("write reply revision");
+    assert!(committed > subscribed_at, "{reply}");
+    let delta = subscriber.next_push_for("n").await;
+    assert_eq!(delta["revision"].as_u64(), Some(committed), "{delta}");
+
+    // A write that changes nothing names the revision that already holds it.
+    let reply = writer.execute("+n(1)").await;
+    assert_eq!(reply["revision"].as_u64(), Some(committed), "{reply}");
+
+    // A program that writes and queries names its commit; a query alone,
+    // or a write that failed, names none.
+    let reply = writer.execute("+n(2)\n?n(X)").await;
+    let committed = reply["revision"]
+        .as_u64()
+        .expect("write and query revision");
+    assert_eq!(rows(&reply["rows"]).len(), 2, "{reply}");
+    let delta = subscriber.next_push_for("n").await;
+    assert_eq!(delta["revision"].as_u64(), Some(committed), "{delta}");
+    let reply = writer.execute("?n(X)").await;
+    assert!(reply.get("revision").is_none(), "{reply}");
+    let reply = writer.execute("+n(3)\n+n(\"three\", 4)").await;
+    assert!(!reply["errors"].as_array().unwrap().is_empty(), "{reply}");
+    assert!(reply.get("revision").is_none(), "{reply}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_delete_produces_retraction() {
     let server = start_server(64).await;
     server.write("+likes(1, 10)\n+likes(1, 11)").await;
