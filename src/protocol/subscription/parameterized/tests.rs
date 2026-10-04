@@ -139,6 +139,24 @@ fn an_ambiguous_row_fails_the_partition() {
     assert!(Partitions::build(&shape, rows).is_err());
 }
 
+#[test]
+fn a_round_shares_while_no_slower_than_the_views_own_evaluations_in_parallel() {
+    // 8 bindings on 4 permits: two waves of own evaluations, 200us.
+    assert!(keeps_sharing(150, 100, 8, 4), "within the bound");
+    assert!(keeps_sharing(240, 100, 8, 4), "at the margin");
+    assert!(!keeps_sharing(241, 100, 8, 4), "past the margin");
+    assert!(!keeps_sharing(1_000, 100, 8, 4));
+    // No more bindings than permits: one own evaluation.
+    assert!(keeps_sharing(120, 100, 3, 4));
+    assert!(!keeps_sharing(121, 100, 3, 4));
+    assert!(!keeps_sharing(121, 100, 4, 4));
+    // Many more bindings than permits.
+    assert!(keeps_sharing(6_000, 100, 200, 4));
+    assert!(!keeps_sharing(6_001, 100, 200, 4));
+    // An unknown own cost keeps sharing.
+    assert!(keeps_sharing(1_000_000, 0, 2, 4));
+}
+
 mod rounds {
     use std::sync::Arc;
 
@@ -193,6 +211,7 @@ mod rounds {
         let metrics = Arc::new(SubscriptionMetrics::default());
         let mut one = member(&families, &handler, &metrics, r#"?item("s1", X)"#);
         let mut two = member(&families, &handler, &metrics, r#"?item("s2", X)"#);
+        assert!(!one.family.shares(), "no own cost to compare a round with");
         // First refreshes evaluate each view's own query.
         assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 1])]);
         assert_eq!(inserted(&two.refresh().await.unwrap()), [json!(["s2", 2])]);
@@ -216,5 +235,17 @@ mod rounds {
         write(&handler, "+item(\"s1\", 5)").await;
         assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 5])]);
         assert_eq!(metrics.shared_evaluations(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn shapes_of_different_parameter_kinds_are_different_families() {
+        let (handler, _tmp) = handler();
+        let families = Families::default();
+        let metrics = Arc::new(SubscriptionMetrics::default());
+        let one = member(&families, &handler, &metrics, r#"?item("s1", X)"#);
+        let int = member(&families, &handler, &metrics, "?item(1, X)");
+        let two = member(&families, &handler, &metrics, r#"?item("s2", X)"#);
+        assert!(!Arc::ptr_eq(&one.family, &int.family));
+        assert!(Arc::ptr_eq(&one.family, &two.family));
     }
 }

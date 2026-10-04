@@ -508,7 +508,8 @@ pub struct RateLimitConfig {
     /// Share one evaluation per commit among standing queries that differ
     /// only in bound constants (`?speech("s-1", ...)`, `?speech("s-2", ...)`),
     /// routing each subscriber exactly its own rows. A family whose shared
-    /// query costs much more than its members' own stops sharing by itself.
+    /// query is slower than its members' own run in parallel stops sharing
+    /// by itself.
     #[serde(default = "default_true")]
     pub subscription_share_parameterized: bool,
 

@@ -193,6 +193,8 @@ pub struct Handler {
     /// Prevents blocking-thread-pool explosion by capping CPU-bound parallelism
     /// at the hardware thread count. Tokio workers queue via async `acquire()`.
     query_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Width of `query_semaphore`: queries that run at once.
+    compute_permits: usize,
     /// Accumulated timing histogram buckets for Prometheus export.
     timing_histograms: Arc<crate::execution::timing::TimingHistograms>,
     /// Teaching agent for guided onboarding.
@@ -842,6 +844,7 @@ impl Handler {
             sessions: SessionManager::default(),
             notifications,
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
+            compute_permits,
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             agent: Arc::new(crate::agent::AgentManager::new(
                 crate::agent::AgentConfig::default(),
@@ -884,6 +887,7 @@ impl Handler {
             sessions: SessionManager::new(session_config),
             notifications,
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
+            compute_permits,
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             agent: Arc::new(crate::agent::AgentManager::new(
                 crate::agent::AgentConfig::default(),
@@ -932,6 +936,11 @@ impl Handler {
     /// Get reference to the handler's configuration.
     pub fn config(&self) -> &crate::Config {
         &self.config
+    }
+
+    /// How many queries run at once; more wait for a compute permit.
+    pub fn compute_permits(&self) -> usize {
+        self.compute_permits
     }
 
     /// Standing-query counters.

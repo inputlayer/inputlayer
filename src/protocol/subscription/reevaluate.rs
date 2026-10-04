@@ -44,7 +44,8 @@ pub struct Evaluated {
     pub result: Arc<ResultSet>,
     pub dependencies: Dependencies,
     pub revision: u64,
-    /// Engine time of the evaluation (excluding waits for a compute permit).
+    /// Engine time of the evaluation (excluding compiling its plan and waits
+    /// for a compute permit).
     pub cost: Duration,
 }
 
@@ -174,8 +175,8 @@ pub struct QueryRows {
     pub columns: Option<Vec<String>>,
     /// Every row, as the engine returned it (distinct as engine values).
     pub rows: Vec<Row>,
-    /// Engine time of the evaluation (excluding waits for a compute permit),
-    /// plus converting its rows.
+    /// Engine time of the evaluation (excluding compiling its plan and waits
+    /// for a compute permit), plus converting its rows.
     pub cost: Duration,
 }
 
@@ -201,7 +202,14 @@ pub async fn run_query(
     }
     let engine = result.timing_breakdown.as_ref().map_or_else(
         || started.elapsed(),
-        |timing| Duration::from_micros(timing.total_us),
+        |timing| {
+            let compiling = timing.parse_us
+                + timing.sip_us
+                + timing.magic_sets_us
+                + timing.ir_build_us
+                + timing.optimize_us;
+            Duration::from_micros(timing.total_us.saturating_sub(compiling))
+        },
     );
     let converting = Instant::now();
     let columns =
