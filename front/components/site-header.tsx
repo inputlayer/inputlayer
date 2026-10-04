@@ -73,6 +73,18 @@ export function SiteHeader() {
             Docs
           </Link>
           <Link
+            href="/#replaces"
+            className="text-muted-foreground transition-colors hover:text-foreground"
+          >
+            What it replaces
+          </Link>
+          <Link
+            href="/compare/"
+            className="text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Compare
+          </Link>
+          <Link
             href="/blog/"
             className="text-muted-foreground transition-colors hover:text-foreground"
           >

@@ -15,7 +15,7 @@ export async function generateMetadata({ params }: ComparePageProps): Promise<Me
   }
 
   const title = `${page.title} - InputLayer`
-  const description = `See how InputLayer compares to ${page.competitors.join(", ")}.`
+  const description = `See how InputLayer, the live rules engine for AI agents, compares to ${page.competitors.join(", ")}.`
 
   return {
     title,

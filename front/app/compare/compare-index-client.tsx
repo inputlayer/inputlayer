@@ -16,7 +16,7 @@ export function CompareIndexClient({ pages }: CompareIndexClientProps) {
     <PageLayout>
       <ContentHero
         heading="Compare"
-        subtitle="How InputLayer compares with the tools already in your stack, starting with where each of them wins."
+        subtitle="InputLayer is the live rules engine for AI agents. Here is how it compares with the tools already in your stack: what it sits beside, and where each of them wins."
       />
 
       <section className="mx-auto max-w-6xl px-6 py-12">
@@ -55,8 +55,8 @@ export function CompareIndexClient({ pages }: CompareIndexClientProps) {
       </section>
 
       <CTABanner
-        heading="Models think. InputLayer knows."
-        description="The live knowledge graph for AI agents. Self-hosted and source-available under the Elastic License 2.0."
+        heading="Take the rules out of your prompts."
+        description="The live rules engine for AI agents. Self-hosted and source-available under the Elastic License 2.0."
         buttons={[
           { label: "Quickstart", href: "/docs/guides/quickstart/" },
           { label: "Read the docs", href: "/docs/", variant: "secondary" },

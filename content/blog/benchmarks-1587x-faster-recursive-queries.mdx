@@ -7,6 +7,11 @@ excerpt: "One fact changes in a graph with 400,000 derived relationships. Full r
 
 # Benchmarks: 1,652x Faster Recursive Queries with Incremental Computation
 
+```note
+type: info
+InputLayer is the live rules engine for AI agents. This post measures one thing: how fast the engine updates recursive rule results after a fact changes. It is a recursive-query result, not an agent-latency figure.
+```
+
 If your compliance system takes 11 seconds to update after an ownership change, that's 11 seconds where a transaction can slip through against a sanctioned entity. If your recommendation engine takes 11 seconds to reflect a stockout, that's 11 seconds of customers clicking "buy" on products you can't ship. If your access control takes 11 seconds to propagate a role change, that's 11 seconds where a terminated employee's permissions are still active. These aren't hypotheticals. They're the cost of recalculating everything from scratch in systems that need to reason over connected data.
 
 One fact changes in a knowledge graph with 400,000 derived relationships. Full recompute: 11.3 seconds. InputLayer: 6.83 milliseconds.
