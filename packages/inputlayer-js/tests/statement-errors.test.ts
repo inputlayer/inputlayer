@@ -7,9 +7,6 @@
  * `result`/`result_start` for failed statements of a longer one.
  */
 
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocketServer } from 'ws';
 import {
@@ -250,20 +247,18 @@ describe('statement errors', () => {
     expect(engine?.sent.slice(-2)).toEqual(['.kg use default', '.status']);
   });
 
-  it('load sends the local file and rejects on a failed statement', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'il-load-'));
-    const path = join(dir, 'seed.iql');
-    writeFileSync(path, '+demo(1)\n+demo(1, 2)\n');
+  it('load sends the server .load command and rejects when the engine refuses it', async () => {
     const kg = await kgOn([
-      messages(
-        ["Inserted 1 fact(s) into 'demo'.", ARITY],
-        [{ index: 1, code: 'validation', message: ARITY }],
-      ),
+      {
+        type: 'error',
+        message: 'This command is client-only and not available via server API.',
+        code: 'unsupported',
+      },
     ]);
-    const err = (await kg.load(path).catch((e: unknown) => e)) as StatementFailedError;
-    expect(err).toBeInstanceOf(StatementFailedError);
-    expect(err.errors.map((e) => e.index)).toEqual([1]);
-    expect(engine?.sent.at(-1)).toBe('+demo(1)\n+demo(1, 2)\n');
+    const err = (await kg.load('/data/seed.iql', 'replace').catch((e: unknown) => e)) as QueryError;
+    expect(err).toBeInstanceOf(QueryError);
+    expect(err.code).toBe('unsupported');
+    expect(engine?.sent.at(-1)).toBe('.load /data/seed.iql replace');
   });
 });
 
@@ -431,4 +426,28 @@ describe('durability outcomes', () => {
       });
     }
   }
+});
+
+describe('unchanged management and vector query paths', () => {
+  it('dropping the current KG surfaces the server error without switching', async () => {
+    engine = await ScriptedEngine.start();
+    client = new InputLayer({ url: engine.url, username: 'a', password: 'b', autoReconnect: false });
+    await client.connect();
+    engine.script([{ type: 'error', message: 'Cannot drop current knowledge graph', code: 'conflict' }]);
+    await expect(client.dropKnowledgeGraph('other')).rejects.toMatchObject({ code: 'conflict' });
+    engine.script([messages(['ok'])]);
+    await client.knowledgeGraph('other').execute('.status');
+    expect(engine.sent).toEqual(['.kg drop other', '.status']);
+  });
+
+  it.each([
+    [{ k: 2 }, '?top_k<2, X0, X1, Dist:asc> <- vectors(X0, X1), Dist = cosine(X1, [1, 0])'],
+    [{ radius: 0.5 }, '?within_radius<0.5, X0, X1, Dist:asc> <- vectors(X0, X1), Dist = cosine(X1, [1, 0])'],
+  ])('forwards vector selection to the server: %j', async (selection, query) => {
+    const vectors = relation('Vectors', { id: 'int', embedding: 'vector[2]' });
+    const kg = await kgOn([{ type: 'error', message: 'Unsupported query', code: 'validation' }]);
+    await expect(kg.vectorSearch({ relation: vectors, queryVec: [1, 0], ...selection }))
+      .rejects.toBeInstanceOf(QueryError);
+    expect(engine?.sent.at(-1)).toBe(query);
+  });
 });

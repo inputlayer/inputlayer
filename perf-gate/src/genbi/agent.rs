@@ -212,13 +212,46 @@ impl Agent {
         }
     }
 
-    /// Ids whose maintained state differs from `truth`.
-    pub fn diverged(&self, truth: &BTreeMap<String, RowSet>) -> BTreeSet<String> {
+    /// Ids whose maintained state differs from `truth`, or that errored or
+    /// have no truth, apart from the `retired` questions, which no longer
+    /// count.
+    pub fn diverged(
+        &self,
+        truth: &BTreeMap<String, RowSet>,
+        retired: &BTreeMap<String, String>,
+    ) -> BTreeSet<String> {
         self.subscriptions
             .values()
-            .filter(|s| truth.get(&s.id).is_some_and(|t| keys_differ(&s.state, t)))
+            .filter(|s| !retired.contains_key(&s.id))
+            .filter(|s| {
+                s.error.is_some() || truth.get(&s.id).is_none_or(|t| keys_differ(&s.state, t))
+            })
             .map(|s| s.id.clone())
             .collect()
+    }
+
+    /// Forget the subscription errors of every question in `evaluated`: a
+    /// successful re-query since.
+    pub fn clear_errors(&mut self, evaluated: &BTreeMap<String, RowSet>) {
+        for sub in self.subscriptions.values_mut() {
+            if evaluated.contains_key(&sub.id) {
+                sub.error = None;
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn holding(subscriptions: Vec<Subscription>) -> Self {
+        let (_tx, pushes) = mpsc::unbounded_channel();
+        Self {
+            subscriptions: subscriptions
+                .into_iter()
+                .map(|s| (s.id.clone(), s))
+                .collect(),
+            pushes,
+            reader: tokio::spawn(async {}),
+            fault: None,
+        }
     }
 }
 
@@ -243,6 +276,53 @@ mod tests {
 
     fn truth(id: &str, v: Value) -> BTreeMap<String, RowSet> {
         BTreeMap::from([(id.to_string(), row_set(rows(v)))])
+    }
+
+    #[tokio::test]
+    async fn convergence_requires_truth_for_every_live_subscription() {
+        let mut agent = Agent::holding(vec![
+            Subscription::new("q0", rows(json!([[1]]))),
+            Subscription::new("q1", vec![]),
+        ]);
+        let live = BTreeMap::new();
+        let mut expected = truth("q0", json!([[1]]));
+        assert_eq!(
+            agent.diverged(&expected, &live),
+            BTreeSet::from(["q1".into()])
+        );
+        assert_eq!(agent.diverged(&BTreeMap::new(), &live).len(), 2);
+        expected.insert("q1".into(), row_set(vec![]));
+        assert!(agent.diverged(&expected, &live).is_empty());
+        agent.subscriptions.get_mut("q0").unwrap().state.clear();
+        assert_eq!(
+            agent.diverged(&expected, &live),
+            BTreeSet::from(["q0".into()])
+        );
+        agent.subscriptions.get_mut("q1").unwrap().error = Some("result truncated".into());
+        assert_eq!(agent.diverged(&expected, &live).len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_retired_question_no_longer_counts_and_requery_clears_errors() {
+        let mut agent = Agent::holding(vec![
+            Subscription::new("q0", rows(json!([[1]]))),
+            Subscription::new("q3", rows(json!([[7]]))),
+        ]);
+        agent.subscriptions.get_mut("q3").unwrap().error = Some("result truncated".into());
+        let retired = BTreeMap::from([("q3".to_string(), "result truncated".to_string())]);
+        assert!(agent
+            .diverged(&truth("q0", json!([[1]])), &retired)
+            .is_empty());
+
+        agent.subscriptions.get_mut("q0").unwrap().error = Some("denied".into());
+        let evaluated = truth("q0", json!([[1]]));
+        assert_eq!(
+            agent.diverged(&evaluated, &retired),
+            BTreeSet::from(["q0".into()])
+        );
+        agent.clear_errors(&evaluated);
+        assert!(agent.diverged(&evaluated, &retired).is_empty());
+        assert!(agent.subscriptions["q3"].error.is_some());
     }
 
     #[test]

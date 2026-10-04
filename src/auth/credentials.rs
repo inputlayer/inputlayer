@@ -1,15 +1,13 @@
 //! Live credentials: the in-memory index of users and API keys.
 //!
 //! `_internal` stores users and API keys durably. [`CredentialRegistry`] is
-//! their in-memory index: loaded at startup, then updated by every credential
-//! mutation right after it is persisted. Authenticating against the registry
-//! returns a [`Principal`] bound to exactly one credential: one API key, or one
+//! their in-memory index. Authenticating against the registry returns a
+//! [`Principal`] bound to exactly one credential: one API key, or one
 //! generation of a user's password.
 //!
-//! Revoking a credential (`.apikey revoke`, `.user password`, `.user drop`)
-//! ends it before the command returns. An API key may also carry an expiry,
-//! which ends it once passed: sessions bound to it fail their checks from that
-//! instant, and [`CredentialRegistry::expire_due`] completes their signals.
+//! Revoking a credential ends it before returning. An API key may also carry
+//! an expiry, which ends it once passed: sessions bound to it fail their
+//! checks from that instant, and [`CredentialRegistry::expire_due`] completes their signals.
 //! Other credentials, including other keys of the same user, are untouched.
 //!
 //! The registry lock is taken only to authenticate, to mutate credentials and

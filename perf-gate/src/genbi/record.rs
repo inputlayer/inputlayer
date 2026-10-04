@@ -66,7 +66,9 @@ pub struct ScenarioRun {
     /// `ack_to_delta_later_us` for the rest).
     pub series: BTreeMap<String, Vec<u64>>,
     /// `load_statements`; `converged_mutations` (send to every agent
-    /// converged, serial writer).
+    /// converged, serial writer; a mutation any live subscription diverged
+    /// on is not counted, nor one with no live subscription; retired
+    /// questions do not count).
     pub rates: BTreeMap<String, Rate>,
     /// `rss_after_load_kb`, `rss_after_subscribe_kb`, `rss_end_kb`,
     /// `peak_rss_kb`, `seed_statements`, `seed_failed`, `subscriptions`.
@@ -201,5 +203,16 @@ pub struct DeltaOutcome {
     pub frames: usize,
     pub rows_inserted: usize,
     pub rows_retracted: usize,
-    pub converged: bool,
+    pub convergence: Convergence,
+}
+
+/// Whether a subscription's answer reached the fresh re-query by the deadline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Convergence {
+    Converged,
+    Diverged,
+    /// The question failed to evaluate and was retired: it no longer counts
+    /// toward convergence.
+    Retired,
 }

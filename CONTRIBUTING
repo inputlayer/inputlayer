@@ -71,11 +71,25 @@ Hooks never run tests. Before each commit, run the tests that cover your
 change: `make test-fast` (or the touched crate's `cargo test -p ...`) and the
 affected snapshot specs (`make test-affected`).
 
-Before calling an implementation PR done, run the performance gate and attach
-its report (`target/perf-gate/latest/report.md`) to the PR:
+Before every push to a PR, `make pre-pr` must pass. It runs formatting,
+and the checks that apply to changes since `PRE_PR_BASE` (default: the branch's
+merge base with `origin/main`) in parallel: Rust clippy, workspace tests and
+affected snapshots for Rust inputs, including every workspace member
+(`gateway/`, `ontology-client/`, `testkit/`, and `ws-protocol/`);
+Python SDK tests for `packages/inputlayer-py/`;
+JS SDK tests and `tsc --noEmit` for `packages/inputlayer-js/`;
+`make perf-gate-check` for `perf-gate/`; and the gate's own tests
+(`scripts/test_pre_pr.py`) for `Makefile` or `scripts/`. Formatting always runs. Then it runs
+the performance gate. Attach the gate's
+report (`target/perf-gate/latest/report.md`) to the PR:
+
+The base must resolve to a commit other than `HEAD`. If the merge base with
+`origin/main` cannot be resolved, fetch that reference or set `PRE_PR_BASE`
+explicitly; the gate fails before running checks instead of assuming `HEAD`.
 
 ```bash
-make perf-gate                      # must PASS; see perf-gate/README.md
+make pre-pr                         # fast checks in parallel, then make perf-gate
+make perf-gate                      # the gate alone; see perf-gate/README.md
 ```
 
 Changes to subscriptions, notifications or the WebSocket protocol also run
@@ -356,7 +370,7 @@ CI runs in two tiers so small PRs stay cheap and expensive checks run at release
 
 **Fast gate** (`.github/workflows/ci.yml`) runs only on PRs targeting `main`: format (`make fmt-check`), clippy (`make lint`, which also type-checks every target) and the unit + integration tests (`make unit-test`). The Rust jobs are skipped entirely when a change touches no Rust inputs, as defined by the [workflow's path filter](.github/workflows/ci.yml) (for example `front/`-only or SDK-only PRs). A newer push to a PR cancels its in-progress run.
 
-**Full suite** (`.github/workflows/full-suite.yml`) runs on release commits or a manual run on `main`: the release build with all tests and snapshot specs, Python and JS SDK tests, the Python live-server integration, coverage, MSRV, `make doc-check` and the website build. Docker image builds (`docker.yml`) run on release commits only.
+**Full suite** (`.github/workflows/full-suite.yml`) runs on release commits or a manual run on `main`: the release build with all tests, snapshot specs and the reactive agent path (`make e2e-reactive`), Python and JS SDK tests, the Python live-server integration, coverage, MSRV, `make doc-check`, the website build, the performance gate tool's own checks (`make perf-gate-check`; measuring needs a quiet same-host runner, so `make perf-gate` itself runs locally through `make pre-pr`) and the Verified Completions gate (`make vc-gate`). Docker image builds (`docker.yml`) run on release commits only.
 
 The triggers are:
 

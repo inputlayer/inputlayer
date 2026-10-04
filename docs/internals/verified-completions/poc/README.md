@@ -132,8 +132,11 @@ scored. test_evaluator.py plants each of these defects against the
 contract and runs first. Because the replay is deterministic, a
 detection drop is a contract break too; the warn-only tier #88 sketched
 for detection belongs to live model extraction, which stays out of
-per-PR CI. The path-filtered workflow is
-.github/workflows/verified-completions.yml.
+CI. CI runs it at release checkpoints, as the `verified-completions` job
+of .github/workflows/full-suite.yml (see CONTRIBUTING, "Continuous
+Integration"). Run `make vc-gate` locally when changing the rule pack, the
+extraction prompts, the corpus or evaluator, gateway ingestion or the
+Python client.
 
 ## Sample labels
 

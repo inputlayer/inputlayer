@@ -76,7 +76,7 @@ List access control entries for a knowledge graph. If no name is given, lists AC
 
 ### `.kg acl grant <kg> <user> <role>`
 
-Grant a user access to a knowledge graph with a specific role.
+Grant a user access to a knowledge graph with a specific role. The user must exist.
 
 ```
 .kg acl grant analytics alice reader

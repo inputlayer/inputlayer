@@ -13,6 +13,9 @@
 //! connection forever: a frame the socket does not take within the send
 //! timeout (`http.ws_send_timeout_ms`) fails the connection, and nothing is
 //! written to it after that.
+//!
+//! The check and the hand-off hold the credential's end lock, so revoking it
+//! or bringing its expiry forward waits for a frame already admitted.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -88,12 +91,17 @@ impl<S: Sink<Message> + Unpin> Outbound<S> {
                 deadline.poll(cx, step)
             })
             .await?;
-            if fenced && data && self.principal.as_ref().and_then(Principal::ended).is_some() {
-                return Err(SendError::CredentialEnded);
+            let sink = &mut self.sink;
+            let enqueue = || {
+                sink.start_send_unpin(message)
+                    .map_err(|_| SendError::Closed)
+            };
+            match self.principal.as_ref().filter(|_| fenced && data) {
+                Some(principal) => principal
+                    .admit(enqueue)
+                    .map_err(|_| SendError::CredentialEnded)??,
+                None => enqueue()?,
             }
-            self.sink
-                .start_send_unpin(message)
-                .map_err(|_| SendError::Closed)?;
             std::future::poll_fn(|cx| {
                 let step = self.sink.poll_flush_unpin(cx);
                 deadline.poll(cx, step)
@@ -293,6 +301,103 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn revocation_waits_for_final_frame_enqueue() {
+        use std::pin::Pin;
+        use std::sync::{mpsc, Arc};
+        use std::task::{Context, Poll};
+        use std::time::Duration;
+
+        struct PausedSink {
+            entered: mpsc::Sender<()>,
+            release: mpsc::Receiver<()>,
+            frames: Vec<Message>,
+        }
+
+        impl Sink<Message> for PausedSink {
+            type Error = std::convert::Infallible;
+
+            fn poll_ready(
+                self: Pin<&mut Self>,
+                _: &mut Context<'_>,
+            ) -> Poll<Result<(), Self::Error>> {
+                Poll::Ready(Ok(()))
+            }
+
+            fn start_send(mut self: Pin<&mut Self>, message: Message) -> Result<(), Self::Error> {
+                self.entered.send(()).unwrap();
+                self.release.recv_timeout(Duration::from_secs(10)).unwrap();
+                self.frames.push(message);
+                Ok(())
+            }
+
+            fn poll_flush(
+                self: Pin<&mut Self>,
+                _: &mut Context<'_>,
+            ) -> Poll<Result<(), Self::Error>> {
+                Poll::Ready(Ok(()))
+            }
+
+            fn poll_close(
+                self: Pin<&mut Self>,
+                _: &mut Context<'_>,
+            ) -> Poll<Result<(), Self::Error>> {
+                Poll::Ready(Ok(()))
+            }
+        }
+
+        let ends: [fn(&CredentialRegistry); 2] = [
+            |registry| {
+                registry.revoke_key("k");
+            },
+            |registry| registry.expire_key("h", 0),
+        ];
+        let cases = ends.into_iter().flat_map(|end| {
+            [Message::Text("protected".into()), Message::Binary(vec![1])]
+                .map(|message| (end, message))
+        });
+        for (end, message) in cases {
+            let registry = Arc::new(CredentialRegistry::default());
+            let (entered_tx, entered_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let mut outbound = Outbound::new(PausedSink {
+                entered: entered_tx,
+                release: release_rx,
+                frames: Vec::new(),
+            });
+            outbound.bind(principal(&registry));
+            let expected = message.clone();
+            let sender = std::thread::spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .build()
+                    .unwrap()
+                    .block_on(outbound.send(message))
+                    .unwrap();
+                outbound
+            });
+            entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            let (started_tx, started_rx) = mpsc::channel();
+            let (revoked_tx, revoked_rx) = mpsc::channel();
+            let revoker = std::thread::spawn(move || {
+                started_tx.send(()).unwrap();
+                end(&registry);
+                revoked_tx.send(()).unwrap();
+            });
+            started_rx.recv().unwrap();
+            let early = revoked_rx.recv_timeout(Duration::from_millis(200));
+            release_tx.send(()).unwrap();
+            let mut outbound = sender.join().unwrap();
+            revoker.join().unwrap();
+            assert!(early.is_err(), "credential ended before final enqueue");
+            assert_eq!(outbound.sink.frames, vec![expected]);
+            let result = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap()
+                .block_on(outbound.send(Message::Text("after".into())));
+            assert_eq!(result, Err(SendError::CredentialEnded));
+        }
     }
 
     #[tokio::test]
