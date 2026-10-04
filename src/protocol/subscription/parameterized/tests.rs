@@ -386,7 +386,7 @@ mod rounds {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn with_no_permit_to_spare_families_never_probe() {
+    async fn without_permits_to_probe_a_recursion_bound_family_never_shares() {
         let (handler, _tmp) = handler_with(2);
         chain(&handler, 300).await;
         let families = Families::default();
@@ -413,11 +413,38 @@ mod rounds {
         }
         assert!(views[0].family.own_cost_us.load(Ordering::Relaxed) > 0);
         assert!(!views[0].family.shares());
+        assert!(views[0].family.stops.load(Ordering::Relaxed) > 0, "decided");
         assert_eq!(metrics.shared_evaluations(), 0);
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_probe_due_while_every_permit_is_taken_is_skipped() {
+    async fn without_permits_to_probe_a_family_shares_by_its_shape() {
+        let (handler, _tmp) = handler_with(2);
+        write(&handler, "+item[(\"s1\", 1), (\"s2\", 2)]").await;
+        let families = Families::default();
+        let metrics = Arc::new(SubscriptionMetrics::default());
+        let mut one = member(&families, &handler, &metrics, r#"?item("s1", X)"#);
+        let mut two = member(&families, &handler, &metrics, r#"?item("s2", X)"#);
+        one.refresh().await.unwrap();
+        two.refresh().await.unwrap();
+
+        // The first plan-cached own evaluation decides, without a probe.
+        write(&handler, "+item[(\"s1\", 3), (\"s2\", 4)]").await;
+        assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 3])]);
+        assert!(one.family.shares());
+        assert!(!one.family.probing.load(Ordering::Relaxed));
+        assert_eq!(metrics.shared_evaluations(), 0);
+        // Own evaluations slower than any round here: the guard keeps sharing.
+        one.family
+            .own_cost_us
+            .store(1_000_000_000, Ordering::Relaxed);
+        assert_eq!(inserted(&two.refresh().await.unwrap()), [json!(["s2", 4])]);
+        assert_eq!(metrics.shared_evaluations(), 1);
+        assert!(one.family.shares());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_probe_runs_while_queries_hold_every_compute_permit() {
         let (handler, _tmp) = handler();
         write(&handler, "+item[(\"s1\", 1), (\"s2\", 2)]").await;
         let families = Families::default();
@@ -430,20 +457,16 @@ mod rounds {
             .own_cost_us
             .store(1_000_000_000, Ordering::Relaxed);
 
-        let held: Vec<_> = std::iter::from_fn(|| handler.try_compute_permit()).collect();
-        assert_eq!(held.len(), 4);
+        let held = handler.hold_compute_permits();
         Family::probe(&one.family, two.own.current_snapshot().unwrap());
-        assert!(!one.family.probing.load(Ordering::Relaxed), "skipped");
-        drop(held);
-        assert_eq!(metrics.shared_evaluations(), 0);
-        assert_eq!(one.family.stops.load(Ordering::Relaxed), 0);
-
-        // The next due point probes again, and views still refresh.
-        write(&handler, "+item[(\"s1\", 3), (\"s2\", 4)]").await;
-        assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 3])]);
         probed(&one.family).await;
         assert_eq!(metrics.shared_evaluations(), 1);
-        assert!(one.family.shares());
+        assert!(one.family.shares(), "the probe passed the guard");
+        drop(held);
+
+        write(&handler, "+item[(\"s1\", 3), (\"s2\", 4)]").await;
+        assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 3])]);
         assert_eq!(inserted(&two.refresh().await.unwrap()), [json!(["s2", 4])]);
+        assert_eq!(metrics.shared_evaluations(), 2, "views read one round");
     }
 }

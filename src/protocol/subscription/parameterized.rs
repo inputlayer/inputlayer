@@ -37,12 +37,14 @@
 //! be, run in parallel on the compute permits. A view's own cost counts only
 //! evaluations that reused a compiled plan; a round's leaves out compiling
 //! its plan. Once it has a view's own cost to compare with, a family probes:
-//! it evaluates a round no view waits for, on a compute permit free at the
-//! time (it never waits for one), and starts sharing only when that round
-//! is fast enough. It stops when a round is slower, and probes again
-//! after some commits, waiting longer after each probe that fails. While
-//! sharing, a view evaluates its own query now and then to keep that cost
-//! current.
+//! it evaluates a round no view waits for, under the server's probe permit
+//! rather than a compute permit, and starts sharing only when that round is
+//! fast enough. With too few compute permits for that, a family decides
+//! from its shape instead: it shares unless a parameter binds an atom that
+//! reads a recursive relation, where the constant lets Magic Sets restrict
+//! the work. It stops when a round is slower, and probes (or decides) again
+//! after some commits, waiting longer after each failure. While sharing, a
+//! view evaluates its own query now and then to keep that cost current.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -53,10 +55,11 @@ use arc_swap::ArcSwapOption;
 use futures_util::future::BoxFuture;
 use parking_lot::Mutex;
 use serde_json::Value;
-use tokio::sync::{OnceCell, OwnedSemaphorePermit};
+use tokio::sync::OnceCell;
 use tracing::debug;
 
-use crate::ast::{Atom, BodyPredicate, Term};
+use crate::ast::dependencies::DependencyClosure;
+use crate::ast::{Atom, BodyPredicate, Program, Rule, Term};
 use crate::protocol::handler::{extract_column_names_from_query, transform_query_shorthand};
 use crate::protocol::Handler;
 use crate::statement::{parse_query, QueryGoal};
@@ -77,7 +80,7 @@ const STOP_MARGIN_PERCENT: u64 = 20;
 const PROBE_AFTER: u64 = 256;
 
 /// Fewest compute permits with which families probe: with fewer, a probe
-/// would take a permit views need, so families never start sharing.
+/// would take CPU views need, so families decide from their shape.
 const MIN_PERMITS_FOR_PROBES: usize = 3;
 
 /// A family that keeps failing its probes waits at most this many doublings
@@ -95,6 +98,34 @@ fn keeps_sharing(shared_us: u64, own_us: u64, bindings: u64, permits: u64) -> bo
     let unshared = own_us.saturating_mul(bindings.div_ceil(permits.max(1)).max(1));
     own_us == 0
         || shared_us.saturating_mul(100) <= unshared.saturating_mul(100 + STOP_MARGIN_PERCENT)
+}
+
+/// Whether a parameter of `shape` binds an atom that reads, through
+/// `rules`, a recursive relation: its constant lets Magic Sets restrict the
+/// work, which lifting it would lose.
+fn binds_recursion(shape: &Shape, rules: &[Rule]) -> bool {
+    let mut closure = DependencyClosure::default();
+    let positive = shape.goal.body.iter().filter_map(|pred| match pred {
+        BodyPredicate::Positive(atom) => Some(atom),
+        _ => None,
+    });
+    for atom in shape.goal.goal.iter().chain(positive) {
+        let bound = atom
+            .args
+            .iter()
+            .any(|term| matches!(term, Term::Variable(v) if v.starts_with(PARAM_PREFIX)));
+        if bound {
+            closure.add_relation(&atom.relation);
+        }
+    }
+    closure.close_over(rules);
+    let recursive = crate::recursion::recursive_relations(&Program {
+        rules: rules.to_vec(),
+    });
+    let binds = closure
+        .relations()
+        .any(|relation| recursive.contains(relation));
+    binds
 }
 
 /// Own evaluations, summed over a family's `bindings` views, before a family
@@ -456,18 +487,18 @@ impl Family {
                         .get_snapshot_for(&self.knowledge_graph)
                         .map_err(|e| format!("Knowledge graph '{}': {e}", self.knowledge_graph))?,
                 };
-                self.evaluate(snapshot, None).await
+                self.evaluate(snapshot, false).await
             })
             .await
             .clone()
     }
 
-    /// Evaluate a round at `snapshot`, under `permit` or a compute permit it
-    /// waits for, and judge whether views share.
+    /// Evaluate a round at `snapshot`, as a `probe` or for views waiting on
+    /// it, and judge whether views share.
     async fn evaluate(
         &self,
         snapshot: Arc<KnowledgeGraphSnapshot>,
-        permit: Option<OwnedSemaphorePermit>,
+        probe: bool,
     ) -> Result<Arc<Partitions>, String> {
         self.metrics.record_shared_evaluation();
         let rules = Arc::clone(snapshot.persistent_rules());
@@ -478,7 +509,7 @@ impl Family {
             &self.knowledge_graph,
             &self.shape.query,
             snapshot,
-            permit,
+            probe,
         )
         .await;
         let ran = match ran {
@@ -563,24 +594,26 @@ impl Family {
     }
 
     /// Evaluate a round at `snapshot` that no view waits for, at most one at
-    /// a time: the guard judging it decides whether views share. A probe
-    /// never waits for a compute permit: with none free now, or too few
-    /// permits for views to spare one, it does not start.
+    /// a time, under the server's probe permit: the guard judging it decides
+    /// whether views share. With too few compute permits to spare the CPU,
+    /// decide from the family's shape and `snapshot`'s rules instead.
     fn probe(family: &Arc<Family>, snapshot: Arc<KnowledgeGraphSnapshot>) {
-        if family.handler.compute_permits() < MIN_PERMITS_FOR_PROBES
-            || family.probing.swap(true, Ordering::Relaxed)
-        {
+        if family.handler.compute_permits() < MIN_PERMITS_FOR_PROBES {
+            if binds_recursion(&family.shape, &snapshot.rules) {
+                family.stop_sharing();
+            } else {
+                family.sharing.store(true, Ordering::Relaxed);
+            }
             return;
         }
-        let Some(permit) = family.handler.try_compute_permit() else {
-            family.probing.store(false, Ordering::Relaxed);
+        if family.probing.swap(true, Ordering::Relaxed) {
             return;
-        };
+        }
         let family = Arc::clone(family);
         tokio::spawn(async move {
             #[cfg(test)]
             let gate = family.probe_gate.read().await;
-            let _ = family.evaluate(snapshot, Some(permit)).await;
+            let _ = family.evaluate(snapshot, true).await;
             #[cfg(test)]
             drop(gate);
             family.probing.store(false, Ordering::Relaxed);
