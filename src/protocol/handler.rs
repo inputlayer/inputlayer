@@ -4394,8 +4394,8 @@ impl Handler {
                     MetaCommand::KgAclList(ref kg_filter) => {
                         let effective_kg = kg_filter
                             .as_deref()
-                            .or(knowledge_graph.as_deref())
-                            .unwrap_or("default");
+                            .or(current_kg)
+                            .ok_or_else(|| "No knowledge graph selected".to_string())?;
                         return self
                             .handle_kg_acl_list(effective_kg)
                             .map(|msg| self.message_result(&msg));
@@ -4616,16 +4616,15 @@ impl Handler {
             }
             if let Some(identity) = non_admin {
                 let targets: Vec<&str> = match stmt {
-                    Statement::Meta(MetaCommand::KgDrop(name) | MetaCommand::KgUse(name)) => {
-                        vec![name.as_str()]
-                    }
+                    Statement::Meta(
+                        MetaCommand::KgDrop(name)
+                        | MetaCommand::KgUse(name)
+                        | MetaCommand::KgAclList(Some(name)),
+                    ) => vec![name.as_str()],
                     Statement::Meta(
                         MetaCommand::KgAclGrant { kg_name, .. }
                         | MetaCommand::KgAclRevoke { kg_name, .. },
                     ) => vec![kg_name.as_str()],
-                    Statement::Meta(MetaCommand::KgAclList(kg_opt)) => {
-                        kg_opt.iter().map(String::as_str).collect()
-                    }
                     // Create targets no existing KG; list/show/help are global.
                     Statement::Meta(
                         MetaCommand::KgCreate(_)

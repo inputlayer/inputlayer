@@ -212,6 +212,29 @@ async fn decider_key_writes_only_its_relations() {
 }
 
 #[tokio::test]
+async fn scoped_key_lists_only_its_own_kgs_acl() {
+    let (handler, _tmp) = fixture().await;
+    handler.handle_user_create("bob", "bob-pw", "viewer").unwrap();
+    admin(&handler, ".kg acl grant other bob editor").await.unwrap();
+    let key = create_key(&handler, "agent role decider on shop relations attempt").await;
+    let agent = handler.authenticate_api_key(&key).unwrap();
+
+    for (kg, program) in [("other", ".kg acl list"), (KG, ".kg acl list other")] {
+        let refused = run_on(&handler, &agent, kg, program).await.unwrap_err();
+        assert!(
+            refused.contains("scoped to knowledge graph 'shop'"),
+            "{kg}: {program}: {refused}"
+        );
+    }
+    let listed = run(&handler, &agent, ".kg acl list").await.unwrap();
+    let WireValue::String(listed) = &listed.rows[0].values[0] else {
+        panic!("expected a message, got {listed:?}");
+    };
+    assert!(listed.contains("'shop'"), "{listed}");
+    assert!(!listed.contains("bob"), "{listed}");
+}
+
+#[tokio::test]
 async fn writer_key_writes_any_facts_but_no_policy() {
     let (handler, _tmp) = fixture().await;
     let key = create_key(&handler, "ingest role writer on shop").await;
