@@ -2,14 +2,15 @@
 //!
 //! Provides production-grade query execution with:
 //! - Deadlines and cancellation via cooperative checks ([`RequestControl`])
-//! - A per-query memory limit, metered per thread ([`memory`])
+//! - A per-query memory limit and a server-wide query memory budget,
+//!   metered per thread ([`memory`])
 
 pub mod hnsw_resolve;
 pub mod memory;
 mod request_control;
 pub mod timing;
 
-pub use request_control::{Halt, RequestControl, Stop, QUERY_MEMORY_EXCEEDED};
+pub use request_control::{Halt, QueryMemoryPool, RequestControl, Stop};
 pub use timing::{
     IrBuilderTiming, OptimizerTiming, RuleTiming, TimingBreakdown, TimingCollector,
     TimingHistograms, TimingMode,

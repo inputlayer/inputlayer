@@ -22,14 +22,19 @@ data:
     # limit is set). Set it to the CPUs requested in statefulset.yaml.
     num_threads = 0
     # Memory limits, refused with `resource_exhausted` rather than grown
-    # into. Keep the sum inside the memory limit in statefulset.yaml: every
-    # graph's budget, plus max_query_memory_bytes for each query running at
-    # once (up to about three quarters of the CPUs), plus the server itself.
-    # A query copies the facts it reads while it evaluates, so keep the
-    # per-query limit at least twice the graph budget: a query scanning a
-    # whole graph inside its budget must still fit.
-    max_query_memory_bytes = 2147483648 # 2 GiB
-    max_graph_memory_bytes = 1073741824 # 1 GiB
+    # into, sized for the 4Gi memory limit in statefulset.yaml:
+    # - max_total_query_memory_bytes (unset here) is what all running
+    #   queries may hold together: half the pod's limit, 2 GiB. However many
+    #   queries the CPUs admit at once, together they stop there.
+    # - The other 2 GiB hold the graphs' stored facts and the server: up to
+    #   three graphs at their full max_graph_memory_bytes.
+    # - A query copies the facts it reads while it evaluates, so the
+    #   per-query limit is twice the graph budget: a query scanning a whole
+    #   graph inside its budget fits, and two such queries run at once.
+    # Raising the pod's limit raises the query budget with it; raise the
+    # graph budget and the per-query limit together, keeping that ratio.
+    max_query_memory_bytes = 1073741824 # 1 GiB
+    max_graph_memory_bytes = 536870912 # 512 MiB
 
     [logging]
     format = "json"

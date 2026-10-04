@@ -238,4 +238,12 @@ Code `resource_exhausted`. The query's computation held more than `storage.perfo
 - Adding filters to reduce data
 - Raising the limit in config, if the server has the memory for it
 
+A query also fails with the same code when it grows while the queries running on the server together hold `storage.performance.max_total_query_memory_bytes`, the budget that keeps concurrent queries inside the server's memory:
+
+```
+Error: Request stopped: the queries running on the server hold their whole memory budget (storage.performance.max_total_query_memory_bytes); it was stopped before it began committing and nothing was applied. Retry later
+```
+
+Nothing was applied, and the query may succeed once the others finish: retry it later.
+
 A write fails with the same code when it would grow its knowledge graph's facts past `storage.performance.max_graph_memory_bytes`. Nothing is applied; deleting facts is always allowed, so free space and retry.

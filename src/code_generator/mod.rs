@@ -20,7 +20,7 @@ mod static_input;
 
 use crate::boolean_specialization::SemiringType;
 use crate::execution::memory::thread_net_bytes;
-use crate::execution::{RequestControl, Stop, QUERY_MEMORY_EXCEEDED};
+use crate::execution::{RequestControl, Stop};
 use crate::ir::{AggregateFunction, ArithOp, BuiltinFunction, IRExpression, IRNode, Predicate};
 use crate::semiring_types::{BooleanDiff, DiffType};
 use differential_dataflow::collection::vec::Collection;
@@ -48,7 +48,8 @@ use crate::vector_ops;
 mod scc;
 
 /// The running request's control on this thread, with the thread's net
-/// allocation when it was set: what the request holds is the growth since.
+/// allocation when it last charged the request: the growth since is what
+/// it charges next.
 type ThreadControl = Option<(Arc<RequestControl>, i64)>;
 
 // The running request's deadline, cancellation and memory limit, for
@@ -59,14 +60,22 @@ thread_local! {
 }
 
 /// Set the running request's control for the current thread, metering the
-/// thread's allocations against its memory limit from now on.
+/// thread's allocations against its memory limits from now on.
 /// Called from `spawn_blocking` before starting computation.
 pub fn set_request_control(control: Option<Arc<RequestControl>>) {
-    replace_thread_control(control.map(|c| (c, thread_net_bytes())));
+    replace_thread_control(control);
 }
 
-fn replace_thread_control(control: ThreadControl) -> ThreadControl {
-    REQUEST_CONTROL.with(|cell| cell.replace(control))
+/// Install `control` on this thread, metering from now on; returns the
+/// control it replaces, charged what this thread allocated since it last
+/// charged it.
+fn replace_thread_control(control: Option<Arc<RequestControl>>) -> Option<Arc<RequestControl>> {
+    let metered = control.map(|c| (c, thread_net_bytes()));
+    let replaced = REQUEST_CONTROL.with(|cell| cell.replace(metered));
+    replaced.map(|(c, seen)| {
+        c.charge_memory(thread_net_bytes() - seen);
+        c
+    })
 }
 
 /// The current thread's request control.
@@ -75,13 +84,16 @@ pub(crate) fn current_request_control() -> Option<Arc<RequestControl>> {
 }
 
 /// Whether the current request was stopped (deadline, cancel, or memory).
-/// Charges what this thread allocated since its request started against the
-/// request's memory limit first.
+/// Charges what this thread allocated since it last charged the request
+/// first.
 fn is_query_cancelled() -> bool {
     REQUEST_CONTROL.with(|cell| {
-        cell.borrow()
-            .as_ref()
-            .is_some_and(|(c, baseline)| c.charge_memory(thread_net_bytes() - baseline))
+        cell.borrow_mut().as_mut().is_some_and(|(c, seen)| {
+            let now = thread_net_bytes();
+            let delta = now - *seen;
+            *seen = now;
+            c.charge_memory(delta)
+        })
     })
 }
 
@@ -93,9 +105,11 @@ fn query_stopped_error() -> String {
     let Some(control) = current_request_control() else {
         return QUERY_CANCELLED.to_string();
     };
-    match control.stopped() {
-        Some(Stop::MemoryExhausted) => Stop::MemoryExhausted.message().to_string(),
-        None if control.memory_exceeded() => QUERY_MEMORY_EXCEEDED.to_string(),
+    match (control.stopped(), control.memory_exceeded()) {
+        (Some(stop @ (Stop::MemoryExhausted | Stop::ServerMemoryExhausted)), _) => {
+            stop.message().to_string()
+        }
+        (None, Some(stop)) => stop.after_commit_message().to_string(),
         _ => QUERY_CANCELLED.to_string(),
     }
 }
@@ -1187,8 +1201,8 @@ impl CodeGenerator {
         let all_results: Vec<Result<Vec<Tuple>, String>> = partitioned_inputs
             .into_par_iter()
             .map(|partition| {
-                // Each worker meters its own allocations from here.
-                let prev = replace_thread_control(control.clone().map(|c| (c, thread_net_bytes())));
+                // Each worker charges its allocations to the request from here.
+                let prev = replace_thread_control(control.clone());
                 let mut temp_codegen = CodeGenerator::new();
                 temp_codegen.set_semiring_type(semiring_type);
                 temp_codegen.set_max_result_rows(limit);
@@ -8523,7 +8537,7 @@ mod tests {
     #[test]
     fn test_memory_limit_stops_the_computation() {
         let run = |limit: u64| {
-            let control = RequestControl::limited(None, limit);
+            let control = RequestControl::limited(None, limit, None);
             set_request_control(Some(Arc::clone(&control)));
             let mut codegen = CodeGenerator::new();
             codegen.add_input(
@@ -8548,6 +8562,100 @@ mod tests {
         let (result, stopped) = run(1 << 30);
         assert_eq!(result.unwrap().len(), 20_000);
         assert_eq!(stopped, None);
+    }
+
+    /// A small partitionable query over 2000 rows, and a generator for it.
+    fn small_scan() -> (CodeGenerator, IRNode) {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input(
+            "data".to_string(),
+            (0..2000)
+                .map(|i| Tuple::new(vec![Value::Int64(i), Value::Int64(i + 1)]))
+                .collect(),
+        );
+        let ir = IRNode::Scan {
+            relation: "data".to_string(),
+            schema: vec!["x".to_string(), "y".to_string()],
+        };
+        (codegen, ir)
+    }
+
+    /// Run `small_scan` on four workers under `control`, after this thread
+    /// charged it `ballast` bytes it still holds.
+    fn run_on_workers(control: &Arc<RequestControl>, ballast: usize) -> Result<usize, String> {
+        let (codegen, ir) = small_scan();
+        set_request_control(Some(Arc::clone(control)));
+        let held = vec![1u8; ballast];
+        let stopped = is_query_cancelled();
+        let result = codegen.execute_with_config(&ir, ExecutionConfig::with_workers(4));
+        set_request_control(None);
+        drop(held);
+        assert!(!stopped, "the ballast alone fits");
+        result.map(|rows| rows.len())
+    }
+
+    /// The workers of one query charge one count: what the query already
+    /// holds on another thread counts against them, so the query is capped
+    /// at its limit however many workers it runs on.
+    #[test]
+    fn test_memory_limit_caps_a_query_across_its_workers() {
+        const LIMIT: u64 = 4 << 20;
+        let control = RequestControl::limited(None, LIMIT, None);
+        assert_eq!(run_on_workers(&control, 0), Ok(2000));
+        assert_eq!(control.stopped(), None);
+
+        let control = RequestControl::limited(None, LIMIT, None);
+        let result = run_on_workers(&control, (LIMIT - (64 << 10)) as usize);
+        assert_eq!(result.unwrap_err(), Stop::MemoryExhausted.message());
+        assert_eq!(control.stopped(), Some(Stop::MemoryExhausted));
+    }
+
+    /// Requests running at once share the server's budget: a query that
+    /// fits its own limit is stopped while others hold the budget, and runs
+    /// once they ended.
+    #[test]
+    fn test_concurrent_queries_are_capped_by_the_server_budget() {
+        const BUDGET: u64 = 8 << 20;
+        let pool = crate::execution::QueryMemoryPool::new(BUDGET);
+        let limited = || RequestControl::limited(None, 1 << 30, Some(Arc::clone(&pool)));
+
+        // Three requests hold all but 64 KiB of the budget between them.
+        let ballast = ((BUDGET - (64 << 10)) / 3) as usize;
+        let others: Vec<_> = (0..3)
+            .map(|_| {
+                let control = limited();
+                std::thread::spawn(move || {
+                    set_request_control(Some(Arc::clone(&control)));
+                    let held = vec![1u8; ballast];
+                    let stopped = is_query_cancelled();
+                    set_request_control(None);
+                    (control, held, stopped)
+                })
+            })
+            .collect();
+        let others: Vec<_> = others.into_iter().map(|t| t.join().unwrap()).collect();
+        assert!(
+            others.iter().all(|(_, _, stopped)| !stopped),
+            "together they fit the budget"
+        );
+
+        let control = limited();
+        let (codegen, ir) = small_scan();
+        set_request_control(Some(Arc::clone(&control)));
+        let result = codegen.execute(&ir);
+        set_request_control(None);
+        assert_eq!(result.unwrap_err(), Stop::ServerMemoryExhausted.message());
+        assert_eq!(control.stopped(), Some(Stop::ServerMemoryExhausted));
+
+        drop(others);
+        assert!(pool.held() < (BUDGET / 2) as i64, "{}", pool.held());
+        let control = limited();
+        let (codegen, ir) = small_scan();
+        set_request_control(Some(Arc::clone(&control)));
+        let result = codegen.execute(&ir);
+        set_request_control(None);
+        assert_eq!(result.unwrap().len(), 2000);
+        assert_eq!(control.stopped(), None);
     }
 
     /// Inputs share tuples with the caller's map; adding a relation to the

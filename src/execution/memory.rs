@@ -1,15 +1,18 @@
-//! Per-thread heap accounting for the per-query memory limit.
+//! Per-thread heap accounting for the per-query memory limit and the
+//! server's query memory budget.
 //!
 //! [`MeteredAllocator`], the process's global allocator, forwards to the
 //! system allocator and keeps a running count of the bytes each thread has
 //! allocated minus the bytes it has freed. The count is a plain thread-local
 //! cell: no lock and no atomic on the allocation path.
 //!
-//! A request's computation runs on one thread (Differential Dataflow executes
-//! in place), so the change in that thread's count since the request started
-//! is what the request holds. [`RequestControl::charge_memory`] compares it
-//! with the request's limit at the evaluator's cooperative checkpoints and
-//! stops the request when it is over, as a deadline would.
+//! A request's computation runs on the threads evaluating it (Differential
+//! Dataflow executes in place), so the change in their counts since the
+//! request started is what the request holds. At the evaluator's cooperative checkpoints each
+//! thread charges its growth since the last one through
+//! [`RequestControl::charge_memory`], which sums it over the request's
+//! threads and over all requests in flight and stops a request over its limit
+//! or growing past the server's budget, as a deadline would.
 //!
 //! [`RequestControl::charge_memory`]: super::RequestControl::charge_memory
 
@@ -33,6 +36,17 @@ fn charge(bytes: i64) {
 /// anything.
 pub fn thread_net_bytes() -> i64 {
     NET_BYTES.try_with(Cell::get).unwrap_or(0)
+}
+
+/// The memory limit of the container the process runs in: its cgroup's
+/// (v2, else v1) limit, if one is set.
+pub fn container_memory_limit() -> Option<u64> {
+    let read = |path| std::fs::read_to_string(path).ok();
+    let text = read("/sys/fs/cgroup/memory.max")
+        .or_else(|| read("/sys/fs/cgroup/memory/memory.limit_in_bytes"))?;
+    // v2 says `max` when unlimited, v1 a number near 2^63.
+    let limit: u64 = text.trim().parse().ok()?;
+    (limit < 1 << 60).then_some(limit)
 }
 
 /// The system allocator, metering each thread's net allocation.

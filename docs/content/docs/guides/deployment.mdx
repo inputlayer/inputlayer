@@ -77,6 +77,7 @@ max_result_rows = 100000
 slow_query_log_ms = 5000
 max_query_memory_bytes = 8589934592 # 8 GiB per query; refused past it
 max_graph_memory_bytes = 4294967296 # 4 GiB of facts per graph
+max_total_query_memory_bytes = 17179869184 # 16 GiB for all queries at once (32 GB host)
 
 [logging]
 level = "info"
@@ -567,22 +568,39 @@ InputLayer holds the active working set in memory via Differential Dataflow. Mem
 | Medium production | 1M - 10M | 200 - 1000 | 8 - 16 GB |
 | Large production | 10M+ | 1000+ | 32 GB+ |
 
-Two limits keep the server inside that memory and refuse work with
+Three limits keep the server inside that memory and refuse work with
 `resource_exhausted` instead of growing past it:
 
 - `max_graph_memory_bytes` bounds the **stored data**: the facts of one
   knowledge graph, as estimated from their tuples.
-- `max_query_memory_bytes` bounds a query's **working set**: everything it
-  holds while it evaluates. A query copies the facts it reads into its
-  dataflow, and joins and recursive rules hold intermediate results on top,
-  so its working set is a multiple of the data it reads. Keep the per-query
-  limit at least twice the graph budget, so a query that scans a whole graph
-  inside its budget still runs; raise it further for joins and recursion over
-  large relations.
+- `max_query_memory_bytes` bounds one query's **working set**: everything it
+  holds while it evaluates, summed over all the threads evaluating it. A
+  query copies the facts it reads into its dataflow, and joins and recursive
+  rules hold intermediate results on top, so its working set is a multiple of
+  the data it reads. Keep the per-query limit at least twice the graph
+  budget, so a query that scans a whole graph inside its budget still runs;
+  raise it further for joins and recursion over large relations.
+- `max_total_query_memory_bytes` bounds the working sets of **all queries
+  running at once**. Up to about three quarters of the CPUs run queries
+  concurrently; a query that grows while they hold this much is stopped, so
+  concurrency can never push the server past its memory. Unset, it is half
+  the container's memory limit (its cgroup), or no limit when the server
+  runs outside a memory-limited container: set it explicitly there.
 
-Size the container for the sum: every graph's budget, plus
-`max_query_memory_bytes` for each query running at once (up to about three
-quarters of the CPUs), plus the server itself.
+The sizing rule that keeps the process inside its memory limit is:
+
+```
+max_total_query_memory_bytes
+  + (graphs at full budget) × max_graph_memory_bytes
+  + server overhead (about 0.5 GB)
+  ≤ memory limit
+```
+
+For example, a 32 GB host with the configuration above gives 16 GiB to
+queries (two whole-graph queries at 8 GiB at once) and holds up to three
+graphs at their full 4 GiB budget. The Kubernetes base manifests size the
+same way for their 4Gi pod: 2 GiB for queries (derived from the pod's limit),
+`max_query_memory_bytes` 1 GiB and `max_graph_memory_bytes` 512 MiB.
 
 ### CPU
 

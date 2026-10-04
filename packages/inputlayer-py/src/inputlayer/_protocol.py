@@ -127,8 +127,8 @@ ErrorCode = Literal[
 ``deadline_exceeded`` and ``cancelled`` stop it before it began committing, so
 nothing was applied; ``outcome_unknown`` means its commit failed in a way that
 leaves the changes possibly applied: read the state back before retrying.
-``resource_exhausted`` refuses a query over the engine's per-query memory limit,
-or a write past its knowledge graph's memory budget; nothing was applied."""
+``resource_exhausted`` refuses a query over the engine's per-query memory limit
+or its server-wide query memory budget, or a write past its knowledge graph's memory budget; nothing was applied."""
 
 
 @dataclass(frozen=True)

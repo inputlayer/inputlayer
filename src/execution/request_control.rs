@@ -7,7 +7,7 @@
 //! ```text
 //! Running ──deadline──▶ Stopped(Deadline)
 //!    │ ────cancel────▶ Stopped(Cancelled)
-//!    │ ────memory────▶ Stopped(MemoryExhausted)
+//!    │ ────memory────▶ Stopped(MemoryExhausted | ServerMemoryExhausted)
 //!    │ ──begin_commit─▶ Committing   (durable work started: not interruptible)
 //!    └────finish──────▶ Finished     (result computed: too late to stop)
 //! ```
@@ -18,14 +18,17 @@
 //!
 //! Computation polls [`RequestControl::is_stopped`] at its existing
 //! cooperative checkpoints: one relaxed atomic load, no lock. At the same
-//! checkpoints the evaluator reports what its thread holds through
-//! [`RequestControl::charge_memory`], which stops a request over its memory
-//! limit. The memory limit holds for every computation of the request, even
-//! one that runs after the request began committing (a query after a write
-//! in the same program): the commit is not interrupted, but that
-//! computation is.
+//! checkpoints each thread computing for the request charges what it
+//! allocated since its last checkpoint through
+//! [`RequestControl::charge_memory`]: all threads of a request add to one
+//! count, held against the request's memory limit, and every request adds to
+//! the server's [`QueryMemoryPool`]. A request over its limit, or growing
+//! while the pool is over its budget, is stopped. The memory limits hold for
+//! every computation of the request, even one that runs after the request
+//! began committing (a query after a write in the same program): the commit
+//! is not interrupted, but that computation is.
 
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -37,6 +40,7 @@ const STOPPED_CANCELLED: u8 = 2;
 const COMMITTING: u8 = 3;
 const FINISHED: u8 = 4;
 const STOPPED_MEMORY: u8 = 5;
+const STOPPED_SERVER_MEMORY: u8 = 6;
 
 /// The stop a state records, if it is a stopped state.
 fn stop_of(state: u8) -> Option<Stop> {
@@ -44,14 +48,46 @@ fn stop_of(state: u8) -> Option<Stop> {
         STOPPED_DEADLINE => Some(Stop::Deadline),
         STOPPED_CANCELLED => Some(Stop::Cancelled),
         STOPPED_MEMORY => Some(Stop::MemoryExhausted),
+        STOPPED_SERVER_MEMORY => Some(Stop::ServerMemoryExhausted),
         _ => None,
     }
 }
 
-/// The error of a computation over the per-query memory limit that ran
-/// after its request began committing: what the request committed stays.
-pub const QUERY_MEMORY_EXCEEDED: &str = "Query exceeded the per-query memory limit \
-     (storage.performance.max_query_memory_bytes). Narrow the query or bind more of its arguments";
+/// Bytes held by the computations of every request in flight, against the
+/// server's budget for them. Requests charge it by the same deltas they
+/// charge themselves, and give back what they still hold when they end.
+#[derive(Debug, Default)]
+pub struct QueryMemoryPool {
+    /// Most bytes all running computations may hold together; 0 = no limit.
+    budget: u64,
+    held: AtomicI64,
+}
+
+impl QueryMemoryPool {
+    /// A pool of `budget` bytes (0: no limit).
+    pub fn new(budget: u64) -> Arc<Self> {
+        Arc::new(Self {
+            budget,
+            held: AtomicI64::new(0),
+        })
+    }
+
+    /// Most bytes all running computations may hold together; 0 = no limit.
+    pub fn budget(&self) -> u64 {
+        self.budget
+    }
+
+    /// Bytes the computations in flight hold.
+    pub fn held(&self) -> i64 {
+        self.held.load(Ordering::Acquire)
+    }
+
+    /// Add `delta` bytes; whether that grew the pool past its budget.
+    fn charge(&self, delta: i64) -> bool {
+        let held = self.held.fetch_add(delta, Ordering::AcqRel) + delta;
+        delta > 0 && self.budget > 0 && held > 0 && held as u64 > self.budget
+    }
+}
 
 /// Why a request was stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +98,9 @@ pub enum Stop {
     Cancelled,
     /// Its computation went over the per-query memory limit.
     MemoryExhausted,
+    /// Its computation grew while the computations in flight held more than
+    /// the server's budget for them.
+    ServerMemoryExhausted,
 }
 
 impl Stop {
@@ -77,6 +116,28 @@ impl Stop {
                  (storage.performance.max_query_memory_bytes) before it began committing; \
                  nothing was applied. Narrow the query or bind more of its arguments"
             }
+            Self::ServerMemoryExhausted => {
+                "Request stopped: the queries running on the server hold their whole memory \
+                 budget (storage.performance.max_total_query_memory_bytes); it was stopped \
+                 before it began committing and nothing was applied. Retry later"
+            }
+        }
+    }
+
+    /// The error of a computation stopped for this reason after its request
+    /// began committing: what the request committed stays.
+    pub fn after_commit_message(self) -> &'static str {
+        match self {
+            Self::MemoryExhausted => {
+                "Query exceeded the per-query memory limit \
+                 (storage.performance.max_query_memory_bytes). \
+                 Narrow the query or bind more of its arguments"
+            }
+            Self::ServerMemoryExhausted => {
+                "Query stopped: the queries running on the server hold their whole memory \
+                 budget (storage.performance.max_total_query_memory_bytes). Retry later"
+            }
+            Self::Deadline | Self::Cancelled => self.message(),
         }
     }
 }
@@ -96,10 +157,14 @@ pub enum Halt {
 #[derive(Debug)]
 pub struct RequestControl {
     deadline: Option<Instant>,
-    /// Most bytes the computation may hold on one thread; 0 = no limit.
+    /// Most bytes the computation may hold; 0 = no limit.
     memory_limit: u64,
-    /// A computation of the request went over its memory limit.
-    memory_exceeded: AtomicBool,
+    /// Bytes the computation holds, summed over its threads.
+    held: AtomicI64,
+    /// The server's pool the request also charges, if any.
+    pool: Option<Arc<QueryMemoryPool>>,
+    /// The memory stop a computation of the request hit, if any (a state).
+    memory_exceeded: AtomicU8,
     state: AtomicU8,
     /// Wakes [`Self::interrupted`] on an explicit cancel.
     cancelled: Notify,
@@ -108,16 +173,23 @@ pub struct RequestControl {
 impl RequestControl {
     /// A running request that must finish by `deadline`, if any.
     pub fn new(deadline: Option<Instant>) -> Arc<Self> {
-        Self::limited(deadline, 0)
+        Self::limited(deadline, 0, None)
     }
 
     /// A running request that must finish by `deadline`, if any, holding at
-    /// most `memory_limit` bytes while it computes (0: no limit).
-    pub fn limited(deadline: Option<Instant>, memory_limit: u64) -> Arc<Self> {
+    /// most `memory_limit` bytes while it computes (0: no limit), charged to
+    /// `pool` as well.
+    pub fn limited(
+        deadline: Option<Instant>,
+        memory_limit: u64,
+        pool: Option<Arc<QueryMemoryPool>>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             deadline,
             memory_limit,
-            memory_exceeded: AtomicBool::new(false),
+            held: AtomicI64::new(0),
+            pool,
+            memory_exceeded: AtomicU8::new(RUNNING),
             state: AtomicU8::new(RUNNING),
             cancelled: Notify::new(),
         })
@@ -128,7 +200,7 @@ impl RequestControl {
         Self::new(timeout.map(|t| Instant::now() + t))
     }
 
-    /// Most bytes the computation may hold on one thread; 0 = no limit.
+    /// Most bytes the computation may hold; 0 = no limit.
     pub fn memory_limit(&self) -> u64 {
         self.memory_limit
     }
@@ -147,35 +219,56 @@ impl RequestControl {
     pub fn is_stopped(&self) -> bool {
         matches!(
             self.state.load(Ordering::Relaxed),
-            STOPPED_DEADLINE | STOPPED_CANCELLED | STOPPED_MEMORY
+            STOPPED_DEADLINE | STOPPED_CANCELLED | STOPPED_MEMORY | STOPPED_SERVER_MEMORY
         )
     }
 
-    /// Report that the computation now holds `held` bytes on the calling
-    /// thread, stopping the request if that is over its memory limit.
-    /// Returns whether the computation must stop: the request was stopped,
-    /// for whatever reason, or the computation is over its memory limit. A
-    /// request that began committing is not stopped, as its commit always
-    /// runs to completion, but a computation over the limit still stops.
-    pub fn charge_memory(&self, held: i64) -> bool {
-        if self.memory_limit > 0 && held > 0 && held as u64 > self.memory_limit {
-            let halt = self.stop(STOPPED_MEMORY);
+    /// Report that a thread of the computation allocated `delta` more bytes
+    /// than it freed since its last report, stopping the request if it now
+    /// holds more than its memory limit, or grew the server's pool past its
+    /// budget. Returns whether the computation must stop: the request was
+    /// stopped, for whatever reason, or its computation went over a memory
+    /// limit. A request that began committing is not stopped, as its commit
+    /// always runs to completion, but a computation over a limit still stops.
+    pub fn charge_memory(&self, delta: i64) -> bool {
+        let held = self.held.fetch_add(delta, Ordering::AcqRel) + delta;
+        let over_pool = self.pool.as_ref().is_some_and(|pool| pool.charge(delta));
+        let over = if self.memory_limit > 0 && held > 0 && held as u64 > self.memory_limit {
+            Some(STOPPED_MEMORY)
+        } else if over_pool {
+            Some(STOPPED_SERVER_MEMORY)
+        } else {
+            None
+        };
+        if let Some(stop) = over {
+            let halt = self.stop(stop);
             if !matches!(halt, Halt::AlreadyStopped(_))
-                && !self.memory_exceeded.swap(true, Ordering::AcqRel)
+                && self
+                    .memory_exceeded
+                    .compare_exchange(RUNNING, stop, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
             {
                 tracing::warn!(
                     held_bytes = held,
                     limit_bytes = self.memory_limit,
+                    pool_held_bytes = self.pool.as_ref().map_or(0, |pool| pool.held()),
+                    pool_budget_bytes = self.pool.as_ref().map_or(0, |pool| pool.budget()),
+                    reason = ?stop_of(stop),
                     "query_memory_limit_exceeded"
                 );
             }
         }
-        self.is_stopped() || self.memory_exceeded()
+        self.is_stopped() || self.memory_exceeded().is_some()
     }
 
-    /// Whether a computation of the request went over its memory limit.
-    pub fn memory_exceeded(&self) -> bool {
-        self.memory_exceeded.load(Ordering::Acquire)
+    /// The memory limit a computation of the request went over, if any.
+    pub fn memory_exceeded(&self) -> Option<Stop> {
+        stop_of(self.memory_exceeded.load(Ordering::Acquire))
+    }
+
+    /// Bytes the computation holds, summed over its threads.
+    pub fn memory_held(&self) -> i64 {
+        self.held.load(Ordering::Acquire)
     }
 
     /// Whether the request began durable work, which is not interrupted.
@@ -275,6 +368,15 @@ impl RequestControl {
     }
 }
 
+impl Drop for RequestControl {
+    /// The request ended: what its computation still holds leaves the pool.
+    fn drop(&mut self) {
+        if let Some(pool) = &self.pool {
+            pool.held.fetch_sub(*self.held.get_mut(), Ordering::AcqRel);
+        }
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -345,12 +447,14 @@ mod tests {
 
     #[test]
     fn going_over_the_memory_limit_stops_the_request() {
-        let control = RequestControl::limited(None, 1000);
+        let control = RequestControl::limited(None, 1000, None);
         assert_eq!(control.memory_limit(), 1000);
         assert!(!control.charge_memory(1000));
         assert!(!control.charge_memory(-5000));
-        assert!(control.charge_memory(1001));
-        assert!(control.memory_exceeded());
+        assert!(!control.charge_memory(5000));
+        assert_eq!(control.memory_held(), 1000);
+        assert!(control.charge_memory(1));
+        assert_eq!(control.memory_exceeded(), Some(Stop::MemoryExhausted));
         assert_eq!(control.stopped(), Some(Stop::MemoryExhausted));
         assert_eq!(control.finish(), Err(Stop::MemoryExhausted));
         assert_eq!(control.begin_commit(), Err(Stop::MemoryExhausted));
@@ -361,16 +465,60 @@ mod tests {
     }
 
     #[test]
+    fn the_threads_of_a_request_share_its_memory_limit() {
+        let control = RequestControl::limited(None, 1000, None);
+        let charged: Vec<bool> = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..4)
+                .map(|_| scope.spawn(|| control.charge_memory(300)))
+                .collect();
+            workers.into_iter().map(|w| w.join().unwrap()).collect()
+        });
+        assert!(charged.iter().any(|&stopped| stopped));
+        assert_eq!(control.memory_held(), 1200);
+        assert_eq!(control.stopped(), Some(Stop::MemoryExhausted));
+    }
+
+    #[test]
+    fn concurrent_requests_are_capped_by_the_pool() {
+        let pool = QueryMemoryPool::new(1000);
+        let requests: Vec<_> = (0..4)
+            .map(|_| RequestControl::limited(None, 800, Some(Arc::clone(&pool))))
+            .collect();
+        // Each fits its own limit; together they would hold 1600 bytes.
+        let stopped: Vec<bool> = std::thread::scope(|scope| {
+            let running: Vec<_> = requests
+                .iter()
+                .map(|request| scope.spawn(|| request.charge_memory(400)))
+                .collect();
+            running.into_iter().map(|r| r.join().unwrap()).collect()
+        });
+        let over = stopped.iter().filter(|&&s| s).count();
+        assert_eq!(over, 2, "{stopped:?}");
+        for (request, stopped) in requests.iter().zip(&stopped) {
+            let reason = stopped.then_some(Stop::ServerMemoryExhausted);
+            assert_eq!(request.stopped(), reason);
+        }
+        assert_eq!(pool.held(), 1600);
+
+        // Ended requests give back what they held.
+        drop(requests);
+        assert_eq!(pool.held(), 0);
+        let next = RequestControl::limited(None, 800, Some(Arc::clone(&pool)));
+        assert!(!next.charge_memory(700));
+        assert_eq!(pool.held(), 700);
+    }
+
+    #[test]
     fn a_computation_after_the_commit_began_still_stops_at_its_memory_limit() {
         let unlimited = RequestControl::new(None);
-        assert!(!unlimited.charge_memory(i64::MAX));
-        assert!(!unlimited.memory_exceeded());
+        assert!(!unlimited.charge_memory(i64::MAX / 2));
+        assert_eq!(unlimited.memory_exceeded(), None);
 
-        let committing = RequestControl::limited(None, 10);
+        let committing = RequestControl::limited(None, 10, None);
         committing.begin_commit().unwrap();
         assert!(!committing.charge_memory(10));
         assert!(committing.charge_memory(1 << 30));
-        assert!(committing.memory_exceeded());
+        assert_eq!(committing.memory_exceeded(), Some(Stop::MemoryExhausted));
         // The commit itself is not interrupted.
         assert!(committing.is_committing());
         assert_eq!(committing.stopped(), None);
@@ -378,12 +526,12 @@ mod tests {
 
         // A stop that already happened is reported, whatever the charge,
         // and stays the reason.
-        let cancelled = RequestControl::limited(None, 10);
+        let cancelled = RequestControl::limited(None, 10, None);
         cancelled.cancel();
         assert!(cancelled.charge_memory(0));
         assert!(cancelled.charge_memory(1 << 30));
         assert_eq!(cancelled.stopped(), Some(Stop::Cancelled));
-        assert!(!cancelled.memory_exceeded());
+        assert_eq!(cancelled.memory_exceeded(), None);
     }
 
     #[tokio::test]

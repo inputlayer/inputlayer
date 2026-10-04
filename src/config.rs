@@ -264,13 +264,22 @@ pub struct PerformanceConfig {
     #[serde(default)]
     pub max_query_cost: u64,
 
-    /// Most heap bytes one request's computation may hold on a thread.
-    /// A query that grows past it is stopped and refused with
-    /// `resource_exhausted`; nothing it would have changed is applied.
-    /// Size the container for every compute permit running a query this
-    /// large at once, plus the knowledge graphs' budgets. 0 = no limit.
+    /// Most heap bytes one request's computation may hold, summed over all
+    /// the threads evaluating it. A query that grows past it is stopped and
+    /// refused with `resource_exhausted`; nothing it would have changed is
+    /// applied. 0 = no limit.
     #[serde(default = "default_max_query_memory_bytes")]
     pub max_query_memory_bytes: u64,
+
+    /// Most heap bytes the computations of all requests in flight may hold
+    /// together. A query that grows while they hold more is stopped and
+    /// refused with `resource_exhausted`, so concurrent queries never push
+    /// the server past its container. Unset: half the container's memory
+    /// limit (cgroup), the other half left to the knowledge graphs' stored
+    /// facts and the server; no limit outside a memory-limited container.
+    /// 0 = no limit.
+    #[serde(default)]
+    pub max_total_query_memory_bytes: Option<u64>,
 
     /// Memory budget of each knowledge graph's stored facts, as estimated
     /// from their tuples. A write that would grow a graph past it is refused
@@ -1010,6 +1019,7 @@ impl Config {
                     max_query_cost: 0,
                     max_query_memory_bytes: default_max_query_memory_bytes(),
                     max_graph_memory_bytes: 0,
+                    max_total_query_memory_bytes: None,
                     timing_mode: crate::execution::TimingMode::default(),
                 },
                 max_knowledge_graphs: 1000,
@@ -1032,6 +1042,16 @@ impl Default for Config {
     }
 }
 
+impl PerformanceConfig {
+    /// The budget of all requests' computations together, in bytes; 0 = no
+    /// limit. See [`Self::max_total_query_memory_bytes`].
+    pub fn total_query_memory_bytes(&self) -> u64 {
+        self.max_total_query_memory_bytes.unwrap_or_else(|| {
+            crate::execution::memory::container_memory_limit().map_or(0, |limit| limit / 2)
+        })
+    }
+}
+
 impl Default for PerformanceConfig {
     fn default() -> Self {
         PerformanceConfig {
@@ -1047,7 +1067,8 @@ impl Default for PerformanceConfig {
             slow_query_log_ms: default_slow_query_log_ms(),
             max_query_cost: 0, // 0 = unlimited
             max_query_memory_bytes: default_max_query_memory_bytes(),
-            max_graph_memory_bytes: 0, // 0 = unlimited
+            max_graph_memory_bytes: 0,          // 0 = unlimited
+            max_total_query_memory_bytes: None, // half the container's limit
             timing_mode: crate::execution::TimingMode::default(),
         }
     }

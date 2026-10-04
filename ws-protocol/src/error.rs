@@ -32,7 +32,8 @@ pub enum ErrorCode {
     /// not be applied. Read the state back before retrying.
     OutcomeUnknown,
     /// The request would go over a memory limit: its query held more than
-    /// the per-query limit, or its writes would grow the knowledge graph past
+    /// the per-query limit or grew past the server's query memory budget, or
+    /// its writes would grow the knowledge graph past
     /// its memory budget. It was refused and nothing was applied.
     ResourceExhausted,
 }

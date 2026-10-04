@@ -10,7 +10,7 @@
 //! Test code uses `expect()` with descriptive messages for better failure diagnostics.
 
 use crate::ast::Term;
-use crate::execution::RequestControl;
+use crate::execution::{QueryMemoryPool, RequestControl};
 use crate::index_manager::IndexStats;
 use crate::rule_catalog::validate_rule;
 
@@ -199,6 +199,8 @@ pub struct Handler {
     /// Permits of standing-query sharing probes, apart from the compute
     /// permits so that a probe never takes one a query waits for.
     probe_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Memory held by the computations of every request in flight.
+    query_memory: Arc<QueryMemoryPool>,
     /// Accumulated timing histogram buckets for Prometheus export.
     timing_histograms: Arc<crate::execution::timing::TimingHistograms>,
     /// Standing-query counters (evaluations, active subscriptions, views).
@@ -983,6 +985,7 @@ impl Handler {
         // The rest are available for CPU-bound DD computations via spawn_blocking.
         let io_reserve = (ncpu / 4).max(2).min(ncpu - 1);
         let compute_permits = ncpu - io_reserve;
+        let total_query_memory = config.storage.performance.total_query_memory_bytes();
         Self {
             storage: Arc::new(RwLock::new(storage)),
             config,
@@ -994,6 +997,7 @@ impl Handler {
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             compute_permits,
             probe_semaphore: Arc::new(tokio::sync::Semaphore::new(PROBE_PERMITS)),
+            query_memory: QueryMemoryPool::new(total_query_memory),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             subscription_metrics: Arc::default(),
             subscription_hub: std::sync::OnceLock::new(),
@@ -1011,7 +1015,14 @@ impl Handler {
         config.validate()?;
         let storage =
             StorageEngine::new(config).map_err(|e| format!("Failed to create storage: {e}"))?;
-        Ok(Self::new(storage))
+        let handler = Self::new(storage);
+        info!(
+            query_memory_bytes = handler.config.storage.performance.max_query_memory_bytes,
+            total_query_memory_bytes = handler.query_memory.budget(),
+            compute_permits = handler.query_semaphore.available_permits(),
+            "query_memory_limits"
+        );
+        Ok(handler)
     }
 
     /// Create a new handler with custom session configuration.
@@ -1024,6 +1035,7 @@ impl Handler {
         // Reserve ~25% of cores (min 2) for Tokio async I/O, health checks, WebSocket handling.
         let io_reserve = (ncpu / 4).max(2).min(ncpu - 1);
         let compute_permits = ncpu - io_reserve;
+        let total_query_memory = config.storage.performance.total_query_memory_bytes();
         Self {
             storage: Arc::new(RwLock::new(storage)),
             config,
@@ -1035,6 +1047,7 @@ impl Handler {
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             compute_permits,
             probe_semaphore: Arc::new(tokio::sync::Semaphore::new(PROBE_PERMITS)),
+            query_memory: QueryMemoryPool::new(total_query_memory),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             subscription_metrics: Arc::default(),
             subscription_hub: std::sync::OnceLock::new(),
@@ -1077,6 +1090,7 @@ impl Handler {
         RequestControl::limited(
             ms.map(|ms| Instant::now() + std::time::Duration::from_millis(ms)),
             self.config.storage.performance.max_query_memory_bytes,
+            Some(Arc::clone(&self.query_memory)),
         )
     }
 
@@ -3436,7 +3450,7 @@ impl QueryJob {
             Ok(executed) => executed,
             Err(e) => {
                 let over_memory = crate::code_generator::current_request_control()
-                    .is_some_and(|c| c.memory_exceeded());
+                    .is_some_and(|c| c.memory_exceeded().is_some());
                 let code = if over_memory {
                     ErrorCode::ResourceExhausted
                 } else {

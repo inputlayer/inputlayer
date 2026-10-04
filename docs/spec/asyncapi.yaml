@@ -702,7 +702,8 @@ components:
         have left the changes applied; read the state back before retrying.
         `store_read_only`: the write was refused because the store is read-only
         until restart recovery. `resource_exhausted`: a query went over the
-        per-query memory limit, or a write would grow its knowledge graph past
+        per-query memory limit or grew while the server's queries held their
+        whole memory budget, or a write would grow its knowledge graph past
         its memory budget; nothing was applied.
 
     StatementError:
