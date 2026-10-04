@@ -823,20 +823,9 @@ function explainable(plan: QueryPlan, what: string): QueryPlan {
   return plan;
 }
 
-/** The engine's reply to one insert statement. */
-const INSERTED = /^Inserted (\d+) fact\(s\) into '.*'\.$/;
-
 /** Facts stored, summed over the engine's per-statement insert replies. */
 function insertedCount(result: ResultResponse): number {
-  let count = 0;
-  for (const row of result.rows) {
-    const match = INSERTED.exec(String(row[0]));
-    if (!match) {
-      throw new InternalError(`Unexpected insert reply from the engine: ${JSON.stringify(row)}`);
-    }
-    count += Number(match[1]);
-  }
-  return count;
+  return result.rows.reduce((count, row) => count + parseWriteMessage(String(row[0])).inserted, 0);
 }
 
 /** Pick `vars` out of engine rows, in order. */

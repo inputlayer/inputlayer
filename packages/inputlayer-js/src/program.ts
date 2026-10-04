@@ -7,7 +7,7 @@
  * and the row is removed last, so the program applies whole or not at all.
  * The single-head `+r(...) <- body` form is never emitted for a fact write:
  * the engine registers it as a rule. A guarded insert is the update form
- * with a ghost delete, `-r(ghost), +r(...) <- body`.
+ * with a ghost delete, `-il_ghost(0), +r(...) <- body`.
  *
  * Every function here is pure; `KnowledgeGraph` runs what they return.
  */
@@ -59,18 +59,8 @@ export interface CompiledProgram {
   writeIndexes: number[];
 }
 
-/** A never-present row of `rel`: the delete anchor of a guarded insert. */
-function ghost(rel: RelationDef): string {
-  const values = rel.columns.map((c) => {
-    const type = rel.columnTypes[c];
-    if (type === 'string') return '""';
-    if (type === 'float') return '-1.0';
-    if (type === 'bool') return 'false';
-    if (type.startsWith('vector')) return '[]';
-    return '-1';
-  });
-  return `-${rel.relationName}(${values.join(', ')})`;
-}
+/** Delete anchor of a guarded insert: a row of an SDK-owned relation nothing writes. */
+const GHOST = '-il_ghost(0)';
 
 /** Literal values of a full row, in column order; refuses a missing column. */
 function rowValues(rel: RelationDef, fact: Fact, what: string): string[] {
@@ -131,7 +121,7 @@ function writeStatements(s: Statement, cond?: string): string[] {
         return [s.facts.length === 1 ? compileInsert(s.rel, s.facts[0]) : compileBulkInsert(s.rel, s.facts)];
       }
       return s.facts.map(
-        (f) => `${ghost(s.rel)}, +${s.rel.relationName}(${rowValues(s.rel, f, 'insert()').join(', ')}) <- ${cond}`,
+        (f) => `${GHOST}, +${s.rel.relationName}(${rowValues(s.rel, f, 'insert()').join(', ')}) <- ${cond}`,
       );
     case 'retract': {
       const atom = `${s.rel.relationName}(${rowValues(s.rel, s.fact, 'retract()').join(', ')})`;
@@ -404,7 +394,7 @@ export function compileClaim(rel: RelationDef, row: Fact, opts: ClaimOptions = {
   const guard = compileGuard([...when, ...(unless !== undefined ? [astNot(unless)] : [])]);
   const insert = guard.body === ''
     ? `+${rel.relationName}(${values.join(', ')})`
-    : `${ghost(rel)}, +${rel.relationName}(${values.join(', ')}) <- ${guard.body}`;
+    : `${GHOST}, +${rel.relationName}(${values.join(', ')}) <- ${guard.body}`;
 
   const vars = columnVars(rel);
   const queryArgs = rel.columns.map((c, i) => (key.includes(c) ? values[i] : vars[i]));

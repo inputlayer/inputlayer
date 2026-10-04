@@ -49,6 +49,7 @@ const Race = relation('RaceAttempt', { work: 'string', attempt: 'string' });
 const PropA = relation('PropA', { k: 'int' });
 const PropB = relation('PropB', { k: 'int', v: 'string' });
 const Flag = relation('PropFlag', { f: 'string' });
+const Probe = relation('GhostProbe', { id: 'int', on: 'bool', tag: 'string' });
 
 async function rows(kg: KnowledgeGraph, iql: string): Promise<unknown[][]> {
   return (await kg.execute(iql)).rows;
@@ -88,7 +89,7 @@ describe.skipIf(!SERVER_URL)('guards and claims (live)', () => {
     kg = il.knowledgeGraph(KG_NAME);
     await kg.define(
       Shipment, Eta, Promised, ToolPolicy, KillSwitch, Attempt,
-      Session, Cursor, Goal, AttemptDone, CarrierNote, PackVersion, Race, PropA, PropB, Flag,
+      Session, Cursor, Goal, AttemptDone, CarrierNote, PackVersion, Race, PropA, PropB, Flag, Probe,
     );
   });
 
@@ -241,6 +242,23 @@ describe.skipIf(!SERVER_URL)('guards and claims (live)', () => {
       .commit();
     expect([r.applied, r.inserted, r.deleted]).toEqual([true, 1, 1]);
     expect(await rows(kg, '?carrier_note(S, R, V)')).toEqual([['S-77', 'weather_delay', 2201]]);
+    await expectNoGuardLeftovers(kg);
+  });
+
+  it('guarded writes keep a stored row equal to a typed placeholder', async () => {
+    await kg.insert(Probe, { id: -1, on: false, tag: '' });
+    const r = await kg
+      .program()
+      .insert(Probe, { id: 1, on: true, tag: 'a' })
+      .when(any(Probe, { id: -1 }))
+      .commit();
+    expect([r.applied, r.inserted, r.deleted]).toEqual([true, 1, 0]);
+    const c = await kg.claim(Probe, { id: 2, on: true, tag: 'b' }, { when: any(Probe, { id: -1 }), key: ['id'] });
+    expect(c.won).toBe(true);
+    expect(await rows(kg, '?ghost_probe(I, O, T)')).toEqual(
+      expect.arrayContaining([[-1, false, ''], [1, true, 'a'], [2, true, 'b']]),
+    );
+    expect(await rows(kg, '?ghost_probe(I, O, T)')).toHaveLength(3);
     await expectNoGuardLeftovers(kg);
   });
 

@@ -440,3 +440,31 @@ describe('in / notIn', () => {
     ).toThrow(/relation definition/);
   });
 });
+
+describe('AND/OR with three or more conditions', () => {
+  const hr = () => Employee.col('department').eq('hr');
+  const rich = () => Employee.col('salary').gt(100000);
+  const on = () => Employee.col('active').eq(true);
+
+  it('compiles in a query', () => {
+    expect(compileQuery({ select: [Employee], where: AND(hr(), rich(), on()) })).toBe(
+      '?employee(Id, Name, Department, Salary, Active), Department = "hr", Salary > 100000, Active = true',
+    );
+    expect(compileQueryPlan({ select: [Employee], where: OR(hr(), rich(), on()) }).programs).toEqual([
+      '?employee(Id, Name, Department, Salary, Active), Department = "hr"',
+      '?employee(Id, Name, Department, Salary, Active), Salary > 100000',
+      '?employee(Id, Name, Department, Salary, Active), Active = true',
+    ]);
+  });
+
+  it('compiles AND in a rule', () => {
+    const rule = compileRule(
+      'picked',
+      ['name'],
+      from(Employee).where(AND(hr(), rich(), on())).select({ name: Employee.col('name') }),
+    );
+    expect(rule).toBe(
+      '+picked(Name) <- employee(_, Name, Department, Salary, Active), Department = "hr", Salary > 100000, Active = true',
+    );
+  });
+});

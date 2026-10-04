@@ -140,7 +140,7 @@ describe('Program', () => {
     expect(c.iql.split('\n')).toEqual([
       '-il_txn(""), +il_txn("t-1") <- utterance_cursor("s-42", Last), Last < 7',
       '-utterance_cursor("s-42", Last) <- utterance_cursor("s-42", Last), il_txn("t-1")',
-      '-utterance_cursor("", -1), +utterance_cursor("s-42", 7) <- il_txn("t-1")',
+      '-il_ghost(0), +utterance_cursor("s-42", 7) <- il_txn("t-1")',
       '-il_txn("t-1") <- il_txn("t-1")',
     ]);
     expect(c.tokenIndex).toBe(0);
@@ -163,7 +163,7 @@ describe('Program', () => {
       '.rule clear late',
       '+late(Order) <- shipment(Order, _)',
       '-pack_version("delivery", Version) <- pack_version("delivery", Version), il_txn("t-d2")',
-      '-pack_version("", ""), +pack_version("delivery", "v3") <- il_txn("t-d2")',
+      '-il_ghost(0), +pack_version("delivery", "v3") <- il_txn("t-d2")',
       '-il_txn("t-d2") <- il_txn("t-d2")',
       '-il_txn_pending("t-d2")',
     ]);
@@ -191,7 +191,7 @@ describe('Program', () => {
       '+il_txn_pending("t-1")',
       '-il_txn(""), +il_txn("t-1") <- il_txn_const_s(K), !attempt_done(K, _), K = "att-y"',
       '-il_assert(0), +il_assert("precondition_failed:t-1") <- il_txn_pending(K), K = "t-1", !il_txn(K)',
-      '-attempt_done("", ""), +attempt_done("att-y", "ok") <- il_txn("t-1")',
+      '-il_ghost(0), +attempt_done("att-y", "ok") <- il_txn("t-1")',
       '-il_txn("t-1") <- il_txn("t-1")',
       '-il_txn_pending("t-1")',
       '-il_txn_const_s("att-y")',
@@ -201,10 +201,10 @@ describe('Program', () => {
     expect(c.writeIndexes).toEqual([4]);
   });
 
-  it('writes a ghost row by column type', () => {
-    const p = new Program().insert(Doc, { id: 1, emb: [0.5, 0.5], ok: true, score: 2.5 }).when(any(PackVersion));
+  it('anchors a guarded insert on the SDK ghost row, never a row of the written relation', () => {
+    const p = new Program().insert(Doc, { id: -1, emb: [], ok: false, score: 2.5 }).when(any(PackVersion));
     expect(p.compile(false, T).iql.split('\n')[1]).toBe(
-      '-doc(-1, [], false, -1.0), +doc(1, [0.5, 0.5], true, 2.5) <- il_txn("t-1")',
+      '-il_ghost(0), +doc(-1, [], false, 2.5) <- il_txn("t-1")',
     );
   });
 
@@ -247,7 +247,7 @@ describe('claim', () => {
     );
     expect(key).toEqual(['order', 'tool']);
     expect(iql.split('\n')).toEqual([
-      '-attempt("", "", ""), +attempt("ORD-1", "carrier_check", "a1") <- check_needed(Order, _), ' +
+      '-il_ghost(0), +attempt("ORD-1", "carrier_check", "a1") <- check_needed(Order, _), ' +
         '!attempt(Order, "carrier_check", _), Order = "ORD-1"',
       '?attempt("ORD-1", "carrier_check", Attempt)',
     ]);
@@ -257,7 +257,7 @@ describe('claim', () => {
     const { iql } = compileClaim(Attempt, { order: 'ORD-2', tool: 't', attempt: 'b' }, { key: ['order'] });
     expect(iql.split('\n')).toEqual([
       '+il_txn_const_s("ORD-2")',
-      '-attempt("", "", ""), +attempt("ORD-2", "t", "b") <- il_txn_const_s(K), !attempt(K, _, _), K = "ORD-2"',
+      '-il_ghost(0), +attempt("ORD-2", "t", "b") <- il_txn_const_s(K), !attempt(K, _, _), K = "ORD-2"',
       '-il_txn_const_s("ORD-2")',
       '?attempt("ORD-2", Tool, Attempt)',
     ]);
