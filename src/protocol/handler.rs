@@ -5427,7 +5427,9 @@ fn storage_error_code(error: &crate::storage::StorageError, default: ErrorCode) 
         }
         StorageError::KnowledgeGraphExists(_)
         | StorageError::CannotDropDefault
-        | StorageError::CannotDropCurrentKnowledgeGraph => ErrorCode::Conflict,
+        | StorageError::CannotDropCurrentKnowledgeGraph
+        | StorageError::RelationNegated { .. }
+        | StorageError::RuleNegated { .. } => ErrorCode::Conflict,
         StorageError::InvalidName(_)
         | StorageError::ParseError(_)
         | StorageError::WriteRejected(_) => ErrorCode::Validation,

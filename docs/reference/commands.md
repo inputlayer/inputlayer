@@ -166,7 +166,7 @@ Delete a relation and all its data, schema, and associated rules.
 .rel drop old_events
 ```
 
-**Warning:** This permanently deletes the relation, its schema, and any rules that define it. A `schema_change` notification is emitted.
+**Warning:** This permanently deletes the relation, its schema, and any rules that define it. A `schema_change` notification is emitted. The drop is refused while a persistent rule negates the relation (directly or through a rule that reads it), since the rule would then fail open; drop or redefine those rules first.
 
 ### `.rel <name>`
 
@@ -252,6 +252,15 @@ Delete a rule entirely (removes all clauses).
 .rule drop reachable
 ```
 
+**Refused while a rule negates it.** Removing a rule's clauses makes it read as empty, so a rule that negates it (directly, or through rules that read it) would derive every row it blocked and fail open. `.rule drop`, `-name`, `.rule drop prefix`, `.rule clear`, and `.rule remove` of a rule's last clause are refused with a `conflict` error naming the negating rules:
+
+```
+.rule drop blocked
+// Error: Cannot remove rule 'blocked': rule(s) allowed negate it or a rule that reads it, ...
+```
+
+Drop or redefine the negating rules first, or remove them in the same program: the check runs on the program's end state, so `.rule drop blocked` followed by `.rule drop allowed` in one program succeeds.
+
 ### `.rule drop prefix <prefix>`
 
 Delete all rules whose names start with the given prefix.
@@ -260,7 +269,7 @@ Delete all rules whose names start with the given prefix.
 .rule drop prefix temp_
 ```
 
-**Note:** An empty prefix is rejected to prevent accidentally dropping all rules.
+**Note:** An empty prefix is rejected to prevent accidentally dropping all rules. The drop is refused while a rule outside the prefix negates a matched rule (see `.rule drop`).
 
 ### `.rule remove <name> <index>`
 
@@ -279,6 +288,7 @@ Clause 2 removed from rule 'reachable'
 ```
 Clause 1 removed from rule 'simple'. Rule completely deleted (no clauses remaining)
 ```
+Removing the last clause is refused while a rule negates the rule (see `.rule drop`).
 
 **Errors:**
 - If clause index is out of bounds: `Clause index 5 out of bounds. Rule 'reachable' has 2 clause(s)`
@@ -291,6 +301,8 @@ Clear all clauses from a rule for re-registration.
 ```
 .rule clear reachable
 ```
+
+**Note:** Refused while a rule negates the rule (see `.rule drop`): the cleared rule reads as empty until clauses are registered again.
 
 ### `.rule edit <name> <index> <clause>`
 

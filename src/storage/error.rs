@@ -94,6 +94,36 @@ pub enum StorageError {
     #[error("{0}")]
     WriteRejected(String),
 
+    /// A relation a registered rule negates: dropping it would let that
+    /// rule derive the rows the relation blocks.
+    #[error(
+        "Cannot drop relation '{relation}': rule(s) {} negate it or a rule that reads it, \
+         so dropping it would make them derive the rows it blocks. Drop or redefine those \
+         rules first (.rule drop <name>), or delete its facts instead.",
+        rules.join(", ")
+    )]
+    RelationNegated {
+        /// The relation that was to be dropped
+        relation: String,
+        /// The rules that negate it, directly or through other rules
+        rules: Vec<String>,
+    },
+
+    /// A rule a registered rule negates: removing its clauses would let that
+    /// rule derive the rows it blocks.
+    #[error(
+        "Cannot remove rule '{rule}': rule(s) {} negate it or a rule that reads it, \
+         so removing it would make them derive the rows it blocks. Drop or redefine those \
+         rules first, or remove them together.",
+        rules.join(", ")
+    )]
+    RuleNegated {
+        /// The rule that was to be removed or cleared
+        rule: String,
+        /// The rules that negate it, directly or through other rules
+        rules: Vec<String>,
+    },
+
     /// A WAL write failed and could not be undone on disk, so a restart may still
     /// recover its transaction: the commit's outcome is unknown, not failed.
     #[error(

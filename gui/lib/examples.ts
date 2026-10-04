@@ -249,10 +249,12 @@ path(X, Z) <- path(X, Y), edge(Y, Z)
         name: "Universal Quantification",
         description: "Check if all items satisfy a condition (via double negation)",
         code: `+employee[(1, "eng"), (2, "eng"), (3, "sales")]
-+all_eng(X) <- employee(X, "eng")
-// Find departments where NOT all employees are engineering
-+has_non_eng(D) <- employee(_, D), !all_eng(_)
-?has_non_eng(X)`,
++senior[(1,), (2,)]
+// A department has a junior if some employee in it is not senior
++has_junior(D) <- employee(E, D), !senior(E)
+// Departments where all employees are senior: no junior in them
++all_senior(D) <- employee(_, D), !has_junior(D)
+?all_senior(D)`,
         difficulty: "advanced",
       },
     ],

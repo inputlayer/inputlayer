@@ -93,10 +93,21 @@ pub fn validate_rule(rule: &Rule, name: &str) -> Result<(), String> {
     }
 
     // Check 3: Range restriction for negated atoms
-    // Variables in negated atoms must be bound by positive atoms
+    // Variables in negated atoms must be bound by positive atoms, and a
+    // negated atom needs at least one of them: the antijoin keys on shared
+    // variables, so `!kill_switch("x")` or `!kill_switch(_)` registered fine
+    // and then failed every query of the rule.
     for pred in &rule.body {
         if let BodyPredicate::Negated(atom) = pred {
             let neg_vars = atom.variables();
+            if neg_vars.is_empty() {
+                return Err(format!(
+                    "Unsafe negation in rule '{}': Negated atom !{}(...) shares no variables \
+                     with positive body atoms. Negation requires at least one shared variable: \
+                     bind the constant to a variable first, e.g. `T = \"value\", !{}(T)`.",
+                    name, atom.relation, atom.relation
+                ));
+            }
             let unbound: Vec<_> = neg_vars.difference(&positive_vars).cloned().collect();
             if !unbound.is_empty() {
                 let mut sorted_unbound = unbound;
@@ -809,6 +820,48 @@ impl RuleCatalog {
         self.rules.get(name)
     }
 
+    /// Rules whose result dropping relation `name` would grow: those that
+    /// negate `name`, or negate a rule that reads it directly or through
+    /// other rules. Sorted; empty when no rule negates it.
+    pub fn rules_negating(&self, name: &str) -> Vec<String> {
+        let rules: Vec<(&str, Vec<Rule>)> = self
+            .rules
+            .iter()
+            .map(|(rule_name, def)| (rule_name.as_str(), def.to_rules()))
+            .collect();
+
+        // Everything whose rows can change when `name` goes away.
+        let mut affected: HashSet<&str> = HashSet::from([name]);
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for (rule_name, clauses) in &rules {
+                if !affected.contains(rule_name)
+                    && clauses.iter().flat_map(|c| &c.body).any(|pred| {
+                        pred.atom()
+                            .is_some_and(|atom| affected.contains(atom.relation.as_str()))
+                    })
+                {
+                    affected.insert(rule_name);
+                    changed = true;
+                }
+            }
+        }
+
+        let mut negating: Vec<String> = rules
+            .iter()
+            .filter(|(_, clauses)| {
+                clauses.iter().flat_map(|c| &c.body).any(|pred| {
+                    matches!(pred, BodyPredicate::Negated(atom)
+                        if affected.contains(atom.relation.as_str()))
+                })
+            })
+            .map(|(rule_name, _)| (*rule_name).to_string())
+            .collect();
+        negating.sort();
+        negating
+    }
+
     /// Get all rules from all definitions (for prepending to queries)
     /// Rules are returned in dependency order (topologically sorted)
     /// so that a rule only appears after all rules it depends on.
@@ -1509,6 +1562,59 @@ mod tests {
             let view = catalog.get("connected").expect("View should exist");
             assert_eq!(view.rules.len(), 2, "View should have 2 rules after reload");
         }
+    }
+
+    fn register_text(catalog: &mut RuleCatalog, text: &str) -> Result<(), String> {
+        catalog
+            .register_rule(&crate::statement::parse_rule_definition(text)?)
+            .map(drop)
+    }
+
+    #[test]
+    fn test_negation_sharing_no_variables_rejected_at_registration() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+
+        // Each of these registered and then failed every query of the rule.
+        for text in [
+            r#"g1(O, S) <- shipment(O, S), !kill_switch("carrier_check")"#,
+            "g2(O, S) <- shipment(O, S), !kill_switch(_)",
+            "g3(O, S) <- shipment(O, S), !flag(1)",
+        ] {
+            let err = register_text(&mut catalog, text).unwrap_err();
+            assert!(err.contains("shares no variables"), "{text}: {err}");
+        }
+        assert!(catalog.is_empty());
+
+        // A variable bound by an assignment is shared, as the docs teach.
+        register_text(
+            &mut catalog,
+            r#"g4(O, S) <- shipment(O, S), T = "carrier_check", !kill_switch(T)"#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_rules_negating_follows_dependents() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut catalog = RuleCatalog::new(tmp_dir.path().to_path_buf()).unwrap();
+        for text in [
+            "blocked(T) <- blocklist(T)",
+            "allowed(O) <- order(O, T), !blocked(T)",
+            "direct(O) <- order(O, T), !kill_switch(T)",
+            "listed(O) <- order(O, T), blocklist(T)",
+        ] {
+            register_text(&mut catalog, text).unwrap();
+        }
+
+        assert_eq!(catalog.rules_negating("kill_switch"), ["direct"]);
+        // Through the rule that reads it.
+        assert_eq!(catalog.rules_negating("blocklist"), ["allowed"]);
+        assert_eq!(catalog.rules_negating("blocked"), ["allowed"]);
+        // Only positive readers: dropping it can only shrink results.
+        assert!(catalog.rules_negating("order").is_empty());
+        assert!(catalog.rules_negating("allowed").is_empty());
+        assert!(catalog.rules_negating("unrelated").is_empty());
     }
 
     #[test]

@@ -121,6 +121,67 @@ async fn dropping_the_current_kg_is_a_conflict() {
 }
 
 #[tokio::test]
+async fn dropping_a_negated_relation_is_a_conflict_and_the_rule_stays_closed() {
+    let (handler, _tmp) = handler();
+    run(
+        &handler,
+        "+shipment(\"O1\", \"S1\")\n+kill(\"check\")\n\
+         +check_needed(O, S) <- shipment(O, S), T = \"check\", !kill(T)",
+    )
+    .await
+    .expect("setup");
+    assert_eq!(count(&handler, "?check_needed(O, S)").await, 0);
+
+    let err = run(&handler, ".rel drop kill")
+        .await
+        .expect_err("drop of a negated relation");
+    assert_eq!(err.code, Some(ErrorCode::Conflict), "{err:?}");
+    assert!(err.message.contains("check_needed"), "{err:?}");
+    assert_eq!(count(&handler, "?check_needed(O, S)").await, 0);
+
+    // A negated atom without a shared variable fails at registration, not
+    // at every later query.
+    let err = run(
+        &handler,
+        "+ground(O, S) <- shipment(O, S), !kill(\"check\")",
+    )
+    .await
+    .expect_err("ground negation");
+    assert!(err.message.contains("shares no variables"), "{err:?}");
+}
+
+#[tokio::test]
+async fn dropping_a_negated_rule_is_a_conflict_and_the_rule_stays_closed() {
+    let (handler, _tmp) = handler();
+    run(
+        &handler,
+        "+order(\"O1\", \"T1\")\n+blocklist(\"T1\")\n\
+         +blocked(T) <- blocklist(T)\n\
+         +allowed(O) <- order(O, T), !blocked(T)",
+    )
+    .await
+    .expect("setup");
+    assert_eq!(count(&handler, "?allowed(O)").await, 0);
+
+    for command in [
+        "-blocked",
+        ".rule drop blocked",
+        ".rule clear blocked",
+        ".rule remove blocked 1",
+        ".rule drop prefix bl",
+    ] {
+        let err = run(&handler, command).await.expect_err(command);
+        assert_eq!(err.code, Some(ErrorCode::Conflict), "{command}: {err:?}");
+        assert!(err.message.contains("allowed"), "{command}: {err:?}");
+        assert_eq!(count(&handler, "?allowed(O)").await, 0, "{command}");
+    }
+
+    run(&handler, ".rule drop allowed\n.rule drop blocked")
+        .await
+        .expect("dependents first");
+}
+
+#[tokio::test]
 async fn statements_of_a_program_without_writes_fail_independently() {
     let (handler, _tmp) = handler();
     let result = run(&handler, "?a(X)\n.rel drop missing\n.index drop missing")
@@ -356,4 +417,53 @@ mod ws {
         assert_eq!(frames[4]["type"], "error", "{}", frames[4]);
         assert_eq!(frames[4]["code"], "validation", "{}", frames[4]);
     }
+}
+
+#[tokio::test]
+async fn a_program_may_remove_a_negated_rule_with_its_negators_in_any_order() {
+    let (handler, _tmp) = handler();
+    let setup = "+blocked(T) <- blocklist(T)\n+allowed(O) <- order(O, T), !blocked(T)";
+    run(&handler, setup).await.expect("setup");
+
+    // Alone, or with an unrelated edit, the removal is refused and rolled back.
+    let result = run(&handler, "+other(X) <- order(X, _)\n.rule drop blocked")
+        .await
+        .expect("program result");
+    let errors: Vec<(usize, ErrorCode)> = result.errors.iter().map(|e| (e.index, e.code)).collect();
+    assert_eq!(
+        errors,
+        vec![(1, ErrorCode::Conflict)],
+        "{:?}",
+        result.errors
+    );
+    assert!(
+        result.errors[0].message.contains("allowed"),
+        "{:?}",
+        result.errors
+    );
+    let rules = run(&handler, ".rule list").await.expect("list").rows;
+    assert_eq!(rules.len(), 3, "{rules:?}");
+    // A later schema statement on the dropped name is not blamed for it.
+    let result = run(&handler, ".rule drop blocked\n+blocked(t: string)")
+        .await
+        .expect("program result");
+    let errors: Vec<(usize, ErrorCode)> = result.errors.iter().map(|e| (e.index, e.code)).collect();
+    assert_eq!(
+        errors,
+        vec![(0, ErrorCode::Conflict)],
+        "{:?}",
+        result.errors
+    );
+
+    // Removed together, the negated rule may come first.
+    let result = run(&handler, ".rule drop blocked\n.rule drop allowed")
+        .await
+        .expect("program result");
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    // Dropped and redefined in one program, the rule is never left empty.
+    run(&handler, setup).await.expect("setup again");
+    let result = run(&handler, ".rule drop blocked\n+blocked(T) <- denylist(T)")
+        .await
+        .expect("program result");
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
 }

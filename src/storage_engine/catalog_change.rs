@@ -229,6 +229,23 @@ impl<'a> StagedCatalog<'a> {
         }
     }
 
+    /// A rule the staged changes leave without clauses while a staged rule
+    /// still negates it, with the rules that negate it: the program would
+    /// make them fail open. Checked on the program's end state, so a program
+    /// may remove a rule together with the rules negating it in any order.
+    pub fn emptied_negated_rule(&self) -> Option<(String, Vec<String>)> {
+        let staged = self.rules.as_ref()?;
+        let has_clauses =
+            |rules: &RuleCatalog, name: &str| rules.rule_count(name).is_some_and(|n| n > 0);
+        self.touched_rules
+            .iter()
+            .filter(|name| has_clauses(self.base_rules, name) && !has_clauses(staged, name))
+            .find_map(|name| {
+                let negating = staged.rules_negating(name);
+                (!negating.is_empty()).then(|| (name.clone(), negating))
+            })
+    }
+
     /// The net effect of the staged changes.
     pub fn into_delta(self) -> CatalogDelta {
         let rules = match &self.rules {

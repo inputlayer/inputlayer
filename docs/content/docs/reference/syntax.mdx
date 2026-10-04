@@ -319,7 +319,10 @@ Express "does not exist" conditions.
 ### Rules
 
 1. **Safety**: Variables in negation must appear positively elsewhere
-2. **Stratification**: No circular dependencies through negation
+2. **Shared variable**: A negated atom must use at least one variable from the positive body. `!kill_switch("carrier_check")` or `!kill_switch(_)` is refused when the rule is registered; bind the constant to a variable instead: `T = "carrier_check", !kill_switch(T)`
+3. **Stratification**: No circular dependencies through negation
+
+A relation that a persistent rule negates cannot be dropped with `.rel drop` while that rule exists (see [`.rel drop`](/docs/reference/commands)).
 
 ### Examples
 
