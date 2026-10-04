@@ -180,6 +180,11 @@ per_ip_max_rps = 0
 # evaluation, and every delta waits up to this long (0 = evaluate at once, max 100)
 subscription_coalesce_ms = 0
 
+# Standing queries that differ only in bound constants (?speech("s-1", ...) and
+# ?speech("s-2", ...)) share one evaluation per commit; each subscriber still gets
+# exactly its own rows. Turns itself off per query shape when sharing costs more.
+subscription_share_parameterized = true
+
 # Notification ring buffer size for reconnect replay
 notification_buffer_size = 4096
 ```

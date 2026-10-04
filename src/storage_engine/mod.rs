@@ -48,7 +48,7 @@ mod write_program;
 pub use catalog_change::{CatalogChange, CatalogOutcome};
 pub use checkpoint::{CheckpointExport, ExportStatus};
 pub use relation_store::RelationStore;
-pub use snapshot::KnowledgeGraphSnapshot;
+pub use snapshot::{KnowledgeGraphSnapshot, PersistentRules};
 pub use write_program::{
     CommitError, FactChange, FactCount, ProgramCommit, RelationChange, StagedChanges,
     StagedStatement, StatementEffect, StatementOutcome, WriteProgram,

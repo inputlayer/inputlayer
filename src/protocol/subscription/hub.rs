@@ -25,9 +25,10 @@ use tracing::{debug, warn};
 
 use crate::protocol::handler::Notification;
 
+use super::parameterized::{self, Families};
 use super::publication::{Doorbell, SubscriberId};
 use super::views::{Attach, Attachment, Completion, Dispatch, ViewId, ViewKey, ViewRegistry};
-use super::{change_of, changes_rules, StandingQuery, SubscriptionMetrics};
+use super::{change_of, changes_rules, ReevaluatingQuery, StandingQuery, SubscriptionMetrics};
 
 type Reply = oneshot::Sender<Result<Attachment, String>>;
 
@@ -47,6 +48,8 @@ enum Command {
 pub struct SubscriptionHub {
     commands: mpsc::UnboundedSender<Command>,
     next_subscriber: Arc<AtomicU64>,
+    families: Arc<Families>,
+    metrics: Arc<SubscriptionMetrics>,
 }
 
 impl SubscriptionHub {
@@ -66,12 +69,30 @@ impl SubscriptionHub {
             in_flight: JoinSet::new(),
             running: HashMap::new(),
             replies: HashMap::new(),
-            metrics,
+            metrics: Arc::clone(&metrics),
         };
         tokio::spawn(worker.run());
         Self {
             commands,
             next_subscriber: Arc::new(AtomicU64::new(0)),
+            families: Arc::default(),
+            metrics,
+        }
+    }
+
+    /// The standing query for a new view of `query`: a member of its
+    /// parameterized family when its constants lift, else `query` itself.
+    pub fn standing_query(
+        &self,
+        query: ReevaluatingQuery,
+        share_parameterized: bool,
+    ) -> Box<dyn StandingQuery> {
+        let lifted = share_parameterized
+            .then(|| parameterized::lift(query.query(), query.goal()))
+            .flatten();
+        match lifted {
+            Some(lifted) => Box::new(self.families.member(query, lifted, &self.metrics)),
+            None => Box::new(query),
         }
     }
 

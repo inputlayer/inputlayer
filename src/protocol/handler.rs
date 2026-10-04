@@ -54,6 +54,9 @@ pub(crate) struct QueryTransform {
     pub limit: Option<usize>,
     /// Number of rows to skip before applying limit.
     pub offset: Option<usize>,
+    /// The `__query__` head: one variable per result column (empty when the
+    /// text was not a `?` query).
+    pub columns: Vec<String>,
 }
 
 /// Term -> Value (constants only, rejects variables/placeholders).
@@ -3923,6 +3926,23 @@ impl Handler {
         settle_result(result, auth, single_statement)
     }
 
+    /// The registered schema column names of the relation a query program
+    /// (`__query__(...) <- ...`) reads first, if it has a schema: a result as
+    /// wide as the schema takes its names.
+    pub(crate) fn source_schema_columns(
+        &self,
+        knowledge_graph: &str,
+        query_program: &str,
+    ) -> Option<Vec<String>> {
+        let relation = find_query_source_relation(query_program)?;
+        let storage = self.storage.read();
+        storage
+            .get_schema_in(knowledge_graph, &relation)
+            .ok()
+            .flatten()
+            .map(|schema| schema.columns.iter().map(|c| c.name.clone()).collect())
+    }
+
     /// Check that `auth` may run the query `goal` on `knowledge_graph`: the
     /// check `execute_program` makes before running it.
     pub fn authorize_query(
@@ -5229,6 +5249,7 @@ pub(crate) fn transform_query_shorthand(program_text: &str) -> Result<QueryTrans
                 order_by: vec![],
                 limit: None,
                 offset: None,
+                columns: vec![],
             });
         }
         let query_text = after_q;
@@ -5315,6 +5336,7 @@ pub(crate) fn transform_query_shorthand(program_text: &str) -> Result<QueryTrans
             order_by,
             limit: goal.limit,
             offset: goal.offset,
+            columns: head_vars,
         })
     } else {
         Ok(QueryTransform {
@@ -5322,6 +5344,7 @@ pub(crate) fn transform_query_shorthand(program_text: &str) -> Result<QueryTrans
             order_by: vec![],
             limit: None,
             offset: None,
+            columns: vec![],
         })
     }
 }
@@ -5515,7 +5538,7 @@ fn program_statement_count(program: &str) -> usize {
 /// Parses the query program and inspects the last rule's head atom arguments
 /// to derive column names. Falls back to `col0, col1, ...` if parsing fails
 /// or arity doesn't match.
-fn extract_column_names_from_query(program: &str, arity: usize) -> Vec<String> {
+pub(crate) fn extract_column_names_from_query(program: &str, arity: usize) -> Vec<String> {
     let parsed = match crate::parser::parse_program(program) {
         Ok(p) => p,
         Err(_) => return (0..arity).map(|i| format!("col{i}")).collect(),
