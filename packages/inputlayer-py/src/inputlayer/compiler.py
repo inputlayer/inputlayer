@@ -402,10 +402,10 @@ def _compile_branches(expr: BoolExpr, env: _VarEnv) -> list[list[_Part]]:
 # ── Negation binding (R-NEG) ─────────────────────────────────────────
 #
 # The engine needs every negated atom to share a variable with a positive
-# atom; it refuses ``!kill_switch("refund")`` and, inside a rule, accepts the
-# clause and then fails every query of that rule. A negated atom whose only
-# link to the body is a constant binds it through an SDK-owned one-column
-# relation instead: ``il_const_s(K), K = "refund", !kill_switch(K)``. A
+# atom; it refuses ``!kill_switch("refund")`` in a query and in a rule's
+# registration alike. A negated atom whose only link to the body is a
+# constant binds it through an SDK-owned one-column relation instead:
+# ``il_const_s(K), K = "refund", !kill_switch(K)``. A
 # query sends the row as a session fact in its own program, gone after the
 # request; a persistent view writes it as a persistent row in the program
 # that defines the view (rows are never deleted: other views may share them).
