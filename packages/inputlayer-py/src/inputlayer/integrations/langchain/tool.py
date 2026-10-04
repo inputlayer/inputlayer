@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from collections.abc import Callable
 from typing import Any
 
@@ -37,20 +36,59 @@ logger = logging.getLogger(__name__)
 
 # ── Read-only guard ─────────────────────────────────────────────────
 
-# Patterns that indicate a write or DDL operation in IQL.
-_WRITE_RE = re.compile(
-    r"^\s*[+\-]"           # fact assertion (+) or retraction (-)
-    r"|^\s*\.(drop|create|load|save)\b",  # DDL dot-commands
-    re.IGNORECASE | re.MULTILINE,
-)
+# Meta commands a read-only tool may run: provenance for a query result
+# (``.why``, ``.why full``) or for a missing tuple (``.why_not``). Every
+# other dot-command is refused, read-only or not, so a new engine command
+# never slips through.
+_READ_ONLY_META = frozenset({"why", "why_not"})
+
+
+def _statements(program: str) -> list[str]:
+    """Split *program* into statements the way the engine executes it.
+
+    Mirrors the server: comment lines (``%`` or ``//``) are dropped, a
+    line that starts with whitespace continues the previous statement,
+    and every other non-empty line is a statement of its own.
+    """
+    statements: list[str] = []
+    for raw in program.split("\n"):
+        line = raw.removesuffix("\r")
+        trimmed = line.strip()
+        if trimmed.startswith(("%", "//")):
+            continue
+        if not trimmed:
+            continue
+        if line[:1].isspace() and statements:
+            statements[-1] += " " + trimmed
+        else:
+            statements.append(trimmed)
+    return statements
+
+
+def _is_read_only_statement(statement: str) -> bool:
+    if statement.startswith("?"):
+        return True
+    if not statement.startswith("."):
+        return False
+    command = statement.lstrip(".").split(maxsplit=1)
+    return bool(command) and command[0].lower() in _READ_ONLY_META
 
 
 def _check_read_only(query: str) -> None:
-    """Raise ``ValueError`` if *query* looks like a write/DDL statement."""
-    if _WRITE_RE.search(query):
+    """Raise ``ValueError`` unless every statement of *query* only reads.
+
+    An allowlist: queries (``?...``) and ``.why`` / ``.why_not`` pass;
+    inserts, retractions, rules, type declarations and every other
+    dot-command (``.rel drop``, ``.rule clear``, ``.kg drop``, ...) fail.
+    """
+    statements = _statements(query)
+    rejected = [s for s in statements if not _is_read_only_statement(s)]
+    if rejected or not statements:
+        shown = rejected[0] if rejected else query
         raise ValueError(
-            "Query rejected by read_only guard - it appears to contain a "
-            "write or DDL operation. Set read_only=False on the tool if "
+            "Query rejected by read_only guard - only queries (?...), "
+            ".why and .why_not are allowed, got: "
+            f"{shown[:80]!r}. Set read_only=False on the tool if "
             "mutations are intentional."
         )
 
@@ -83,6 +121,12 @@ class InputLayerIQLTool(BaseTool):
        placeholder; the agent's input is safely bound (escaped, quoted)
        rather than spliced as raw text.
 
+    Read-only by default: every statement must be a query (``?...``),
+    ``.why`` or ``.why_not``; anything else (inserts, retractions, rules,
+    ``.rel drop``, ``.rule clear``, ``.kg drop``, ...) raises
+    ``ValueError`` before it reaches the engine. Pass ``read_only=False``
+    to let the agent write.
+
     Engine errors are returned to the agent as ``"Error: <message>"`` so
     the tool-calling LLM can observe the failure and adjust its next
     action instead of the coroutine raising an exception mid-chain.
@@ -104,8 +148,9 @@ class InputLayerIQLTool(BaseTool):
     read_only: bool = Field(
         default=True,
         description=(
-            "When True (default), reject queries that attempt writes or DDL. "
-            "Set to False only if the agent is trusted to mutate the KG."
+            "When True (default), allow only queries (?...), .why and "
+            ".why_not. Set to False only if the agent is trusted to mutate "
+            "the KG."
         ),
     )
 

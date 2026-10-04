@@ -242,7 +242,7 @@ tools = tools_from_relations(kg, [Employee, Article])
 agent = create_tool_calling_agent(llm, tools, prompt)
 ```
 
-For agents that genuinely need raw IQL access, `InputLayerIQLTool` is the escape hatch. All components support both sync (`invoke`) and async (`ainvoke`) and are safe to use inside Jupyter, FastAPI, and LangGraph.
+For agents that genuinely need raw IQL access, `InputLayerIQLTool` is the escape hatch; it is read-only by default (queries, `.why` and `.why_not` only) and runs writes only with `read_only=False`. All components support both sync (`invoke`) and async (`ainvoke`) and are safe to use inside Jupyter, FastAPI, and LangGraph.
 
 ### Examples
 
