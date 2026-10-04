@@ -88,6 +88,7 @@ export class InputLayer {
   private readonly opts: InputLayerOptions;
   private readonly conn: Connection;
   private readonly dispatcher = new NotificationDispatcher();
+  private creating: Promise<unknown> = Promise.resolve();
   private readonly kgs = new Map<string, KnowledgeGraph>();
 
   /**
@@ -153,10 +154,17 @@ export class InputLayer {
    * client's own connection creates it (`conflict` means it exists, so the
    * refusal stands) and switches back, because `.kg create` also moves the
    * creating session onto the new graph, which could then not be dropped.
+   * Creations run one at a time so none reads another's switch as home.
    */
-  private async createIfMissing(name: string): Promise<boolean> {
+  private createIfMissing(name: string): Promise<boolean> {
+    const run = this.creating.then(() => this.createKg(name));
+    this.creating = run.catch(() => undefined);
+    return run;
+  }
+
+  private async createKg(name: string): Promise<boolean> {
     await this.conn.connect();
-    const home = this.conn.currentKg;
+    const home = this.conn.boundKg;
     try {
       await this.conn.execute(`.kg create ${name}`);
     } catch (e) {

@@ -414,6 +414,26 @@ describe('KG binding', () => {
     expect(engine.bound).toEqual([undefined, 'default', 'default']);
   });
 
+  it('concurrent creations each switch the client connection back to its own graph', async () => {
+    engine = await ScriptedEngine.start();
+    client = new InputLayer({ url: engine.url, username: 'a', password: 'b', autoReconnect: false });
+    await client.connect();
+    const graphs = engine.graphs;
+    engine.onProgram = (program) => {
+      const [, verb, name] = /^\.kg (create|use) (\w+)$/.exec(program) ?? [];
+      if (verb === 'create') graphs.add(name);
+      engine!.script([
+        name
+          ? messages([`Switched to knowledge graph: ${name}`], [], { switched_kg: name })
+          : messages(["Inserted 1 fact(s) into 'demo'."]),
+      ]);
+    };
+    await Promise.all(['a', 'b', 'c'].map((kg) => client!.knowledgeGraph(kg).insert(Demo, { x: 1 })));
+    const switches = engine.sent.filter((p) => p.startsWith('.kg'));
+    expect(switches.filter((_, i) => i % 2 === 0).sort()).toEqual(['.kg create a', '.kg create b', '.kg create c']);
+    expect(switches.filter((_, i) => i % 2 === 1)).toEqual(['.kg use other', '.kg use other', '.kg use other']);
+  });
+
   it('an existing graph that refuses the binding is not created', async () => {
     engine = await ScriptedEngine.start();
     engine.graphs.delete('default');

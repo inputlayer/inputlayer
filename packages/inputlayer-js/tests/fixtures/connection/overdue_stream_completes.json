@@ -1,0 +1,74 @@
+{
+  "name": "overdue_stream_completes",
+  "about": "A reply that started streaming before the deadline plus grace is not failed locally: the call waits for result_end and returns the rows.",
+  "options": {
+    "timeoutMs": 50,
+    "timeoutGraceMs": 50
+  },
+  "calls": [
+    "?big(X)"
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 1
+      }
+    },
+    {
+      "send": {
+        "type": "result_start",
+        "id": "$r0",
+        "columns": [
+          "x"
+        ],
+        "total_count": 2,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    },
+    {
+      "sleep": 200
+    },
+    {
+      "send": {
+        "type": "result_chunk",
+        "id": "$r0",
+        "rows": [
+          [
+            1
+          ],
+          [
+            2
+          ]
+        ],
+        "chunk_index": 0
+      }
+    },
+    {
+      "send": {
+        "type": "result_end",
+        "id": "$r0",
+        "row_count": 2,
+        "chunk_count": 1
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "rows": [
+          [
+            1
+          ],
+          [
+            2
+          ]
+        ]
+      }
+    ],
+    "stats": {
+      "staleReplies": 0
+    }
+  }
+}

@@ -229,6 +229,7 @@ describe('connection fixtures', () => {
         'interleaved_streams',
         'missing_chunk',
         'out_of_order_replies',
+        'overdue_stream_completes',
         'queued_call_deadline',
         'silent_server_query',
         'silent_server_write',
@@ -369,6 +370,50 @@ describe('routing', () => {
 });
 
 // ── Keepalive, cancellation, errors ─────────────────────────────────
+
+function stall(c: Connected): void {
+  (c.socket as unknown as { _socket: { pause(): void } })._socket.pause();
+}
+
+describe('deadline probe', () => {
+  it('a full request window is not taken for a dead server', async () => {
+    const c = await open({ maxInFlight: 1, timeoutGraceMs: 200 });
+    const call = c.execute('?slow(X)', { timeoutMs: 50 }).catch((e: unknown) => e);
+    await server!.until(() => executes(server!.last).length === 1);
+    stall(server!.last);
+    expect(await call).toBeInstanceOf(sdk.DeadlineExceededError);
+    expect(c.connected).toBe(true);
+  });
+
+  it('any frame from the server answers the probe', async () => {
+    const c = await open({ timeoutGraceMs: 200 });
+    const call = c.execute('?slow(X)', { timeoutMs: 50 }).catch((e: unknown) => e);
+    await server!.until(() => executes(server!.last).length === 1);
+    stall(server!.last);
+    await new Promise((resolve) => setTimeout(resolve, 90));
+    server!.last.socket.send(JSON.stringify({ type: 'persistent_update', seq: 1, timestamp_ms: 0,
+      knowledge_graph: 'default', relation: 'a', operation: 'insert', count: 1 }));
+    expect(await call).toBeInstanceOf(sdk.DeadlineExceededError);
+    expect(c.connected).toBe(true);
+  });
+
+  it('a call failed locally holds its slot until the engine replies', async () => {
+    const c = await open({ maxInFlight: 1, timeoutGraceMs: 50 });
+    const first = c.execute('?a(X)', { timeoutMs: 50 }).catch((e: unknown) => e);
+    const second = c.execute('?b(X)', { timeoutMs: 0 });
+    expect(await first).toBeInstanceOf(sdk.DeadlineExceededError);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(executes(server!.last)).toHaveLength(1);
+    const reply = (id: unknown) =>
+      server!.last.socket.send(JSON.stringify({ type: 'result', id, columns: [], rows: [],
+        row_count: 0, total_count: 0, truncated: false, execution_time_ms: 0, errors: [] }));
+    reply(executes(server!.last)[0].id);
+    await server!.until(() => executes(server!.last).length === 2);
+    reply(executes(server!.last)[1].id);
+    await second;
+    expect(c.stats.staleReplies).toBe(1);
+  });
+});
 
 describe('keepalive', () => {
   it('pings a connection that sends nothing', async () => {
@@ -618,7 +663,8 @@ describe('reconnect', () => {
     const closed = new Promise((resolve) => c.events.addEventListener('closed', resolve));
     server!.refuseAuth = true;
     server!.last.socket.close();
-    await closed;
+    const error = (await closed) as CustomEvent<{ error: Error }>;
+    expect(error.detail.error.message).toContain('after 1 attempt(s)');
     await expect(c.execute('?a(X)')).rejects.toBeInstanceOf(ConnectionError);
     // An authentication refusal is final: no second attempt.
     expect(server!.connections).toHaveLength(2);

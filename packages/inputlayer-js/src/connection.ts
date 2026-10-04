@@ -125,7 +125,7 @@ export interface SubscriptionRoute {
 export interface ConnectionStats {
   /** Subscription pushes of a stale generation, or for no route. */
   stalePushes: number;
-  /** Replies to calls that no longer wait (abandoned after a protocol failure or failed locally past their deadline). */
+  /** Replies for no waiting call: for an unknown id, or to a call failed locally past its deadline. */
   staleReplies: number;
   /** Frames that were not JSON or had an unknown type. */
   malformedFrames: number;
@@ -220,6 +220,7 @@ export class Connection {
   private _serverVersion?: string;
   private _role?: string;
   private _currentKg?: string;
+  private _boundKg?: string;
   private _epoch?: string;
   private _lastSeq?: number;
   private lastNotice?: NoticeResponse;
@@ -232,8 +233,13 @@ export class Connection {
   private readonly inFlight = new Map<string, Call>();
   /** Replies to `cancel`, `ping` and authentication, by id; an error when the connection ends first. */
   private readonly control = new Map<string, (reply: ServerMessage | Error) => void>();
-  /** Ids of calls abandoned mid-stream whose remaining frames are dropped. */
-  private readonly abandoned = new Set<string>();
+  /**
+   * Ids of calls settled before their reply ended (a broken stream, or no
+   * reply past the deadline), by whether that reply counts as stale. The
+   * engine still holds each one, so it counts against `maxInFlight` until its
+   * final frame arrives.
+   */
+  private readonly abandoned = new Map<string, boolean>();
   private readonly routes = new Map<string, Route>();
   private readonly _dispatcher: NotificationDispatcher;
   private readonly _stats: ConnectionStats = {
@@ -288,6 +294,11 @@ export class Connection {
   /** The knowledge graph the connection is on; a reconnect re-opens it there. */
   get currentKg(): string | undefined {
     return this._currentKg;
+  }
+
+  /** The knowledge graph the connection was opened on, before any `.kg use`. */
+  get boundKg(): string | undefined {
+    return this._boundKg;
   }
 
   get dispatcher(): NotificationDispatcher {
@@ -433,6 +444,7 @@ export class Connection {
       this._serverVersion = response.version;
       this._role = response.role;
       this._currentKg = response.knowledge_graph;
+      this._boundKg = response.knowledge_graph;
       if (response.stream_epoch !== this._epoch) {
         // A cursor from another engine run means nothing in this one.
         this._epoch = response.stream_epoch;
@@ -516,7 +528,11 @@ export class Connection {
 
   /** Send queued calls while the in-flight bound allows. */
   private pump(): void {
-    while (this.state === 'open' && this.queue.length > 0 && this.inFlight.size < this.maxInFlight) {
+    while (
+      this.state === 'open' &&
+      this.queue.length > 0 &&
+      this.inFlight.size + this.abandoned.size < this.maxInFlight
+    ) {
       const call = this.queue.shift()!;
       const id = this.newId('r');
       call.id = id;
@@ -552,11 +568,13 @@ export class Connection {
     call.reject(new DeadlineExceededError('The deadline passed before the request was sent; nothing was applied'));
   }
 
-  /** The grace period past the deadline ended without a reply: fail locally. */
+  /** The grace period past the deadline ended: fail locally unless the reply is streaming in. */
   private overdue(call: Call): void {
     call.deadline = undefined;
+    if (call.stream) return;
     // The reply and the cancel's ack, if they come, are dropped and counted.
     if (call.cancelId) this.control.delete(call.cancelId);
+    this.abandoned.set(call.id!, true);
     const waited = `No reply ${this.timeoutGraceMs} ms past the deadline`;
     this.finish(call, () => {
       throw mayWrite(call.program)
@@ -592,16 +610,19 @@ export class Connection {
   }
 
   /**
-   * Ping the transport: a live server answers at once, even while computing.
-   * No answer within half the grace period means the connection is dead:
-   * drop it, so its calls fail with `ConnectionLostError` and it reconnects.
+   * Ping the transport: a live server answers at once, even while computing,
+   * unless its request window is full (it then reads nothing more). Any frame
+   * from it answers the probe too. No answer within half the grace period
+   * while the window has room means the connection is dead: drop it, so its
+   * calls fail with `ConnectionLostError` and it reconnects.
    */
   private probeServer(): void {
     const ws = this.ws;
     if (!ws || this.probe) return;
     const timer = setTimeout(() => {
       this.probe = undefined;
-      if (this.ws === ws) ws.terminate();
+      const outstanding = this.inFlight.size + this.abandoned.size + this.control.size;
+      if (this.ws === ws && outstanding < this.maxInFlight) ws.terminate();
     }, Math.max(1, Math.floor(this.timeoutGraceMs / 2)));
     this.probe = { timer, ws };
     ws.once('pong', () => {
@@ -624,6 +645,7 @@ export class Connection {
   // ── Frame routing ───────────────────────────────────────────────
 
   private onFrame(data: string): void {
+    this.clearProbe();
     let msg: ServerMessage;
     try {
       msg = deserializeMessage(data);
@@ -648,8 +670,13 @@ export class Connection {
     }
     const call = this.inFlight.get(id);
     if (!call) {
-      if (this.abandoned.has(id)) {
-        if (msg.type === 'result_end' || msg.type === 'error') this.abandoned.delete(id);
+      const stale = this.abandoned.get(id);
+      if (stale !== undefined) {
+        if (msg.type === 'result' || msg.type === 'result_end' || msg.type === 'error') {
+          this.abandoned.delete(id);
+          if (stale) this._stats.staleReplies += 1;
+          this.pump();
+        }
       } else {
         this._stats.staleReplies += 1;
       }
@@ -740,7 +767,7 @@ export class Connection {
 
   /** Fail a call whose stream broke; drop the rest of its frames. */
   private abandon(call: Call, id: string, error: Error): void {
-    this.abandoned.add(id);
+    this.abandoned.set(id, false);
     this.finish(call, () => {
       throw error;
     });
@@ -934,6 +961,7 @@ export class Connection {
 
   private async reconnect(code: string, reason: string): Promise<void> {
     const hadCursor = this._lastSeq !== undefined;
+    let attempts = 0;
     let delay = this.reconnectDelay;
     let lastError: Error = new ConnectionLostError(`Connection lost: ${reason}`, code);
     for (let attempt = 1; attempt <= this.maxReconnectAttempts; attempt++) {
@@ -947,6 +975,7 @@ export class Connection {
       });
       this.wake = undefined;
       if (this.state !== 'reconnecting') return;
+      attempts = attempt;
       try {
         await this.open();
       } catch (e) {
@@ -973,7 +1002,7 @@ export class Connection {
     if (this.state !== 'reconnecting') return;
     this.state = 'closed';
     const error = new ConnectionLostError(
-      `Reconnecting failed after ${this.maxReconnectAttempts} attempt(s): ${lastError.message}`,
+      `Reconnecting failed after ${attempts} attempt(s): ${lastError.message}`,
       code,
     );
     this.failQueued(error);
