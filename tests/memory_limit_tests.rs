@@ -239,6 +239,32 @@ async fn a_proof_after_a_commit_is_refused_as_resource_exhausted() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_conditional_delete_after_the_commit_began_is_refused_as_resource_exhausted() {
+    let server = start_server(|config| {
+        config.storage.performance.max_query_memory_bytes = 32 << 20;
+        config.storage.performance.query_timeout_ms = 0;
+    })
+    .await;
+    server.write(&edges(0, NODES)).await;
+    server
+        .write(
+            "+reach(X, Y) <- edge(X, Y)\n+reach(X, Z) <- reach(X, Y), edge(Y, Z)\n\
+             +spare(X) <- edge(X, 0)",
+        )
+        .await;
+    let stored = server.count("edge");
+    let mut client = Client::connect(&server).await;
+
+    // `.compact` cannot share a program with writes; dropping a rule is a
+    // write that enters the commit before the delete stages.
+    let reply = client
+        .execute("delete", ".rule drop spare\n-edge(X, Y) <- reach(X, Y)")
+        .await;
+    assert_query_exhausted(&reply, 1);
+    assert_eq!(server.count("edge"), stored, "nothing was deleted");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_query_under_the_limit_is_unaffected() {
     let server = start_server(|config| {
         config.storage.performance.max_query_memory_bytes = 32 << 20;

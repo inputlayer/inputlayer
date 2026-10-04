@@ -275,8 +275,9 @@ pub struct PerformanceConfig {
     /// together. A query that grows while they hold more is stopped and
     /// refused with `resource_exhausted`, so concurrent queries never push
     /// the server past its container. Unset: 60% of the container's memory
-    /// limit (cgroup), the other 40% left as headroom for allocator overhead
-    /// and the server itself; no limit outside a memory-limited container.
+    /// limit (cgroup); no limit outside a memory-limited container. Stored
+    /// graphs are separate from it: graph budgets summed, plus this, plus
+    /// the server's overhead must stay within 80% of the container's limit.
     /// 0 = no limit.
     #[serde(default)]
     pub max_total_query_memory_bytes: Option<u64>,

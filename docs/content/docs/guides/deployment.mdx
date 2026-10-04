@@ -77,7 +77,7 @@ max_result_rows = 100000
 slow_query_log_ms = 5000
 max_query_memory_bytes = 8589934592 # 8 GiB per query; refused past it
 max_graph_memory_bytes = 4294967296 # 4 GiB of facts per graph
-max_total_query_memory_bytes = 17179869184 # 16 GiB for all queries at once (32 GB host)
+max_total_query_memory_bytes = 12884901888 # 12 GiB for all queries at once (32 GB host)
 
 [logging]
 level = "info"
@@ -585,27 +585,34 @@ Three limits keep the server inside that memory and refuse work with
   concurrently; a query that grows while they hold this much is stopped, so
   concurrency can never push the server past its memory. Unset, it is 60%
   of the container's memory limit (its cgroup), or no limit when the server
-  runs outside a memory-limited container: set it explicitly there. The
-  server logs the budget it uses at startup (`query_memory_limits`).
+  runs outside a memory-limited container. That default leaves room only
+  for the server and small graphs: set it explicitly whenever graphs hold
+  real data, and outside a memory-limited container. The server logs the
+  budget it uses at startup (`query_memory_limits`).
 
+Stored graphs and the queries' working memory are separate, so they add up.
 The sizing rule that keeps the process inside its memory limit is:
 
 ```
-max_total_query_memory_bytes ≤ 0.6 × memory limit
+(sum of the graphs' max_graph_memory_bytes)
+  + max_total_query_memory_bytes
+  + server overhead (about 0.5 GB)
+  ≤ 0.8 × memory limit
+
 max_query_memory_bytes ≤ max_total_query_memory_bytes
-sum of the graphs' max_graph_memory_bytes ≤ max_total_query_memory_bytes
 ```
 
-The remaining 40% of the memory limit is headroom: the allocator holds more
-resident memory than the bytes it hands out, and the server itself needs
-some.
+The last 20% of the memory limit is margin for allocator overhead: the
+allocator holds more resident memory than the bytes it hands out.
 
-For example, a 32 GB host with the configuration above gives 16 GiB to
-queries (two whole-graph queries at 8 GiB at once) and holds up to four
-graphs at their full 4 GiB budget. The Kubernetes base manifests follow the
-same rule for their 8Gi pod: about 4.8 GiB for queries (derived from the
-pod's limit), `max_query_memory_bytes` 2 GiB and `max_graph_memory_bytes`
-1 GiB, so up to four graphs at their full budget.
+For example, a 32 GB host with the configuration above gives 12 GiB to
+queries (one whole-graph query at 8 GiB, with room for smaller ones beside
+it) and holds up to two graphs at their full 4 GiB budget: 8 + 12 + 0.5 =
+20.5 GiB, inside 0.8 × 32 GB. The Kubernetes base manifests follow the same
+rule for their 8Gi pod: `max_total_query_memory_bytes` 3 GiB,
+`max_query_memory_bytes` 1 GiB and `max_graph_memory_bytes` 512 MiB, so up to
+four graphs at their full budget (4 × 0.5 + 3 + 0.5 = 5.5 GiB, inside
+6.4 GiB).
 
 ### CPU
 
