@@ -31,7 +31,7 @@ impl ConnectionSubscriptions {
         id: &str,
         view: Box<dyn StandingQuery>,
     ) -> Result<(Snapshot, u64), String> {
-        let opening = self.opening(key, id, view);
+        let opening = self.opening(key, id, 0, view);
         self.finish_subscribe(opening.run().await, |_| true)
     }
 }

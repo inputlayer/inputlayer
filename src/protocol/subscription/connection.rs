@@ -86,23 +86,33 @@ impl ConnectionSubscriptions {
         let view = ReevaluatingQuery::new(Arc::clone(&self.handler), knowledge_graph, query)?;
         self.handler
             .authorize_query(self.auth.as_ref(), knowledge_graph, view.goal())?;
+        // A view not refreshed since is still exact now, but must say so: a
+        // client may expect the revision its snapshot reports.
+        let revision = view.current_snapshot().map_or(0, |snapshot| snapshot.revision);
         let key = ViewKey {
             knowledge_graph: knowledge_graph.to_string(),
             query: query.trim().to_string(),
         };
         let share = self.handler.config().subscriptions.share_parameterized;
         let view = self.hub().standing_query(view, share);
-        Ok(self.opening(key, id, view))
+        Ok(self.opening(key, id, revision, view))
     }
 
     /// An [`Opening`] attaching `id` to the view of `key`, created from `view`
-    /// if there is none.
-    fn opening(&self, key: ViewKey, id: &str, view: Box<dyn StandingQuery>) -> Opening {
+    /// if there is none, with a snapshot exact at `revision` or later.
+    fn opening(
+        &self,
+        key: ViewKey,
+        id: &str,
+        revision: u64,
+        view: Box<dyn StandingQuery>,
+    ) -> Opening {
         let hub = self.hub().clone();
         let doorbell = Doorbell::new(hub.next_subscriber_id(), self.mailbox.clone());
         Opening {
             id: id.to_string(),
             key,
+            revision,
             view,
             attached: Attached {
                 hub,
@@ -267,6 +277,7 @@ impl Drop for ConnectionSubscriptions {
 pub struct Opening {
     id: String,
     key: ViewKey,
+    revision: u64,
     view: Box<dyn StandingQuery>,
     attached: Attached,
 }
@@ -285,12 +296,13 @@ impl Opening {
         let Opening {
             id,
             key,
+            revision,
             view,
             attached,
         } = self;
         let attachment = attached
             .hub
-            .attach(key.clone(), Arc::clone(&attached.doorbell), view)
+            .attach(key.clone(), Arc::clone(&attached.doorbell), revision, view)
             .await;
         Opened {
             id,

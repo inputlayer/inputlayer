@@ -40,6 +40,16 @@ pub(super) fn publish(
             let unchanged = refresh.is_unchanged();
             view.dependencies = refresh.dependencies;
             if unchanged && !matches!(last.outcome, Outcome::Failed(_)) {
+                // No news for subscribers, but the result is exact at this revision too.
+                let publication = Arc::new(Publication {
+                    revision: refresh.revision,
+                    columns: last.columns.clone(),
+                    result: Arc::clone(&last.result),
+                    outcome: last.outcome.clone(),
+                    ..**last
+                });
+                live.cell.publish(Arc::clone(&publication));
+                live.latest = publication;
                 return Vec::new();
             }
             Publication {

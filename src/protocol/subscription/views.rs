@@ -12,11 +12,13 @@
 //! most one window (plus an evaluation in flight) after it is seen.
 //!
 //! A completed refresh that changed, failed or recovered the result is the view's next
-//! [`Publication`], and every subscriber's doorbell rings. A subscriber joins at once only a
-//! clean view: one with a current result and no refresh in flight or due. Otherwise it waits
-//! for an evaluation that has seen every change seen before it joined, started at once if
-//! idle, so its snapshot includes every write acknowledged before it subscribed. A retry of a
-//! failed view failing as before is no news to the others.
+//! [`Publication`], and every subscriber's doorbell rings; one that left it unchanged only
+//! advances the revision the result is exact at. A subscriber joins at once only a clean view:
+//! one with a current result, no refresh in flight or due, and a revision no older than the
+//! knowledge graph's when it subscribed. Otherwise it waits for an evaluation that has seen
+//! every change seen before it joined, started at once if idle, so its snapshot includes every
+//! write acknowledged before it subscribed and its revision is as recent as the state it read.
+//! A retry of a failed view failing as before is no news to the others.
 
 use std::collections::hash_map::RandomState;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -191,11 +193,13 @@ impl<S: BuildHasher + Default> ViewRegistry<S> {
     }
 
     /// Attach `doorbell`'s subscriber to the view of `key`, creating it (with the query
-    /// `create` builds) if there is none.
+    /// `create` builds) if there is none. `revision` is the knowledge graph's when it
+    /// subscribed: its snapshot is exact at that revision or a later one.
     pub fn attach(
         &mut self,
         key: ViewKey,
         doorbell: Arc<Doorbell>,
+        revision: u64,
         create: impl FnOnce() -> Box<dyn StandingQuery>,
     ) -> Attach {
         let subscriber = doorbell.id();
@@ -204,7 +208,11 @@ impl<S: BuildHasher + Default> ViewRegistry<S> {
                 self.subscribers.insert(subscriber, id);
                 let clean = view.query.is_some() && view.due.is_none();
                 return match &view.live {
-                    Some(live) if clean && !matches!(live.latest.outcome, Outcome::Failed(_)) => {
+                    Some(live)
+                        if clean
+                            && live.latest.revision >= revision
+                            && !matches!(live.latest.outcome, Outcome::Failed(_)) =>
+                    {
                         let attachment = live.attachment(None);
                         view.subscribers.insert(subscriber, doorbell);
                         Attach::Attached(attachment)

@@ -291,3 +291,53 @@ async fn of_clients_racing_on_one_revision_exactly_one_commits() {
     assert_eq!(committed, 1);
     assert_eq!(server.count("slot"), 2);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_decider_that_reads_again_can_commit() {
+    let server = start_server().await;
+    let mut decider = Client::connect(&server).await;
+    let mut watcher = Client::connect(&server).await;
+    let mut writer = Client::connect(&server).await;
+    writer.write("w1", "+eta(\"s1\", 9)").await;
+    writer.write("rule", "+late(S) <- eta(S, D), D > 4").await;
+    // Another client keeps the views shared.
+    watcher.subscribe("all", "?eta(S, D)").await;
+    watcher.subscribe("late", "?late(S)").await;
+
+    // (subscription, query, scope, a write after the first read)
+    let cases = [
+        // Outside the view: its result is untouched, and it is not refreshed.
+        ("w1", "?eta(S, D)", None, "+noise(1)"),
+        // Refreshes the view to the same result.
+        ("w2", "?late(S)", Some(json!(["late"])), "+eta(\"s2\", 1)"),
+        // A rule the view does not read.
+        ("w3", "?eta(S, D)", None, "+early(S) <- eta(S, D), D < 2"),
+    ];
+    for (name, query, scope, write) in cases {
+        let decide = |revision: u64| {
+            let mut frame = json!({"program": "+claim(\"s1\")", "expect_revision": revision});
+            if let Some(scope) = &scope {
+                frame["expect_relations"] = scope.clone();
+            }
+            frame
+        };
+        let seen = decider.subscribe(name, query).await;
+        writer.write("w", write).await;
+        let reply = decider.request("d", decide(seen)).await;
+        assert_refused(&reply, "precondition_failed");
+
+        // Read the state again and decide again: nothing changed meanwhile.
+        let reply = decider
+            .request("u", json!({"program": format!(".unsubscribe {name}")}))
+            .await;
+        assert_eq!(reply["type"], "result", "{reply}");
+        let again = decider.subscribe(name, query).await;
+        assert!(again > seen, "{name}: read again at {again}, first at {seen}");
+        let reply = decider.request("d", decide(again)).await;
+        assert_eq!(reply["type"], "result", "{name}: {reply}");
+        let reply = decider
+            .request("u", json!({"program": format!(".unsubscribe {name}")}))
+            .await;
+        assert_eq!(reply["type"], "result", "{reply}");
+    }
+}
