@@ -99,6 +99,10 @@ export type { UserInfo, ApiKeyInfo, AclEntry } from './auth.js';
 // Session
 export { Session } from './session.js';
 
+// Meta commands
+export { meta, sessionRules, ruleList, ruleClauses } from './meta.js';
+export type { MetaCommandName } from './meta.js';
+
 // Notifications
 export type { NotificationEvent, NotificationCallback } from './notifications.js';
 export { NotificationDispatcher } from './notifications.js';

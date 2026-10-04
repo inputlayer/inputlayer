@@ -9,6 +9,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   InputLayer,
   relation,
@@ -23,6 +25,9 @@ import {
   compileRule,
   QueryError,
   StatementFailedError,
+  count,
+  meta,
+  Timestamp,
 } from '../src/index';
 
 const SERVER_URL = process.env.INPUTLAYER_TEST_SERVER ?? '';
@@ -128,6 +133,18 @@ describe.skipIf(SKIP)('Integration: Schema', () => {
     const kg = client.knowledgeGraph(kg_name);
     await kg.define(Edge);
     await kg.define(Edge); // No error
+  });
+
+  it('defines a timestamp column and stores Unix milliseconds', async () => {
+    const Event = relation('Event', { id: 'int', occurredAt: 'timestamp' });
+    const kg = client.knowledgeGraph(kg_name);
+    await kg.define(Event);
+    await kg.insert(Event, [
+      { id: 1, occurredAt: new Timestamp(1704067200000) },
+      { id: 2, occurredAt: 1704153600000 },
+    ]);
+    const result = await kg.execute('?event(Id, T), T > 1704100000000');
+    expect(result.rows).toEqual([[2, 1704153600000]]);
   });
 });
 
@@ -290,6 +307,28 @@ describe.skipIf(SKIP)('Integration: Aggregations', () => {
     expect(result.length).toBe(2);
   });
 
+  it('count() without a column counts every row through kg.query()', async () => {
+    const kg = client.knowledgeGraph(kg_name);
+    const total = await kg.query({ select: [count()], join: [Employee] });
+    expect(total.scalar()).toBe(3);
+    const byDept = await kg.query({
+      select: [Employee.col('department').toAst(), count()],
+      join: [Employee],
+      orderBy: Employee.col('department').asc(),
+    });
+    expect(byDept.rows).toEqual([['eng', 2], ['hr', 1]]);
+    expect(byDept.columns).toEqual(['Department', 'Count']);
+  });
+
+  it('count() without a column in a rule head', async () => {
+    const kg = client.knowledgeGraph(kg_name);
+    await kg.defineRules('dept_size', ['department', 'n'], [
+      from(Employee).select({ department: Employee.col('department'), n: count() }),
+    ]);
+    const result = await kg.execute('?dept_size(D, N)');
+    expect(result.rows.sort()).toEqual([['eng', 2], ['hr', 1]]);
+  });
+
   it('min/max aggregation via rule', async () => {
     const kg = client.knowledgeGraph(kg_name);
     await kg.execute('+salary_min(min<Salary>) <- employee(_, _, _, Salary, _)');
@@ -356,6 +395,15 @@ describe.skipIf(SKIP)('Integration: Rules', () => {
     expect(text).toContain('reachable');
   });
 
+  it('listRules() and ruleDefinition() read the engine replies', async () => {
+    const kg = client.knowledgeGraph(kg_name);
+    expect(await kg.listRules()).toContainEqual({ name: 'reachable', clauseCount: 2 });
+    expect(await kg.ruleDefinition('reachable')).toEqual([
+      'reachable(Src, Dst) <- edge(Src, Dst)',
+      'reachable(Src, Dst_1) <- reachable(Src, Dst), edge(Dst, Dst_1)',
+    ]);
+  });
+
   it('drops a rule', async () => {
     const kg = client.knowledgeGraph(kg_name);
     await kg.execute('+high_edge(Src, Dst) <- edge(Src, Dst), Src > 1');
@@ -417,6 +465,31 @@ describe.skipIf(SKIP)('Integration: Delete', () => {
     const result = await kg.execute('?employee(Id, Name, Dept, Salary, Active)');
     expect(result.length).toBe(1);
   });
+
+  it('filters by membership in another relation with in() and notIn()', async () => {
+    const Member = relation('Member', { id: 'int', team: 'string' });
+    const Banned = relation('Banned', { since: 'int', memberId: 'int' });
+    const kg = client.knowledgeGraph(kg_name);
+    await kg.define(Member, Banned);
+    await kg.insert(Member, [
+      { id: 1, team: 'a' },
+      { id: 2, team: 'b' },
+      { id: 3, team: 'c' },
+    ]);
+    await kg.insert(Banned, [{ since: 2020, memberId: 2 }]);
+
+    await kg.defineRules('allowed_member', ['id'], [
+      from(Member)
+        .where((m) => m.col('id').notIn(Banned.col('memberId')))
+        .select({ id: Member.col('id') }),
+    ]);
+    const allowed = await kg.execute('?allowed_member(Id)');
+    expect(allowed.rows.map((r) => r[0]).sort()).toEqual([1, 3]);
+
+    await kg.delete(Member, Member.col('id').in(Banned.col('memberId')));
+    const left = await kg.execute('?member(Id, Team)');
+    expect(left.rows.map((r) => r[0]).sort()).toEqual([1, 3]);
+  });
 });
 
 // ── Session Tests ───────────────────────────────────────────────────
@@ -445,6 +518,22 @@ describe.skipIf(SKIP)('Integration: Sessions', () => {
     await kg.session.insert(Edge, { src: 10, dst: 20 });
     const result = await kg.execute('?edge(X, Y)');
     expect(result.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('lists and drops session rules', async () => {
+    const kg = client.knowledgeGraph(kg_name);
+    await kg.session.defineRules('hop', ['src', 'dst'], [
+      from(Edge).select({ src: Edge.col('src'), dst: Edge.col('dst') }),
+      from(Edge).select({ src: Edge.col('dst'), dst: Edge.col('src') }),
+    ]);
+    const rules = await kg.session.listRules();
+    expect(rules).toHaveLength(2);
+    expect(rules.every((r) => r.startsWith('hop('))).toBe(true);
+    await kg.session.dropRule('hop', 2);
+    expect(await kg.session.listRules()).toEqual(rules.slice(0, 1));
+    await expect(kg.session.dropRule('hop', 2)).rejects.toBeInstanceOf(RangeError);
+    await kg.session.dropRule('hop');
+    expect(await kg.session.listRules()).toEqual([]);
   });
 
   it('clears session data', async () => {
@@ -839,14 +928,25 @@ describe.skipIf(SKIP)('Integration: Engine failures', () => {
 
   it('a partial failure names each failed statement', async () => {
     const kg = client.knowledgeGraph(kg_name);
+    await kg.execute('+edge[(200, 201), (201, 202)]');
     const err = (await kg
-      .execute('+edge[(200, 201)]\n.rel drop no_such_rel\n+edge[(201, 202)]')
+      .execute('?edge(200, Y)\n.rel drop no_such_rel\n?edge(201, Y)')
       .catch((e: unknown) => e)) as StatementFailedError;
     expect(err).toBeInstanceOf(StatementFailedError);
     expect(err.errors.map((e) => [e.index, e.code])).toEqual([[1, 'not_found']]);
-    // The engine ran the other statements.
-    expect((await kg.execute('?edge(200, Y)')).length).toBe(1);
-    expect((await kg.execute('?edge(201, Y)')).length).toBe(1);
+  });
+
+  it('a program mixing writes with a command is rejected before any statement runs', async () => {
+    // Documented in core-concepts: the command is rejected with
+    // `unsupported` and none of the program's statements run.
+    const kg = client.knowledgeGraph(kg_name);
+    const err = (await kg
+      .execute('+edge[(300, 301)]\n.rel drop no_such_rel\n+edge[(301, 302)]')
+      .catch((e: unknown) => e)) as StatementFailedError;
+    expect(err).toBeInstanceOf(StatementFailedError);
+    expect(err.errors.map((e) => [e.index, e.code])).toEqual([[1, 'unsupported']]);
+    expect((await kg.execute('?edge(300, Y)')).length).toBe(0);
+    expect((await kg.execute('?edge(301, Y)')).length).toBe(0);
   });
 
   it('a partial failure survives a chunked result', async () => {
@@ -880,5 +980,46 @@ describe.skipIf(SKIP)('Integration: Engine failures', () => {
     // Retrying before any KG command must still reject dropping the active graph.
     await expect(client.dropKnowledgeGraph(kg_name)).rejects.toBeInstanceOf(QueryError);
     expect((await kg.execute('?edge(900, Y)')).length).toBe(1);
+  });
+});
+
+// ── Meta commands ───────────────────────────────────────────────────
+
+describe.skipIf(SKIP)('Integration: Meta commands', () => {
+  let client: InputLayer;
+  const kg_name = kgName('meta');
+  // The fixture the Python SDK renders its command table against too.
+  const fixture = JSON.parse(
+    readFileSync(resolve(__dirname, '../../conformance/meta-commands.json'), 'utf8'),
+  );
+  const key = (name: string) => name.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+
+  beforeAll(async () => {
+    client = new InputLayer(API_KEY ? { url: SERVER_URL, apiKey: API_KEY } : { url: SERVER_URL, username: USERNAME, password: PASSWORD });
+    await client.connect();
+  });
+
+  afterAll(async () => {
+    try {
+      await client.knowledgeGraph('default').execute('.kg use default');
+      await client.dropKnowledgeGraph(kg_name);
+    } catch {}
+    await client.close();
+  });
+
+  it('the engine accepts every command in the shared table', async () => {
+    const kg = client.knowledgeGraph(kg_name);
+    for (const statement of fixture.setup) await kg.execute(statement);
+    for (const { name, args } of fixture.commands) {
+      const text = (meta[key(name) as keyof typeof meta] as (...a: unknown[]) => string)(...args);
+      await expect(kg.execute(text), text).resolves.toBeDefined();
+    }
+  });
+
+  it('the engine rejects the spellings the table must never produce', async () => {
+    const kg = client.knowledgeGraph(kg_name);
+    for (const { text } of fixture.rejected) {
+      await expect(kg.execute(text), text).rejects.toBeInstanceOf(QueryError);
+    }
   });
 });

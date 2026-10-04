@@ -143,7 +143,7 @@ for (const col of desc.columns) {
 | `"bool"` | `bool` | Boolean |
 | `"vector[N]"` | `vector(N)` | N-dimensional float32 vector |
 | `"vector_int8[N]"` | `vector_int8(N)` | N-dimensional int8 quantized vector |
-| `"timestamp"` | `timestamp` | Unix epoch milliseconds |
+| `"timestamp"` | `int` | Unix epoch milliseconds; `Timestamp` and `Date` values are written as milliseconds |
 
 ### Custom Relation Names
 
@@ -476,7 +476,7 @@ for (const r of rules) {
   console.log(`${r.name}: ${r.clauseCount} clause(s)`);
 }
 
-// View a rule's compiled IQL definition
+// View a rule's clauses, one IQL string each
 const clauses = await kg.ruleDefinition("reachable");
 for (const clause of clauses) {
   console.log(clause);
@@ -572,8 +572,9 @@ await kg.session.defineRules("my_temp_view", ["name", "salary"], tempRules);
 // Query as normal - session facts mix with persistent data
 const result = await kg.query({ select: [Employee] });
 
-// List session rules
+// List session rules (one clause per entry), or drop one
 const sessionRules = await kg.session.listRules();
+await kg.session.dropRule("my_temp_view", 1); // 1-based clause index
 
 // Clean up (or just disconnect - session state is automatically cleared)
 await kg.session.clear();

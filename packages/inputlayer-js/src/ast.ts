@@ -173,10 +173,12 @@ export interface InExpr extends BoolExpr {
   readonly _tag: 'InExpr';
   readonly column: Expr;
   readonly targetColumn: Expr;
+  /** All columns of the target relation, in order, to build its atom. */
+  readonly targetColumns?: readonly string[];
 }
 
-export function inExpr(col: Expr, target: Expr): InExpr {
-  return { _tag: 'InExpr', column: col, targetColumn: target };
+export function inExpr(col: Expr, target: Expr, targetColumns?: readonly string[]): InExpr {
+  return { _tag: 'InExpr', column: col, targetColumn: target, targetColumns };
 }
 
 /** Negated membership test. */
@@ -184,10 +186,12 @@ export interface NegatedIn extends BoolExpr {
   readonly _tag: 'NegatedIn';
   readonly column: Expr;
   readonly targetColumn: Expr;
+  /** All columns of the target relation, in order, to build its atom. */
+  readonly targetColumns?: readonly string[];
 }
 
-export function negatedIn(col: Expr, target: Expr): NegatedIn {
-  return { _tag: 'NegatedIn', column: col, targetColumn: target };
+export function negatedIn(col: Expr, target: Expr, targetColumns?: readonly string[]): NegatedIn {
+  return { _tag: 'NegatedIn', column: col, targetColumn: target, targetColumns };
 }
 
 /** Multi-column negation/existence check against a relation. */

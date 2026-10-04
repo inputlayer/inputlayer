@@ -429,8 +429,10 @@ js-test:
 	cd packages/inputlayer-js && npm ci --ignore-scripts && npm test
 
 # js-test-live runs every query example in the JS SDK guide
-# (docs/content/docs/guides/js-sdk.mdx) against a live server, so a query
-# form the engine rejects fails here rather than in a user's hands.
+# (docs/content/docs/guides/js-sdk.mdx) and the SDK's integration tests
+# (including the shared meta-command fixture, packages/conformance) against a
+# live server, so a form the engine rejects fails here rather than in a
+# user's hands.
 JS_LIVE_PORT ?= 8091
 js-test-live:
 	@cargo build --release --bin inputlayer-server
@@ -448,7 +450,7 @@ js-test-live:
 		INPUTLAYER_TEST_SERVER=ws://127.0.0.1:$(JS_LIVE_PORT)/ws \
 		INPUTLAYER_TEST_USER=admin \
 		INPUTLAYER_TEST_PASSWORD=admin \
-		npx vitest run tests/docs-queries.integration.test.ts; \
+		npx vitest run tests/docs-queries.integration.test.ts tests/integration.test.ts; \
 	TEST_EXIT=$$?; \
 	cd - > /dev/null; \
 	kill $$SERVER_PID 2>/dev/null || true; \

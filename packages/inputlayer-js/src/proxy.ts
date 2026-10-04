@@ -59,11 +59,14 @@ export class ColumnProxy {
   readonly relation: string;
   readonly name: string;
   readonly refAlias?: string;
+  /** All columns of the relation, in order, when the proxy came from its definition. */
+  readonly relationColumns?: readonly string[];
 
-  constructor(relation: string, name: string, refAlias?: string) {
+  constructor(relation: string, name: string, refAlias?: string, relationColumns?: readonly string[]) {
     this.relation = relation;
     this.name = name;
     this.refAlias = refAlias;
+    this.relationColumns = relationColumns;
   }
 
   toAst(): Column {
@@ -121,11 +124,11 @@ export class ColumnProxy {
   // ── Membership ──────────────────────────────────────────────────
 
   in(other: ColumnProxy): InExpr {
-    return inExpr(this.toAst(), other.toAst());
+    return inExpr(this.toAst(), other.toAst(), other.relationColumns);
   }
 
   notIn(other: ColumnProxy): NegatedIn {
-    return negatedIn(this.toAst(), other.toAst());
+    return negatedIn(this.toAst(), other.toAst(), other.relationColumns);
   }
 
   // ── Ordering ────────────────────────────────────────────────────
@@ -220,6 +223,11 @@ export class RelationRef {
 
   /** Get a ColumnProxy for the named column. */
   col(name: string): ColumnProxy {
-    return new ColumnProxy(this.relationName, name, this.alias);
+    return new ColumnProxy(
+      this.relationName,
+      name,
+      this.alias,
+      this.schema.columns.map((c) => c.name),
+    );
   }
 }

@@ -26,6 +26,7 @@ import { InternalError, QueryError } from './errors.js';
 import { HnswIndex } from './index-def.js';
 import { ResultSet } from './result.js';
 import { Session } from './session.js';
+import { meta, ruleClauses, ruleList } from './meta.js';
 
 // ── Data types ──────────────────────────────────────────────────────
 
@@ -478,30 +479,27 @@ export class KnowledgeGraph {
   /** List all rules in this KG. */
   async listRules(): Promise<RuleInfo[]> {
     await this.ensureKg();
-    const result = await this.conn.execute('.rule list');
-    return result.rows.map((row) => ({
-      name: String(row[0]),
-      clauseCount: row.length > 1 ? Number(row[1]) : 1,
-    }));
+    const result = await this.conn.execute(meta.ruleList());
+    return ruleList(result.rows);
   }
 
-  /** Get the IQL definition of a rule. */
+  /** Get the IQL clauses of a rule, in order. */
   async ruleDefinition(name: string): Promise<string[]> {
     await this.ensureKg();
-    const result = await this.conn.execute(`.rule show ${name}`);
-    return result.rows.map((row) => String(row[0]));
+    const result = await this.conn.execute(meta.ruleDef(name));
+    return ruleClauses(result.rows);
   }
 
   /** Drop all clauses of a rule. */
   async dropRule(name: string): Promise<void> {
     await this.ensureKg();
-    await this.conn.execute(`.rule drop ${name}`);
+    await this.conn.execute(meta.ruleDrop(name));
   }
 
   /** Remove a specific clause from a rule (1-based index). */
   async dropRuleClause(name: string, index: number): Promise<void> {
     await this.ensureKg();
-    await this.conn.execute(`.rule remove ${name} ${index}`);
+    await this.conn.execute(meta.ruleRemove(name, index));
   }
 
   /** Replace a specific rule clause (remove + re-add). */
@@ -519,13 +517,13 @@ export class KnowledgeGraph {
   /** Clear a rule's materialized data. */
   async clearRule(name: string): Promise<void> {
     await this.ensureKg();
-    await this.conn.execute(`.rule clear ${name}`);
+    await this.conn.execute(meta.ruleClear(name));
   }
 
   /** Drop all rules whose names start with prefix. */
   async dropRulesByPrefix(prefix: string): Promise<void> {
     await this.ensureKg();
-    await this.conn.execute(`.rule drop prefix ${prefix}`);
+    await this.conn.execute(meta.ruleDropPrefix(prefix));
   }
 
   // ── Indexes ─────────────────────────────────────────────────────
@@ -616,8 +614,7 @@ export class KnowledgeGraph {
   async why(opts: QueryOptions & { full?: boolean }): Promise<WhyResult> {
     await this.ensureKg();
     const plan = compileQueryPlan(opts);
-    const cmd = opts.full ? `.why full ${plan.why.statement}` : `.why ${plan.why.statement}`;
-    const result = await this.conn.execute(cmd);
+    const result = await this.conn.execute(meta.why(plan.why.statement, opts.full));
     // The rule's columns are its head variables by position.
     const at = (v: string) => plan.why.columns.indexOf(v);
     const outputIdx = plan.outputs.map((o) => at(o.variable));
@@ -658,7 +655,7 @@ export class KnowledgeGraph {
         return String(v);
       })
       .join(', ');
-    const result = await this.conn.execute(`.why_not ${relName}(${vals})`);
+    const result = await this.conn.execute(meta.whyNot(`${relName}(${vals})`));
     const text = result.rows.map((row) => String(row[0])).join('\n');
     const explanation = (result.proof_trees?.[0] ?? null) as ProofTree | null;
     return { text, explanation };

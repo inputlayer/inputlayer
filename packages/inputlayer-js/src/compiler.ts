@@ -11,6 +11,8 @@ import {
   type Column,
   type AggExpr,
   type OrderedColumn,
+  type InExpr,
+  type NegatedIn,
   isColumn,
   isLiteral,
   isArithmetic,
@@ -147,6 +149,12 @@ export function compileExpr(expr: Expr, env: VarEnv): string {
 }
 
 function compileAggExpr(agg: AggExpr, env: VarEnv): string {
+  if (agg.func === 'count' && agg.column === undefined && agg.orderColumn === undefined) {
+    throw new Error(
+      'count() without a column has no variable to count; the query compiler ' +
+        'counts the first column of the first relation (count<V>)',
+    );
+  }
   const parts: string[] = [];
 
   for (const p of agg.params) {
@@ -169,6 +177,17 @@ function compileAggExpr(agg: AggExpr, env: VarEnv): string {
   return `${agg.func}<${inner}>`;
 }
 
+/**
+ * A column-less `count()` counts the first column of the first relation:
+ * `count<V>` counts body bindings, and the engine rejects `count<>`.
+ */
+function withCountColumn(expr: Expr, first: Column): Expr {
+  if (isAggExpr(expr) && expr.func === 'count' && expr.column === undefined && expr.orderColumn === undefined) {
+    return { ...expr, column: first } as AggExpr;
+  }
+  return expr;
+}
+
 // ── Boolean expression compilation ──────────────────────────────────
 
 export function compileBoolExpr(expr: BoolExpr, env: VarEnv): string[] {
@@ -187,11 +206,8 @@ export function compileBoolExpr(expr: BoolExpr, env: VarEnv): string[] {
     const innerParts = compileBoolExpr(expr.operand, env);
     return [`!(${innerParts.join(', ')})`];
   }
-  if (isInExpr(expr)) {
-    return [compileIn(expr.column, expr.targetColumn, false, env)];
-  }
-  if (isNegatedIn(expr)) {
-    return [compileIn(expr.column, expr.targetColumn, true, env)];
+  if (isInExpr(expr) || isNegatedIn(expr)) {
+    return [compileIn(expr, isNegatedIn(expr), env)];
   }
   if (isMatchExpr(expr)) {
     return [compileMatch(expr, env)];
@@ -212,21 +228,21 @@ function compileComparison(
   return `${left} ${comp.op} ${right}`;
 }
 
-function compileIn(
-  col: Expr,
-  target: Expr,
-  negated: boolean,
-  env: VarEnv,
-): string {
-  if (isColumn(col) && isColumn(target)) {
-    env.unify(col, target);
-    const tgtVar = env.getVar(target);
-    const prefix = negated ? '!' : '';
-    return `${prefix}${target.relation}(..., ${tgtVar}, ...)`;
+/**
+ * `a.in(b)` becomes an atom of b's relation with a's variable in b's column
+ * and `_` elsewhere: `manager(_, EmployeeId)`. notIn negates the atom.
+ */
+function compileIn(expr: InExpr | NegatedIn, negated: boolean, env: VarEnv): string {
+  const target = expr.targetColumn;
+  if (!isColumn(target) || expr.targetColumns === undefined) {
+    throw new Error(
+      'in()/notIn() needs a column taken from a relation definition, ' +
+        'e.g. Employee.col("id").in(Manager.col("employeeId"))',
+    );
   }
-  const srcVar = compileExpr(col, env);
-  const prefix = negated ? '!' : '';
-  return `${prefix}(..., ${srcVar}, ...)`;
+  const value = compileExpr(expr.column, env);
+  const args = expr.targetColumns.map((c) => (c === target.name ? value : '_'));
+  return `${negated ? '!' : ''}${target.relation}(${args.join(', ')})`;
 }
 
 function compileMatch(
@@ -259,8 +275,9 @@ export function compileSchema(rel: RelationDef): string {
   const cols = rel.columns;
   const colTypes = rel.columnTypes;
   const parts = cols.map((c) => {
-    // Convert type notation: vector[3] -> vector(3), vector_int8[3] -> vector_int8(3)
-    const type = colTypes[c].replace(/\[(\d+)\]/, '($1)');
+    // Timestamps are stored as int Unix milliseconds. Convert type notation:
+    // vector[3] -> vector(3), vector_int8[3] -> vector_int8(3).
+    const type = colTypes[c] === 'timestamp' ? 'int' : colTypes[c].replace(/\[(\d+)\]/, '($1)');
     return `${c}: ${type}`;
   });
   return `+${name}(${parts.join(', ')})`;
@@ -669,6 +686,8 @@ function compileAggPlan(
   computed: Record<string, Expr>,
 ): QueryPlan {
   const { env, atoms, order } = shape;
+  const first = shape.relations[0];
+  const firstColumn = astColumn(first.name, first.def.columns[0], first.alias);
   const head: string[] = [];
   const outputs: QueryOutput[] = [];
   const bindings: string[] = [];
@@ -682,7 +701,7 @@ function compileAggPlan(
         outputs.push({ label: col, variable: v });
       }
     } else if (isAggExpr(s)) {
-      head.push(compileAggExpr(s, env));
+      head.push(compileExpr(withCountColumn(s, firstColumn), env));
       for (const v of aggOutputVars(s, env)) outputs.push({ label: v, variable: v });
     } else if (isColumn(s)) {
       const v = env.getVar(s);
@@ -699,7 +718,7 @@ function compileAggPlan(
   for (const [alias, expr] of Object.entries(computed)) {
     const label = columnToVariable(alias);
     if (isAggExpr(expr)) {
-      head.push(compileAggExpr(expr, env));
+      head.push(compileExpr(withCountColumn(expr, firstColumn), env));
       const vars = aggOutputVars(expr, env);
       for (const v of vars) outputs.push({ label: vars.length === 1 ? label : v, variable: v });
     } else {
@@ -799,14 +818,23 @@ export function compileRule(
     processJoinCondition(clause.condition, env);
   }
 
-  // Build head
+  // Build head. A column-less count() counts the first body column.
+  const first = clause.relations[0];
+  const firstColumn = first !== undefined ? astColumn(first.name, first.def.columns[0], first.alias) : undefined;
   const headParts = headColumns.map((col) => {
     const expr = clause.selectMap[col];
     if (expr !== undefined) {
-      return compileExpr(expr, env);
+      return compileExpr(firstColumn !== undefined ? withCountColumn(expr, firstColumn) : expr, env);
     }
     return columnToVariable(col);
   });
+
+  // Compile filter conditions before the atoms, so a column a condition
+  // uses gets its variable in the atom rather than `_`.
+  let condParts: string[] = [];
+  if (clause.condition) {
+    condParts = compileBoolExpr(clause.condition, env).filter((p) => p !== '');
+  }
 
   // Build body atoms
   const bodyAtoms: string[] = [];
@@ -817,12 +845,6 @@ export function compileRule(
       return env.lookup(astCol) ?? '_';
     });
     bodyAtoms.push(`${name}(${atomParts.join(', ')})`);
-  }
-
-  // Compile filter conditions
-  let condParts: string[] = [];
-  if (clause.condition) {
-    condParts = compileBoolExpr(clause.condition, env).filter((p) => p !== '');
   }
 
   const allBody = [...bodyAtoms, ...condParts];
