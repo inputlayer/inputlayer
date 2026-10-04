@@ -7,6 +7,8 @@
 //! - `recompute` - the engine's snapshot evaluator, queried afresh;
 //! - `subscription` - standing queries assembled from pushed deltas, the
 //!   path a subscribed agent sees;
+//! - `subscription[group]` - every query in one subscription group, each
+//!   member assembled from pushed group deltas;
 //! - `spec` - recorded `.iql.out` results (corpus cases only).
 //!
 //! Histories come from hand-written scenarios, seeded random generation and
@@ -21,6 +23,7 @@ mod adapter;
 mod corpus;
 mod engine;
 mod generate;
+mod group;
 mod minimize;
 mod model;
 mod oracle;
@@ -30,6 +33,7 @@ mod scenarios;
 mod subscription;
 
 use adapter::Adapter;
+use group::GroupAdapter;
 use model::History;
 use oracle::Report;
 use recompute::RecomputeAdapter;
@@ -39,7 +43,11 @@ use subscription::{Fault, SubscriptionAdapter};
 /// The standard adapter set, reference first so it is the baseline wherever
 /// it can answer.
 fn adapters(queries: &[String]) -> Vec<Box<dyn Adapter>> {
-    with_fault(queries, Fault::None)
+    let mut adapters = with_fault(queries, Fault::None);
+    adapters.push(Box::new(
+        GroupAdapter::open(queries).expect("open subscription group engine"),
+    ));
+    adapters
 }
 
 fn with_fault(queries: &[String], fault: Fault) -> Vec<Box<dyn Adapter>> {
@@ -78,10 +86,12 @@ fn assert_reference_complete(label: &str, report: &Report) {
         "{label}: reference skipped:\n{}",
         skips.join("\n")
     );
-    assert!(
-        report.compared.get("subscription").copied().unwrap_or(0) > 0,
-        "{label}: nothing was compared"
-    );
+    for adapter in ["subscription", "subscription[group]"] {
+        assert!(
+            report.compared.get(adapter).copied().unwrap_or(0) > 0,
+            "{label}: nothing was compared for {adapter}"
+        );
+    }
 }
 
 #[test]

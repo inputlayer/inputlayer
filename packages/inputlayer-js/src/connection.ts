@@ -9,6 +9,13 @@
  * end the pending calls when they announce a close. The reader runs while no
  * call is in flight, so pushes are delivered to an idle client.
  *
+ * Calls are programs (`execute`), snapshot reads (`read`, several queries at
+ * one revision) and subscription groups (`subscribeGroup`). A read's or a
+ * group's reply is a `snapshot`, streamed as `snapshot_start`,
+ * `snapshot_chunk`s and `snapshot_end` when large; it is checked whole (chunk
+ * order, each result's rows against its header, one result per query, in
+ * order) before the call resolves.
+ *
  * Deadlines: a call's `timeoutMs` runs from `execute()`; what is left of it
  * when the call is sent goes as `timeout_ms`, and a call still waiting to be
  * sent when it passes fails with `DeadlineExceededError`. If a sent call has
@@ -39,12 +46,16 @@ import WebSocket from 'ws';
 import {
   type ClientMessage,
   type ErrorResponse,
+  type NamedQuery,
   type NoticeResponse,
   type NotificationResponse,
   type PushMessage,
   type ResultResponse,
   type ResultStartResponse,
   type ServerMessage,
+  type SnapshotChunkResponse,
+  type SnapshotResponse,
+  type SnapshotStartResponse,
   serializeMessage,
   deserializeMessage,
   isPush,
@@ -176,16 +187,36 @@ interface Stream {
   chunks: number;
 }
 
+/** A streamed snapshot being assembled: rows per result, in request order. */
+interface SnapshotStream {
+  start: SnapshotStartResponse;
+  rows: unknown[][][];
+  /** The result the last chunk belonged to. */
+  result: number;
+  chunks: number;
+}
+
+/** What a call asks for. */
+type Request =
+  | { type: 'execute'; program: string }
+  | { type: 'read'; queries: NamedQuery[] }
+  | { type: 'subscribe'; subscription: string; queries: NamedQuery[] };
+
 interface Call {
+  request: Request;
+  /** What its errors carry as `iql`: the program, or the queries one per line. */
   program: string;
+  /** Whether it may write, so a lost reply leaves its outcome open. */
+  mayWrite: boolean;
   /** `performance.now()` at the call's deadline. */
   expiresAt?: number;
   signal?: AbortSignal;
   onAbort?: () => void;
-  resolve: (result: ResultResponse) => void;
+  resolve: (reply: ResultResponse | SnapshotResponse) => void;
   reject: (error: Error) => void;
   id?: string;
   stream?: Stream;
+  snapshot?: SnapshotStream;
   deadline?: ReturnType<typeof setTimeout>;
   cancelId?: string;
   /** Its deadline passed: it is in the grace period for the reply. */
@@ -205,6 +236,10 @@ interface Route {
 
 /** Notices after which the server keeps the connection open. */
 const OPEN_NOTICES: ReadonlySet<string> = new Set(['notifications_missed', 'replay_gap']);
+
+/** Reply frames of a program, and of a read or a subscription group. */
+const RESULT_FRAMES: ReadonlySet<string> = new Set(['result', 'result_start', 'result_chunk', 'result_end']);
+const SNAPSHOT_FRAMES: ReadonlySet<string> = new Set(['snapshot', 'snapshot_start', 'snapshot_chunk', 'snapshot_end']);
 
 /** The connection's message rate window is one second. */
 const RATE_WINDOW_MS = 1000;
@@ -510,6 +545,35 @@ export class Connection {
    * `errors` is not empty, so no caller can read a failed program as data.
    */
   execute(program: string, opts: ExecuteOptions = {}): Promise<ResultResponse> {
+    return this.call({ type: 'execute', program }, program, mayWrite(program), opts);
+  }
+
+  /**
+   * Run `queries` on one snapshot of the knowledge graph: every result is
+   * exact at the reply's `revision`, in request order. Deadline and
+   * cancellation stop the whole read, as for `execute`; an `error` frame
+   * (naming the failing query) rejects it as a whole.
+   */
+  read(queries: NamedQuery[], opts: ExecuteOptions = {}): Promise<SnapshotResponse> {
+    return this.call({ type: 'read', queries }, queryLines(queries), false, opts);
+  }
+
+  /**
+   * Subscribe to the group `queries` as `subscription`; resolves with the
+   * group's snapshot (`subscribed` names the generation its pushes carry).
+   * Route the pushes with `routeSubscription` before calling. `timeoutMs`
+   * bounds the call locally: the engine takes no deadline for it.
+   */
+  subscribeGroup(subscription: string, queries: NamedQuery[], opts: ExecuteOptions = {}): Promise<SnapshotResponse> {
+    return this.call({ type: 'subscribe', subscription, queries }, queryLines(queries), false, opts);
+  }
+
+  private call<R extends ResultResponse | SnapshotResponse>(
+    request: Request,
+    program: string,
+    writes: boolean,
+    opts: ExecuteOptions,
+  ): Promise<R> {
     if (this.state === 'closed' || (this.state === 'idle' && !this.lazy)) {
       return Promise.reject(withIql(new ConnectionError('Not connected'), program));
     }
@@ -522,12 +586,14 @@ export class Connection {
     if (opts.signal?.aborted) {
       return Promise.reject(withIql(new CancelledError('Cancelled before it was sent'), program));
     }
-    return new Promise<ResultResponse>((resolve, reject) => {
+    return new Promise<R>((resolve, reject) => {
       const timeoutMs = opts.timeoutMs ?? this.defaultTimeoutMs;
       const call: Call = {
+        request,
         program,
+        mayWrite: writes,
         signal: opts.signal,
-        resolve,
+        resolve: resolve as (reply: ResultResponse | SnapshotResponse) => void,
         reject: (error) => reject(withIql(error, program)),
         retried: false,
         settled: false,
@@ -552,10 +618,21 @@ export class Connection {
       const id = this.newId('r');
       call.id = id;
       call.stream = undefined;
+      call.snapshot = undefined;
       this.inFlight.set(id, call);
-      const msg: ClientMessage = { type: 'execute', id, program: call.program };
-      if (call.expiresAt !== undefined) {
-        msg.timeout_ms = Math.max(1, Math.ceil(call.expiresAt - performance.now()));
+      const timeoutMs =
+        call.expiresAt === undefined ? undefined : Math.max(1, Math.ceil(call.expiresAt - performance.now()));
+      const { request } = call;
+      let msg: ClientMessage;
+      if (request.type === 'subscribe') {
+        // The engine takes no deadline for a subscribe: it is bounded here.
+        msg = { type: 'subscribe', id, subscription: request.subscription, queries: request.queries };
+      } else if (request.type === 'read') {
+        msg = { type: 'read', id, queries: request.queries };
+        if (timeoutMs !== undefined) msg.timeout_ms = timeoutMs;
+      } else {
+        msg = { type: 'execute', id, program: request.program };
+        if (timeoutMs !== undefined) msg.timeout_ms = timeoutMs;
       }
       try {
         this.send(msg);
@@ -598,7 +675,7 @@ export class Connection {
     this.abandoned.set(call.id!, true);
     const waited = `No reply ${this.timeoutGraceMs} ms past the deadline`;
     this.finish(call, () => {
-      throw mayWrite(call.program)
+      throw call.mayWrite
         ? new OutcomeUnknownError(`${waited}: the program may have committed; read the state back before retrying it`)
         : new DeadlineExceededError(waited);
     });
@@ -694,7 +771,13 @@ export class Connection {
     if (!call) {
       const stale = this.abandoned.get(id);
       if (stale !== undefined) {
-        if (msg.type === 'result' || msg.type === 'result_end' || msg.type === 'error') {
+        if (
+          msg.type === 'result' ||
+          msg.type === 'result_end' ||
+          msg.type === 'snapshot' ||
+          msg.type === 'snapshot_end' ||
+          msg.type === 'error'
+        ) {
           this.abandoned.delete(id);
           if (stale) this._stats.staleReplies += 1;
         }
@@ -707,22 +790,36 @@ export class Connection {
   }
 
   private onReply(call: Call, id: string, msg: ServerMessage): void {
+    if (msg.type === 'error') {
+      if (msg.code === 'rate_limited' && !call.retried && !call.cancelledBy) {
+        this.retryLater(call, id);
+        return;
+      }
+      this.finish(call, () => {
+        // The deadline's own cancel can reach the engine before its deadline does.
+        if (msg.code === 'cancelled' && call.cancelledBy === 'deadline') {
+          throw new DeadlineExceededError(msg.message);
+        }
+        throw queryError(msg);
+      });
+      return;
+    }
+    const expected = call.request.type === 'execute' ? RESULT_FRAMES : SNAPSHOT_FRAMES;
+    if (!expected.has(msg.type)) {
+      const error = new InternalError(`Unexpected ${msg.type} frame in reply to ${call.request.type}`);
+      if (msg.type.endsWith('_start') || msg.type.endsWith('_chunk')) {
+        // Parts of a reply announce more frames: drop them too.
+        this.abandon(call, id, error);
+      } else {
+        this.finish(call, () => {
+          throw error;
+        });
+      }
+      return;
+    }
     switch (msg.type) {
       case 'result':
         this.finish(call, () => this.accept(msg));
-        return;
-      case 'error':
-        if (msg.code === 'rate_limited' && !call.retried && !call.cancelledBy) {
-          this.retryLater(call, id);
-          return;
-        }
-        this.finish(call, () => {
-          // The deadline's own cancel can reach the engine before its deadline does.
-          if (msg.code === 'cancelled' && call.cancelledBy === 'deadline') {
-            throw new DeadlineExceededError(msg.message);
-          }
-          throw queryError(msg);
-        });
         return;
       case 'result_start':
         if (call.stream) {
@@ -769,15 +866,56 @@ export class Connection {
         });
         return;
       }
-      default:
+      case 'snapshot':
         this.finish(call, () => {
-          throw new InternalError(`Unexpected reply frame: ${JSON.stringify(msg)}`);
+          if (call.snapshot) throw new InternalError('A snapshot arrived inside a streamed snapshot');
+          return answers(call, msg);
         });
+        return;
+      case 'snapshot_start':
+        if (call.snapshot) {
+          this.abandon(call, id, new InternalError('A second snapshot_start arrived inside a streamed snapshot'));
+          return;
+        }
+        call.snapshot = { start: msg, rows: msg.results.map(() => []), result: 0, chunks: 0 };
+        if (call.graced) this.armOverdue(call);
+        return;
+      case 'snapshot_chunk': {
+        const snapshot = call.snapshot;
+        const broken = brokenChunk(snapshot, msg);
+        if (!snapshot || broken) {
+          this.abandon(call, id, new InternalError(broken ?? 'snapshot_chunk arrived without snapshot_start'));
+          return;
+        }
+        snapshot.chunks += 1;
+        snapshot.result = msg.result;
+        snapshot.rows[msg.result].push(...msg.rows);
+        if (call.graced) this.armOverdue(call);
+        return;
+      }
+      case 'snapshot_end': {
+        const snapshot = call.snapshot;
+        this.finish(call, () => {
+          if (!snapshot) throw new InternalError('snapshot_end arrived without snapshot_start');
+          const short = snapshot.start.results.findIndex((r, i) => r.row_count !== snapshot.rows[i].length);
+          if (msg.chunk_count !== snapshot.chunks || short >= 0) {
+            throw new InternalError(
+              `Incomplete streamed snapshot: ${snapshot.chunks} chunk(s) arrived, end announces ${msg.chunk_count}` +
+                (short >= 0
+                  ? `; result ${short} has ${snapshot.rows[short].length} row(s), its header announces ` +
+                    `${snapshot.start.results[short].row_count}`
+                  : ''),
+            );
+          }
+          return answers(call, assembleSnapshot(snapshot));
+        });
+        return;
+      }
     }
   }
 
   /** Settle a call with the outcome of `outcome`, and send what waits. */
-  private finish(call: Call, outcome: () => ResultResponse): void {
+  private finish(call: Call, outcome: () => ResultResponse | SnapshotResponse): void {
     if (call.id) this.inFlight.delete(call.id);
     this.settle(call);
     try {
@@ -972,7 +1110,7 @@ export class Connection {
     for (const call of calls) {
       this.settle(call);
       call.reject(
-        new ConnectionLostError(`Connection lost: ${reason}`, code, mayWrite(call.program)),
+        new ConnectionLostError(`Connection lost: ${reason}`, code, call.mayWrite),
       );
     }
   }
@@ -1123,6 +1261,68 @@ function assemble(stream: Stream, rowCount: number): ResultResponse {
     errors: start.errors,
     subscribed: start.subscribed,
   };
+}
+
+/**
+ * Why `chunk` cannot extend `snapshot`: out of order, for a result before
+ * the last chunk's or past the last one, empty, or past its result's
+ * announced rows. Undefined when it fits.
+ */
+function brokenChunk(snapshot: SnapshotStream | undefined, chunk: SnapshotChunkResponse): string | undefined {
+  if (!snapshot) return undefined;
+  if (chunk.chunk_index !== snapshot.chunks) {
+    return `Streamed snapshot chunk ${chunk.chunk_index} arrived, expected ${snapshot.chunks}`;
+  }
+  const header = snapshot.start.results[chunk.result];
+  if (!Number.isInteger(chunk.result) || chunk.result < snapshot.result || header === undefined) {
+    return (
+      `Streamed snapshot chunk ${chunk.chunk_index} holds rows of result ${chunk.result}, ` +
+      `after result ${snapshot.result} of ${snapshot.start.results.length}`
+    );
+  }
+  if (chunk.rows.length === 0 || snapshot.rows[chunk.result].length + chunk.rows.length > header.row_count) {
+    return (
+      `Streamed snapshot chunk ${chunk.chunk_index} brings result ${chunk.result} to ` +
+      `${snapshot.rows[chunk.result].length + chunk.rows.length} row(s), its header announces ${header.row_count}`
+    );
+  }
+  return undefined;
+}
+
+function assembleSnapshot(stream: SnapshotStream): SnapshotResponse {
+  const { start } = stream;
+  return {
+    type: 'snapshot',
+    id: start.id,
+    knowledge_graph: start.knowledge_graph,
+    revision: start.revision,
+    results: start.results.map((header, i) => ({
+      name: header.name,
+      columns: header.columns,
+      rows: stream.rows[i],
+      total_count: header.total_count,
+      truncated: header.truncated,
+    })),
+    execution_time_ms: start.execution_time_ms,
+    subscribed: start.subscribed,
+  };
+}
+
+/** `snapshot`, if it holds one result per query of the call, in order. */
+function answers(call: Call, snapshot: SnapshotResponse): SnapshotResponse {
+  const queries = call.request.type === 'execute' ? [] : call.request.queries;
+  const names = snapshot.results.map((r) => r.name);
+  if (names.length !== queries.length || queries.some((q, i) => q.name !== names[i])) {
+    throw new InternalError(
+      `The snapshot's results (${names.join(', ')}) do not answer the queries (${queries.map((q) => q.name).join(', ')})`,
+    );
+  }
+  return snapshot;
+}
+
+/** The queries of a read or a group, one per line, as its errors carry them. */
+function queryLines(queries: NamedQuery[]): string {
+  return queries.map((q) => q.query).join('\n');
 }
 
 function queryError(response: ErrorResponse): QueryError {

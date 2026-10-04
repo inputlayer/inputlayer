@@ -8,26 +8,36 @@ use serde_json::json;
 use tokio::sync::mpsc;
 
 use super::publication::{Doorbell, SubscriberId};
-use super::{Dependencies, Refresh, ResultSet, Row, StandingQuery};
+use super::{Dependencies, QueryRefresh, Refresh, ResultSet, Row, StandingQuery};
 use crate::statement::parse_query;
 
 /// One scripted refresh: the complete result (single-column integers) and
 /// the relation it depends on, or an error.
 pub(super) type Step = Result<(Vec<i64>, &'static str), String>;
 
+/// One scripted refresh of a group: each query's complete result and the
+/// relation it depends on, or an error for the whole refresh.
+pub(super) type GroupStep = Result<Vec<(Vec<i64>, &'static str)>, String>;
+
 /// A view that returns scripted results, diffing them like a real strategy.
 /// Each refresh is at the next revision.
 pub(super) struct Scripted {
-    steps: VecDeque<Step>,
-    current: Arc<ResultSet>,
+    steps: VecDeque<GroupStep>,
+    current: Vec<Arc<ResultSet>>,
     revision: u64,
 }
 
 impl Scripted {
+    /// A view of one query.
     pub(super) fn boxed(steps: impl IntoIterator<Item = Step>) -> Box<dyn StandingQuery> {
+        Self::group(steps.into_iter().map(|step| step.map(|query| vec![query])))
+    }
+
+    /// A view of a group of queries.
+    pub(super) fn group(steps: impl IntoIterator<Item = GroupStep>) -> Box<dyn StandingQuery> {
         Box::new(Self {
             steps: steps.into_iter().collect(),
-            current: Arc::default(),
+            current: Vec::new(),
             revision: 0,
         })
     }
@@ -37,18 +47,36 @@ impl StandingQuery for Scripted {
     fn refresh(&mut self) -> BoxFuture<'_, Result<Refresh, String>> {
         self.revision += 1;
         let step = self.steps.pop_front().expect("a scripted step per refresh");
-        let refresh = step.map(|(values, relation)| {
-            let next: Arc<ResultSet> = Arc::new(rows(&values).into_iter().collect());
-            let refresh = Refresh {
-                columns: vec!["x".to_string()],
-                inserted: next.difference(&self.current),
-                retracted: self.current.difference(&next),
-                dependencies: deps_on(relation),
+        let refresh = step.map(|queries| {
+            self.current.resize_with(queries.len(), Arc::default);
+            let mut dependencies = Dependencies::default();
+            let queries = queries
+                .into_iter()
+                .zip(&mut self.current)
+                .map(|((values, relation), current)| {
+                    dependencies.merge(&deps_on(relation));
+                    let next: Arc<ResultSet> = Arc::new(rows(&values).into_iter().collect());
+                    // A real strategy keeps an unchanged result's set.
+                    let next = if next.sorted_rows() == current.sorted_rows() {
+                        Arc::clone(current)
+                    } else {
+                        next
+                    };
+                    let refresh = QueryRefresh {
+                        columns: vec!["x".to_string()],
+                        inserted: next.difference(current),
+                        retracted: current.difference(&next),
+                        result: Arc::clone(&next),
+                    };
+                    *current = next;
+                    refresh
+                })
+                .collect();
+            Refresh {
+                queries,
+                dependencies,
                 revision: self.revision,
-                result: Arc::clone(&next),
-            };
-            self.current = next;
-            refresh
+            }
         });
         Box::pin(async move { refresh })
     }

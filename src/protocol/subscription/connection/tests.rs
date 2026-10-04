@@ -31,7 +31,7 @@ impl ConnectionSubscriptions {
         id: &str,
         view: Box<dyn StandingQuery>,
     ) -> Result<(Snapshot, u64), String> {
-        let opening = self.opening(key, id, view);
+        let opening = self.opening(key, id, None, view);
         self.finish_subscribe(opening.run().await, |_| true)
     }
 }
@@ -106,13 +106,13 @@ async fn a_commit_between_snapshot_and_registration_is_delivered() {
     };
     let key = ViewKey {
         knowledge_graph: KG.to_string(),
-        query: "?p(X)".to_string(),
+        queries: vec!["?p(X)".to_string()],
     };
     let (snapshot, _) = subscriptions
         .register(key, "s", Box::new(view))
         .await
         .unwrap();
-    assert_eq!(snapshot.rows, [vec![json!(1)]]);
+    assert_eq!(snapshot.results[0].rows, [vec![json!(1)]]);
 
     let SubscriptionPush::SubscriptionDelta {
         seq,
@@ -181,7 +181,7 @@ async fn fan_out(
                 .await
                 .unwrap();
             results.push(
-                snapshot
+                snapshot.results[0]
                     .rows
                     .iter()
                     .map(|row| json!(row).to_string())
@@ -275,7 +275,7 @@ async fn unsubscribing_the_last_subscriber_drops_the_view_and_a_reused_name_star
     // The reused name gets a new generation on the still-shared view.
     let (snapshot, generation) = first.subscribe(KG, "s", "?p(X)").await.unwrap();
     assert_eq!(generation, 2);
-    assert_eq!(snapshot.rows, [vec![json!(1)], vec![json!(2)]]);
+    assert_eq!(snapshot.results[0].rows, [vec![json!(1)], vec![json!(2)]]);
     assert_eq!(handler.subscription_metrics().evaluations(), 2);
 
     drop(second);
@@ -294,7 +294,7 @@ async fn a_snapshot_includes_a_write_acknowledged_before_subscribing() {
 
     write(&handler, "+order(42)").await;
     let (snapshot, _) = agent_b.subscribe(KG, "s", "?order(X)").await.unwrap();
-    assert_eq!(snapshot.rows, [vec![json!(1)], vec![json!(42)]]);
+    assert_eq!(snapshot.results[0].rows, [vec![json!(1)], vec![json!(42)]]);
     assert_eq!(inserted(next_push(&mut agent_a).await), [vec![json!(42)]]);
 }
 
@@ -334,7 +334,11 @@ async fn a_snapshot_is_withheld_when_access_is_lost_while_it_opens() {
     no_views_left(&handler).await;
 
     let (snapshot, _) = subscriptions.subscribe(KG, "s", "?p(X)").await.unwrap();
-    assert_eq!(snapshot.rows, [vec![json!(1)]], "the name is free again");
+    assert_eq!(
+        snapshot.results[0].rows,
+        [vec![json!(1)]],
+        "the name is free again"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -356,4 +360,164 @@ async fn reset_spares_a_newer_registration() {
     assert!(!subscriptions.reset("s", generation), "an old generation");
     assert!(subscriptions.reset("s", newer));
     assert!(subscriptions.is_empty());
+}
+
+mod groups {
+    use super::*;
+
+    fn named(queries: &[(&str, &str)]) -> Vec<NamedQuery> {
+        queries
+            .iter()
+            .map(|(name, query)| NamedQuery {
+                name: name.to_string(),
+                query: query.to_string(),
+            })
+            .collect()
+    }
+
+    impl ConnectionSubscriptions {
+        async fn subscribe_group(
+            &mut self,
+            id: &str,
+            queries: &[(&str, &str)],
+        ) -> Result<(Snapshot, u64), String> {
+            let opening = self.begin_subscribe_group(KG, id, &named(queries))?;
+            self.finish_subscribe(opening.run().await, |_| true)
+        }
+    }
+
+    fn values(rows: &[Row]) -> Vec<i64> {
+        rows.iter().map(|row| row[0].as_i64().unwrap()).collect()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_group_snapshots_every_member_and_pushes_one_delta_per_commit() {
+        let (handler, _tmp) = handler();
+        write(&handler, "+p[(1,), (2,)]\n+q(10)").await;
+        let mut subscriptions = ConnectionSubscriptions::new(Arc::clone(&handler), None);
+        let (snapshot, generation) = subscriptions
+            .subscribe_group("w", &[("ps", "?p(X)"), ("qs", "?q(X)")])
+            .await
+            .unwrap();
+        assert_eq!(values(&snapshot.results[0].rows), [1, 2]);
+        assert_eq!(values(&snapshot.results[1].rows), [10]);
+        assert_eq!(subscriptions.len(), 1);
+
+        // One commit touching both members: one push, both changed.
+        write(&handler, "+p(3)\n-q(10)").await;
+        let SubscriptionPush::SubscriptionGroupDelta {
+            subscription,
+            generation: pushed_generation,
+            seq,
+            revision,
+            members,
+            ..
+        } = next_push(&mut subscriptions).await
+        else {
+            panic!("expected a group delta");
+        };
+        assert_eq!(
+            (subscription.as_str(), pushed_generation, seq),
+            ("w", generation, 1)
+        );
+        assert!(revision > snapshot.revision);
+        assert_eq!(members.len(), 2);
+        assert_eq!(
+            (members[0].name.as_str(), values(&members[0].inserted)),
+            ("ps", vec![3])
+        );
+        assert_eq!(
+            (members[1].name.as_str(), values(&members[1].retracted)),
+            ("qs", vec![10])
+        );
+
+        // A commit touching one member marks the other unchanged.
+        write(&handler, "+q(11)").await;
+        let SubscriptionPush::SubscriptionGroupDelta { seq, members, .. } =
+            next_push(&mut subscriptions).await
+        else {
+            panic!("expected a group delta");
+        };
+        assert_eq!(seq, 2);
+        assert!(members[0].unchanged && members[0].inserted.is_empty());
+        assert!(!members[1].unchanged);
+        assert_eq!(values(&members[1].inserted), [11]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn malformed_groups_are_refused_before_anything_is_registered() {
+        let (handler, _tmp) = handler();
+        let mut subscriptions = ConnectionSubscriptions::new(Arc::clone(&handler), None);
+        for (queries, expected) in [
+            (vec![], "at least one query"),
+            (
+                vec![("a", "?p(X)"), ("a", "?q(X)")],
+                "names two queries 'a'",
+            ),
+            (vec![("", "?p(X)")], "a name for every query"),
+            (vec![("a", "p(X)")], "must start with '?'"),
+            (
+                vec![("a", "?p(X)"), ("b", "?q(X), limit(2)")],
+                "limit/offset",
+            ),
+        ] {
+            let error = subscriptions
+                .subscribe_group("w", &queries)
+                .await
+                .err()
+                .unwrap_or_else(|| panic!("{queries:?} must be refused"));
+            assert!(error.contains(expected), "{queries:?}: {error}");
+        }
+        assert!(subscriptions.is_empty());
+        assert_eq!(handler.subscription_metrics().active(), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_group_counts_each_of_its_queries_against_the_limit() {
+        let tmp = TempDir::new().unwrap();
+        let mut config = Config::default();
+        config.storage.data_dir = tmp.path().join("data");
+        config.http.rate_limit.ws_max_subscriptions = 3;
+        let handler = Arc::new(Handler::from_config(config).unwrap());
+        handler.get_storage().create_knowledge_graph(KG).unwrap();
+        let mut subscriptions = ConnectionSubscriptions::new(Arc::clone(&handler), None);
+
+        subscriptions
+            .subscribe_group("g", &[("a", "?p(X)"), ("b", "?q(X)")])
+            .await
+            .unwrap();
+        let error = subscriptions
+            .subscribe_group("h", &[("a", "?p(X)"), ("b", "?q(X)")])
+            .await
+            .unwrap_err();
+        assert!(error.contains("Subscription limit reached (3"), "{error}");
+        subscriptions.subscribe(KG, "s", "?p(X)").await.unwrap();
+        assert!(subscriptions.subscribe(KG, "t", "?q(X)").await.is_err());
+
+        // Unsubscribing a group frees all of its queries.
+        subscriptions.unsubscribe("g").unwrap();
+        subscriptions
+            .subscribe_group("h", &[("a", "?p(X)"), ("b", "?q(X)")])
+            .await
+            .unwrap();
+        assert_eq!(subscriptions.len(), 2);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_group_name_cannot_be_taken_twice_and_is_free_after_unsubscribe() {
+        let (handler, _tmp) = handler();
+        let mut subscriptions = ConnectionSubscriptions::new(Arc::clone(&handler), None);
+        subscriptions.subscribe(KG, "w", "?p(X)").await.unwrap();
+        let error = subscriptions
+            .subscribe_group("w", &[("a", "?p(X)")])
+            .await
+            .unwrap_err();
+        assert!(error.contains("already exists"), "{error}");
+        subscriptions.unsubscribe("w").unwrap();
+        subscriptions
+            .subscribe_group("w", &[("a", "?p(X)")])
+            .await
+            .unwrap();
+        assert_eq!(handler.subscription_metrics().active(), 1);
+    }
 }

@@ -99,7 +99,11 @@ from inputlayer.session import Session
 # Subscriptions
 from inputlayer.subscription import (
     Change,
+    GroupChange,
+    GroupSubscription,
     Live,
+    MemberChange,
+    ReadResult,
     Row,
     Subscription,
     SubscriptionHandle,
@@ -129,6 +133,8 @@ __all__ = [
     "DeleteResult",
     "Derived",
     "From",
+    "GroupChange",
+    "GroupSubscription",
     # Index
     "HnswIndex",
     "IndexInfo",
@@ -148,6 +154,7 @@ __all__ = [
     "KnowledgeGraphExistsError",
     "KnowledgeGraphNotFoundError",
     "Live",
+    "MemberChange",
     # Notifications
     "NotificationEvent",
     "OutcomeUnknownError",
@@ -161,6 +168,7 @@ __all__ = [
     "QueryError",
     "QueryTimeoutError",
     "RateLimited",
+    "ReadResult",
     # Relation
     "Relation",
     "RelationDescription",

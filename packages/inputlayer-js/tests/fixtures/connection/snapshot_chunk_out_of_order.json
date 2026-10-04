@@ -1,0 +1,128 @@
+{
+  "name": "snapshot_chunk_out_of_order",
+  "about": "A streamed snapshot whose chunk goes back to an earlier result is broken: the read fails typed, its remaining frames are dropped, and the next call reads its own reply.",
+  "calls": [
+    {
+      "read": [
+        {
+          "name": "orders",
+          "query": "?order(S, O)"
+        },
+        {
+          "name": "etas",
+          "query": "?eta(O, T)"
+        }
+      ]
+    },
+    "?b(X)"
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 2
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_start",
+        "id": "$r0",
+        "knowledge_graph": "default",
+        "revision": 5,
+        "results": [
+          {
+            "name": "orders",
+            "columns": [
+              "S",
+              "O"
+            ],
+            "row_count": 1,
+            "total_count": 1,
+            "truncated": false
+          },
+          {
+            "name": "etas",
+            "columns": [
+              "O",
+              "T"
+            ],
+            "row_count": 1,
+            "total_count": 1,
+            "truncated": false
+          }
+        ],
+        "execution_time_ms": 0
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_chunk",
+        "id": "$r0",
+        "result": 1,
+        "chunk_index": 0,
+        "rows": [
+          [
+            10,
+            "tue"
+          ]
+        ]
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_chunk",
+        "id": "$r0",
+        "result": 0,
+        "chunk_index": 1,
+        "rows": [
+          [
+            1,
+            10
+          ]
+        ]
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_end",
+        "id": "$r0",
+        "chunk_count": 2
+      }
+    },
+    {
+      "send": {
+        "type": "result",
+        "id": "$r1",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            9
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "error": "InternalError"
+      },
+      {
+        "rows": [
+          [
+            9
+          ]
+        ]
+      }
+    ],
+    "stats": {
+      "staleReplies": 0
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "name": "read_error_names_query",
+  "description": "A read fails as a whole: one error, its message naming the failing query, its code typed.",
+  "calls": [
+    {
+      "read": [
+        {
+          "name": "orders",
+          "query": "?order(S, O)"
+        },
+        {
+          "name": "eta",
+          "query": "?eta(O, T)"
+        }
+      ],
+      "expect": {
+        "error": "query",
+        "code": "validation"
+      }
+    }
+  ],
+  "server": [
+    {
+      "recv": {
+        "type": "read",
+        "queries": [
+          {
+            "name": "orders",
+            "query": "?order(S, O)"
+          },
+          {
+            "name": "eta",
+            "query": "?eta(O, T)"
+          }
+        ]
+      },
+      "as": "q"
+    },
+    {
+      "send": {
+        "type": "error",
+        "id": "$q",
+        "code": "validation",
+        "message": "Query 'eta': Invalid atom: eta("
+      }
+    }
+  ]
+}

@@ -5,8 +5,10 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod groups;
 mod harness;
 mod parameterized;
+mod reads;
 mod sharing;
 
 use std::collections::BTreeSet;

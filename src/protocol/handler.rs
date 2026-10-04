@@ -40,6 +40,8 @@ mod backup_command;
 mod catalog_staging;
 mod fact_staging;
 mod program_boundary;
+mod snapshot_read;
+pub use snapshot_read::SnapshotRead;
 mod supervise;
 pub(crate) use supervise::stop_error;
 mod write_run;

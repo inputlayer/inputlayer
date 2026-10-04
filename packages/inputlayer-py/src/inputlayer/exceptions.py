@@ -269,10 +269,13 @@ SubscriptionRejectedReason = Literal[
 
 
 class SubscriptionRejected(InputLayerError):
-    """A subscription could not be opened, or could not be opened again after
-    it lost its verified state. Fix or narrow the query; retrying it as it is
-    fails the same way. ``query`` is the ``.subscribe`` program when one was
-    sent."""
+    """A subscription (or subscription group) could not be opened, or could
+    not be opened again after it lost its verified state. Fix or narrow the
+    query; retrying it as it is fails the same way. ``query`` is the
+    ``.subscribe`` program (a group's queries) when one was sent.
+
+    ``kg.read()`` raises it too, before sending anything, for a target that
+    is not one ``?`` query: a read stands on the queries a subscription can."""
 
     def __init__(
         self,

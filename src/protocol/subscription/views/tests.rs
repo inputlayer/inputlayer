@@ -4,16 +4,18 @@ use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::*;
+use crate::protocol::subscription::publication::RowChange;
 use crate::protocol::subscription::testing::{doorbell, rows, Scripted, Step};
 
 mod failures;
+mod groups;
 
 const KG: &str = "kg";
 
 fn key(query: &str) -> ViewKey {
     ViewKey {
         knowledge_graph: KG.to_string(),
-        query: query.to_string(),
+        queries: vec![query.to_string()],
     }
 }
 
@@ -88,7 +90,7 @@ async fn identical_queries_share_one_view_and_one_evaluation_per_change() {
         vec![ok(&[1], "a"), ok(&[1, 2], "a")],
     )
     .await;
-    assert_eq!(first.initial_rows.as_deref(), Some(&rows(&[1])));
+    assert_eq!(first.initial_rows.as_deref(), Some(&vec![rows(&[1])]));
 
     let (Attach::Attached(second), mut mailbox_2) = attach(&mut registry, "?a(X)", 2, vec![])
     else {
@@ -106,8 +108,8 @@ async fn identical_queries_share_one_view_and_one_evaluation_per_change() {
     let publication = latest(&first);
     assert_eq!(publication.number, 2);
     assert!(
-        matches!(&publication.outcome, Outcome::Delta { base: 1, inserted, retracted }
-            if *inserted == rows(&[2]) && retracted.is_empty())
+        matches!(&publication.outcome, Outcome::Delta { base: 1, changes }
+            if *changes == [RowChange { inserted: rows(&[2]), retracted: vec![] }])
     );
 }
 
@@ -119,7 +121,7 @@ async fn distinct_queries_and_graphs_get_their_own_views() {
     let (doorbell_3, _mailbox) = doorbell(3);
     let other_graph = ViewKey {
         knowledge_graph: "other".to_string(),
-        query: "?a(X)".to_string(),
+        queries: vec!["?a(X)".to_string()],
     };
     assert!(matches!(
         registry.attach(other_graph, doorbell_3, || Scripted::boxed([ok(&[], "a")])),
@@ -145,12 +147,12 @@ async fn colliding_keys_never_share_a_view() {
     let (secret, _m1) = live(&mut registry, "?secret(X)", 1, vec![ok(&[42], "secret")]).await;
     let (public, _m2) = live(&mut registry, "?public(X)", 2, vec![ok(&[1], "public")]).await;
     assert!(!Arc::ptr_eq(&secret.cell, &public.cell));
-    assert_eq!(public.initial_rows.as_deref(), Some(&rows(&[1])));
+    assert_eq!(public.initial_rows.as_deref(), Some(&vec![rows(&[1])]));
     let (Attach::Attached(again), _m3) = attach(&mut registry, "?public(X)", 3, vec![]) else {
         panic!("attaches to the existing view");
     };
     assert!(Arc::ptr_eq(&again.cell, &public.cell));
-    assert_eq!(again.publication.result.sorted_rows(), rows(&[1]));
+    assert_eq!(again.publication.results[0].rows.sorted_rows(), rows(&[1]));
 }
 
 #[tokio::test]
@@ -182,7 +184,7 @@ async fn changes_while_in_flight_coalesce_into_one_follow_up() {
     assert!(completed.follow_up.is_none());
     let publication = latest(&attachment);
     assert_eq!(publication.number, 3);
-    assert_eq!(publication.result.sorted_rows(), rows(&[1, 2, 3]));
+    assert_eq!(publication.results[0].rows.sorted_rows(), rows(&[1, 2, 3]));
 }
 
 #[tokio::test]
@@ -206,7 +208,10 @@ async fn pending_change_is_checked_against_the_new_dependencies() {
         "unchanged result publishes nothing"
     );
     complete(&mut registry, completed.follow_up.expect("rerun for b")).await;
-    assert_eq!(latest(&attachment).result.sorted_rows(), rows(&[7]));
+    assert_eq!(
+        latest(&attachment).results[0].rows.sorted_rows(),
+        rows(&[7])
+    );
 }
 
 #[tokio::test]
@@ -228,7 +233,10 @@ async fn a_change_before_the_first_result_is_not_lost() {
         completed.follow_up.expect("the change is evaluated"),
     )
     .await;
-    assert_eq!(latest(&attachment).result.sorted_rows(), rows(&[1, 2]));
+    assert_eq!(
+        latest(&attachment).results[0].rows.sorted_rows(),
+        rows(&[1, 2])
+    );
 }
 
 #[tokio::test]
@@ -246,7 +254,10 @@ async fn subscribers_waiting_for_the_first_result_share_it() {
     let ids: Vec<SubscriberId> = completed.replies.iter().map(|(id, _)| *id).collect();
     assert_eq!(ids, [1, 2]);
     for (_, reply) in completed.replies {
-        assert_eq!(reply.unwrap().initial_rows.as_deref(), Some(&rows(&[5])));
+        assert_eq!(
+            reply.unwrap().initial_rows.as_deref(),
+            Some(&vec![rows(&[5])])
+        );
     }
 }
 
@@ -268,12 +279,18 @@ async fn a_subscriber_joining_mid_refresh_gets_a_result_that_saw_every_earlier_c
     let [(2, Ok(second))] = &completed.replies[..] else {
         panic!("only subscriber 2 is answered");
     };
-    assert_eq!(second.publication.result.sorted_rows(), rows(&[1, 2]));
+    assert_eq!(
+        second.publication.results[0].rows.sorted_rows(),
+        rows(&[1, 2])
+    );
     let completed = complete(&mut registry, completed.follow_up.unwrap()).await;
     let [(3, Ok(third))] = &completed.replies[..] else {
         panic!("subscriber 3 is answered by the follow-up");
     };
-    assert_eq!(third.publication.result.sorted_rows(), rows(&[1, 2, 3]));
+    assert_eq!(
+        third.publication.results[0].rows.sorted_rows(),
+        rows(&[1, 2, 3])
+    );
 }
 
 #[tokio::test]
@@ -290,7 +307,10 @@ async fn a_subscriber_starts_a_due_refresh_at_once() {
     let [(2, Ok(joined))] = &completed.replies[..] else {
         panic!("subscriber 2 is answered");
     };
-    assert_eq!(joined.publication.result.sorted_rows(), rows(&[1, 2]));
+    assert_eq!(
+        joined.publication.results[0].rows.sorted_rows(),
+        rows(&[1, 2])
+    );
 }
 
 #[tokio::test]
@@ -312,7 +332,10 @@ async fn a_rule_change_retires_the_views_it_affects() {
     assert_eq!(registry.len(), 2);
     let mut completed = complete(&mut registry, fresh).await;
     let attachment = completed.replies.remove(0).1.unwrap();
-    assert_eq!(attachment.initial_rows.as_deref(), Some(&rows(&[1, 2])));
+    assert_eq!(
+        attachment.initial_rows.as_deref(),
+        Some(&vec![rows(&[1, 2])])
+    );
 
     // The retired view leaving does not take the new view's key.
     registry.detach(1);
@@ -358,7 +381,7 @@ async fn the_last_detach_drops_the_view_and_a_reused_key_starts_fresh() {
     assert_ne!(fresh.view, 1);
     let mut completed = complete(&mut registry, fresh).await;
     let attachment = completed.replies.remove(0).1.unwrap();
-    assert_eq!(attachment.initial_rows.as_deref(), Some(&rows(&[9])));
+    assert_eq!(attachment.initial_rows.as_deref(), Some(&vec![rows(&[9])]));
 }
 
 #[tokio::test]
@@ -409,7 +432,10 @@ async fn a_window_coalesces_changes_and_never_restarts() {
     assert_eq!(registry.next_due(), Some(t1 + window));
     let follow_up = registry.take_due(t1 + window).remove(0);
     registry.on_complete(follow_up.run().await, t1 + window);
-    assert_eq!(latest(&attachment).result.sorted_rows(), rows(&[1, 2, 3]));
+    assert_eq!(
+        latest(&attachment).results[0].rows.sorted_rows(),
+        rows(&[1, 2, 3])
+    );
 }
 
 #[tokio::test]

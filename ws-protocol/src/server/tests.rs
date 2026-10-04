@@ -25,6 +25,23 @@ fn result(id: Option<RequestId>) -> ServerFrame {
     })
 }
 
+fn snapshot(id: Option<RequestId>) -> ServerFrame {
+    ServerFrame::Snapshot(SnapshotFrame {
+        id,
+        knowledge_graph: "default".into(),
+        revision: 3,
+        results: vec![NamedResult {
+            name: "q".into(),
+            columns: vec!["x".into()],
+            rows: vec![vec![serde_json::json!(1)]],
+            total_count: 1,
+            truncated: false,
+        }],
+        execution_time_ms: 0,
+        subscribed: None,
+    })
+}
+
 fn round_trip(frame: &ServerFrame) -> ServerFrame {
     let json = serde_json::to_string(frame).unwrap();
     serde_json::from_str(&json).unwrap_or_else(|e| panic!("{json}: {e}"))
@@ -71,6 +88,31 @@ fn every_reply_echoes_its_id() {
             id: id("a"),
             row_count: 0,
             chunk_count: 0,
+        },
+        snapshot(id("a")),
+        ServerFrame::SnapshotStart(SnapshotStartFrame {
+            id: id("a"),
+            knowledge_graph: "default".into(),
+            revision: 3,
+            results: vec![NamedResultHeader {
+                name: "q".into(),
+                columns: vec!["x".into()],
+                row_count: 2,
+                total_count: 2,
+                truncated: false,
+            }],
+            execution_time_ms: 0,
+            subscribed: None,
+        }),
+        ServerFrame::SnapshotChunk {
+            id: id("a"),
+            result: 0,
+            chunk_index: 0,
+            rows: vec![vec![serde_json::json!(1)]],
+        },
+        ServerFrame::SnapshotEnd {
+            id: id("a"),
+            chunk_count: 1,
         },
         ServerFrame::error(id("a"), Some(ErrorCode::InvalidRequest), "bad".into()),
         ServerFrame::Pong { id: id("a") },
@@ -162,6 +204,61 @@ fn notices_and_pushes_never_carry_an_id() {
 }
 
 #[test]
+fn group_pushes_never_carry_an_id() {
+    let frames = [
+        ServerFrame::Subscription(SubscriptionPush::SubscriptionGroupDelta {
+            subscription: "g".into(),
+            generation: 3,
+            knowledge_graph: "default".into(),
+            seq: 1,
+            revision: 14,
+            members: vec![crate::GroupMemberDelta {
+                name: "a".into(),
+                unchanged: true,
+                columns: vec!["x".into()],
+                inserted: Vec::new(),
+                retracted: Vec::new(),
+            }],
+        }),
+        ServerFrame::Subscription(SubscriptionPush::SubscriptionGroupDeltaStart {
+            subscription: "g".into(),
+            generation: 3,
+            knowledge_graph: "default".into(),
+            seq: 2,
+            revision: 15,
+            members: vec![crate::GroupMemberDeltaHeader {
+                name: "a".into(),
+                unchanged: false,
+                columns: vec!["x".into()],
+                inserted_count: 1,
+                retracted_count: 0,
+            }],
+        }),
+        ServerFrame::Subscription(SubscriptionPush::SubscriptionGroupDeltaChunk {
+            subscription: "g".into(),
+            generation: 3,
+            seq: 2,
+            chunk_index: 0,
+            member: 0,
+            inserted: vec![vec![serde_json::json!(5)]],
+            retracted: Vec::new(),
+        }),
+        ServerFrame::Subscription(SubscriptionPush::SubscriptionGroupDeltaEnd {
+            subscription: "g".into(),
+            generation: 3,
+            seq: 2,
+            chunk_count: 1,
+        }),
+    ];
+    for frame in frames {
+        let parsed = round_trip(&frame);
+        assert_eq!(parsed, frame);
+        assert_eq!(parsed.class(), FrameClass::Push);
+        assert_eq!(parsed.request_id(), None);
+    }
+}
+
+#[test]
 fn notice_wire_shape() {
     let frame = ServerFrame::Notice {
         code: NoticeCode::NotificationsMissed,
@@ -248,6 +345,60 @@ fn subscribe_reply_names_the_subscription() {
         json["subscribed"],
         serde_json::json!({"subscription": "s", "generation": 7, "revision": 3})
     );
+}
+
+#[test]
+fn snapshot_wire_shape() {
+    let json = r#"{"type":"snapshot","id":"r","knowledge_graph":"default","revision":5,
+        "results":[{"name":"a","columns":["X"],"rows":[[1]],"total_count":1,"truncated":false}],
+        "execution_time_ms":2,"subscribed":{"subscription":"w","generation":1,"revision":5}}"#;
+    let ServerFrame::Snapshot(frame) = serde_json::from_str(json).unwrap() else {
+        panic!("not a snapshot");
+    };
+    assert_eq!(frame.results[0].name, "a");
+    assert_eq!(frame.subscribed.map(|s| s.revision), Some(5));
+    // A read's reply names no subscription and omits the field.
+    let json = serde_json::to_value(snapshot(id("r"))).unwrap();
+    assert!(json.get("subscribed").is_none(), "{json}");
+    for json in [
+        r#"{"type":"snapshot_start","id":"r","knowledge_graph":"default","revision":5,
+            "results":[{"name":"a","columns":["X"],"row_count":1,"total_count":1,
+            "truncated":false}],"execution_time_ms":2}"#,
+        r#"{"type":"snapshot_chunk","id":"r","result":0,"chunk_index":0,"rows":[[1]]}"#,
+        r#"{"type":"snapshot_end","id":"r","chunk_count":1}"#,
+    ] {
+        let frame: ServerFrame =
+            serde_json::from_str(json).unwrap_or_else(|e| panic!("{json}: {e}"));
+        assert_eq!(frame.class(), FrameClass::Reply);
+        assert_eq!(frame.request_id(), id("r").as_ref());
+    }
+}
+
+#[test]
+fn group_delta_wire_shape() {
+    let frames = [
+        r#"{"type":"subscription_group_delta","subscription":"w","generation":4,
+            "knowledge_graph":"default","seq":1,"revision":9,"members":[
+            {"name":"a","unchanged":false,"columns":["X"],"inserted":[[3]],"retracted":[]},
+            {"name":"b","unchanged":true,"columns":["Y"],"inserted":[],"retracted":[]}]}"#,
+        r#"{"type":"subscription_group_delta_start","subscription":"w","generation":4,
+            "knowledge_graph":"default","seq":2,"revision":10,"members":[
+            {"name":"a","unchanged":false,"columns":["X"],"inserted_count":1,
+            "retracted_count":0}]}"#,
+        r#"{"type":"subscription_group_delta_chunk","subscription":"w","generation":4,"seq":2,
+            "chunk_index":0,"member":0,"inserted":[[4]],"retracted":[]}"#,
+        r#"{"type":"subscription_group_delta_end","subscription":"w","generation":4,"seq":2,
+            "chunk_count":1}"#,
+    ];
+    for json in frames {
+        let frame: ServerFrame =
+            serde_json::from_str(json).unwrap_or_else(|e| panic!("{json}: {e}"));
+        let ServerFrame::Subscription(push) = &frame else {
+            panic!("{frame:?}");
+        };
+        assert_eq!(push.subscription(), ("w", 4));
+        assert_eq!(frame.class(), FrameClass::Push);
+    }
 }
 
 #[test]

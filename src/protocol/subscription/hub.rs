@@ -292,7 +292,7 @@ mod tests {
     fn key() -> ViewKey {
         ViewKey {
             knowledge_graph: "kg".to_string(),
-            query: "?a(X)".to_string(),
+            queries: vec!["?a(X)".to_string()],
         }
     }
 
@@ -325,6 +325,6 @@ mod tests {
             .await
             .unwrap();
         assert!(!Arc::ptr_eq(&new.cell, &old.cell));
-        assert_eq!(new.initial_rows.as_deref(), Some(&rows(&[2])));
+        assert_eq!(new.initial_rows.as_deref(), Some(&vec![rows(&[2])]));
     }
 }

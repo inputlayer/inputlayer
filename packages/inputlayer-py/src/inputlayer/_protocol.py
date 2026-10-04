@@ -1,10 +1,11 @@
 """WebSocket wire protocol: message serialization and deserialization.
 
-Matches the AsyncAPI spec at ``docs/spec/asyncapi.yaml`` (protocol version 3,
+Matches the AsyncAPI spec at ``docs/spec/asyncapi.yaml`` (protocol version 4,
 defined by the ``inputlayer-ws-protocol`` crate).
 
 Any request may carry an ``id``; every reply to it (``authenticated``,
 ``auth_error``, ``result``, ``result_start``/``result_chunk``/``result_end``,
+``snapshot``, ``snapshot_start``/``snapshot_chunk``/``snapshot_end``,
 ``error``, ``pong``, ``cancel_ack``) echoes it. Pushes (notifications, subscription deltas) and
 ``notice`` frames never carry one and are never replies.
 """
@@ -15,7 +16,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Literal
 
-PROTOCOL_VERSION = 3
+PROTOCOL_VERSION = 4
 """The ``/ws`` protocol version this SDK speaks (``authenticated.protocol_version``)."""
 
 
@@ -65,6 +66,53 @@ class ExecuteMessage:
         if self.timeout_ms is not None:
             frame["timeout_ms"] = self.timeout_ms
         return _with_id(frame, self.id)
+
+
+@dataclass(frozen=True)
+class NamedQuery:
+    """One query of a ``read`` or ``subscribe``, and the name its result goes by."""
+
+    name: str
+    query: str
+
+
+def _queries(queries: tuple[NamedQuery, ...]) -> list[dict[str, str]]:
+    return [{"name": q.name, "query": q.query} for q in queries]
+
+
+@dataclass(frozen=True)
+class ReadMessage:
+    """Run several ``?`` queries on one snapshot; answered by ``snapshot``.
+
+    Persistent data only (no session facts or rules). Deadline and ``cancel``
+    stop the whole read; it fails as a whole."""
+
+    queries: tuple[NamedQuery, ...]
+    id: str | None = None
+    timeout_ms: int | None = None
+
+    def to_json(self) -> str:
+        frame: dict[str, Any] = {"type": "read", "queries": _queries(self.queries)}
+        if self.timeout_ms is not None:
+            frame["timeout_ms"] = self.timeout_ms
+        return _with_id(frame, self.id)
+
+
+@dataclass(frozen=True)
+class SubscribeMessage:
+    """Open the subscription group ``subscription``; answered by a ``snapshot``
+    naming it. Ended by ``.unsubscribe <subscription>``."""
+
+    subscription: str
+    queries: tuple[NamedQuery, ...]
+    id: str | None = None
+
+    def to_json(self) -> str:
+        return _with_id({
+            "type": "subscribe",
+            "subscription": self.subscription,
+            "queries": _queries(self.queries),
+        }, self.id)
 
 
 @dataclass(frozen=True)
@@ -211,6 +259,75 @@ class ResultEndResponse:
 
 
 @dataclass(frozen=True)
+class NamedResult:
+    """One query's result in a ``snapshot``."""
+
+    name: str
+    columns: list[str]
+    rows: list[list[Any]]
+    total_count: int
+    truncated: bool
+    """Whether a limit or the result cap cut the rows; never in a group snapshot."""
+
+
+@dataclass(frozen=True)
+class SnapshotResponse:
+    """Results of several queries, all exact at ``revision``: the reply to
+    ``read``, and to ``subscribe`` (then naming the group in ``subscribed``)."""
+
+    knowledge_graph: str
+    revision: int
+    results: list[NamedResult]
+    """One per query of the request, in its order."""
+    execution_time_ms: int
+    subscribed: Subscribed | None = None
+    id: str | None = None
+
+
+@dataclass(frozen=True)
+class NamedResultHeader:
+    """One result of a ``snapshot_start``: its chunks carry ``row_count`` rows."""
+
+    name: str
+    columns: list[str]
+    row_count: int
+    total_count: int
+    truncated: bool
+
+
+@dataclass(frozen=True)
+class SnapshotStartResponse:
+    """Header of a snapshot streamed as ``snapshot_chunk`` frames; complete only
+    at its ``snapshot_end``."""
+
+    knowledge_graph: str
+    revision: int
+    results: list[NamedResultHeader]
+    execution_time_ms: int
+    subscribed: Subscribed | None = None
+    id: str | None = None
+
+
+@dataclass(frozen=True)
+class SnapshotChunkResponse:
+    """Rows of result ``result`` (its index) of a streamed snapshot; ``chunk_index``
+    counts from 0 across all results, which stream in order."""
+
+    result: int
+    chunk_index: int
+    rows: list[list[Any]]
+    id: str | None = None
+
+
+@dataclass(frozen=True)
+class SnapshotEndResponse:
+    """End of a streamed snapshot: how many chunks it had."""
+
+    chunk_count: int
+    id: str | None = None
+
+
+@dataclass(frozen=True)
 class PongResponse:
     id: str | None = None
 
@@ -311,8 +428,83 @@ class SubscriptionDeltaEndResponse:
 
 
 @dataclass(frozen=True)
+class GroupMemberDelta:
+    """One member of a ``subscription_group_delta``, in group order."""
+
+    name: str
+    unchanged: bool
+    """Its ``inserted`` and ``retracted`` are empty: already exact at the revision."""
+    columns: list[str]
+    inserted: list[list[Any]]
+    retracted: list[list[Any]]
+
+
+@dataclass(frozen=True)
+class SubscriptionGroupDeltaResponse:
+    """The results of a subscription group changed: every member, in group
+    order; after it every member is exact at ``revision``."""
+
+    subscription: str
+    generation: int
+    knowledge_graph: str
+    seq: int
+    """Delta number within the generation, from 1, shared by the group, without gaps."""
+    revision: int
+    members: list[GroupMemberDelta]
+
+
+@dataclass(frozen=True)
+class GroupMemberDeltaHeader:
+    """One member of a ``subscription_group_delta_start``, with its row counts."""
+
+    name: str
+    unchanged: bool
+    columns: list[str]
+    inserted_count: int
+    retracted_count: int
+
+
+@dataclass(frozen=True)
+class SubscriptionGroupDeltaStartResponse:
+    """Header of a group delta streamed in chunks; it applies only at its
+    ``subscription_group_delta_end``."""
+
+    subscription: str
+    generation: int
+    knowledge_graph: str
+    seq: int
+    revision: int
+    members: list[GroupMemberDeltaHeader]
+
+
+@dataclass(frozen=True)
+class SubscriptionGroupDeltaChunkResponse:
+    """Rows of member ``member`` of a streamed group delta; ``chunk_index``
+    counts from 0 across all members, which stream in order."""
+
+    subscription: str
+    generation: int
+    seq: int
+    chunk_index: int
+    member: int
+    inserted: list[list[Any]]
+    retracted: list[list[Any]]
+
+
+@dataclass(frozen=True)
+class SubscriptionGroupDeltaEndResponse:
+    """End of a streamed group delta: how many chunks it had."""
+
+    subscription: str
+    generation: int
+    seq: int
+    chunk_count: int
+
+
+@dataclass(frozen=True)
 class SubscriptionErrorResponse:
-    """A standing query failed to re-evaluate; it stays registered."""
+    """A standing query failed to re-evaluate; it stays registered. A group's
+    refresh failed as a whole: every member keeps its last result."""
 
     subscription: str
     generation: int
@@ -356,6 +548,10 @@ ServerMessage = (
     | ResultStartResponse
     | ResultChunkResponse
     | ResultEndResponse
+    | SnapshotResponse
+    | SnapshotStartResponse
+    | SnapshotChunkResponse
+    | SnapshotEndResponse
     | PongResponse
     | CancelAckResponse
     | NoticeResponse
@@ -364,6 +560,10 @@ ServerMessage = (
     | SubscriptionDeltaStartResponse
     | SubscriptionDeltaChunkResponse
     | SubscriptionDeltaEndResponse
+    | SubscriptionGroupDeltaResponse
+    | SubscriptionGroupDeltaStartResponse
+    | SubscriptionGroupDeltaChunkResponse
+    | SubscriptionGroupDeltaEndResponse
     | SubscriptionErrorResponse
     | SubscriptionResetResponse
 )
@@ -376,6 +576,10 @@ ReplyMessage = (
     | ResultStartResponse
     | ResultChunkResponse
     | ResultEndResponse
+    | SnapshotResponse
+    | SnapshotStartResponse
+    | SnapshotChunkResponse
+    | SnapshotEndResponse
     | PongResponse
     | CancelAckResponse
 )
@@ -386,6 +590,10 @@ SubscriptionPush = (
     | SubscriptionDeltaStartResponse
     | SubscriptionDeltaChunkResponse
     | SubscriptionDeltaEndResponse
+    | SubscriptionGroupDeltaResponse
+    | SubscriptionGroupDeltaStartResponse
+    | SubscriptionGroupDeltaChunkResponse
+    | SubscriptionGroupDeltaEndResponse
     | SubscriptionErrorResponse
     | SubscriptionResetResponse
 )
@@ -398,6 +606,10 @@ PushMessage = (
     | SubscriptionDeltaStartResponse
     | SubscriptionDeltaChunkResponse
     | SubscriptionDeltaEndResponse
+    | SubscriptionGroupDeltaResponse
+    | SubscriptionGroupDeltaStartResponse
+    | SubscriptionGroupDeltaChunkResponse
+    | SubscriptionGroupDeltaEndResponse
     | SubscriptionErrorResponse
     | SubscriptionResetResponse
 )
@@ -407,7 +619,13 @@ PushMessage = (
 # ── Serialization / Deserialization ───────────────────────────────────
 
 def serialize_message(
-    msg: LoginMessage | AuthenticateMessage | ExecuteMessage | CancelMessage | PingMessage,
+    msg: LoginMessage
+    | AuthenticateMessage
+    | ExecuteMessage
+    | ReadMessage
+    | SubscribeMessage
+    | CancelMessage
+    | PingMessage,
 ) -> str:
     """Serialize a client message to JSON."""
     return msg.to_json()
@@ -430,6 +648,58 @@ def _subscribed(raw: dict[str, Any] | None) -> Subscribed | None:
         generation=raw["generation"],
         revision=raw["revision"],
     )
+
+
+def _named_results(raw: list[dict[str, Any]]) -> list[NamedResult]:
+    return [
+        NamedResult(
+            name=r["name"],
+            columns=r["columns"],
+            rows=r["rows"],
+            total_count=r["total_count"],
+            truncated=r["truncated"],
+        )
+        for r in raw
+    ]
+
+
+def _named_result_headers(raw: list[dict[str, Any]]) -> list[NamedResultHeader]:
+    return [
+        NamedResultHeader(
+            name=r["name"],
+            columns=r["columns"],
+            row_count=r["row_count"],
+            total_count=r["total_count"],
+            truncated=r["truncated"],
+        )
+        for r in raw
+    ]
+
+
+def _member_deltas(raw: list[dict[str, Any]]) -> list[GroupMemberDelta]:
+    return [
+        GroupMemberDelta(
+            name=m["name"],
+            unchanged=m["unchanged"],
+            columns=m["columns"],
+            inserted=m["inserted"],
+            retracted=m["retracted"],
+        )
+        for m in raw
+    ]
+
+
+def _member_headers(raw: list[dict[str, Any]]) -> list[GroupMemberDeltaHeader]:
+    return [
+        GroupMemberDeltaHeader(
+            name=m["name"],
+            unchanged=m["unchanged"],
+            columns=m["columns"],
+            inserted_count=m["inserted_count"],
+            retracted_count=m["retracted_count"],
+        )
+        for m in raw
+    ]
 
 
 def deserialize_message(data: str | bytes) -> ServerMessage:
@@ -502,6 +772,33 @@ def deserialize_message(data: str | bytes) -> ServerMessage:
             chunk_count=obj["chunk_count"],
             id=obj.get("id"),
         )
+    if msg_type == "snapshot":
+        return SnapshotResponse(
+            knowledge_graph=obj["knowledge_graph"],
+            revision=obj["revision"],
+            results=_named_results(obj["results"]),
+            execution_time_ms=obj["execution_time_ms"],
+            subscribed=_subscribed(obj.get("subscribed")),
+            id=obj.get("id"),
+        )
+    if msg_type == "snapshot_start":
+        return SnapshotStartResponse(
+            knowledge_graph=obj["knowledge_graph"],
+            revision=obj["revision"],
+            results=_named_result_headers(obj["results"]),
+            execution_time_ms=obj["execution_time_ms"],
+            subscribed=_subscribed(obj.get("subscribed")),
+            id=obj.get("id"),
+        )
+    if msg_type == "snapshot_chunk":
+        return SnapshotChunkResponse(
+            result=obj["result"],
+            chunk_index=obj["chunk_index"],
+            rows=obj["rows"],
+            id=obj.get("id"),
+        )
+    if msg_type == "snapshot_end":
+        return SnapshotEndResponse(chunk_count=obj["chunk_count"], id=obj.get("id"))
     if msg_type == "pong":
         return PongResponse(id=obj.get("id"))
     if msg_type == "cancel_ack":
@@ -545,6 +842,41 @@ def deserialize_message(data: str | bytes) -> ServerMessage:
             chunk_count=obj["chunk_count"],
             inserted_count=obj["inserted_count"],
             retracted_count=obj["retracted_count"],
+        )
+    if msg_type == "subscription_group_delta":
+        return SubscriptionGroupDeltaResponse(
+            subscription=obj["subscription"],
+            generation=obj["generation"],
+            knowledge_graph=obj["knowledge_graph"],
+            seq=obj["seq"],
+            revision=obj["revision"],
+            members=_member_deltas(obj["members"]),
+        )
+    if msg_type == "subscription_group_delta_start":
+        return SubscriptionGroupDeltaStartResponse(
+            subscription=obj["subscription"],
+            generation=obj["generation"],
+            knowledge_graph=obj["knowledge_graph"],
+            seq=obj["seq"],
+            revision=obj["revision"],
+            members=_member_headers(obj["members"]),
+        )
+    if msg_type == "subscription_group_delta_chunk":
+        return SubscriptionGroupDeltaChunkResponse(
+            subscription=obj["subscription"],
+            generation=obj["generation"],
+            seq=obj["seq"],
+            chunk_index=obj["chunk_index"],
+            member=obj["member"],
+            inserted=obj["inserted"],
+            retracted=obj["retracted"],
+        )
+    if msg_type == "subscription_group_delta_end":
+        return SubscriptionGroupDeltaEndResponse(
+            subscription=obj["subscription"],
+            generation=obj["generation"],
+            seq=obj["seq"],
+            chunk_count=obj["chunk_count"],
         )
     if msg_type == "subscription_error":
         return SubscriptionErrorResponse(

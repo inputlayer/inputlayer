@@ -8,10 +8,12 @@
 //! publications instead of queueing them, its mailbox never holds more than
 //! one entry per subscription, and the worker never waits for a connection.
 //!
-//! Each subscriber keeps the last result it delivered. When a publication's
-//! delta starts from that result, the subscriber forwards the shared delta;
-//! otherwise (it skipped publications, or was denied one) it diffs its own
-//! result against the publication's complete result.
+//! A publication carries one result per query of the view: a group's
+//! results are always published together, all exact at the publication's
+//! revision. Each subscriber keeps the last results it delivered. When a
+//! publication's delta starts from those results, the subscriber forwards the
+//! shared delta; otherwise (it skipped publications, or was denied one) it
+//! diffs its own results against the publication's complete results.
 //!
 //! The store, the ring, the answer and the load are sequentially consistent:
 //! when a ring finds a wake-up still queued, the answer that dequeues it comes
@@ -33,28 +35,54 @@ pub type SubscriberId = u64;
 pub struct Publication {
     /// Position in the view's publications, from 1.
     pub number: u64,
-    /// The knowledge graph revision `result` is the exact answer at.
+    /// The knowledge graph revision every result in `results` is the exact
+    /// answer at.
     pub revision: u64,
-    /// Number of the publication that produced `result`.
+    /// Number of the publication that produced `results`.
     pub result_number: u64,
-    pub columns: Vec<String>,
-    /// The view's last complete result.
-    pub result: Arc<ResultSet>,
+    /// The view's last complete results, one per query in the view's order.
+    pub results: Arc<[ViewResult]>,
     pub outcome: Outcome,
+}
+
+/// One query's complete result in a publication.
+#[derive(Debug, Clone, Default)]
+pub struct ViewResult {
+    pub columns: Vec<String>,
+    pub rows: Arc<ResultSet>,
+}
+
+/// Rows of one query's result that changed.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RowChange {
+    pub inserted: Vec<Row>,
+    pub retracted: Vec<Row>,
+}
+
+impl RowChange {
+    /// True when no row changed.
+    pub fn is_empty(&self) -> bool {
+        self.inserted.is_empty() && self.retracted.is_empty()
+    }
+
+    /// The change from `base` to `next`.
+    pub fn between(base: &ResultSet, next: &ResultSet) -> Self {
+        Self {
+            inserted: next.difference(base),
+            retracted: base.difference(next),
+        }
+    }
 }
 
 /// What a publication reports.
 #[derive(Debug)]
 pub enum Outcome {
-    /// The view's first result.
+    /// The view's first results.
     Snapshot,
-    /// `result` is the result of publication `base` with these rows changed.
-    Delta {
-        base: u64,
-        inserted: Vec<Row>,
-        retracted: Vec<Row>,
-    },
-    /// A refresh failed; `result` is still the last complete result.
+    /// `results` are the results of publication `base` with these rows
+    /// changed, one change per query (empty for a result that did not change).
+    Delta { base: u64, changes: Vec<RowChange> },
+    /// A refresh failed; `results` are still the last complete results.
     Failed(String),
 }
 
@@ -128,8 +156,7 @@ mod tests {
             number,
             revision: number,
             result_number: number,
-            columns: Vec::new(),
-            result: Arc::default(),
+            results: Arc::new([]),
             outcome: Outcome::Snapshot,
         })
     }

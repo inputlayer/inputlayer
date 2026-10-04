@@ -144,14 +144,41 @@ impl Client {
     pub async fn execute(&mut self, program: &str) -> Value {
         self.send(json!({"type": "execute", "program": program}))
             .await;
+        self.reply().await
+    }
+
+    /// The next reply (`result`, `snapshot` or `error`), keeping the
+    /// subscription pushes that arrive first.
+    pub async fn reply(&mut self) -> Value {
         loop {
             let msg = self.recv().await;
             match msg["type"].as_str() {
-                Some("result" | "error") => return msg,
-                Some("subscription_delta" | "subscription_error") => self.pushes.push_back(msg),
+                Some("result" | "snapshot" | "error") => return msg,
+                Some(push) if push.starts_with("subscription_") => self.pushes.push_back(msg),
                 _ => {}
             }
         }
+    }
+
+    /// Send `read` of the named `queries`; returns its reply.
+    pub async fn read(&mut self, queries: &[(&str, &str)]) -> Value {
+        self.send(json!({"type": "read", "queries": named(queries)}))
+            .await;
+        self.reply().await
+    }
+
+    /// Subscribe to the group of named `queries`; returns its `snapshot`.
+    pub async fn subscribe_group(&mut self, id: &str, queries: &[(&str, &str)]) -> Value {
+        let reply = self.try_subscribe_group(id, queries).await;
+        assert_eq!(reply["type"], "snapshot", "subscribe failed: {reply}");
+        reply
+    }
+
+    /// Send `subscribe` for the group of named `queries`; returns its reply.
+    pub async fn try_subscribe_group(&mut self, id: &str, queries: &[(&str, &str)]) -> Value {
+        self.send(json!({"type": "subscribe", "subscription": id, "queries": named(queries)}))
+            .await;
+        self.reply().await
     }
 
     pub async fn next_push(&mut self) -> Value {
@@ -181,6 +208,14 @@ impl Client {
         assert_eq!(reply["type"], "result", "subscribe failed: {reply}");
         reply
     }
+}
+
+/// `queries` as the `queries` field of `read` and `subscribe`.
+pub fn named(queries: &[(&str, &str)]) -> Value {
+    queries
+        .iter()
+        .map(|(name, query)| json!({"name": name, "query": query}))
+        .collect()
 }
 
 pub fn rows(value: &Value) -> Vec<Value> {

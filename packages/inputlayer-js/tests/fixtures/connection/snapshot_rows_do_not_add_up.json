@@ -1,0 +1,101 @@
+{
+  "name": "snapshot_rows_do_not_add_up",
+  "about": "snapshot_end after chunks that carry fewer rows than a result's header announces is not a snapshot, though the chunk count matches.",
+  "calls": [
+    {
+      "read": [
+        {
+          "name": "orders",
+          "query": "?order(S, O)"
+        },
+        {
+          "name": "etas",
+          "query": "?eta(O, T)"
+        }
+      ]
+    }
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 1
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_start",
+        "id": "$r0",
+        "knowledge_graph": "default",
+        "revision": 5,
+        "results": [
+          {
+            "name": "orders",
+            "columns": [
+              "S",
+              "O"
+            ],
+            "row_count": 2,
+            "total_count": 2,
+            "truncated": false
+          },
+          {
+            "name": "etas",
+            "columns": [
+              "O",
+              "T"
+            ],
+            "row_count": 1,
+            "total_count": 1,
+            "truncated": false
+          }
+        ],
+        "execution_time_ms": 0
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_chunk",
+        "id": "$r0",
+        "result": 0,
+        "chunk_index": 0,
+        "rows": [
+          [
+            1,
+            10
+          ]
+        ]
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_chunk",
+        "id": "$r0",
+        "result": 1,
+        "chunk_index": 1,
+        "rows": [
+          [
+            10,
+            "tue"
+          ]
+        ]
+      }
+    },
+    {
+      "send": {
+        "type": "snapshot_end",
+        "id": "$r0",
+        "chunk_count": 2
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "error": "InternalError"
+      }
+    ],
+    "stats": {
+      "staleReplies": 0
+    }
+  }
+}

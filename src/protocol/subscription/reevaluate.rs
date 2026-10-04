@@ -24,7 +24,7 @@ use crate::protocol::Handler;
 use crate::statement::{parse_query, QueryGoal};
 use crate::storage_engine::KnowledgeGraphSnapshot;
 
-use super::{Dependencies, Refresh, ResultSet, Row, StandingQuery};
+use super::{Dependencies, QueryRefresh, Refresh, ResultSet, Row, StandingQuery};
 
 /// A standing query kept current by full re-evaluation.
 pub struct ReevaluatingQuery {
@@ -135,14 +135,33 @@ impl ReevaluatingQuery {
         }
         let inserted = next.difference(&self.current);
         let retracted = self.current.difference(&next);
-        self.current = Arc::clone(&next);
+        let query = if inserted.is_empty() && retracted.is_empty() {
+            // Keep the set publications already share, so a subscriber that
+            // compares results sees at once that this one did not change.
+            self.unchanged()
+        } else {
+            self.current = Arc::clone(&next);
+            QueryRefresh {
+                columns: self.columns.clone(),
+                inserted,
+                retracted,
+                result: next,
+            }
+        };
         Refresh {
-            columns: self.columns.clone(),
-            inserted,
-            retracted,
+            queries: vec![query],
             dependencies,
             revision,
-            result: next,
+        }
+    }
+
+    /// The current result, unchanged.
+    pub fn unchanged(&self) -> QueryRefresh {
+        QueryRefresh {
+            columns: self.columns.clone(),
+            inserted: Vec::new(),
+            retracted: Vec::new(),
+            result: Arc::clone(&self.current),
         }
     }
 

@@ -2,7 +2,7 @@ asyncapi: 3.0.0
 
 info:
   title: InputLayer WebSocket API
-  version: 2.0.0
+  version: 2.1.0
   description: |
     WebSocket API for InputLayer Knowledge Graph Engine.
 
@@ -52,14 +52,16 @@ info:
 
     ## Protocol version and request IDs
 
-    This is protocol version 3, reported as `protocol_version` in `authenticated`.
+    This is protocol version 4, reported as `protocol_version` in `authenticated`.
+    Version 4 added snapshot reads (`read`) and subscription groups (`subscribe`).
     The frame types are defined once in the `inputlayer-ws-protocol` crate
     (`ws-protocol/`); the Python and JS SDKs mirror them.
 
-    Any request (`login`, `authenticate`, `execute`, `ping`) may carry an `id`: a
-    non-empty string of at most 64 bytes. Every frame answering that request echoes it:
-    `authenticated`, `auth_error`, `result`, `result_start`, `result_chunk`, `result_end`,
-    `error` and `pong`. A request without an `id` gets replies without one. An `id` must
+    Any request (`login`, `authenticate`, `execute`, `read`, `subscribe`, `cancel`,
+    `ping`) may carry an `id`: a non-empty string of at most 64 bytes. Every frame
+    answering that request echoes it: `authenticated`, `auth_error`, `result`,
+    `result_start`, `result_chunk`, `result_end`, `snapshot`, `snapshot_start`,
+    `snapshot_chunk`, `snapshot_end`, `error`, `cancel_ack` and `pong`. A request without an `id` gets replies without one. An `id` must
     be unique among your requests still awaiting a reply; it may be reused once answered.
     A request reusing the `id` of an unanswered request gets an `invalid_request` error
     and does not run. Replies come back in request order (see Pipelining).
@@ -70,8 +72,11 @@ info:
     - pushes: change notifications (`persistent_update`, `rule_change`, `kg_change`,
       `schema_change`) and standing-query results (`subscription_delta`, its streamed
       form `subscription_delta_start` / `subscription_delta_chunk` /
-      `subscription_delta_end`, `subscription_error` and `subscription_reset`), addressed
-      by subscription name and generation;
+      `subscription_delta_end`, for a subscription group `subscription_group_delta` and
+      its streamed form `subscription_group_delta_start` /
+      `subscription_group_delta_chunk` / `subscription_group_delta_end`, and
+      `subscription_error` and `subscription_reset`), addressed by subscription name and
+      generation;
     - `notice`: connection events such as an idle timeout, typed by `code`. Every code
       except `notifications_missed` and `replay_gap` is followed by the server closing
       the connection.
@@ -86,9 +91,13 @@ info:
 
     No frame exceeds the 16 MiB message limit. A result, or a `.subscribe` snapshot,
     whose single frame would exceed 1 MiB is streamed as `result_start`, `result_chunk`s
-    and `result_end`; a subscription delta as `subscription_delta_start`,
-    `subscription_delta_chunk`s and `subscription_delta_end`. A chunk holds at most 500
-    rows and about 1 MiB. Each stream is one logical result or delta: apply it only at
+    and `result_end`; a `snapshot` (the reply to `read` and `subscribe`) as
+    `snapshot_start`, `snapshot_chunk`s and `snapshot_end`; a subscription delta as
+    `subscription_delta_start`, `subscription_delta_chunk`s and `subscription_delta_end`;
+    a group delta as `subscription_group_delta_start`, `subscription_group_delta_chunk`s
+    and `subscription_group_delta_end`. A chunk holds at most 500 rows and about 1 MiB;
+    in a payload of several results (a snapshot, a group delta) each chunk holds rows of
+    one result only, names it by index, and results stream in order. Each stream is one logical result or delta: apply it only at
     its end frame, after checking that the chunks arrived in order from `chunk_index` 0
     and add up to the end frame's counts. Until then the previous state stands. Frames
     of one stream arrive in order; other frames may arrive between them.
@@ -103,21 +112,46 @@ info:
     `http.ws_send_timeout_ms` (default 30 s) is disconnected, so a stalled reader holds
     no server resources and never delays other connections.
 
+    ## Snapshot reads and subscription groups
+
+    A caller that renders one state from several queries needs them all at the same
+    revision. Two requests give that:
+
+    - `read` runs several named queries on one pinned snapshot of the connection's
+      knowledge graph and answers with one `snapshot`: every result is its query's exact
+      answer at the snapshot's `revision`, whatever commits meanwhile. It sees persistent
+      data only, as a subscription does (no session facts or rules), and fails as a
+      whole, naming the failing query. It runs alongside other queries (see Pipelining)
+      under the request's deadline and `cancel`, which stop every query of it.
+    - `subscribe` registers a subscription *group*: several named queries kept current
+      together. Its reply is a `snapshot` of every member at one revision (with
+      `subscribed`). Afterwards the server pushes one `subscription_group_delta` per
+      refresh that changed any member, listing every member in order, the ones whose
+      result did not change marked `unchanged`; after applying it, every member is its
+      query's exact answer at the push's `revision`. A refresh that changes no member
+      pushes nothing. A refresh fails as a whole (`subscription_error`), every member
+      keeping its last result. `seq` is gapless per group. End a group with
+      `.unsubscribe <name>`; names are shared with `.subscribe`, and a group counts once
+      per query against `http.rate_limit.ws_max_subscriptions`. Bursts of commits
+      coalesce, as for any subscription: a row that appears and disappears between two
+      refreshes is never seen.
+
     ## Message Flow
 
     1. Client connects → must authenticate first
     2. Client sends `login` or `authenticate` → Server responds with `authenticated` or `auth_error`
     3. If `last_seq` and `epoch` were provided, the server replays missed notifications or sends a `replay_gap` notice
-    4. Client sends `execute` messages → Server responds with `result` or `error`, echoing the request `id`
+    4. Client sends `execute` messages → Server responds with `result` or `error`, echoing the request `id`; `read` and `subscribe` are answered by `snapshot` or `error`
     5. For large results (>1 MB), the server streams: `result_start` → `result_chunk` (×N) → `result_end`
-    6. Server may push change notifications (`persistent_update`, `rule_change`, ...), for `.subscribe`d queries `subscription_delta` (streamed when large) / `subscription_error` / `subscription_reset`, and connection `notice`s
+    6. Server may push change notifications (`persistent_update`, `rule_change`, ...), for `.subscribe`d queries `subscription_delta` (streamed when large), for subscription groups `subscription_group_delta` (streamed when large), `subscription_error` / `subscription_reset`, and connection `notice`s
     7. Client disconnects → Server auto-closes session
 
     ## Pipelining
 
     Clients may send requests without waiting for replies. Replies come back in
-    request order. Programs made only of queries run concurrently; any other
-    request (writes, rules, session changes, `.kg use`, `.subscribe`, ...) starts
+    request order. Programs made only of queries, and `read`s, run concurrently; any
+    other request (writes, rules, session changes, `.kg use`, `.subscribe`,
+    `subscribe`, ...) starts
     after every earlier request has replied and finishes before any later one
     starts. Pushes are delivered while requests run, between replies. At most
     `http.rate_limit.ws_max_in_flight_requests` (default 16) requests are
@@ -125,7 +159,7 @@ info:
 
     ## Deadlines and cancellation
 
-    Every `execute` runs under one deadline that starts when the server reads it
+    Every `execute` and `read` runs under one deadline that starts when the server reads it
     and covers waiting behind earlier requests, waiting for a compute slot and
     computing: `storage.performance.query_timeout_ms` (default 30 s), or the
     request's own `timeout_ms` when that is sooner.
@@ -198,6 +232,10 @@ channels:
       # Client → Server (operations)
       execute:
         $ref: '#/components/messages/Execute'
+      read:
+        $ref: '#/components/messages/Read'
+      subscribe:
+        $ref: '#/components/messages/Subscribe'
       ping:
         $ref: '#/components/messages/Ping'
       cancel:
@@ -216,6 +254,14 @@ channels:
         $ref: '#/components/messages/ResultChunk'
       result_end:
         $ref: '#/components/messages/ResultEnd'
+      snapshot:
+        $ref: '#/components/messages/Snapshot'
+      snapshot_start:
+        $ref: '#/components/messages/SnapshotStart'
+      snapshot_chunk:
+        $ref: '#/components/messages/SnapshotChunk'
+      snapshot_end:
+        $ref: '#/components/messages/SnapshotEnd'
       error:
         $ref: '#/components/messages/Error'
       pong:
@@ -232,6 +278,14 @@ channels:
         $ref: '#/components/messages/SubscriptionDeltaChunk'
       subscription_delta_end:
         $ref: '#/components/messages/SubscriptionDeltaEnd'
+      subscription_group_delta:
+        $ref: '#/components/messages/SubscriptionGroupDelta'
+      subscription_group_delta_start:
+        $ref: '#/components/messages/SubscriptionGroupDeltaStart'
+      subscription_group_delta_chunk:
+        $ref: '#/components/messages/SubscriptionGroupDeltaChunk'
+      subscription_group_delta_end:
+        $ref: '#/components/messages/SubscriptionGroupDeltaEnd'
       subscription_error:
         $ref: '#/components/messages/SubscriptionError'
       subscription_reset:
@@ -291,12 +345,136 @@ operations:
       - `.index list` / `.index create ...` / `.index drop <name>` - Index management
       - `.clear prefix <prefix>` - Clear relations by prefix
       - `.debug <query>` - Show query plan without executing
-      - `.subscribe <id> ?<query>` / `.unsubscribe <id>` - Standing queries (replies with the initial snapshot; pushes `subscription_delta`)
+      - `.subscribe <id> ?<query>` / `.unsubscribe <id>` - Standing queries (replies with the initial snapshot; pushes `subscription_delta`); `.unsubscribe` also ends a subscription group
       - `.help` - Show available commands
       - `.status` - Server status
       - `.compact` - Trigger compaction
     messages:
       - $ref: '#/channels/ws/messages/execute'
+
+  read:
+    action: send
+    channel:
+      $ref: '#/channels/ws'
+    summary: Read several queries at one revision
+    description: |
+      Answered by one `snapshot` holding every named query's result, all exact at its
+      `revision`, or one `error` naming the failing query. Persistent data only. See
+      "Snapshot reads and subscription groups".
+    messages:
+      - $ref: '#/channels/ws/messages/read'
+
+  subscribe:
+    action: send
+    channel:
+      $ref: '#/channels/ws'
+    summary: Subscribe to a group of queries kept current together
+    description: |
+      Answered by a `snapshot` of every member at one revision, with `subscribed`;
+      then `subscription_group_delta` pushes, each leaving every member exact at its
+      revision. See "Snapshot reads and subscription groups".
+    messages:
+      - $ref: '#/channels/ws/messages/subscribe'
+
+  onSnapshot:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: Several query results at one revision
+    description: |
+      The reply to `read`, and to `subscribe` (then with `subscribed`). `results` is in
+      request order. A read's result may be cut at `max_result_rows` (`truncated`); a
+      group's snapshot never is: a capped member fails the `subscribe` instead.
+    messages:
+      - $ref: '#/channels/ws/messages/snapshot'
+
+  onSnapshotStart:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: Start of a streamed snapshot
+    description: |
+      Sent instead of `snapshot` when it would exceed 1 MiB: every result's name,
+      columns and row count. Followed by `snapshot_chunk`s and a `snapshot_end`; the
+      snapshot is complete only at its end. An `error` with the same `id` instead ends
+      the stream as failed: discard the rows received.
+    messages:
+      - $ref: '#/channels/ws/messages/snapshot_start'
+
+  onSnapshotChunk:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: Rows of one result of a streamed snapshot
+    description: |
+      At most 500 rows and about 1 MiB, of the result at index `result`. `chunk_index`
+      counts from 0 across all results without gaps; results stream in order, and a
+      result without rows has no chunks.
+    messages:
+      - $ref: '#/channels/ws/messages/snapshot_chunk'
+
+  onSnapshotEnd:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: End of a streamed snapshot
+    description: |
+      The number of chunks sent. Each result's chunks must add up to the `row_count`
+      its header announced; only now is the snapshot complete.
+    messages:
+      - $ref: '#/channels/ws/messages/snapshot_end'
+
+  onSubscriptionGroupDelta:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: Change to a subscription group's results
+    description: |
+      One per refresh that changed any member. Lists every member in the group's
+      order; `unchanged` marks a member whose result did not change. After applying
+      it, every member is its query's exact answer at `revision`. `seq` starts at 1 per
+      group and has no gaps; `revision` increases with every push. A push whose frame
+      would exceed 1 MiB is streamed instead (`subscription_group_delta_start`).
+    messages:
+      - $ref: '#/channels/ws/messages/subscription_group_delta'
+
+  onSubscriptionGroupDeltaStart:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: Start of a group delta streamed in chunks
+    description: |
+      Everything a `subscription_group_delta` carries but its rows, with each member's
+      row counts. Followed by `subscription_group_delta_chunk`s and a
+      `subscription_group_delta_end` for the same subscription, generation and `seq`;
+      together they are that one push. Other frames may arrive in between. Apply it
+      only at its end.
+    messages:
+      - $ref: '#/channels/ws/messages/subscription_group_delta_start'
+
+  onSubscriptionGroupDeltaChunk:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: Rows of one member of a streamed group delta
+    description: |
+      At most 500 rows and about 1 MiB, of the member at index `member`. `chunk_index`
+      counts from 0 across all members without gaps; members stream in order. A
+      missing, repeated or out-of-order chunk means the stream is broken: drop the
+      group's rows and subscribe again.
+    messages:
+      - $ref: '#/channels/ws/messages/subscription_group_delta_chunk'
+
+  onSubscriptionGroupDeltaEnd:
+    action: receive
+    channel:
+      $ref: '#/channels/ws'
+    summary: End of a streamed group delta
+    description: |
+      The number of chunks sent. Each member's chunks must add up to the counts its
+      header announced; only now does the push apply.
+    messages:
+      - $ref: '#/channels/ws/messages/subscription_group_delta_end'
 
   ping:
     action: send
@@ -498,7 +676,8 @@ operations:
     summary: Standing query re-evaluation failed or was denied
     description: |
       The subscription stays registered and keeps the last result it received;
-      the next delta is relative to it. A result cut at `max_result_rows`, and
+      the next delta is relative to it. For a group, the refresh failed as a whole:
+      every member keeps its last result. A result cut at `max_result_rows`, and
       a result the subscriber may no longer read (`.kg acl revoke`), are
       reported this way instead of being delivered.
     messages:
@@ -513,6 +692,86 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/ExecuteRequest'
+
+    Read:
+      name: read
+      title: Read
+      summary: Read several queries at one revision
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ReadRequest'
+
+    Subscribe:
+      name: subscribe
+      title: Subscribe
+      summary: Subscribe to a group of queries kept current together
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SubscribeRequest'
+
+    Snapshot:
+      name: snapshot
+      title: Snapshot
+      summary: Several query results at one revision
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SnapshotResponse'
+
+    SnapshotStart:
+      name: snapshot_start
+      title: Snapshot Start
+      summary: Header of a snapshot streamed in chunks
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SnapshotStartResponse'
+
+    SnapshotChunk:
+      name: snapshot_chunk
+      title: Snapshot Chunk
+      summary: Rows of one result of a streamed snapshot
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SnapshotChunkResponse'
+
+    SnapshotEnd:
+      name: snapshot_end
+      title: Snapshot End
+      summary: End of a streamed snapshot
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SnapshotEndResponse'
+
+    SubscriptionGroupDelta:
+      name: subscription_group_delta
+      title: Subscription Group Delta
+      summary: Every member of a subscription group at a new revision
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SubscriptionGroupDeltaResponse'
+
+    SubscriptionGroupDeltaStart:
+      name: subscription_group_delta_start
+      title: Subscription Group Delta Start
+      summary: Header of a group delta streamed in chunks
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SubscriptionGroupDeltaStartResponse'
+
+    SubscriptionGroupDeltaChunk:
+      name: subscription_group_delta_chunk
+      title: Subscription Group Delta Chunk
+      summary: Rows of one member of a streamed group delta
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SubscriptionGroupDeltaChunkResponse'
+
+    SubscriptionGroupDeltaEnd:
+      name: subscription_group_delta_end
+      title: Subscription Group Delta End
+      summary: End of a streamed group delta
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SubscriptionGroupDeltaEndResponse'
 
     Ping:
       name: ping
@@ -778,7 +1037,7 @@ components:
       type: object
       required: [subscription, generation, revision]
       description: |
-        The subscription a `.subscribe` registered. A name can be reused after
+        The subscription a `.subscribe` or `subscribe` registered. A name can be reused after
         `.unsubscribe`; the generation is unique per connection, so a push whose
         generation differs belongs to an earlier registration and is stale.
         Subscriptions end with their connection.
@@ -1031,6 +1290,350 @@ components:
           program: ".kg list"
         - type: execute
           program: "+path(X, Y) <- edge(X, Y)"
+
+    NamedQuery:
+      type: object
+      required: [name, query]
+      description: One query of a `read` or `subscribe`, and the name its result goes by.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Unique within the request
+        query:
+          type: string
+          description: |
+            One `?` query. A `read` query may carry limit/offset and sort annotations;
+            a `subscribe` query may not (a subscription tracks the whole result).
+
+    ReadRequest:
+      type: object
+      required: [type, queries]
+      properties:
+        type:
+          type: string
+          const: read
+        id:
+          $ref: '#/components/schemas/RequestId'
+        queries:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/NamedQuery'
+        timeout_ms:
+          type: integer
+          minimum: 0
+          description: As for `execute`; stops every query of the read.
+      examples:
+        - type: read
+          id: "w1"
+          queries:
+            - {name: orders, query: "?order(S, O)"}
+            - {name: eta, query: "?eta(O, T)"}
+
+    SubscribeRequest:
+      type: object
+      required: [type, subscription, queries]
+      properties:
+        type:
+          type: string
+          const: subscribe
+        id:
+          $ref: '#/components/schemas/RequestId'
+        subscription:
+          type: string
+          pattern: '^[A-Za-z0-9_.:-]{1,128}$'
+          description: The group's name, under the `.subscribe` id rules and shared with `.subscribe` names on this connection
+        queries:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/NamedQuery'
+      examples:
+        - type: subscribe
+          id: "s1"
+          subscription: window
+          queries:
+            - {name: orders, query: "?order(S, O)"}
+            - {name: eta, query: "?eta(O, T)"}
+
+    NamedResult:
+      type: object
+      required: [name, columns, rows, total_count, truncated]
+      properties:
+        name:
+          type: string
+          description: The query's name in the request
+        columns:
+          type: array
+          items:
+            type: string
+        rows:
+          type: array
+          items:
+            type: array
+        total_count:
+          type: integer
+          description: Rows before the result cap
+        truncated:
+          type: boolean
+          description: Whether the result cap cut the rows; never set in a group's snapshot
+
+    SnapshotResponse:
+      type: object
+      required: [type, knowledge_graph, revision, results, execution_time_ms]
+      properties:
+        type:
+          type: string
+          const: snapshot
+        id:
+          $ref: '#/components/schemas/RequestId'
+        knowledge_graph:
+          type: string
+        revision:
+          type: integer
+          format: int64
+          description: The knowledge graph revision every result is the exact answer at
+        results:
+          type: array
+          description: One per query of the request, in its order
+          items:
+            $ref: '#/components/schemas/NamedResult'
+        execution_time_ms:
+          type: integer
+        subscribed:
+          $ref: '#/components/schemas/Subscribed'
+      examples:
+        - type: snapshot
+          id: "s1"
+          knowledge_graph: default
+          revision: 17
+          results:
+            - {name: orders, columns: [S, O], rows: [[1, 1042]], total_count: 1, truncated: false}
+            - {name: eta, columns: [O, T], rows: [], total_count: 0, truncated: false}
+          execution_time_ms: 2
+          subscribed: {subscription: window, generation: 1, revision: 17}
+
+    SnapshotStartResponse:
+      type: object
+      required: [type, knowledge_graph, revision, results, execution_time_ms]
+      properties:
+        type:
+          type: string
+          const: snapshot_start
+        id:
+          $ref: '#/components/schemas/RequestId'
+        knowledge_graph:
+          type: string
+        revision:
+          type: integer
+          format: int64
+        results:
+          type: array
+          items:
+            type: object
+            required: [name, columns, row_count, total_count, truncated]
+            properties:
+              name:
+                type: string
+              columns:
+                type: array
+                items:
+                  type: string
+              row_count:
+                type: integer
+                description: Rows this result's chunks carry, in total
+              total_count:
+                type: integer
+              truncated:
+                type: boolean
+        execution_time_ms:
+          type: integer
+        subscribed:
+          $ref: '#/components/schemas/Subscribed'
+
+    SnapshotChunkResponse:
+      type: object
+      required: [type, result, chunk_index, rows]
+      properties:
+        type:
+          type: string
+          const: snapshot_chunk
+        id:
+          $ref: '#/components/schemas/RequestId'
+        result:
+          type: integer
+          description: Index of the result these rows belong to
+        chunk_index:
+          type: integer
+          description: 0-based across all results, without gaps
+        rows:
+          type: array
+          items:
+            type: array
+
+    SnapshotEndResponse:
+      type: object
+      required: [type, chunk_count]
+      properties:
+        type:
+          type: string
+          const: snapshot_end
+        id:
+          $ref: '#/components/schemas/RequestId'
+        chunk_count:
+          type: integer
+          description: Number of chunks sent
+
+    GroupMemberDelta:
+      type: object
+      required: [name, unchanged, columns, inserted, retracted]
+      properties:
+        name:
+          type: string
+          description: The member's name in the `subscribe` request
+        unchanged:
+          type: boolean
+          description: The member's result did not change; `inserted` and `retracted` are empty
+        columns:
+          type: array
+          items:
+            type: string
+        inserted:
+          type: array
+          description: Rows now in the member's result, sorted
+          items:
+            type: array
+        retracted:
+          type: array
+          description: Rows no longer in the member's result, sorted
+          items:
+            type: array
+
+    SubscriptionGroupDeltaResponse:
+      type: object
+      required: [type, subscription, generation, knowledge_graph, seq, revision, members]
+      properties:
+        type:
+          type: string
+          const: subscription_group_delta
+        subscription:
+          type: string
+        generation:
+          type: integer
+          format: int64
+        knowledge_graph:
+          type: string
+        seq:
+          type: integer
+          format: int64
+          description: Per-group push number, starting at 1, without gaps
+        revision:
+          type: integer
+          format: int64
+          description: The revision every member is the exact answer at once this applies
+        members:
+          type: array
+          description: Every member, in the group's order
+          items:
+            $ref: '#/components/schemas/GroupMemberDelta'
+      examples:
+        - type: subscription_group_delta
+          subscription: window
+          generation: 1
+          knowledge_graph: default
+          seq: 1
+          revision: 18
+          members:
+            - {name: orders, unchanged: true, columns: [S, O], inserted: [], retracted: []}
+            - {name: eta, unchanged: false, columns: [O, T], inserted: [[1042, "2026-10-05"]], retracted: []}
+
+    SubscriptionGroupDeltaStartResponse:
+      type: object
+      required: [type, subscription, generation, knowledge_graph, seq, revision, members]
+      properties:
+        type:
+          type: string
+          const: subscription_group_delta_start
+        subscription:
+          type: string
+        generation:
+          type: integer
+          format: int64
+        knowledge_graph:
+          type: string
+        seq:
+          type: integer
+          format: int64
+        revision:
+          type: integer
+          format: int64
+        members:
+          type: array
+          items:
+            type: object
+            required: [name, unchanged, columns, inserted_count, retracted_count]
+            properties:
+              name:
+                type: string
+              unchanged:
+                type: boolean
+              columns:
+                type: array
+                items:
+                  type: string
+              inserted_count:
+                type: integer
+              retracted_count:
+                type: integer
+
+    SubscriptionGroupDeltaChunkResponse:
+      type: object
+      required: [type, subscription, generation, seq, chunk_index, member, inserted, retracted]
+      properties:
+        type:
+          type: string
+          const: subscription_group_delta_chunk
+        subscription:
+          type: string
+        generation:
+          type: integer
+          format: int64
+        seq:
+          type: integer
+          format: int64
+        chunk_index:
+          type: integer
+          description: 0-based across all members, without gaps
+        member:
+          type: integer
+          description: Index of the member these rows belong to
+        inserted:
+          type: array
+          items:
+            type: array
+        retracted:
+          type: array
+          items:
+            type: array
+
+    SubscriptionGroupDeltaEndResponse:
+      type: object
+      required: [type, subscription, generation, seq, chunk_count]
+      properties:
+        type:
+          type: string
+          const: subscription_group_delta_end
+        subscription:
+          type: string
+        generation:
+          type: integer
+          format: int64
+        seq:
+          type: integer
+          format: int64
+        chunk_count:
+          type: integer
 
     PingRequest:
       type: object

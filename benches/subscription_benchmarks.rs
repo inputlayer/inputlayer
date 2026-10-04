@@ -8,13 +8,18 @@
 //! query (one shared view) or each on its own; each iteration commits one
 //! insert and times from its acknowledgement until every subscriber has its
 //! delta. Evaluations per commit and the process RSS are printed per case.
+//!
+//! Groups: the refresh of a subscription group of 5 queries on the 10K-fact
+//! KG (four bound `two_hop` queries and `?marker(X)`), after a commit that
+//! changes only `marker` (`one_changed`: the four `two_hop` queries are not
+//! re-run) or every member (`all_changed`).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use inputlayer::protocol::subscription::{
-    ConnectionSubscriptions, ReevaluatingQuery, StandingQuery,
+    ConnectionSubscriptions, GroupQuery, ReevaluatingQuery, StandingQuery,
 };
 use inputlayer::protocol::Handler;
 use inputlayer::Config;
@@ -79,7 +84,7 @@ fn bench_refresh_after_insert(c: &mut Criterion) {
                     let start = Instant::now();
                     let refresh = rt.block_on(view.refresh()).expect("refresh");
                     total += start.elapsed();
-                    assert!(!refresh.inserted.is_empty());
+                    assert!(!refresh.queries[0].inserted.is_empty());
                 }
                 total
             });
@@ -178,12 +183,59 @@ fn bench_fanout_after_insert(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_group_refresh_after_insert(c: &mut Criterion) {
+    let mut group = c.benchmark_group("subscription_group_refresh_after_insert");
+    let rt = Runtime::new().expect("runtime");
+    let (handler, _tmp) = make_handler(10_000);
+    let members = [
+        "?two_hop(1, Z)",
+        "?two_hop(2, Z)",
+        "?two_hop(3, Z)",
+        "?two_hop(4, Z)",
+        "?marker(X)",
+    ];
+    for all in [false, true] {
+        let mut view = GroupQuery::new(Arc::clone(&handler), KG, &members).expect("view");
+        rt.block_on(view.refresh()).expect("initial refresh");
+        let mut next_node = if all { 3_000_000u64 } else { 2_000_000u64 };
+        let name = if all { "all_changed" } else { "one_changed" };
+        group.bench_function(name, |b| {
+            b.iter_custom(|iters| {
+                let mut total = Duration::ZERO;
+                for _ in 0..iters {
+                    // Each `two_hop(k, Z)` gains `m` through `n`.
+                    let insert = if all {
+                        format!(
+                            "+edge[(1, {n}), (2, {n}), (3, {n}), (4, {n}), ({n}, {m})]\n\
+                             +marker({n})",
+                            n = next_node,
+                            m = next_node + 1
+                        )
+                    } else {
+                        format!("+marker({next_node})")
+                    };
+                    next_node += 2;
+                    rt.block_on(handler.execute_program(None, Some(KG.to_string()), insert, None))
+                        .expect("insert");
+                    let start = Instant::now();
+                    let refresh = rt.block_on(view.refresh()).expect("refresh");
+                    total += start.elapsed();
+                    let changed = refresh.queries.iter().filter(|q| !q.is_unchanged());
+                    assert_eq!(changed.count(), if all { 5 } else { 1 });
+                }
+                total
+            });
+        });
+    }
+    group.finish();
+}
+
 criterion_group! {
     name = subscriptions;
     config = Criterion::default()
         .measurement_time(Duration::from_secs(10))
         .warm_up_time(Duration::from_secs(2))
         .sample_size(30);
-    targets = bench_refresh_after_insert, bench_fanout_after_insert
+    targets = bench_refresh_after_insert, bench_fanout_after_insert, bench_group_refresh_after_insert
 }
 criterion_main!(subscriptions);

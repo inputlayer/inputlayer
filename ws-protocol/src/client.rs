@@ -32,6 +32,29 @@ pub enum ClientFrame {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout_ms: Option<u64>,
     },
+    /// Read several queries at one knowledge graph revision; answered by a
+    /// `snapshot` holding one result per query, in order. Reads persistent
+    /// data only, as a subscription does: session facts and session rules
+    /// are not visible. Deadline and cancellation work as for `execute`.
+    Read {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<RequestId>,
+        queries: Vec<NamedQuery>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout_ms: Option<u64>,
+    },
+    /// Subscribe to a group of queries kept current together, on the
+    /// connection's knowledge graph; answered by a `snapshot` naming the
+    /// subscription. Its results change only together: each later push is a
+    /// `subscription_group_delta` after which every member is exact at the
+    /// push's revision. Ended by `.unsubscribe <subscription>`.
+    Subscribe {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<RequestId>,
+        /// 1-128 characters from `[A-Za-z0-9_.:-]`, as a `.subscribe` id.
+        subscription: String,
+        queries: Vec<NamedQuery>,
+    },
     /// Cancel the unanswered request `target`; answered by `cancel_ack`.
     Cancel {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -52,10 +75,21 @@ impl ClientFrame {
             Self::Login { id, .. }
             | Self::Authenticate { id, .. }
             | Self::Execute { id, .. }
+            | Self::Read { id, .. }
+            | Self::Subscribe { id, .. }
             | Self::Cancel { id, .. }
             | Self::Ping { id } => id.as_ref(),
         }
     }
+}
+
+/// One query of a `read` or `subscribe`, and the name its result goes by.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NamedQuery {
+    /// Unique within the request.
+    pub name: String,
+    /// `?body`, without limit or offset.
+    pub query: String,
 }
 
 #[cfg(test)]
@@ -96,6 +130,36 @@ mod tests {
             }
         ));
         assert!(serde_json::from_str::<ClientFrame>(r#"{"type":"cancel"}"#).is_err());
+    }
+
+    #[test]
+    fn read_and_subscribe_round_trip() {
+        let read: ClientFrame = serde_json::from_str(
+            r#"{"type":"read","id":"r","queries":[{"name":"a","query":"?a(X)"}],"timeout_ms":5}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            read,
+            ClientFrame::Read {
+                id: Some(RequestId::new("r").unwrap()),
+                queries: vec![NamedQuery {
+                    name: "a".to_string(),
+                    query: "?a(X)".to_string(),
+                }],
+                timeout_ms: Some(5),
+            }
+        );
+        let json = r#"{"type":"subscribe","id":"s","subscription":"w","queries":[{"name":"a","query":"?a(X)"},{"name":"b","query":"?b(Y)"}]}"#;
+        let subscribe: ClientFrame = serde_json::from_str(json).unwrap();
+        assert_eq!(subscribe.id(), Some(&RequestId::new("s").unwrap()));
+        assert_eq!(serde_json::to_string(&subscribe).unwrap(), json);
+        for bad in [
+            r#"{"type":"read","id":"r"}"#,
+            r#"{"type":"subscribe","id":"s","queries":[]}"#,
+            r#"{"type":"subscribe","subscription":"w","queries":[{"name":"a"}]}"#,
+        ] {
+            assert!(serde_json::from_str::<ClientFrame>(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

@@ -80,11 +80,14 @@ export {
 export type { SubscriptionRejectedReason } from './errors.js';
 
 // Subscriptions
-export { Subscription } from './subscription.js';
+export { GroupSubscription, Subscription } from './subscription.js';
 export type {
   Change,
   ChangeKind,
+  GroupChange,
   Live,
+  MemberChange,
+  ReadResult,
   Row,
   SubscribeOptions,
   SubscriptionHandle,
@@ -156,6 +159,9 @@ export type {
   LoginMessage,
   AuthenticateMessage,
   ExecuteMessage,
+  ReadMessage,
+  SubscribeMessage,
+  NamedQuery,
   CancelMessage,
   PingMessage,
   AuthenticatedResponse,
@@ -165,6 +171,12 @@ export type {
   ResultStartResponse,
   ResultChunkResponse,
   ResultEndResponse,
+  NamedResult,
+  NamedResultHeader,
+  SnapshotResponse,
+  SnapshotStartResponse,
+  SnapshotChunkResponse,
+  SnapshotEndResponse,
   PongResponse,
   CancelAckResponse,
   NoticeCode,
@@ -176,6 +188,12 @@ export type {
   SubscriptionDeltaStartResponse,
   SubscriptionDeltaChunkResponse,
   SubscriptionDeltaEndResponse,
+  GroupMemberDelta,
+  GroupMemberDeltaHeader,
+  SubscriptionGroupDeltaResponse,
+  SubscriptionGroupDeltaStartResponse,
+  SubscriptionGroupDeltaChunkResponse,
+  SubscriptionGroupDeltaEndResponse,
   SubscriptionErrorResponse,
   SubscriptionResetResponse,
   TimingBreakdown,
