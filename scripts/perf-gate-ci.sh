@@ -4,7 +4,8 @@
 # gate's own clients. An INCONCLUSIVE first attempt is retried once with more
 # rounds; only PASS exits zero.
 #
-# Usage: scripts/perf-gate-ci.sh
+# Usage: scripts/perf-gate-ci.sh [--aa]
+#   --aa                    baseline against itself: the runner's noise check
 #   PERF_GATE_ROUNDS        rounds of the first attempt (default 20)
 #   PERF_GATE_RETRY_ROUNDS  rounds of the retry after INCONCLUSIVE (default 30)
 #
@@ -18,6 +19,7 @@ cd "$ROOT"
 ROUNDS=${PERF_GATE_ROUNDS:-20}
 RETRY_ROUNDS=${PERF_GATE_RETRY_ROUNDS:-30}
 SUMMARY=${GITHUB_STEP_SUMMARY:-/dev/null}
+EXTRA=("$@")
 
 # Keep CPUs 0-1 for the gate's clients and the runner agent; the servers get
 # the rest. Too few CPUs to split: leave them unpinned.
@@ -37,8 +39,8 @@ status_name() {
 attempt() {
     local n=$1 rounds=$2 status=0 before
     before=$(readlink target/perf-gate/latest 2>/dev/null || true)
-    echo "=== Attempt $n: $rounds rounds ${PIN[*]} ==="
-    scripts/perf-gate.sh --rounds "$rounds" "${PIN[@]}" || status=$?
+    echo "=== Attempt $n: $rounds rounds ${PIN[*]} ${EXTRA[*]} ==="
+    scripts/perf-gate.sh --rounds "$rounds" "${PIN[@]}" "${EXTRA[@]}" || status=$?
     {
         echo "## Performance gate attempt $n ($rounds rounds): $(status_name "$status")"
         echo

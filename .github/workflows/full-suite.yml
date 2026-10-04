@@ -24,6 +24,10 @@ on:
         description: Run only the performance gate (allowed on any ref)
         type: boolean
         default: false
+      perf_gate_aa:
+        description: Measure the baseline against itself (the runner's noise check)
+        type: boolean
+        default: false
   workflow_call:
 
 permissions:
@@ -349,7 +353,7 @@ jobs:
           cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo "governor: not exposed (virtual machine)"
 
       - name: Run the performance gate
-        run: scripts/perf-gate-ci.sh
+        run: scripts/perf-gate-ci.sh ${{ inputs.perf_gate_aa && '--aa' || '' }}
 
       - name: Upload the samples and reports
         if: always()
