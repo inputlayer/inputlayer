@@ -383,8 +383,11 @@ export function rowKey(values: unknown): string {
   return JSON.stringify(values, (_k, v: unknown) => (typeof v === 'bigint' ? `${v}n` : v));
 }
 
+/** An integer token of 16 or more digits: not part of a fraction or an exponent. */
+const LARGE_INTEGER = /(?<![\d.eE+-])-?\d{16,}(?![\d.eE])/;
+
 export function deserializeMessage(data: string): ServerMessage {
-  const obj = /\d{16}/.test(data) ? JSON.parse(data, exactIntegers) : JSON.parse(data);
+  const obj = LARGE_INTEGER.test(data) ? JSON.parse(data, exactIntegers) : JSON.parse(data);
   const type = obj.type;
 
   if (type === 'authenticated') {

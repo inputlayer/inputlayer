@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { serializeMessage, deserializeMessage, isPush } from '../src/protocol';
 
 describe('serializeMessage', () => {
@@ -144,6 +144,19 @@ describe('integers past 2^53', () => {
       '{"type":"result","columns":["a","b","c","d","e"],"rows":[[9007199254740993,-9223372036854775808,1e300,42,"12345678901234567"]]}',
     );
     expect(msg.type === 'result' && msg.rows).toEqual([[9007199254740993n, -(2n ** 63n), 1e300, 42, '12345678901234567']]);
+  });
+
+  it('leave a frame of full-precision floats on the plain JSON.parse path', () => {
+    const parse = vi.spyOn(JSON, 'parse');
+    try {
+      const frame = '{"type":"result","columns":["a","b","c"],"rows":[[0.30000000000000004,-1.2345678901234567e-300,1.2345678901234567e+300]]}';
+      const msg = deserializeMessage(frame);
+      expect(msg.type === 'result' && msg.rows).toEqual([[0.30000000000000004, -1.2345678901234567e-300, 1.2345678901234567e300]]);
+      expect(parse).toHaveBeenCalledTimes(1);
+      expect(parse.mock.calls[0]).toEqual([frame]);
+    } finally {
+      parse.mockRestore();
+    }
   });
 });
 
