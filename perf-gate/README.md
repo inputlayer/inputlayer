@@ -202,7 +202,7 @@ Memory is `/proc` RSS after load, after subscribing and at the end, plus
 peak RSS. Throughput is `load_statements` (seed statements per second of
 cold load) and `converged_mutations` (mutations per second of send-to-
 converged time, one serial writer). Convergence requires a successful, complete
-re-query for every subscription and a matching maintained answer without a
+re-query for every unretired subscription and a matching maintained answer without a
 subscription error. Missing ground truth (including truncated re-queries) never
 counts as convergence or contributes a convergence latency sample. A question
 whose re-query fails is retired: its subscriptions are reported as `retired`
