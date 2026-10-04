@@ -405,6 +405,15 @@ export interface QueryOutput {
 export interface QueryPlan {
   /** IQL programs to execute; several when an OR condition splits the query. */
   programs: string[];
+  /**
+   * The one statement `.debug` and `.why` take: the query of the first
+   * program, or for an aggregate its rule, whose rows are the outputs by
+   * position. They see no rule defined beside it, so an OR split shows its
+   * first branch only.
+   */
+  explain: string;
+  /** Whether the query aggregates. */
+  aggregate: boolean;
   /** Result columns, in select order. */
   outputs: QueryOutput[];
   /**
@@ -603,13 +612,15 @@ function compilePlainPlan(
 
   const plan = {
     outputs: uniqueLabels(outputs),
+    aggregate: false,
     goalVars: atomVars[0],
     rowVars: shape.rowVars,
   };
 
   if (shape.orBranches === undefined) {
     const body = [...head, ...shape.whereParts, ...limitAtom(shape.limit, shape.offset)];
-    return { ...plan, programs: [`?${body.join(', ')}`] };
+    const program = `?${body.join(', ')}`;
+    return { ...plan, programs: [program], explain: program };
   }
 
   // Each branch returns its own first limit + offset rows in order; the
@@ -621,6 +632,7 @@ function compilePlainPlan(
   return {
     ...plan,
     programs,
+    explain: programs[0],
     merge: {
       order: orderVar !== undefined ? { variable: orderVar, descending: order!.descending } : undefined,
       limit: shape.limit,
@@ -706,22 +718,25 @@ function compileAggPlan(
     queryArgs[i] = `${queryVars[i]}${order.descending ? ':desc' : ':asc'}`;
   }
 
+  const aggHead = `${AGG_RULE}(${head.join(', ')})`;
+  const explain = `${aggHead} <- ${[...atoms, ...bindings, ...(shape.orBranches?.[0] ?? shape.whereParts)].join(', ')}`;
   let rules: string[];
   if (shape.orBranches === undefined) {
-    const body = [...atoms, ...bindings, ...shape.whereParts];
-    rules = [`${AGG_RULE}(${head.join(', ')}) <- ${body.join(', ')}`];
+    rules = [explain];
   } else {
     // Aggregate over the union of the branches: collect it in a source rule first.
     const src = `${AGG_SOURCE_RULE}(${[...shape.rowVars, ...boundVars].join(', ')})`;
     rules = [
       ...shape.orBranches.map((branch) => `${src} <- ${[...atoms, ...bindings, ...branch].join(', ')}`),
-      `${AGG_RULE}(${head.join(', ')}) <- ${src}`,
+      `${aggHead} <- ${src}`,
     ];
   }
   const query = `?${[`${AGG_RULE}(${queryArgs.join(', ')})`, ...limitAtom(shape.limit, shape.offset)].join(', ')}`;
 
   return {
     programs: [[...rules, query].join('\n')],
+    explain,
+    aggregate: true,
     outputs: uniqueLabels(outputs.map((o, i) => ({ label: o.label, variable: queryVars[i] }))),
     goalVars: [],
     rowVars: [],

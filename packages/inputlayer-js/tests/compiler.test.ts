@@ -215,6 +215,9 @@ describe('compileQuery', () => {
         '?il_sdk_agg(Department:asc, CountId, AvgSalary), limit(5)',
     ]);
     expect(plan.outputs.map((o) => o.label)).toEqual(['Department', 'CountId', 'AvgSalary']);
+    expect(plan.explain).toBe(
+      'il_sdk_agg(Department, count<Id>, avg<Salary>) <- employee(Id, Name, Department, Salary, Active)',
+    );
   });
 
   it('gives each aggregate of the same column its own result column', () => {

@@ -15,7 +15,6 @@ import {
   compileBulkInsert,
   compileDelete,
   compileConditionalDelete,
-  compileQuery,
   compileQueryPlan,
   resultColumnIndexes,
   compileRule,
@@ -606,10 +605,7 @@ export class KnowledgeGraph {
   /** Show the query plan without executing. */
   async debug(opts: QueryOptions): Promise<DebugResult> {
     await this.ensureKg();
-    let iql = compileQuery(opts);
-    if (Array.isArray(iql)) {
-      iql = iql[0];
-    }
+    const iql = compileQueryPlan(opts).explain;
     const result = await this.conn.execute(`.debug ${iql}`);
     const planText = result.rows.map((row) => String(row[0])).join('\n');
     return { iql, plan: planText };
@@ -622,15 +618,15 @@ export class KnowledgeGraph {
    */
   async why(opts: QueryOptions & { full?: boolean }): Promise<WhyResult> {
     await this.ensureKg();
-    let iql = compileQuery(opts);
-    if (Array.isArray(iql)) {
-      iql = iql[0];
-    }
-    const cmd = opts.full ? `.why full ${iql}` : `.why ${iql}`;
+    const plan = compileQueryPlan(opts);
+    const cmd = opts.full ? `.why full ${plan.explain}` : `.why ${plan.explain}`;
     const result = await this.conn.execute(cmd);
+    const rows = plan.aggregate
+      ? result.rows
+      : projectRows(plan, result.columns, result.rows, plan.outputs.map((o) => o.variable));
     const resultSet = new ResultSet({
-      columns: result.columns,
-      rows: result.rows,
+      columns: plan.outputs.map((o) => o.label),
+      rows,
       rowCount: result.row_count,
       totalCount: result.total_count,
       truncated: result.truncated,

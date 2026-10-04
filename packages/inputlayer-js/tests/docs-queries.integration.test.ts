@@ -335,6 +335,42 @@ describe.skipIf(!SERVER_URL)('js-sdk.mdx query examples', () => {
     expect(plan.plan).toContain('employee');
   });
 
+  it('debug shows the plan of an aggregate query', async () => {
+    const plan = await kg.debug({
+      select: [Employee.col('department').toAst(), count(Employee.col('id'))],
+      join: [Employee],
+    });
+    expect(plan.plan).toContain('employee');
+  });
+
+  it('why returns the selected columns with a proof per row', async () => {
+    const why = await kg.why({
+      select: [Employee.col('name').toAst(), Employee.col('salary').toAst()],
+      join: [Employee],
+      where: Employee.col('department').eq('eng'),
+    });
+    expect(why.results.columns).toEqual(['Name', 'Salary']);
+    expect(why.results.toTuples().sort()).toEqual([
+      ['Alice', 120000],
+      ['Charlie', 110000],
+      ['Dana', 130000],
+    ]);
+    expect(why.proofTrees).toHaveLength(3);
+  });
+
+  it('why explains an aggregate query', async () => {
+    const why = await kg.why({
+      select: [Employee.col('department').toAst(), count(Employee.col('id'))],
+      join: [Employee],
+    });
+    expect(why.results.columns).toEqual(['Department', 'CountId']);
+    expect(why.results.toTuples().sort()).toEqual([
+      ['eng', 3],
+      ['hr', 2],
+    ]);
+    expect(why.proofTrees).toHaveLength(2);
+  });
+
   it('Raw IQL', async () => {
     const result = await kg.execute('?employee(Id, Name, _, Salary, _), Salary > 100000');
     expect(result.rows.map((r) => r[1]).sort()).toEqual(['Alice', 'Charlie', 'Dana']);
