@@ -655,6 +655,14 @@ class QueryPlan:
 
     def shape(self, rows: list[list[Any]]) -> list[list[Any]]:
         """Pick the selected columns out of the engine's rows, by position."""
+        rows = self.pick(rows)
+        if self.dedupe:
+            rows = _distinct(rows)
+        return [self.from_engine(row) for row in rows]
+
+    def pick(self, rows: list[list[Any]]) -> list[list[Any]]:
+        """The selected columns of the engine's rows, by position, as the
+        engine sent them: a projection keeps its repeats."""
         if rows and len(rows[0]) != len(self.columns):
             raise InternalError(
                 f"The engine returned {len(rows[0])} columns for a query binding "
@@ -667,11 +675,10 @@ class QueryPlan:
             else:
                 pick = operator.itemgetter(*idx)
                 rows = [list(pick(row)) for row in rows]
-        if self.dedupe:
-            rows = _distinct(rows)
-        return [self._from_engine(row) for row in rows]
+        return rows
 
-    def _from_engine(self, row: list[Any]) -> list[Any]:
+    def from_engine(self, row: list[Any]) -> list[Any]:
+        """A picked row with engine values made Python values (R-TYPE)."""
         return [
             ms_to_datetime(v)
             if o.is_datetime and isinstance(v, int) and not isinstance(v, bool)
@@ -696,7 +703,7 @@ class QueryPlan:
         return picked[start:end]
 
     def project_why(self, row: list[Any]) -> list[Any]:
-        return self._from_engine([row[self.why_columns.index(o.variable)] for o in self.outputs])
+        return self.from_engine([row[self.why_columns.index(o.variable)] for o in self.outputs])
 
 
 def compile_query(

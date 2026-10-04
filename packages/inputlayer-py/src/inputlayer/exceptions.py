@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from inputlayer._protocol import ErrorCode, ResultResponse, StatementError
@@ -250,3 +250,38 @@ class CompileError(InputLayerError, ValueError):
     def __init__(self, message: str, *, hint: str | None = None) -> None:
         super().__init__(f"{message} ({hint})" if hint else message)
         self.hint = hint
+
+
+SubscriptionRejectedReason = Literal[
+    "limit_offset",
+    "or_branches",
+    "session_view",
+    "result_cap",
+    "access_denied",
+    "id_taken",
+    "subscription_limit",
+    "rejected",
+]
+"""Why a subscription was refused: by the SDK before anything was sent
+(``limit_offset``, ``or_branches``, ``session_view``), or by the engine
+(``result_cap``, ``access_denied``, ``id_taken``, ``subscription_limit``, and
+``rejected`` for any other refusal, such as an invalid query)."""
+
+
+class SubscriptionRejected(InputLayerError):
+    """A subscription could not be opened, or could not be opened again after
+    it lost its verified state. Fix or narrow the query; retrying it as it is
+    fails the same way. ``query`` is the ``.subscribe`` program when one was
+    sent."""
+
+    def __init__(
+        self,
+        message: str,
+        reason: SubscriptionRejectedReason,
+        *,
+        query: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.reason = reason
+        self.query = query

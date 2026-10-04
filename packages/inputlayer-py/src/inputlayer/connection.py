@@ -114,21 +114,29 @@ _Kind = Literal["execute", "ping", "cancel"]
 PushSink = Callable[[SubscriptionPush], None]
 ReconnectHook = Callable[["Connection"], Awaitable[None]]
 
+LinkChange = Literal["lost", "given_up", "closed"]
+"""What happened to a connection's link: it dropped (a reconnect may follow),
+reconnecting gave up or was not allowed, or the client closed it."""
+LinkListener = Callable[[LinkChange, "str | None"], None]
+"""Called with what happened and the server's closing notice code, if any."""
+
 
 @dataclass
 class SubscriptionRoute:
     """Where pushes of one subscription go.
 
     Register it before sending ``.subscribe``: the reader sets ``generation``
-    from the ``.subscribe`` reply before it reads the next frame, so no push of
-    the new generation can be dropped. Pushes of any other generation are
-    stale; they are dropped and counted in ``stale``.
+    from the ``.subscribe`` reply before it reads the next frame. Pushes that
+    arrive before the reply are held and then filtered by it, so no push of
+    the new generation is dropped. Pushes of any other generation are stale;
+    they are dropped and counted in ``stale``.
     """
 
     subscription: str
     sink: PushSink
     generation: int | None = None
     stale: int = 0
+    early: list[SubscriptionPush] = field(default_factory=list)
 
 
 @dataclass
@@ -270,6 +278,7 @@ class Connection:
         self._events = events if events is not None else EventDispatcher()
         self._routes: dict[str, SubscriptionRoute] = {}
         self._reconnect_hooks: list[ReconnectHook] = []
+        self._link_listeners: list[LinkListener] = []
         self._stale_pushes = 0
 
         # Created on first use, inside the event loop that uses them, so a
@@ -377,6 +386,7 @@ class Connection:
         A lazy connection reopens on its next call once closed, unless the
         close is ``final``.
         """
+        was_closed = self._state == "closed"
         self._closing = True
         self._reopenable = False
         self._state = "closed"
@@ -397,6 +407,8 @@ class Connection:
         if self._ready is not None:
             self._ready.set()
         self._reopenable = not final
+        if not was_closed:
+            self._link_changed("closed")
 
     def _url_for(self, kg: str | None) -> str:
         params = []
@@ -707,8 +719,11 @@ class Connection:
         self._routes[subscription] = route
         return route
 
-    def remove_route(self, subscription: str) -> None:
-        self._routes.pop(subscription, None)
+    def remove_route(self, subscription: str, route: SubscriptionRoute | None = None) -> None:
+        """Stop routing pushes of *subscription* (only if its route is still
+        *route*, when given)."""
+        if route is None or self._routes.get(subscription) is route:
+            self._routes.pop(subscription, None)
 
     def add_reconnect_hook(self, hook: ReconnectHook) -> None:
         """Run *hook* after every reconnect, before ``reconnected`` is emitted."""
@@ -717,6 +732,24 @@ class Connection:
     def remove_reconnect_hook(self, hook: ReconnectHook) -> None:
         with contextlib.suppress(ValueError):
             self._reconnect_hooks.remove(hook)
+
+    def add_link_listener(self, listener: LinkListener) -> None:
+        """Call *listener* when this connection drops, gives up reconnecting,
+        or is closed by the client. It runs in the reader, before a reconnect
+        starts, so it must not block."""
+        self._link_listeners.append(listener)
+
+    def remove_link_listener(self, listener: LinkListener) -> None:
+        with contextlib.suppress(ValueError):
+            self._link_listeners.remove(listener)
+
+    def _link_changed(self, change: LinkChange) -> None:
+        code = self._notice_code()
+        for listener in list(self._link_listeners):
+            try:
+                listener(change, code)
+            except Exception:
+                logger.exception("Link listener %r failed", listener)
 
     # ── The reader ────────────────────────────────────────────────────
 
@@ -784,6 +817,13 @@ class Connection:
 
     def _deliver_push(self, frame: SubscriptionPush) -> None:
         route = self._routes.get(frame.subscription)
+        if route is not None and route.generation is None:
+            # Its .subscribe reply has not arrived: it names the generation.
+            route.early.append(frame)
+            return
+        self._push_to(route, frame)
+
+    def _push_to(self, route: SubscriptionRoute | None, frame: SubscriptionPush) -> None:
         if route is None or route.generation != frame.generation:
             self._stale_pushes += 1
             if route is not None:
@@ -880,6 +920,9 @@ class Connection:
             route = self._routes.get(result.subscribed.subscription)
             if route is not None:
                 route.generation = result.subscribed.generation
+                early, route.early = route.early, []
+                for frame in early:
+                    self._push_to(route, frame)
         for code, error_type in (
             ("outcome_unknown", OutcomeUnknownError),
             ("store_read_only", StoreReadOnlyError),
@@ -966,6 +1009,7 @@ class Connection:
             reason = f"{reason}: {cause}"
         self._teardown(ws, ConnectionLost(reason, code=code))
         kg = self._current_kg
+        self._link_changed("lost")
         self._events.emit(ConnectionEvent(type="disconnected", knowledge_graph=kg, code=code))
         if self._auto_reconnect and code not in _FINAL_NOTICES and self._max_reconnect_attempts:
             self._state = "reconnecting"
@@ -979,6 +1023,7 @@ class Connection:
         self._state = "closed"
         if self._ready is not None:
             self._ready.set()
+        self._link_changed("given_up")
         if self._ends_notifications:
             self._dispatcher.fail(
                 ConnectionLost(

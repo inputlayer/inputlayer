@@ -23,11 +23,22 @@ from inputlayer.compiler import (
     compile_rule,
     compile_schema,
 )
-from inputlayer.exceptions import CompileError, InternalError, QueryError
+from inputlayer.exceptions import CompileError, InternalError, QueryError, SubscriptionRejected
 from inputlayer.index import HnswIndex
 from inputlayer.relation import Relation
 from inputlayer.result import ResultSet
 from inputlayer.session import Session
+from inputlayer.subscription import (
+    DEFAULT_QUEUE,
+    Change,
+    Live,
+    Subscription,
+    SubscriptionHandle,
+    iql_shape,
+    plan_shape,
+    run_callback,
+    watch_changes,
+)
 
 if TYPE_CHECKING:
     from inputlayer._protocol import ResultResponse
@@ -526,6 +537,109 @@ class KnowledgeGraph:
         result = await self.query(*select, **kwargs)
         for i in range(0, len(result.rows), batch_size):
             yield result.rows[i : i + batch_size]
+
+    # ── Subscriptions ─────────────────────────────────────────────────
+
+    def subscribe(
+        self,
+        *select: type[Relation] | ColumnProxy | Expr,
+        join: list[type[Relation] | RelationRef] | None = None,
+        on: Callable[..., Any] | None = None,
+        where: Callable[..., Any] | None = None,
+        order_by: ColumnProxy | OrderedColumn | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        iql: str | None = None,
+        queue: int = DEFAULT_QUEUE,
+        timeout: float | None = None,
+        **computed: Expr,
+    ) -> Subscription[Any]:
+        """Subscribe to a query (the arguments of ``query``) or to raw IQL
+        (``iql="?..."``): an async iterator of ``Change`` events, a
+        ``snapshot`` and then ``delta``s, with ``unverified`` and ``resync``
+        around anything that broke the stream (see ``inputlayer.subscription``).
+        It opens on the first event; leaving the loop or ``close()`` ends it.
+
+        Rows are instances of the relation when one whole relation is selected,
+        else ``Row`` records keyed by column. ``queue`` bounds the events held
+        for a consumer that has not read them; one that falls further behind
+        gets ``unverified`` (``slow_consumer``) and then a ``resync``.
+        ``timeout`` (seconds) is the deadline of each ``.subscribe``, snapshot
+        included. A result is a set, so ``order_by`` is ignored.
+
+        Raises ``SubscriptionRejected`` for ``limit`` or ``offset``, an OR
+        condition, an aggregate, a negated constant, or a session rule, which a
+        standing query cannot track: declare a persistent rule instead::
+
+            async for change in kg.subscribe(Late):
+                for row in change.retracted:
+                    cancel(row)
+                for row in change.inserted:
+                    start(row)
+                if not change.verified:
+                    pause()
+        """
+        if iql is not None:
+            if select or join or on or where or computed:
+                raise CompileError(
+                    "subscribe takes a query or iql=, not both",
+                    hint="put the whole query in iql=, or drop iql=",
+                )
+            shape = iql_shape(iql)
+        else:
+            if limit is not None or offset is not None:
+                raise SubscriptionRejected(
+                    "A subscription tracks the whole result: remove limit and offset "
+                    "from the query.",
+                    "limit_offset",
+                )
+            del order_by  # a result is a set: its order means nothing to deltas
+            plan, relation_cls = self._plan(
+                *select, join=join, on=on, where=where,
+                order_by=None, limit=None, offset=None, **computed,
+            )
+            aggregate = any(isinstance(s, AggExpr) for s in (*select, *computed.values()))
+            shape = plan_shape(plan, relation_cls, aggregate=aggregate)
+        return Subscription(
+            self._conn,
+            shape,
+            queue=queue,
+            timeout=timeout,
+            session_rules=self._session.list_rules,
+        )
+
+    def watch(self, *select: Any, **kwargs: Any) -> AsyncIterator[Live[Any]]:
+        """The whole current result of a subscription (the arguments of
+        ``subscribe``) each time it changes, with its revision.
+
+        ``verified`` is false from a lost connection (or any other
+        ``unverified`` event) until the fresh result arrives: act on nothing
+        new meanwhile. Coalesced commits are seen as one change, so a row
+        that appears and disappears between two evaluations is never seen;
+        what must not be missed belongs in facts.
+        """
+        return watch_changes(self.subscribe(*select, **kwargs))
+
+    def on(
+        self,
+        *args: Any,
+        callback: Callable[[Change[Any]], Any] | None = None,
+        on_error: Callable[[BaseException], Any] | None = None,
+        **kwargs: Any,
+    ) -> SubscriptionHandle:
+        """Call a callback with every ``Change`` of a subscription, one at a
+        time: ``kg.on(Late, callback)``, with the arguments of ``subscribe``
+        before the callback (or the callback as ``callback=``). An async
+        callback is awaited. Errors it raises, and the error that ends the
+        subscription, go to *on_error* (default: logged). ``handle.close()``
+        ends it. Must be called with an event loop running.
+        """
+        select = args
+        if callback is None:
+            if not args or isinstance(args[-1], type) or not callable(args[-1]):
+                raise TypeError("on() needs a callback: kg.on(Relation, callback)")
+            select, callback = args[:-1], args[-1]
+        return run_callback(self.subscribe(*select, **kwargs), callback, on_error)
 
     # ── Vector search ─────────────────────────────────────────────────
 

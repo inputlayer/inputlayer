@@ -6,8 +6,8 @@ any context: plain scripts, Jupyter notebooks, FastAPI, LangGraph, etc.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
+from collections.abc import AsyncIterator, Callable, Iterator
+from typing import Any, TypeVar
 
 from inputlayer._sync import run_sync
 from inputlayer.auth import AclEntry, ApiKeyInfo, UserInfo
@@ -30,6 +30,15 @@ from inputlayer.knowledge_graph import (
 )
 from inputlayer.relation import Relation
 from inputlayer.result import ResultSet
+from inputlayer.subscription import (
+    Change,
+    Live,
+    Subscription,
+    SubscriptionHandle,
+    SubscriptionStats,
+)
+
+T = TypeVar("T")
 
 
 class KnowledgeGraphSync:
@@ -168,6 +177,102 @@ class KnowledgeGraphSync:
 
     def execute(self, iql: str, *, timeout: float | None = None) -> ResultSet:
         return run_sync(self._kg.execute(iql, timeout=timeout))
+
+    # ── Subscriptions ─────────────────────────────────────────────────
+
+    def subscribe(self, *select: Any, **kwargs: Any) -> SubscriptionSync:
+        """``KnowledgeGraph.subscribe`` as a blocking iterator of ``Change``
+        events. The subscription runs on the background event loop, so events
+        keep arriving (up to ``queue``) between reads; leaving the loop or
+        ``close()`` ends it."""
+        return SubscriptionSync(self._kg.subscribe(*select, **kwargs))
+
+    def watch(self, *select: Any, **kwargs: Any) -> Iterator[Live[Any]]:
+        """``KnowledgeGraph.watch`` as a blocking iterator of ``Live`` results."""
+        levels = self._kg.watch(*select, **kwargs)
+        try:
+            while True:
+                try:
+                    yield run_sync(_next(levels))
+                except StopAsyncIteration:
+                    return
+        finally:
+            run_sync(levels.aclose())  # type: ignore[attr-defined]
+
+    def on(self, *args: Any, **kwargs: Any) -> SubscriptionHandleSync:
+        """``KnowledgeGraph.on``. The callback runs on the background event
+        loop's thread, one change at a time; keep it short, or hand the change
+        to your own thread."""
+
+        async def start() -> SubscriptionHandle:
+            return self._kg.on(*args, **kwargs)
+
+        return SubscriptionHandleSync(run_sync(start()))
+
+
+async def _next(iterator: AsyncIterator[T]) -> T:
+    return await iterator.__anext__()
+
+
+class SubscriptionSync:
+    """A subscription read by blocking: ``for change in kg.subscribe(...)``."""
+
+    def __init__(self, sub: Subscription[Any]) -> None:
+        self._sub = sub
+
+    @property
+    def id(self) -> str:
+        return self._sub.id
+
+    @property
+    def query(self) -> str:
+        return self._sub.query
+
+    @property
+    def stats(self) -> SubscriptionStats:
+        return self._sub.stats
+
+    def __iter__(self) -> Iterator[Change[Any]]:
+        # A generator, so that leaving the loop closes the subscription.
+        try:
+            while True:
+                try:
+                    change = self.next()
+                except StopIteration:
+                    return
+                yield change
+        finally:
+            self.close()
+
+    def next(self) -> Change[Any]:
+        """The next event, blocking until it arrives."""
+        try:
+            return run_sync(_next(self._sub))
+        except StopAsyncIteration:
+            raise StopIteration from None
+
+    def close(self) -> None:
+        run_sync(self._sub.close())
+
+    def __enter__(self) -> SubscriptionSync:
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+
+class SubscriptionHandleSync:
+    """A callback subscription; see ``KnowledgeGraphSync.on``."""
+
+    def __init__(self, handle: SubscriptionHandle) -> None:
+        self._handle = handle
+
+    @property
+    def stats(self) -> SubscriptionStats:
+        return self._handle.stats
+
+    def close(self) -> None:
+        run_sync(self._handle.close())
 
 
 class InputLayerSync:

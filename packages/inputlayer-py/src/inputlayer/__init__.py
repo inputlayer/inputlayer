@@ -52,6 +52,7 @@ from inputlayer.exceptions import (
     SchemaConflictError,
     StatementFailedError,
     StoreReadOnlyError,
+    SubscriptionRejected,
     ValidationError,
 )
 
@@ -89,6 +90,16 @@ from inputlayer.result import ResultSet
 
 # Session
 from inputlayer.session import Session
+
+# Subscriptions
+from inputlayer.subscription import (
+    Change,
+    Live,
+    Row,
+    Subscription,
+    SubscriptionHandle,
+    SubscriptionStats,
+)
 from inputlayer.types import Timestamp, Vector, VectorInt8
 
 __version__ = "0.1.0"
@@ -99,6 +110,7 @@ __all__ = [
     "AuthenticationError",
     "Cancelled",
     "CannotDropError",
+    "Change",
     "ClearResult",
     "ColumnInfo",
     "CompileError",
@@ -128,6 +140,7 @@ __all__ = [
     "KnowledgeGraph",
     "KnowledgeGraphExistsError",
     "KnowledgeGraphNotFoundError",
+    "Live",
     # Notifications
     "NotificationEvent",
     "OutcomeUnknownError",
@@ -145,6 +158,7 @@ __all__ = [
     "RelationNotFoundError",
     # Result
     "ResultSet",
+    "Row",
     "RuleClause",
     "RuleInfo",
     "RuleNotFoundError",
@@ -155,6 +169,10 @@ __all__ = [
     "StatementError",
     "StatementFailedError",
     "StoreReadOnlyError",
+    "Subscription",
+    "SubscriptionHandle",
+    "SubscriptionRejected",
+    "SubscriptionStats",
     "Timestamp",
     # Auth
     "UserInfo",
