@@ -56,12 +56,12 @@ On success:
   "knowledge_graph": "default",
   "version": "0.1.0",
   "role": "admin",
-  "protocol_version": 3,
+  "protocol_version": 4,
   "stream_epoch": "3f9c2a7e01b4d865"
 }
 ```
 
-`protocol_version` is the version of this protocol the server speaks (currently 3). `stream_epoch` identifies this run of the engine: notification `seq` numbers and knowledge graph revisions belong to it, and a restarted engine has a new one (see [Reconnection](#reconnection)).
+`protocol_version` is the version of this protocol the server speaks (currently 4; version 4 added [parameters](#parameters)). `stream_epoch` identifies this run of the engine: notification `seq` numbers and knowledge graph revisions belong to it, and a restarted engine has a new one (see [Reconnection](#reconnection)).
 
 On failure:
 
@@ -88,6 +88,47 @@ Send any InputLayer statement or meta command:
 ```
 
 The `program` field accepts any valid InputLayer statement: queries, inserts, rule definitions, meta commands, etc.
+
+### Parameters
+
+Send values beside the program instead of inside it. The program names each value `$name`, and `params` maps names to values:
+
+```json
+{
+  "type": "execute",
+  "program": "+eta($shipment, $date)\n-pending($shipment)",
+  "params": {"shipment": "S-77", "date": "2026-10-10"}
+}
+```
+
+The engine binds each value to the program's parsed statements. A value is never lexed or parsed, so it cannot change what the program does, whatever characters it holds: `"S-77\"), +admin(1"` is stored as that string. Use parameters for every value you did not write yourself (customer data, model output); string-escaping is then no longer the injection boundary.
+
+A parameter stands where a literal may stand, and binds exactly the value its literal would:
+
+| Where | Example |
+|---|---|
+| Fact arguments | `+order($id, $total)`, `-order($id, T)`, `+r[($a, 1), ($b, 2)]` |
+| Rule heads and bodies | `+vip(C) <- spend(C, S), S >= $threshold` |
+| Query goals and filters | `?order($id, T)`, `?order(I, T), T > $min, !refunded(I)` |
+| Arithmetic and function arguments | `?price(I, P), Q = P * $rate`, `?doc(I, T), L = len($needle)` |
+| Updates and conditional deletes | `-stock($item, N), +stock($item, M) <- stock($item, N), M = N - $qty` |
+| A vector search query | `hnsw_nearest("docs_idx", $embedding, 5, Id, Dist)` |
+
+A parameter cannot name a relation or variable, or set an aggregate's or `limit(...)`'s arguments. Meta commands take none: `.why`, `.debug`, `.subscribe` and `.rule edit` refuse a `$name` in their IQL. Inside a string literal, `"$name"` is plain text. A persistent rule stores the value bound when it was registered.
+
+Values are typed by their JSON form, or explicitly with a one-key object:
+
+| Type | Bare JSON | Explicit |
+|---|---|---|
+| int (64-bit) | `42` (no fraction or exponent) | `{"int": 42}`, `{"int": "9007199254740993"}` |
+| float (finite) | `0.5`, `1e-3` | `{"float": 1}` |
+| string | `"S-77"` | `{"string": "S-77"}` |
+| bool | `true` | `{"bool": true}` |
+| vector | `[0.1, 0.2]` | `{"vector": [0.1, 0.2]}` |
+
+Nothing is converted silently. JavaScript writes `1.0` as `1`, so send a float with an integral value as `{"float": 1}`; send an int beyond JavaScript's safe integer range as a decimal string, `{"int": "..."}`. A frame whose `params` cannot be bound exactly gets an `invalid_request` error naming the parameter, and nothing runs: `null` (what `JSON.stringify` writes for `NaN` and the infinities), an integer outside int64, a bare integral number of magnitude 2^63 or more, `{"float": n}` for an integer no float equals, `{"int": ...}` with a fraction, an unknown type tag, a name given twice, or a name that is not an identifier (`[A-Za-z_][A-Za-z0-9_]*`, at most 64 bytes).
+
+Every parameter the program references must be given, and every one given must be referenced; otherwise the request fails with code `validation` (a missing one is reported in `validation_errors` against its statement) and nothing runs. A value that cannot stand where it is referenced, such as a string in arithmetic, fails the same way. Parameter values count toward `storage.performance.max_query_size_bytes` and are never logged.
 
 ### Request IDs
 

@@ -42,6 +42,7 @@ impl IRBuilder {
 
     /// Build IR from a rule
     pub fn build_ir(&self, rule: &Rule) -> Result<IRNode, String> {
+        crate::params::refuse_unbound(rule)?;
         // 1. Build scans for all positive body atoms
         let mut scans = self.build_scans(rule)?;
 
@@ -115,6 +116,7 @@ impl IRBuilder {
 
     /// Build IR with detailed timing breakdown.
     pub fn build_ir_timed(&self, rule: &Rule) -> Result<(IRNode, IrBuilderTiming), String> {
+        crate::params::refuse_unbound(rule)?;
         let mut timing = IrBuilderTiming::default();
 
         let start = std::time::Instant::now();
@@ -322,6 +324,7 @@ impl IRBuilder {
                 Term::FieldAccess(_, field) => field.clone(),
                 // Record pattern - generate a name
                 Term::RecordPattern(_) => format!("rec{i}"),
+                Term::Param(_) => unreachable!("refused by build_ir"),
             })
             .collect();
 
@@ -1013,6 +1016,7 @@ impl IRBuilder {
             ArithExpr::FloatConstant(bits) => {
                 Ok(IRExpression::FloatConstant(f64::from_bits(*bits)))
             }
+            ArithExpr::Param(name) => Err(crate::params::unbound(name)),
             ArithExpr::Binary { op, left, right } => {
                 let left_ir = Self::arith_expr_to_ir_expression(left, schema)?;
                 let right_ir = Self::arith_expr_to_ir_expression(right, schema)?;
@@ -1132,6 +1136,7 @@ impl IRBuilder {
                 Term::RecordPattern(_) => {
                     return Err("Record patterns in rule head not yet supported.".to_string());
                 }
+                Term::Param(name) => return Err(crate::params::unbound(name)),
             }
         }
 
@@ -1536,6 +1541,7 @@ impl IRBuilder {
                 Term::RecordPattern(_) => {
                     return Err("Record patterns in aggregation head not supported".to_string());
                 }
+                Term::Param(name) => return Err(crate::params::unbound(name)),
             }
         }
 

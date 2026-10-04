@@ -26,7 +26,7 @@
 use super::catalog_change::{CatalogChange, CatalogOutcome};
 use super::KnowledgeGraphSnapshot;
 use crate::ast::dependencies::DependencyClosure;
-use crate::ast::Rule;
+use crate::ast::{Program, Rule};
 use crate::execution::Stop;
 use crate::rule_catalog::RuleCatalog;
 use crate::storage::StorageError;
@@ -100,11 +100,8 @@ enum ReadSet {
 }
 
 impl ReadSet {
-    /// Relations `query` reads, directly or through `rules`.
-    fn of(query: &str, rules: &[Rule]) -> Self {
-        let Ok(program) = crate::parser::parse_program(query) else {
-            return Self::Everything;
-        };
+    /// Relations `program` reads, directly or through `rules`.
+    fn of(program: &Program, rules: &[Rule]) -> Self {
         let mut closure = DependencyClosure::default();
         for rule in &program.rules {
             closure.add_rule(rule);
@@ -175,7 +172,12 @@ impl WriteProgram {
     /// # Panics
     /// In debug builds, if the program already read a different snapshot;
     /// every statement of a program must stage against the same one.
-    pub fn read(&mut self, snapshot: &Arc<KnowledgeGraphSnapshot>, rules: &[Rule], query: &str) {
+    pub fn read(
+        &mut self,
+        snapshot: &Arc<KnowledgeGraphSnapshot>,
+        rules: &[Rule],
+        query: &Program,
+    ) {
         let relations = ReadSet::of(query, rules);
         match &mut self.read {
             Some(read) => {
@@ -517,7 +519,8 @@ mod tests {
         let base = Arc::new(KnowledgeGraphSnapshot::new(inputs, rules));
         let mut program = WriteProgram::new();
         assert!(program.read_holds_in(&base));
-        program.read(&base, &base.rules, "q(X) <- p(X)");
+        let query = crate::parser::parse_program("q(X) <- p(X)").unwrap();
+        program.read(&base, &base.rules, &query);
 
         let republished = |edit: &dyn Fn(&mut RelationMap)| {
             let mut next = (*base).clone();

@@ -4,10 +4,12 @@
 //! Literal inserts and deletes resolve from their own terms. Conditional
 //! deletes and updates evaluate their query on a view of the KG that already
 //! includes the changes staged before them (see
-//! [`crate::storage_engine::WriteProgram::view`]).
+//! [`crate::storage_engine::WriteProgram::view`]). The query is built from
+//! the statement's syntax tree and evaluated as one, never written back into
+//! IQL text: its constants, bound parameters included, are never re-parsed.
 
-use super::{format_body_pred, format_term, term_to_value};
-use crate::ast::Term;
+use super::term_to_value;
+use crate::ast::{Atom, BodyPredicate, Program, Rule, Term};
 use crate::protocol::wire::{ErrorCode, StatementKind};
 use crate::statement::{DeleteOp, DeletePattern, InsertOp, UpdateOp};
 use crate::storage_engine::{FactChange, KnowledgeGraphSnapshot};
@@ -45,7 +47,7 @@ impl FactStatement {
     pub fn changes(
         &self,
         limits: &InsertLimits,
-        view: impl FnOnce(&str) -> Result<Arc<KnowledgeGraphSnapshot>, StageError>,
+        view: impl FnOnce(&Program) -> Result<Arc<KnowledgeGraphSnapshot>, StageError>,
     ) -> Result<Vec<FactChange>, StageError> {
         let invalid = |message| StageError {
             code: ErrorCode::Validation,
@@ -92,7 +94,8 @@ impl FactStatement {
                         .collect(),
                     DeletePattern::Conditional { head_args, body } => {
                         let (query, vars) = conditional_delete_query(&op.relation, head_args, body);
-                        conditional_delete_tuples(head_args, &vars, &query, &*view(&query)?)
+                        let view = view(&query)?;
+                        conditional_delete_tuples(head_args, &vars, query, &view)
                             .map_err(|e| failed(self.failure_message(e)))?
                     }
                 };
@@ -103,8 +106,8 @@ impl FactStatement {
             }
             Self::Update(op) => {
                 let (query, vars) = update_query(op);
-                update_changes(op, &vars, &query, &*view(&query)?)
-                    .map_err(|e| failed(self.failure_message(e)))
+                let view = view(&query)?;
+                update_changes(op, &vars, query, &view).map_err(|e| failed(self.failure_message(e)))
             }
         }
     }
@@ -210,9 +213,17 @@ fn collect_vars<'a>(terms: impl IntoIterator<Item = &'a Term>, vars: &mut Vec<St
 
 /// Run `query` on `view` without the result-row cap: every match must be
 /// changed, not a page of them.
-fn evaluate(view: &KnowledgeGraphSnapshot, query: &str) -> Result<Vec<Tuple>, String> {
-    crate::without_result_cap(|| view.execute_with_rules_tuples(query))
+fn evaluate(view: &KnowledgeGraphSnapshot, query: Program) -> Result<Vec<Tuple>, String> {
+    crate::without_result_cap(|| view.execute_program_with_rules(query))
         .map_err(|e| format!("Query execution failed: {e}"))
+}
+
+/// The one-rule program `head(vars) <- body`.
+fn query_program(head: &str, vars: &[String], body: Vec<BodyPredicate>) -> Program {
+    let args = vars.iter().cloned().map(Term::Variable).collect();
+    Program {
+        rules: vec![Rule::new(Atom::new(head.to_string(), args), body)],
+    }
 }
 
 /// The query finding matches of `-relation(head_args) <- body`, and the head
@@ -220,28 +231,25 @@ fn evaluate(view: &KnowledgeGraphSnapshot, query: &str) -> Result<Vec<Tuple>, St
 fn conditional_delete_query(
     relation: &str,
     head_args: &[Term],
-    body: &[crate::ast::BodyPredicate],
-) -> (String, Vec<String>) {
+    body: &[BodyPredicate],
+) -> (Program, Vec<String>) {
     let mut vars = Vec::new();
     collect_vars(head_args, &mut vars);
-    let head: Vec<String> = head_args.iter().map(format_term).collect();
     // The target relation binds every head variable.
-    let body: Vec<String> = std::iter::once(format!("{relation}({})", head.join(", ")))
-        .chain(body.iter().map(format_body_pred))
-        .collect();
-    let query = format!(
-        "__cond_del_query__({}) <- {}",
-        vars.join(", "),
-        body.join(", ")
-    );
-    (query, vars)
+    let body = std::iter::once(BodyPredicate::Positive(Atom::new(
+        relation.to_string(),
+        head_args.to_vec(),
+    )))
+    .chain(body.iter().cloned())
+    .collect();
+    (query_program("__cond_del_query__", &vars, body), vars)
 }
 
 /// Tuples to delete: `head_args` under each match of `query` on `view`.
 fn conditional_delete_tuples(
     head_args: &[Term],
     vars: &[String],
-    query: &str,
+    query: Program,
     view: &KnowledgeGraphSnapshot,
 ) -> Result<Vec<Tuple>, String> {
     let mut tuples = Vec::new();
@@ -271,13 +279,11 @@ fn conditional_delete_tuples(
 
 /// The query finding matches of an update's body, and the target variables
 /// its result columns bind.
-fn update_query(op: &UpdateOp) -> (String, Vec<String>) {
+fn update_query(op: &UpdateOp) -> (Program, Vec<String>) {
     let mut vars = Vec::new();
     collect_vars(op.deletes.iter().flat_map(|t| &t.args), &mut vars);
     collect_vars(op.inserts.iter().flat_map(|t| &t.args), &mut vars);
-    let body: Vec<String> = op.body.iter().map(format_body_pred).collect();
-    let query = format!("__upd_query__({}) <- {}", vars.join(", "), body.join(", "));
-    (query, vars)
+    (query_program("__upd_query__", &vars, op.body.clone()), vars)
 }
 
 /// Changes of `-old, +new <- body`: for each match of `query` on `view`, in
@@ -286,7 +292,7 @@ fn update_query(op: &UpdateOp) -> (String, Vec<String>) {
 fn update_changes(
     op: &UpdateOp,
     vars: &[String],
-    query: &str,
+    query: Program,
     view: &KnowledgeGraphSnapshot,
 ) -> Result<Vec<FactChange>, String> {
     let mut changes = Vec::new();

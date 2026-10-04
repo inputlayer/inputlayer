@@ -8,9 +8,12 @@
 
 use std::time::Instant;
 
-use inputlayer_ws_protocol::{probe_request_id, ClientFrame, ErrorCode, RequestId, ServerFrame};
+use inputlayer_ws_protocol::{
+    probe_request_id, ClientFrame, ErrorCode, Params, RequestId, ServerFrame,
+};
 
 use super::pipeline::Access;
+use crate::params::{references_params, META_PARAMS};
 use crate::protocol::handler::is_query_program;
 use crate::protocol::subscription::connection::Opened;
 use crate::statement::{MetaCommand, Statement};
@@ -29,6 +32,7 @@ pub(super) enum Job {
     /// when the client set one.
     Execute {
         program: String,
+        params: Params,
         timeout_ms: Option<u64>,
     },
     /// Cancel the unanswered request `target`; handled on arrival.
@@ -71,9 +75,20 @@ impl Request {
             ClientFrame::Execute {
                 id,
                 program,
+                params,
                 timeout_ms,
             } => {
-                let (access, job) = match subscription_command(&program) {
+                let command = subscription_command(&program);
+                // Standing queries take no parameters: their IQL is
+                // re-evaluated long after the request.
+                if command.is_some() && (!params.is_empty() || references_params(&program)) {
+                    return Self::immediate(ServerFrame::error(
+                        id,
+                        Some(ErrorCode::Validation),
+                        META_PARAMS.to_string(),
+                    ));
+                }
+                let (access, job) = match command {
                     Some(MetaCommand::Subscribe { id: name, query }) => {
                         (Access::Exclusive, Job::Subscribe { name, query })
                     }
@@ -84,6 +99,7 @@ impl Request {
                         program_access(&program),
                         Job::Execute {
                             program,
+                            params,
                             timeout_ms,
                         },
                     ),

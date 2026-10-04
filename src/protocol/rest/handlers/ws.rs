@@ -665,7 +665,9 @@ fn start_requests(
             Job::Immediate(frame) => {
                 requests.complete(ticket, Reply::Frames(vec![encode(&frame)]));
             }
-            Job::Execute { program, .. } => {
+            Job::Execute {
+                program, params, ..
+            } => {
                 let control = match in_flight.control(ticket) {
                     Some(control) => Arc::clone(control),
                     None => handler.request_control(None),
@@ -685,6 +687,7 @@ fn start_requests(
                     session_id.to_string(),
                     id,
                     program,
+                    params,
                     principal.clone(),
                     control,
                 );

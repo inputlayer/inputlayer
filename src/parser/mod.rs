@@ -290,6 +290,11 @@ pub fn parse_term(s: &str) -> Result<Term, String> {
         return Ok(Term::Placeholder);
     }
 
+    // Parameter reference: $name, bound to a value sent beside the program
+    if let Some(name) = lexer::param_name(s) {
+        return Ok(Term::Param(name.to_string()));
+    }
+
     // Check for vector literal: [1.0, 2.0, 3.0]
     if s.starts_with('[') && s.ends_with(']') {
         return parse_vector_literal(s);
@@ -683,6 +688,10 @@ fn parse_primary(s: &str) -> Result<ArithExpr, String> {
         if let Ok(num) = s[1..].trim().parse::<f64>() {
             return Ok(ArithExpr::from_float(-num));
         }
+    }
+
+    if let Some(name) = lexer::param_name(s) {
+        return Ok(ArithExpr::Param(name.to_string()));
     }
 
     // Must be a variable

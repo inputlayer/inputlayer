@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::RequestId;
+use crate::{Params, RequestId};
 
 /// A request from the client. Each may carry an `id`, echoed on its replies.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -26,6 +26,12 @@ pub enum ClientFrame {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         id: Option<RequestId>,
         program: String,
+        /// Values of the program's `$name` parameters, bound by the engine
+        /// without passing through the parser (see [`Params`]). Every
+        /// parameter the program names must be given, and every one given
+        /// must be named.
+        #[serde(default, skip_serializing_if = "Params::is_empty")]
+        params: Params,
         /// Milliseconds the request may take, from its arrival: queueing,
         /// admission and computation together. Capped by the engine's own
         /// query timeout.
@@ -96,6 +102,38 @@ mod tests {
             }
         ));
         assert!(serde_json::from_str::<ClientFrame>(r#"{"type":"cancel"}"#).is_err());
+    }
+
+    #[test]
+    fn execute_carries_params_beside_the_program() {
+        let frame: ClientFrame = serde_json::from_str(
+            r#"{"type":"execute","program":"+eta($s, $d)","params":{"s":"S-77","d":{"int":"20261010"}}}"#,
+        )
+        .unwrap();
+        let ClientFrame::Execute { params, .. } = &frame else {
+            panic!("not an execute: {frame:?}");
+        };
+        assert_eq!(
+            params.get("s"),
+            Some(&crate::ParamValue::String("S-77".into()))
+        );
+        assert_eq!(params.get("d"), Some(&crate::ParamValue::Int(20_261_010)));
+        let json = serde_json::to_string(&frame).unwrap();
+        assert_eq!(serde_json::from_str::<ClientFrame>(&json).unwrap(), frame);
+        // No params: the field is omitted, and an empty object is the same.
+        let bare: ClientFrame =
+            serde_json::from_str(r#"{"type":"execute","program":"?a(X)","params":{}}"#).unwrap();
+        assert_eq!(
+            serde_json::to_string(&bare).unwrap(),
+            r#"{"type":"execute","program":"?a(X)"}"#
+        );
+        // A bad value fails the frame, naming the parameter.
+        let error = serde_json::from_str::<ClientFrame>(
+            r#"{"type":"execute","program":"+a($x)","params":{"x":null}}"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("parameter \"x\""), "{error}");
     }
 
     #[test]

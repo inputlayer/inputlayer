@@ -52,7 +52,8 @@ info:
 
     ## Protocol version and request IDs
 
-    This is protocol version 3, reported as `protocol_version` in `authenticated`.
+    This is protocol version 4, reported as `protocol_version` in `authenticated`.
+    Version 4 added `execute.params`; an engine reporting less ignores them.
     The frame types are defined once in the `inputlayer-ws-protocol` crate
     (`ws-protocol/`); the Python and JS SDKs mirror them.
 
@@ -1015,6 +1016,8 @@ components:
           description: |
             Any valid IQL statement or meta command as raw text.
             Examples: "+edge[(1,2)]", "?edge(X,Y)", ".kg list", ".rule list"
+        params:
+          $ref: '#/components/schemas/Params'
         timeout_ms:
           type: integer
           minimum: 0
@@ -1031,6 +1034,72 @@ components:
           program: ".kg list"
         - type: execute
           program: "+path(X, Y) <- edge(X, Y)"
+        - type: execute
+          id: "2"
+          program: "+eta($shipment, $date)"
+          params:
+            shipment: "S-77"
+            date: "2026-10-10"
+
+    Params:
+      type: object
+      description: |
+        Values of the program's `$name` parameters, sent beside its text. The engine
+        binds each value to the program's parsed statements: a value is never lexed or
+        parsed, so no value can change what a program does, whatever characters it holds.
+        A parameter stands where a literal may stand (an atom argument, a comparison or
+        arithmetic operand, a function argument, an `hnsw_nearest` query vector) and
+        binds exactly the value its literal would. Meta commands take none.
+
+        Every parameter the program references must be given, and every one given must be
+        referenced; otherwise the request fails with code `validation` and nothing runs.
+        Values that cannot be bound exactly fail the frame with `invalid_request`: `null`
+        (what JSON.stringify writes for NaN and the infinities), integers outside int64,
+        a bare integral number of magnitude 2^63 or more, `{"float": n}` for an integer
+        no float equals, `{"int": ...}` with a fraction, unknown type tags, a name given
+        twice, or a name that is not an identifier. Parameter values count toward
+        `storage.performance.max_query_size_bytes` and are never logged.
+      propertyNames:
+        pattern: '^[A-Za-z_][A-Za-z0-9_]{0,63}$'
+      additionalProperties:
+        $ref: '#/components/schemas/ParamValue'
+
+    ParamValue:
+      description: |
+        A bare JSON value is typed by its form: a string, a boolean, an integer (int64;
+        no fraction or exponent), a float (with a fraction or exponent) or an array of
+        numbers (a vector). The one-key form names the type explicitly: `{"float": 1}` is
+        a float, and `{"int": "9007199254740993"}` an int beyond JavaScript's safe range.
+      oneOf:
+        - type: string
+        - type: boolean
+        - type: integer
+          minimum: -9223372036854775808
+          maximum: 9223372036854775807
+        - type: number
+        - type: array
+          items:
+            type: number
+        - type: object
+          minProperties: 1
+          maxProperties: 1
+          properties:
+            int:
+              oneOf:
+                - type: integer
+                - type: string
+                  pattern: '^-?[0-9]+$'
+            float:
+              type: number
+            string:
+              type: string
+            bool:
+              type: boolean
+            vector:
+              type: array
+              items:
+                type: number
+          additionalProperties: false
 
     PingRequest:
       type: object

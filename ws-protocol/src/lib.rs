@@ -59,6 +59,7 @@
 mod client;
 mod error;
 mod notice;
+mod params;
 mod push;
 mod request_id;
 mod server;
@@ -67,6 +68,7 @@ mod timing;
 pub use client::ClientFrame;
 pub use error::{ErrorCode, StatementError, ValidationError};
 pub use notice::NoticeCode;
+pub use params::{is_param_name, InvalidParamName, ParamValue, Params, MAX_PARAM_NAME_LEN};
 pub use push::{Notification, Row, SubscriptionPush};
 pub use request_id::{probe_request_id, InvalidRequestId, RequestId, MAX_REQUEST_ID_LEN};
 pub use server::{
@@ -77,4 +79,4 @@ pub use timing::{IrBuilderTiming, OptimizerTiming, RuleTiming, TimingBreakdown};
 
 /// Version of this protocol, sent in `authenticated`. Bumped on any change a
 /// client must know about.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
