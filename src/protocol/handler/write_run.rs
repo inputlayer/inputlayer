@@ -119,8 +119,9 @@ impl WriteRun {
 impl QueryJob {
     /// Commit the statements queued in `run` to `kg` as one transaction and
     /// fill their message rows in `messages`. Returns the snapshot the
-    /// program committed against (see [`ProgramCommit::base`]) and the counts
-    /// of its fact statements.
+    /// program committed against (see [`ProgramCommit::base`]), the counts
+    /// of its fact statements, and the revision the program's effect is
+    /// visible at.
     ///
     /// A program whose staging read the KG is staged again, up to
     /// [`MAX_STAGE_ATTEMPTS`] times with a short random pause, if a concurrent
@@ -131,7 +132,7 @@ impl QueryJob {
         kg: &str,
         run: &mut WriteRun,
         messages: &mut [String],
-    ) -> Result<(Arc<KnowledgeGraphSnapshot>, Vec<StatementCounts>), RunFailure> {
+    ) -> Result<(Arc<KnowledgeGraphSnapshot>, Vec<StatementCounts>, u64), RunFailure> {
         let commit = match self.commit_queued(storage, kg, &run.queued) {
             Ok(commit) => commit,
             Err(mut failure) => {
@@ -188,7 +189,7 @@ impl QueryJob {
                 change.inserted + change.deleted,
             );
         }
-        Ok((commit.base, counts))
+        Ok((commit.base, counts, commit.revision))
     }
 
     /// Stage `queued` and commit it, re-staging while it goes stale.
