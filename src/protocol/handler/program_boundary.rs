@@ -123,15 +123,12 @@ pub(super) fn check(statements: &[Statement]) -> Result<(), BoundaryViolation> {
         }
     }
     if role(&statements[last]) == Role::Proof {
-        if let Some(index) = statements
-            .iter()
-            .position(|s| {
-                matches!(
-                    s,
-                    Statement::Query(_) | Statement::Meta(MetaCommand::RuleQuery(_))
-                )
-            })
-        {
+        if let Some(index) = statements.iter().position(|s| {
+            matches!(
+                s,
+                Statement::Query(_) | Statement::Meta(MetaCommand::RuleQuery(_))
+            )
+        }) {
             return violation(index, ViolationKind::QueryWithProof);
         }
     }
