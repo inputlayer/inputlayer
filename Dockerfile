@@ -27,6 +27,9 @@ COPY Cargo.toml ./
 COPY gateway/Cargo.toml ./gateway/
 COPY ontology-client/Cargo.toml ./ontology-client/
 COPY ws-protocol/Cargo.toml ./ws-protocol/
+# A workspace member, though no image binary depends on it: cargo refuses to
+# load the workspace without its manifest.
+COPY testkit/Cargo.toml ./testkit/
 RUN mkdir src && echo "fn main() {}" > src/main.rs && \
     mkdir -p src/bin && echo "fn main() {}" > src/bin/server.rs && \
     echo "" > src/lib.rs && \
@@ -34,10 +37,11 @@ RUN mkdir src && echo "fn main() {}" > src/main.rs && \
     echo "" > gateway/src/lib.rs && \
     mkdir -p ontology-client/src && echo "" > ontology-client/src/lib.rs && \
     mkdir -p ws-protocol/src && echo "" > ws-protocol/src/lib.rs && \
+    mkdir -p testkit/src && echo "" > testkit/src/lib.rs && \
     cargo generate-lockfile && \
     (cargo build --release -p inputlayer --bin inputlayer-server && \
      cargo build --release -p inputlayer-gateway --bin inputlayer-gateway) 2>/dev/null || true && \
-    rm -rf src gateway/src ontology-client/src ws-protocol/src
+    rm -rf src gateway/src ontology-client/src ws-protocol/src testkit/src
 
 # Build the real binaries. The touch is load-bearing: COPY preserves context
 # mtimes, which in CI predate the dummy dep-cache build above - without it
@@ -48,6 +52,7 @@ COPY src/ src/
 COPY gateway/ gateway/
 COPY ontology-client/ ontology-client/
 COPY ws-protocol/ ws-protocol/
+COPY testkit/ testkit/
 COPY docs/ docs/
 RUN find src gateway/src ontology-client/src ws-protocol/src -type f -exec touch {} + && \
     cargo build --all-features --release -p inputlayer --bin inputlayer-server --bin inputlayer-backup && \
