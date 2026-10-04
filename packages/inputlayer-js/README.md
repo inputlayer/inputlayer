@@ -4,7 +4,7 @@ TypeScript SDK for [InputLayer](https://github.com/inputlayer/inputlayer), the l
 
 Take the rules out of your prompts: declare facts and rules in TypeScript, and InputLayer keeps every conclusion current as facts change. The SDK compiles your declarations into IQL, InputLayer's rule language, and sends it over WebSocket. A knowledge graph (`il.knowledgeGraph("support")`) is the facts and rule-derived conclusions of one domain.
 
-**Today and next.** This package declares relations and rules (`relation()`, `from()`), writes and deletes facts, and queries the derived views. Phase 1 of the new SDK adds `kg.subscribe()` (the engine pushes each change to the agent) and `kg.claim()` (an agent's action is recorded only while the rules allow it): in progress, not merged yet. Until then, standing queries run over the [WebSocket API](https://inputlayer.ai/docs/guides/websocket-api/). The [main README](../../README.md) shows both forms.
+**Today and next.** This package declares relations and rules (`relation()`, `from()`), writes and deletes facts, and queries the derived views. Phase 1 of the new SDK adds `kg.subscribe()` (the engine pushes each change to the agent) and `kg.claim()` (an agent's action is recorded only while the rules allow it): merged on main, not in a release yet. Until then, standing queries run over the [WebSocket API](https://inputlayer.ai/docs/guides/websocket-api/). The [main README](../../README.md) shows both forms.
 
 ## Installation
 

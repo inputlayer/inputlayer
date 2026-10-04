@@ -107,12 +107,14 @@ class TestAnyInRules:
         clause = (
             From(Shipment, Eta, Promised, ToolPolicy)
             .where(
-                lambda s, e, p, t: (e.shipment == s.shipment)
-                & (p.order == s.order)
-                & (e.due > p.due)
-                & (t.tool == "carrier_check")
-                & (t.mode == "auto")
-                & ~KillSwitch.any(tool=t.tool)
+                lambda s, e, p, t: (
+                    (e.shipment == s.shipment)
+                    & (p.order == s.order)
+                    & (e.due > p.due)
+                    & (t.tool == "carrier_check")
+                    & (t.mode == "auto")
+                    & ~KillSwitch.any(tool=t.tool)
+                )
             )
             .select(order=Shipment.order, shipment=Shipment.shipment)
         )
@@ -171,9 +173,7 @@ class TestAnyInRules:
 
     def test_derived_any(self) -> None:
         clause = (
-            From(Shipment)
-            .where(lambda s: ~Late.any(order=s.order))
-            .select(order=Shipment.order)
+            From(Shipment).where(lambda s: ~Late.any(order=s.order)).select(order=Shipment.order)
         )
         assert _rule("not_late", ["order"], clause) == (
             "+not_late(Order) <- shipment(Order, _), !late(Order)"

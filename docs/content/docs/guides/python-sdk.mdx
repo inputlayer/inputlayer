@@ -488,6 +488,78 @@ await kg.drop_rule("high_earner")
 await kg.clear_rule("reachable")
 ```
 
+## Guarded writes and claims
+
+### Existence checks
+
+`R.any(**columns)` is true when a row of `R` exists whose columns equal the given values. Columns you leave out match anything, and a value can be a column of another relation in the same condition. `~R.any(...)` is true when no such row exists. You can use both in rule conditions, in the `where=` of queries and conditional deletes, and in guards:
+
+```python
+class AutoTool(Derived):
+    tool: str
+    rules: ClassVar[list] = [
+        From(ToolPolicy)
+            .where(lambda t: (t.mode == "auto") & ~KillSwitch.any(tool=t.tool))
+            .select(tool=ToolPolicy.tool),
+    ]
+
+auto = await kg.query(ToolPolicy, where=lambda t: (t.mode == "auto") & ~KillSwitch.any(tool=t.tool))
+await kg.delete(Attempt, where=lambda a: AttemptDone.any(attempt=a.attempt))
+```
+
+`~R.any()` must bind at least one column. A constant binding works even when no positive relation in the condition carries that value; the SDK supplies the binding through its own `il_const_*` relations.
+
+### Programs
+
+`kg.program()` collects statements and commits them as one request and one transaction. The builder methods chain: `insert(*facts)`, `retract(row)` or `retract(R, **columns)` (every row matching those columns), `define(*relations)`, `define_rules(*derived)` and `clear_rule(name)`. `commit()` returns a `ProgramResult(applied, inserted, deleted, iql)`, where `inserted` and `deleted` count the facts that the program's writes changed. `kg.retract(...)` is a one-statement program.
+
+`.when(*conditions)` makes the whole program conditional. The engine evaluates the guard once at commit, and the program applies whole or not at all. Conditions are `R.any()` / `~R.any()` atoms and comparisons over their columns, such as `Cursor.any(session="s-42"), Cursor.last < 7`.
+
+```python
+from inputlayer import PreconditionFailed
+
+try:
+    result = await (
+        kg.program()
+        .retract(CarrierNote, shipment="S-77")
+        .insert(CarrierNote(shipment="S-77", reason="weather_delay"))
+        .when(Attempt.any(attempt="att-9f3"), ~AttemptDone.any(attempt="att-9f3"))
+        .commit()
+    )
+    print(f"+{result.inserted} -{result.deleted}")
+except PreconditionFailed:
+    ...  # nothing was applied; re-read the state before retrying
+```
+
+A guard comes in two forms:
+
+- **Abort form, `commit()` (`strict=True`, the default).** If the guard does not hold, the engine rolls back the whole program, rules and schema included, and the call raises `PreconditionFailed`. Use this form for a program that holds `define()`, `define_rules()` or `clear_rule()`.
+- **Token form, `commit(strict=False)`, for programs that only insert or retract facts.** If the guard does not hold, nothing is applied and the call returns `applied=False` instead of raising. `strict=False` on a program that holds rules or schema raises `CompileError` before anything is sent.
+
+`kg.define()` also declares the SDK's guard relations (`il_txn`, `il_txn_pending` and `il_assert`). A guarded program declares them itself on a graph that was defined elsewhere.
+
+### Claims
+
+`kg.claim(row, when=, unless=, key=)` inserts `row` only if every `when` condition holds and no `unless` row exists at commit. It is one request: of many concurrent claims on one key, exactly one wins, and every caller sees the same holder.
+
+```python
+c = await kg.claim(
+    Attempt(order="ORD-1", tool="carrier_check", attempt=attempt_id),
+    when=[CheckNeeded.any(order="ORD-1")],
+    unless=Attempt.any(order="ORD-1", tool="carrier_check"),
+)
+if c.won:
+    run_tool()                 # c.holder is the claimed row
+elif c.holder is None:
+    ...                        # the when guard did not hold
+else:
+    ...                        # c.holder is the row that already holds the key
+```
+
+It returns a `Claim(won, holder)`. `unless` defaults to a row with the `key` columns of `row`. `key` defaults to the columns that `unless` binds when it checks the claimed relation, otherwise to every column. A claim that loses does not raise.
+
+A guarded program or claim whose guard reads rows that concurrent commits keep changing raises `Conflict`. Nothing was applied, so retry with backoff. On `InputLayerSync`, `program().commit()`, `claim()` and `retract()` block.
+
 ## Vector Search
 
 InputLayer supports HNSW indexes for approximate nearest-neighbor search over vector columns.

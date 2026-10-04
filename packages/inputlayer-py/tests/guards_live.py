@@ -84,12 +84,14 @@ class CheckNeeded(Derived):
 CheckNeeded.rules = [
     From(Shipment, Eta, Promised, ToolPolicy)
     .where(
-        lambda s, e, p, t: (e.shipment == s.shipment)
-        & (p.order == s.order)
-        & (e.due > p.due)
-        & (t.tool == "carrier_check")
-        & (t.mode == "auto")
-        & ~KillSwitch.any(tool=t.tool)
+        lambda s, e, p, t: (
+            (e.shipment == s.shipment)
+            & (p.order == s.order)
+            & (e.due > p.due)
+            & (t.tool == "carrier_check")
+            & (t.mode == "auto")
+            & ~KillSwitch.any(tool=t.tool)
+        )
     )
     .select(order=Shipment.order, shipment=Shipment.shipment)
 ]
@@ -147,9 +149,7 @@ class LateV2(Derived):
 
 Late.rules = [From(Shipment).select(order=Shipment.order)]
 LateV2.rules = [
-    From(Shipment, Eta)
-    .where(lambda s, e: e.shipment == s.shipment)
-    .select(order=Shipment.order)
+    From(Shipment, Eta).where(lambda s, e: e.shipment == s.shipment).select(order=Shipment.order)
 ]
 
 
@@ -401,10 +401,7 @@ async def test_guarded_writes_keep_a_stored_row_equal_to_a_typed_placeholder(
 ) -> None:
     await kg.insert(GhostProbe(id=-1, on=False, tag=""))
     r = await (
-        kg.program()
-        .insert(GhostProbe(id=1, on=True, tag="a"))
-        .when(GhostProbe.any(id=-1))
-        .commit()
+        kg.program().insert(GhostProbe(id=1, on=True, tag="a")).when(GhostProbe.any(id=-1)).commit()
     )
     assert (r.applied, r.inserted, r.deleted) == (True, 1, 0)
     c = await kg.claim(GhostProbe(id=2, on=True, tag="b"), when=GhostProbe.any(id=-1), key=["id"])

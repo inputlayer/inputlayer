@@ -506,6 +506,81 @@ await kg.dropRule("high_earner");
 await kg.clearRule("reachable");
 ```
 
+## Guarded writes and claims
+
+### Existence checks
+
+`any(Rel, { ...columns })`, or `Rel.any({ ...columns })`, is true when a row of `Rel` exists whose columns equal the given values. Columns you leave out match anything, and a value can be a column of another relation in the same condition. `NOT(any(...))` is true when no such row exists. You can use both in rule conditions, in the `where` of queries and conditional deletes, and in guards:
+
+```typescript
+import { any, AND, NOT, from } from "inputlayer";
+
+await kg.defineRules("auto_tool", ["tool"], [
+  from(ToolPolicy)
+    .where((t) => AND(t.col("mode").eq("auto"), NOT(any(KillSwitch, { tool: t.col("tool") }))))
+    .select({ tool: ToolPolicy.col("tool") }),
+]);
+
+const auto = await kg.query({
+  select: [ToolPolicy],
+  where: NOT(any(KillSwitch, { tool: "carrier_check" })),
+});
+await kg.delete(Attempt, AttemptDone.any({ attempt: Attempt.col("attempt") }));
+```
+
+`NOT(any())` must bind at least one column. A constant binding works even when no positive relation in the condition carries that value; the SDK supplies the binding through its own `il_const_*` relations. `AND()` and `OR()` take two or more conditions.
+
+### Programs
+
+`kg.program()` collects statements and commits them as one request and one transaction. The builder methods chain: `insert(Rel, facts)`, `retract(Rel, rowOrKey)` (a full row, or every row matching the given columns), `define(...rels)`, `defineRules(name, columns, clauses)` and `clearRule(name)`. `commit()` resolves with a `ProgramResult` (`applied`, `inserted`, `deleted`, `iql`), where `inserted` and `deleted` count the facts that the program's writes changed. `kg.retract(Rel, rowOrKey)` is a one-statement program.
+
+`.when(...conditions)` makes the whole program conditional. The engine evaluates the guard once at commit, and the program applies whole or not at all. Conditions are `any()` / `NOT(any())` atoms and comparisons over their columns, such as `any(Cursor, { session: "s-42" }), Cursor.col("last").lt(7)`.
+
+```typescript
+import { any, NOT, PreconditionFailed } from "inputlayer";
+
+try {
+  const result = await kg.program()
+    .retract(CarrierNote, { shipment: "S-77" })
+    .insert(CarrierNote, { shipment: "S-77", reason: "weather_delay" })
+    .when(any(Attempt, { attempt: "att-9f3" }), NOT(any(AttemptDone, { attempt: "att-9f3" })))
+    .commit();
+  console.log(`+${result.inserted} -${result.deleted}`);
+} catch (e) {
+  if (!(e instanceof PreconditionFailed)) throw e;
+  // nothing was applied; re-read the state before retrying
+}
+```
+
+A guard comes in two forms:
+
+- **Abort form, `commit()` (`strict: true`, the default).** If the guard does not hold, the engine rolls back the whole program, rules and schema included, and the call rejects with `PreconditionFailed`. Use this form for a program that holds `define()`, `defineRules()` or `clearRule()`.
+- **Token form, `commit({ strict: false })`, for programs that only insert or retract facts.** If the guard does not hold, nothing is applied and the call resolves with `applied: false` instead of rejecting. `strict: false` on a program that holds rules or schema throws `CompileError` before anything is sent.
+
+`kg.define()` also declares the SDK's guard relations (`il_txn`, `il_txn_pending` and `il_assert`). A guarded program declares them itself on a graph that was defined elsewhere.
+
+### Claims
+
+`kg.claim(Rel, row, { when, unless, key })` inserts `row` only if every `when` condition holds and no `unless` row exists at commit. It is one request: of many concurrent claims on one key, exactly one wins, and every caller sees the same holder.
+
+```typescript
+const c = await kg.claim(Attempt, { order: "ORD-1", tool: "carrier_check", attempt: attemptId }, {
+  when: [any(CheckNeeded, { order: "ORD-1" })],
+  unless: any(Attempt, { order: "ORD-1", tool: "carrier_check" }),
+});
+if (c.won) {
+  runTool();                   // c.holder is the claimed row
+} else if (c.holder === null) {
+  // the when guard did not hold
+} else {
+  // c.holder is the row that already holds the key
+}
+```
+
+It resolves with a `Claim` (`won`, `holder`). `unless` defaults to a row with the `key` columns of `row`. `key` defaults to the columns that `unless` binds when it checks the claimed relation, otherwise to every column. A claim that loses does not reject.
+
+A guarded program or claim whose guard reads rows that concurrent commits keep changing rejects with `ConflictError`. Nothing was applied, so retry with backoff.
+
 ## Vector Search
 
 `vectorSearch()` forwards the legacy `top_k` / `within_radius` query syntax to

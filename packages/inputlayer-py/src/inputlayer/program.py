@@ -252,9 +252,7 @@ class Program:
             return self
         rel = row_or_relation
         if not (isinstance(rel, type) and issubclass(rel, Relation)):
-            raise TypeError(
-                f"retract() takes a row or a Relation class, got {type(rel).__name__}"
-            )
+            raise TypeError(f"retract() takes a row or a Relation class, got {type(rel).__name__}")
         self._statements.append(_RetractKey(rel, {k: v for k, v in key.items() if v is not None}))
         return self
 
