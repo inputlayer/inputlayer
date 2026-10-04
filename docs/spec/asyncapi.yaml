@@ -1244,6 +1244,15 @@ components:
             Fact statements the program committed, with their counts, in
             program order. Absent when the program committed no fact statement
             (a read, a failed program, or only schema and rule changes).
+        revision:
+          type: integer
+          format: int64
+          description: |
+            Knowledge graph revision the program's committed writes are visible at,
+            the revision pushes carry: a delta at this revision or later reflects them.
+            Present only when the program changed persistent state of a knowledge graph;
+            see the WebSocket API guide for which statements carry it. Comparable only
+            within one knowledge graph and stream epoch.
         subscribed:
           $ref: '#/components/schemas/Subscribed'
           description: Set on the reply to `.subscribe`, whose `rows` are the snapshot
@@ -1348,6 +1357,9 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/StatementCounts'
+        revision:
+          type: integer
+          format: int64
         subscribed:
           $ref: '#/components/schemas/Subscribed'
       examples:
