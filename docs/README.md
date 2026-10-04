@@ -2,7 +2,7 @@
 
 Welcome to the InputLayer documentation. InputLayer is the live rules engine for AI agents: declare your facts and rules once, and InputLayer keeps every conclusion current as facts change, tells your agents what changed, and records an agent's action only while the rules allow it. Any row can be explained with a proof, on request. A knowledge graph is what the engine holds: the facts and rule-derived conclusions of one domain.
 
-The project's [README](../README.md) has the first screen: what InputLayer replaces in an agent stack, what it keeps, and where it sits.
+The project's [README](../README.md) has the first screen: what InputLayer replaces in an agent stack, what it keeps, and where it sits. The guides [What InputLayer Replaces](content/docs/guides/what-it-replaces.mdx) and [Where It Sits](content/docs/guides/where-it-sits.mdx) cover both in depth, with examples that run on today's engine.
 
 ## Documentation Structure
 

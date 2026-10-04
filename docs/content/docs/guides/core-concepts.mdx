@@ -2,6 +2,18 @@
 
 Identity semantics, schema options, and update patterns.
 
+## Terms
+
+InputLayer is the live rules engine for AI agents. These docs use a few words with one meaning each:
+
+- **Fact**: a row in a relation, written by your adapters, operators or agents (`+eta("SHP-77", 20261009)`).
+- **Rule**: a declaration of what follows from facts, evaluated by the engine (`+late(Order) <- ...`).
+- **View**: a rule-derived relation the engine keeps current. When a fact changes, rows that stop holding are retracted and new ones are added.
+- **Knowledge graph**: the facts and rule-derived conclusions of one domain. It is what the engine holds; one server holds many knowledge graphs.
+- **Standing query**: a query whose result the engine keeps current and whose exact changes it pushes to the subscriber (see [Standing Queries](/docs/guides/websocket-api#standing-queries)).
+- **Claim**: a guarded write an agent sends before it acts. It is recorded only while the rules allow it at commit, and only one claimant wins (see [What InputLayer Replaces](/docs/guides/what-it-replaces#4-already-handled-rows-and-claimedby-columns)).
+- **Proof**: the derivation of a row from facts and rules, returned by `.why`; `.why_not` names the condition that blocks a missing row (see [Explainability](/docs/guides/explainability)).
+
 ## Identity Model
 
 InputLayer uses **pure multiset semantics** by default, where the **entire tuple is the identity**. This is the native model for Differential Dataflow (DD).

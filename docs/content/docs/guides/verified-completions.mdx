@@ -10,7 +10,7 @@ Three design decisions shape everything:
 
 ## The stack
 
-- **Engine** (`inputlayer`): the reasoning core. Owns knowledge graphs, rules, facts, and the ontology lifecycle. Fetches packs from the [ontology registry](https://github.com/inputlayer/ontology-registry) - or from a local clone, for deployments with no outbound network (`INPUTLAYER_REGISTRY` accepts a filesystem path).
+- **Engine** (`inputlayer`): the rules engine. Owns knowledge graphs, rules, facts, and the ontology lifecycle. Fetches packs from the [ontology registry](https://github.com/inputlayer/ontology-registry) - or from a local clone, for deployments with no outbound network (`INPUTLAYER_REGISTRY` accepts a filesystem path).
 - **Model gateway** (`inputlayer-gateway`): the only component holding the model provider key. Serves the OpenAI-compatible chat API and the per-conversation events stream.
 
 ```yaml
