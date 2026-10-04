@@ -770,6 +770,9 @@ import {
   StatementFailedError,         // some statements of a program failed
   OutcomeUnknownError,          // commit outcome unknown; store may be read-only
   StoreReadOnlyError,           // write refused until restart recovery
+  CompileError,                 // SDK refused to compile a call; nothing sent
+  PreconditionFailed,           // strict guarded program's guard did not hold
+  ConflictError,                // guarded write found no stable state; retry
   ConnectionError,              // network/connection issues
   ConnectionLostError,          // closed with the call pending; see mayHaveCommitted
   DeadlineExceededError,        // timeoutMs passed before committing; nothing applied
