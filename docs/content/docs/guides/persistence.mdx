@@ -157,6 +157,17 @@ failure: recovery may include or discard that transaction.
   `StoreReadOnlyError` in the SDKs), across all knowledge graphs. Only restart
   recovery clears this state; in-process repair cannot resume writes. Read the
   recovered data before deciding whether to retry the uncertain transaction.
+- If the WAL file or the data directory is removed or moved while the server runs,
+  writes to the still-open file keep succeeding, but restart recovery never reads
+  them. After each append the server checks that the file it wrote is still the
+  one at `wal/current.wal`. If it is not, that commit returns `OutcomeUnknown`:
+  the record is in the detached file, which is recovered only if it is put back.
+  The same check runs before the server reopens, reads or rewrites the file, so
+  a WAL file removed or replaced between writes is refused the same way rather
+  than replaced by a fresh, empty one.
+  Every later write is refused with `StoreReadOnly` until restart. The server
+  does not recreate the directory, because writes acknowledged earlier may have
+  been lost with it.
 - Once its record is in the WAL, a commit succeeds even if the flush it triggers
   fails (for example on a full disk). The changes stay in the WAL and are flushed by
   a later commit; the failure is logged as `persist_flush_failed`.

@@ -433,3 +433,138 @@ fn durability_repair_retries_sync_absent_marker_live_and_on_open() {
         }
     }
 }
+
+#[test]
+fn append_after_the_wal_directory_is_removed_reports_an_unknown_outcome() {
+    for durable in [true, false] {
+        let temp = TempDir::new().unwrap();
+        let dir = temp.path().join("wal");
+        let mut wal = open(&dir);
+        wal.append(&txn(1, &["db:a"]), true).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+
+        let err = wal.append(&txn(2, &["db:a"]), durable).unwrap_err();
+        assert!(matches!(err, StorageError::OutcomeUnknown { .. }), "{err}");
+        assert!(err.to_string().contains("removed or moved"), "{err}");
+        assert!(matches!(
+            wal.append(&txn(3, &["db:a"]), durable),
+            Err(StorageError::StoreReadOnly)
+        ));
+        drop(wal);
+        assert!(
+            !dir.exists(),
+            "a refused WAL must not recreate its directory"
+        );
+    }
+}
+
+#[test]
+fn append_after_the_wal_directory_is_moved_reports_an_unknown_outcome() {
+    let temp = TempDir::new().unwrap();
+    let dir = temp.path().join("wal");
+    let moved = temp.path().join("moved");
+    let mut wal = open(&dir);
+    wal.append(&txn(1, &["db:a"]), true).unwrap();
+    fs::rename(&dir, &moved).unwrap();
+
+    let err = wal.append(&txn(2, &["db:a"]), true).unwrap_err();
+    assert!(matches!(err, StorageError::OutcomeUnknown { .. }), "{err}");
+    drop(wal);
+    // The record reached the moved file, so it is recovered once the file is put
+    // back: the outcome was unknown, not failed.
+    fs::rename(&moved, &dir).unwrap();
+    assert_eq!(recovered(&dir), [txn(1, &["db:a"]), txn(2, &["db:a"])]);
+}
+
+#[test]
+fn append_after_the_wal_file_is_replaced_reports_an_unknown_outcome() {
+    let temp = TempDir::new().unwrap();
+    let mut wal = open(temp.path());
+    wal.append(&txn(1, &["db:a"]), true).unwrap();
+    let file = temp.path().join("current.wal");
+    fs::rename(&file, temp.path().join("old.wal")).unwrap();
+    fs::write(&file, b"").unwrap();
+
+    let err = wal.append(&txn(2, &["db:a"]), true).unwrap_err();
+    assert!(err.to_string().contains("is a different file"), "{err}");
+    assert!(matches!(
+        wal.append(&txn(3, &["db:a"]), true),
+        Err(StorageError::StoreReadOnly)
+    ));
+}
+
+#[test]
+fn appends_continue_after_the_wal_rewrites_or_clears_its_own_file() {
+    let temp = TempDir::new().unwrap();
+    let mut wal = open(temp.path());
+    wal.append(&txn(1, &["db:a", "db:b"]), true).unwrap();
+    wal.remove_shard_entries("db:b").unwrap();
+    wal.append(&txn(2, &["db:a"]), true).unwrap();
+    wal.clear().unwrap();
+    wal.append(&txn(3, &["db:a"]), true).unwrap();
+    assert_eq!(wal.read_all().unwrap(), [txn(3, &["db:a"])]);
+}
+
+#[test]
+fn append_after_the_wal_file_is_removed_while_the_writer_is_closed_is_refused() {
+    let temp = TempDir::new().unwrap();
+    let mut wal = open(temp.path());
+    wal.append(&txn(1, &["db:a", "db:b"]), true).unwrap();
+    wal.remove_shard_entries("db:a").unwrap();
+    fs::remove_file(temp.path().join("current.wal")).unwrap();
+
+    let err = wal.append(&txn(2, &["db:a"]), true).unwrap_err();
+    assert!(matches!(err, StorageError::OutcomeUnknown { .. }), "{err}");
+    assert!(matches!(
+        wal.append(&txn(3, &["db:a"]), true),
+        Err(StorageError::StoreReadOnly)
+    ));
+    drop(wal);
+    assert!(
+        !temp.path().join("current.wal").exists(),
+        "a refused WAL must not create a fresh file"
+    );
+}
+
+#[test]
+fn append_after_the_wal_file_is_replaced_while_the_writer_is_closed_is_refused() {
+    let temp = TempDir::new().unwrap();
+    let mut wal = open(temp.path());
+    wal.append(&txn(1, &["db:a", "db:b"]), true).unwrap();
+    wal.read_all().unwrap();
+    let file = temp.path().join("current.wal");
+    fs::rename(&file, temp.path().join("old.wal")).unwrap();
+    fs::write(&file, b"").unwrap();
+
+    let err = wal.append(&txn(2, &["db:a"]), true).unwrap_err();
+    assert!(err.to_string().contains("is a different file"), "{err}");
+    assert!(matches!(
+        wal.remove_shard_entries("db:a"),
+        Err(StorageError::StoreReadOnly)
+    ));
+    assert_eq!(fs::read(&file).unwrap(), b"");
+}
+
+#[test]
+fn rewrite_after_the_wal_file_is_replaced_is_refused() {
+    let temp = TempDir::new().unwrap();
+    let mut wal = open(temp.path());
+    wal.append(&txn(1, &["db:a", "db:b"]), true).unwrap();
+    let file = temp.path().join("current.wal");
+    fs::rename(&file, temp.path().join("old.wal")).unwrap();
+    fs::write(&file, b"").unwrap();
+
+    let err = wal.remove_shard_entries("db:a").unwrap_err();
+    assert!(matches!(err, StorageError::OutcomeUnknown { .. }), "{err}");
+}
+
+#[test]
+fn a_wal_file_present_at_open_must_stay_in_place() {
+    let temp = TempDir::new().unwrap();
+    open(temp.path()).append(&txn(1, &["db:a"]), true).unwrap();
+    let mut wal = open(temp.path());
+    fs::remove_file(temp.path().join("current.wal")).unwrap();
+
+    let err = wal.append(&txn(2, &["db:a"]), true).unwrap_err();
+    assert!(matches!(err, StorageError::OutcomeUnknown { .. }), "{err}");
+}
