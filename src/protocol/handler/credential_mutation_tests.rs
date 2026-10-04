@@ -11,7 +11,7 @@ fn fixture() -> (Arc<Handler>, tempfile::TempDir) {
     config.storage.data_dir = temp.path().to_path_buf();
     config.http.auth.bootstrap_admin_password = Some("test-password".into());
     let handler = Arc::new(Handler::from_config(config).unwrap());
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().unwrap();
     handler
         .handle_user_create("bob", "test-password", "editor")
         .unwrap();
@@ -152,7 +152,7 @@ fn restart(handler: Arc<Handler>) -> Arc<Handler> {
     handler.shutdown();
     drop(handler);
     let handler = Arc::new(Handler::from_config(config).unwrap());
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().unwrap();
     handler
 }
 
@@ -249,7 +249,7 @@ fn bootstrap_key_that_fails_to_store_is_neither_recorded_nor_saved() {
         .create_knowledge_graph(INTERNAL_KG)
         .unwrap();
     break_relation(&handler, "api_keys");
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().unwrap();
 
     let saved =
         crate::auth::PersistedCredentials::load(&temp.path().join("credentials.toml")).unwrap();
@@ -290,7 +290,7 @@ fn partial_first_boot_issues_a_working_key_on_the_next_boot() {
         .create_knowledge_graph(INTERNAL_KG)
         .unwrap();
     break_relation(&handler, "users");
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().unwrap();
     assert!(handler.authenticate_user("admin", "test-password").is_err());
     handler
         .storage
@@ -301,7 +301,7 @@ fn partial_first_boot_issues_a_working_key_on_the_next_boot() {
     drop(handler);
 
     let handler = Handler::from_config(config.clone()).unwrap();
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().unwrap();
     let key = bootstrap_key(&config);
     assert!(handler.authenticate_api_key(&key).is_ok());
     assert!(handler.authenticate_user("admin", "test-password").is_ok());

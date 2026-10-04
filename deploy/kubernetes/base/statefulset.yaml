@@ -65,7 +65,8 @@ spec:
             - name: INPUTLAYER_LOGGING__LEVEL
               value: info
             # Required: the pod does not start without the secret, and the
-            # engine refuses a password shorter than 12 characters.
+            # engine refuses a password shorter than 12 characters on first
+            # boot (once the admin exists it only warns).
             - name: INPUTLAYER_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:

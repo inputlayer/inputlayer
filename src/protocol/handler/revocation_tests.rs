@@ -19,7 +19,7 @@ async fn handler_with_proof_fixture() -> (Arc<Handler>, String, tempfile::TempDi
     config.http.auth.bootstrap_admin_password = Some("admin-password".to_string());
     config.http.auth.credentials_file = Some(tmp.path().join("credentials.toml"));
     let handler = Arc::new(Handler::from_config(config).expect("handler creation failed"));
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().unwrap();
     handler
         .storage
         .read()

@@ -150,7 +150,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     })?);
 
     // Bootstrap auth: create _internal KG and admin user if needed
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().map_err(|e| {
+        eprintln!("ERROR: {e}");
+        Box::<dyn std::error::Error + Send + Sync>::from(e)
+    })?;
 
     println!("Storage engine initialized");
     println!();

@@ -6,8 +6,11 @@ services:
       - inputlayer-data:/var/lib/inputlayer/data
     environment:
       # REQUIRED, at least 12 characters each (the engine refuses shorter
-      # ones). Compose refuses to start without them; the gateway uses the
-      # API key to reach the engine.
+      # ones on first boot). Compose refuses to start without them; the
+      # gateway uses the API key to reach the engine. Generate them into
+      # .env, on a private network too:
+      #   echo "INPUTLAYER_ADMIN_PASSWORD=$(openssl rand -hex 24)" >> .env
+      #   echo "INPUTLAYER_BOOTSTRAP_API_KEY=$(openssl rand -hex 24)" >> .env
       INPUTLAYER_ADMIN_PASSWORD: ${INPUTLAYER_ADMIN_PASSWORD:?Set INPUTLAYER_ADMIN_PASSWORD (at least 12 characters) in .env}
       INPUTLAYER_BOOTSTRAP_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:?Set INPUTLAYER_BOOTSTRAP_API_KEY (at least 12 characters) in .env}
       INPUTLAYER_HTTP__HOST: "0.0.0.0"
@@ -37,7 +40,8 @@ services:
       # REQUIRED here: this compose file publishes the gateway to the
       # internet via Caddy, and an unauthenticated gateway spends your
       # model-provider budget for anyone who finds it. Compose refuses to
-      # start without it.
+      # start without it. Generate it into .env:
+      #   echo "GATEWAY_API_KEY=$(openssl rand -hex 24)" >> .env
       GATEWAY_API_KEY: ${GATEWAY_API_KEY:?GATEWAY_API_KEY is required for the public TLS deployment - clients authenticate with Authorization Bearer}
       # Every ontology published in the registry index is loaded at startup
       # and pinned by version and digest; each request selects one via the

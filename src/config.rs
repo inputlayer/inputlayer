@@ -502,7 +502,8 @@ pub struct AuthConfig {
     /// If unset or blank on first boot, a random password is generated and
     /// saved to the credentials file. A supplied one needs at least
     /// [`crate::auth::MIN_PASSWORD_CHARS`] characters or the server refuses
-    /// to start.
+    /// to start on first boot; once the admin exists a short one is ignored
+    /// with a warning.
     #[serde(default)]
     pub bootstrap_admin_password: Option<String>,
 
@@ -888,11 +889,6 @@ impl Config {
     /// Validate configuration values and auto-correct safe-to-fix issues.
     /// Returns Err for fatal misconfigurations that would cause panics.
     pub fn validate(&mut self) -> Result<(), String> {
-        // A weak supplied bootstrap secret refuses startup; a blank one
-        // counts as unset and bootstrap generates it.
-        crate::auth::supplied_admin_password(self.http.auth.bootstrap_admin_password.as_deref())?;
-        crate::auth::supplied_bootstrap_api_key()?;
-
         // notification_buffer_size=0 causes broadcast::channel(0) panic
         if self.http.rate_limit.notification_buffer_size == 0 {
             tracing::warn!("notification_buffer_size = 0 is invalid, auto-correcting to 4096");
@@ -1500,26 +1496,6 @@ mod tests {
         let toml_str = toml::to_string(&full).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.http.ws_idle_timeout_ms, 300_000);
-    }
-
-    #[test]
-    fn test_validate_refuses_short_bootstrap_admin_password() {
-        let mut config = Config::default();
-        config.http.auth.bootstrap_admin_password = Some("admin".to_string());
-        let err = config.validate().unwrap_err();
-        assert!(
-            err.contains("http.auth.bootstrap_admin_password") && err.contains("12 characters"),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn test_validate_accepts_blank_bootstrap_admin_password() {
-        for blank in ["", "  "] {
-            let mut config = Config::default();
-            config.http.auth.bootstrap_admin_password = Some(blank.to_string());
-            config.validate().unwrap();
-        }
     }
 
     // === Regression tests for Config::validate() auto-correction ===

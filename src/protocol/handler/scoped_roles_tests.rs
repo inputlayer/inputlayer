@@ -16,7 +16,7 @@ async fn fixture() -> (Arc<Handler>, tempfile::TempDir) {
     config.http.auth.bootstrap_admin_password = Some("admin-password".to_string());
     config.http.auth.credentials_file = Some(tmp.path().join("credentials.toml"));
     let handler = Arc::new(Handler::from_config(config).unwrap());
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().unwrap();
     for kg in [KG, "other"] {
         handler.storage.read().create_knowledge_graph(kg).unwrap();
     }
@@ -36,7 +36,7 @@ fn restart(handler: Arc<Handler>) -> Arc<Handler> {
     handler.shutdown();
     drop(handler);
     let handler = Arc::new(Handler::from_config(config).unwrap());
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().unwrap();
     handler
 }
 

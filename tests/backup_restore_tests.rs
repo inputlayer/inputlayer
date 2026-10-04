@@ -31,7 +31,7 @@ fn config(dir: &Path) -> Config {
 
 fn open(dir: &Path) -> Handler {
     let handler = Handler::new(StorageEngine::new(config(dir)).unwrap());
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().unwrap();
     handler
 }
 

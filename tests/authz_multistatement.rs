@@ -32,7 +32,7 @@ async fn setup() -> (Handler, TempDir) {
     config.storage.data_dir = temp.path().to_path_buf();
     config.http.auth.credentials_file = Some(temp.path().join("credentials.toml"));
     let handler = Handler::new(StorageEngine::new(config).unwrap());
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().unwrap();
     handler
         .handle_user_create("mallory", "password-mallory", "viewer")
         .unwrap();

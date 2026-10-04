@@ -9,7 +9,7 @@ On first launch, the server creates a default admin account:
 - **Username**: `admin`
 - **Password**: Set via `INPUTLAYER_ADMIN_PASSWORD` environment variable, or generated if unset and saved to `credentials.toml` in the data directory
 
-A supplied password needs at least 12 characters: the server refuses to start with a shorter one and names the setting. An empty or whitespace-only value counts as unset, so the server generates the password as on a first boot without one. `INPUTLAYER_BOOTSTRAP_API_KEY` follows the same rules.
+A supplied password needs at least 12 characters: on first boot the server refuses to start with a shorter one and names the setting. Once the admin exists, a short supplied value is ignored and the server starts with a warning telling you to remove it. An empty or whitespace-only value counts as unset, so the server generates the password as on a first boot without one. `INPUTLAYER_BOOTSTRAP_API_KEY` follows the same rules.
 
 ```bash
 INPUTLAYER_ADMIN_PASSWORD=my-secure-password inputlayer-server

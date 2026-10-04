@@ -1,8 +1,9 @@
 //! Supplied bootstrap secrets at server startup: a blank one counts as unset
-//! (the server generates and saves one, as on a first boot with none), and a
-//! too-short one refuses startup with an error naming its source.
+//! (the server generates and saves one, as on a first boot with none), a
+//! too-short one refuses first-boot startup with an error naming its source,
+//! and once the admin exists a too-short one is ignored with a warning.
 
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::sync::mpsc;
@@ -29,14 +30,21 @@ fn server(dir: &Path, env: &[(&str, &str)]) -> Command {
     cmd
 }
 
-/// Start the server, wait until its storage is up, then stop it.
-fn boot(dir: &Path, env: &[(&str, &str)]) {
+/// Start the server, wait until its storage is up, then stop it. Returns
+/// its stderr.
+fn boot(dir: &Path, env: &[(&str, &str)]) -> String {
     let mut child = server(dir, env)
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .expect("spawn server");
     let stdout = child.stdout.take().expect("piped stdout");
+    let mut stderr = child.stderr.take().expect("piped stderr");
+    let stderr = thread::spawn(move || {
+        let mut text = String::new();
+        let _ = stderr.read_to_string(&mut text);
+        text
+    });
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
@@ -48,7 +56,9 @@ fn boot(dir: &Path, env: &[(&str, &str)]) {
     let ready = rx.recv_timeout(STARTUP_TIMEOUT).is_ok();
     let _ = child.kill();
     let _ = child.wait();
-    assert!(ready, "server never became ready with {env:?}");
+    let stderr = stderr.join().expect("stderr reader");
+    assert!(ready, "server never became ready with {env:?}: {stderr}");
+    stderr
 }
 
 /// Run a server that is expected to exit on its own.
@@ -117,21 +127,37 @@ fn short_supplied_secret_refuses_startup() {
 }
 
 #[test]
-fn short_configured_password_refuses_startup_even_when_env_overrides_it() {
+fn short_configured_password_overridden_by_env_is_ignored_with_a_warning() {
     let tmp = TempDir::new().unwrap();
     std::fs::write(
         tmp.path().join("config.toml"),
         "[http.auth]\nbootstrap_admin_password = \"admin\"\n",
     )
     .unwrap();
-    let out = run_to_exit(
+    let stderr = boot(
         tmp.path(),
         &[("INPUTLAYER_ADMIN_PASSWORD", "a-strong-enough-secret")],
     );
-    assert!(!out.status.success(), "server started");
-    let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("http.auth.bootstrap_admin_password"),
+        stderr.contains("WARNING: http.auth.bootstrap_admin_password"),
         "{stderr}"
     );
+}
+
+#[test]
+fn short_supplied_secret_is_ignored_with_a_warning_once_admin_exists() {
+    for var in ["INPUTLAYER_ADMIN_PASSWORD", "INPUTLAYER_BOOTSTRAP_API_KEY"] {
+        let tmp = TempDir::new().unwrap();
+        let strong = [
+            ("INPUTLAYER_ADMIN_PASSWORD", "a-strong-enough-secret"),
+            ("INPUTLAYER_BOOTSTRAP_API_KEY", "a-strong-enough-api-key"),
+        ];
+        boot(tmp.path(), &strong);
+        let weak = strong.map(|(key, value)| (key, if key == var { "admin" } else { value }));
+        let stderr = boot(tmp.path(), &weak);
+        assert!(
+            stderr.contains(&format!("WARNING: {var}")) && stderr.contains("12 characters"),
+            "{var}: {stderr}"
+        );
+    }
 }

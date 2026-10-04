@@ -82,7 +82,7 @@ mod tests {
         config.http.auth.bootstrap_admin_password = Some("admin-password".to_string());
         config.http.auth.credentials_file = Some(tmp.path().join("credentials.toml"));
         let handler = Handler::from_config(config).unwrap();
-        handler.bootstrap_auth();
+        handler.bootstrap_auth().unwrap();
         handler.get_storage().create_knowledge_graph(KG).unwrap();
         handler
             .handle_user_create("bob", "bob-password", "editor")

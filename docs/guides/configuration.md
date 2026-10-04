@@ -184,8 +184,8 @@ static_dir = "./gui/dist"
 # -----------------------------------------------------------------------------
 [http.auth]
 # On first boot, an admin user and bootstrap API key are created.
-# Set a known password (at least 12 characters, or the server refuses to
-# start), or omit it or leave it empty to have one generated and saved to
+# Set a known password (at least 12 characters, or the first boot refuses
+# to start), or omit it or leave it empty to have one generated and saved to
 # credentials.toml in the data directory.
 # bootstrap_admin_password = "your-secure-password"
 

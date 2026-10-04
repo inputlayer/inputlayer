@@ -15,7 +15,7 @@ fn config(dir: &std::path::Path) -> Config {
 /// A bootstrapped handler on `dir`; call again on the same `dir` to restart.
 fn open(dir: &std::path::Path) -> Arc<Handler> {
     let handler = Arc::new(Handler::from_config(config(dir)).unwrap());
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().unwrap();
     handler
 }
 

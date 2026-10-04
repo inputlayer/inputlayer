@@ -55,7 +55,7 @@ async fn start_server(configure: impl FnOnce(&mut Config)) -> Server {
     config.http.gui.enabled = false;
     configure(&mut config);
     let handler = Arc::new(Handler::from_config(config).unwrap());
-    handler.bootstrap_auth();
+    handler.bootstrap_auth().unwrap();
     handler.get_storage().create_knowledge_graph(KG).unwrap();
     let app = create_router(Arc::clone(&handler), &handler.config().http);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

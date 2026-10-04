@@ -1286,9 +1286,11 @@ impl Handler {
     /// Bootstrap auth: create the `_internal` knowledge graph and an admin
     /// user if there is none, then load the credential registry from it.
     /// Called once on server startup; until then no credential authenticates.
-    pub fn bootstrap_auth(&self) {
-        self.seed_admin_credentials();
+    /// `Err` when a supplied secret bootstrap would store is too short.
+    pub fn bootstrap_auth(&self) -> Result<(), String> {
+        self.seed_admin_credentials()?;
         self.load_credentials();
+        Ok(())
     }
 
     /// Load every user and API key from `_internal` into the registry.
@@ -1308,11 +1310,19 @@ impl Handler {
     /// Insert the bootstrap admin user when `_internal` has no users, with an
     /// API key only if bootstrap has never issued one for this data directory.
     /// The key is saved to the credentials file and printed only once stored.
-    fn seed_admin_credentials(&self) {
+    /// `Err`, before anything is written, when a supplied secret it would
+    /// store is too short.
+    fn seed_admin_credentials(&self) -> Result<(), String> {
         use crate::auth;
 
-        let Some(issue_api_key) = self.bootstrap_needed() else {
-            return;
+        let bootstrap = self.bootstrap_needed();
+        // Supplied secrets are never written to disk; blank ones count as unset.
+        let (supplied_password, supplied_api_key) = auth::bootstrap_secrets(
+            self.config.http.auth.bootstrap_admin_password.as_deref(),
+            bootstrap,
+        )?;
+        let Some(issue_api_key) = bootstrap else {
+            return Ok(());
         };
 
         let credentials_path = self
@@ -1324,19 +1334,7 @@ impl Handler {
             .unwrap_or_else(|| self.config.storage.data_dir.join("credentials.toml"));
         let persisted = auth::PersistedCredentials::load(&credentials_path).unwrap_or_default();
 
-        // Precedence: env var / config > persisted file > generated. Supplied
-        // secrets are never written to disk; blank ones count as unset.
-        let supplied = auth::supplied_admin_password(
-            self.config.http.auth.bootstrap_admin_password.as_deref(),
-        )
-        .and_then(|password| Ok((password, auth::supplied_bootstrap_api_key()?)));
-        let (supplied_password, supplied_api_key) = match supplied {
-            Ok(supplied) => supplied,
-            Err(e) => {
-                eprintln!("ERROR: {e} Admin user not created.");
-                return;
-            }
-        };
+        // Precedence: env var / config > persisted file > generated.
         let mut to_persist = auth::PersistedCredentials::default();
         let resolve =
             |supplied: Option<String>, persisted: Option<String>, slot: &mut Option<String>| {
@@ -1365,7 +1363,7 @@ impl Handler {
             Ok(h) => h,
             Err(e) => {
                 eprintln!("ERROR: Failed to hash admin password: {e}");
-                return;
+                return Ok(());
             }
         };
 
@@ -1386,7 +1384,7 @@ impl Handler {
                     "ERROR: cannot save generated credentials to {}: {e}. Admin user not created.",
                     credentials_path.display()
                 );
-                return;
+                return Ok(());
             }
         } else if to_persist != auth::PersistedCredentials::default() {
             info!(
@@ -1406,7 +1404,7 @@ impl Handler {
             },
         ) {
             warn!(error = %e, "Failed to insert admin user");
-            return;
+            return Ok(());
         }
         info!("Auth bootstrap: admin user created");
 
@@ -1459,6 +1457,7 @@ impl Handler {
             eprintln!("Delete this file to generate new credentials on next boot.");
             eprintln!();
         }
+        Ok(())
     }
 
     /// Prepare `_internal` for bootstrap and backfill the record of an already
@@ -5757,7 +5756,7 @@ mod tests {
         config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
         config.http.auth.bootstrap_admin_password = Some("password-0123".to_string());
         let handler = Handler::from_config(config).unwrap();
-        handler.bootstrap_auth();
+        handler.bootstrap_auth().unwrap();
         handler
             .handle_user_create("editor", "password-0123", "editor")
             .unwrap();
@@ -5910,7 +5909,7 @@ mod tests {
             config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
             config.http.auth.bootstrap_admin_password = Some("password-0123".to_string());
             let handler = Handler::from_config(config.clone()).unwrap();
-            handler.bootstrap_auth();
+            handler.bootstrap_auth().unwrap();
             handler
                 .handle_user_create("bob", "password-0123", "viewer")
                 .unwrap();
@@ -5959,7 +5958,7 @@ mod tests {
             handler.shutdown();
             drop(handler);
             let reopened = Handler::from_config(config).unwrap();
-            reopened.bootstrap_auth();
+            reopened.bootstrap_auth().unwrap();
             assert!(reopened.authenticate_user("bob", "password-0456").is_ok());
             assert!(reopened
                 .get_kg_role_for_user("private", "bob", &Role::Viewer)
@@ -5985,7 +5984,7 @@ mod tests {
             config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
             config.http.auth.bootstrap_admin_password = Some("password-0123".to_string());
             let handler = Handler::from_config(config).unwrap();
-            handler.bootstrap_auth();
+            handler.bootstrap_auth().unwrap();
             handler.storage.write().create_knowledge_graph("g").unwrap();
             handler
                 .handle_user_create("bob", "password-0123", "viewer")
@@ -6031,7 +6030,7 @@ mod tests {
         config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
         config.http.auth.bootstrap_admin_password = Some("password-0123".to_string());
         let handler = Handler::from_config(config).unwrap();
-        handler.bootstrap_auth();
+        handler.bootstrap_auth().unwrap();
         handler
             .handle_user_create("bob", "password-0123", "viewer")
             .unwrap();
@@ -6069,7 +6068,7 @@ mod tests {
             config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
             config.http.auth.bootstrap_admin_password = Some("password-0123".to_string());
             let handler = Handler::from_config(config).unwrap();
-            handler.bootstrap_auth();
+            handler.bootstrap_auth().unwrap();
             handler
                 .handle_user_create("bob", "password-0123", "viewer")
                 .unwrap();
@@ -6118,7 +6117,7 @@ mod tests {
         let (mut config, _tmp) = make_test_config();
         config.http.auth.bootstrap_admin_password = Some("test-password".to_string());
         let handler = Arc::new(Handler::from_config(config).expect("handler creation failed"));
-        handler.bootstrap_auth();
+        handler.bootstrap_auth().unwrap();
         let peer = std::net::IpAddr::from([192, 0, 2, 1]);
         for _ in 0..4 {
             let attempt = handler.login_throttle.begin(peer, "admin").unwrap();
