@@ -75,7 +75,8 @@ pub(super) struct RequestPipeline<J, R> {
     queued: VecDeque<Queued<J>>,
     /// Started and not yet released.
     started: BTreeMap<Ticket, Access>,
-    /// Started and not finished; a panic yields `None`.
+    /// Started and not finished; a panic yields `None`. Also holds one
+    /// future that never finishes (see [`Self::new`]).
     running: FuturesUnordered<BoxFuture<'static, (Ticket, Option<R>)>>,
     /// Finished, waiting for every earlier reply.
     finished: BTreeMap<Ticket, Option<R>>,
@@ -84,13 +85,24 @@ pub(super) struct RequestPipeline<J, R> {
 impl<J, R: Send + 'static> RequestPipeline<J, R> {
     /// Pipeline admitting at most `capacity` (at least 1) unreleased requests.
     pub(super) fn new(capacity: usize) -> Self {
+        // `FuturesUnordered` wakes its own task and returns `Pending` after a
+        // poll that polled every future in it. With one request running, that
+        // is every request's first poll: the connection task wakes itself,
+        // tokio schedules that as a yield, wakes an idle worker to take it,
+        // and the request's reply pays for the hand-off. A future that is
+        // never woken is polled once, by the first poll, and from then on
+        // keeps the set larger than any poll can reach, so that yield no
+        // longer happens; the yield after futures that woke themselves still
+        // does.
+        let running = FuturesUnordered::new();
+        running.push(std::future::pending().boxed());
         Self {
             capacity: capacity.max(1),
             next_ticket: 0,
             next_release: 0,
             queued: VecDeque::new(),
             started: BTreeMap::new(),
-            running: FuturesUnordered::new(),
+            running,
             finished: BTreeMap::new(),
         }
     }
@@ -183,6 +195,7 @@ impl<J, R: Send + 'static> RequestPipeline<J, R> {
                 Some((ticket, reply)) => {
                     self.finished.insert(ticket, reply);
                 }
+                // Not reached: the future that never finishes stays in the set.
                 None => std::future::pending::<()>().await,
             }
         }
@@ -193,7 +206,11 @@ impl<J, R: Send + 'static> RequestPipeline<J, R> {
     /// never cut in half. Replies are discarded.
     pub(super) async fn shutdown(mut self) {
         if self.exclusive_started() {
-            while self.running.next().await.is_some() {}
+            // Every request has finished once only the future that never
+            // finishes is left.
+            while self.running.len() > 1 {
+                self.running.next().await;
+            }
         }
     }
 }
@@ -201,8 +218,10 @@ impl<J, R: Send + 'static> RequestPipeline<J, R> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::pin::pin;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::task::{Context, Poll, Wake, Waker};
     use std::time::Duration;
 
     use tokio::sync::oneshot;
@@ -348,5 +367,56 @@ mod tests {
         });
         pipeline.shutdown().await;
         assert!(finished.load(Ordering::SeqCst), "write was cut off");
+    }
+
+    /// Counts the wakes of the task polling the pipeline.
+    #[derive(Default)]
+    struct Wakes(AtomicUsize);
+
+    impl Wake for Wakes {
+        fn wake(self: Arc<Self>) {
+            self.wake_by_ref();
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    impl Wakes {
+        fn take(&self) -> usize {
+            self.0.swap(0, Ordering::SeqCst)
+        }
+    }
+
+    #[test]
+    fn a_running_request_wakes_the_connection_only_when_it_finishes() {
+        let wakes = Arc::new(Wakes::default());
+        let waker = Waker::from(Arc::clone(&wakes));
+        let mut cx = Context::from_waker(&waker);
+        let mut pipeline = Pipeline::new(8);
+        // The connection loop polls the idle pipeline before any request.
+        assert!(pin!(pipeline.next_reply()).poll(&mut cx).is_pending());
+        wakes.take();
+
+        for _ in 0..3 {
+            pipeline.admit(Access::Shared, "read");
+            let started = start_all(&mut pipeline);
+            let (finish, finished) = oneshot::channel::<()>();
+            pipeline.run(started[0].0, async move {
+                finished.await.unwrap();
+                "read"
+            });
+            assert!(pin!(pipeline.next_reply()).poll(&mut cx).is_pending());
+            assert_eq!(wakes.take(), 0, "starting a request woke the connection");
+            finish.send(()).unwrap();
+            assert_eq!(
+                wakes.take(),
+                1,
+                "a finished request wakes the connection once"
+            );
+            let released = pin!(pipeline.next_reply()).poll(&mut cx);
+            assert!(matches!(released, Poll::Ready(r) if r.reply == Some("read")));
+        }
     }
 }
