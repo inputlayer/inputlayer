@@ -196,6 +196,25 @@ A command that cannot join the transaction (`.kg use`, `.rel drop`, `.index`, `.
 
 An empty `errors` means every statement succeeded. Do not match message text to detect failures.
 
+### Statement Counts
+
+A program that commits fact statements lists them in `statements`, in program order, with the tuples each one changed. The list rides on the reply even when the program ends with a query, whose rows are the `rows`:
+
+```json
+{
+  "type": "result",
+  "columns": ["message"],
+  "rows": [["Inserted 1 fact(s) into 'task'."], ["Update: 0 deleted, 1 inserted."]],
+  "errors": [],
+  "statements": [
+    {"index": 0, "kind": "insert", "inserted": 1, "deleted": 0},
+    {"index": 1, "kind": "update", "inserted": 1, "deleted": 0}
+  ]
+}
+```
+
+`kind` is `insert`, `delete` or `update`. Counts are effective, as of the statements before it: inserting a fact that is present or deleting one that is absent is listed with zero counts. A conditional write that matched nothing is listed with zero counts too, so `inserted` of a guarded update says whether it landed. Schema and rule statements are not listed. `statements` is absent when the program committed no fact statement, including a program that failed and rolled back. Read counts from `statements`, not from the message rows.
+
 ## Knowledge Graph Operations
 
 Use meta commands via execute:

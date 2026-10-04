@@ -186,6 +186,9 @@ pub struct ResultFrame {
     /// Failed statements; empty when every statement succeeded.
     #[serde(default)]
     pub errors: Vec<StatementError>,
+    /// Fact statements the program committed, with their effective counts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub statements: Vec<StatementCounts>,
     /// Set on the reply to `.subscribe`: `rows` is the subscription's snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subscribed: Option<Subscribed>,
@@ -210,9 +213,39 @@ pub struct ResultStartFrame {
     pub timing_breakdown: Option<TimingBreakdown>,
     #[serde(default)]
     pub errors: Vec<StatementError>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub statements: Vec<StatementCounts>,
     /// Set on the reply to `.subscribe`: the chunks hold the snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subscribed: Option<Subscribed>,
+}
+
+/// What a committed fact statement changed.
+///
+/// Counts are effective: `inserted` counts tuples absent before the statement
+/// and present after it, `deleted` tuples present before it and absent after
+/// it, each as of the statements before it in the same program. A statement
+/// that matched nothing, or inserted facts that were already present, commits
+/// with zero counts and is still listed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatementCounts {
+    /// 0-based statement index in the program.
+    pub index: usize,
+    pub kind: StatementKind,
+    pub inserted: usize,
+    pub deleted: usize,
+}
+
+/// The form of a fact statement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StatementKind {
+    /// `+relation(...)`, one tuple or a bulk list.
+    Insert,
+    /// `-relation(...)`, literal tuples or a conditional delete.
+    Delete,
+    /// `-old, +new <- body`.
+    Update,
 }
 
 /// Session (ephemeral) data that took part in a result.

@@ -715,6 +715,27 @@ components:
         message:
           type: string
 
+    StatementCounts:
+      type: object
+      required: [index, kind, inserted, deleted]
+      description: |
+        What a committed fact statement changed. Counts are effective, as of
+        the statements before it in the same program: `inserted` counts tuples
+        that were absent and are now present, `deleted` tuples that were
+        present and are now absent. A statement that changed nothing is listed
+        with zero counts.
+      properties:
+        index:
+          type: integer
+          description: 0-based statement index in the program
+        kind:
+          type: string
+          enum: [insert, delete, update]
+        inserted:
+          type: integer
+        deleted:
+          type: integer
+
     NoticeResponse:
       type: object
       required: [type, code, message]
@@ -1212,6 +1233,14 @@ components:
           items:
             $ref: '#/components/schemas/StatementError'
           description: Failed statements of the program; empty when every statement succeeded
+        statements:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatementCounts'
+          description: |
+            Fact statements the program committed, with their counts, in
+            program order. Absent when the program committed no fact statement
+            (a read, a failed program, or only schema and rule changes).
         subscribed:
           $ref: '#/components/schemas/Subscribed'
           description: Set on the reply to `.subscribe`, whose `rows` are the snapshot
@@ -1312,6 +1341,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/StatementError'
+        statements:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatementCounts'
         subscribed:
           $ref: '#/components/schemas/Subscribed'
       examples:
