@@ -1,734 +1,554 @@
-"""Tests for inputlayer.connection - mocked WebSocket connection tests."""
+"""The connection core against a mock server on a real socket.
+
+The shared frame scenarios live in packages/conformance/connection and run in
+test_connection_conformance.py; these tests cover what needs timing or more
+than one connection: ids, the in-flight bound, deadlines and cancel, idle
+delivery, keepalive, reconnect and the per-graph connection pool.
+"""
+
+from __future__ import annotations
 
 import asyncio
-import json
-from unittest.mock import AsyncMock
+from typing import Any
 
 import pytest
 
-from inputlayer._protocol import (
-    ResultResponse,
-)
+from inputlayer import InputLayer
 from inputlayer.connection import Connection
 from inputlayer.exceptions import (
     AuthenticationError,
+    Cancelled,
     ConnectionError,
-    InternalError,
-    QueryError,
+    ConnectionLost,
+    DeadlineExceeded,
 )
+from inputlayer.notifications import ConnectionEvent
+
+from ._mock_server import EPOCH, MockServer, Peer, notification, result
+
+pytestmark = pytest.mark.asyncio
 
 
-def _auth_response() -> str:
-    return json.dumps({
-        "type": "authenticated",
-        "session_id": "1",
-        "knowledge_graph": "default",
-        "version": "0.1.0",
-        "role": "admin",
-        "protocol_version": 2,
-        "stream_epoch": "00112233aabbccdd",
-    })
+def _conn(server: MockServer, **kwargs: Any) -> Connection:
+    kwargs.setdefault("auto_reconnect", False)
+    return Connection(server.url, username="admin", password="pw", **kwargs)
 
 
-def _result_response(columns: list[str], rows: list[list]) -> str:
-    return json.dumps({
-        "type": "result",
-        "columns": columns,
-        "rows": rows,
-        "row_count": len(rows),
-        "total_count": len(rows),
-        "truncated": False,
-        "execution_time_ms": 1,
-    })
+async def _until(condition: Any, timeout: float = 5.0) -> None:
+    async def poll() -> None:
+        while not condition():
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(poll(), timeout)
 
 
-def _error_response(message: str) -> str:
-    return json.dumps({"type": "error", "message": message})
+# ── Authentication ───────────────────────────────────────────────────
 
 
-class TestConnectionProperties:
-    def test_initial_state(self):
-        conn = Connection("ws://localhost:8080/ws", username="admin", password="admin")
-        assert conn.connected is False
-        assert conn.session_id is None
-        assert conn.server_version is None
-        assert conn.role is None
+class TestAuthentication:
+    async def test_login_carries_an_id_and_binds_the_graph(self) -> None:
+        async def handler(peer: Peer) -> None:
+            login = await peer.authenticate()
+            assert login == {
+                "type": "login", "id": "r1", "username": "admin", "password": "pw",
+            }
+            await peer.serve_results()
 
+        async with MockServer(handler) as server:
+            conn = _conn(server, initial_kg="sales")
+            await conn.connect()
+            assert server.peers[0].params == {"kg": "sales"}
+            assert conn.current_kg == "sales"
+            assert conn.session_id == "1"
+            assert conn.stream_epoch == EPOCH
+            await conn.close()
 
-class TestConnectionAuth:
-    @pytest.mark.asyncio
-    async def test_no_credentials_raises(self):
-        conn = Connection("ws://localhost:8080/ws")
-        mock_ws = AsyncMock()
-        conn._ws = mock_ws
-        with pytest.raises(AuthenticationError, match="No credentials"):
-            await conn._authenticate()
+    async def test_api_key(self) -> None:
+        async def handler(peer: Peer) -> None:
+            assert (await peer.authenticate())["api_key"] == "ilk_test"
+            await peer.serve_results()
 
-    @pytest.mark.asyncio
-    async def test_login_success(self):
-        conn = Connection("ws://localhost:8080/ws", username="admin", password="secret")
-        mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(return_value=_auth_response())
-        conn._ws = mock_ws
+        async with MockServer(handler) as server:
+            conn = Connection(server.url, api_key="ilk_test", auto_reconnect=False)
+            await conn.connect()
+            assert conn.connected
+            await conn.close()
 
-        await conn._authenticate()
-        assert conn.session_id == "1"
-        assert conn.server_version == "0.1.0"
-        assert conn.role == "admin"
+    async def test_auth_error(self) -> None:
+        async def handler(peer: Peer) -> None:
+            login = await peer.recv()
+            await peer.send(
+                {"type": "auth_error", "id": login["id"], "message": "Invalid credentials"}
+            )
 
-    @pytest.mark.asyncio
-    async def test_api_key_success(self):
-        conn = Connection("ws://localhost:8080/ws", api_key="ilk_test")
-        mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(return_value=_auth_response())
-        conn._ws = mock_ws
+        async with MockServer(handler) as server:
+            with pytest.raises(AuthenticationError, match="Invalid credentials"):
+                await _conn(server).connect()
 
-        await conn._authenticate()
-        assert conn.session_id == "1"
+    async def test_no_credentials(self) -> None:
+        async with MockServer(Peer.serve_results) as server:
+            conn = Connection(server.url, auto_reconnect=False)
+            with pytest.raises(AuthenticationError, match="No credentials"):
+                await conn.connect()
 
-    @pytest.mark.asyncio
-    async def test_auth_error(self):
-        conn = Connection("ws://localhost:8080/ws", username="bad", password="bad")
-        mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(return_value=json.dumps({
-            "type": "auth_error",
-            "message": "Invalid credentials",
-        }))
-        conn._ws = mock_ws
-
-        with pytest.raises(AuthenticationError, match="Invalid credentials"):
-            await conn._authenticate()
-
-
-class TestConnectionExecute:
-    @pytest.mark.asyncio
-    async def test_execute_result(self):
-        conn = Connection("ws://localhost:8080/ws", username="admin", password="admin")
-        mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(return_value=_result_response(["x", "y"], [[1, 2]]))
-        conn._ws = mock_ws
-        conn._connected = True
-
-        result = await conn.execute("?edge(X, Y)")
-        assert isinstance(result, ResultResponse)
-        assert result.columns == ["x", "y"]
-        assert result.rows == [[1, 2]]
-
-    @pytest.mark.asyncio
-    async def test_execute_error_raises(self):
-        conn = Connection("ws://localhost:8080/ws", username="admin", password="admin")
-        mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(return_value=_error_response("Parse error"))
-        conn._ws = mock_ws
-        conn._connected = True
-
-        with pytest.raises(QueryError, match="Parse error"):
-            await conn.execute("bad query")
-
-    @pytest.mark.asyncio
-    async def test_execute_not_connected(self):
-        conn = Connection("ws://localhost:8080/ws", username="admin", password="admin")
+    async def test_execute_before_connect_raises(self) -> None:
+        conn = Connection("ws://127.0.0.1:1/ws", username="a", password="b")
         with pytest.raises(ConnectionError, match="Not connected"):
-            await conn.execute("?test()")
-
-
-class TestConnectionStreaming:
-    @pytest.mark.asyncio
-    async def test_stream_assembly(self):
-        conn = Connection("ws://localhost:8080/ws", username="admin", password="admin")
-
-        responses = [
-            json.dumps({
-                "type": "result_start",
-                "columns": ["id", "name"],
-                "total_count": 3,
-                "truncated": False,
-                "execution_time_ms": 10,
-            }),
-            json.dumps({
-                "type": "result_chunk",
-                "rows": [[1, "alice"], [2, "bob"]],
-                "chunk_index": 0,
-            }),
-            json.dumps({
-                "type": "result_chunk",
-                "rows": [[3, "charlie"]],
-                "chunk_index": 1,
-            }),
-            json.dumps({
-                "type": "result_end",
-                "row_count": 3,
-                "chunk_count": 2,
-            }),
-        ]
-        mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=responses)
-        conn._ws = mock_ws
-        conn._connected = True
-
-        result = await conn.execute("?big_table(Id, Name)")
-        assert result.columns == ["id", "name"]
-        assert len(result.rows) == 3
-        assert result.rows[0] == [1, "alice"]
-        assert result.rows[2] == [3, "charlie"]
-        assert result.row_count == 3
-
-    @staticmethod
-    def _streamed(start: dict, chunks: list[dict], end: dict) -> Connection:
-        conn = Connection("ws://localhost:8080/ws", username="admin", password="admin")
-        frames = [
-            {
-                "type": "result_start",
-                "columns": ["x"],
-                "total_count": 3,
-                "truncated": False,
-                "execution_time_ms": 1,
-                **start,
-            },
-            *({"type": "result_chunk", **chunk} for chunk in chunks),
-            {"type": "result_end", **end},
-        ]
-        mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=[json.dumps(f) for f in frames])
-        conn._ws = mock_ws
-        conn._connected = True
-        return conn
-
-    @pytest.mark.asyncio
-    async def test_streamed_subscribe_keeps_its_subscription(self):
-        subscribed = {"subscription": "s", "generation": 2, "revision": 7}
-        conn = self._streamed(
-            {"subscribed": subscribed},
-            [{"rows": [[1], [2]], "chunk_index": 0}, {"rows": [[3]], "chunk_index": 1}],
-            {"row_count": 3, "chunk_count": 2},
-        )
-        result = await conn.execute(".subscribe s ?demo(X)")
-        assert result.rows == [[1], [2], [3]]
-        assert result.subscribed is not None
-        assert (
-            result.subscribed.subscription,
-            result.subscribed.generation,
-            result.subscribed.revision,
-        ) == ("s", 2, 7)
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("chunks", "end"),
-        [
-            # A chunk is missing.
-            ([{"rows": [[1], [2]], "chunk_index": 0}], {"row_count": 3, "chunk_count": 2}),
-            # A chunk is repeated.
-            (
-                [{"rows": [[1]], "chunk_index": 0}, {"rows": [[1]], "chunk_index": 0}],
-                {"row_count": 2, "chunk_count": 2},
-            ),
-            # The rows do not add up.
-            ([{"rows": [[1]], "chunk_index": 0}], {"row_count": 3, "chunk_count": 1}),
-        ],
-    )
-    async def test_incomplete_stream_is_not_a_result(self, chunks, end):
-        conn = self._streamed({}, chunks, end)
-        with pytest.raises(InternalError):
-            await conn.execute("?demo(X)")
-
-
-class TestConnectionNotifications:
-    @pytest.mark.asyncio
-    async def test_notification_during_result(self):
-        """Notifications received while waiting for a result should be dispatched."""
-        conn = Connection("ws://localhost:8080/ws", username="admin", password="admin")
-
-        received_events = []
-        conn.dispatcher.on("persistent_update", callback=lambda e: received_events.append(e))
-
-        responses = [
-            json.dumps({
-                "type": "persistent_update",
-                "knowledge_graph": "default",
-                "relation": "edge",
-                "operation": "insert",
-                "count": 5,
-                "seq": 1,
-                "timestamp_ms": 1000,
-            }),
-            _result_response(["x"], [[42]]),
-        ]
-        mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=responses)
-        conn._ws = mock_ws
-        conn._connected = True
-
-        result = await conn.execute("?edge(X)")
-        assert result.rows == [[42]]
-        assert len(received_events) == 1
-        assert received_events[0].relation == "edge"
-
-    @pytest.mark.asyncio
-    async def test_notices_and_subscription_pushes_are_not_replies(self):
-        """A notice or subscription push before the reply must not answer the call."""
-        conn = Connection("ws://localhost:8080/ws", username="admin", password="admin")
-        responses = [
-            json.dumps({"type": "notice", "code": "notifications_missed", "message": "Missed 2"}),
-            json.dumps({
-                "type": "subscription_delta", "subscription": "s", "generation": 1,
-                "knowledge_graph": "default", "seq": 1, "revision": 4, "columns": ["x"],
-                "inserted": [[1]], "retracted": [],
-            }),
-            _result_response(["x"], [[42]]),
-        ]
-        mock_ws = AsyncMock()
-        mock_ws.recv = AsyncMock(side_effect=responses)
-        conn._ws = mock_ws
-        conn._connected = True
-
-        result = await conn.execute("?x(X)")
-        assert result.rows == [[42]]
-
-
-    def test_failing_callback_does_not_crash_dispatcher(self) -> None:
-        """A callback that raises must be logged but must not stop other callbacks."""
-        from inputlayer.notifications import NotificationDispatcher, NotificationEvent
-
-        dispatcher = NotificationDispatcher()
-        received = []
-
-        dispatcher.on(callback=lambda e: (_ for _ in ()).throw(RuntimeError("boom")))
-        dispatcher.on(callback=lambda e: received.append(e))
-
-        event = NotificationEvent(
-            type="persistent_update", seq=1, timestamp_ms=0, relation="test"
-        )
-        dispatcher.dispatch(event)  # Must not raise
-
-        assert received == [event]  # Second callback still ran
-
-    def test_failing_callback_is_logged(self, caplog) -> None:
-        """A callback exception must be logged via logger.exception."""
-        import logging
-
-        from inputlayer.notifications import NotificationDispatcher, NotificationEvent
-
-        dispatcher = NotificationDispatcher()
-        dispatcher.on(callback=lambda e: 1 / 0)
-
-        event = NotificationEvent(type="persistent_update", seq=1, timestamp_ms=0)
-        with caplog.at_level(logging.ERROR, logger="inputlayer.notifications"):
-            dispatcher.dispatch(event)
-
-        assert any("ZeroDivisionError" in r.message or "raised" in r.message.lower()
-                   for r in caplog.records)
-
-
-class TestConnectionLockSerialization:
-    """Verify the execute lock prevents interleaved send/recv."""
-
-    @pytest.mark.asyncio
-    async def test_concurrent_executes_are_serialized(self) -> None:
-        """Two concurrent execute() calls must not interleave.
-
-        We verify by tracking the order of send/recv calls. Without the
-        lock, sends could interleave with recvs. With the lock, each
-        send-recv pair completes atomically.
-        """
-        conn = Connection("ws://localhost:8080/ws")
-        call_log: list[str] = []
-
-        async def mock_send(msg: str) -> None:
-            parsed = json.loads(msg)
-            program = parsed.get("program", "?")
-            call_log.append(f"send:{program}")
-            await asyncio.sleep(0.01)  # yield to event loop
-
-        recv_responses = [
-            _result_response(["x"], [[1]]),
-            _result_response(["x"], [[2]]),
-        ]
-        recv_index = 0
-
-        async def mock_recv() -> str:
-            nonlocal recv_index
-            idx = recv_index
-            recv_index += 1
-            call_log.append(f"recv:{idx}")
-            await asyncio.sleep(0.01)  # yield to event loop
-            return recv_responses[idx]
-
-        mock_ws = AsyncMock()
-        mock_ws.send = mock_send
-        mock_ws.recv = mock_recv
-        conn._ws = mock_ws
-        conn._connected = True
-
-        # Launch two concurrent executes
-        await asyncio.gather(
-            conn.execute("query_A"),
-            conn.execute("query_B"),
-        )
-
-        # With the lock, the pattern must be send-recv-send-recv (atomic pairs).
-        # Without the lock, we'd see send-send-recv-recv (interleaved).
-        assert call_log[0].startswith("send:")
-        assert call_log[1].startswith("recv:")
-        assert call_log[2].startswith("send:")
-        assert call_log[3].startswith("recv:")
-
-    @pytest.mark.asyncio
-    async def test_execute_lock_lazy_init(self) -> None:
-        conn = Connection("ws://localhost:8080/ws")
-        # Lock starts as None (lazy init for cross-event-loop safety)
-        assert conn._execute_lock is None
-        # First call to _get_execute_lock() creates it
-        lock = conn._get_execute_lock()
-        assert isinstance(lock, asyncio.Lock)
-        # Subsequent calls return the same lock
-        assert conn._get_execute_lock() is lock
-
-
-class TestExecuteWithPreamble:
-    """Tests for atomic preamble + execute."""
-
-    @pytest.mark.asyncio
-    async def test_preamble_and_program_under_single_lock(self) -> None:
-        """Preamble (KG switch) and program must be atomic."""
-        conn = Connection("ws://localhost:8080/ws")
-        call_log: list[str] = []
-
-        async def mock_send(msg: str) -> None:
-            parsed = json.loads(msg)
-            program = parsed.get("program", "?")
-            call_log.append(f"send:{program}")
-            await asyncio.sleep(0.01)
-
-        responses = [
-            # Preamble result (KG switch)
-            json.dumps({
-                "type": "result",
-                "columns": [],
-                "rows": [],
-                "row_count": 0,
-                "total_count": 0,
-                "truncated": False,
-                "execution_time_ms": 0,
-                "switched_kg": "my_kg",
-            }),
-            # Actual command result
-            _result_response(["x"], [[42]]),
-        ]
-        recv_idx = 0
-
-        async def mock_recv() -> str:
-            nonlocal recv_idx
-            idx = recv_idx
-            recv_idx += 1
-            call_log.append(f"recv:{idx}")
-            await asyncio.sleep(0.01)
-            return responses[idx]
-
-        mock_ws = AsyncMock()
-        mock_ws.send = mock_send
-        mock_ws.recv = mock_recv
-        conn._ws = mock_ws
-        conn._connected = True
-
-        result = await conn.execute_with_preamble(
-            ".kg use my_kg", "?query(X)"
-        )
-        assert result.rows == [[42]]
-        assert conn._current_kg == "my_kg"
-        # All four operations (send preamble, recv, send query, recv) happened
-        assert len(call_log) == 4
-        assert call_log[0] == "send:.kg use my_kg"
-        assert call_log[2] == "send:?query(X)"
-
-    @pytest.mark.asyncio
-    async def test_preamble_none_skips_switch(self) -> None:
-        conn = Connection("ws://localhost:8080/ws")
-        call_log: list[str] = []
-
-        async def mock_send(msg: str) -> None:
-            parsed = json.loads(msg)
-            call_log.append(parsed.get("program", "?"))
-
-        mock_ws = AsyncMock()
-        mock_ws.send = mock_send
-        mock_ws.recv = AsyncMock(return_value=_result_response(["x"], [[1]]))
-        conn._ws = mock_ws
-        conn._connected = True
-
-        await conn.execute_with_preamble(None, "?query(X)")
-        # Only one send (no preamble)
-        assert call_log == ["?query(X)"]
-
-
-class TestExecuteSequence:
-    """Tests for atomic multi-command execution."""
-
-    @pytest.mark.asyncio
-    async def test_sequence_holds_lock_across_all_commands(self) -> None:
-        conn = Connection("ws://localhost:8080/ws")
-        call_log: list[str] = []
-
-        async def mock_send(msg: str) -> None:
-            parsed = json.loads(msg)
-            call_log.append(f"send:{parsed.get('program', '?')}")
-            await asyncio.sleep(0.01)
-
-        responses = [
-            _result_response(["ok"], [["done"]]),
-            _result_response(["x"], [[1], [2]]),
-            _result_response(["ok"], [["dropped"]]),
-        ]
-        recv_idx = 0
-
-        async def mock_recv() -> str:
-            nonlocal recv_idx
-            idx = recv_idx
-            recv_idx += 1
-            call_log.append(f"recv:{idx}")
-            await asyncio.sleep(0.01)
-            return responses[idx]
-
-        mock_ws = AsyncMock()
-        mock_ws.send = mock_send
-        mock_ws.recv = mock_recv
-        conn._ws = mock_ws
-        conn._connected = True
-
-        results = await conn.execute_sequence([
-            "+setup_rule(...)",
-            "?query(X)",
-            ".rule drop temp",
-        ])
-        assert len(results) == 3
-        assert results[1].rows == [[1], [2]]
-        # All 6 operations in strict send-recv pairs
-        assert call_log == [
-            "send:+setup_rule(...)", "recv:0",
-            "send:?query(X)", "recv:1",
-            "send:.rule drop temp", "recv:2",
-        ]
-
-
-class TestConcurrentMultiKGAtomicity:
-    """Verify that two KnowledgeGraph handles sharing one Connection
-    cannot corrupt each other's KG context.
-
-    This is the critical production scenario: two coroutines on the same
-    event loop, each targeting a different KG, running concurrently via
-    the sync bridge's background thread.
-    """
-
-    @pytest.mark.asyncio
-    async def test_concurrent_kg_operations_are_isolated(self) -> None:
-        """Two KG handles issuing concurrent queries must each operate
-        against the correct KG. Without atomic preamble+execute, the
-        sequence could be:
-            KG-A sends ".kg use A"  (lock released)
-            KG-B sends ".kg use B"  (lock released)
-            KG-A sends query        -> runs against B (WRONG!)
-
-        With the fix, each preamble+query is under a single lock hold.
-        """
-        from inputlayer.knowledge_graph import KnowledgeGraph
-
-        conn = Connection("ws://localhost:8080/ws")
-        sent_programs: list[str] = []
-
-        async def mock_send(msg: str) -> None:
-            parsed = json.loads(msg)
-            sent_programs.append(parsed.get("program", "?"))
-            # Yield to let the other coroutine try to interleave.
-            await asyncio.sleep(0.01)
-
-        # Build responses: each execute_with_preamble needs 2 responses
-        # (preamble result + query result). We need 4 total for 2 KGs.
-        responses = [
-            # KG-A preamble (.kg use kg_a)
-            json.dumps({
-                "type": "result", "columns": [], "rows": [],
-                "row_count": 0, "total_count": 0, "truncated": False,
-                "execution_time_ms": 0, "switched_kg": "kg_a",
-            }),
-            # KG-A query result
-            _result_response(["from_kg"], [["kg_a_data"]]),
-            # KG-B preamble (.kg use kg_b)
-            json.dumps({
-                "type": "result", "columns": [], "rows": [],
-                "row_count": 0, "total_count": 0, "truncated": False,
-                "execution_time_ms": 0, "switched_kg": "kg_b",
-            }),
-            # KG-B query result
-            _result_response(["from_kg"], [["kg_b_data"]]),
-        ]
-        recv_idx = 0
-
-        async def mock_recv() -> str:
-            nonlocal recv_idx
-            idx = recv_idx
-            recv_idx += 1
-            await asyncio.sleep(0.01)
-            return responses[idx]
-
-        mock_ws = AsyncMock()
-        mock_ws.send = mock_send
-        mock_ws.recv = mock_recv
-        conn._ws = mock_ws
-        conn._connected = True
-        conn._current_kg = "default"  # Start on neither KG.
-
-        kg_a = KnowledgeGraph("kg_a", conn)
-        kg_b = KnowledgeGraph("kg_b", conn)
-
-        # Launch both concurrently.
-        result_a, result_b = await asyncio.gather(
-            kg_a._execute("?query_a(X)"),
-            kg_b._execute("?query_b(X)"),
-        )
-
-        # The lock ensures preamble+query pairs are atomic:
-        #   [".kg use kg_a", "?query_a(X)", ".kg use kg_b", "?query_b(X)"]
-        # NOT interleaved like:
-        #   [".kg use kg_a", ".kg use kg_b", "?query_a(X)", "?query_b(X)"]
-        assert sent_programs[0] == ".kg use kg_a"
-        assert sent_programs[1] == "?query_a(X)"
-        assert sent_programs[2] == ".kg use kg_b"
-        assert sent_programs[3] == "?query_b(X)"
-
-        # Each KG got its own result.
-        assert result_a.rows == [["kg_a_data"]]
-        assert result_b.rows == [["kg_b_data"]]
-
-    @pytest.mark.asyncio
-    async def test_kg_auto_create_under_lock(self) -> None:
-        """When _execute hits 'not found', the create+use+execute sequence
-        must all happen under one lock hold."""
-        from inputlayer.knowledge_graph import KnowledgeGraph
-
-        conn = Connection("ws://localhost:8080/ws")
-        sent_programs: list[str] = []
-
-        async def mock_send(msg: str) -> None:
-            parsed = json.loads(msg)
-            sent_programs.append(parsed.get("program", "?"))
-
-        responses = [
-            # 1. ".kg use new_kg" -> error: not found
-            json.dumps({
-                "type": "error",
-                "message": "Knowledge graph 'new_kg' not found",
-                "code": "not_found",
-            }),
-            # 2. ".kg create new_kg" -> ok
-            _result_response(["ok"], [["created"]]),
-            # 3. ".kg use new_kg" retry -> switched
-            json.dumps({
-                "type": "result", "columns": [], "rows": [],
-                "row_count": 0, "total_count": 0, "truncated": False,
-                "execution_time_ms": 0, "switched_kg": "new_kg",
-            }),
-            # 4. actual query
-            _result_response(["x"], [[1]]),
-        ]
-        recv_idx = 0
-
-        async def mock_recv() -> str:
-            nonlocal recv_idx
-            idx = recv_idx
-            recv_idx += 1
-            return responses[idx]
-
-        mock_ws = AsyncMock()
-        mock_ws.send = mock_send
-        mock_ws.recv = mock_recv
-        conn._ws = mock_ws
-        conn._connected = True
-        conn._current_kg = "default"
-
-        kg = KnowledgeGraph("new_kg", conn)
-        result = await kg._execute("?test(X)")
-
-        assert sent_programs == [
-            ".kg use new_kg",       # attempt switch
-            ".kg create new_kg",    # auto-create
-            ".kg use new_kg",       # retry switch
-            "?test(X)",             # actual query
-        ]
-        assert result.rows == [[1]]
-        assert conn._current_kg == "new_kg"
-
-    @pytest.mark.asyncio
-    async def test_kg_already_current_skips_preamble(self) -> None:
-        """When connection is already on the right KG, no preamble is sent."""
-        from inputlayer.knowledge_graph import KnowledgeGraph
-
-        conn = Connection("ws://localhost:8080/ws")
-        sent_programs: list[str] = []
-
-        async def mock_send(msg: str) -> None:
-            parsed = json.loads(msg)
-            sent_programs.append(parsed.get("program", "?"))
-
-        mock_ws = AsyncMock()
-        mock_ws.send = mock_send
-        mock_ws.recv = AsyncMock(return_value=_result_response(["x"], [[42]]))
-        conn._ws = mock_ws
-        conn._connected = True
-        conn._current_kg = "my_kg"  # Already on this KG.
-
-        kg = KnowledgeGraph("my_kg", conn)
-        result = await kg._execute("?test(X)")
-
-        # Only the query, no preamble.
-        assert sent_programs == ["?test(X)"]
-        assert result.rows == [[42]]
-
-    @pytest.mark.asyncio
-    async def test_concurrent_sequence_no_interleave(self) -> None:
-        """An execute_sequence from one coroutine cannot be interleaved
-        by execute from another coroutine."""
-        conn = Connection("ws://localhost:8080/ws")
-        call_log: list[str] = []
-
-        async def mock_send(msg: str) -> None:
-            parsed = json.loads(msg)
-            call_log.append(f"send:{parsed.get('program', '?')}")
-            await asyncio.sleep(0.01)
-
-        responses = [
-            # sequence: 3 commands
-            _result_response([], []),
-            _result_response(["x"], [[1]]),
-            _result_response([], []),
-            # single execute
-            _result_response(["y"], [[2]]),
-        ]
-        recv_idx = 0
-
-        async def mock_recv() -> str:
-            nonlocal recv_idx
-            idx = recv_idx
-            recv_idx += 1
-            call_log.append(f"recv:{idx}")
-            await asyncio.sleep(0.01)
-            return responses[idx]
-
-        mock_ws = AsyncMock()
-        mock_ws.send = mock_send
-        mock_ws.recv = mock_recv
-        conn._ws = mock_ws
-        conn._connected = True
-
-        await asyncio.gather(
-            conn.execute_sequence(["cmd_1", "cmd_2", "cmd_3"]),
-            conn.execute("cmd_solo"),
-        )
-
-        # The sequence must be fully contiguous - cmd_solo cannot
-        # appear between cmd_1, cmd_2, cmd_3.
-        send_order = [e.split(":")[1] for e in call_log if e.startswith("send:")]
-        # Either [cmd_1, cmd_2, cmd_3, cmd_solo] or [cmd_solo, cmd_1, cmd_2, cmd_3]
-        # but NEVER [cmd_1, cmd_solo, cmd_2, cmd_3]
-        if send_order[0] == "cmd_1":
-            assert send_order == ["cmd_1", "cmd_2", "cmd_3", "cmd_solo"]
-        else:
-            assert send_order == ["cmd_solo", "cmd_1", "cmd_2", "cmd_3"]
+            await conn.execute("?a(X)")
+
+
+# ── Requests ─────────────────────────────────────────────────────────
+
+
+class TestRequests:
+    async def test_every_request_has_an_id_and_a_deadline(self) -> None:
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            await peer.serve_results()
+
+        async with MockServer(handler) as server:
+            conn = _conn(server, default_timeout=2.5)
+            await conn.connect()
+            await conn.execute("?a(X)")
+            await conn.execute("?b(X)", timeout=0.25)
+            executes = [f for f in server.received if f["type"] == "execute"]
+            assert [(f["id"], f["timeout_ms"]) for f in executes] == [("r2", 2500), ("r3", 250)]
+            await conn.close()
+
+    async def test_no_timeout_leaves_the_engine_default(self) -> None:
+        async with MockServer(_serve) as server:
+            conn = _conn(server, default_timeout=None)
+            await conn.connect()
+            await conn.execute("?a(X)")
+            assert "timeout_ms" not in server.received[-1]
+            await conn.close()
+
+    async def test_queries_are_pipelined_not_serialized(self) -> None:
+        # The server reads both requests before answering either; a client
+        # that waited for each reply would deadlock here.
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            a = await peer.recv_type("execute")
+            b = await peer.recv_type("execute")
+            await peer.send({**result([[2]]), "id": b["id"]})
+            await peer.send({**result([[1]]), "id": a["id"]})
+            await peer.serve_results()
+
+        async with MockServer(handler) as server:
+            conn = _conn(server)
+            await conn.connect()
+            first, second = await asyncio.gather(conn.execute("?a(X)"), conn.execute("?b(X)"))
+            assert (first.rows, second.rows) == ([[1]], [[2]])
+            await conn.close()
+
+    async def test_in_flight_bound(self) -> None:
+        held: list[dict[str, Any]] = []
+        release = asyncio.Event()
+
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            held.append(await peer.recv_type("execute"))
+            held.append(await peer.recv_type("execute"))
+            await release.wait()
+            await peer.send({**result([[1]]), "id": held[0]["id"]})
+            held.append(await peer.recv_type("execute"))
+            await peer.send({**result([[2]]), "id": held[1]["id"]})
+            await peer.send({**result([[3]]), "id": held[2]["id"]})
+            await peer.serve_results()
+
+        async with MockServer(handler) as server:
+            conn = _conn(server, max_in_flight=2)
+            await conn.connect()
+            calls = [asyncio.ensure_future(conn.execute(f"?q{i}(X)")) for i in range(3)]
+            await _until(lambda: len(held) == 2)
+            await asyncio.sleep(0.1)
+            # The third request waits for a slot; it has not been sent.
+            assert [f["program"] for f in server.received if f["type"] == "execute"] == [
+                "?q0(X)", "?q1(X)",
+            ]
+            release.set()
+            assert [r.rows for r in await asyncio.gather(*calls)] == [[[1]], [[2]], [[3]]]
+            assert conn.in_flight == 0
+            await conn.close()
+
+
+async def _serve(peer: Peer) -> None:
+    await peer.authenticate()
+    await peer.serve_results()
+
+
+# ── Deadlines and cancel ─────────────────────────────────────────────
+
+
+class TestDeadlines:
+    async def test_server_deadline_is_typed(self) -> None:
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            q = await peer.recv_type("execute")
+            assert q["timeout_ms"] == 100
+            await peer.send({
+                "type": "error", "id": q["id"], "code": "deadline_exceeded",
+                "message": "Request deadline of 100 ms exceeded",
+            })
+            await peer.serve_results()
+
+        async with MockServer(handler) as server:
+            conn = _conn(server)
+            await conn.connect()
+            with pytest.raises(DeadlineExceeded) as caught:
+                await conn.execute("?slow(X)", timeout=0.1)
+            assert caught.value.code == "deadline_exceeded"
+            await conn.close()
+
+    async def test_silent_server_gets_a_cancel_and_the_call_a_deadline(self) -> None:
+        frames: list[dict[str, Any]] = []
+
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            q = await peer.recv_type("execute")
+            cancel = await peer.recv_type("cancel")
+            frames.extend([q, cancel])
+            # Answer only after the client gave up: the late reply is dropped
+            # and its slot comes back.
+            await asyncio.sleep(0.2)
+            await peer.send({**result([[1]]), "id": q["id"]})
+            await peer.send({
+                "type": "cancel_ack", "id": cancel["id"], "target": q["id"],
+                "outcome": "not_found",
+            })
+            await peer.serve_results()
+
+        async with MockServer(handler) as server:
+            conn = _conn(server, deadline_grace=0.05, max_in_flight=1)
+            await conn.connect()
+            with pytest.raises(DeadlineExceeded):
+                await conn.execute("?slow(X)", timeout=0.1)
+            assert frames[1]["target"] == frames[0]["id"]
+            # The one slot is held by the abandoned request until its reply.
+            assert (await conn.execute("?next(X)", timeout=2)).rows == []
+            assert conn.in_flight == 0
+            await conn.close()
+
+    async def test_too_late_cancel_returns_the_committed_result(self) -> None:
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            q = await peer.recv_type("execute")
+            cancel = await peer.recv_type("cancel")
+            inserted = result([["Inserted 1 fact(s) into 'a'."]], ["message"])
+            await peer.send({**inserted, "id": q["id"]})
+            await peer.send({
+                "type": "cancel_ack", "id": cancel["id"], "target": q["id"],
+                "outcome": "too_late",
+            })
+            await peer.serve_results()
+
+        async with MockServer(handler) as server:
+            conn = _conn(server, deadline_grace=0.05)
+            await conn.connect()
+            reply = await conn.execute("+a(1)", timeout=0.05)
+            assert reply.rows == [["Inserted 1 fact(s) into 'a'."]]
+            await conn.close()
+
+    async def test_cancelling_the_caller_cancels_on_the_server(self) -> None:
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            q = await peer.recv_type("execute")
+            cancel = await peer.recv_type("cancel")
+            assert cancel["target"] == q["id"]
+            await peer.send(
+                {"type": "error", "id": q["id"], "code": "cancelled", "message": "Cancelled"}
+            )
+            await peer.send({
+                "type": "cancel_ack", "id": cancel["id"], "target": q["id"],
+                "outcome": "cancelled",
+            })
+            await peer.serve_results()
+
+        async with MockServer(handler) as server:
+            conn = _conn(server)
+            await conn.connect()
+            call = asyncio.ensure_future(conn.execute("?slow(X)"))
+            await _until(lambda: any(f["type"] == "execute" for f in server.received))
+            call.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await call
+            await _until(lambda: conn.in_flight == 0)
+            await conn.close()
+
+    async def test_explicit_cancel_returns_the_outcome(self) -> None:
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            q = await peer.recv_type("execute")
+            cancel = await peer.recv_type("cancel")
+            await peer.send(
+                {"type": "error", "id": q["id"], "code": "cancelled", "message": "Cancelled"}
+            )
+            await peer.send({
+                "type": "cancel_ack", "id": cancel["id"], "target": q["id"],
+                "outcome": "cancelled",
+            })
+            await peer.serve_results()
+
+        async with MockServer(handler) as server:
+            conn = _conn(server)
+            await conn.connect()
+            call = asyncio.ensure_future(conn.execute("?slow(X)"))
+            await _until(lambda: any(f["type"] == "execute" for f in server.received))
+            assert await conn.cancel("r2") == "cancelled"
+            with pytest.raises(Cancelled):
+                await call
+            await conn.close()
+
+
+# ── Idle delivery and keepalive ──────────────────────────────────────
+
+
+class TestIdle:
+    async def test_notifications_arrive_while_idle(self) -> None:
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            await asyncio.sleep(0.05)
+            await peer.send(notification(1))
+            await peer.send(notification(2))
+            await peer.serve_results()
+
+        async with MockServer(handler) as server:
+            conn = _conn(server)
+            await conn.connect()
+            seen: list[int] = []
+
+            async def consume() -> None:
+                async for event in conn.dispatcher:
+                    seen.append(event.seq)
+                    if len(seen) == 2:
+                        return
+
+            await asyncio.wait_for(consume(), 2)
+            assert seen == [1, 2]
+            assert conn.last_seq == 2
+            await conn.close()
+
+    async def test_keepalive_pings_an_idle_connection(self) -> None:
+        pings = asyncio.Event()
+
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            frame = await peer.recv(timeout=3)
+            assert frame["type"] == "ping" and frame["id"].startswith("r")
+            await peer.send({"type": "pong", "id": frame["id"]})
+            pings.set()
+            await peer.serve_results()
+
+        async with MockServer(handler) as server:
+            conn = _conn(server, keepalive=0.1)
+            await conn.connect()
+            await asyncio.wait_for(pings.wait(), 3)
+            await _until(lambda: conn.in_flight == 0)
+            await conn.close()
+
+    async def test_keepalive_waits_while_requests_flow(self) -> None:
+        async with MockServer(_serve) as server:
+            conn = _conn(server, keepalive=0.3)
+            await conn.connect()
+            for _ in range(5):
+                await conn.execute("?a(X)")
+                await asyncio.sleep(0.1)
+            assert not [f for f in server.received if f["type"] == "ping"]
+            await conn.close()
+
+
+# ── Losing the connection and reconnecting ───────────────────────────
+
+
+class TestReconnect:
+    async def test_reconnect_restores_graph_and_notification_cursor(self) -> None:
+        async def first(peer: Peer) -> None:
+            await peer.authenticate()
+            q = await peer.recv_type("execute")
+            assert q["program"] == ".kg use other"
+            switched = result([["Switched"]], ["message"], switched_kg="other")
+            await peer.send({**switched, "id": q["id"]})
+            await peer.send(notification(41, kg="other"))
+            await peer.send(notification(42, kg="other"))
+            await peer.recv_type("execute")  # the write that will be lost
+            await peer.close(1011)
+
+        async def second(peer: Peer) -> None:
+            await peer.authenticate()
+            await peer.send({"type": "notice", "code": "replay_gap", "message": "evicted"})
+            await peer.serve_results()
+
+        async with MockServer(first, second) as server:
+            conn = _conn(server, auto_reconnect=True, reconnect_delay=0.01, initial_kg="main")
+            events: list[ConnectionEvent] = []
+            conn.events.on(callback=events.append)
+            hooked: list[str | None] = []
+
+            async def hook(c: Connection) -> None:
+                hooked.append(c.current_kg)
+
+            conn.add_reconnect_hook(hook)
+            await conn.connect()
+            await conn.execute(".kg use other")
+            await _until(lambda: conn.last_seq == 42)
+            with pytest.raises(ConnectionLost) as caught:
+                await conn.execute("+a(1)")
+            assert caught.value.may_have_committed is True
+            await _until(lambda: any(e.type == "notification_gap" for e in events))
+            assert server.peers[1].params == {
+                "kg": "other", "last_seq": "42", "epoch": EPOCH,
+            }
+            assert [e.type for e in events] == [
+                "disconnected", "session_reset", "reconnected", "notification_gap",
+            ]
+            assert hooked == ["other"]
+            assert (await conn.execute("?a(X)")).rows == []
+            await conn.close()
+
+    async def test_calls_during_a_reconnect_wait_for_it(self) -> None:
+        async def first(peer: Peer) -> None:
+            await peer.authenticate()
+            await peer.close(1011)
+
+        async def second(peer: Peer) -> None:
+            await asyncio.sleep(0.2)
+            await peer.authenticate()
+            await peer.serve_results(lambda program: result([[program]]))
+
+        async with MockServer(first, second) as server:
+            conn = _conn(server, auto_reconnect=True, reconnect_delay=0.01)
+            await conn.connect()
+            await _until(lambda: conn.state == "reconnecting")
+            assert (await conn.execute("?a(X)", timeout=5)).rows == [["?a(X)"]]
+            await conn.close()
+
+    async def test_reconnect_gives_up_and_ends_iterators(self) -> None:
+        async def first(peer: Peer) -> None:
+            await peer.authenticate()
+            await peer.close(1011)
+
+        async def refuse(peer: Peer) -> None:
+            await peer.close(1013)
+
+        async with MockServer(first, refuse) as server:
+            conn = _conn(
+                server, auto_reconnect=True, reconnect_delay=0.01, max_reconnect_attempts=2
+            )
+            await conn.connect()
+
+            async def consume() -> None:
+                async for _ in conn.dispatcher:
+                    pass
+
+            consumer = asyncio.ensure_future(consume())
+            await asyncio.sleep(0)
+            with pytest.raises(ConnectionLost):
+                await asyncio.wait_for(consumer, 5)
+            assert conn.state == "closed"
+            with pytest.raises(ConnectionLost):
+                await conn.execute("?a(X)")
+            await conn.close()
+
+    async def test_revoked_credential_does_not_reconnect(self) -> None:
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            await peer.send({"type": "notice", "code": "credential_revoked", "message": "revoked"})
+            await peer.close(1008)
+
+        async with MockServer(handler) as server:
+            conn = _conn(server, auto_reconnect=True, reconnect_delay=0.01)
+            closed = asyncio.Event()
+            conn.events.on("closed", callback=lambda e: closed.set())
+            await conn.connect()
+            await asyncio.wait_for(closed.wait(), 2)
+            assert len(server.peers) == 1
+            with pytest.raises(ConnectionLost) as caught:
+                await conn.execute("?a(X)")
+            assert caught.value.code == "credential_revoked"
+            await conn.close()
+
+    async def test_close_fails_pending_calls(self) -> None:
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            await peer.recv_type("execute")
+            await asyncio.sleep(5)
+
+        async with MockServer(handler) as server:
+            conn = _conn(server)
+            await conn.connect()
+            call = asyncio.ensure_future(conn.execute("?a(X)"))
+            await _until(lambda: conn.in_flight == 1)
+            await conn.close()
+            with pytest.raises(ConnectionLost) as caught:
+                await call
+            assert caught.value.may_have_committed is False
+
+
+# ── The client: one connection per knowledge graph ───────────────────
+
+
+class TestPool:
+    async def test_each_graph_gets_its_own_bound_connection(self) -> None:
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            kg = peer.params.get("kg", "default")
+            await peer.serve_results(lambda program: result([[kg, program]], ["kg", "p"]))
+
+        async with MockServer(handler) as server:
+            async with InputLayer(server.url, username="a", password="b") as il:
+                sales, ops = il.knowledge_graph("sales"), il.knowledge_graph("ops")
+                default = il.knowledge_graph("default")
+                rows = await asyncio.gather(
+                    sales.execute("?s(X)"), ops.execute("?o(X)"), default.execute("?d(X)")
+                )
+                assert [r.rows for r in rows] == [
+                    [["sales", "?s(X)"]], [["ops", "?o(X)"]], [["default", "?d(X)"]],
+                ]
+            # The client's own connection serves "default"; no .kg use was sent.
+            assert sorted(p.params.get("kg", "") for p in server.peers) == ["", "ops", "sales"]
+            assert not [f for f in server.received if f.get("program", "").startswith(".kg use")]
+
+    async def test_missing_graph_is_created_then_bound(self) -> None:
+        created: list[str] = []
+
+        async def handler(peer: Peer) -> None:
+            kg = peer.params.get("kg")
+            if kg == "fresh" and "fresh" not in created:
+                login = await peer.recv()
+                await peer.send({
+                    "type": "auth_error", "id": login["id"],
+                    "message": "Knowledge graph 'fresh' not found",
+                })
+                return
+            await peer.authenticate()
+
+            def answer(program: str) -> dict[str, Any]:
+                if program == ".kg create fresh":
+                    created.append("fresh")
+                return result([])
+
+            await peer.serve_results(answer)
+
+        async with MockServer(handler) as server:
+            async with InputLayer(server.url, username="a", password="b") as il:
+                await il.knowledge_graph("fresh").execute("?a(X)")
+            assert created == ["fresh"]
+
+    async def test_a_notification_on_two_connections_is_delivered_once(self) -> None:
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            await peer.send({
+                "type": "kg_change", "seq": 9, "timestamp_ms": 0, "knowledge_graph": "new",
+            })
+            await peer.serve_results()
+
+        async with MockServer(handler) as server:
+            il = InputLayer(server.url, username="a", password="b")
+            seen: list[int] = []
+            il.on("kg_change")(lambda e: seen.append(e.seq))
+            async with il:
+                await il.knowledge_graph("other").execute("?a(X)")
+                await asyncio.sleep(0.1)
+                assert len(server.peers) == 2
+                assert seen == [9]
+                assert il.last_seq == 9

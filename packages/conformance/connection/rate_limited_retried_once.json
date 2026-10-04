@@ -1,0 +1,57 @@
+{
+  "name": "rate_limited_retried_once",
+  "description": "A rate_limited refusal ran nothing; the SDK resends the request once after the rate window.",
+  "calls": [
+    {
+      "execute": "?a(X)",
+      "expect": {
+        "rows": [
+          [
+            1
+          ]
+        ]
+      }
+    }
+  ],
+  "server": [
+    {
+      "recv": {
+        "type": "execute"
+      },
+      "as": "q"
+    },
+    {
+      "send": {
+        "type": "error",
+        "id": "$q",
+        "code": "rate_limited",
+        "message": "Rate limit exceeded (1000 msgs/sec)"
+      }
+    },
+    {
+      "recv": {
+        "type": "execute",
+        "program": "?a(X)"
+      },
+      "as": "r"
+    },
+    {
+      "send": {
+        "type": "result",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            1
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "id": "$r"
+      }
+    }
+  ]
+}

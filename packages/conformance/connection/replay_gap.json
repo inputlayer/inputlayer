@@ -1,0 +1,54 @@
+{
+  "name": "replay_gap",
+  "description": "A replay_gap notice keeps the connection open and is reported as a notification gap.",
+  "calls": [
+    {
+      "execute": "?a(X)",
+      "expect": {
+        "rows": [
+          [
+            1
+          ]
+        ]
+      }
+    }
+  ],
+  "server": [
+    {
+      "send": {
+        "type": "notice",
+        "code": "replay_gap",
+        "message": "Cannot replay notifications after seq 4"
+      }
+    },
+    {
+      "recv": {
+        "type": "execute"
+      },
+      "as": "q"
+    },
+    {
+      "send": {
+        "type": "result",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            1
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "id": "$q"
+      }
+    }
+  ],
+  "expect": {
+    "events": [
+      "notification_gap"
+    ]
+  }
+}

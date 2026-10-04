@@ -5,7 +5,7 @@ defined by the ``inputlayer-ws-protocol`` crate).
 
 Any request may carry an ``id``; every reply to it (``authenticated``,
 ``auth_error``, ``result``, ``result_start``/``result_chunk``/``result_end``,
-``error``, ``pong``) echoes it. Pushes (notifications, subscription deltas) and
+``error``, ``pong``, ``cancel_ack``) echoes it. Pushes (notifications, subscription deltas) and
 ``notice`` frames never carry one and are never replies.
 """
 
@@ -56,12 +56,26 @@ class AuthenticateMessage:
 class ExecuteMessage:
     program: str
     id: str | None = None
+    timeout_ms: int | None = None
+    """The request's deadline, counted from when the server reads it (capped
+    by the engine's own query timeout)."""
 
     def to_json(self) -> str:
-        return _with_id({
-            "type": "execute",
-            "program": self.program,
-        }, self.id)
+        frame: dict[str, Any] = {"type": "execute", "program": self.program}
+        if self.timeout_ms is not None:
+            frame["timeout_ms"] = self.timeout_ms
+        return _with_id(frame, self.id)
+
+
+@dataclass(frozen=True)
+class CancelMessage:
+    """Stop the unanswered request ``target``; answered by ``cancel_ack``."""
+
+    target: str
+    id: str | None = None
+
+    def to_json(self) -> str:
+        return _with_id({"type": "cancel", "target": self.target}, self.id)
 
 
 @dataclass(frozen=True)
@@ -197,6 +211,21 @@ class PongResponse:
     id: str | None = None
 
 
+CancelOutcome = Literal["cancelled", "too_late", "not_found"]
+"""What a ``cancel`` did to its target: stopped before it began committing
+(its reply is an ``error`` with code ``cancelled``), too late (its reply
+reports what it committed), or no unanswered request has that id."""
+
+
+@dataclass(frozen=True)
+class CancelAckResponse:
+    """Answer to ``cancel``, released after the target's own reply."""
+
+    target: str
+    outcome: CancelOutcome
+    id: str | None = None
+
+
 NoticeCode = Literal[
     "notifications_missed",
     "replay_gap",
@@ -205,6 +234,7 @@ NoticeCode = Literal[
     "lifetime_exceeded",
     "auth_timeout",
     "credential_revoked",
+    "credential_expired",
     "server_shutdown",
 ]
 """A connection event. The server closes the connection after every one but
@@ -323,6 +353,7 @@ ServerMessage = (
     | ResultChunkResponse
     | ResultEndResponse
     | PongResponse
+    | CancelAckResponse
     | NoticeResponse
     | NotificationResponse
     | SubscriptionDeltaResponse
@@ -332,6 +363,29 @@ ServerMessage = (
     | SubscriptionErrorResponse
     | SubscriptionResetResponse
 )
+
+ReplyMessage = (
+    AuthenticatedResponse
+    | AuthErrorResponse
+    | ResultResponse
+    | ErrorResponse
+    | ResultStartResponse
+    | ResultChunkResponse
+    | ResultEndResponse
+    | PongResponse
+    | CancelAckResponse
+)
+"""Frames that answer a request and echo its ``id``."""
+
+SubscriptionPush = (
+    SubscriptionDeltaResponse
+    | SubscriptionDeltaStartResponse
+    | SubscriptionDeltaChunkResponse
+    | SubscriptionDeltaEndResponse
+    | SubscriptionErrorResponse
+    | SubscriptionResetResponse
+)
+"""Standing-query frames; each names its ``subscription`` and ``generation``."""
 
 PushMessage = (
     NoticeResponse
@@ -349,7 +403,7 @@ PushMessage = (
 # ── Serialization / Deserialization ───────────────────────────────────
 
 def serialize_message(
-    msg: LoginMessage | AuthenticateMessage | ExecuteMessage | PingMessage,
+    msg: LoginMessage | AuthenticateMessage | ExecuteMessage | CancelMessage | PingMessage,
 ) -> str:
     """Serialize a client message to JSON."""
     return msg.to_json()
@@ -446,6 +500,8 @@ def deserialize_message(data: str | bytes) -> ServerMessage:
         )
     if msg_type == "pong":
         return PongResponse(id=obj.get("id"))
+    if msg_type == "cancel_ack":
+        return CancelAckResponse(target=obj["target"], outcome=obj["outcome"], id=obj.get("id"))
     if msg_type == "notice":
         return NoticeResponse(code=obj["code"], message=obj["message"])
     if msg_type == "subscription_delta":

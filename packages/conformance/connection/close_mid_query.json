@@ -1,0 +1,24 @@
+{
+  "name": "close_mid_query",
+  "description": "The socket closes before a query is answered: connection lost, and a query never committed anything.",
+  "calls": [
+    {
+      "execute": "?a(X)",
+      "expect": {
+        "error": "connection_lost",
+        "may_have_committed": false
+      }
+    }
+  ],
+  "server": [
+    {
+      "recv": {
+        "type": "execute"
+      },
+      "as": "q"
+    },
+    {
+      "close": 1011
+    }
+  ]
+}

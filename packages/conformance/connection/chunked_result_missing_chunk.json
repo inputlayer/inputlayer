@@ -1,0 +1,100 @@
+{
+  "name": "chunked_result_missing_chunk",
+  "description": "A chunk index skips one: the call fails as an internal error, and the connection keeps serving the next call.",
+  "calls": [
+    {
+      "execute": "?a(X)",
+      "expect": {
+        "error": "internal"
+      }
+    },
+    {
+      "execute": "?b(X)",
+      "expect": {
+        "rows": [
+          [
+            9
+          ]
+        ]
+      }
+    }
+  ],
+  "server": [
+    {
+      "recv": {
+        "type": "execute",
+        "program": "?a(X)"
+      },
+      "as": "q"
+    },
+    {
+      "recv": {
+        "type": "execute",
+        "program": "?b(X)"
+      },
+      "as": "r"
+    },
+    {
+      "send": {
+        "type": "result_start",
+        "id": "$q",
+        "columns": [
+          "x"
+        ],
+        "total_count": 3,
+        "truncated": false,
+        "execution_time_ms": 1
+      }
+    },
+    {
+      "send": {
+        "type": "result_chunk",
+        "id": "$q",
+        "rows": [
+          [
+            1
+          ]
+        ],
+        "chunk_index": 0
+      }
+    },
+    {
+      "send": {
+        "type": "result_chunk",
+        "id": "$q",
+        "rows": [
+          [
+            3
+          ]
+        ],
+        "chunk_index": 2
+      }
+    },
+    {
+      "send": {
+        "type": "result_end",
+        "id": "$q",
+        "row_count": 2,
+        "chunk_count": 2
+      }
+    },
+    {
+      "send": {
+        "type": "result",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            9
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "id": "$r"
+      }
+    }
+  ]
+}

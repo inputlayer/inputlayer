@@ -382,7 +382,7 @@ python-test-live:
 		INPUTLAYER_USER=admin \
 		INPUTLAYER_PASSWORD=admin \
 		uv run --extra dev pytest \
-			tests/test_langchain.py tests/test_integration.py -v; \
+			tests/test_langchain.py tests/test_integration.py tests/test_connection_live.py -v; \
 	TEST_EXIT=$$?; \
 	cd - > /dev/null; \
 	kill $$SERVER_PID 2>/dev/null || true; \

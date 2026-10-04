@@ -1,0 +1,29 @@
+{
+  "name": "duplicate_id_rejection",
+  "description": "The server refuses a request (a reused or malformed id) with invalid_request: a protocol error that names the SDK as the culprit.",
+  "calls": [
+    {
+      "execute": "?a(X)",
+      "expect": {
+        "error": "protocol",
+        "code": "invalid_request"
+      }
+    }
+  ],
+  "server": [
+    {
+      "recv": {
+        "type": "execute"
+      },
+      "as": "q"
+    },
+    {
+      "send": {
+        "type": "error",
+        "id": "$q",
+        "code": "invalid_request",
+        "message": "Duplicate request id"
+      }
+    }
+  ]
+}

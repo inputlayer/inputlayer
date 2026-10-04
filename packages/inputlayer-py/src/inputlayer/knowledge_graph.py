@@ -266,35 +266,14 @@ class KnowledgeGraph:
         self._conn = connection
         self._session = Session(connection)
 
-    async def _execute(self, iql: str) -> ResultResponse:
-        """Execute a statement, switching to this KG first if needed.
+    async def _execute(self, iql: str, *, timeout: float | None = None) -> ResultResponse:
+        """Execute a statement on this KG's own connection.
 
-        The KG switch and the statement are sent under a single lock hold
-        on the Connection so that no other coroutine can interleave and
-        change the active KG between the switch and the command.
-
-        Engine failures raise ``QueryError`` naming *iql*.
+        The connection is bound to this KG when it opens (``?kg=``), so no
+        statement ever switches it. Engine failures raise ``QueryError``
+        naming *iql*.
         """
-        if self._conn.current_kg == self._name:
-            return await _naming_query(iql, self._conn.execute(iql))
-        async with self._conn._get_execute_lock():
-            await self._switch_to_kg()
-            return await _naming_query(iql, self._conn._send_and_recv(iql))
-
-    async def _switch_to_kg(self) -> None:
-        """Bind the connection to this KG, creating it on first use.
-
-        Caller must hold the connection's execute lock.
-        """
-        use = f".kg use {self._name}"
-        try:
-            await _naming_query(use, self._conn._send_and_recv(use))
-        except QueryError as err:
-            if err.code != "not_found":
-                raise
-            create = f".kg create {self._name}"
-            await _naming_query(create, self._conn._send_and_recv(create))
-            await _naming_query(use, self._conn._send_and_recv(use))
+        return await _naming_query(iql, self._conn.execute(iql, timeout=timeout))
 
     @property
     def name(self) -> str:
@@ -946,9 +925,14 @@ class KnowledgeGraph:
             details=[(row[0], int(row[1])) for row in result.rows if len(row) > 1],
         )
 
-    async def execute(self, iql: str) -> ResultSet:
-        """Execute raw IQL."""
-        result = await self._execute(iql)
+    async def execute(self, iql: str, *, timeout: float | None = None) -> ResultSet:
+        """Execute raw IQL.
+
+        ``timeout`` (seconds) is the request's deadline, default the client's
+        ``default_timeout``; past it the engine stops the program before it
+        commits and ``DeadlineExceeded`` is raised.
+        """
+        result = await self._execute(iql, timeout=timeout)
         return ResultSet(
             columns=result.columns,
             rows=result.rows,

@@ -7,7 +7,6 @@ handlers/ws.rs`): an `error` frame for a failed one-statement program and
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import pytest
@@ -25,35 +24,15 @@ from inputlayer.knowledge_graph import KnowledgeGraph
 from inputlayer.migrations.errors import MigrationError
 from inputlayer.migrations.recorder import MigrationRecorder
 
+from ._wire import ScriptedWire, attach
+
 
 class Demo(Relation):
     x: int
 
 
-class ScriptedWire:
-    """A WebSocket that answers each recv() with the next scripted frame."""
-
-    def __init__(self, *frames: dict[str, Any]) -> None:
-        self._frames = [json.dumps(f) for f in frames]
-        self.sent: list[str] = []
-
-    async def send(self, raw: str) -> None:
-        self.sent.append(json.loads(raw)["program"])
-
-    async def recv(self) -> str:
-        return self._frames.pop(0)
-
-    @property
-    def drained(self) -> bool:
-        return not self._frames
-
-
 def _kg(wire: ScriptedWire, current_kg: str = "default") -> KnowledgeGraph:
-    conn = Connection("ws://unused")
-    conn._ws = wire  # type: ignore[assignment]
-    conn._connected = True
-    conn._current_kg = current_kg
-    return KnowledgeGraph("default", conn)
+    return KnowledgeGraph("default", attach(Connection("ws://unused"), wire, current_kg))
 
 
 def _messages(*rows: str, errors: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -230,28 +209,6 @@ class TestInsertCount:
         wire = ScriptedWire(_messages("Something else entirely"))
         with pytest.raises(InternalError):
             await _kg(wire).insert(Demo(x=1))
-
-
-class TestKgSwitch:
-    @pytest.mark.asyncio
-    async def test_missing_kg_is_created_on_not_found(self) -> None:
-        wire = ScriptedWire(
-            {"type": "error", "message": "Knowledge graph not found", "code": "not_found"},
-            _messages("Knowledge graph 'default' created."),
-            {**_messages("Switched to knowledge graph: default"), "switched_kg": "default"},
-            _messages("Inserted 1 fact(s) into 'demo'."),
-        )
-        kg = _kg(wire, current_kg="other")
-        assert (await kg.insert(Demo(x=1))).count == 1
-        assert wire.sent[:3] == [".kg use default", ".kg create default", ".kg use default"]
-
-    @pytest.mark.asyncio
-    async def test_other_switch_failures_raise(self) -> None:
-        wire = ScriptedWire({"type": "error", "message": "Permission denied", "code": "validation"})
-        with pytest.raises(QueryError) as caught:
-            await _kg(wire, current_kg="other").insert(Demo(x=1))
-        assert caught.value.query == ".kg use default"
-        assert wire.sent == [".kg use default"]
 
 
 class TestMigrationRecorder:

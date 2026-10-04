@@ -1,0 +1,48 @@
+{
+  "name": "close_mid_stream_write",
+  "description": "The socket closes inside a streamed reply to a write: the call fails with connection lost and may have committed.",
+  "calls": [
+    {
+      "execute": "+a(1)\n?a(X)",
+      "expect": {
+        "error": "connection_lost",
+        "may_have_committed": true
+      }
+    }
+  ],
+  "server": [
+    {
+      "recv": {
+        "type": "execute"
+      },
+      "as": "q"
+    },
+    {
+      "send": {
+        "type": "result_start",
+        "id": "$q",
+        "columns": [
+          "x"
+        ],
+        "total_count": 2,
+        "truncated": false,
+        "execution_time_ms": 1
+      }
+    },
+    {
+      "send": {
+        "type": "result_chunk",
+        "id": "$q",
+        "rows": [
+          [
+            1
+          ]
+        ],
+        "chunk_index": 0
+      }
+    },
+    {
+      "close": 1011
+    }
+  ]
+}
