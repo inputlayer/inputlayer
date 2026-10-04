@@ -123,7 +123,8 @@ both groups, and the default stays the gate's eight.
 | `claims` | the guarded insert an SDK `claim()` sends (`-il_ghost(0), +claim(K, o) <- task(K), K = k, !claim(K, _)`): 150 wins on fresh keys, 150 losses on held keys, then 8 connections racing for each of 40 keys (exactly one winner each, checked) | `win_ack_us`, `lose_ack_us`, `race_ack_us` |
 | `why` | `.why ?two_hop(1, Z)` and `.why ?reach(1, Y)` on 200 nodes / 300 edges, 20 each | `two_hop_us`, `reach_us` |
 | `sessions` | 100 sessions in one graph (2.5K nodes / 10K edges), session `k` subscribed to `?two_hop(k, Z)`; an external writer, open loop, every 200 ms, 100 writes, each changing one session's answer | `delta_us` (write to the target session's delta), `ack_us`, `subscribe_us`, `subscriptions_per_sec`, `rss_per_session_kb` |
-| `memory` | a fresh server: 90K two-integer facts loaded and read back, then 8 graphs of 2.5K nodes / 10K edges with the two-hop rule | `rss_idle_kb`, `rss_bytes_per_fact`, `peak_bytes_per_fact`, `rss_first_graph_kb`, `rss_per_graph_kb` |
+| `memory_facts` | a fresh server: 90K two-integer facts loaded, then read back | `rss_idle_kb`, `rss_bytes_per_fact` (after loading), `peak_bytes_per_fact` (high-water mark after reading them back) |
+| `memory_graphs` | a fresh server: 8 graphs of 2.5K nodes / 10K edges with the two-hop rule, each queried once | `rss_idle_kb`, `rss_first_graph_kb`, `rss_per_graph_kb` (mean growth over the next 7) |
 | `recovery` | 10K edges, the two-hop rule and 50K durable facts in 1K batches; then 3 times: SIGKILL, restart on the same data directory | `restart_ready_us` (kill to first accepted login), `first_query_us` (first `?two_hop(1, Z)` after it; every fact is checked) |
 | `insert_async` | `insert_single` on a server with `storage.persist.durability_mode = async` (recorded in the run file): with `insert_single`, the synchronous WAL's share of a write | as `insert_single` |
 

@@ -370,19 +370,16 @@ async fn session_agent(
     Ok(arrivals)
 }
 
-/// Resident memory: idle; per base fact, after loading `facts` two-integer
-/// facts into a fresh server and reading them all back; then after each of
-/// `graphs` loaded graphs (edges and the two-hop rule, queried once so its
-/// view exists).
-pub async fn memory(server: &RunningServer, params: &MemoryParams) -> Result<Measurement> {
+/// Resident memory of base facts, on a fresh server: the resident set after
+/// loading `facts` two-integer facts, and the high-water mark after reading
+/// them all back as well. Graphs are measured on their own server
+/// ([`memory_graphs`]): memory one phase frees and the allocator keeps would
+/// hide the next phase's growth.
+pub async fn memory_facts(server: &RunningServer, params: &MemoryParams) -> Result<Measurement> {
     let rss = || server.rss_kb().context("read server RSS");
-    // Let startup allocations settle.
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    let idle = rss()?;
-    let mut admin = server.client("default").await?;
-    admin.execute(".kg create facts").await?;
-    let mut client = server.client("facts").await?;
-    let before_facts = rss()?;
+    let idle = settled_rss(server).await?;
+    let mut client = create_kg(server).await?;
+    let before = rss()?;
     let mut loaded = 0;
     while loaded < params.facts {
         let end = (loaded + 5_000).min(params.facts);
@@ -392,14 +389,34 @@ pub async fn memory(server: &RunningServer, params: &MemoryParams) -> Result<Mea
             .await?;
         loaded = end;
     }
-    // Read every fact back, so whatever the engine builds to serve them exists.
+    let after_load = rss()?;
     let (_, reply) = client.execute("?fact(X, Y)").await?;
     expect_rows("facts", reply.row_count, params.facts)?;
-    let after_facts = rss()?;
-    let peak_after = server.peak_rss_kb().context("read server peak RSS")?;
+    let peak = server.peak_rss_kb().context("read server peak RSS")?;
 
+    let per_fact = |kb: u64| kb * 1024 / params.facts as u64;
+    let mut measurement = Measurement::default();
+    let gauges = &mut measurement.gauges;
+    gauges.insert("rss_idle_kb".into(), idle);
+    gauges.insert(
+        "rss_bytes_per_fact".into(),
+        per_fact(after_load.saturating_sub(before)),
+    );
+    // Includes the transient cost of answering a query over all of them.
+    gauges.insert(
+        "peak_bytes_per_fact".into(),
+        per_fact(peak.saturating_sub(before)),
+    );
+    Ok(measurement)
+}
+
+/// Resident memory of knowledge graphs, on a fresh server: after each of
+/// `graphs` graphs of `edges` edges with the two-hop rule, queried once so
+/// its view exists.
+pub async fn memory_graphs(server: &RunningServer, params: &MemoryParams) -> Result<Measurement> {
+    let idle = settled_rss(server).await?;
     let graph = Graph::random(params.nodes, params.edges, SEED);
-    let before_graphs = rss()?;
+    let mut admin = server.client("default").await?;
     let mut after = Vec::with_capacity(params.graphs);
     for index in 0..params.graphs {
         let name = format!("mem{index}");
@@ -408,33 +425,23 @@ pub async fn memory(server: &RunningServer, params: &MemoryParams) -> Result<Mea
         load(&mut client, &graph, &[TWO_HOP_RULE]).await?;
         let (_, reply) = client.execute("?two_hop(1, Z)").await?;
         expect_rows("two_hop(1, Z)", reply.row_count, graph.two_hop(1))?;
-        after.push(rss()?);
+        after.push(server.rss_kb().context("read server RSS")?);
     }
-
     let mut measurement = Measurement::default();
     let gauges = &mut measurement.gauges;
     gauges.insert("rss_idle_kb".into(), idle);
-    gauges.insert(
-        "rss_first_graph_kb".into(),
-        after[0].saturating_sub(before_graphs),
-    );
+    gauges.insert("rss_first_graph_kb".into(), after[0].saturating_sub(idle));
     if params.graphs > 1 {
         let per = after[params.graphs - 1].saturating_sub(after[0]) / (params.graphs as u64 - 1);
         gauges.insert("rss_per_graph_kb".into(), per);
     }
-    let per_fact = |kb: u64| kb * 1024 / params.facts as u64;
-    gauges.insert(
-        "rss_bytes_per_fact".into(),
-        per_fact(after_facts.saturating_sub(before_facts)),
-    );
-    // From the resident set before loading to the high-water mark after
-    // reading: what loading and reading them needed at most. Earlier peaks
-    // can hide part of it, so it is a lower bound.
-    gauges.insert(
-        "peak_bytes_per_fact".into(),
-        per_fact(peak_after.saturating_sub(before_facts)),
-    );
     Ok(measurement)
+}
+
+/// The resident set once startup allocations have settled.
+async fn settled_rss(server: &RunningServer) -> Result<u64> {
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    server.rss_kb().context("read server RSS")
 }
 
 /// Durable facts and a rule, then crash (SIGKILL) and restart on the same

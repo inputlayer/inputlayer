@@ -53,8 +53,10 @@ pub enum Fixture {
     Why,
     /// Many sessions with their own bound standing queries in one graph.
     Sessions,
-    /// Resident memory: idle, per graph, per fact.
-    Memory,
+    /// Resident memory per base fact.
+    MemoryFacts,
+    /// Resident memory per knowledge graph.
+    MemoryGraphs,
     /// Crash and restart on the same data directory.
     Recovery,
     /// `insert_single` with asynchronous durability: the WAL's share.
@@ -63,7 +65,7 @@ pub enum Fixture {
 
 impl Fixture {
     /// Every fixture, by name.
-    pub const ALL: [Fixture; 17] = [
+    pub const ALL: [Fixture; 18] = [
         Fixture::CheapQuery,
         Fixture::BoundQuery,
         Fixture::InsertSingle,
@@ -78,7 +80,8 @@ impl Fixture {
         Fixture::Claims,
         Fixture::Why,
         Fixture::Sessions,
-        Fixture::Memory,
+        Fixture::MemoryFacts,
+        Fixture::MemoryGraphs,
         Fixture::Recovery,
         Fixture::InsertAsync,
     ];
@@ -111,7 +114,8 @@ impl Fixture {
             Fixture::Claims => "claims",
             Fixture::Why => "why",
             Fixture::Sessions => "sessions",
-            Fixture::Memory => "memory",
+            Fixture::MemoryFacts => "memory_facts",
+            Fixture::MemoryGraphs => "memory_graphs",
             Fixture::Recovery => "recovery",
             Fixture::InsertAsync => "insert_async",
         }
@@ -167,7 +171,8 @@ impl Fixture {
             Fixture::Claims => engine::claims(server, &engine.claims).await,
             Fixture::Why => engine::why(server, &engine.why).await,
             Fixture::Sessions => engine::sessions(server, &engine.sessions).await,
-            Fixture::Memory => engine::memory(server, &engine.memory).await,
+            Fixture::MemoryFacts => engine::memory_facts(server, &engine.memory).await,
+            Fixture::MemoryGraphs => engine::memory_graphs(server, &engine.memory).await,
             Fixture::Recovery => engine::recovery(server, &engine.recovery).await,
         }?;
         if let Some(rss) = server.peak_rss_kb() {
