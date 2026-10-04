@@ -293,6 +293,53 @@ pub(super) struct CatalogDelta {
 }
 
 impl CatalogDelta {
+    /// The delta that sets rules and persistent schemas to the states
+    /// `entries` give (later entries win), leaving out those already in
+    /// that state: how a replication follower applies its primary's catalog
+    /// changes. Session schemas are kept.
+    pub(super) fn replicated(
+        rules: &RuleCatalog,
+        schemas: &SchemaCatalog,
+        entries: impl IntoIterator<Item = CatalogEntry>,
+    ) -> Self {
+        let mut delta = CatalogDelta::default();
+        let mut staged: Option<SchemaCatalog> = None;
+        for entry in entries {
+            match entry {
+                CatalogEntry::Rule { name, definition } => {
+                    delta.rules.retain(|(n, _)| *n != name);
+                    if rules.get(&name) != definition.as_ref() {
+                        delta.rules.push((name, definition));
+                    }
+                }
+                CatalogEntry::Schema { relation, schema } => {
+                    delta.schemas.retain(|(r, _)| *r != relation);
+                    if schemas.persistent_schema(&relation) != schema.as_ref() {
+                        delta.schemas.push((relation, schema));
+                    }
+                }
+            }
+        }
+        if !delta.schemas.is_empty() {
+            let staged = staged.get_or_insert_with(|| schemas.clone());
+            for (relation, schema) in &delta.schemas {
+                staged.set_persistent(relation, schema.clone());
+            }
+        }
+        delta.schema_catalog = staged;
+        delta
+    }
+
+    /// Names of the rules the delta changes.
+    pub(super) fn rule_names(&self) -> impl Iterator<Item = &str> {
+        self.rules.iter().map(|(name, _)| name.as_str())
+    }
+
+    /// Names of the relations whose persistent schema the delta changes.
+    pub(super) fn schema_names(&self) -> impl Iterator<Item = &str> {
+        self.schemas.iter().map(|(relation, _)| relation.as_str())
+    }
+
     /// Whether the delta changes anything that is persisted.
     pub fn is_durable(&self) -> bool {
         !self.rules.is_empty() || !self.schemas.is_empty()

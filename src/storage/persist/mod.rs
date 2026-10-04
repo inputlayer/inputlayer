@@ -54,6 +54,23 @@ pub use export_writer::ExportWriter;
 pub use transaction::{CatalogEntry, CatalogRecord, Transaction, TxnOp};
 pub use wal::PersistWal;
 
+/// Encode `txn` as one WAL record (CRC, JSON, newline): the form the
+/// replication stream ships a commit in.
+///
+/// # Errors
+/// The transaction cannot be serialized.
+pub fn encode_record(txn: &Transaction) -> StorageResult<Vec<u8>> {
+    wal_record::encode(txn)
+}
+
+/// Decode one WAL record made by [`encode_record`], checksum included.
+///
+/// # Errors
+/// A damaged record, or one this server cannot decode.
+pub fn decode_record(line: &[u8]) -> Result<Transaction, String> {
+    wal_record::decode_line(line)
+}
+
 use crate::storage::{StorageError, StorageResult};
 use crate::value::record_batch_to_tuples;
 use catalog_log::CatalogLog;
@@ -76,6 +93,7 @@ use parquet::file::properties::WriterProperties;
 use std::sync::Arc;
 
 use crate::config::DurabilityMode;
+use crate::replication::ReplicationLog;
 
 /// Configuration for the persist layer
 #[derive(Debug, Clone)]
@@ -159,6 +177,8 @@ pub struct FilePersist {
     catalog: Mutex<CatalogLog>,
     /// Catalog changes replayed from the WAL at startup, until the engine takes them.
     recovered_catalog: Mutex<Vec<CatalogRecord>>,
+    /// Where committed transactions are shipped to followers, on a primary.
+    replication: std::sync::OnceLock<Arc<ReplicationLog>>,
     next_batch_id: AtomicU64,
     #[cfg(test)]
     flush_faults: Mutex<Vec<FlushFault>>,
@@ -184,6 +204,7 @@ impl FilePersist {
             wal: Mutex::new(wal),
             catalog: Mutex::new(CatalogLog::default()),
             recovered_catalog: Mutex::new(Vec::new()),
+            replication: std::sync::OnceLock::new(),
             next_batch_id: AtomicU64::new(1),
             #[cfg(test)]
             flush_faults: Mutex::new(Vec::new()),
@@ -338,6 +359,17 @@ impl FilePersist {
             recovered.extend(catalog);
         }
         count
+    }
+
+    /// Ship every transaction committed from now on to `log`, in WAL order.
+    /// Returns false (and changes nothing) when a log is already attached.
+    pub fn attach_replication_log(&self, log: Arc<ReplicationLog>) -> bool {
+        self.replication.set(log).is_ok()
+    }
+
+    /// The attached replication log, on a primary.
+    pub fn replication_log(&self) -> Option<&Arc<ReplicationLog>> {
+        self.replication.get()
     }
 
     /// The rule and schema changes the WAL held at startup, in commit order.
@@ -631,11 +663,25 @@ impl PersistBackend for FilePersist {
             if self.config.durability_mode != DurabilityMode::Async {
                 self.check_unflushed(&txn)?;
             }
-            match self.config.durability_mode {
-                DurabilityMode::Immediate => wal.append(&txn, true)?,
-                DurabilityMode::Batched => wal.append(&txn, false)?,
-                // No WAL: data is lost on crash. Only for ephemeral/reproducible data.
-                DurabilityMode::Async => {}
+            match self.replication.get() {
+                None => match self.config.durability_mode {
+                    DurabilityMode::Immediate => wal.append(&txn, true)?,
+                    DurabilityMode::Batched => wal.append(&txn, false)?,
+                    // No WAL: data is lost on crash. Only for ephemeral/reproducible data.
+                    DurabilityMode::Async => {}
+                },
+                // Shipped under the WAL mutex once its WAL write succeeded, so
+                // followers receive commits in WAL order and never one the
+                // primary failed to store.
+                Some(log) => {
+                    let record = wal_record::encode(&txn)?;
+                    match self.config.durability_mode {
+                        DurabilityMode::Immediate => wal.append_record(&record, true)?,
+                        DurabilityMode::Batched => wal.append_record(&record, false)?,
+                        DurabilityMode::Async => {}
+                    }
+                    log.append(crate::replication::event::commit_line(&record));
+                }
             }
 
             let mut shards = self.shards.write();

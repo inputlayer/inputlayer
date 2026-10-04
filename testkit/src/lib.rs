@@ -22,7 +22,7 @@ pub mod streamed;
 pub use agent::{Agent, Delta, View};
 pub use client::{Commit, QueryResult, WsClient};
 pub use contract::{Checked, Violation};
-pub use engine::{Engine, EngineBuilder};
+pub use engine::{Engine, EngineBuilder, Replication};
 pub use fixture::Fixture;
 pub use known_defect::{KnownDefect, Reproduction};
 pub use metrics::SampleLog;

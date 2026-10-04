@@ -142,6 +142,13 @@ pub enum StorageError {
     #[error("store read-only until restart recovery")]
     StoreReadOnly,
 
+    /// This server is a replication follower: it serves reads and applies
+    /// the primary's changes, and refuses every client write.
+    #[error(
+        "read-only replica: this server is a replication follower; send writes to the primary"
+    )]
+    ReadOnlyReplica,
+
     /// A write that would grow a knowledge graph past its memory budget.
     #[error(
         "Knowledge graph '{kg}' would hold about {projected} bytes of facts, over its \

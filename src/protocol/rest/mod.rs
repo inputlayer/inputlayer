@@ -75,8 +75,9 @@ async fn auth_middleware(
         return next.run(req).await;
     }
 
-    // The WebSocket endpoint handles its own auth flow (Login/Authenticate messages)
-    if effective_path == "/ws" {
+    // The WebSocket endpoint handles its own auth flow (Login/Authenticate
+    // messages); the replication stream checks the replication token.
+    if effective_path == "/ws" || effective_path == crate::protocol::replication::STREAM_PATH {
         return next.run(req).await;
     }
 
@@ -355,6 +356,14 @@ pub fn create_router(handler: Arc<Handler>, config: &HttpConfig) -> Router {
         .route("/metrics", get(admin::stats))
         .route("/metrics/prometheus", get(admin::prometheus_metrics))
         .route("/ws", get(ws::global_websocket))
+        .route(
+            crate::protocol::replication::STREAM_PATH,
+            get(crate::protocol::replication::primary::stream),
+        )
+        .route(
+            "/replication/status",
+            get(crate::protocol::replication::primary::status),
+        )
         .route("/api/asyncapi.yaml", get(asyncapi_yaml))
         .route("/api/openapi.yaml", get(openapi_yaml))
         .route("/api/ws-docs", get(asyncapi_docs));
@@ -471,6 +480,9 @@ pub async fn start_http_server(
     // Expire API keys on time and persist their last use
     let upkeep = tokio::spawn(Arc::clone(&handler).credential_upkeep());
 
+    // On a follower: keep applying the primary's replication stream
+    let follower = crate::protocol::replication::follower::spawn(Arc::clone(&handler));
+
     // Spawn background auto-compaction task (if enabled)
     let compact_interval = handler.config().storage.persist.auto_compact_interval_secs;
     let compact_threshold = handler.config().storage.persist.auto_compact_threshold;
@@ -576,6 +588,7 @@ pub async fn start_http_server(
     // Signal reaper to stop
     let _ = shutdown_tx.send(true);
     upkeep.abort();
+    follower.abort();
 
     // Flush WAL and save metadata with a timeout.
     // If a long-running query holds the storage lock, we don't want to hang indefinitely.

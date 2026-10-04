@@ -136,6 +136,7 @@ pub mod syntax; // PEG-based syntax highlighting for REPL
 // Storage Engine
 pub mod config; // Configuration system
 pub mod naming; // Canonical KG and relation name grammar
+pub mod replication; // Warm-standby replication (engine side)
 pub mod size_limits; // Bounds on request-supplied sizes
 pub mod storage; // Storage formats (Parquet, metadata)
 pub mod storage_engine; // Multi-knowledge-graph storage engine

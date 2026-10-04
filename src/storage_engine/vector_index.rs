@@ -12,6 +12,7 @@ use crate::index_manager::{
     DistanceMetric, HnswConfig, IdType, IndexStats, IndexType, ManagedIndex, RegisteredIndex,
     TupleId, INDEX_DEFINITIONS_FILE,
 };
+use crate::replication::EngineEvent;
 use crate::schema::SchemaType;
 use crate::size_limits::{MAX_EF_CONSTRUCTION, MAX_EF_SEARCH};
 use crate::statement::IndexCreateOptions;
@@ -169,6 +170,26 @@ impl KnowledgeGraph {
         }
         self.publish_snapshot();
         Ok(stats)
+    }
+
+    /// Make index `def` exist exactly as defined, built from the current
+    /// facts; an identical index is left alone. For replication followers.
+    pub(super) fn install_index(&mut self, def: RegisteredIndex) -> Result<(), String> {
+        if self
+            .indexes
+            .get(&def.name)
+            .is_some_and(|managed| managed.definition == def)
+        {
+            return Ok(());
+        }
+        if self.indexes.contains(&def.name) {
+            self.indexes.remove(&def.name)?;
+        }
+        let managed = self.build_index(def)?;
+        self.indexes.insert(managed)?;
+        self.save_index_definitions()?;
+        self.publish_snapshot();
+        Ok(())
     }
 
     /// Drop an index and persist the change.
@@ -388,6 +409,12 @@ impl StorageEngine {
     ) -> StorageResult<(IndexStats, u64)> {
         self.with_kg_mut(kg, |db| {
             let stats = db.create_index(opts)?;
+            if let Some(managed) = db.indexes.get(&opts.name) {
+                self.replicate(&EngineEvent::CreateIndex {
+                    kg: kg.to_string(),
+                    index: managed.definition.clone(),
+                });
+            }
             Ok((stats, db.snapshot.load().revision))
         })
     }
@@ -397,6 +424,10 @@ impl StorageEngine {
     pub fn drop_index_in(&self, kg: &str, name: &str) -> StorageResult<u64> {
         self.with_kg_mut(kg, |db| {
             db.drop_index(name)?;
+            self.replicate(&EngineEvent::DropIndex {
+                kg: kg.to_string(),
+                name: name.to_string(),
+            });
             Ok(db.snapshot.load().revision)
         })
     }

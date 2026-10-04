@@ -131,6 +131,11 @@ impl Transaction {
         &self.ops
     }
 
+    /// The changes, in commit order, by value.
+    pub fn into_ops(self) -> Vec<TxnOp> {
+        self.ops
+    }
+
     /// Whether the transaction changes nothing.
     pub fn is_empty(&self) -> bool {
         self.ops.is_empty()
