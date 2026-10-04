@@ -1110,4 +1110,3 @@ function mayWrite(program: string): boolean {
     .map((line) => line.trim())
     .some((line) => line !== '' && !line.startsWith('?') && !line.startsWith('//'));
 }
-
