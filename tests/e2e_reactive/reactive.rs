@@ -220,31 +220,90 @@ async fn unrelated_writes_produce_no_deltas() -> Checked<()> {
 /// Complete bipartite graph, both directions: no odd cycle, so
 /// [`TRIANGLES`] returns nothing, yet the cyclic join runs long.
 const BIPARTITE_SIDE: i64 = 14;
+/// Largest side calibration may grow to, far past the engine's query deadline.
+const MAX_BIPARTITE_SIDE: i64 = 64;
 const TRIANGLES: &str = "?edge(X, Y), edge(Y, Z), edge(Z, X)";
 /// Below this, the agent's own query proves nothing about blocking.
 const LONG_QUERY: Duration = Duration::from_millis(500);
 /// Writer ack to the agent's delta while the agent's own query runs.
 const DELTA_BUDGET: Duration = Duration::from_millis(250);
 
-#[tokio::test(flavor = "multi_thread")]
-async fn agent_receives_deltas_while_its_own_long_query_runs() -> Checked<()> {
+/// Edges of the bipartite graph of `side` that the one of `smaller` lacks.
+/// Left nodes are even and right nodes odd, so growing the side only adds
+/// edges.
+fn bipartite_edges(side: i64, smaller: i64) -> Vec<String> {
+    let mut edges = Vec::new();
+    for a in 0..side {
+        for b in 0..side {
+            if a >= smaller || b >= smaller {
+                let (left, right) = (2 * a, 2 * b + 1);
+                edges.push(format!("({left}, {right})"));
+                edges.push(format!("({right}, {left})"));
+            }
+        }
+    }
+    edges
+}
+
+/// Engine with `seen(0)` and the bipartite graph of [`BIPARTITE_SIDE`].
+async fn bipartite_engine() -> Checked<Engine> {
     let engine = engine().start().await.expect("start engine");
-    let side = BIPARTITE_SIDE;
     Fixture::new("bipartite", KG)
-        .facts(
-            "edge",
-            (0..side).flat_map(|a| {
-                (side..2 * side).flat_map(move |b| [format!("({a}, {b})"), format!("({b}, {a})")])
-            }),
-        )
+        .facts("edge", bipartite_edges(BIPARTITE_SIDE, 0))
         .facts("seen", ["(0)".to_string()])
         .install(&engine)
         .await?;
+    Ok(engine)
+}
+
+/// Grow the bipartite graph until [`TRIANGLES`] runs for twice
+/// [`LONG_QUERY`] on this host: join speed differs several-fold between hosts,
+/// and a fixed side ran under [`LONG_QUERY`] on CI runners. Returns the side.
+async fn calibrate_long_query(engine: &Engine) -> Checked<i64> {
+    let target = 2 * LONG_QUERY;
+    let mut probe = WsClient::connect(engine, KG).await?;
+    let mut side = BIPARTITE_SIDE;
+    loop {
+        let started = std::time::Instant::now();
+        match probe.execute(TRIANGLES).await {
+            Ok(result) => assert!(result.rows.is_empty(), "{:?}", result.rows),
+            Err(Violation::Rejected(message)) if message.contains("deadline exceeded") => break,
+            Err(other) => return Err(other),
+        }
+        let ran = started.elapsed();
+        if ran >= target {
+            break;
+        }
+        assert!(
+            side < MAX_BIPARTITE_SIDE,
+            "side {side} still runs {TRIANGLES} in {ran:?}"
+        );
+        // Step by the cube root of the shortfall; the next probe checks it.
+        let scale = (target.as_secs_f64() / ran.as_secs_f64()).cbrt();
+        let grown = ((side as f64 * scale).ceil() as i64).clamp(side + 1, MAX_BIPARTITE_SIDE);
+        for batch in bipartite_edges(grown, side).chunks(1_000) {
+            probe
+                .commit(&format!("+edge[{}]", batch.join(", ")))
+                .await?;
+        }
+        side = grown;
+    }
+    probe.close().await;
+    Ok(side)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn agent_receives_deltas_while_its_own_long_query_runs() -> Checked<()> {
+    let engine = bipartite_engine().await?;
+    let side = calibrate_long_query(&engine).await?;
     let mut agent = Agent::connect(&engine, KG).await?;
     let mut writer = WsClient::connect(&engine, KG).await?;
     agent.subscribe("seen", "?seen(X)").await?;
 
-    let mut log = SampleLog::new("long_query_on_subscriber", "bipartite_triangles");
+    let mut log = SampleLog::new(
+        "long_query_on_subscriber",
+        &format!("bipartite_triangles_{side}"),
+    );
     let sent = std::time::Instant::now();
     agent.send_execute(TRIANGLES).await?;
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -284,18 +343,7 @@ const CANCEL_BUDGET: Duration = Duration::from_millis(500);
 
 #[tokio::test(flavor = "multi_thread")]
 async fn agent_cancels_its_long_query_and_keeps_its_subscription() -> Checked<()> {
-    let engine = engine().start().await.expect("start engine");
-    let side = BIPARTITE_SIDE;
-    Fixture::new("bipartite", KG)
-        .facts(
-            "edge",
-            (0..side).flat_map(|a| {
-                (side..2 * side).flat_map(move |b| [format!("({a}, {b})"), format!("({b}, {a})")])
-            }),
-        )
-        .facts("seen", ["(0)".to_string()])
-        .install(&engine)
-        .await?;
+    let engine = bipartite_engine().await?;
     let mut agent = Agent::connect(&engine, KG).await?;
     let mut writer = WsClient::connect(&engine, KG).await?;
     agent.subscribe("seen", "?seen(X)").await?;
