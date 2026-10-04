@@ -239,6 +239,16 @@ impl StorageEngine {
         }
     }
 
+    /// Make every change applied so far durable (one WAL fsync). A follower
+    /// calls it after applying a batch of events and before saving its
+    /// position.
+    ///
+    /// # Errors
+    /// The WAL could not be synced; the position must not advance.
+    pub fn sync_replicated(&self) -> StorageResult<()> {
+        self.persist.sync()
+    }
+
     /// Bring graph `kg` to `state` from a primary's checkpoint: create it if
     /// missing, commit the difference in facts, rules and schemas as one
     /// transaction, then make its vector indexes match.
@@ -396,7 +406,9 @@ impl StorageEngine {
         let time = self.logical_time.fetch_add(1, Ordering::SeqCst);
         let mut txn = transaction(kg, time, &facts);
         catalog.write_to(&mut txn, kg);
-        self.persist.commit(txn)?;
+        // Durable at the follower's next `sync_replicated`, before it saves
+        // its position: one fsync per batch of events, not one per event.
+        self.persist.commit_unsynced(txn)?;
 
         let catalog_durable = catalog.is_durable();
         let catalog_saved = db.install_catalog(catalog, time);

@@ -46,12 +46,18 @@ impl Position {
         }
     }
 
-    /// Replace the file with this position: write a temporary file, fsync
-    /// it, rename it over the old one, fsync the directory.
+    /// Replace the file with this position: write a temporary file and
+    /// rename it over the old one; with `durable`, fsync the file before and
+    /// the directory after the rename.
+    ///
+    /// Without `durable` a crash may leave the old position (or, at worst,
+    /// an unreadable file, which the follower answers with a resync). Both
+    /// only make the follower apply events again, which is idempotent, as
+    /// long as the changes up to this position are already durable.
     ///
     /// # Errors
     /// Any I/O failure; the old file is then unchanged.
-    pub fn save(&self, path: &Path) -> StorageResult<()> {
+    pub fn save(&self, path: &Path, durable: bool) -> StorageResult<()> {
         let dir = path
             .parent()
             .ok_or_else(|| StorageError::Other(format!("{} has no parent", path.display())))?;
@@ -59,9 +65,13 @@ impl Position {
         let tmp = path.with_extension("json.tmp");
         let mut file = fs::File::create(&tmp)?;
         file.write_all(&serde_json::to_vec(self).map_err(|e| StorageError::Other(e.to_string()))?)?;
-        file.sync_all()?;
+        if durable {
+            file.sync_all()?;
+        }
         fs::rename(&tmp, path)?;
-        fs::File::open(dir)?.sync_all()?;
+        if durable {
+            fs::File::open(dir)?.sync_all()?;
+        }
         Ok(())
     }
 }
@@ -80,8 +90,14 @@ mod tests {
             lsn: 42,
             primary_revision: 17,
         };
-        position.save(&path).unwrap();
+        position.save(&path, true).unwrap();
         assert_eq!(Position::load(&path).unwrap(), position);
+        let later = Position {
+            lsn: 43,
+            ..position
+        };
+        later.save(&path, false).unwrap();
+        assert_eq!(Position::load(&path).unwrap(), later);
     }
 
     #[test]

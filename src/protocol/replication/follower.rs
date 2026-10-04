@@ -16,7 +16,7 @@ use crate::replication::event::{decode_line, split_lines};
 use crate::replication::position::position_path;
 use crate::replication::{Event, Line, Position, ResyncMark};
 use crate::storage_engine::{GraphEvent, GraphState, ReplicaChange};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{FutureExt, SinkExt, StreamExt};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -27,6 +27,8 @@ use tokio_tungstenite::tungstenite::Message;
 use tracing::{info, warn};
 
 const MIN_BACKOFF: Duration = Duration::from_millis(100);
+/// Bytes of already-received events applied as one batch.
+const BATCH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_BACKOFF: Duration = Duration::from_secs(2);
 
 /// Start the follower task (a no-op future when this is not a follower).
@@ -104,9 +106,7 @@ impl Follower {
         let base = config.primary_url.as_deref().unwrap_or_default();
         let url = format!(
             "{}/v1{}",
-            base.trim_end_matches('/')
-                .replacen("https://", "wss://", 1)
-                .replacen("http://", "ws://", 1),
+            base.trim_end_matches('/').replacen("http://", "ws://", 1),
             super::STREAM_PATH
         );
         let mut request = url
@@ -174,7 +174,7 @@ impl Follower {
                                 info!(stream_id = id, head, "replication_resync_started");
                                 status.set_state(FollowerState::Resyncing);
                                 // A crash mid-resync must not resume from the old position.
-                                self.save(Position::default())?;
+                                self.save_position(Position::default(), true)?;
                                 resync = Some(Resync::default());
                             } else {
                                 status.set_state(FollowerState::Streaming);
@@ -188,7 +188,10 @@ impl Follower {
                     if stream_id == 0 {
                         return Err("stream data before start".into());
                     }
-                    let (first, lines) = decode_frame(&frame)?;
+                    let (first, head, lines) = decode_frame(&frame)?;
+                    if head > 0 {
+                        status.contact(head);
+                    }
                     let lsn = if first == 0 {
                         let state = resync.as_mut().ok_or("checkpoint data outside a resync")?;
                         match self.resync_lines(state, lines.to_vec(), stream_id).await? {
@@ -203,7 +206,45 @@ impl Follower {
                         if resync.is_some() {
                             return Err("events before the checkpoint ended".into());
                         }
-                        self.apply_events(stream_id, first, lines.to_vec()).await?
+                        // Apply every frame that already arrived as one batch:
+                        // one fsync and one position save for all of them.
+                        let mut batch = lines.to_vec();
+                        let mut next = first + split_lines(lines).count() as u64;
+                        while batch.len() < BATCH_BYTES {
+                            let Some(message) = ws.next().now_or_never() else {
+                                break;
+                            };
+                            match message {
+                                Some(Ok(Message::Binary(frame))) => {
+                                    let (more, head, lines) = decode_frame(&frame)?;
+                                    if more != next {
+                                        return Err(format!(
+                                            "frame at LSN {more} does not follow {}",
+                                            next - 1
+                                        ));
+                                    }
+                                    status.contact(head);
+                                    next += split_lines(lines).count() as u64;
+                                    batch.extend_from_slice(lines);
+                                }
+                                Some(Ok(Message::Text(text))) => {
+                                    match serde_json::from_str(&text) {
+                                        Ok(PrimaryMessage::Heartbeat { head }) => {
+                                            status.contact(head);
+                                        }
+                                        Ok(PrimaryMessage::Error { message }) => {
+                                            return Err(message)
+                                        }
+                                        _ => return Err(format!("unexpected message: {text}")),
+                                    }
+                                }
+                                Some(Ok(_)) => {}
+                                Some(Err(e)) => return Err(e.to_string()),
+                                // Closed: apply what arrived; the next read reports it.
+                                None => break,
+                            }
+                        }
+                        self.apply_events(stream_id, first, batch).await?
                     };
                     self.streamed = true;
                     let ack = FollowerMessage::Ack { lsn };
@@ -217,7 +258,7 @@ impl Follower {
         }
     }
 
-    /// Apply a frame of events starting at LSN `first`; returns the last LSN.
+    /// Apply a batch of events starting at LSN `first`; returns the last LSN.
     async fn apply_events(
         &mut self,
         stream_id: u64,
@@ -225,7 +266,7 @@ impl Follower {
         lines: Vec<u8>,
     ) -> Result<u64, String> {
         if stream_id != self.position.stream_id || first != self.position.lsn + 1 {
-            self.save(Position::default())?;
+            self.save_position(Position::default(), true)?;
             return Err(format!(
                 "stream gap: expected LSN {} of stream {:016x}, got {first} of {stream_id:016x}",
                 self.position.lsn + 1,
@@ -250,6 +291,7 @@ impl Follower {
                 changes.extend(storage.apply_replicated(event).map_err(|e| e.to_string())?);
                 count += 1;
             }
+            storage.sync_replicated().map_err(|e| e.to_string())?;
             Ok((changes, count, revision))
         })
         .await
@@ -258,7 +300,7 @@ impl Follower {
             Ok(applied) => applied,
             Err(e) => {
                 // The state may be partly applied: rebuild it from a checkpoint.
-                self.save(Position::default())?;
+                self.save_position(Position::default(), true)?;
                 return Err(format!("applying the primary's events failed: {e}"));
             }
         };
@@ -268,7 +310,7 @@ impl Follower {
             lsn: first + count - 1,
             primary_revision: self.position.primary_revision.max(revision),
         };
-        self.save(position)?;
+        self.save_position(position, false)?;
         Ok(position.lsn)
     }
 
@@ -336,6 +378,7 @@ impl Follower {
                         .map_err(|e| e.to_string())?,
                 );
             }
+            storage.sync_replicated().map_err(|e| e.to_string())?;
             Ok(changes)
         })
         .await
@@ -349,7 +392,7 @@ impl Follower {
             lsn: state.head,
             primary_revision: state.revision,
         };
-        self.save(position)?;
+        self.save_position(position, true)?;
         info!(
             stream_id,
             head = state.head,
@@ -360,9 +403,12 @@ impl Follower {
         Ok(Some(state.head))
     }
 
-    fn save(&mut self, position: Position) -> Result<(), String> {
+    /// Record `position`. With `durable` the file is fsynced; without, a
+    /// crash may bring back an older position, which only replays events
+    /// (the WAL holding them is synced first).
+    fn save_position(&mut self, position: Position, durable: bool) -> Result<(), String> {
         position
-            .save(&self.path)
+            .save(&self.path, durable)
             .map_err(|e| format!("saving the replication position: {e}"))?;
         self.position = position;
         self.handler.replication_status().applied(

@@ -30,7 +30,8 @@ primary_url = "http://primary:8080"
 ```
 
 The follower connects to `GET /v1/replication/stream` on the primary's HTTP
-port. It copies the primary's whole state, then applies changes as they
+port. The follower's client speaks plain HTTP only. Keep the connection on a
+private network, or put a proxy that handles TLS in front of the primary. It copies the primary's whole state, then applies changes as they
 commit. Users and API keys live in the replicated `_internal` graph, so the
 primary's API keys work on the follower too. The follower creates no admin
 user of its own.
@@ -116,7 +117,7 @@ curl -H "Authorization: Bearer $INPUTLAYER_API_KEY" http://follower:8080/v1/repl
 | `token` | both | none | shared secret, at least 16 characters |
 | `retain_bytes` | primary | 64 MiB | recent changes kept in memory for followers to catch up from |
 | `heartbeat_ms` | primary | 500 | heartbeat interval on an idle stream |
-| `primary_url` | follower | none | the primary's HTTP base URL |
+| `primary_url` | follower | none | the primary's base URL (`http://` only) |
 | `timeout_ms` | follower | 3000 | silence after which the follower reconnects; must exceed `heartbeat_ms` |
 
 Keep the primary on `durability_mode = "immediate"` (the default). With

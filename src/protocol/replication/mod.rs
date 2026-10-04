@@ -6,9 +6,10 @@
 //! `tail` (the follower's position is in the retained log) or `resync` (a
 //! checkpoint of the whole state comes first). Then:
 //!
-//! - binary frames carry stream lines (see `replication::event`): an 8-byte
-//!   big-endian LSN of the first line, then the lines; LSN 0 marks the lines
-//!   of a checkpoint;
+//! - binary frames carry stream lines (see `replication::event`): the LSN of
+//!   the first line and the primary's head LSN when it was sent (8 bytes
+//!   each, big-endian), then the lines; LSN 0 marks the lines of a
+//!   checkpoint;
 //! - `heartbeat` text frames carry the primary's head LSN while idle;
 //! - the follower answers each applied frame with `ack`.
 //!
@@ -87,21 +88,32 @@ fn token_matches(expected: &str, presented: &str) -> bool {
         == 0
 }
 
-/// A binary frame: the first line's LSN (0 for checkpoint lines), then lines.
-fn encode_frame(first_lsn: u64, lines: impl IntoIterator<Item = impl AsRef<[u8]>>) -> Vec<u8> {
-    let mut frame = first_lsn.to_be_bytes().to_vec();
+/// Bytes before a frame's lines.
+const FRAME_HEADER: usize = 16;
+
+/// A binary frame: the first line's LSN (0 for checkpoint lines), the
+/// primary's head LSN, then the lines.
+fn encode_frame(
+    first_lsn: u64,
+    head: u64,
+    lines: impl IntoIterator<Item = impl AsRef<[u8]>>,
+) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(FRAME_HEADER);
+    frame.extend_from_slice(&first_lsn.to_be_bytes());
+    frame.extend_from_slice(&head.to_be_bytes());
     for line in lines {
         frame.extend_from_slice(line.as_ref());
     }
     frame
 }
 
-/// Split a binary frame into its first LSN and its lines' bytes.
-fn decode_frame(frame: &[u8]) -> Result<(u64, &[u8]), String> {
-    let (lsn, lines) = frame
-        .split_first_chunk::<8>()
-        .ok_or_else(|| format!("replication frame of {} bytes has no LSN", frame.len()))?;
-    Ok((u64::from_be_bytes(*lsn), lines))
+/// Split a binary frame into its first LSN, the primary's head and its
+/// lines' bytes.
+fn decode_frame(frame: &[u8]) -> Result<(u64, u64, &[u8]), String> {
+    let short = || format!("replication frame of {} bytes has no header", frame.len());
+    let (lsn, rest) = frame.split_first_chunk::<8>().ok_or_else(short)?;
+    let (head, lines) = rest.split_first_chunk::<8>().ok_or_else(short)?;
+    Ok((u64::from_be_bytes(*lsn), u64::from_be_bytes(*head), lines))
 }
 
 #[cfg(test)]
@@ -117,8 +129,11 @@ mod tests {
 
     #[test]
     fn frames_round_trip() {
-        let frame = encode_frame(42, [b"a\n".as_slice(), b"b\n".as_slice()]);
-        assert_eq!(decode_frame(&frame).unwrap(), (42, b"a\nb\n".as_slice()));
+        let frame = encode_frame(42, 50, [b"a\n".as_slice(), b"b\n".as_slice()]);
+        assert_eq!(
+            decode_frame(&frame).unwrap(),
+            (42, 50, b"a\nb\n".as_slice())
+        );
         assert!(decode_frame(b"short").is_err());
     }
 

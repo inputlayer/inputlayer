@@ -488,7 +488,8 @@ pub struct ReplicationConfig {
     #[serde(default = "default_replication_heartbeat_ms")]
     pub heartbeat_ms: u64,
 
-    /// Follower: the primary's HTTP base URL, e.g. `http://primary:8080`.
+    /// Follower: the primary's HTTP base URL, e.g. `http://primary:8080`
+    /// (plain HTTP: the stream client has no TLS).
     #[serde(default)]
     pub primary_url: Option<String>,
 
@@ -551,12 +552,13 @@ impl ReplicationConfig {
             return Err("replication.heartbeat_ms must be greater than 0".to_string());
         }
         if self.role == ReplicationRole::Follower {
+            // The stream client has no TLS: reach the primary over a private
+            // network, or through a proxy that terminates TLS.
             match &self.primary_url {
-                Some(url) if url.starts_with("http://") || url.starts_with("https://") => {}
+                Some(url) if url.starts_with("http://") => {}
                 _ => {
                     return Err(
-                        "replication.primary_url must be an http:// or https:// URL for a follower"
-                            .to_string(),
+                        "replication.primary_url must be an http:// URL for a follower".to_string(),
                     )
                 }
             }
@@ -1435,6 +1437,79 @@ mod tests {
             assert_eq!(config.storage.data_dir, PathBuf::from("/tmp/x"));
             Ok(())
         });
+    }
+
+    #[test]
+    fn test_replication_section_reads_from_file_and_env() {
+        figment::Jail::expect_with(|jail| {
+            assert_eq!(
+                Config::load().unwrap().replication.role,
+                ReplicationRole::Standalone
+            );
+            jail.create_file(
+                "server.toml",
+                "[replication]\nrole = \"follower\"\nprimary_url = \"http://p:8080\"\n",
+            )?;
+            jail.set_env("INPUTLAYER_REPLICATION__TOKEN", "0123456789abcdef-secret");
+            let mut config = Config::from_file("server.toml").expect("parse must succeed");
+            assert_eq!(config.replication.role, ReplicationRole::Follower);
+            assert_eq!(
+                config.replication.token.as_deref(),
+                Some("0123456789abcdef-secret")
+            );
+            config
+                .validate()
+                .expect("a complete follower section is valid");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_replication_validation_refuses_setups_that_cannot_work() {
+        let follower = ReplicationConfig {
+            role: ReplicationRole::Follower,
+            token: Some("0123456789abcdef".into()),
+            primary_url: Some("http://primary:8080".into()),
+            ..ReplicationConfig::default()
+        };
+        assert!(follower.validate().is_ok());
+        let refused = [
+            ReplicationConfig {
+                token: Some("short".into()),
+                ..follower.clone()
+            },
+            ReplicationConfig {
+                token: None,
+                ..follower.clone()
+            },
+            ReplicationConfig {
+                primary_url: None,
+                ..follower.clone()
+            },
+            ReplicationConfig {
+                primary_url: Some("https://primary:8443".into()),
+                ..follower.clone()
+            },
+            ReplicationConfig {
+                timeout_ms: 500,
+                ..follower.clone()
+            },
+            ReplicationConfig {
+                role: ReplicationRole::Primary,
+                heartbeat_ms: 0,
+                ..follower.clone()
+            },
+        ];
+        for config in refused {
+            assert!(config.validate().is_err(), "{config:?}");
+        }
+        // A standalone server ignores the rest of the section.
+        let standalone = ReplicationConfig {
+            role: ReplicationRole::Standalone,
+            token: None,
+            ..follower
+        };
+        assert!(standalone.validate().is_ok());
     }
 
     #[test]

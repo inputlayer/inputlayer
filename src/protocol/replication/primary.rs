@@ -200,7 +200,7 @@ async fn stream_to(
         match log.read_after(cursor, FRAME_BYTES) {
             Read::Events { first, lines } => {
                 let last = first + lines.len() as u64 - 1;
-                let frame = encode_frame(first, &lines);
+                let frame = encode_frame(first, log.head(), &lines);
                 if let Err(e) = send(sink, Message::Binary(frame), send_timeout).await {
                     return End::Gone(e);
                 }
@@ -244,12 +244,12 @@ async fn send_checkpoint(
             .capture_checkpoint_at_lsn()
             .map_err(|e| format!("checkpoint capture failed: {e}"))?;
         let _ = head_tx.send((head, checkpoint.revision));
-        let mut frame = encode_frame(0, std::iter::empty::<&[u8]>());
+        let empty = || encode_frame(0, 0, std::iter::empty::<&[u8]>());
+        let mut frame = empty();
         let result = checkpoint_lines::<Closed>(&checkpoint, head, CHUNK_TUPLES, |line| {
             frame.extend_from_slice(&line);
             if frame.len() >= FRAME_BYTES {
-                let full =
-                    std::mem::replace(&mut frame, encode_frame(0, std::iter::empty::<&[u8]>()));
+                let full = std::mem::replace(&mut frame, empty());
                 frames_tx
                     .blocking_send(full)
                     .map_err(|_| Closed::Receiver)?;
@@ -258,7 +258,7 @@ async fn send_checkpoint(
         });
         match result {
             Ok(()) => {
-                if frame.len() > 8 {
+                if frame.len() > super::FRAME_HEADER {
                     frames_tx
                         .blocking_send(frame)
                         .map_err(|_| "sender closed".to_string())?;

@@ -361,6 +361,93 @@ impl FilePersist {
         count
     }
 
+    /// Commit `txn`, fsyncing its WAL record only with `sync`. A record
+    /// written without it is durable after the next [`PersistBackend::sync`].
+    fn commit_txn(&self, txn: Transaction, sync: bool) -> StorageResult<()> {
+        self.check_writable()?;
+        if txn.is_empty() {
+            return Ok(());
+        }
+        let revision = txn.revision();
+        for shard in txn.shards() {
+            self.ensure_shard(shard)?;
+        }
+
+        // WAL write and buffer push share one critical section, so a concurrent flush
+        // never drops a WAL record whose updates are not yet in its batch.
+        // Lock order everywhere: WAL, then shards.
+        let full: Vec<String> = {
+            let mut wal = self.wal.lock();
+            wal.check_writable()?;
+            if self.config.durability_mode != DurabilityMode::Async {
+                self.check_unflushed(&txn)?;
+            }
+            match self.replication.get() {
+                None => match self.config.durability_mode {
+                    DurabilityMode::Immediate | DurabilityMode::Batched => {
+                        wal.append(&txn, sync)?;
+                    }
+                    // No WAL: data is lost on crash. Only for ephemeral/reproducible data.
+                    DurabilityMode::Async => {}
+                },
+                // Shipped under the WAL mutex once its WAL write succeeded, so
+                // followers receive commits in WAL order and never one the
+                // primary failed to store.
+                Some(log) => {
+                    let record = wal_record::encode(&txn)?;
+                    match self.config.durability_mode {
+                        DurabilityMode::Immediate | DurabilityMode::Batched => {
+                            wal.append_record(&record, sync)?;
+                        }
+                        DurabilityMode::Async => {}
+                    }
+                    log.append(crate::replication::event::commit_line(&record));
+                }
+            }
+
+            let mut shards = self.shards.write();
+            // Only rule and schema changes are tracked: plain fact commits
+            // never take the catalog lock.
+            if self.config.durability_mode != DurabilityMode::Async
+                && txn.catalog_kgs().next().is_some()
+            {
+                self.catalog.lock().logged(&txn);
+            }
+            let (updates, _) = txn.split();
+            updates
+                .into_iter()
+                .filter_map(|(shard, updates)| {
+                    let len = buffer_updates(&mut shards, shard.clone(), updates);
+                    (len >= self.config.buffer_size).then_some(shard)
+                })
+                .collect()
+        };
+
+        // Committed: the transaction is in the WAL and the buffers. Flushing is
+        // upkeep the next commit retries, so its failure must not report this
+        // commit failed - a restart would still recover it.
+        if let Err(e) = self.flush_after_commit(&full) {
+            tracing::error!(
+                revision,
+                error = %e,
+                "persist_flush_failed: updates stay in the WAL and buffers until a flush succeeds"
+            );
+        }
+        Ok(())
+    }
+
+    /// Commit `txn` with its WAL record written but not fsynced, whatever the
+    /// durability mode: a replication follower applies a batch of its
+    /// primary's events this way, then makes them durable with one
+    /// [`PersistBackend::sync`] before it records its position. A crash in
+    /// between only replays those events, which is idempotent.
+    ///
+    /// # Errors
+    /// As [`PersistBackend::commit`].
+    pub fn commit_unsynced(&self, txn: Transaction) -> StorageResult<()> {
+        self.commit_txn(txn, false)
+    }
+
     /// Ship every transaction committed from now on to `log`, in WAL order.
     /// Returns false (and changes nothing) when a log is already attached.
     pub fn attach_replication_log(&self, log: Arc<ReplicationLog>) -> bool {
@@ -645,74 +732,8 @@ impl FilePersist {
 
 impl PersistBackend for FilePersist {
     fn commit(&self, txn: Transaction) -> StorageResult<()> {
-        self.check_writable()?;
-        if txn.is_empty() {
-            return Ok(());
-        }
-        let revision = txn.revision();
-        for shard in txn.shards() {
-            self.ensure_shard(shard)?;
-        }
-
-        // WAL write and buffer push share one critical section, so a concurrent flush
-        // never drops a WAL record whose updates are not yet in its batch.
-        // Lock order everywhere: WAL, then shards.
-        let full: Vec<String> = {
-            let mut wal = self.wal.lock();
-            wal.check_writable()?;
-            if self.config.durability_mode != DurabilityMode::Async {
-                self.check_unflushed(&txn)?;
-            }
-            match self.replication.get() {
-                None => match self.config.durability_mode {
-                    DurabilityMode::Immediate => wal.append(&txn, true)?,
-                    DurabilityMode::Batched => wal.append(&txn, false)?,
-                    // No WAL: data is lost on crash. Only for ephemeral/reproducible data.
-                    DurabilityMode::Async => {}
-                },
-                // Shipped under the WAL mutex once its WAL write succeeded, so
-                // followers receive commits in WAL order and never one the
-                // primary failed to store.
-                Some(log) => {
-                    let record = wal_record::encode(&txn)?;
-                    match self.config.durability_mode {
-                        DurabilityMode::Immediate => wal.append_record(&record, true)?,
-                        DurabilityMode::Batched => wal.append_record(&record, false)?,
-                        DurabilityMode::Async => {}
-                    }
-                    log.append(crate::replication::event::commit_line(&record));
-                }
-            }
-
-            let mut shards = self.shards.write();
-            // Only rule and schema changes are tracked: plain fact commits
-            // never take the catalog lock.
-            if self.config.durability_mode != DurabilityMode::Async
-                && txn.catalog_kgs().next().is_some()
-            {
-                self.catalog.lock().logged(&txn);
-            }
-            let (updates, _) = txn.split();
-            updates
-                .into_iter()
-                .filter_map(|(shard, updates)| {
-                    let len = buffer_updates(&mut shards, shard.clone(), updates);
-                    (len >= self.config.buffer_size).then_some(shard)
-                })
-                .collect()
-        };
-
-        // Committed: the transaction is in the WAL and the buffers. Flushing is
-        // upkeep the next commit retries, so its failure must not report this
-        // commit failed - a restart would still recover it.
-        if let Err(e) = self.flush_after_commit(&full) {
-            tracing::error!(
-                revision,
-                error = %e,
-                "persist_flush_failed: updates stay in the WAL and buffers until a flush succeeds"
-            );
-        }
-        Ok(())
+        let sync = self.config.durability_mode == DurabilityMode::Immediate;
+        self.commit_txn(txn, sync)
     }
 
     /// Batch files are read without holding the shard map, which every commit
