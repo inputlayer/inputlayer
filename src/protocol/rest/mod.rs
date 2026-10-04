@@ -91,8 +91,16 @@ async fn auth_middleware(
         }
     }
 
-    (StatusCode::UNAUTHORIZED, "Invalid or missing API key").into_response()
+    (StatusCode::UNAUTHORIZED, UNAUTHORIZED_MESSAGE).into_response()
 }
+
+/// The 401 body: says where a first-run user finds a key, without echoing the
+/// server's paths to an unauthenticated caller.
+const UNAUTHORIZED_MESSAGE: &str = "Invalid or missing API key. Send `Authorization: Bearer <key>`. \
+On first boot the server issues an admin API key: the value of INPUTLAYER_BOOTSTRAP_API_KEY if set, \
+otherwise a generated key saved as `api_key` in credentials.toml in the server's data directory \
+(in Docker: docker exec <container> cat /var/lib/inputlayer/data/credentials.toml). \
+The GUI at / is served without a key when http.gui.enabled is true.\n";
 
 /// Middleware: Add `X-API-Version` header to all responses (#25).
 async fn api_version_middleware(req: Request<Body>, next: Next) -> Response {
@@ -830,6 +838,14 @@ mod tests {
             resp.status(),
             StatusCode::UNAUTHORIZED,
             "Unauthenticated request to /metrics must get 401"
+        );
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            body.contains("credentials.toml") && body.contains("INPUTLAYER_BOOTSTRAP_API_KEY"),
+            "401 body must say where the first-run key lives: {body}"
         );
     }
 

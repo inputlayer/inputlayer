@@ -17,8 +17,7 @@ class Employee(Relation):
 async def main():
     async with InputLayer(
         os.environ.get("INPUTLAYER_URL", "ws://localhost:8080/ws"),
-        username=os.environ.get("INPUTLAYER_USER", "admin"),
-        password=os.environ.get("INPUTLAYER_PASSWORD", "admin"),
+        api_key=os.environ["INPUTLAYER_API_KEY"],
     ) as il:
         kg = il.knowledge_graph("quickstart")
 
@@ -35,7 +34,7 @@ async def main():
         # Query all employees
         result = await kg.query(Employee)
         for emp in result:
-            print(f"{emp.Name}: ${emp.Salary}")
+            print(f"{emp.name}: ${emp.salary}")
 
         # Query with filter
         engineers = await kg.query(

@@ -107,6 +107,9 @@ ENV INPUTLAYER_HTTP__PORT=8080
 ENV INPUTLAYER_STORAGE__DATA_DIR=/var/lib/inputlayer/data
 ENV INPUTLAYER_STORAGE__AUTO_CREATE_KNOWLEDGE_GRAPHS=true
 ENV INPUTLAYER_LOGGING__LEVEL=info
+# The GUI ships in this image, so serve it: the config default is off.
+ENV INPUTLAYER_HTTP__GUI__ENABLED=true
+ENV INPUTLAYER_HTTP__GUI__STATIC_DIR=/var/lib/inputlayer/gui/dist
 
 EXPOSE 8080
 USER inputlayer

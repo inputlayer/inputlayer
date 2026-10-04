@@ -211,18 +211,28 @@ Lab measurements on a shared 32-vCPU host, not a benchmark rig:
 
 ## Get Started
 
+<!-- quickstart:docker (run by .github/workflows/quickstart.yml) -->
 ```bash
-# Docker
-docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer
+docker run -d --name inputlayer -p 8080:8080 ghcr.io/inputlayer/inputlayer
+until curl -sf http://localhost:8080/health > /dev/null; do sleep 1; done   # first boot
 
-# Or build from source
+# On first boot the server generates the admin password and an admin API key
+docker exec inputlayer cat /var/lib/inputlayer/data/credentials.toml
+
+# The SDKs and inputlayer-client read the key from the environment
+export INPUTLAYER_API_KEY=$(docker exec inputlayer sed -n 's/^api_key = "\(.*\)"/\1/p' /var/lib/inputlayer/data/credentials.toml)
+```
+
+Open [http://localhost:8080](http://localhost:8080) for the interactive GUI and sign in as `admin` with the `admin_password` from `credentials.toml`, or connect via WebSocket at `ws://localhost:8080/ws`. To choose the secrets yourself, start the container with `-e INPUTLAYER_ADMIN_PASSWORD=...` and `-e INPUTLAYER_BOOTSTRAP_API_KEY=...`; supplied values are never written to disk.
+
+Or build from source (Rust 1.88+); the server writes the same file to `./data/credentials.toml`:
+
+```bash
 git clone https://github.com/inputlayer/inputlayer.git
 cd inputlayer
 cargo build --release
 ./target/release/inputlayer-server --port 8080
 ```
-
-Open [http://localhost:8080](http://localhost:8080) for the interactive GUI, or connect via WebSocket at `ws://localhost:8080/ws`.
 
 See the [Quick Start Guide](https://inputlayer.ai/docs/guides/quickstart/) to load a sample and watch conclusions change as facts do.
 

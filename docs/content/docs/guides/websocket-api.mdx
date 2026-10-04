@@ -32,7 +32,7 @@ The first message after connection must authenticate. There are two methods:
 {
   "type": "login",
   "username": "admin",
-  "password": "admin"
+  "password": "<the admin password>"
 }
 ```
 
@@ -564,15 +564,15 @@ The server applies per-connection rate limiting (default: 1000 messages/sec, con
 ```python
 import asyncio
 import json
+import os
 import websockets
 
 async def main():
     async with websockets.connect("ws://localhost:8080/ws") as ws:
         # Authenticate
         await ws.send(json.dumps({
-            "type": "login",
-            "username": "admin",
-            "password": "admin"
+            "type": "authenticate",
+            "api_key": os.environ["INPUTLAYER_API_KEY"]
         }))
         auth_resp = json.loads(await ws.recv())
         assert auth_resp["type"] == "authenticated"
@@ -606,9 +606,8 @@ const ws = new WebSocket("ws://localhost:8080/ws");
 
 ws.onopen = () => {
   ws.send(JSON.stringify({
-    type: "login",
-    username: "admin",
-    password: "admin"
+    type: "authenticate",
+    api_key: process.env.INPUTLAYER_API_KEY
   }));
 };
 

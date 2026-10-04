@@ -24,15 +24,14 @@ Requirements: Node.js 18+ (or any runtime with WebSocket support) and a running 
 
 ## Connecting
 
-The `InputLayer` client manages a WebSocket connection with automatic reconnection. You can authenticate with username/password or API keys.
+The `InputLayer` client manages a WebSocket connection with automatic reconnection. It authenticates with an API key or a username and password. The examples read secrets from the environment: `INPUTLAYER_API_KEY` holds a key (on first boot the server writes the admin key to `credentials.toml` in its data directory; see [Installation](installation#credentials)), never a literal in code.
 
 ```typescript
 import { InputLayer } from "inputlayer";
 
 const il = new InputLayer({
   url: "ws://localhost:8080/ws",
-  username: "admin",
-  password: "admin",
+  apiKey: process.env.INPUTLAYER_API_KEY,
 });
 
 await il.connect();
@@ -43,12 +42,13 @@ console.log(`Connected to InputLayer ${il.serverVersion}`);
 await il.close();
 ```
 
-If you prefer API key authentication:
+To sign in as a user instead:
 
 ```typescript
 const il = new InputLayer({
   url: "ws://localhost:8080/ws",
-  apiKey: "il_key_abc123",
+  username: process.env.INPUTLAYER_USER,
+  password: process.env.INPUTLAYER_PASSWORD,
 });
 ```
 
@@ -57,8 +57,7 @@ The client accepts a few optional parameters for connection resilience:
 ```typescript
 const il = new InputLayer({
   url: "ws://localhost:8080/ws",
-  username: "admin",
-  password: "admin",
+  apiKey: process.env.INPUTLAYER_API_KEY,
   autoReconnect: true,          // reconnect on disconnect (default: true)
   reconnectDelay: 1.0,          // first backoff in seconds, doubled with jitter up to 30 (default: 1.0)
   maxReconnectAttempts: 10,     // give up after N failures (default: 10)

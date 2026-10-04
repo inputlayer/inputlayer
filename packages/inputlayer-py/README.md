@@ -26,8 +26,13 @@ This also installs the `inputlayer-migrate` tool for schema migrations; with the
 
 ## Quick Start
 
+Start a server and export its admin API key as `INPUTLAYER_API_KEY` ([Get Started](../../README.md#get-started) shows both in three commands), then run:
+
+<!-- quickstart:python (run by .github/workflows/quickstart.yml) -->
 ```python
 import asyncio
+import os
+
 from inputlayer import InputLayer, Relation
 
 class Employee(Relation):
@@ -38,7 +43,10 @@ class Employee(Relation):
     active: bool
 
 async def main():
-    async with InputLayer("ws://localhost:8080/ws", username="admin", password="admin") as il:
+    async with InputLayer(
+        os.environ.get("INPUTLAYER_URL", "ws://localhost:8080/ws"),
+        api_key=os.environ["INPUTLAYER_API_KEY"],
+    ) as il:
         kg = il.knowledge_graph("demo")
 
         # Define schema (idempotent)
@@ -60,6 +68,13 @@ async def main():
             print(f"{emp.name}: ${emp.salary}")
 
 asyncio.run(main())
+```
+
+Prints:
+
+<!-- quickstart:python-output -->
+```
+Alice: $120000.0
 ```
 
 ## Core Concepts
@@ -381,9 +396,10 @@ Requires a running InputLayer server. Examples marked [LLM] need LM Studio (or a
 For scripts, notebooks, and non-async contexts:
 
 ```python
+import os
 from inputlayer import InputLayerSync
 
-with InputLayerSync("ws://localhost:8080/ws", username="admin", password="admin") as il:
+with InputLayerSync("ws://localhost:8080/ws", api_key=os.environ["INPUTLAYER_API_KEY"]) as il:
     kg = il.knowledge_graph("demo")
     kg.define(Employee)
     kg.insert(Employee(id=1, name="Alice", department="eng", salary=120000.0, active=True))

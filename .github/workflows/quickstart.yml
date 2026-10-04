@@ -1,0 +1,71 @@
+name: Quick starts
+
+# Runs the README quick starts (scripts/check-quickstarts.sh) against a fresh
+# container built from this checkout's Dockerfile, so the documented first run
+# (docker run, credentials, GUI, Python and TypeScript quick starts) cannot
+# drift. The image is tagged with the documented name and never pushed. The
+# weekly run catches drift from changes outside the path filter.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'README.md'
+      - 'Dockerfile'
+      - 'gui/**'
+      - 'packages/inputlayer-py/**'
+      - 'packages/inputlayer-js/**'
+      - 'packages/api-client/**'
+      - 'src/auth/**'
+      - 'src/config.rs'
+      - 'src/protocol/handler.rs'
+      - 'src/protocol/rest/**'
+      - 'scripts/check-quickstarts.sh'
+      - '.github/workflows/quickstart.yml'
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quickstart-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quickstart:
+    name: README quick starts (fresh container)
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the engine image as the documented name
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: engine
+          platforms: linux/amd64
+          load: true
+          tags: ghcr.io/inputlayer/inputlayer:latest
+          cache-from: |
+            type=gha,scope=quickstart
+            type=gha,scope=engine-linux/amd64
+          cache-to: type=gha,scope=quickstart,mode=max
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run the README quick starts
+        run: ./scripts/check-quickstarts.sh

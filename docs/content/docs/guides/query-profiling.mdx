@@ -93,8 +93,7 @@ import { InputLayer } from "inputlayer";
 
 const il = new InputLayer({
   url: "ws://localhost:8080/ws",
-  username: "admin",
-  password: "admin",
+  apiKey: process.env.INPUTLAYER_API_KEY,
 });
 await il.connect();
 
@@ -116,9 +115,10 @@ if (rs.timingBreakdown) {
 ### Python
 
 ```python
+import os
 from inputlayer import InputLayer
 
-async with InputLayer("ws://localhost:8080/ws", username="admin", password="admin") as il:
+async with InputLayer("ws://localhost:8080/ws", api_key=os.environ["INPUTLAYER_API_KEY"]) as il:
     kg = il.knowledge_graph("default")
     rs = await kg.execute("?tc(X, Y)")
 

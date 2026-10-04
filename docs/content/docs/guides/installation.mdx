@@ -42,8 +42,9 @@ cargo build --release
 
 # The binaries are in target/release/
 ./target/release/inputlayer-server   # Start server first
-./target/release/inputlayer-client   # Then connect with client
 ```
+
+Then connect with the client using the API key the server generated (see [Credentials](#credentials)).
 
 To put the binaries on your `PATH` (`~/.cargo/bin/`), install them from the same checkout:
 
@@ -57,21 +58,41 @@ For quick testing without installing:
 
 ```bash
 cargo run --release --bin inputlayer-server &
+# once the server is listening, export its API key (see Credentials)
 cargo run --release --bin inputlayer-client
 ```
 
 ### Option 3: Docker
 
 ```bash
-docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer:latest
+docker run -d --name inputlayer -p 8080:8080 ghcr.io/inputlayer/inputlayer
+until curl -sf http://localhost:8080/health > /dev/null; do sleep 1; done   # first boot
+
+# The admin password and API key generated on first boot
+docker exec inputlayer cat /var/lib/inputlayer/data/credentials.toml
+export INPUTLAYER_API_KEY=$(docker exec inputlayer sed -n 's/^api_key = "\(.*\)"/\1/p' /var/lib/inputlayer/data/credentials.toml)
 ```
+
+Open [http://localhost:8080](http://localhost:8080) for the GUI and sign in as `admin` with the `admin_password` from that file. Mount a volume on `/var/lib/inputlayer/data` to keep data and credentials across container restarts.
+
+## Credentials
+
+Authentication is always on. On first boot the server creates the `admin` user and an admin API key, and saves any secret it generated to `credentials.toml` in its data directory (`./data/credentials.toml` by default, `/var/lib/inputlayer/data/credentials.toml` in Docker):
+
+```toml
+admin_password = "..."   # GUI and username/password login as admin
+api_key = "..."          # inputlayer-client, the SDKs and HTTP (Authorization: Bearer)
+```
+
+To choose the secrets yourself, set `INPUTLAYER_ADMIN_PASSWORD` and `INPUTLAYER_BOOTSTRAP_API_KEY` when the server first starts (`docker run -e ...`); supplied values are never written to disk. Clients read the key from `INPUTLAYER_API_KEY` (or `--api-key` for `inputlayer-client`). Once connected, create less privileged users and keys as described in [Authentication](authentication).
 
 ## Verify Installation
 
-Start the server, then connect with the client:
+Start the server, then connect with the client and the generated API key:
 
 ```bash
 ./target/release/inputlayer-server &
+export INPUTLAYER_API_KEY=$(sed -n 's/^api_key = "\(.*\)"/\1/p' data/credentials.toml)
 ./target/release/inputlayer-client
 ```
 
@@ -90,8 +111,8 @@ Try a simple command:
 
 ```
 > .kg list
-Knowledge graphs:
-  default
+Knowledge Graphs:
+  default *
 ```
 
 Type `.quit` to exit.
