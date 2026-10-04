@@ -259,7 +259,7 @@ Delete a rule entirely (removes all clauses).
 // Error: Cannot remove rule 'blocked': rule(s) allowed negate it or a rule that reads it, ...
 ```
 
-Drop or redefine the negating rules first, or remove them in the same change (for example with one `.rule drop prefix` that matches both).
+Drop or redefine the negating rules first, or remove them in the same program: the check runs on the program's end state, so `.rule drop blocked` followed by `.rule drop allowed` in one program succeeds.
 
 ### `.rule drop prefix <prefix>`
 

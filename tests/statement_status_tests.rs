@@ -418,3 +418,41 @@ mod ws {
         assert_eq!(frames[4]["code"], "validation", "{}", frames[4]);
     }
 }
+
+#[tokio::test]
+async fn a_program_may_remove_a_negated_rule_with_its_negators_in_any_order() {
+    let (handler, _tmp) = handler();
+    let setup = "+blocked(T) <- blocklist(T)\n+allowed(O) <- order(O, T), !blocked(T)";
+    run(&handler, setup).await.expect("setup");
+
+    // Alone, or with an unrelated edit, the removal is refused and rolled back.
+    let result = run(&handler, "+other(X) <- order(X, _)\n.rule drop blocked")
+        .await
+        .expect("program result");
+    let errors: Vec<(usize, ErrorCode)> = result.errors.iter().map(|e| (e.index, e.code)).collect();
+    assert_eq!(
+        errors,
+        vec![(1, ErrorCode::Conflict)],
+        "{:?}",
+        result.errors
+    );
+    assert!(
+        result.errors[0].message.contains("allowed"),
+        "{:?}",
+        result.errors
+    );
+    let rules = run(&handler, ".rule list").await.expect("list").rows;
+    assert_eq!(rules.len(), 3, "{rules:?}");
+
+    // Removed together, the negated rule may come first.
+    let result = run(&handler, ".rule drop blocked\n.rule drop allowed")
+        .await
+        .expect("program result");
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    // Dropped and redefined in one program, the rule is never left empty.
+    run(&handler, setup).await.expect("setup again");
+    let result = run(&handler, ".rule drop blocked\n+blocked(T) <- denylist(T)")
+        .await
+        .expect("program result");
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+}

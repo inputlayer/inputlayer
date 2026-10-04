@@ -104,7 +104,6 @@ impl CatalogChange {
     }
 
     fn apply_rule_change(&self, rules: &mut RuleCatalog) -> StorageResult<CatalogOutcome> {
-        self.check_not_negated(rules)?;
         let failed =
             |action: &str, e: String| StorageError::Other(format!("Failed to {action}: {e}"));
         match self {
@@ -135,40 +134,6 @@ impl CatalogChange {
                 unreachable!("schema change applied as a rule change")
             }
         }
-    }
-
-    /// Refuse a change that leaves a rule with no clauses while a rule it
-    /// does not also remove negates it: that rule would fail open.
-    fn check_not_negated(&self, rules: &RuleCatalog) -> StorageResult<()> {
-        let has_clauses = |name: &str| rules.rule_count(name).is_some_and(|n| n > 0);
-        let emptied: Vec<String> = match self {
-            Self::DropRule(name) | Self::ClearRule(name) if has_clauses(name) => {
-                vec![name.clone()]
-            }
-            Self::DropRulesByPrefix(prefix) if !prefix.is_empty() => rules
-                .list()
-                .into_iter()
-                .filter(|name| name.starts_with(prefix.as_str()) && has_clauses(name))
-                .collect(),
-            Self::RemoveRuleClause { name, index: 0 } if rules.rule_count(name) == Some(1) => {
-                vec![name.clone()]
-            }
-            _ => Vec::new(),
-        };
-        for name in &emptied {
-            let negating: Vec<String> = rules
-                .rules_negating(name)
-                .into_iter()
-                .filter(|rule| !emptied.contains(rule))
-                .collect();
-            if !negating.is_empty() {
-                return Err(StorageError::RuleNegated {
-                    rule: name.clone(),
-                    rules: negating,
-                });
-            }
-        }
-        Ok(())
     }
 
     fn apply_schema_change(
@@ -262,6 +227,23 @@ impl<'a> StagedCatalog<'a> {
                 .extend(change.name().map(str::to_string));
             Ok(outcome)
         }
+    }
+
+    /// A rule the staged changes leave without clauses while a staged rule
+    /// still negates it, with the rules that negate it: the program would
+    /// make them fail open. Checked on the program's end state, so a program
+    /// may remove a rule together with the rules negating it in any order.
+    pub fn emptied_negated_rule(&self) -> Option<(String, Vec<String>)> {
+        let staged = self.rules.as_ref()?;
+        let has_clauses =
+            |rules: &RuleCatalog, name: &str| rules.rule_count(name).is_some_and(|n| n > 0);
+        self.touched_rules
+            .iter()
+            .filter(|name| has_clauses(self.base_rules, name) && !has_clauses(staged, name))
+            .find_map(|name| {
+                let negating = staged.rules_negating(name);
+                (!negating.is_empty()).then(|| (name.clone(), negating))
+            })
     }
 
     /// The net effect of the staged changes.

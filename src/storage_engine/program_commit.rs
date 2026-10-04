@@ -1,7 +1,7 @@
 //! Committing a staged [`WriteProgram`]: one KG write lock, one effective
 //! delta of facts and catalogs, one WAL transaction, one snapshot publish.
 
-use super::catalog_change::{CatalogDelta, StagedCatalog};
+use super::catalog_change::{CatalogDelta, CatalogOutcome, StagedCatalog};
 use super::write_program::{
     CommitError, FactChange, FactCount, ProgramCommit, RelationChange, StagedChanges,
     StatementEffect, StatementOutcome, WriteProgram,
@@ -132,6 +132,8 @@ impl KnowledgeGraph {
         let mut delta = FactDelta::default();
         let mut index_dims = HashMap::new();
         let mut statements = Vec::with_capacity(program.statements().len());
+        // The last statement that edited each rule, to blame for emptying it.
+        let mut rule_edited_by = HashMap::new();
         for statement in program.into_statements() {
             let rejected = |error| CommitError::Rejected {
                 statement: statement.index,
@@ -139,7 +141,15 @@ impl KnowledgeGraph {
             };
             let effect = match statement.changes {
                 StagedChanges::Catalog(change) => {
-                    StatementEffect::Catalog(catalog.apply(kg, &change).map_err(rejected)?)
+                    let outcome = catalog.apply(kg, &change).map_err(rejected)?;
+                    let edited = match &outcome {
+                        CatalogOutcome::RulesDropped(names) => names.clone(),
+                        _ => change.name().map(str::to_string).into_iter().collect(),
+                    };
+                    for name in edited {
+                        rule_edited_by.insert(name, statement.index);
+                    }
+                    StatementEffect::Catalog(outcome)
                 }
                 StagedChanges::Facts(changes) => StatementEffect::Facts(
                     self.resolve_facts(kg, changes, &catalog, &mut delta, &mut index_dims)
@@ -149,6 +159,12 @@ impl KnowledgeGraph {
             statements.push(StatementOutcome {
                 index: statement.index,
                 effect,
+            });
+        }
+        if let Some((rule, rules)) = catalog.emptied_negated_rule() {
+            return Err(CommitError::Rejected {
+                statement: rule_edited_by.get(&rule).copied().unwrap_or_default(),
+                error: StorageError::RuleNegated { rule, rules },
             });
         }
         Ok(Resolved {
