@@ -20,7 +20,7 @@ mod static_input;
 
 use crate::boolean_specialization::SemiringType;
 use crate::execution::memory::thread_net_bytes;
-use crate::execution::{RequestControl, Stop};
+use crate::execution::{RequestControl, Stop, QUERY_MEMORY_EXCEEDED};
 use crate::ir::{AggregateFunction, ArithOp, BuiltinFunction, IRExpression, IRNode, Predicate};
 use crate::semiring_types::{BooleanDiff, DiffType};
 use differential_dataflow::collection::vec::Collection;
@@ -90,8 +90,12 @@ const QUERY_CANCELLED: &str = "Query stopped: deadline exceeded or cancelled";
 
 /// The error of a query its request stopped.
 fn query_stopped_error() -> String {
-    match current_request_control().and_then(|c| c.stopped()) {
+    let Some(control) = current_request_control() else {
+        return QUERY_CANCELLED.to_string();
+    };
+    match control.stopped() {
         Some(Stop::MemoryExhausted) => Stop::MemoryExhausted.message().to_string(),
+        None if control.memory_exceeded() => QUERY_MEMORY_EXCEEDED.to_string(),
         _ => QUERY_CANCELLED.to_string(),
     }
 }

@@ -96,6 +96,9 @@ max_query_memory_bytes = 4294967296
 # Memory budget of each knowledge graph's stored facts (estimated from their
 # tuples); writes that would grow a graph past it are refused with
 # `resource_exhausted`, deletes are always accepted (0 = unlimited)
+# Keep max_query_memory_bytes at least twice this budget: a query copies the
+# facts it reads while it evaluates, so a whole-graph scan needs more than
+# the graph's stored size.
 max_graph_memory_bytes = 0
 
 [optimization]

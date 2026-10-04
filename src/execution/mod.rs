@@ -9,7 +9,7 @@ pub mod memory;
 mod request_control;
 pub mod timing;
 
-pub use request_control::{Halt, RequestControl, Stop};
+pub use request_control::{Halt, RequestControl, Stop, QUERY_MEMORY_EXCEEDED};
 pub use timing::{
     IrBuilderTiming, OptimizerTiming, RuleTiming, TimingBreakdown, TimingCollector,
     TimingHistograms, TimingMode,

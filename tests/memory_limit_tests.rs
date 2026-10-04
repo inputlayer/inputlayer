@@ -179,6 +179,48 @@ async fn a_runaway_query_is_refused_instead_of_growing_the_server() {
     assert!(reply["row_count"].as_u64().unwrap() > 0, "{reply}");
 }
 
+/// The query's failure in a program whose earlier statements committed:
+/// those keep their results, the query is refused for memory.
+fn assert_query_exhausted(reply: &Value, query_index: u64) {
+    assert_eq!(reply["type"], "result", "{reply}");
+    let errors = reply["errors"].as_array().unwrap();
+    assert_eq!(errors.len(), 1, "{reply}");
+    assert_eq!(errors[0]["index"], query_index, "{reply}");
+    assert_eq!(errors[0]["code"], "resource_exhausted", "{reply}");
+    let message = errors[0]["message"].as_str().unwrap();
+    assert!(message.contains("max_query_memory_bytes"), "{reply}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_runaway_query_after_a_commit_in_the_same_program_is_still_refused() {
+    let server = start_server(|config| {
+        config.storage.performance.max_query_memory_bytes = 32 << 20;
+        config.storage.performance.query_timeout_ms = 0;
+    })
+    .await;
+    server.write(&edges(0, NODES)).await;
+    let mut client = Client::connect(&server).await;
+
+    // A durable meta command enters the commit before the query runs.
+    let started = std::time::Instant::now();
+    let reply = client
+        .execute("compact", &format!(".compact\n{CLOSURE}"))
+        .await;
+    assert_query_exhausted(&reply, 3);
+    let stopped_in = started.elapsed();
+    assert!(stopped_in < Duration::from_secs(60), "took {stopped_in:?}");
+
+    // So does a write; it stays committed.
+    let reply = client
+        .execute("write", &format!("+note(1)\n{CLOSURE}"))
+        .await;
+    assert_query_exhausted(&reply, 3);
+    assert_eq!(server.count("note"), 1);
+
+    let reply = client.execute("bound", "?edge(0, Y)").await;
+    assert_eq!(reply["type"], "result", "{reply}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_query_under_the_limit_is_unaffected() {
     let server = start_server(|config| {

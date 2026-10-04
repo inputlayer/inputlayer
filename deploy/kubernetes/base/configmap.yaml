@@ -25,7 +25,10 @@ data:
     # into. Keep the sum inside the memory limit in statefulset.yaml: every
     # graph's budget, plus max_query_memory_bytes for each query running at
     # once (up to about three quarters of the CPUs), plus the server itself.
-    max_query_memory_bytes = 536870912 # 512 MiB
+    # A query copies the facts it reads while it evaluates, so keep the
+    # per-query limit at least twice the graph budget: a query scanning a
+    # whole graph inside its budget must still fit.
+    max_query_memory_bytes = 2147483648 # 2 GiB
     max_graph_memory_bytes = 1073741824 # 1 GiB
 
     [logging]

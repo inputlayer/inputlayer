@@ -75,7 +75,7 @@ max_query_size_bytes = 1048576      # 1 MB
 max_insert_tuples = 10000
 max_result_rows = 100000
 slow_query_log_ms = 5000
-max_query_memory_bytes = 1073741824 # 1 GiB per query; refused past it
+max_query_memory_bytes = 8589934592 # 8 GiB per query; refused past it
 max_graph_memory_bytes = 4294967296 # 4 GiB of facts per graph
 
 [logging]
@@ -566,6 +566,23 @@ InputLayer holds the active working set in memory via Differential Dataflow. Mem
 | Small production | 100K - 1M | 50 - 200 | 2 - 4 GB |
 | Medium production | 1M - 10M | 200 - 1000 | 8 - 16 GB |
 | Large production | 10M+ | 1000+ | 32 GB+ |
+
+Two limits keep the server inside that memory and refuse work with
+`resource_exhausted` instead of growing past it:
+
+- `max_graph_memory_bytes` bounds the **stored data**: the facts of one
+  knowledge graph, as estimated from their tuples.
+- `max_query_memory_bytes` bounds a query's **working set**: everything it
+  holds while it evaluates. A query copies the facts it reads into its
+  dataflow, and joins and recursive rules hold intermediate results on top,
+  so its working set is a multiple of the data it reads. Keep the per-query
+  limit at least twice the graph budget, so a query that scans a whole graph
+  inside its budget still runs; raise it further for joins and recursion over
+  large relations.
+
+Size the container for the sum: every graph's budget, plus
+`max_query_memory_bytes` for each query running at once (up to about three
+quarters of the CPUs), plus the server itself.
 
 ### CPU
 
