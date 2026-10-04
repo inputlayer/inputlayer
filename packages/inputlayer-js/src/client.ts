@@ -52,7 +52,7 @@ export interface InputLayerOptions {
   defaultTimeoutMs?: number;
   /** Wait past a deadline, after cancelling, before failing the call locally (default: 2 000) */
   timeoutGraceMs?: number;
-  /** Ping an otherwise silent connection this often so it is never idle-closed (default: 20 000; 0 disables) */
+  /** Ping an otherwise silent connection this often so it is never idle-closed, and probe the transport: no pong and no frame within `timeoutGraceMs` drops and reconnects it (default: 20 000; 0 disables) */
   keepaliveMs?: number;
   /** Requests in flight per connection (default: 15, one below the server's bound so a cancel can always be read) */
   maxInFlight?: number;

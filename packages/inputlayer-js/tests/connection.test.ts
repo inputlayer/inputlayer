@@ -37,6 +37,8 @@ class MockServer {
   closeOnAuth = false;
   /** Record authentication but never answer it. */
   holdAuth = false;
+  /** Never answer application pings, as an engine whose pong waits behind a slow reply. */
+  holdPings = false;
   private readonly server: WebSocketServer;
   private readonly waiters: Array<() => void> = [];
 
@@ -84,7 +86,7 @@ class MockServer {
           return;
         }
         conn.received.push(msg);
-        if (msg.type === 'ping') socket.send(JSON.stringify({ type: 'pong', id: msg.id }));
+        if (msg.type === 'ping' && !this.holdPings) socket.send(JSON.stringify({ type: 'pong', id: msg.id }));
         for (const waiter of this.waiters.splice(0)) waiter();
       });
     });
@@ -414,6 +416,20 @@ describe('keepalive', () => {
   it('pings a connection that sends nothing', async () => {
     await open({ keepaliveMs: 40 });
     await server!.until(() => server!.last.received.some((f) => f.type === 'ping'), 2000);
+  });
+
+  it('a long call past the keepalive interval keeps a live connection', async () => {
+    const c = await open({ keepaliveMs: 50, timeoutGraceMs: 50 });
+    server!.holdPings = true;
+    const call = c.execute('?slow(X)', { timeoutMs: 0 });
+    await server!.until(() => executes(server!.last).length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const id = executes(server!.last)[0].id;
+    server!.last.socket.send(JSON.stringify({ type: 'result', id, columns: ['x'], rows: [[1]],
+      row_count: 1, total_count: 1, truncated: false, execution_time_ms: 0, errors: [] }));
+    expect((await call).rows).toEqual([[1]]);
+    expect(c.connected).toBe(true);
+    expect(server!.connections).toHaveLength(1);
   });
 
   it('a half-open socket is dropped and reconnected, failing calls in flight', async () => {

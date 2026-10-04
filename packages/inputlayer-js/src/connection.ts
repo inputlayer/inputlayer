@@ -21,9 +21,11 @@
  * `OutcomeUnknownError` for a program that may write. A later reply is
  * dropped and counted.
  *
- * Keepalive: a ping goes out whenever nothing was sent for `keepaliveMs`,
- * calls in flight or not; one unanswered within `timeoutGraceMs` means the
- * socket is half-open, so it is dropped and the connection reconnects.
+ * Keepalive: whenever nothing was sent for `keepaliveMs`, an application ping
+ * resets the server's idle timer (only with no call in flight, as its pong
+ * waits behind earlier replies), and the transport is probed, calls in flight
+ * or not: no pong and no frame within the probe window means the socket is
+ * half-open, so it is dropped and the connection reconnects.
  *
  * Reconnect: exponential backoff with jitter, re-opened on the same knowledge
  * graph (`?kg=`) with the notification cursor (`last_seq` and `epoch`), then
@@ -87,9 +89,9 @@ export interface ConnectionOptions {
   timeoutGraceMs?: number;
   /**
    * Ping when nothing was sent for this long, so the server's idle timeout
-   * never ends a connection that only listens; a ping unanswered within
-   * `timeoutGraceMs` drops the connection, which then reconnects (default
-   * 20 000; 0 disables).
+   * never ends a connection that only listens, and probe the transport: no
+   * WebSocket pong and no frame within `timeoutGraceMs` drops the connection,
+   * which then reconnects (default 20 000; 0 disables).
    */
   keepaliveMs?: number;
   /**
@@ -1038,11 +1040,12 @@ export class Connection {
     this.keepalive = setInterval(() => {
       if (this.state !== 'open') return;
       if (Date.now() - this.lastSentAt < this.keepaliveMs) return;
-      const ws = this.ws;
-      const id = this.newId('p');
-      this.request({ type: 'ping', id }, id, Math.max(1, this.timeoutGraceMs)).catch(() => {
-        if (ws && this.ws === ws) ws.terminate();
-      });
+      if (this.inFlight.size === 0) {
+        this.ping().catch(() => {
+          // Liveness is the transport probe's to judge
+        });
+      }
+      this.probeServer();
     }, period);
     this.keepalive.unref?.();
   }
