@@ -39,7 +39,7 @@ const QUERY: &str = "__query__(Z) <- two_hop(1, Z)";
 
 /// The cached path's result, checked against a fresh compilation.
 fn cached(snapshot: &KnowledgeGraphSnapshot, program: &str) -> (Vec<Tuple>, TimingBreakdown) {
-    let (tuples, timing) = snapshot
+    let (tuples, timing, _) = snapshot
         .execute_with_rules_tuples_cached(program, TimingMode::Summary)
         .unwrap();
     let fresh = snapshot.execute_with_rules_tuples(program).unwrap();
@@ -62,6 +62,24 @@ fn a_plan_is_compiled_once_and_reused() {
     assert_eq!(snapshot.persistent_rules().cached_plans(), 1);
     let compile = timing.parse_us + timing.sip_us + timing.ir_build_us + timing.optimize_us;
     assert_eq!(compile, 0, "a hit compiles nothing: {timing:?}");
+}
+
+#[test]
+fn an_execution_tells_whether_its_plan_came_from_the_cache() {
+    let first = snapshot_after(&[(1, 2), (2, 3)], TWO_HOP, None);
+    let plan_cached = |snapshot: &KnowledgeGraphSnapshot| {
+        let (_, timing, plan_cached) = snapshot
+            .execute_with_rules_tuples_cached(QUERY, TimingMode::Off)
+            .unwrap();
+        assert!(timing.is_none());
+        plan_cached
+    };
+    assert!(!plan_cached(&first), "the first execution compiles");
+    assert!(plan_cached(&first));
+    let next = snapshot_after(&[(1, 2), (2, 5)], TWO_HOP, Some(&first));
+    assert!(plan_cached(&next));
+    let changed = snapshot_after(&[(1, 2)], "two_hop(X, Z) <- edge(X, Z)", Some(&next));
+    assert!(!plan_cached(&changed), "a rule change compiles again");
 }
 
 #[test]

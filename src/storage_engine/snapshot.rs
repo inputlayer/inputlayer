@@ -448,12 +448,13 @@ impl KnowledgeGraphSnapshot {
     /// [`Self::execute_with_rules_tuples_profiled`] reusing the plan compiled
     /// for `program` on any snapshot of the same rules, compiling and keeping
     /// it on a miss. For programs evaluated again and again (standing
-    /// queries); a hit's timing breakdown has no compile stages.
+    /// queries); a hit's timing breakdown has no compile stages. The flag
+    /// tells whether the plan came from the cache.
     pub fn execute_with_rules_tuples_cached(
         &self,
         program: &str,
         timing_mode: TimingMode,
-    ) -> Result<(Vec<Tuple>, Option<TimingBreakdown>), String> {
+    ) -> Result<(Vec<Tuple>, Option<TimingBreakdown>, bool), String> {
         let start = Instant::now();
         let (plan, compiled_now) = match self.persistent.plan(program, &self.optimization) {
             Some(plan) => (plan, false),
@@ -489,7 +490,7 @@ impl KnowledgeGraphSnapshot {
             elapsed_ms = start.elapsed().as_millis() as u64,
             "snapshot_execute_cached"
         );
-        Ok((tuples, timing))
+        Ok((tuples, timing, !compiled_now))
     }
 
     /// Execute a query with rules, returning tuples, all derived relation data,

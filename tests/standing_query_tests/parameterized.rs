@@ -92,11 +92,21 @@ async fn bound_subscriptions_share_one_evaluation_and_get_only_their_rows() {
     assert_eq!(one.rows.len(), 1);
     assert!(three.rows.is_empty());
 
+    // The views' first evaluations compiled their plans; the next ones give
+    // the cost a shared evaluation is compared with.
+    server
+        .write("+item[(\"s1\", 9), (\"s2\", 9), (\"s3\", 9)]\n+kind(9, \"a\")")
+        .await;
+    for member in [&mut one, &mut two, &mut three] {
+        let expected = member.oracle().await;
+        member.converge(&expected).await;
+    }
+
     let before = shared(&server);
     server.write("+item(\"s1\", 3)\n+kind(3, \"a\")").await;
     let expected = one.oracle().await;
     one.converge(&expected).await;
-    assert_eq!(one.rows.len(), 2);
+    assert_eq!(one.rows.len(), 3);
     expect_quiet(&mut two.client, Duration::from_millis(300)).await;
     expect_quiet(&mut three.client, Duration::from_millis(1)).await;
     assert_eq!(
@@ -112,7 +122,7 @@ async fn bound_subscriptions_share_one_evaluation_and_get_only_their_rows() {
         member.converge(&expected).await;
     }
     assert!(one.rows.iter().all(|row| row.contains("s1")));
-    assert_eq!(three.rows.len(), 1);
+    assert_eq!(three.rows.len(), 2);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -168,10 +178,15 @@ async fn a_family_of_one_binding_evaluates_on_its_own() {
     // The same binding spelled differently is another view of one binding.
     let mut same = Member::subscribe(&server, r#"?view("s1",X,"a")"#).await;
     let mut two = Member::subscribe(&server, r#"?view("s2", X, "a")"#).await;
-    server.write("+item(\"s1\", 2)\n+kind(2, \"a\")").await;
-    for member in [&mut one, &mut same] {
-        let expected = member.oracle().await;
-        member.converge(&expected).await;
+    for write in [
+        "+item[(\"s1\", 2), (\"s2\", 2)]\n+kind(2, \"a\")",
+        "+item(\"s1\", 4)\n+kind(4, \"a\")",
+    ] {
+        server.write(write).await;
+        for member in [&mut one, &mut same, &mut two] {
+            let expected = member.oracle().await;
+            member.converge(&expected).await;
+        }
     }
     let after_shared = shared(&server);
     assert!(after_shared > 0);
