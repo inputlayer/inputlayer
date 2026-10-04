@@ -575,6 +575,24 @@ async def test_connection_closed_for_good_ends_with_connection_lost() -> None:
     await _teardown(server, il)
 
 
+async def test_subscribing_after_the_connection_gave_up_ends_with_connection_lost() -> None:
+    engine = Engine([[1, 1]])
+    server, il, kg = await _setup(engine, auto_reconnect=False)
+    first = kg.subscribe(Edge)
+    await _next(first)
+    assert engine.peer is not None
+    await engine.peer.close()
+    assert (await _next(first)).reason == "connection_lost"
+    with pytest.raises(ConnectionLost):
+        await _next(first)
+    sub = kg.subscribe(Edge)
+    with pytest.raises(ConnectionLost):
+        await _next(sub, timeout=1.0)
+    with pytest.raises(StopAsyncIteration):
+        await _next(sub)
+    await _teardown(server, il)
+
+
 async def test_client_close_ends_the_iterator_quietly() -> None:
     engine = Engine([[1, 1]])
     server, il, kg = await _setup(engine)

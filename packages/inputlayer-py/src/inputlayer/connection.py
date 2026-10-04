@@ -309,6 +309,11 @@ class Connection:
         return self._state
 
     @property
+    def closed_for_good(self) -> bool:
+        """Closed, and no call will open it again."""
+        return self._state == "closed" and not (self._reopenable and self._lazy)
+
+    @property
     def session_id(self) -> str | None:
         return self._session_id
 
@@ -572,7 +577,7 @@ class Connection:
             # Opens it (lazy), or waits for the connect in progress.
             await self.connect()
             return
-        if self._state == "closed" and self._reopenable and self._lazy:
+        if self._state == "closed" and not self.closed_for_good:
             # Closed by close(), not given up: the next call reopens it.
             await self.connect()
             return

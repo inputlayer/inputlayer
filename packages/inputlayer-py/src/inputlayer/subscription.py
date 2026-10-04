@@ -560,7 +560,7 @@ class Subscription(Generic[T]):
             except Exception as e:
                 if self._state != waiting:
                     return
-                if not _transient(e):
+                if not _transient(e) or self._conn.closed_for_good:
                     self._fail(e)
                     return
             # Jitter in [delay/2, delay], ended early by close().
