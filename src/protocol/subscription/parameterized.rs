@@ -32,8 +32,12 @@
 //! so its errors are exactly its own. It also evaluates its own query when the
 //! round fails, is truncated, or holds more rows for it than
 //! `max_result_rows` allows. A lifted query computes every binding's rows,
-//! subscribed or not. When that costs much more than a view's own query, the
-//! family stops sharing and probes again later.
+//! subscribed or not, and every view waits for it. A family therefore shares
+//! only while a round is about as fast as its views' own evaluations would
+//! be, run in parallel on the compute permits: it starts sharing once it has
+//! a view's own cost to compare with, stops when a round is slower, and
+//! probes again later. While sharing, a view evaluates its own query now and
+//! then to keep that cost current.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -60,17 +64,25 @@ use super::{Dependencies, ReevaluatingQuery, Refresh, ResultSet, Row, StandingQu
 /// Name prefix of lifted parameters; queries using it are not lifted.
 const PARAM_PREFIX: &str = "_L";
 
-/// A round may always cost this many times a view's own evaluation: a delta
-/// waits at most about that much longer than without sharing.
-const MAX_COST_RATIO: u64 = 2;
-
-/// A costlier round still pays when it saves at least this share of the
-/// views' own evaluations (each commit a family reads re-evaluates all of its
-/// views: they read the same relations).
-const MIN_SAVING_DIVISOR: u64 = 2;
+/// How much slower than its views' own evaluations, in percent, a round may
+/// be before the family stops sharing.
+const STOP_MARGIN_PERCENT: u64 = 20;
 
 /// Own evaluations before a family that stopped sharing tries again.
 const PROBE_AFTER: u64 = 256;
+
+/// Rounds between a view's own evaluations while sharing.
+const SAMPLE_EVERY: u64 = 64;
+
+/// Whether a family keeps sharing after a round of `shared_us`: unless the
+/// round is slower, by more than [`STOP_MARGIN_PERCENT`], than its `bindings`
+/// views' own evaluations of `own_us` each, run `permits` at a time. An
+/// unknown own cost (0) keeps sharing.
+fn keeps_sharing(shared_us: u64, own_us: u64, bindings: u64, permits: u64) -> bool {
+    let unshared = own_us.saturating_mul(bindings.div_ceil(permits.max(1)).max(1));
+    own_us == 0
+        || shared_us.saturating_mul(100) <= unshared.saturating_mul(100 + STOP_MARGIN_PERCENT)
+}
 
 /// How the engine matches a lifted constant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -342,6 +354,10 @@ pub struct Family {
     own_since_stop: AtomicU64,
     /// Recent cost of a view's own evaluation, in microseconds (0: unknown).
     own_cost_us: AtomicU64,
+    /// Rounds evaluated.
+    rounds: AtomicU64,
+    /// Whether the next view to refresh evaluates its own query.
+    sample_due: AtomicBool,
 }
 
 impl Family {
@@ -446,18 +462,19 @@ impl Family {
         let own = self.own_cost_us.load(Ordering::Relaxed);
         let shared = (ran.cost + partitioning.elapsed()).as_micros() as u64;
         let bindings = self.bindings.load(Ordering::Relaxed) as u64;
-        let worth = own
-            .saturating_mul(MAX_COST_RATIO)
-            .max(own.saturating_mul(bindings) / MIN_SAVING_DIVISOR);
-        if own > 0 && shared > worth {
+        let permits = self.handler.compute_permits() as u64;
+        if !keeps_sharing(shared, own, bindings, permits) {
             debug!(
                 query = %self.shape.query,
                 shared_us = shared,
                 own_us = own,
                 bindings,
+                permits,
                 "subscription_family_stops_sharing"
             );
             self.stop_sharing();
+        } else if (self.rounds.fetch_add(1, Ordering::Relaxed) + 1).is_multiple_of(SAMPLE_EVERY) {
+            self.sample_due.store(true, Ordering::Relaxed);
         }
         Ok(Arc::new(Partitions {
             revision,
@@ -470,13 +487,18 @@ impl Family {
         }))
     }
 
+    /// Whether the caller should evaluate its own query as a cost sample.
+    fn takes_sample(&self) -> bool {
+        self.sample_due.load(Ordering::Relaxed) && self.sample_due.swap(false, Ordering::Relaxed)
+    }
+
     fn stop_sharing(&self) {
         self.own_since_stop.store(0, Ordering::Relaxed);
         self.sharing.store(false, Ordering::Relaxed);
     }
 
-    /// Note a view's own evaluation of `cost`; after enough of them, try
-    /// sharing again.
+    /// Note a view's own evaluation of `cost`; at the first, and after
+    /// enough of them since sharing stopped, try sharing.
     fn record_own(&self, cost: Duration) {
         let cost = (cost.as_micros() as u64).max(1);
         let average = self.own_cost_us.load(Ordering::Relaxed);
@@ -487,17 +509,22 @@ impl Family {
         };
         self.own_cost_us.store(next, Ordering::Relaxed);
         if !self.sharing.load(Ordering::Relaxed)
-            && self.own_since_stop.fetch_add(1, Ordering::Relaxed) + 1 >= PROBE_AFTER
+            && (average == 0
+                || self.own_since_stop.fetch_add(1, Ordering::Relaxed) + 1 >= PROBE_AFTER)
         {
             self.sharing.store(true, Ordering::Relaxed);
         }
     }
 }
 
-/// Every family of a server, by knowledge graph and lifted query.
+/// A family's key: knowledge graph, lifted query and parameter kinds.
+type FamilyKey = (String, String, Vec<ParamKind>);
+
+/// Every family of a server, by knowledge graph, lifted query and parameter
+/// kinds.
 #[derive(Default)]
 pub struct Families {
-    families: Mutex<HashMap<(String, String), Weak<Family>>>,
+    families: Mutex<HashMap<FamilyKey, Weak<Family>>>,
 }
 
 impl Families {
@@ -509,14 +536,14 @@ impl Families {
         metrics: &Arc<SubscriptionMetrics>,
     ) -> MemberQuery {
         let Lifted { shape, binding } = lifted;
-        let key = (own.knowledge_graph().to_string(), shape.query.clone());
+        let key = (
+            own.knowledge_graph().to_string(),
+            shape.query.clone(),
+            shape.kinds.clone(),
+        );
         let family = {
             let mut families = self.families.lock();
-            let existing = families
-                .get(&key)
-                .and_then(Weak::upgrade)
-                .filter(|family| family.shape.kinds == shape.kinds);
-            match existing {
+            match families.get(&key).and_then(Weak::upgrade) {
                 Some(family) => family,
                 None => {
                     families.retain(|_, family| family.strong_count() > 0);
@@ -528,9 +555,11 @@ impl Families {
                         members: Mutex::default(),
                         bindings: AtomicUsize::new(0),
                         latest: ArcSwapOption::empty(),
-                        sharing: AtomicBool::new(true),
+                        sharing: AtomicBool::new(false),
                         own_since_stop: AtomicU64::new(0),
                         own_cost_us: AtomicU64::new(0),
+                        rounds: AtomicU64::new(0),
+                        sample_due: AtomicBool::new(false),
                     });
                     families.insert(key, Arc::downgrade(&family));
                     family
@@ -571,7 +600,7 @@ impl MemberQuery {
             .validated
             .as_ref()
             .is_some_and(|rules| Arc::ptr_eq(rules, snapshot.persistent_rules()));
-        if validated && self.family.shares() {
+        if validated && self.family.shares() && !self.family.takes_sample() {
             let round = self.family.round_for(snapshot);
             if let Ok(partitions) = self.family.outcome(&round).await {
                 if let Some(evaluated) = self.read(&partitions) {
