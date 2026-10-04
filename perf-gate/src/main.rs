@@ -3,7 +3,9 @@
 //! `run` measures a baseline and a candidate server binary in interleaved
 //! rounds and writes every raw sample to a run file; `compare` judges a run
 //! file under the policy and exits zero only on a pass; `genbi` benchmarks
-//! one server as the substrate for reactive agents on the genbi-trust suite.
+//! one server as the substrate for reactive agents on the genbi-trust suite;
+//! `sessions` measures standing-query cost as the sessions on one knowledge
+//! graph grow.
 //! See `perf-gate/README.md`.
 
 mod client;
@@ -18,6 +20,7 @@ mod report;
 mod runner;
 mod schema;
 mod server;
+mod sessions;
 mod stats;
 
 use std::path::{Path, PathBuf};
@@ -50,6 +53,8 @@ enum Command {
     Compare(CompareArgs),
     /// Benchmark one server as reactive-agent substrate on genbi-trust.
     Genbi(genbi::GenbiArgs),
+    /// Measure standing-query cost as sessions grow (voice-agent pack).
+    Sessions(sessions::SessionsArgs),
 }
 
 #[derive(clap::Args)]
@@ -106,6 +111,7 @@ fn main() -> ExitCode {
         Command::Run(args) => run(&args).map(|()| ExitCode::SUCCESS),
         Command::Compare(args) => compare(&args),
         Command::Genbi(args) => genbi::run(&args),
+        Command::Sessions(args) => sessions::run(&args),
     };
     result.unwrap_or_else(|e| {
         eprintln!("perf-gate: {e:#}");
@@ -142,6 +148,7 @@ fn run(args: &RunArgs) -> Result<()> {
             server: ServerSpec {
                 binary,
                 cpus: args.server_cpus.clone(),
+                env: Vec::new(),
             },
         })
     };

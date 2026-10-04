@@ -55,6 +55,9 @@ pub struct ServerSpec {
     pub binary: PathBuf,
     /// `taskset -c` CPU list, if the servers should be pinned.
     pub cpus: Option<String>,
+    /// Environment set after [`SERVER_OVERRIDES`], for benchmarks that need
+    /// more (recorded by the benchmark).
+    pub env: Vec<(String, String)>,
 }
 
 /// A running server; killed and its data removed on drop.
@@ -97,6 +100,9 @@ impl RunningServer {
         for (key, value, _) in SERVER_OVERRIDES {
             command.env(key, value);
         }
+        for (key, value) in &spec.env {
+            command.env(key, value);
+        }
         let child = command
             .spawn()
             .with_context(|| format!("spawn {}", spec.binary.display()))?;
@@ -107,6 +113,19 @@ impl RunningServer {
         };
         server.wait_ready().await?;
         Ok(server)
+    }
+
+    /// User plus system CPU time used so far, in seconds, from
+    /// `/proc/<pid>/stat` (clock ticks of 1/100 s, the Linux default).
+    pub fn cpu_seconds(&self) -> Option<f64> {
+        let stat = std::fs::read_to_string(format!("/proc/{}/stat", self.child.id())).ok()?;
+        // Fields after the parenthesized command name; utime and stime are
+        // the 14th and 15th fields of the line.
+        let rest = &stat[stat.rfind(')')? + 2..];
+        let fields: Vec<&str> = rest.split(' ').collect();
+        let ticks: u64 =
+            fields.get(11)?.parse::<u64>().ok()? + fields.get(12)?.parse::<u64>().ok()?;
+        Some(ticks as f64 / 100.0)
     }
 
     /// Peak resident set size so far, from `/proc/<pid>/status`.

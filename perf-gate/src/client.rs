@@ -135,6 +135,29 @@ impl Client {
         }
     }
 
+    /// Connect to `/ws?kg=<kg>` and authenticate with an API key. Many
+    /// connections from one host log in this way: concurrent password logins
+    /// from one address are throttled by design.
+    pub async fn connect_with_key(addr: SocketAddr, kg: &str, api_key: &str) -> Result<Self> {
+        let url = format!("ws://{addr}/ws?kg={kg}");
+        let (ws, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .with_context(|| format!("connect to {addr}"))?;
+        let mut client = Self {
+            ws,
+            deferred: Vec::new(),
+            sent: 0,
+        };
+        client
+            .send(json!({"type": "authenticate", "api_key": api_key}))
+            .await?;
+        match client.next().await?.frame {
+            Frame::Authenticated {} => Ok(client),
+            Frame::AuthError { message } => bail!("authentication failed: {message}"),
+            other => bail!("unexpected authentication reply: {other:?}"),
+        }
+    }
+
     /// Send one program without waiting; returns the send instant.
     pub async fn send_execute(&mut self, program: &str) -> Result<Instant> {
         let start = Instant::now();
