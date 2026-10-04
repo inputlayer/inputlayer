@@ -93,6 +93,41 @@ async fn test_write_reply_names_the_revision_its_push_carries() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_relation_commands_name_the_revision_their_push_carries() {
+    let server = start_server(64).await;
+    server.write("+p_n(1)\n+gone(1)").await;
+    let mut subscriber = Client::connect(&server).await;
+    subscriber.subscribe("n", "?p_n(X)").await;
+    let mut writer = Client::connect(&server).await;
+
+    let reply = writer.execute(".clear prefix p_").await;
+    assert!(reply["errors"].as_array().unwrap().is_empty(), "{reply}");
+    let cleared = reply["revision"].as_u64().expect("clear revision");
+    let delta = subscriber.next_push_for("n").await;
+    assert_eq!(rows(&delta["retracted"]), vec![json!([1])], "{delta}");
+    assert_eq!(delta["revision"].as_u64(), Some(cleared), "{delta}");
+
+    subscriber.subscribe("g", "?gone(X)").await;
+    let reply = writer.execute(".rel drop gone").await;
+    assert!(reply["errors"].as_array().unwrap().is_empty(), "{reply}");
+    let dropped = reply["revision"].as_u64().expect("drop revision");
+    assert!(dropped > cleared, "{reply}");
+    let delta = subscriber.next_push_for("g").await;
+    assert_eq!(delta["revision"].as_u64(), Some(dropped), "{delta}");
+
+    // Session schemas and inspection change nothing persistent.
+    let reply = writer.execute("s(a: int)").await;
+    assert!(reply["errors"].as_array().unwrap().is_empty(), "{reply}");
+    assert!(reply.get("revision").is_none(), "{reply}");
+    let reply = writer.execute(".rel").await;
+    assert!(reply.get("revision").is_none(), "{reply}");
+
+    let reply = writer.execute(".kg create fresh").await;
+    let created = reply["revision"].as_u64().expect("create revision");
+    assert!(created > dropped, "{reply}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_delete_produces_retraction() {
     let server = start_server(64).await;
     server.write("+likes(1, 10)\n+likes(1, 11)").await;

@@ -48,6 +48,12 @@ impl WriteStatement {
         matches!(self, Self::Catalog(statement) if statement.changes_rules())
     }
 
+    /// Whether this statement writes persistent state rather than a session
+    /// schema.
+    fn is_durable(&self) -> bool {
+        !matches!(self, Self::Catalog(CatalogStatement::Schema(decl)) if !decl.persistent)
+    }
+
     /// The code and message reporting that this statement failed with `error`.
     fn failure(&self, error: &crate::storage::StorageError) -> StageError {
         match self {
@@ -121,7 +127,7 @@ impl QueryJob {
     /// fill their message rows in `messages`. Returns the snapshot the
     /// program committed against (see [`ProgramCommit::base`]), the counts
     /// of its fact statements, and the revision the program's effect is
-    /// visible at.
+    /// visible at, or `None` when every queued statement is a session schema.
     ///
     /// A program whose staging read the KG is staged again, up to
     /// [`MAX_STAGE_ATTEMPTS`] times with a short random pause, if a concurrent
@@ -132,7 +138,14 @@ impl QueryJob {
         kg: &str,
         run: &mut WriteRun,
         messages: &mut [String],
-    ) -> Result<(Arc<KnowledgeGraphSnapshot>, Vec<StatementCounts>, u64), RunFailure> {
+    ) -> Result<
+        (
+            Arc<KnowledgeGraphSnapshot>,
+            Vec<StatementCounts>,
+            Option<u64>,
+        ),
+        RunFailure,
+    > {
         let commit = match self.commit_queued(storage, kg, &run.queued) {
             Ok(commit) => commit,
             Err(mut failure) => {
@@ -147,6 +160,7 @@ impl QueryJob {
         };
 
         let queued = std::mem::take(&mut run.queued);
+        let durable = queued.iter().any(|q| q.statement.is_durable());
         let mut inserted_total = 0;
         let mut counts = Vec::new();
         for (queued, outcome) in queued.iter().zip(&commit.statements) {
@@ -189,7 +203,7 @@ impl QueryJob {
                 change.inserted + change.deleted,
             );
         }
-        Ok((commit.base, counts, commit.revision))
+        Ok((commit.base, counts, durable.then_some(commit.revision)))
     }
 
     /// Stage `queued` and commit it, re-staging while it goes stale.
