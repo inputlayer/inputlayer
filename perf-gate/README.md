@@ -123,8 +123,40 @@ Results are only as good as the host. Use a host with no other heavy work
 running: the report records the load average at the start and end of a run,
 and an A/A run (`--aa`) shows whether noise fits the budgets. If you can, pin
 the servers with `--server-cpus` (`taskset -c`) and run the gate itself on
-other CPUs. A shared CI runner is too noisy to give a verdict, so CI only
-lints and tests the tool (`make perf-gate-check`).
+other CPUs. Per-PR CI does not measure: a shared runner is too noisy to
+give a verdict, so the fast gate only lints and tests the tool
+(`make perf-gate-check`).
+
+## At release checkpoints (CI)
+
+The full suite (`.github/workflows/full-suite.yml`, job `Performance gate`)
+runs the gate on every release checkpoint, on a dedicated 32-vCPU runner
+with nothing else on it. Both arms run on that one runner, so its speed
+cancels out of the paired ratios. `scripts/perf-gate-ci.sh` drives it:
+
+- The baseline and the checkout are built with `--release --all-features`.
+  Baseline servers are cached per commit and toolchain.
+- The servers are pinned to CPUs 2 and up, leaving 0-1 to the gate's
+  clients. The job sets the `performance` frequency governor and turns
+  boost off where the VM exposes them; the report records the governor.
+- It runs 20 rounds. If the verdict is INCONCLUSIVE, it reruns once with 30.
+  Change the counts with `PERF_GATE_ROUNDS` and `PERF_GATE_RETRY_ROUNDS`.
+- FAIL or INVALID fails the checkpoint. A retry that is still INCONCLUSIVE
+  passes the job with a warning: runner noise alone does not block a
+  release, but it is not a PASS, and the summary says so. Each attempt's
+  report is in the job summary. The
+  `perf-gate-runs` artifact holds every attempt's `run.json`, `report.md`
+  and `verdict.json` for 30 days.
+
+To measure a branch before its checkpoint, dispatch the workflow with only
+the gate: `gh workflow run full-suite.yml --ref <branch> -f perf_gate_only=true`.
+Add `-f perf_gate_aa=true` to measure the baseline against itself, which
+checks the runner's noise and records a calibration run for the baseline.
+
+The runner is not yet quiet enough for a PASS every time (#198). An A/A run
+on it (2026-10-04, 20 then 30 rounds) was INCONCLUSIVE on 7 required
+metrics, among them `insert_single.ack_us.p50`, `insert_batch.ack_us.p50`
+and the `delta_single` delta percentiles.
 
 ## Relationship to the Criterion benches
 

@@ -370,7 +370,7 @@ CI runs in two tiers so small PRs stay cheap and expensive checks run at release
 
 **Fast gate** (`.github/workflows/ci.yml`) runs only on PRs targeting `main`: format (`make fmt-check`), clippy (`make lint`, which also type-checks every target) and the unit + integration tests (`make unit-test`). The Rust jobs are skipped entirely when a change touches no Rust inputs, as defined by the [workflow's path filter](.github/workflows/ci.yml) (for example `front/`-only or SDK-only PRs). A newer push to a PR cancels its in-progress run.
 
-**Full suite** (`.github/workflows/full-suite.yml`) runs on release commits or a manual run on `main`: the release build with all tests, snapshot specs and the reactive agent path (`make e2e-reactive`), Python and JS SDK tests, the Python live-server integration, coverage, MSRV, `make doc-check`, the website build, the performance gate tool's own checks (`make perf-gate-check`; measuring needs a quiet same-host runner, so `make perf-gate` itself runs locally through `make pre-pr`) and the Verified Completions gate (`make vc-gate`). Docker image builds (`docker.yml`) run on release commits only.
+**Full suite** (`.github/workflows/full-suite.yml`) runs on release commits or a manual run on `main`: the release build with all tests, snapshot specs and the reactive agent path (`make e2e-reactive`), Python and JS SDK tests, the Python live-server integration, coverage, MSRV, `make doc-check`, the website build, the performance gate tool's own checks (`make perf-gate-check`), the performance gate itself (approved baseline vs the checkpoint commit on one dedicated 32-vCPU runner, FAIL fails the checkpoint; INCONCLUSIVE is retried once with more rounds, then reported as a warning; see [perf-gate/README.md](perf-gate/README.md#at-release-checkpoints-ci)) and the Verified Completions gate (`make vc-gate`). Docker image builds (`docker.yml`) run on release commits only.
 
 The triggers are:
 
@@ -379,7 +379,7 @@ The triggers are:
 | PR targeting `main`, labeled `release` | Full suite and Docker build when the label is added, then again on every push while it stays. On PR updates, the fast gate still runs format and clippy when its path filter matches, and leaves the tests to the full suite. Removing the label restores fast-gate tests on the next push, unless the branch is covered by the row below. |
 | Push to a `release/**` branch (`make release VERSION=x.y.z`) | Full suite and Docker build. A PR from that branch in this repository is covered by the branch push, so it does not run the suite or Docker build a second time. |
 | Push of a `v*` tag | The Release workflow runs the full suite once, including SDK tests and the website build. Only after it passes do the crates.io, PyPI and npm publishing jobs and website deployment run. Deployment reuses the website artifact from the full suite. Docker builds and pushes images in its own workflow. |
-| Manual run (Actions tab, or `gh workflow run full-suite.yml --ref main`) | Full suite on `main` only; dispatches on other refs skip all jobs. No Docker build or publishing. Publishing workflows cannot be dispatched manually. |
+| Manual run (Actions tab, or `gh workflow run full-suite.yml --ref main`) | Full suite on `main` only; dispatches on other refs skip all jobs. With `-f perf_gate_only=true`, only the performance gate runs, on any ref. No Docker build or publishing. Publishing workflows cannot be dispatched manually. |
 
 Nothing runs on ordinary pushes to `main`; merging does not repeat the PR fast gate.
 
