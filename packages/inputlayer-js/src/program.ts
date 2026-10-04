@@ -71,7 +71,7 @@ function rowValues(rel: RelationDef, fact: Fact, what: string): string[] {
         `Give every column: ${rel.columns.join(', ')}`,
       );
     }
-    return compileValue(fact[c]);
+    return compileValue(fact[c], rel.columnTypes[c]);
   });
 }
 
@@ -103,7 +103,7 @@ function keyedDelete(rel: RelationDef, key: Fact, extra: string[]): string {
     }
   }
   const vars = columnVars(rel);
-  const args = rel.columns.map((c, i) => (key[c] !== undefined ? compileValue(key[c]) : vars[i]));
+  const args = rel.columns.map((c, i) => (key[c] !== undefined ? compileValue(key[c], rel.columnTypes[c]) : vars[i]));
   const atom = `${rel.relationName}(${args.join(', ')})`;
   return `-${atom} <- ${[atom, ...extra].join(', ')}`;
 }

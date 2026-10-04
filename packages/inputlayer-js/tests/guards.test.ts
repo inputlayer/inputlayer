@@ -20,6 +20,7 @@ import {
 } from '../src/index';
 import { compileQueryPlan } from '../src/compiler';
 import { compileClaim, parseWriteMessage } from '../src/program';
+import { deserializeMessage, type ResultResponse } from '../src/protocol';
 
 const Shipment = relation('Shipment', { order: 'string', shipment: 'string' });
 const Eta = relation('Eta', { shipment: 'string', due: 'string' });
@@ -113,6 +114,80 @@ describe('any() in queries', () => {
       where: AND(any(Eta, { shipment: Shipment.col('shipment') }), NOT(any(Attempt, { order: Shipment.col('order') }))),
     });
     expect(plan.programs).toEqual(['?shipment(Order, Shipment), eta(Shipment, _), !attempt(Order, _, _)']);
+  });
+});
+
+describe('non-finite numbers', () => {
+  // NaN and the infinities have no IQL literal; written bare they parse as
+  // variables, so a retract keyed on NaN once deleted every row.
+  const Scored = relation('Attempt', { order: 'int', tool: 'string', score: 'float' });
+  const refusing = () => {
+    const sent: string[] = [];
+    const conn = { execute: async (iql: string) => { sent.push(iql); return { columns: [], rows: [] }; } };
+    return { sent, kg: new KnowledgeGraph('kg', conn as unknown as Connection) };
+  };
+
+  it('kg.retract(Attempt, {order: NaN}) raises CompileError and sends nothing', async () => {
+    const { sent, kg } = refusing();
+    await expect(kg.retract(Attempt, { order: NaN })).rejects.toThrow(CompileError);
+    await expect(kg.retract(Scored, { order: Number('x') })).rejects.toThrow(/no literal for NaN/);
+    expect(sent).toEqual([]);
+  });
+
+  it.each([NaN, Infinity, -Infinity])('refuses %s on every write and query path', async (bad) => {
+    const { sent, kg } = refusing();
+    const row = { order: 1, tool: 't', score: bad };
+    await expect(kg.insert(Scored, row)).rejects.toThrow(CompileError);
+    await expect(kg.insert(Scored, [row])).rejects.toThrow(CompileError);
+    await expect(kg.delete(Scored, row)).rejects.toThrow(CompileError);
+    await expect(kg.delete(Scored, [row])).rejects.toThrow(CompileError);
+    await expect(kg.delete(Scored, Scored.col('score').gt(bad))).rejects.toThrow(CompileError);
+    await expect(kg.retract(Scored, { score: bad })).rejects.toThrow(CompileError);
+    await expect(kg.claim(Scored, row, { key: ['order'] })).rejects.toThrow(CompileError);
+    await expect(kg.query({ select: [Scored], where: Scored.col('score').eq(bad) })).rejects.toThrow(CompileError);
+    await expect(
+      kg.query({ select: [Shipment], where: NOT(any(Scored, { score: bad })) }),
+    ).rejects.toThrow(CompileError);
+    await expect(kg.program().insert(Scored, row).commit()).rejects.toThrow(CompileError);
+    await expect(kg.whyNot(Scored, row)).rejects.toThrow(CompileError);
+    expect(sent).toEqual([]);
+  });
+
+  it('keeps large finite floats, and refuses an unsafe number only in an int column', async () => {
+    const { sent, kg } = refusing();
+    await kg.insert(Scored, { order: 1, tool: 't', score: 1e20 });
+    expect(sent).toEqual(['+attempt(1, "t", 1e+20)']);
+    await expect(kg.retract(Scored, { order: 2 ** 53 + 2 })).rejects.toThrow(/BigInt/);
+    await kg.delete(Scored, { order: 9007199254740993n, tool: 't', score: 0.5 });
+    expect(sent[1]).toBe('-attempt(9007199254740993, "t", 0.5)');
+  });
+
+  it('claim() reports a lost race when the holder holds a value past the encoder range', async () => {
+    const holder = [2 ** 63, 't', 1e300];
+    const conn = { execute: async () => ({ columns: [], rows: [holder] }) };
+    const kg = new KnowledgeGraph('kg', conn as unknown as Connection);
+    const got = await kg.claim(Scored, { order: 1, tool: 't', score: 0.5 }, { key: ['tool'] });
+    expect(got).toEqual({ won: false, holder: { order: 2 ** 63, tool: 't', score: 1e300 } });
+  });
+
+  it('claim() wins when the engine returns our own row holding a BigInt past 2^53', async () => {
+    const frame = '{"type":"result","columns":["order","tool","score"],"rows":[[9007199254740993,"t",0.5]]}';
+    const conn = { execute: async () => deserializeMessage(frame) as ResultResponse };
+    const kg = new KnowledgeGraph('kg', conn as unknown as Connection);
+    const got = await kg.claim(Scored, { order: 9007199254740993n, tool: 't', score: 0.5 }, { key: ['order'] });
+    expect(got.won).toBe(true);
+  });
+
+  it('compiles a literal compared with a typed column as a value of its type', async () => {
+    const { sent, kg } = refusing();
+    await expect(kg.query({ select: [Scored], where: Scored.col('order').eq(2 ** 60) })).rejects.toThrow(/BigInt/);
+    await expect(kg.delete(Scored, Scored.col('order').ge(2 ** 60))).rejects.toThrow(/BigInt/);
+    const [ref] = Scored.refs(1);
+    await expect(kg.query({ select: [ref!.col('tool')], join: [ref!], where: ref!.col('order').lt(-(2 ** 60)) })).rejects.toThrow(/BigInt/);
+    expect(sent).toEqual([]);
+    await kg.query({ select: [Scored], where: AND(Scored.col('order').eq(2n ** 60n), Scored.col('score').gt(2 ** 60)) });
+    expect(sent[0]).toContain('1152921504606846976');
+    expect(sent[0]).toContain('> 1.152921504606847e+18');
   });
 });
 

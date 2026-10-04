@@ -49,6 +49,7 @@ import {
 } from './errors.js';
 import { meta } from './meta.js';
 import type { SubscriptionDeltaStartResponse } from './protocol.js';
+import { rowKey } from './protocol.js';
 import { RelationDef } from './relation.js';
 
 /** A row of a subscribed result, keyed by column name. */
@@ -245,7 +246,7 @@ function resultOf(shape: Shape, columns: string[], rows: unknown[][]): Result {
   const result: Result = new Map();
   const labels = shape.labels(columns);
   for (const values of shape.project(columns, rows)) {
-    const key = JSON.stringify(values);
+    const key = rowKey(values);
     const held = result.get(key);
     if (held) held.count += 1;
     else result.set(key, { row: toRow(labels, values), count: 1 });
@@ -550,14 +551,14 @@ export class Subscription<T = Row> implements AsyncIterableIterator<Change<T>> {
       if (!touched.has(key)) touched.set(key, { before: held.count, held });
     };
     for (const values of this.shape.project(columns, retracted)) {
-      const key = JSON.stringify(values);
+      const key = rowKey(values);
       const held = this.held.get(key);
       if (!held || held.count === 0) return this.unverified('broken_stream');
       visit(key, held);
       held.count -= 1;
     }
     for (const values of this.shape.project(columns, inserted)) {
-      const key = JSON.stringify(values);
+      const key = rowKey(values);
       let held = this.held.get(key);
       if (!held) {
         held = { row: toRow(labels, values), count: 0 };
@@ -718,8 +719,8 @@ export function watchChanges<T>(sub: Subscription<T>): AsyncIterableIterator<Liv
           done: false,
         };
       }
-      for (const row of change.retracted) rows.delete(JSON.stringify(row));
-      for (const row of change.inserted) rows.set(JSON.stringify(row), row);
+      for (const row of change.retracted) rows.delete(rowKey(row));
+      for (const row of change.inserted) rows.set(rowKey(row), row);
       return { value: { rows: [...rows.values()], revision: change.revision, verified: true }, done: false };
     },
     async return(): Promise<IteratorResult<Live<T>>> {

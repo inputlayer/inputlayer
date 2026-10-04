@@ -252,9 +252,15 @@ function compileComparison(
     env.unify(comp.left, comp.right);
     return '';
   }
-  const left = compileExpr(comp.left, env);
-  const right = compileExpr(comp.right, env);
+  const left = compileOperand(comp.left, comp.right, env);
+  const right = compileOperand(comp.right, comp.left, env);
   return `${left} ${comp.op} ${right}`;
+}
+
+/** A literal compared with a typed column is compiled as a value of that column's type. */
+function compileOperand(expr: Expr, other: Expr, env: VarEnv): string {
+  if (isLiteral(expr) && isColumn(other)) return compileValue(expr.value, other.type);
+  return compileExpr(expr, env);
 }
 
 /**
@@ -446,7 +452,7 @@ function normalizeBody(conjuncts: BoolExpr[], contextKeys: ReadonlySet<string>, 
       );
     }
     const [col, lit] = first as [string, Literal];
-    const shared = sharedColumn(compileValue(lit.value), lit.value, neg.columnTypes[col], out, positiveKeys, ctx, neg.relation);
+    const shared = sharedColumn(compileValue(lit.value, neg.columnTypes[col]), lit.value, neg.columnTypes[col], out, positiveKeys, ctx, neg.relation);
     out[i] = astNot(anyExpr(neg.relation, neg.columns, neg.columnTypes, { ...neg.bindings, [col]: shared }, neg.alias));
   }
 
@@ -488,7 +494,7 @@ function sharedColumn(
   for (const c of out) {
     if (!isComparison(c) || c.op !== '=') continue;
     for (const [a, b] of [[c.left, c.right], [c.right, c.left]]) {
-      if (isColumn(a) && isLiteral(b) && compileValue(b.value) === text && positiveKeys.has(atomKey(a))) {
+      if (isColumn(a) && isLiteral(b) && compileValue(b.value, a.type) === text && positiveKeys.has(atomKey(a))) {
         return a;
       }
     }
@@ -498,7 +504,7 @@ function sharedColumn(
     const p = out[j];
     if (!isAnyExpr(p)) continue;
     for (const [col, b] of Object.entries(p.bindings)) {
-      if (!isLiteral(b) || compileValue(b.value) !== text) continue;
+      if (!isLiteral(b) || compileValue(b.value, p.columnTypes[col]) !== text) continue;
       const { [col]: _, ...rest } = p.bindings;
       out[j] = anyExpr(p.relation, p.columns, p.columnTypes, rest, p.alias);
       const own = astColumn(p.relation, col, p.alias);
@@ -537,7 +543,7 @@ function compileAny(expr: AnyExpr, env: VarEnv): { atom: string; extra: string[]
     const b = expr.bindings[col];
     if (b === undefined) return env.isReferenced(own) ? env.getVar(own) : '_';
     if (isColumn(b)) return env.unify(b, own);
-    if (isLiteral(b) && !env.isReferenced(own)) return compileValue(b.value);
+    if (isLiteral(b) && !env.isReferenced(own)) return compileValue(b.value, expr.columnTypes[col]);
     const v = env.getVar(own);
     extra.push(`${v} = ${compileExpr(b, env)}`);
     return v;
@@ -618,7 +624,7 @@ export function compileInsert(
   persistent = true,
 ): string {
   const name = rel.relationName;
-  const values = rel.columns.map((c) => compileValue(fact[c]));
+  const values = rel.columns.map((c) => compileValue(fact[c], rel.columnTypes[c]));
   const prefix = persistent ? '+' : '';
   return `${prefix}${name}(${values.join(', ')})`;
 }
@@ -631,7 +637,7 @@ export function compileBulkInsert(
 ): string {
   const name = rel.relationName;
   const tuples = facts.map((fact) => {
-    const values = rel.columns.map((c) => compileValue(fact[c]));
+    const values = rel.columns.map((c) => compileValue(fact[c], rel.columnTypes[c]));
     return `(${values.join(', ')})`;
   });
   const prefix = persistent ? '+' : '';
@@ -643,7 +649,7 @@ export function compileBulkInsert(
 /** Compile a single fact deletion: -employee(1, "Alice", ...) */
 export function compileDelete(rel: RelationDef, fact: Fact): string {
   const name = rel.relationName;
-  const values = rel.columns.map((c) => compileValue(fact[c]));
+  const values = rel.columns.map((c) => compileValue(fact[c], rel.columnTypes[c]));
   return `-${name}(${values.join(', ')})`;
 }
 

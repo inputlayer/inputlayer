@@ -370,8 +370,24 @@ export function serializeMessage(msg: ClientMessage): string {
   return JSON.stringify(msg);
 }
 
+/** An integer token the engine sent past 2^53 decodes to a BigInt, keeping every digit. */
+function exactIntegers(_key: string, value: unknown, context?: { source?: string }): unknown {
+  if (typeof value === 'number' && !Number.isSafeInteger(value) && context?.source !== undefined && /^-?\d+$/.test(context.source)) {
+    return BigInt(context.source);
+  }
+  return value;
+}
+
+/** A row's identity as text; an integer past 2^53 arrives as a BigInt. */
+export function rowKey(values: unknown): string {
+  return JSON.stringify(values, (_k, v: unknown) => (typeof v === 'bigint' ? `${v}n` : v));
+}
+
+/** An integer token of 16 or more digits: not part of a fraction or an exponent. */
+const LARGE_INTEGER = /(?<![\d.eE+-])-?\d{16,}(?![\d.eE])/;
+
 export function deserializeMessage(data: string): ServerMessage {
-  const obj = JSON.parse(data);
+  const obj = LARGE_INTEGER.test(data) ? JSON.parse(data, exactIntegers) : JSON.parse(data);
   const type = obj.type;
 
   if (type === 'authenticated') {

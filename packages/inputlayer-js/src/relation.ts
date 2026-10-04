@@ -29,7 +29,9 @@ export type ColumnTypes = Record<string, IQLType>;
 /** The TypeScript value of a column of IQL type `T`. */
 export type ValueOf<T extends IQLType> = T extends 'string'
   ? string
-  : T extends 'int' | 'float'
+  : T extends 'int'
+    ? number | bigint
+    : T extends 'float'
     ? number
     : T extends 'bool'
       ? boolean
@@ -72,7 +74,7 @@ export class RelationDef<T extends ColumnTypes = ColumnTypes> {
           `Available: ${this.columns.join(', ')}`,
       );
     }
-    return new ColumnProxy(this.relationName, name, undefined, this.columns);
+    return new ColumnProxy(this.relationName, name, undefined, this.columns, this.columnTypes[name]);
   }
 
   /** A row of this relation exists with the given column values: see `any()`. */
@@ -153,8 +155,15 @@ export function any<T extends ColumnTypes>(
   return anyExpr(rel.relationName, rel.columns, rel.columnTypes, bound);
 }
 
-/** Compile a value to its IQL literal representation. */
-export function compileValue(value: unknown): string {
+const I64_MIN = -(2n ** 63n);
+const I64_MAX = 2n ** 63n - 1n;
+
+/**
+ * Compile a value to its IQL literal representation. `type` is the column's
+ * type when known: an `int` or `timestamp` column refuses a number past
+ * Number.MAX_SAFE_INTEGER, which has already lost digits (pass a BigInt).
+ */
+export function compileValue(value: unknown, type?: string): string {
   if (value === null || value === undefined) {
     return 'null';
   }
@@ -162,17 +171,32 @@ export function compileValue(value: unknown): string {
     return value ? 'true' : 'false';
   }
   if (value instanceof Timestamp) {
-    return String(value.ms);
+    return compileValue(value.ms, 'int');
   }
   if (value instanceof Date) {
     // Timestamps are stored as int Unix milliseconds.
-    return String(value.getTime());
+    return compileValue(value.getTime(), 'int');
+  }
+  if (typeof value === 'bigint') {
+    if (value < I64_MIN || value > I64_MAX) {
+      throw new CompileError(
+        `Integer ${value} does not fit the engine's 64-bit integers`,
+        `keep integers within [${I64_MIN}, ${I64_MAX}], or store it as a string`,
+      );
+    }
+    return value.toString();
   }
   if (typeof value === 'number') {
-    if (Number.isInteger(value)) {
+    if (Number.isSafeInteger(value)) {
       return String(value);
     }
-    return String(value);
+    if (Number.isInteger(value) && (type === 'int' || type === 'timestamp')) {
+      throw new CompileError(
+        `Integer ${value} is past Number.MAX_SAFE_INTEGER, so it may already have lost digits`,
+        'pass the integer as a BigInt',
+      );
+    }
+    return compileFloat(value);
   }
   if (typeof value === 'string') {
     const escaped = value
@@ -184,12 +208,36 @@ export function compileValue(value: unknown): string {
     return `"${escaped}"`;
   }
   if (Array.isArray(value)) {
-    const inner = value.map(compileValue).join(', ');
-    return `[${inner}]`;
+    return `[${value.map(compileVectorItem).join(', ')}]`;
   }
   throw new TypeError(
     `Cannot compile value of type ${typeof value}: ${String(value)}`,
   );
+}
+
+/** A float literal the engine parses back as the same f64; refuses NaN and the infinities. */
+function compileFloat(value: number): string {
+  // IQL has no literal for NaN or the infinities: written bare they parse
+  // as variables, so a retract keyed on NaN would match every row.
+  if (!Number.isFinite(value)) {
+    throw new CompileError(
+      `IQL has no literal for ${value}: it does not support infinity or NaN`,
+      'use a finite number, or leave the value out',
+    );
+  }
+  if (!Number.isInteger(value)) return String(value);
+  // A whole number written as digits would parse as an integer.
+  return Number.isSafeInteger(value) ? `${value}.0` : value.toExponential();
+}
+
+function compileVectorItem(value: unknown): string {
+  if (typeof value !== 'number') {
+    throw new CompileError(
+      `A vector holds numbers only, got ${typeof value}: ${String(value)}`,
+      'pass an array of numbers',
+    );
+  }
+  return compileFloat(value);
 }
 
 /** Resolve a RelationDef or string to its IQL relation name. */

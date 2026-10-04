@@ -4,6 +4,7 @@
 
 import type { Connection, ExecuteOptions } from './connection.js';
 import type { ResultResponse } from './protocol.js';
+import { rowKey } from './protocol.js';
 import type { Expr, BoolExpr, OrderedColumn } from './ast.js';
 import { compileValue, type ColumnTypes, type RelationDef, type RowOf } from './relation.js';
 import type { Fact } from './types.js';
@@ -397,14 +398,22 @@ export class KnowledgeGraph {
       throw asConflict(e, iql);
     }
     const cols = rel.columns;
-    const ours = cols.map((c) => compileValue(fact[c]));
+    const types = cols.map((c) => rel.columnTypes[c]);
+    const ours = cols.map((c, i) => compileValue(fact[c], types[i]));
     const rows = result.rows.map((r) => {
       if (r.length !== cols.length) {
         throw new InternalError(`Unexpected claim reply: ${JSON.stringify(r)} for columns ${cols.join(', ')}`);
       }
       return r;
     });
-    if (rows.some((r) => r.every((v, i) => compileValue(v) === ours[i]))) {
+    const same = (v: unknown, i: number): boolean => {
+      try {
+        return compileValue(v, types[i]) === ours[i];
+      } catch {
+        return false;
+      }
+    };
+    if (rows.some((r) => r.every(same))) {
       return { won: true, holder: row };
     }
     const first = rows[0];
@@ -481,7 +490,7 @@ export class KnowledgeGraph {
     for (const program of plan.programs) {
       const result = await this.conn.execute(program);
       for (const row of projectRows(plan, result.columns, result.rows, vars)) {
-        const key = JSON.stringify(row.slice(outputVars.length, idEnd));
+        const key = rowKey(row.slice(outputVars.length, idEnd));
         if (seen.has(key)) continue;
         seen.add(key);
         merged.push(row);
@@ -795,15 +804,7 @@ export class KnowledgeGraph {
   async whyNot(relation: RelationDef, fact: Fact): Promise<WhyNotResult> {
     const relName = relation.relationName;
     const cols = relation.columns;
-    const vals = cols
-      .map((col) => {
-        const v = fact[col];
-        if (v === null || v === undefined) return 'null';
-        if (typeof v === 'string') return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
-
-        return String(v);
-      })
-      .join(', ');
+    const vals = cols.map((col) => compileValue(fact[col], relation.columnTypes[col])).join(', ');
     const result = await this.conn.execute(meta.whyNot(`${relName}(${vals})`));
     const text = result.rows.map((row) => String(row[0])).join('\n');
     const explanation = (result.proof_trees?.[0] ?? null) as ProofTree | null;
@@ -918,7 +919,9 @@ function compareValues(a: unknown, b: unknown): number {
   if (a === b) return 0;
   if (a === null || a === undefined) return 1;
   if (b === null || b === undefined) return -1;
-  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  if ((typeof a === 'number' || typeof a === 'bigint') && (typeof b === 'number' || typeof b === 'bigint')) {
+    return a < b ? -1 : a > b ? 1 : 0;
+  }
   const sa = typeof a === 'string' ? a : JSON.stringify(a);
   const sb = typeof b === 'string' ? b : JSON.stringify(b);
   return sa < sb ? -1 : sa > sb ? 1 : 0;

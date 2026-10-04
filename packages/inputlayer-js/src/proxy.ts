@@ -61,41 +61,44 @@ export class ColumnProxy {
   readonly refAlias?: string;
   /** All columns of the relation, in order, when the proxy came from its definition. */
   readonly relationColumns?: readonly string[];
+  /** The column's IQL type, when the proxy came from a typed definition. */
+  readonly type?: string;
 
-  constructor(relation: string, name: string, refAlias?: string, relationColumns?: readonly string[]) {
+  constructor(relation: string, name: string, refAlias?: string, relationColumns?: readonly string[], type?: string) {
     this.relation = relation;
     this.name = name;
     this.refAlias = refAlias;
     this.relationColumns = relationColumns;
+    this.type = type;
   }
 
   toAst(): Column {
-    return column(this.relation, this.name, this.refAlias);
+    return column(this.relation, this.name, this.refAlias, this.type);
   }
 
   // ── Comparison operators -> BoolExpr ────────────────────────────
 
-  eq(other: ColumnProxy | Expr | number | string | boolean | null): Comparison {
+  eq(other: ColumnProxy | Expr | number | bigint | string | boolean | null): Comparison {
     return comparison('=', this.toAst(), wrap(other));
   }
 
-  ne(other: ColumnProxy | Expr | number | string | boolean | null): Comparison {
+  ne(other: ColumnProxy | Expr | number | bigint | string | boolean | null): Comparison {
     return comparison('!=', this.toAst(), wrap(other));
   }
 
-  lt(other: ColumnProxy | Expr | number | string): Comparison {
+  lt(other: ColumnProxy | Expr | number | bigint | string): Comparison {
     return comparison('<', this.toAst(), wrap(other));
   }
 
-  le(other: ColumnProxy | Expr | number | string): Comparison {
+  le(other: ColumnProxy | Expr | number | bigint | string): Comparison {
     return comparison('<=', this.toAst(), wrap(other));
   }
 
-  gt(other: ColumnProxy | Expr | number | string): Comparison {
+  gt(other: ColumnProxy | Expr | number | bigint | string): Comparison {
     return comparison('>', this.toAst(), wrap(other));
   }
 
-  ge(other: ColumnProxy | Expr | number | string): Comparison {
+  ge(other: ColumnProxy | Expr | number | bigint | string): Comparison {
     return comparison('>=', this.toAst(), wrap(other));
   }
 
@@ -230,6 +233,7 @@ export class RelationRef {
       name,
       this.alias,
       this.schema.columns.map((c) => c.name),
+      this.schema.columns.find((c) => c.name === name)?.type,
     );
   }
 }

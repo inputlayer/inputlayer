@@ -154,8 +154,8 @@ for (const col of desc.columns) {
 
 | Type String | InputLayer Type | Description |
 |-------------|-----------------|-------------|
-| `"int"` | `int` | 64-bit integer |
-| `"float"` | `float` | 64-bit floating point |
+| `"int"` | `int` | 64-bit integer; pass a `number` within `Number.MAX_SAFE_INTEGER` or a `bigint` (a larger `number` raises `CompileError`), and results return integers past 2^53 as `bigint` |
+| `"float"` | `float` | 64-bit floating point; `NaN` and the infinities raise `CompileError` |
 | `"string"` | `string` | UTF-8 string |
 | `"bool"` | `bool` | Boolean |
 | `"vector[N]"` | `vector(N)` | N-dimensional float32 vector |
