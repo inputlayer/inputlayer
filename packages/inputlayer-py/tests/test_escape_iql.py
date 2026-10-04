@@ -27,8 +27,9 @@ class TestEscapeIql:
     def test_tab_escaped(self) -> None:
         assert escape_iql("a\tb") == "a\\tb"
 
-    def test_nul_byte_escaped(self) -> None:
-        assert escape_iql("a\x00b") == "a\\0b"
+    def test_nul_byte_passes_through(self) -> None:
+        # The engine reads `\0` as a backslash and a zero; a raw NUL round-trips.
+        assert escape_iql("a\x00b") == "a\x00b"
 
     def test_plain_string_unchanged(self) -> None:
         assert escape_iql("hello world 123") == "hello world 123"
@@ -42,22 +43,13 @@ class TestEscapeIql:
 
     def test_all_control_chars_in_one_string(self) -> None:
         result = escape_iql('\\"test\n\r\t\x00')
-        assert result == '\\\\\\"test\\n\\r\\t\\0'
+        assert result == '\\\\\\"test\\n\\r\\t\x00'
 
-    def test_bell_char_escaped(self) -> None:
-        assert escape_iql("a\x07b") == "a\\x07b"
-
-    def test_backspace_escaped(self) -> None:
-        assert escape_iql("a\x08b") == "a\\x08b"
-
-    def test_vertical_tab_escaped(self) -> None:
-        assert escape_iql("a\x0bb") == "a\\x0bb"
-
-    def test_form_feed_escaped(self) -> None:
-        assert escape_iql("a\x0cb") == "a\\x0cb"
-
-    def test_escape_char_escaped(self) -> None:
-        assert escape_iql("a\x1bb") == "a\\x1bb"
+    def test_other_control_chars_pass_through(self) -> None:
+        # The engine keeps an unknown escape such as `\x07` verbatim, so
+        # escaping these would store different text; raw, they round-trip.
+        for ch in ["\x07", "\x08", "\x0b", "\x0c", "\x1b"]:
+            assert escape_iql(f"a{ch}b") == f"a{ch}b"
 
     def test_single_quotes_passthrough(self) -> None:
         """Single quotes are safe inside double-quoted IQL strings."""
@@ -77,11 +69,9 @@ class TestEscapeIql:
         assert "\\\\" in escaped
         assert "\\n" in escaped
         assert "\\t" in escaped
-        assert "\\0" in escaped
-        assert "\\x07" in escaped
-        # Verify no raw control chars survive
-        for ch in escaped:
-            assert ord(ch) >= 0x20, f"Unexpected control char: {ch!r}"
+        assert "\x00left\x07" in escaped
+        # No raw line break or tab survives: they would end the statement.
+        assert not {"\n", "\r", "\t"} & set(escaped)
 
     def test_consecutive_backslashes(self) -> None:
         assert escape_iql("\\\\") == "\\\\\\\\"
@@ -92,7 +82,7 @@ class TestEscapeIql:
 
 
 class TestMockUnescapeRoundTrip:
-    """Verify that mock _unescape correctly reverses escape_iql, including \\xHH."""
+    """Verify that mock _unescape correctly reverses escape_iql."""
 
     def test_control_char_round_trip(self) -> None:
         from tests._mock_checkpoint_kg import MockKG

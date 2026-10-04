@@ -25,9 +25,10 @@ In both cases the original text is preserved verbatim.
 
 from __future__ import annotations
 
-import math
 import re
 from typing import Any
+
+from inputlayer._literal import encode as encode_literal
 
 # A placeholder is ``:`` followed by an identifier.
 _PLACEHOLDER_RE = re.compile(r":([A-Za-z_][A-Za-z_0-9]*)")
@@ -44,7 +45,7 @@ def iql_literal(value: Any) -> str:
     """Render a Python value as an IQL literal.
 
     Supported:
-        - str  -> "..."  (quotes + backslashes escaped)
+        - str  -> "..."  (the engine's escapes: backslash, quote, \\n, \\t, \\r)
         - bool -> true / false
         - int / float -> bare number
         - list / tuple of numbers -> [1.0, 2.0, 3.0]
@@ -55,40 +56,9 @@ def iql_literal(value: Any) -> str:
             "Cannot bind None as an IQL literal - omit the parameter "
             "or use a sentinel value of the appropriate type."
         )
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (int, float)):
-        if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
-            raise ValueError(
-                f"Cannot bind {value!r} as an IQL literal - "
-                "IQL does not support infinity or NaN."
-            )
-        return repr(value)
-    if isinstance(value, str):
-        escaped = (
-            value
-            .replace("\\", "\\\\")
-            .replace('"', '\\"')
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
-            .replace("\t", "\\t")
-            .replace("\x00", "\\0")
-        )
-        return f'"{escaped}"'
-    if isinstance(value, (list, tuple)):
-        if not all(
-            isinstance(v, (int, float)) and not isinstance(v, bool) for v in value
-        ):
-            raise ValueError(
-                f"List parameters must contain only numbers, got {value!r}"
-            )
-        for v in value:
-            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-                raise ValueError(
-                    f"Cannot bind {v!r} in list as an IQL literal - "
-                    "IQL does not support infinity or NaN."
-                )
-        return "[" + ", ".join(repr(float(v)) for v in value) + "]"
+    if isinstance(value, (str, bool, int, float, list, tuple)):
+        # The SDK's one literal encoder (R-LIT); its CompileError is a ValueError.
+        return encode_literal(value)
     raise TypeError(
         f"Cannot bind {type(value).__name__} as an IQL literal: {value!r}"
     )

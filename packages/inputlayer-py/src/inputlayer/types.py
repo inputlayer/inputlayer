@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, ClassVar
@@ -161,6 +162,7 @@ class Timestamp(int):
 TYPE_MAP: dict[type, str] = {
     bool: "bool",
     Timestamp: "timestamp",
+    datetime: "timestamp",
     int: "int",
     float: "float",
     str: "string",
@@ -190,3 +192,16 @@ def python_type_to_iql(tp: type) -> str:
         except TypeError:
             pass
     raise TypeError(f"Unsupported type for InputLayer schema: {tp!r}")
+
+
+def schema_type(iql_type: str) -> str:
+    """The type a schema declaration sends for the IQL type name *iql_type*.
+
+    A ``timestamp`` column (``Timestamp`` or ``datetime``) is declared ``int``
+    and holds Unix milliseconds: the engine's schema parser has no timestamp
+    type (R-TYPE). Dimensions are written ``vector(N)``, the form the parser
+    reads.
+    """
+    if iql_type == "timestamp":
+        return "int"
+    return re.sub(r"\[(\d+)\]$", r"(\1)", iql_type)

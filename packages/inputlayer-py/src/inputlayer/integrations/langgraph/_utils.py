@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import base64
 import binascii
-import re
 from collections.abc import Sequence
 from typing import Any
+
+from inputlayer._literal import escape_string
 
 __all__ = [
     "DEFAULT_KG_TIMEOUT",
@@ -42,32 +43,17 @@ def b64d(s: str) -> str:
         raise ValueError(f"Failed to decode base64 memory data: {s[:40]!r}") from exc
 
 
-# Match ASCII control characters not already handled explicitly
-_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
-
-
 def escape_iql(s: str) -> str:
     """Escape a string value for safe embedding in an IQL literal.
 
-    Handles backslashes, double-quotes, and control characters that
-    would otherwise produce malformed IQL. Always escape backslashes
-    first so later replacements don't double-escape.
+    The body of the literal the SDK's one encoder writes (R-LIT): backslash,
+    quote, newline, tab and carriage return are escaped; every other
+    character, control characters included, is written as itself, which is
+    how the engine reads it back.
     """
     if not isinstance(s, str):
         raise TypeError(f"escape_iql expects a str, got {type(s).__name__}: {s!r}")
-    result = (
-        s.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")
-        .replace("\0", "\\0")
-    )
-    # Escape remaining ASCII control characters as \xHH
-    return _CONTROL_CHARS_RE.sub(
-        lambda m: f"\\x{ord(m.group()):02x}",
-        result,
-    )
+    return escape_string(s)
 
 
 def validate_thread_id(thread_id: str, context: str) -> None:

@@ -1,5 +1,5 @@
 {
-  "description": "Meta commands the SDKs send and the replies they parse. The JS SDK renders `commands` from its command table and must produce `text` exactly (the Python SDK is planned to do the same); a live test sends every command to the engine (in order, so each one has the state it needs) and expects `rejected` to fail. Replies are copied from the engine and pin the SDK parsers.",
+  "description": "Meta commands the SDKs send and the replies they parse. Both SDKs render `commands` from their command tables and must produce `text` exactly; a live test sends every command to the engine (in order, so each one has the state it needs) and expects `rejected` to fail. Replies are copied from the engine and pin the SDK parsers.",
   "commands": [
     { "name": "session_list", "args": [], "text": ".session" },
     { "name": "session_drop", "args": [2], "text": ".session drop 2" },

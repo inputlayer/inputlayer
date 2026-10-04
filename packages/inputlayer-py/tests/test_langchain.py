@@ -147,8 +147,9 @@ class TestIQLLiteral:
     def test_tab_escaped(self) -> None:
         assert iql_literal("a\tb") == '"a\\tb"'
 
-    def test_nul_byte_escaped(self) -> None:
-        assert iql_literal("a\x00b") == '"a\\0b"'
+    def test_nul_byte_passes_through(self) -> None:
+        # The engine reads `\0` as a backslash and a zero; a raw NUL round-trips.
+        assert iql_literal("a\x00b") == '"a\x00b"'
 
     def test_backslash_before_newline(self) -> None:
         # Backslash must be escaped first, then \n
@@ -156,7 +157,7 @@ class TestIQLLiteral:
 
     def test_all_control_chars_in_one_string(self) -> None:
         result = iql_literal('\\"test\n\r\t\x00')
-        assert result == '"\\\\\\"test\\n\\r\\t\\0"'
+        assert result == '"\\\\\\"test\\n\\r\\t\x00"'
 
 
 class TestBindParams:

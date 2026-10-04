@@ -76,7 +76,7 @@ class Document(Relation):
     created_at: Timestamp
 ```
 
-Supported types: `int`, `float`, `str`, `bool`, `Vector[N]`, `VectorInt8[N]`, `Timestamp`
+Supported types: `int`, `float`, `str`, `bool`, `Vector[N]`, `VectorInt8[N]`, `Timestamp`, `datetime` (both stored as Unix milliseconds)
 
 ### Derived Relations (Rules)
 

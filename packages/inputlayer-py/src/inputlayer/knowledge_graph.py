@@ -7,8 +7,10 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from inputlayer import _meta
 from inputlayer._ast import AggExpr, Expr, OrderedColumn
 from inputlayer._ast import Column as AstColumn
+from inputlayer._literal import encode as encode_literal
 from inputlayer._proxy import ColumnProxy, RelationProxy, RelationRef
 from inputlayer.auth import AclEntry
 from inputlayer.compiler import (
@@ -21,7 +23,7 @@ from inputlayer.compiler import (
     compile_rule,
     compile_schema,
 )
-from inputlayer.exceptions import InternalError, QueryError
+from inputlayer.exceptions import CompileError, InternalError, QueryError
 from inputlayer.index import HnswIndex
 from inputlayer.relation import Relation
 from inputlayer.result import ResultSet
@@ -353,7 +355,9 @@ class KnowledgeGraph:
         if isinstance(facts, type) and issubclass(facts, Relation) and where is not None:
             # Conditional delete
             rel_cls = facts
-            proxy = RelationProxy(Relation._resolve_name(rel_cls))
+            proxy = RelationProxy(
+                Relation._resolve_name(rel_cls), columns=tuple(Relation._get_columns(rel_cls))
+            )
             condition = where(proxy)
             iql = compile_conditional_delete(rel_cls, condition)
         elif isinstance(facts, list):
@@ -480,6 +484,9 @@ class KnowledgeGraph:
             RelationProxy(
                 r.relation_name if isinstance(r, RelationRef) else Relation._resolve_name(r),
                 ref_alias=r.alias if isinstance(r, RelationRef) else None,
+                columns=tuple(
+                    Relation._get_columns(r.relation_cls if isinstance(r, RelationRef) else r)
+                ),
             )
             for r in relations
         ]
@@ -566,7 +573,7 @@ class KnowledgeGraph:
         if k is None and radius is None:
             raise ValueError("Must specify either k or radius")
 
-        vec_str = "[" + ", ".join(repr(float(v)) for v in query_vec) + "]"
+        vec_str = encode_literal([float(v) for v in query_vec])
         _valid_metrics = {
             "cosine": "cosine",
             "euclidean": "euclidean",
@@ -592,7 +599,7 @@ class KnowledgeGraph:
 
         # Radius filter is applied server-side in the query body.
         if radius is not None:
-            iql_parts.append(f"Dist <= {radius}")
+            iql_parts.append(f"Dist <= {encode_literal(radius)}")
 
         if extra_iql_clauses:
             iql_parts.extend(extra_iql_clauses)
@@ -638,30 +645,27 @@ class KnowledgeGraph:
 
     async def list_rules(self) -> list[RuleInfo]:
         """List all rules in this KG."""
-        result = await self._execute(".rule list")
-        rules = []
-        for row in result.rows:
-            rules.append(RuleInfo(name=row[0], clause_count=int(row[1]) if len(row) > 1 else 1))
-        return rules
+        result = await self._execute(_meta.rule_list())
+        return [RuleInfo(name, count) for name, count in _meta.rule_infos(result.rows)]
 
     async def rule_definition(self, name: str | type) -> list[str]:
-        """Get the IQL definition of a rule."""
+        """Get the IQL clauses of a rule, in order."""
         if isinstance(name, type):
             name = Relation._resolve_name(name)
-        result = await self._execute(f".rule show {name}")
-        return [row[0] for row in result.rows]
+        result = await self._execute(_meta.rule_def(name))
+        return _meta.rule_clauses(result.rows)
 
     async def drop_rule(self, name: str | type) -> None:
         """Drop all clauses of a rule."""
         if isinstance(name, type):
             name = Relation._resolve_name(name)
-        await self._execute(f".rule drop {name}")
+        await self._execute(_meta.rule_drop(name))
 
     async def drop_rule_clause(self, name: str | type, index: int) -> None:
         """Remove a specific clause from a rule (1-based index)."""
         if isinstance(name, type):
             name = Relation._resolve_name(name)
-        await self._execute(f".rule remove {name} {index}")
+        await self._execute(_meta.rule_remove(name, index))
 
     async def edit_rule_clause(self, name: str | type, index: int, clause: Any) -> None:
         """Replace a specific rule clause: remove and re-add in one program."""
@@ -679,17 +683,17 @@ class KnowledgeGraph:
             clause.condition,
             persistent=True,
         )
-        await self._execute(f".rule remove {head_name} {index}\n{iql}")
+        await self._execute(f"{_meta.rule_remove(head_name, index)}\n{iql}")
 
     async def clear_rule(self, name: str | type) -> None:
-        """Clear a rule's materialized data."""
+        """Clear a rule's clauses."""
         if isinstance(name, type):
             name = Relation._resolve_name(name)
-        await self._execute(f".rule clear {name}")
+        await self._execute(_meta.rule_clear(name))
 
     async def drop_rules_by_prefix(self, prefix: str) -> None:
         """Drop all rules whose names start with prefix."""
-        await self._execute(f".rule drop prefix {prefix}")
+        await self._execute(_meta.rule_drop_prefix(prefix))
 
     # ── Indexes ───────────────────────────────────────────────────────
 
@@ -770,8 +774,14 @@ class KnowledgeGraph:
         each with the proof tree of its derivation.
         """
         plan, _ = self._plan(*select, **kwargs)
-        cmd = f".why full {plan.why}" if full else f".why {plan.why}"
-        result = await self._execute(cmd)
+        if plan.setup:
+            # .why does not see a program's session facts.
+            raise CompileError(
+                "why() cannot explain a query whose negated atom is linked to the "
+                "body by a constant only",
+                hint="define the query as a rule with define_rules() and explain that rule",
+            )
+        result = await self._execute(_meta.why(plan.why, full))
         raw_graphs = getattr(result, "proof_trees", None) or []
         picked = plan.shape_why(result.rows)
         rows = [plan.project_why(result.rows[i]) for i in picked]
@@ -802,18 +812,14 @@ class KnowledgeGraph:
 
         rel_name = Relation._resolve_name(relation)
         cols = Relation._get_columns(relation)
-        parts = []
-        for col in cols:
-            v = values.get(col)
-            if v is None:
-                parts.append("null")
-            elif isinstance(v, str):
-                escaped = v.replace("\\", "\\\\").replace('"', '\\"')
-                parts.append(f'"{escaped}"')
-            else:
-                parts.append(str(v))
-        vals_str = ", ".join(parts)
-        result = await self._execute(f".why_not {rel_name}({vals_str})")
+        missing = [col for col in cols if values.get(col) is None]
+        if missing:
+            raise CompileError(
+                f"why_not() needs a value for every column of {rel_name}",
+                hint=f"pass {', '.join(missing)}",
+            )
+        vals_str = ", ".join(encode_literal(values[col]) for col in cols)
+        result = await self._execute(_meta.why_not(f"{rel_name}({vals_str})"))
         text = "\n".join(str(row[0]) for row in result.rows)
         raw_graphs = getattr(result, "proof_trees", None) or []
         if raw_graphs and isinstance(raw_graphs[0], dict):
