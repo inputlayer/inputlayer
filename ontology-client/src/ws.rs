@@ -8,7 +8,8 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use futures_util::{SinkExt, StreamExt};
-use inputlayer_ws_protocol::{ClientFrame, FrameClass, Params, RequestId, ServerFrame};
+use inputlayer_ws_protocol::{ClientFrame, FrameClass, RequestId, ServerFrame};
+pub use inputlayer_ws_protocol::{ParamValue, Params};
 use tokio_tungstenite::tungstenite;
 
 /// A failed statement of a multi-statement program.

@@ -489,7 +489,7 @@ async fn incremental_turns_ledger_retraction_and_restart() {
 }
 
 #[tokio::test]
-async fn unstorable_text_drops_only_its_row() {
+async fn iql_syntax_in_text_is_stored_and_control_characters_drop_only_their_row() {
     let kg = "gw_live_literals";
     let conv = "voice77";
     let Some(Live {
@@ -530,26 +530,28 @@ async fn unstorable_text_drops_only_its_row() {
     )
     .await
     .expect("turn is recorded");
-    // The paren surface and the newline value drop; the surface quoted
-    // across a line break is normalized and stored.
-    assert_eq!(turn.eval.dropped.len(), 2, "{:?}", turn.eval.dropped);
+    // Values travel as parameters: the paren surface is stored verbatim.
+    // The newline value drops; the surface quoted across a line break is
+    // normalized and stored.
+    assert_eq!(turn.eval.dropped.len(), 1, "{:?}", turn.eval.dropped);
     let sources = engine
         .execute("?claim_source(C, M, S)")
         .await
         .expect("sources");
-    let stored: Vec<&Vec<Value>> = sources
+    let mut stored: Vec<&str> = sources
         .rows
         .iter()
         .filter(|row| row[0].as_str().is_some_and(|c| c.starts_with(conv)))
+        .filter_map(|row| row[2].as_str())
         .collect();
-    assert_eq!(stored.len(), 1, "{stored:?}");
-    assert_eq!(stored[0][2], "leave on August 14th");
+    stored.sort_unstable();
+    assert_eq!(stored, ["Option 1) Paris", "leave on August 14th"]);
     let prior = inputlayer_gateway::pipeline::read_prior(&pool, &loaded, kg, conv)
         .await
         .expect("prior");
     assert_eq!(prior.next_index, 1);
     assert_eq!(prior.context[0].2, content, "message round-trips");
-    assert_eq!(prior.rows.len(), 1);
+    assert_eq!(prior.rows.len(), 2);
 
     // On the next turn the marker sits in CONTEXT and stays literal.
     run_turn(

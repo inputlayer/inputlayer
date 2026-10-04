@@ -19,7 +19,7 @@
 //! idempotent (set-semantics inserts, conditional deletes, queries).
 
 use anyhow::{Context, Result};
-use inputlayer_ontology_client::ws::{Disconnected, Engine, QueryResult};
+use inputlayer_ontology_client::ws::{Disconnected, Engine, Params, QueryResult};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -146,20 +146,36 @@ pub struct PooledEngine<'a> {
 }
 
 impl PooledEngine<'_> {
+    /// Execute IQL the gateway wrote itself, holding no value.
     pub async fn execute(&mut self, program: &str) -> Result<QueryResult> {
+        self.execute_with(program, &Params::new()).await
+    }
+
+    /// Execute `program` with `params` bound to its `$name` references.
+    pub async fn execute_with(&mut self, program: &str, params: &Params) -> Result<QueryResult> {
         self.in_flight = true;
-        let result = self.execute_inner(program).await;
+        let result = self.execute_inner(program, params).await;
         self.in_flight = false;
         result
     }
 
-    async fn execute_inner(&mut self, program: &str) -> Result<QueryResult> {
+    /// Execute a statement, its values as parameters.
+    pub async fn run(&mut self, stmt: &crate::iql::Stmt) -> Result<QueryResult> {
+        self.execute_with(stmt.iql(), stmt.params()).await
+    }
+
+    /// Execute a program, its values as parameters.
+    pub async fn run_program(&mut self, program: &crate::iql::Program) -> Result<QueryResult> {
+        self.execute_with(&program.iql(), program.params()).await
+    }
+
+    async fn execute_inner(&mut self, program: &str, params: &Params) -> Result<QueryResult> {
         let first = std::mem::replace(&mut self.fresh_command, false);
         let engine = self
             .engine
             .as_mut()
             .context("engine connection already failed")?;
-        match engine.execute(program).await {
+        match engine.execute_with(program, params).await {
             Ok(result) => Ok(result),
             Err(err) if err.downcast_ref::<Disconnected>().is_some() => {
                 self.engine = None;
@@ -169,7 +185,7 @@ impl PooledEngine<'_> {
                 let mut engine = self.pool.open(&self.kg).await?;
                 self.created = Instant::now();
                 self.reused = false;
-                let result = engine.execute(program).await;
+                let result = engine.execute_with(program, params).await;
                 if result
                     .as_ref()
                     .err()
