@@ -182,6 +182,15 @@ subscription_coalesce_ms = 0
 
 # Notification ring buffer size for reconnect replay
 notification_buffer_size = 4096
+
+# =============================================================================
+# STANDING QUERIES (.subscribe)
+# =============================================================================
+[subscriptions]
+# Standing queries that differ only in bound constants (?speech("s-1", ...) and
+# ?speech("s-2", ...)) share one evaluation per commit; each subscriber still gets
+# exactly its own rows. Turns itself off per query shape when sharing is slower.
+share_parameterized = true
 ```
 
 ## Environment Variables
@@ -210,6 +219,9 @@ export INPUTLAYER_STORAGE__PERFORMANCE__MAX_RESULT_ROWS=50000
 
 # Rate limiting
 export INPUTLAYER_HTTP__RATE_LIMIT__WS_MAX_MESSAGES_PER_SEC=500
+
+# Standing queries
+export INPUTLAYER_SUBSCRIPTIONS__SHARE_PARAMETERIZED=false
 
 # Logging
 export INPUTLAYER_LOGGING__LEVEL=debug

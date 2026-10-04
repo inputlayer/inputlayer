@@ -48,7 +48,7 @@ mod write_program;
 pub use catalog_change::{CatalogChange, CatalogOutcome};
 pub use checkpoint::{CheckpointExport, ExportStatus};
 pub use relation_store::RelationStore;
-pub use snapshot::KnowledgeGraphSnapshot;
+pub use snapshot::{CachedRun, KnowledgeGraphSnapshot, PersistentRules};
 pub use write_program::{
     CommitError, FactChange, FactCount, ProgramCommit, RelationChange, StagedChanges,
     StagedStatement, StatementEffect, StatementOutcome, WriteProgram,
@@ -2388,11 +2388,12 @@ impl KnowledgeGraph {
             // Create AND publish snapshot while still holding the lock
             // This ensures no concurrent invalidation can occur between
             // reading materializations and making them visible to readers.
-            let mut new_snapshot = KnowledgeGraphSnapshot::new_with_materializations(
+            let mut new_snapshot = KnowledgeGraphSnapshot::with_rules_after(
                 input_tuples,
                 rules,
                 self.num_workers,
                 materialized_names,
+                Some(&self.snapshot.load()),
             );
             new_snapshot.max_result_rows = self.max_result_rows;
             new_snapshot.max_query_cost = self.max_query_cost;
@@ -2403,11 +2404,12 @@ impl KnowledgeGraph {
             // Lock drops here AFTER publication - this is the fix for TOCTOU
         } else {
             // No DD computation - publish without materializations
-            let mut new_snapshot = KnowledgeGraphSnapshot::new_with_materializations(
+            let mut new_snapshot = KnowledgeGraphSnapshot::with_rules_after(
                 input_tuples,
                 rules,
                 self.num_workers,
                 HashSet::new(),
+                Some(&self.snapshot.load()),
             );
             new_snapshot.max_result_rows = self.max_result_rows;
             new_snapshot.max_query_cost = self.max_query_cost;

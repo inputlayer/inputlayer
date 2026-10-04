@@ -296,6 +296,51 @@ use tracing::info;
 pub type ExecutionOutput =
     Result<(Vec<Tuple>, RelationMap, Option<execution::TimingBreakdown>), String>;
 
+/// Magic Sets seed facts, by relation.
+type MagicSeeds = Vec<(String, Vec<Tuple>)>;
+
+fn inject_magic_seeds(inputs: &mut RelationMap, seeds: &MagicSeeds) {
+    for (relation, tuples) in seeds {
+        inputs
+            .entry(relation.clone())
+            .or_default()
+            .extend(tuples.iter().cloned());
+    }
+}
+
+/// What execution needs from compilation besides the engine's fields.
+#[derive(Clone)]
+struct Staged {
+    /// IR before optimization: recursive rules run on it.
+    unoptimized_ir_nodes: Vec<IRNode>,
+    /// Per IR node, the relation it recursively defines, if any.
+    recursive_info: Vec<Option<String>>,
+    magic_seeds: MagicSeeds,
+}
+
+/// A program compiled by [`IQLEngine::compile_program`]: rewritten, lowered to
+/// IR and optimized. It depends only on the program and the optimizer
+/// configuration, never on data, so it can be executed on any inputs.
+#[derive(Clone)]
+pub struct CompiledProgram {
+    program: Program,
+    ir_nodes: Vec<IRNode>,
+    shared_views: HashMap<String, IRNode>,
+    semiring_annotations: Vec<boolean_specialization::SemiringAnnotation>,
+    has_recursion: bool,
+    strata: Vec<Vec<usize>>,
+    staged: Staged,
+    /// Compile-stage timings of the compilation.
+    timing: execution::TimingBreakdown,
+}
+
+impl CompiledProgram {
+    /// Compile-stage timings (parse to optimize) of the compilation.
+    pub fn compile_timing(&self) -> &execution::TimingBreakdown {
+        &self.timing
+    }
+}
+
 thread_local! {
     static RESULT_TRUNCATED: Cell<bool> = const { Cell::new(false) };
     static RESULT_CAP_OFF: Cell<bool> = const { Cell::new(false) };
@@ -698,20 +743,21 @@ impl IQLEngine {
     /// Rewrites recursive rules so that the fixpoint computation is restricted to
     /// only the tuples demanded by the query's constant bindings. For example,
     /// `?reach(1, Y)` will only compute reachability from node 1.
-    fn apply_magic_sets(&mut self) {
+    /// Returns the seed facts it added to the inputs.
+    fn apply_magic_sets(&mut self) -> MagicSeeds {
         if !self.optimization_config.enable_magic_sets {
-            return;
+            return MagicSeeds::new();
         }
         if let Some(program) = &self.program {
             let recursive_rels = magic_sets::find_recursive_relations(program);
             if recursive_rels.is_empty() {
-                return;
+                return MagicSeeds::new();
             }
 
             let bindings =
                 magic_sets::MagicSetRewriter::detect_query_bindings(program, &recursive_rels);
             if bindings.is_empty() {
-                return;
+                return MagicSeeds::new();
             }
 
             let (rewritten, magic_seeds) =
@@ -749,18 +795,16 @@ impl IQLEngine {
             }
 
             // Inject magic seed facts into input_tuples
-            for (magic_rel, seed_tuples) in magic_seeds {
-                self.input_tuples
-                    .entry(magic_rel)
-                    .or_default()
-                    .extend(seed_tuples);
-            }
+            let magic_seeds: MagicSeeds = magic_seeds.into_iter().collect();
+            inject_magic_seeds(&mut self.input_tuples, &magic_seeds);
 
             // Re-run recursion detection on rewritten program
             self.has_recursion = recursion::has_recursion(&rewritten);
             self.strata = recursion::stratify(&rewritten);
             self.program = Some(rewritten);
+            return magic_seeds;
         }
+        MagicSeeds::new()
     }
 
     /// Build IR from the parsed program
@@ -1370,6 +1414,49 @@ impl IQLEngine {
         self.run_loaded_program(collector, parse_us, source_len)
     }
 
+    /// Compile `program` without executing it: everything the pipeline derives
+    /// before it reads data. [`Self::execute_compiled_profiled`] runs the
+    /// result on any inputs, so one compilation can serve many evaluations.
+    pub fn compile_program(&mut self, program: Program) -> Result<CompiledProgram, String> {
+        let mut collector = execution::TimingCollector::new(self.timing_mode);
+        let source_len = program.rules.len();
+        let (load_result, parse_us) = collector.time(|| self.load_program(program).map(|_| ()));
+        load_result?;
+        let staged = self.compile_loaded(&mut collector, parse_us, source_len)?;
+        let program = self
+            .program
+            .clone()
+            .ok_or("No program parsed yet. Call parse() first.")?;
+        Ok(CompiledProgram {
+            program,
+            ir_nodes: self.ir_nodes.clone(),
+            shared_views: self.shared_views.clone(),
+            semiring_annotations: self.semiring_annotations.clone(),
+            has_recursion: self.has_recursion,
+            strata: self.strata.clone(),
+            staged,
+            timing: collector.breakdown,
+        })
+    }
+
+    /// Execute a program compiled by [`Self::compile_program`] on this
+    /// engine's inputs, as executing the program itself would. The timing
+    /// breakdown has no compile stages: none ran.
+    pub fn execute_compiled_profiled(&mut self, compiled: &CompiledProgram) -> ExecutionOutput {
+        self.program = Some(compiled.program.clone());
+        self.ir_nodes.clone_from(&compiled.ir_nodes);
+        self.shared_views.clone_from(&compiled.shared_views);
+        self.semiring_annotations
+            .clone_from(&compiled.semiring_annotations);
+        self.has_recursion = compiled.has_recursion;
+        self.strata.clone_from(&compiled.strata);
+        inject_magic_seeds(&mut self.input_tuples, &compiled.staged.magic_seeds);
+        let collector = execution::TimingCollector::new(self.timing_mode);
+        let source_len = compiled.program.rules.len();
+        info!(rules = source_len, "engine_execute_compiled_start");
+        self.execute_loaded(collector, compiled.staged.clone(), source_len)
+    }
+
     /// Run the pipeline after parsing: SIP, magic sets, IR, optimize, execute.
     fn run_loaded_program(
         &mut self,
@@ -1377,9 +1464,19 @@ impl IQLEngine {
         parse_us: u64,
         source_len: usize,
     ) -> ExecutionOutput {
-        RESULT_TRUNCATED.set(false);
+        let staged = self.compile_loaded(&mut collector, parse_us, source_len)?;
+        self.execute_loaded(collector, staged, source_len)
+    }
+
+    /// The compile stages after parsing: constant specialization, SIP, Magic
+    /// Sets, IR and optimization. Leaves the engine ready to execute.
+    fn compile_loaded(
+        &mut self,
+        collector: &mut execution::TimingCollector,
+        parse_us: u64,
+        source_len: usize,
+    ) -> Result<Staged, String> {
         let debug = std::env::var("INPUTLAYER_DEBUG").is_ok();
-        let exec_start = Instant::now();
         let parse_ms = parse_us / 1000;
         info!(source_len, parse_ms, "engine_parse_complete");
         collector.breakdown.parse_us = parse_us;
@@ -1392,7 +1489,7 @@ impl IQLEngine {
         info!(source_len, sip_ms, "engine_sip_complete");
         collector.breakdown.sip_us = sip_us;
 
-        let ((), magic_us) = collector.time(|| self.apply_magic_sets());
+        let (magic_seeds, magic_us) = collector.time(|| self.apply_magic_sets());
         let magic_ms = magic_us / 1000;
         info!(source_len, magic_ms, "engine_magic_sets_complete");
         collector.breakdown.magic_sets_us = magic_us;
@@ -1418,7 +1515,7 @@ impl IQLEngine {
         // Detect recursion BEFORE optimization (optimization destroys Union structure)
         let rule_heads = self.get_rule_heads();
         let recursive_info = self.detect_recursion_info(&rule_heads);
-        let mut unoptimized_ir_nodes = self.ir_nodes.clone();
+        let unoptimized_ir_nodes = self.ir_nodes.clone();
 
         // Optimize (for non-recursive nodes)
         let (opt_result, opt_us) = collector.time(|| self.optimize_ir(collector.is_detailed()));
@@ -1426,6 +1523,29 @@ impl IQLEngine {
         let opt_ms = opt_us / 1000;
         info!(source_len, opt_ms, "engine_optimize_complete");
         collector.breakdown.optimize_us = opt_us;
+
+        Ok(Staged {
+            unoptimized_ir_nodes,
+            recursive_info,
+            magic_seeds,
+        })
+    }
+
+    /// Execute the compiled program on the engine's inputs.
+    fn execute_loaded(
+        &mut self,
+        mut collector: execution::TimingCollector,
+        staged: Staged,
+        source_len: usize,
+    ) -> ExecutionOutput {
+        RESULT_TRUNCATED.set(false);
+        let exec_start = Instant::now();
+        let Staged {
+            mut unoptimized_ir_nodes,
+            recursive_info,
+            ..
+        } = staged;
+        let rule_heads = self.get_rule_heads();
 
         if self.ir_nodes.is_empty() {
             return Err("No IR nodes to execute".to_string());

@@ -54,6 +54,9 @@ pub(crate) struct QueryTransform {
     pub limit: Option<usize>,
     /// Number of rows to skip before applying limit.
     pub offset: Option<usize>,
+    /// The `__query__` head: one variable per result column (empty when the
+    /// text was not a `?` query).
+    pub columns: Vec<String>,
 }
 
 /// Term -> Value (constants only, rejects variables/placeholders).
@@ -97,6 +100,9 @@ fn term_to_value(term: &Term) -> Result<Value, String> {
 /// Reply when `.subscribe`/`.unsubscribe` reach the generic executor.
 const SUBSCRIPTION_WS_ONLY: &str =
     ".subscribe and .unsubscribe are only available as standalone commands on the global /ws endpoint.";
+
+/// Standing-query sharing probes computing at once, server-wide.
+const PROBE_PERMITS: usize = 1;
 
 /// Password logins allowed in flight; more are refused as busy.
 const MAX_QUEUED_LOGINS: usize = 64;
@@ -190,6 +196,11 @@ pub struct Handler {
     /// Prevents blocking-thread-pool explosion by capping CPU-bound parallelism
     /// at the hardware thread count. Tokio workers queue via async `acquire()`.
     query_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Width of `query_semaphore`: queries that run at once.
+    compute_permits: usize,
+    /// Permits of standing-query sharing probes, apart from the compute
+    /// permits so that a probe never takes one a query waits for.
+    probe_semaphore: Arc<tokio::sync::Semaphore>,
     /// Accumulated timing histogram buckets for Prometheus export.
     timing_histograms: Arc<crate::execution::timing::TimingHistograms>,
     /// Teaching agent for guided onboarding.
@@ -506,6 +517,10 @@ struct QueryJob {
     /// When set, the query reads this snapshot of its knowledge graph instead
     /// of the one current when it runs.
     pinned: Option<Arc<KnowledgeGraphSnapshot>>,
+    /// When set, reuse the query's compiled plan while the rules stay the
+    /// same (for queries evaluated again and again: standing queries), and
+    /// note here how the run went.
+    cache_plan: Option<Arc<std::sync::OnceLock<crate::storage_engine::CachedRun>>>,
 }
 
 impl QueryJob {
@@ -889,6 +904,8 @@ impl Handler {
             sessions: SessionManager::default(),
             notifications,
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
+            compute_permits,
+            probe_semaphore: Arc::new(tokio::sync::Semaphore::new(PROBE_PERMITS)),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             agent: Arc::new(crate::agent::AgentManager::new(
                 crate::agent::AgentConfig::default(),
@@ -931,6 +948,8 @@ impl Handler {
             sessions: SessionManager::new(session_config),
             notifications,
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
+            compute_permits,
+            probe_semaphore: Arc::new(tokio::sync::Semaphore::new(PROBE_PERMITS)),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             agent: Arc::new(crate::agent::AgentManager::new(
                 crate::agent::AgentConfig::default(),
@@ -957,6 +976,7 @@ impl Handler {
             start_time: self.start_time,
             timing_histograms: Arc::clone(&self.timing_histograms),
             pinned: None,
+            cache_plan: None,
         }
     }
 
@@ -978,6 +998,27 @@ impl Handler {
     /// Get reference to the handler's configuration.
     pub fn config(&self) -> &crate::Config {
         &self.config
+    }
+
+    /// How many queries run at once; more wait for a compute permit.
+    pub fn compute_permits(&self) -> usize {
+        self.compute_permits
+    }
+
+    /// Every compute permit, held until the result drops.
+    #[cfg(test)]
+    pub(crate) fn hold_compute_permits(&self) -> tokio::sync::OwnedSemaphorePermit {
+        Arc::clone(&self.query_semaphore)
+            .try_acquire_many_owned(self.compute_permits as u32)
+            .unwrap_or_else(|e| panic!("compute permits taken: {e}"))
+    }
+
+    /// This handler running `permits` queries at once (by default, one per
+    /// core not reserved for I/O).
+    pub fn with_compute_permits(mut self, permits: usize) -> Self {
+        self.query_semaphore = Arc::new(tokio::sync::Semaphore::new(permits));
+        self.compute_permits = permits;
+        self
     }
 
     /// Standing-query counters.
@@ -2347,12 +2388,13 @@ impl Handler {
             program,
             statements,
             control,
+            &self.query_semaphore,
         )
         .await
     }
 
-    /// Run `job` for `program` on the blocking pool under a compute permit and
-    /// the request's deadline and cancellation.
+    /// Run `job` for `program` on the blocking pool under one of `permits`
+    /// and the request's deadline and cancellation.
     async fn run_job(
         &self,
         job: QueryJob,
@@ -2360,6 +2402,7 @@ impl Handler {
         program: String,
         statements: Option<Vec<statement::Statement>>,
         control: &Arc<RequestControl>,
+        permits: &Arc<tokio::sync::Semaphore>,
     ) -> Result<QueryResult, ProgramError> {
         let program_len = program.len();
         let query_start = Instant::now();
@@ -2381,13 +2424,13 @@ impl Handler {
         // request's one deadline; see `supervise`.
         #[cfg(test)]
         let hook = test_hook::take();
-        let result = supervise::run_blocking(&self.query_semaphore, control, move || {
+        let run = move || {
             #[cfg(test)]
             let _hook = test_hook::install(hook);
             job.execute(knowledge_graph, program, statements)
                 .map_err(ProgramError::from)
-        })
-        .await;
+        };
+        let result = supervise::run_blocking(permits, control, run).await;
         let compute_ms = query_start.elapsed().as_millis() as u64;
         info!(
             program_len,
@@ -3500,6 +3543,13 @@ impl QueryJob {
                     session_fact_tuples,
                     timing_mode,
                 )
+            } else if let Some(cache_plan) = &self.cache_plan {
+                snapshot
+                    .execute_with_rules_tuples_cached(&query_program, timing_mode)
+                    .map(|(tuples, timing, run)| {
+                        let _ = cache_plan.set(run);
+                        (tuples, timing)
+                    })
             } else {
                 snapshot.execute_with_rules_tuples_profiled(&query_program, timing_mode)
             }
@@ -4033,6 +4083,23 @@ impl Handler {
         settle_result(result, auth, single_statement)
     }
 
+    /// The registered schema column names of the relation a query program
+    /// (`__query__(...) <- ...`) reads first, if it has a schema: a result as
+    /// wide as the schema takes its names.
+    pub(crate) fn source_schema_columns(
+        &self,
+        knowledge_graph: &str,
+        query_program: &str,
+    ) -> Option<Vec<String>> {
+        let relation = find_query_source_relation(query_program)?;
+        let storage = self.storage.read();
+        storage
+            .get_schema_in(knowledge_graph, &relation)
+            .ok()
+            .flatten()
+            .map(|schema| schema.columns.iter().map(|c| c.name.clone()).collect())
+    }
+
     /// Check that `auth` may run the query `goal` on `knowledge_graph`: the
     /// check `execute_program` makes before running it.
     pub fn authorize_query(
@@ -4056,14 +4123,19 @@ impl Handler {
     /// `knowledge_graph`, as `auth` would run it with `execute_program`:
     /// admitted and authorized the same way, but reading `snapshot` instead of
     /// whatever is current when the query runs. The result is therefore the
-    /// query's exact answer at `snapshot.revision`.
+    /// query's exact answer at `snapshot.revision`. The query's compiled plan
+    /// is kept and reused on later snapshots until the rules change; the
+    /// [`CachedRun`](crate::storage_engine::CachedRun) tells whether this run
+    /// reused it and how long executing it took. A `probe` (of standing-query
+    /// sharing) computes under a probe permit instead of a compute permit.
     pub async fn query_snapshot(
         &self,
         knowledge_graph: &str,
         snapshot: Arc<KnowledgeGraphSnapshot>,
         query: &str,
         auth: Option<&crate::auth::Principal>,
-    ) -> Result<QueryResult, String> {
+        probe: bool,
+    ) -> Result<(QueryResult, crate::storage_engine::CachedRun), String> {
         let identity = auth
             .map(crate::auth::Principal::identity)
             .transpose()
@@ -4076,8 +4148,10 @@ impl Handler {
             return Err("A snapshot query must be a single query".to_string());
         }
         self.authorize_program(identity.as_ref(), Some(knowledge_graph), &statements)?;
+        let cache_plan = Arc::new(std::sync::OnceLock::new());
         let job = QueryJob {
             pinned: Some(snapshot),
+            cache_plan: Some(Arc::clone(&cache_plan)),
             ..self.make_query_job()
         };
         let control = self.request_control(None);
@@ -4088,9 +4162,15 @@ impl Handler {
                 query.to_string(),
                 Some(statements),
                 &control,
+                if probe {
+                    &self.probe_semaphore
+                } else {
+                    &self.query_semaphore
+                },
             )
             .await?;
-        settle_result(result, auth, true).map_err(|e| e.message)
+        let result = settle_result(result, auth, true).map_err(|e| e.message)?;
+        Ok((result, cache_plan.get().copied().unwrap_or_default()))
     }
 
     async fn run_execute_program(
@@ -5340,6 +5420,7 @@ pub(crate) fn transform_query_shorthand(program_text: &str) -> Result<QueryTrans
                 order_by: vec![],
                 limit: None,
                 offset: None,
+                columns: vec![],
             });
         }
         let query_text = after_q;
@@ -5426,6 +5507,7 @@ pub(crate) fn transform_query_shorthand(program_text: &str) -> Result<QueryTrans
             order_by,
             limit: goal.limit,
             offset: goal.offset,
+            columns: head_vars,
         })
     } else {
         Ok(QueryTransform {
@@ -5433,6 +5515,7 @@ pub(crate) fn transform_query_shorthand(program_text: &str) -> Result<QueryTrans
             order_by: vec![],
             limit: None,
             offset: None,
+            columns: vec![],
         })
     }
 }
@@ -5628,7 +5711,7 @@ fn program_statement_count(program: &str) -> usize {
 /// Parses the query program and inspects the last rule's head atom arguments
 /// to derive column names. Falls back to `col0, col1, ...` if parsing fails
 /// or arity doesn't match.
-fn extract_column_names_from_query(program: &str, arity: usize) -> Vec<String> {
+pub(crate) fn extract_column_names_from_query(program: &str, arity: usize) -> Vec<String> {
     let parsed = match crate::parser::parse_program(program) {
         Ok(p) => p,
         Err(_) => return (0..arity).map(|i| format!("col{i}")).collect(),

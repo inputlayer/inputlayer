@@ -43,6 +43,8 @@ pub struct Config {
     pub logging: LoggingConfig,
     #[serde(default)]
     pub http: HttpConfig,
+    #[serde(default)]
+    pub subscriptions: SubscriptionsConfig,
 }
 
 /// Storage engine configuration
@@ -271,7 +273,7 @@ pub struct PerformanceConfig {
 /// Query optimizer passes applied by every `IQLEngine` the server builds.
 ///
 /// Every pass defaults to on, whether the section or a key is omitted.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OptimizationConfig {
     /// Join order planning (maximum spanning tree)
@@ -365,6 +367,27 @@ pub struct LoggingConfig {
     /// Log format (text, json)
     #[serde(default = "default_log_format")]
     pub format: String,
+}
+
+/// Standing-query (`.subscribe`) configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SubscriptionsConfig {
+    /// Share one evaluation per commit among standing queries that differ
+    /// only in bound constants (`?speech("s-1", ...)`, `?speech("s-2", ...)`),
+    /// routing each subscriber exactly its own rows. A family whose shared
+    /// query is slower than its members' own run in parallel stops sharing
+    /// by itself.
+    #[serde(default = "default_true")]
+    pub share_parameterized: bool,
+}
+
+impl Default for SubscriptionsConfig {
+    fn default() -> Self {
+        Self {
+            share_parameterized: true,
+        }
+    }
 }
 
 /// HTTP server configuration for WebSocket API and GUI
@@ -760,7 +783,8 @@ impl Config {
             },
             "optimization": {},
             "logging": {},
-            "http": { "gui": {}, "auth": {}, "rate_limit": {} }
+            "http": { "gui": {}, "auth": {}, "rate_limit": {} },
+            "subscriptions": {}
         });
         serde_json::from_value(minimal).expect("minimal config seed must deserialize")
     }
@@ -774,7 +798,13 @@ impl Config {
     /// strict parsing turned any of them into a startup failure (#92). The
     /// TOML sources stay strict; only the env source is filtered.
     fn env_source() -> Env {
-        const SECTIONS: [&str; 4] = ["storage", "optimization", "logging", "http"];
+        const SECTIONS: [&str; 5] = [
+            "storage",
+            "optimization",
+            "logging",
+            "http",
+            "subscriptions",
+        ];
         Env::prefixed("INPUTLAYER_")
             .filter(|key| {
                 let key = key.as_str().to_ascii_lowercase();
@@ -965,6 +995,7 @@ impl Config {
                 format: "text".to_string(),
             },
             http: HttpConfig::default(),
+            subscriptions: SubscriptionsConfig::default(),
         }
     }
 }
@@ -1059,6 +1090,17 @@ mod tests {
             jail.set_env("INPUTLAYER_API_KEY", "client-key");
             let config = Config::from_file("server.toml").expect("parse must succeed");
             assert_eq!(config.storage.data_dir, PathBuf::from("/tmp/x"));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_env_override_switches_parameterized_sharing_off() {
+        figment::Jail::expect_with(|jail| {
+            assert!(Config::load().unwrap().subscriptions.share_parameterized);
+            jail.set_env("INPUTLAYER_SUBSCRIPTIONS__SHARE_PARAMETERIZED", "false");
+            let config = Config::load().expect("load must succeed with no file");
+            assert!(!config.subscriptions.share_parameterized);
             Ok(())
         });
     }

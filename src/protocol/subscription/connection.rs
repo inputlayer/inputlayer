@@ -90,7 +90,9 @@ impl ConnectionSubscriptions {
             knowledge_graph: knowledge_graph.to_string(),
             query: query.trim().to_string(),
         };
-        Ok(self.opening(key, id, Box::new(view)))
+        let share = self.handler.config().subscriptions.share_parameterized;
+        let view = self.hub().standing_query(view, share);
+        Ok(self.opening(key, id, view))
     }
 
     /// An [`Opening`] attaching `id` to the view of `key`, created from `view`
