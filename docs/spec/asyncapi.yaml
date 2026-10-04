@@ -165,7 +165,11 @@ info:
     A refused program applies nothing and fails with `precondition_failed`; the
     message names what changed and at which revision. Retrying the same request
     cannot succeed: read the state again first. Of several writers expecting
-    the same revision of the same scope, at most one commits.
+    the same revision of the same scope, at most one commits, but only when
+    each writer's program writes a relation in that scope. Writes outside the
+    scope do not refuse each other, so racing deciders that write a claim
+    relation should include it in `expect_relations` or rely on the claim
+    guard.
 
     Revisions restart with the engine. `expect_epoch` names the stream epoch
     (`authenticated.stream_epoch`) the revision belongs to and fails the
