@@ -4,7 +4,7 @@ Python SDK for [InputLayer](https://github.com/inputlayer/inputlayer), the live 
 
 Take the rules out of your prompts: declare facts and rules as typed Python classes, and InputLayer keeps every conclusion current as facts change. Write Python, no query syntax required: the SDK compiles your classes into IQL, InputLayer's rule language, and sends it over WebSocket. A knowledge graph (`il.knowledge_graph("support")`) is the facts and rule-derived conclusions of one domain.
 
-**Today and next.** This package declares relations and rules (`Relation`, `Derived`, `From`), writes and deletes facts, and queries the derived views. Phase 1 of the new SDK adds `kg.subscribe()` (the engine pushes each change to the agent) and `kg.claim()` (an agent's action is recorded only while the rules allow it): in progress, not merged yet. Until then, standing queries run over the [WebSocket API](https://inputlayer.ai/docs/guides/websocket-api/). The [main README](../../README.md) shows both forms side by side.
+**Today and next.** This package declares relations and rules (`Relation`, `Derived`, `From`), writes and deletes facts, and queries the derived views. It also subscribes to them: `kg.subscribe()` (the engine pushes each change to the agent), `kg.watch()` and `kg.on()`, described in the [Python SDK guide](../../docs/content/docs/guides/python-sdk.mdx#subscriptions). Phase 1 of the new SDK also adds `kg.claim()` (an agent's action is recorded only while the rules allow it): in progress, not merged yet. The [main README](../../README.md) shows both forms side by side.
 
 ## Installation
 
@@ -458,6 +458,9 @@ The autodetector diffs your current Python models against the last migration's s
 | `list_acl()` | List access control entries |
 | `debug(*select, ...)` | Show query plan without executing (same arguments as `query`) |
 | `execute(iql)` | Execute raw IQL |
+| `subscribe(*select, ..., queue=1024)` | Async iterator of `Change` events (snapshot, then deltas) |
+| `watch(*select, ...)` | Async iterator of the whole current result (`Live`) |
+| `on(*select, callback)` | Call `callback` with every `Change`; returns a handle with `close()` |
 | `status()` | Get server status |
 | `compact()` | Trigger storage compaction |
 
