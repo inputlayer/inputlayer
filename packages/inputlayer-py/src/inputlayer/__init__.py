@@ -31,6 +31,7 @@ from inputlayer.exceptions import (
     Cancelled,
     CannotDropError,
     CompileError,
+    Conflict,
     ConnectionError,
     ConnectionLost,
     DeadlineExceeded,
@@ -43,6 +44,7 @@ from inputlayer.exceptions import (
     KnowledgeGraphNotFoundError,
     OutcomeUnknownError,
     PermissionError,
+    PreconditionFailed,
     ProtocolError,
     QueryError,
     QueryTimeoutError,
@@ -82,6 +84,9 @@ from inputlayer.knowledge_graph import (
 # Notifications
 from inputlayer.notifications import ConnectionEvent, NotificationEvent
 
+# Programs, guards and claims
+from inputlayer.program import Claim, Program, ProgramResult
+
 # Relation system
 from inputlayer.relation import Relation
 
@@ -111,9 +116,11 @@ __all__ = [
     "Cancelled",
     "CannotDropError",
     "Change",
+    "Claim",
     "ClearResult",
     "ColumnInfo",
     "CompileError",
+    "Conflict",
     "ConnectionError",
     "ConnectionEvent",
     "ConnectionLost",
@@ -145,6 +152,9 @@ __all__ = [
     "NotificationEvent",
     "OutcomeUnknownError",
     "PermissionError",
+    "PreconditionFailed",
+    "Program",
+    "ProgramResult",
     "ProofNode",
     "ProofTree",
     "ProtocolError",

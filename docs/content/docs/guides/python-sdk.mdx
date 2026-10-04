@@ -771,6 +771,9 @@ from inputlayer import (
     StatementFailedError,      # some statements of a program failed
     OutcomeUnknownError,       # write outcome unknown; read back before retrying
     StoreReadOnlyError,        # write refused until restart recovery
+    CompileError,              # SDK refused to compile a call; nothing sent
+    PreconditionFailed,        # strict guarded program's guard did not hold
+    Conflict,                  # guarded write found no stable state; retry
     QueryTimeoutError,         # query took too long
     DeadlineExceeded,          # the call's deadline passed; nothing applied
     Cancelled,                 # the call was cancelled; nothing applied

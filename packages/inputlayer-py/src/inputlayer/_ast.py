@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 # ── Base ──────────────────────────────────────────────────────────────
 
@@ -15,6 +15,13 @@ class Expr:
 @dataclass(frozen=True)
 class BoolExpr:
     """Base class for boolean expression AST nodes (conditions)."""
+
+    if TYPE_CHECKING:
+        # ``&``, ``|`` and ``~`` are attached to the condition classes in
+        # ``_proxy``; declared here so type checkers accept them.
+        def __and__(self, other: BoolExpr) -> And: ...
+        def __or__(self, other: BoolExpr) -> Or: ...
+        def __invert__(self) -> Not: ...
 
 
 # ── Leaf nodes ────────────────────────────────────────────────────────
@@ -135,3 +142,6 @@ class MatchExpr(BoolExpr):
     negated: bool = False
     #: Every column of the relation, in order; unbound ones become ``_``.
     columns: tuple[str, ...] | None = None
+    #: Key the atom's own columns are addressed by, when its relation's name
+    #: is taken by another atom of the body; assigned by the compiler.
+    alias: str | None = None

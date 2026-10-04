@@ -28,6 +28,7 @@ from inputlayer.knowledge_graph import (
     WhyNotResult,
     WhyResult,
 )
+from inputlayer.program import Claim, Program, ProgramResult
 from inputlayer.relation import Relation
 from inputlayer.result import ResultSet
 from inputlayer.subscription import (
@@ -39,6 +40,15 @@ from inputlayer.subscription import (
 )
 
 T = TypeVar("T")
+
+R = TypeVar("R", bound=Relation)
+
+
+class ProgramSync(Program):
+    """A ``Program`` whose ``commit()`` blocks: ``KnowledgeGraphSync.program()``."""
+
+    def commit(self, *, strict: bool = True) -> ProgramResult:  # type: ignore[override]
+        return run_sync(super().commit(strict=strict))
 
 
 class KnowledgeGraphSync:
@@ -72,6 +82,15 @@ class KnowledgeGraphSync:
 
     def delete(self, facts: Any, *, where: Callable[..., Any] | None = None) -> DeleteResult:
         return run_sync(self._kg.delete(facts, where=where))
+
+    def retract(self, row_or_relation: Any, **key: Any) -> DeleteResult:
+        return run_sync(self._kg.retract(row_or_relation, **key))
+
+    def program(self) -> ProgramSync:
+        return ProgramSync(self._kg._commit_program)
+
+    def claim(self, row: R, **kwargs: Any) -> Claim[R]:
+        return run_sync(self._kg.claim(row, **kwargs))
 
     def query(self, *select: Any, **kwargs: Any) -> ResultSet:
         return run_sync(self._kg.query(*select, **kwargs))

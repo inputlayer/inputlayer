@@ -5,16 +5,18 @@ from __future__ import annotations
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from inputlayer import _meta
-from inputlayer._ast import AggExpr, Expr, OrderedColumn
+from inputlayer._ast import AggExpr, BoolExpr, Expr, OrderedColumn
 from inputlayer._ast import Column as AstColumn
 from inputlayer._literal import encode as encode_literal
+from inputlayer._literal import ms_to_datetime
 from inputlayer._proxy import ColumnProxy, RelationProxy, RelationRef
 from inputlayer.auth import AclEntry
 from inputlayer.compiler import (
     QueryPlan,
+    _is_datetime_type,
     compile_bulk_insert,
     compile_conditional_delete,
     compile_delete,
@@ -23,8 +25,24 @@ from inputlayer.compiler import (
     compile_rule,
     compile_schema,
 )
-from inputlayer.exceptions import CompileError, InternalError, QueryError, SubscriptionRejected
+from inputlayer.exceptions import (
+    CompileError,
+    Conflict,
+    InternalError,
+    PreconditionFailed,
+    QueryError,
+    StatementFailedError,
+    SubscriptionRejected,
+)
 from inputlayer.index import HnswIndex
+from inputlayer.program import (
+    GUARD_SCHEMAS,
+    Claim,
+    Program,
+    ProgramResult,
+    compile_claim,
+    parse_write_message,
+)
 from inputlayer.relation import Relation
 from inputlayer.result import ResultSet
 from inputlayer.session import Session
@@ -39,6 +57,8 @@ from inputlayer.subscription import (
     run_callback,
     watch_changes,
 )
+
+R = TypeVar("R", bound=Relation)
 
 if TYPE_CHECKING:
     from inputlayer._protocol import ResultResponse
@@ -247,6 +267,9 @@ class KnowledgeGraph:
         self._name = name
         self._conn = connection
         self._session = Session(connection)
+        # Whether this handle declared the guard relations (il_txn,
+        # il_txn_pending, il_assert).
+        self._guard_relations_declared = False
 
     async def _execute(self, iql: str, *, timeout: float | None = None) -> ResultResponse:
         """Execute a statement on this KG's own connection.
@@ -268,9 +291,18 @@ class KnowledgeGraph:
     # ── Schema ────────────────────────────────────────────────────────
 
     async def define(self, *relations: type[Relation]) -> None:
-        """Deploy schema definitions in one program. Idempotent."""
-        if relations:
-            await self._execute("\n".join(compile_schema(rel) for rel in relations))
+        """Deploy schema definitions, with the relations guarded programs use
+        (``il_txn``, ``il_txn_pending``, ``il_assert``), in one program.
+        Idempotent."""
+        schemas = [compile_schema(rel) for rel in relations]
+        await self._execute("\n".join([*schemas, *GUARD_SCHEMAS]))
+        self._guard_relations_declared = True
+
+    async def _ensure_guard_relations(self) -> None:
+        """Declare the guard relations once per handle, for a graph defined elsewhere."""
+        if not self._guard_relations_declared:
+            await self._execute("\n".join(GUARD_SCHEMAS))
+            self._guard_relations_declared = True
 
     async def relations(self) -> list[RelationInfo]:
         """List all relations in this KG.
@@ -382,6 +414,111 @@ class KnowledgeGraph:
 
         result = await self._execute(iql)
         return DeleteResult(count=len(result.rows) if result.rows else 0)
+
+    async def retract(
+        self, row_or_relation: Relation | type[Relation], **key: Any
+    ) -> DeleteResult:
+        """Retract a row, or every row matching the given columns, as one program:
+        ``retract(shipment_row)``, ``retract(Eta, shipment="S-77")``."""
+        result = await self.program().retract(row_or_relation, **key).commit()
+        return DeleteResult(count=result.deleted)
+
+    # ── Programs and claims ───────────────────────────────────────────
+
+    def program(self) -> Program:
+        """Start a program: statements committed as one request and one
+        transaction. ``.when()`` makes the whole program conditional::
+
+            await (
+                kg.program()
+                .insert(AttemptDone(attempt="att-9f3", status="ok"))
+                .when(Attempt.any(attempt="att-9f3"), ~AttemptDone.any(attempt="att-9f3"))
+                .commit()
+            )
+        """
+        return Program(self._commit_program)
+
+    async def _commit_program(self, program: Program, strict: bool) -> ProgramResult:
+        if program.guarded:
+            await self._ensure_guard_relations()
+        compiled = program.compile(strict)
+        iql = compiled.iql
+        try:
+            result = await self._execute(iql)
+        except StatementFailedError as err:
+            if compiled.assert_index is not None and err.errors[0].index == compiled.assert_index:
+                raise PreconditionFailed(iql, err.result) from err
+            raise _as_conflict(err, iql) from err
+        except QueryError as err:
+            raise _as_conflict(err, iql) from err
+
+        def message(i: int) -> str:
+            row = result.rows[i] if i < len(result.rows) else None
+            return str(row[0]) if row else ""
+
+        inserted = deleted = 0
+        for i in compiled.write_indexes:
+            counts = parse_write_message(message(i))
+            inserted += counts.inserted
+            deleted += counts.deleted
+        applied = (
+            compiled.token_index is None
+            or parse_write_message(message(compiled.token_index)).inserted == 1
+        )
+        if strict and not applied:
+            raise PreconditionFailed(iql, result)
+        return ProgramResult(applied=applied, inserted=inserted, deleted=deleted, iql=iql)
+
+    async def claim(
+        self,
+        row: R,
+        *,
+        when: BoolExpr | list[BoolExpr] | None = None,
+        unless: BoolExpr | None = None,
+        key: list[str | ColumnProxy] | None = None,
+    ) -> Claim[R]:
+        """Insert *row* only if the *when* conditions hold and no *unless* row
+        exists, deciding at commit, and say who holds the key afterwards. One
+        request: of many concurrent claims on one key, exactly one wins::
+
+            c = await kg.claim(
+                Attempt(order="ORD-1", tool="carrier_check", attempt=attempt_id),
+                when=[CheckNeeded.any(order="ORD-1")],
+                unless=Attempt.any(order="ORD-1", tool="carrier_check"),
+            )
+            if c.won: ...
+
+        *unless* defaults to a row with the *key* columns of *row*; *key*
+        defaults to the columns *unless* binds, else every column. ``holder``
+        is *row* when won, the row already there when lost, and None when the
+        *when* guard did not hold.
+        """
+        iql = compile_claim(row, when=when, unless=unless, key=key).iql
+        try:
+            result = await self._execute(iql)
+        except QueryError as err:
+            raise _as_conflict(err, iql) from err
+        rel = type(row)
+        columns = Relation._get_columns(rel)
+        ours = [encode_literal(getattr(row, c)) for c in columns]
+        for r in result.rows:
+            if len(r) != len(columns):
+                raise InternalError(
+                    f"Unexpected claim reply: {r!r} for columns {', '.join(columns)}"
+                )
+        if any([encode_literal(v) for v in r] == ours for r in result.rows):
+            return Claim(won=True, holder=row)
+        if not result.rows:
+            return Claim(won=False, holder=None)
+        types_ = Relation._get_column_types(rel)
+        first = result.rows[0]
+        values = {
+            c: ms_to_datetime(v)
+            if _is_datetime_type(types_[c]) and isinstance(v, int) and not isinstance(v, bool)
+            else v
+            for c, v in zip(columns, first, strict=True)
+        }
+        return Claim(won=False, holder=rel(**values))
 
     # ── Query ─────────────────────────────────────────────────────────
 
@@ -1010,19 +1147,16 @@ class KnowledgeGraph:
         )
 
 
-# The engine's reply to one insert statement.
-_INSERTED = re.compile(r"Inserted (\d+) fact\(s\) into '.*'\.")
-
-
 def _inserted_count(result: ResultResponse) -> int:
     """Facts stored, summed over the engine's per-statement insert replies."""
-    count = 0
-    for row in result.rows:
-        match = _INSERTED.fullmatch(str(row[0])) if row else None
-        if match is None:
-            raise InternalError(f"Unexpected insert reply from the engine: {row!r}")
-        count += int(match.group(1))
-    return count
+    return sum(parse_write_message(str(row[0]) if row else "").inserted for row in result.rows)
+
+
+def _as_conflict(err: QueryError, iql: str) -> QueryError:
+    """A ``conflict`` failure of a conditional write as ``Conflict``; anything else unchanged."""
+    if err.code == "conflict":
+        return Conflict(err.message, iql=iql)
+    return err
 
 
 async def _naming_query(query: str, pending: Awaitable[ResultResponse]) -> ResultResponse:
