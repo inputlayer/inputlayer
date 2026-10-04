@@ -51,6 +51,10 @@ impl FactStatement {
             code: ErrorCode::Validation,
             message,
         };
+        let failed = |message| StageError {
+            code: super::supervise::computation_failure_code(ErrorCode::Validation),
+            message,
+        };
         match self {
             Self::Insert(op) => insert_tuples(op, limits)
                 .map(|tuples| {
@@ -89,7 +93,7 @@ impl FactStatement {
                     DeletePattern::Conditional { head_args, body } => {
                         let (query, vars) = conditional_delete_query(&op.relation, head_args, body);
                         conditional_delete_tuples(head_args, &vars, &query, &*view(&query)?)
-                            .map_err(|e| invalid(self.failure_message(e)))?
+                            .map_err(|e| failed(self.failure_message(e)))?
                     }
                 };
                 Ok(vec![FactChange::Delete {
@@ -100,7 +104,7 @@ impl FactStatement {
             Self::Update(op) => {
                 let (query, vars) = update_query(op);
                 update_changes(op, &vars, &query, &*view(&query)?)
-                    .map_err(|e| invalid(self.failure_message(e)))
+                    .map_err(|e| failed(self.failure_message(e)))
             }
         }
     }

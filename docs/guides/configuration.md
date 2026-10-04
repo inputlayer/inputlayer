@@ -99,6 +99,30 @@ max_result_rows = 100000
 # Maximum query cost budget (0 = unlimited)
 max_query_cost = 0
 
+# Most heap bytes one query may hold while it computes, summed over the
+# threads evaluating it (0 = unlimited). A query that grows past it is
+# refused with `resource_exhausted` and applies nothing.
+max_query_memory_bytes = 4294967296
+
+# Most heap bytes all queries running at once may hold together; a query
+# that grows while they hold more is refused with `resource_exhausted`, so
+# concurrent queries never push the server past its memory. Unset: 60% of
+# the container's memory limit (cgroup), or no limit outside a
+# memory-limited container; set it explicitly when graphs hold real data.
+# 0 = unlimited. Stored graphs are separate from it, so size the server by:
+# (graph budgets below, summed) + this + server overhead (about 0.5 GB)
+# <= 0.8 x the server's memory, and keep the per-query limit at most this.
+# max_total_query_memory_bytes = 8589934592
+
+# Memory budget of each knowledge graph's stored facts, estimated from their
+# tuples (0 = unlimited). A write that would grow a graph past it is refused
+# with `resource_exhausted`; deletes are always accepted, and a graph over
+# budget still loads on restart.
+# Keep max_query_memory_bytes at least twice this budget: a query copies the
+# facts it reads while it evaluates, so a whole-graph scan needs more than
+# the graph's stored size.
+max_graph_memory_bytes = 0
+
 # =============================================================================
 # QUERY OPTIMIZATION
 # =============================================================================

@@ -10,7 +10,7 @@
 //! Test code uses `expect()` with descriptive messages for better failure diagnostics.
 
 use crate::ast::Term;
-use crate::execution::RequestControl;
+use crate::execution::{QueryMemoryPool, RequestControl};
 use crate::index_manager::IndexStats;
 use crate::rule_catalog::validate_rule;
 
@@ -199,6 +199,8 @@ pub struct Handler {
     /// Permits of standing-query sharing probes, apart from the compute
     /// permits so that a probe never takes one a query waits for.
     probe_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Memory held by the computations of every request in flight.
+    query_memory: Arc<QueryMemoryPool>,
     /// Accumulated timing histogram buckets for Prometheus export.
     timing_histograms: Arc<crate::execution::timing::TimingHistograms>,
     /// Standing-query counters (evaluations, active subscriptions, views).
@@ -983,6 +985,7 @@ impl Handler {
         // The rest are available for CPU-bound DD computations via spawn_blocking.
         let io_reserve = (ncpu / 4).max(2).min(ncpu - 1);
         let compute_permits = ncpu - io_reserve;
+        let total_query_memory = config.storage.performance.total_query_memory_bytes();
         Self {
             storage: Arc::new(RwLock::new(storage)),
             config,
@@ -994,6 +997,7 @@ impl Handler {
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             compute_permits,
             probe_semaphore: Arc::new(tokio::sync::Semaphore::new(PROBE_PERMITS)),
+            query_memory: QueryMemoryPool::new(total_query_memory),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             subscription_metrics: Arc::default(),
             subscription_hub: std::sync::OnceLock::new(),
@@ -1011,7 +1015,14 @@ impl Handler {
         config.validate()?;
         let storage =
             StorageEngine::new(config).map_err(|e| format!("Failed to create storage: {e}"))?;
-        Ok(Self::new(storage))
+        let handler = Self::new(storage);
+        info!(
+            query_memory_bytes = handler.config.storage.performance.max_query_memory_bytes,
+            total_query_memory_bytes = handler.query_memory.budget(),
+            compute_permits = handler.query_semaphore.available_permits(),
+            "query_memory_limits"
+        );
+        Ok(handler)
     }
 
     /// Create a new handler with custom session configuration.
@@ -1024,6 +1035,7 @@ impl Handler {
         // Reserve ~25% of cores (min 2) for Tokio async I/O, health checks, WebSocket handling.
         let io_reserve = (ncpu / 4).max(2).min(ncpu - 1);
         let compute_permits = ncpu - io_reserve;
+        let total_query_memory = config.storage.performance.total_query_memory_bytes();
         Self {
             storage: Arc::new(RwLock::new(storage)),
             config,
@@ -1035,6 +1047,7 @@ impl Handler {
             query_semaphore: Arc::new(tokio::sync::Semaphore::new(compute_permits)),
             compute_permits,
             probe_semaphore: Arc::new(tokio::sync::Semaphore::new(PROBE_PERMITS)),
+            query_memory: QueryMemoryPool::new(total_query_memory),
             timing_histograms: Arc::new(crate::execution::timing::TimingHistograms::new()),
             subscription_metrics: Arc::default(),
             subscription_hub: std::sync::OnceLock::new(),
@@ -1074,7 +1087,11 @@ impl Handler {
             (Some(client), Some(server)) => Some(client.min(server)),
             (client, server) => client.or(server),
         };
-        RequestControl::with_timeout(ms.map(std::time::Duration::from_millis))
+        RequestControl::limited(
+            ms.map(|ms| Instant::now() + std::time::Duration::from_millis(ms)),
+            self.config.storage.performance.max_query_memory_bytes,
+            Some(Arc::clone(&self.query_memory)),
+        )
     }
 
     /// Get reference to the handler's configuration.
@@ -2510,7 +2527,10 @@ impl QueryJob {
                                 Ok(qr) => return Ok(QueryResult { errors, ..qr }),
                                 Err(e) => {
                                     storage = self.storage.read();
-                                    fail!(ErrorCode::Validation, format!("{label}: {e}"));
+                                    fail!(
+                                        supervise::computation_failure_code(ErrorCode::Validation),
+                                        format!("{label}: {e}")
+                                    );
                                 }
                             }
                         }
@@ -3292,7 +3312,10 @@ impl QueryJob {
                 }
                 Err(e) => {
                     stmt_index = index;
-                    fail!(ErrorCode::Validation, format!("{label}: {e}"));
+                    fail!(
+                        supervise::computation_failure_code(ErrorCode::Validation),
+                        format!("{label}: {e}")
+                    );
                 }
             }
             return Ok(QueryResult {
@@ -3432,7 +3455,7 @@ impl QueryJob {
         let (results, timing_breakdown) = match executed {
             Ok(executed) => executed,
             Err(e) => fail_query!(
-                ErrorCode::Validation,
+                supervise::computation_failure_code(ErrorCode::Validation),
                 format!("Query execution failed: {e}")
             ),
         };
@@ -5508,6 +5531,7 @@ fn storage_error_code(error: &crate::storage::StorageError, default: ErrorCode) 
     match error {
         StorageError::OutcomeUnknown { .. } => ErrorCode::OutcomeUnknown,
         StorageError::StoreReadOnly => ErrorCode::StoreReadOnly,
+        StorageError::MemoryBudgetExceeded { .. } => ErrorCode::ResourceExhausted,
         StorageError::KnowledgeGraphNotFound(_) | StorageError::RelationNotFound(..) => {
             ErrorCode::NotFound
         }

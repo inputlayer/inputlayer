@@ -28,6 +28,7 @@ pub(crate) fn stop_code(stop: Stop) -> ErrorCode {
     match stop {
         Stop::Deadline => ErrorCode::DeadlineExceeded,
         Stop::Cancelled => ErrorCode::Cancelled,
+        Stop::MemoryExhausted | Stop::ServerMemoryExhausted => ErrorCode::ResourceExhausted,
     }
 }
 
@@ -36,6 +37,19 @@ pub(crate) fn stop_error(stop: Stop) -> ProgramError {
     ProgramError {
         message: stop.message().to_string(),
         code: Some(stop_code(stop)),
+    }
+}
+
+/// The code of a computation that failed with `code`, unless the request's
+/// computation went over a memory limit: then it failed for that, with
+/// `resource_exhausted`, even after the request began committing.
+pub(crate) fn computation_failure_code(code: ErrorCode) -> ErrorCode {
+    let over_memory = crate::code_generator::current_request_control()
+        .is_some_and(|c| c.memory_exceeded().is_some());
+    if over_memory {
+        ErrorCode::ResourceExhausted
+    } else {
+        code
     }
 }
 
