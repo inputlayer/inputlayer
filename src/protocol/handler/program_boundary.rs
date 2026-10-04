@@ -125,7 +125,12 @@ pub(super) fn check(statements: &[Statement]) -> Result<(), BoundaryViolation> {
     if role(&statements[last]) == Role::Proof {
         if let Some(index) = statements
             .iter()
-            .position(|s| matches!(s, Statement::Query(_)))
+            .position(|s| {
+                matches!(
+                    s,
+                    Statement::Query(_) | Statement::Meta(MetaCommand::RuleQuery(_))
+                )
+            })
         {
             return violation(index, ViolationKind::QueryWithProof);
         }
@@ -236,6 +241,13 @@ mod tests {
     fn a_program_that_writes_holds_a_query_or_a_proof_not_both() {
         assert_eq!(
             check(&parse("+r(1)\n?r(X)\n.why ?r(X)")),
+            Err(BoundaryViolation {
+                index: 1,
+                kind: ViolationKind::QueryWithProof
+            })
+        );
+        assert_eq!(
+            check(&parse("+r(1)\n.rule foo\n.why ?r(X)")),
             Err(BoundaryViolation {
                 index: 1,
                 kind: ViolationKind::QueryWithProof
