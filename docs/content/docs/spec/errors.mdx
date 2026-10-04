@@ -247,3 +247,11 @@ Error: Request stopped: the queries running on the server hold their whole memor
 Nothing was applied, and the query may succeed once the others finish: retry it later.
 
 A write fails with the same code when it would grow its knowledge graph's facts past `storage.performance.max_graph_memory_bytes`. Nothing is applied; deleting facts is always allowed, so free space and retry.
+
+### Precondition Failed
+
+```
+Error: Precondition failed: relation 'eta' changed at revision 1740, after revision 1731. Nothing was applied.
+```
+
+Code `precondition_failed`. The program carried `expect_revision` and state in its scope changed after that revision, the persistent rules changed, or the revision is not one of this engine run's (see [Revision Preconditions](../guides/websocket-api#revision-preconditions)). Nothing was applied, and sending the same request again cannot succeed. Read the state again, decide again, and send the new revision.

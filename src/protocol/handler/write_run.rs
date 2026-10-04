@@ -15,8 +15,8 @@ use super::{storage_error_code, QueryJob};
 use crate::protocol::wire::{ErrorCode, StatementCounts};
 use crate::rule_catalog::RuleCatalog;
 use crate::storage_engine::{
-    CommitError, KnowledgeGraphSnapshot, ProgramCommit, StagedChanges, StatementEffect,
-    StorageEngine, WriteProgram,
+    CommitError, KnowledgeGraphSnapshot, PreconditionError, ProgramCommit, StagedChanges,
+    StatementEffect, StorageEngine, WriteProgram,
 };
 use rand::Rng;
 use std::sync::atomic::Ordering;
@@ -360,6 +360,14 @@ fn commit_failure(kg: &str, queued: &[Queued], error: CommitError) -> RunFailure
                 ),
             }
         }
+        CommitError::Precondition(error) => RunFailure {
+            index: last,
+            code: match error {
+                PreconditionError::UnknownRelation(_) => ErrorCode::Validation,
+                _ => ErrorCode::PreconditionFailed,
+            },
+            message: error.to_string(),
+        },
         CommitError::Cancelled(stop) => RunFailure {
             index: last,
             code: super::supervise::stop_code(stop),

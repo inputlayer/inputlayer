@@ -583,6 +583,10 @@ mod proof_snapshot_tests;
 mod pinned_proof_tests;
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod expect_revision_tests;
+
+#[cfg(test)]
 mod revocation_tests;
 
 #[cfg(test)]
@@ -1079,6 +1083,16 @@ impl Handler {
     /// `query_timeout_ms` from now, or the client's `timeout_ms` when that is
     /// sooner (no deadline when both are unset or the server's is 0).
     pub fn request_control(&self, timeout_ms: Option<u64>) -> Arc<RequestControl> {
+        self.request_control_expecting(timeout_ms, None)
+    }
+
+    /// [`Self::request_control`] for a request whose commit must meet
+    /// `precondition`, if any.
+    pub fn request_control_expecting(
+        &self,
+        timeout_ms: Option<u64>,
+        precondition: Option<crate::storage_engine::Precondition>,
+    ) -> Arc<RequestControl> {
         let server_ms = match self.config.storage.performance.query_timeout_ms {
             0 => None,
             ms => Some(ms),
@@ -1087,10 +1101,11 @@ impl Handler {
             (Some(client), Some(server)) => Some(client.min(server)),
             (client, server) => client.or(server),
         };
-        RequestControl::limited(
+        RequestControl::limited_expecting(
             ms.map(|ms| Instant::now() + std::time::Duration::from_millis(ms)),
             self.config.storage.performance.max_query_memory_bytes,
             Some(Arc::clone(&self.query_memory)),
+            precondition,
         )
     }
 
@@ -4137,6 +4152,18 @@ impl Handler {
         let statements = parse_program(&program).ok();
         let stmts = statements.as_deref().unwrap_or_default();
         self.authorize_program(effective_auth, current_kg, stmts)?;
+        if control.precondition().is_some()
+            && statements.is_some()
+            && !program_boundary::is_transactional(stmts)
+        {
+            return Err(ProgramError {
+                message: "expect_revision needs a program that writes persistent state \
+                          (facts, schemas or rules): it is checked when those writes commit. \
+                          Nothing ran."
+                    .to_string(),
+                code: Some(ErrorCode::InvalidRequest),
+            });
+        }
         if stmts.len() > 1
             && stmts.iter().any(|stmt| {
                 matches!(

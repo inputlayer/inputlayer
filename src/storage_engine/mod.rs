@@ -38,6 +38,7 @@ mod checkpoint;
 mod commit_tests;
 #[cfg(test)]
 mod materialize_tests;
+mod precondition;
 mod program_commit;
 #[cfg(test)]
 mod program_commit_tests;
@@ -47,6 +48,7 @@ mod vector_index;
 mod write_program;
 pub use catalog_change::{CatalogChange, CatalogOutcome};
 pub use checkpoint::{CheckpointExport, ExportStatus};
+pub use precondition::{ChangeLog, Precondition, PreconditionError};
 pub use relation_store::RelationStore;
 pub use snapshot::{CachedRun, KnowledgeGraphSnapshot, PersistentRules};
 pub use write_program::{
@@ -1964,6 +1966,8 @@ impl StorageEngine {
             num_workers,
         );
         initial.optimization = self.config.optimization.clone();
+        let changes = precondition::ChangeLog::first(&initial);
+        initial.set_changes(changes);
         let snapshot = ArcSwap::from_pointee(initial);
 
         let mut kg = KnowledgeGraph {
@@ -2399,6 +2403,7 @@ impl KnowledgeGraph {
             new_snapshot.max_query_cost = self.max_query_cost;
             new_snapshot.optimization = self.optimization.clone();
             new_snapshot.hnsw_search_fn = self.hnsw_search_fn();
+            self.stamp_changes(&mut new_snapshot);
             self.snapshot.store(Arc::new(new_snapshot));
 
             // Lock drops here AFTER publication - this is the fix for TOCTOU
@@ -2415,6 +2420,7 @@ impl KnowledgeGraph {
             new_snapshot.max_query_cost = self.max_query_cost;
             new_snapshot.optimization = self.optimization.clone();
             new_snapshot.hnsw_search_fn = self.hnsw_search_fn();
+            self.stamp_changes(&mut new_snapshot);
             self.snapshot.store(Arc::new(new_snapshot));
         }
 
@@ -2424,6 +2430,20 @@ impl KnowledgeGraph {
             snapshot_ms = snapshot_start.elapsed().as_millis() as u64,
             "snapshot_publish_complete"
         );
+    }
+
+    /// Give `snapshot`, about to replace the published one, the change log
+    /// that follows the published one's: what its base relations and rules
+    /// change, stamped with its revision.
+    fn stamp_changes(&self, snapshot: &mut KnowledgeGraphSnapshot) {
+        let previous = self.snapshot.load();
+        let changes = previous.changes().next(
+            &previous,
+            self.store.relations(),
+            &snapshot.rules,
+            snapshot.revision,
+        );
+        snapshot.set_changes(changes);
     }
 
     /// HNSW search over the indexes as of now (None without indexes).

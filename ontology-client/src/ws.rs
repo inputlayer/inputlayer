@@ -126,6 +126,9 @@ impl Engine {
             id: Some(RequestId::from(self.last_id)),
             program: program.to_string(),
             timeout_ms: None,
+            expect_revision: None,
+            expect_relations: None,
+            expect_epoch: None,
         })
         .await?;
 
