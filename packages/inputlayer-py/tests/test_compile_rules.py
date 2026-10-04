@@ -8,13 +8,16 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from inputlayer import From, Relation, Timestamp
+from inputlayer import From, KnowledgeGraph, Relation, Timestamp, Vector
 from inputlayer._ast import Literal, MatchExpr
 from inputlayer._literal import I64_MAX, I64_MIN, encode, ms_to_datetime
 from inputlayer._proxy import ColumnProxy
+from inputlayer.aggregations import count, min_
 from inputlayer.compiler import (
     compile_conditional_delete,
     compile_insert,
@@ -53,6 +56,11 @@ class Reading(Relation):
     sensor: str
     at: datetime
     seen: Timestamp
+
+
+class Doc(Relation):
+    id: int
+    embedding: Vector[2]
 
 
 EMP = "employee(Id, Name, Department)"
@@ -95,12 +103,47 @@ class TestTimestamps:
         assert plan.program == "?reading(Sensor, At, Seen), At > 1767225600000"
 
     def test_typed_rows_convert_milliseconds_back(self) -> None:
+        plan = _query(Reading, relations=[Reading])
         rs = ResultSet(
-            columns=["sensor", "at", "seen"], rows=[["s", 1000, 7]], _relation_cls=Reading
+            columns=plan.labels, rows=plan.shape([["s", 1000, 7]]), _relation_cls=Reading
         )
+        one_second = datetime(1970, 1, 1, 0, 0, 1, tzinfo=timezone.utc)
+        assert rs.rows == [["s", one_second, 7]]
+        assert rs.to_dicts() == [{"sensor": "s", "at": one_second, "seen": 7}]
         row = rs.first()
-        assert row.at == datetime(1970, 1, 1, 0, 0, 1, tzinfo=timezone.utc)
+        assert row.at == one_second
         assert row.seen == 7
+        assert type(row.seen) is Timestamp
+
+    def test_projected_datetime_columns_convert_too(self) -> None:
+        plan = _query(Reading.at, Reading.seen, relations=[Reading])
+        assert plan.shape([["s", 1000, 7]]) == [
+            [datetime(1970, 1, 1, 0, 0, 1, tzinfo=timezone.utc), 7]
+        ]
+        computed = _query(
+            Reading.sensor, relations=[Reading], computed={"when": Reading.at._to_ast()}
+        )
+        assert computed.shape([["s", 1000, 7, 1000]]) == [
+            ["s", datetime(1970, 1, 1, 0, 0, 1, tzinfo=timezone.utc)]
+        ]
+
+    def test_least_and_greatest_datetime_are_datetimes(self) -> None:
+        plan = _query(Reading.sensor, min_(Reading.at), count(), relations=[Reading])
+        assert plan.labels == ["sensor", "min_at", "count"]
+        assert plan.shape([["s", 1000, 2]]) == [
+            ["s", datetime(1970, 1, 1, 0, 0, 1, tzinfo=timezone.utc), 2]
+        ]
+
+    def test_optional_datetime_columns_convert(self) -> None:
+        class Event(Relation):
+            name: str
+            at: datetime | None
+
+        plan = _query(Event, relations=[Event])
+        rs = ResultSet(
+            columns=plan.labels, rows=plan.shape([["e", 1000]]), _relation_cls=Event
+        )
+        assert rs.first().at == datetime(1970, 1, 1, 0, 0, 1, tzinfo=timezone.utc)
 
     def test_ms_to_datetime_is_exact(self) -> None:
         assert ms_to_datetime(1791115200123).microsecond == 123000
@@ -306,3 +349,32 @@ class TestLiterals:
     def test_nan_is_refused_in_a_condition(self) -> None:
         with pytest.raises(CompileError, match="infinity or NaN"):
             _query(Employee.name, where=Employee.id > math.nan)
+
+    @pytest.mark.parametrize(
+        ("limit", "offset"), [(-1, None), (1.5, None), (True, None), ("5", None), (5, -2)]
+    )
+    def test_limit_and_offset_must_be_non_negative_ints(self, limit, offset) -> None:
+        with pytest.raises(CompileError):
+            _query(Employee.name, limit=limit, offset=offset)
+
+    def test_limit_and_offset(self) -> None:
+        assert _query(Employee, limit=5, offset=2).program == f"?{EMP}, limit(5, 2)"
+
+    @pytest.mark.parametrize("radius", [math.nan, math.inf, -math.inf])
+    async def test_vector_search_radius_goes_through_the_encoder(self, radius) -> None:
+        kg = KnowledgeGraph("default", MagicMock())
+        kg._execute = AsyncMock()
+        with pytest.raises(CompileError):
+            await kg.vector_search(Doc, [1.0, 0.0], radius=radius)
+        kg._execute.assert_not_awaited()
+
+    async def test_vector_search_radius_text(self) -> None:
+        kg = KnowledgeGraph("default", MagicMock())
+        kg._execute = AsyncMock(
+            return_value=SimpleNamespace(
+                columns=[], rows=[], total_count=0, truncated=False, execution_time_ms=0
+            )
+        )
+        await kg.vector_search(Doc, [1.0, 0.0], radius=0.5)
+        (iql,), _ = kg._execute.await_args
+        assert iql == "?doc(Id, Embedding), Dist = cosine(Embedding, [1.0, 0.0]), Dist <= 0.5"

@@ -7,9 +7,11 @@ taking Python objects and returning IQL strings.
 from __future__ import annotations
 
 import operator
+import types
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Union, get_args, get_origin
 
 from inputlayer._ast import (
     AggExpr,
@@ -31,6 +33,7 @@ from inputlayer._ast import (
     Column as AstColumn,
 )
 from inputlayer._literal import encode as encode_literal
+from inputlayer._literal import ms_to_datetime
 from inputlayer._naming import column_to_variable
 from inputlayer.exceptions import CompileError, InternalError
 from inputlayer.types import python_type_to_iql, schema_type
@@ -607,10 +610,15 @@ QUERY_SOURCE_RULE = "il_q_src"
 
 @dataclass(frozen=True)
 class QueryOutput:
-    """One result column: the label the caller sees and the variable carrying it."""
+    """One result column: the label the caller sees and the variable carrying it.
+
+    ``is_datetime`` marks a column carrying a ``datetime`` field, which the
+    engine holds as Unix milliseconds (R-TYPE).
+    """
 
     label: str
     variable: str
+    is_datetime: bool = False
 
 
 @dataclass(frozen=True)
@@ -661,7 +669,15 @@ class QueryPlan:
                 rows = [list(pick(row)) for row in rows]
         if self.dedupe:
             rows = _distinct(rows)
-        return rows
+        return [self._from_engine(row) for row in rows]
+
+    def _from_engine(self, row: list[Any]) -> list[Any]:
+        return [
+            ms_to_datetime(v)
+            if o.is_datetime and isinstance(v, int) and not isinstance(v, bool)
+            else v
+            for o, v in zip(self.outputs, row, strict=False)
+        ]
 
     def shape_why(self, rows: list[list[Any]]) -> list[int]:
         """Indexes of the ``.why`` rows the query returns, ordered and paginated."""
@@ -680,7 +696,7 @@ class QueryPlan:
         return picked[start:end]
 
     def project_why(self, row: list[Any]) -> list[Any]:
-        return [row[self.why_columns.index(o.variable)] for o in self.outputs]
+        return self._from_engine([row[self.why_columns.index(o.variable)] for o in self.outputs])
 
 
 def compile_query(
@@ -849,15 +865,16 @@ def _compile_plain_plan(
         var = env.fresh(column_to_variable(label))
         bindings.append(f"{var} = {compile_expr(expr, env)}")
         bound_vars.append(var)
-        outputs.append(QueryOutput(label, var))
+        outputs.append(QueryOutput(label, var, _is_datetime(shape, expr)))
 
     for s in select:
         if isinstance(s, type) and issubclass(s, Relation):
             rn = Relation._resolve_name(s)
             for col in Relation._get_columns(s):
-                outputs.append(QueryOutput(col, env.get_var(AstColumn(rn, col))))
+                c = AstColumn(rn, col)
+                outputs.append(QueryOutput(col, env.get_var(c), _is_datetime(shape, c)))
         elif isinstance(s, AstColumn):
-            outputs.append(QueryOutput(s.name, env.get_var(s)))
+            outputs.append(QueryOutput(s.name, env.get_var(s), _is_datetime(shape, s)))
         else:
             bind("expr", s)
     for alias, expr in computed.items():
@@ -945,8 +962,8 @@ def _compile_agg_plan(
     # count() without a column counts the first variable of the first atom.
     count_var = shape.atom_vars[0][0]
     head: list[str] = []
-    # (label, the body variable the column carries, or None for an aggregate value)
-    outputs: list[tuple[str, str | None]] = []
+    # Each column, with the body variable it carries ("" for an aggregate value).
+    outputs: list[QueryOutput] = []
     bindings: list[str] = []
     bound_vars: list[str] = []
 
@@ -955,28 +972,29 @@ def _compile_agg_plan(
         bindings.append(f"{var} = {compile_expr(expr, env)}")
         bound_vars.append(var)
         head.append(var)
-        outputs.append((label, var))
+        outputs.append(QueryOutput(label, var, _is_datetime(shape, expr)))
 
     def aggregate(agg: AggExpr, label: str | None) -> None:
         head.append(_compile_agg_expr(agg, env, count_var=count_var))
-        cols = _agg_outputs(agg, env)
+        cols = _agg_outputs(agg, shape)
         if label is not None and len(cols) == 1:
-            cols = [(label, cols[0][1])]
+            cols = [replace(cols[0], label=label)]
         outputs.extend(cols)
 
     for s in select:
         if isinstance(s, type) and issubclass(s, Relation):
             rn = Relation._resolve_name(s)
             for col in Relation._get_columns(s):
-                var = env.get_var(AstColumn(rn, col))
+                c = AstColumn(rn, col)
+                var = env.get_var(c)
                 head.append(var)
-                outputs.append((col, var))
+                outputs.append(QueryOutput(col, var, _is_datetime(shape, c)))
         elif isinstance(s, AggExpr):
             aggregate(s, None)
         elif isinstance(s, AstColumn):
             var = env.get_var(s)
             head.append(var)
-            outputs.append((s.name, var))
+            outputs.append(QueryOutput(s.name, var, _is_datetime(shape, s)))
         else:
             bind("expr", s)
     for alias, expr in computed.items():
@@ -985,7 +1003,7 @@ def _compile_agg_plan(
         else:
             bind(alias, expr)
 
-    labelled = _unique_labels([QueryOutput(label, var or "") for label, var in outputs])
+    labelled = _unique_labels(outputs)
     # Every position of the query atom is a fresh variable: a repeated one
     # would join those columns as equal and drop groups (fix-report item 1).
     query_vars = _unique_names([column_to_variable(o.label) for o in labelled])
@@ -995,7 +1013,9 @@ def _compile_agg_plan(
     if shape.order is not None:
         order_col, descending = shape.order
         order_var = env.lookup(order_col)
-        at = next((i for i, (_, var) in enumerate(outputs) if var and var == order_var), None)
+        at = next(
+            (i for i, o in enumerate(outputs) if o.variable and o.variable == order_var), None
+        )
         if at is None:
             raise CompileError(
                 "In an aggregate query, order_by must be a selected column "
@@ -1024,7 +1044,7 @@ def _compile_agg_plan(
         program="\n".join([*shape.constants, *rules, query]),
         columns=tuple(query_vars),
         outputs=tuple(
-            QueryOutput(o.label, v) for o, v in zip(labelled, query_vars, strict=True)
+            replace(o, variable=v) for o, v in zip(labelled, query_vars, strict=True)
         ),
         debug=explain,
         why=explain,
@@ -1037,21 +1057,42 @@ def _compile_agg_plan(
     )
 
 
-def _agg_outputs(agg: AggExpr, env: _VarEnv) -> list[tuple[str, str | None]]:
-    """Result columns an aggregate contributes: (label, carried variable)."""
+def _agg_outputs(agg: AggExpr, shape: _Shape) -> list[QueryOutput]:
+    """Result columns an aggregate contributes, with the variable each carries."""
 
-    def column(expr: Expr) -> tuple[str, str | None]:
+    def column(expr: Expr) -> QueryOutput:
         if isinstance(expr, AstColumn):
-            return expr.name, env.get_var(expr)
-        return "expr", None
+            return QueryOutput(expr.name, shape.env.get_var(expr), _is_datetime(shape, expr))
+        return QueryOutput("expr", "")
 
     if agg.order_column is not None:
         # top_k, top_k_threshold, within_radius: the passthrough columns,
         # then the ordered column.
         return [column(p) for p in agg.passthrough] + [column(agg.order_column)]
     if isinstance(agg.column, AstColumn):
-        return [(f"{agg.func}_{agg.column.name}", None)]
-    return [(agg.func, None)]
+        # The least or greatest of a datetime column is a datetime.
+        return [
+            QueryOutput(
+                f"{agg.func}_{agg.column.name}",
+                "",
+                agg.func in ("min", "max") and _is_datetime(shape, agg.column),
+            )
+        ]
+    return [QueryOutput(agg.func, "")]
+
+
+def _is_datetime(shape: _Shape, expr: Expr) -> bool:
+    """Whether *expr* is a column of a joined relation annotated ``datetime``."""
+    from inputlayer.relation import Relation
+
+    if not isinstance(expr, AstColumn):
+        return False
+    for rn, cls, alias in shape.relations:
+        if rn == expr.relation and alias == expr.ref_alias:
+            tp = Relation._get_column_types(cls).get(expr.name)
+            members = get_args(tp) if get_origin(tp) in (Union, types.UnionType) else (tp,)
+            return any(isinstance(m, type) and issubclass(m, datetime) for m in members)
+    return False
 
 
 def _resolve_order(order_by: Expr | None) -> tuple[AstColumn, bool] | None:
@@ -1074,11 +1115,21 @@ MAX_LIMIT = 9223372036854775807
 
 
 def _limit_atom(limit: int | None, offset: int | None) -> list[str]:
+    for name, value in (("limit", limit), ("offset", offset)):
+        if value is not None and (
+            not isinstance(value, int) or isinstance(value, bool) or value < 0
+        ):
+            raise CompileError(
+                f"{name} must be a non-negative int, got {value!r}",
+                hint=f"pass {name} as an int of 0 or more",
+            )
     if limit is None:
         if not offset:
             return []
         limit = MAX_LIMIT
-    return [f"limit({limit}, {offset})" if offset else f"limit({limit})"]
+    if offset:
+        return [f"limit({encode_literal(limit)}, {encode_literal(offset)})"]
+    return [f"limit({encode_literal(limit)})"]
 
 
 def _unique(items: Any) -> list[str]:
@@ -1100,7 +1151,7 @@ def _unique_names(names: list[str]) -> list[str]:
 
 def _unique_labels(outputs: list[QueryOutput]) -> list[QueryOutput]:
     labels = _unique_names([o.label for o in outputs])
-    return [QueryOutput(label, o.variable) for label, o in zip(labels, outputs, strict=True)]
+    return [replace(o, label=label) for label, o in zip(labels, outputs, strict=True)]
 
 
 def _distinct(rows: list[list[Any]]) -> list[list[Any]]:

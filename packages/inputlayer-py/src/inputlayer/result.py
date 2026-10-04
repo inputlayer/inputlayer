@@ -4,11 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
-
-from inputlayer._literal import ms_to_datetime
 
 
 @dataclass
@@ -94,7 +91,7 @@ class ResultSet:
         if self._relation_cls is not None:
             try:
                 kwargs = dict(zip(self.columns, row, strict=True))
-                return self._relation_cls(**_from_engine(self._relation_cls, kwargs))
+                return self._relation_cls(**kwargs)
             except Exception:
                 pass
         try:
@@ -105,23 +102,3 @@ class ResultSet:
             # is almost certainly a server-side bug.
             return SimpleNamespace(**dict(zip(self.columns, row, strict=False)))
 
-
-def _from_engine(relation_cls: type, values: dict[str, Any]) -> dict[str, Any]:
-    """Column values as the relation's fields take them.
-
-    A ``datetime`` column holds Unix milliseconds in the engine (R-TYPE); it
-    is converted here rather than left to Pydantic, which reads a small
-    integer as seconds.
-    """
-    fields = getattr(relation_cls, "model_fields", {})
-    for name, value in values.items():
-        info = fields.get(name)
-        if (
-            info is not None
-            and isinstance(info.annotation, type)
-            and issubclass(info.annotation, datetime)
-            and isinstance(value, int)
-            and not isinstance(value, bool)
-        ):
-            values[name] = ms_to_datetime(value)
-    return values

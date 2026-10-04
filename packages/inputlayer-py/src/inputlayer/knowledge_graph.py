@@ -599,7 +599,7 @@ class KnowledgeGraph:
 
         # Radius filter is applied server-side in the query body.
         if radius is not None:
-            iql_parts.append(f"Dist <= {radius}")
+            iql_parts.append(f"Dist <= {encode_literal(radius)}")
 
         if extra_iql_clauses:
             iql_parts.extend(extra_iql_clauses)

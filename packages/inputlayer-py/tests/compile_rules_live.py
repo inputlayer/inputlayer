@@ -32,6 +32,7 @@ import pytest_asyncio
 from inputlayer import Derived, From, InputLayer, KnowledgeGraph, Relation, Timestamp, Vector
 from inputlayer._ast import Literal, MatchExpr
 from inputlayer._literal import I64_MAX, I64_MIN
+from inputlayer.aggregations import min_
 from inputlayer.exceptions import CompileError, QueryError
 
 SERVER_URL = os.environ.get("INPUTLAYER_TEST_SERVER", "")
@@ -205,6 +206,13 @@ async def test_datetime_columns_define_insert_and_read_back(kg: KnowledgeGraph) 
     assert rows["b"].seen == 1791117000250
     recent = await kg.query(Reading.sensor, where=lambda r: r.at > datetime(2026, 1, 1))
     assert recent.rows == [["b"]]
+    projected = await kg.query(Reading.at, Reading.seen, where=lambda r: r.sensor == "b")
+    assert projected.rows == [[late, 1791117000250]]
+    assert projected.to_dicts() == [{"at": late, "seen": 1791117000250}]
+    assert [r.at for r in projected] == [late]
+    whole = await kg.query(Reading, where=lambda r: r.sensor == "a")
+    assert whole.rows == [["a", early, 5]]
+    assert (await kg.query(min_(Reading.at))).scalar() == early
     await kg.insert(Doc(id=1, embedding=[1.0, 0.5, 0.25]))
     assert (await kg.query(Doc)).rows == [[1, [1.0, 0.5, 0.25]]]
 
