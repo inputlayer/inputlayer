@@ -743,6 +743,8 @@ from inputlayer import (
     DeadlineExceeded,          # the call's deadline passed; nothing applied
     Cancelled,                 # the call was cancelled; nothing applied
     ConnectionLost,            # connection closed before the reply
+    RateLimited,               # refused by the server's rate limit; already retried once
+    ProtocolError,             # server could not read the request; an SDK bug
     PermissionError,           # insufficient permissions
     KnowledgeGraphNotFoundError,
     KnowledgeGraphExistsError,
