@@ -107,6 +107,13 @@ async fn test_relation_commands_name_the_revision_their_push_carries() {
     assert_eq!(delta["revision"].as_u64(), Some(cleared), "{delta}");
 
     subscriber.subscribe("g", "?gone(X)").await;
+    // A session schema is a write, so it cannot share a program with
+    // `.rel drop`: nothing runs and nothing is named.
+    let reply = writer.execute(".rel drop gone\ns(a: int)").await;
+    assert_eq!(reply["errors"][0]["index"], 0, "{reply}");
+    assert!(reply.get("revision").is_none(), "{reply}");
+    let reply = writer.execute("?gone(X)").await;
+    assert_eq!(rows(&reply["rows"]), vec![json!([1])], "{reply}");
     let reply = writer.execute(".rel drop gone").await;
     assert!(reply["errors"].as_array().unwrap().is_empty(), "{reply}");
     let dropped = reply["revision"].as_u64().expect("drop revision");

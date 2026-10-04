@@ -3357,7 +3357,7 @@ impl QueryJob {
                     Ok((base, counts, committed_at)) => {
                         committed = Some(base);
                         statement_counts = counts;
-                        revision = committed_at;
+                        revision = committed_at.or(revision);
                     }
                     Err(failure) => {
                         stmt_index = failure.index;
