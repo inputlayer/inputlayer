@@ -431,11 +431,13 @@ js-test:
 # Coverage & Static Analysis
 
 # Generate test coverage report (requires cargo-tarpaulin)
+# llvm engine: the default ptrace engine spends ~30s tracing each test binary,
+# which pushed the full run past the CI Coverage job's 45-minute budget.
 coverage:
 	@command -v cargo-tarpaulin >/dev/null 2>&1 || { echo "Install: cargo install cargo-tarpaulin"; exit 1; }
 	@echo "=== Generating Coverage Report ==="
 	@mkdir -p target/coverage
-	cargo tarpaulin --all-features --out html --out json --output-dir target/coverage \
+	cargo tarpaulin --all-features --engine llvm --out html --out json --output-dir target/coverage \
 		--exclude-files "tests/*" --exclude-files "benches/*" --exclude-files "examples/*" \
 		--exclude-files "src/bin/*" --exclude-files "src/main.rs" \
 		--timeout 300 --skip-clean 2>&1
