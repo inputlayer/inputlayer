@@ -121,6 +121,36 @@ async fn dropping_the_current_kg_is_a_conflict() {
 }
 
 #[tokio::test]
+async fn dropping_a_negated_relation_is_a_conflict_and_the_rule_stays_closed() {
+    let (handler, _tmp) = handler();
+    run(
+        &handler,
+        "+shipment(\"O1\", \"S1\")\n+kill(\"check\")\n\
+         +check_needed(O, S) <- shipment(O, S), T = \"check\", !kill(T)",
+    )
+    .await
+    .expect("setup");
+    assert_eq!(count(&handler, "?check_needed(O, S)").await, 0);
+
+    let err = run(&handler, ".rel drop kill")
+        .await
+        .expect_err("drop of a negated relation");
+    assert_eq!(err.code, Some(ErrorCode::Conflict), "{err:?}");
+    assert!(err.message.contains("check_needed"), "{err:?}");
+    assert_eq!(count(&handler, "?check_needed(O, S)").await, 0);
+
+    // A negated atom without a shared variable fails at registration, not
+    // at every later query.
+    let err = run(
+        &handler,
+        "+ground(O, S) <- shipment(O, S), !kill(\"check\")",
+    )
+    .await
+    .expect_err("ground negation");
+    assert!(err.message.contains("shares no variables"), "{err:?}");
+}
+
+#[tokio::test]
 async fn statements_of_a_program_without_writes_fail_independently() {
     let (handler, _tmp) = handler();
     let result = run(&handler, "?a(X)\n.rel drop missing\n.index drop missing")

@@ -1038,6 +1038,9 @@ impl StorageEngine {
 
     /// Drop a relation entirely from a specific knowledge graph.
     ///
+    /// Refused while a registered rule negates it (see
+    /// [`RuleCatalog::rules_negating`]): the rule would fail open.
+    ///
     /// Removes all data, metadata, schema, and any associated rules, and
     /// deletes the persist shard. A durable tombstone is written first and the
     /// KG write lock is held throughout, so neither a crash nor a concurrent
@@ -1051,6 +1054,13 @@ impl StorageEngine {
             return Err(StorageError::Other(format!(
                 "Failed to drop relation: Relation '{name}' not found."
             )));
+        }
+        let negating = db.rule_catalog.rules_negating(name);
+        if !negating.is_empty() {
+            return Err(StorageError::RelationNegated {
+                relation: name.to_string(),
+                rules: negating,
+            });
         }
 
         // Only a relation with a shard needs the tombstone up front.
@@ -3056,6 +3066,44 @@ mod tests {
         drop(storage);
         let storage = StorageEngine::new(config).unwrap();
         assert!(storage.list_rules_in("default").unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_rel_drop_refused_while_a_rule_negates_it() {
+        let temp = TempDir::new().unwrap();
+        let storage = StorageEngine::new(create_test_config(temp.path().to_path_buf())).unwrap();
+        storage
+            .insert_into("default", "order", vec![(1, 7)])
+            .unwrap();
+        storage
+            .insert_into("default", "kill_switch", vec![(7, 0)])
+            .unwrap();
+        storage
+            .register_rule_in(
+                "default",
+                &crate::statement::parse_rule_definition(
+                    "allowed(O) <- order(O, T), !kill_switch(T, _)",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        let err = storage
+            .drop_relation_in("default", "kill_switch")
+            .unwrap_err();
+        assert!(
+            matches!(&err, StorageError::RelationNegated { rules, .. } if rules == &["allowed"]),
+            "{err}"
+        );
+        assert!(err.to_string().contains("'kill_switch'"), "{err}");
+        assert!(storage
+            .list_relations_in("default")
+            .unwrap()
+            .contains(&"kill_switch".to_string()));
+
+        // Once the rule is gone the relation drops.
+        storage.drop_rule_in("default", "allowed").unwrap();
+        storage.drop_relation_in("default", "kill_switch").unwrap();
     }
 
     #[test]

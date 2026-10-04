@@ -166,7 +166,7 @@ Delete a relation and all its data, schema, and associated rules.
 .rel drop old_events
 ```
 
-**Warning:** This permanently deletes the relation, its schema, and any rules that define it. A `schema_change` notification is emitted.
+**Warning:** This permanently deletes the relation, its schema, and any rules that define it. A `schema_change` notification is emitted. The drop is refused while a persistent rule negates the relation (directly or through a rule that reads it), since the rule would then fail open; drop or redefine those rules first.
 
 ### `.rel <name>`
 
