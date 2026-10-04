@@ -109,10 +109,7 @@ fn short_supplied_secret_refuses_startup() {
         ("INPUTLAYER_BOOTSTRAP_API_KEY", "INPUTLAYER_ADMIN_PASSWORD"),
     ] {
         let tmp = TempDir::new().unwrap();
-        let out = run_to_exit(
-            tmp.path(),
-            &[(var, "eleven-char"), (other, "a-strong-enough-secret")],
-        );
+        let out = run_to_exit(tmp.path(), &[(var, "eleven-char"), (other, "")]);
         assert!(!out.status.success(), "{var}: server started");
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
