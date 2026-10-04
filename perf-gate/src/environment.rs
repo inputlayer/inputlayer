@@ -13,7 +13,7 @@ pub fn capture(data_root: &Path, server_cpus: Option<String>, build: String) -> 
         hostname: read_trimmed("/proc/sys/kernel/hostname"),
         kernel: read_trimmed("/proc/sys/kernel/osrelease"),
         cpu_model: cpu_model(),
-        logical_cpus: std::thread::available_parallelism().map_or(0, usize::from),
+        logical_cpus: logical_cpus(),
         mem_total_kb: mem_total_kb(),
         cpu_governor: read_trimmed("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"),
         loadavg_start: loadavg(),
@@ -43,6 +43,20 @@ fn cpu_model() -> String {
                 .map(|rest| rest.trim_start_matches([' ', '\t', ':']).to_string())
         })
         .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// The host's logical CPUs. Not `available_parallelism`: that is this
+/// process's affinity, which `--gate-cpus` narrows.
+fn logical_cpus() -> usize {
+    std::fs::read_to_string("/proc/cpuinfo")
+        .map(|info| {
+            info.lines()
+                .filter(|line| line.starts_with("processor"))
+                .count()
+        })
+        .ok()
+        .filter(|count| *count > 0)
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(0, usize::from))
 }
 
 fn mem_total_kb() -> u64 {

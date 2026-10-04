@@ -32,6 +32,10 @@
 # 4 when the host is busy, or another non-zero status on a setup error.
 set -euo pipefail
 
+# One compound command: bash reads all of it before running any of it, so
+# editing this file while a run is being followed cannot change that run.
+{
+
 ROOT=$(git rev-parse --show-toplevel)
 cd "$ROOT"
 
@@ -184,3 +188,4 @@ ln -sfn "$OUT" "$ROOT/target/perf-gate/remote/latest"
 echo ""
 echo "Results: $OUT (exit status $STATUS)"
 exit "$STATUS"
+}
