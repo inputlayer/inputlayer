@@ -406,3 +406,102 @@ async fn a_follower_with_the_wrong_token_is_refused() {
     let log = std::fs::read_to_string(follower.log_path()).unwrap_or_default();
     assert!(log.contains("401"), "{log}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_writers_on_many_graphs_converge_on_the_follower() {
+    let primary = primary(None).await;
+    let follower = follower(primary.http_url(), TOKEN, primary.api_key()).await;
+    caught_up(&follower).await;
+    for kg in ["g0", "g1", "g2"] {
+        commit(&primary, &format!(".kg create {kg}")).await;
+    }
+    // Writers on different graphs commit concurrently, so their revisions
+    // and WAL order interleave; one writer also creates and drops graphs.
+    let mut tasks = Vec::new();
+    for w in 0..3usize {
+        let mut client = WsClient::connect(&primary, &format!("g{w}"))
+            .await
+            .expect("connect");
+        tasks.push(tokio::spawn(async move {
+            for i in 0..60 {
+                client
+                    .commit(&format!("+fact({w}, {i})"))
+                    .await
+                    .expect("insert");
+                if i % 3 == 0 {
+                    client
+                        .commit(&format!("-fact({w}, {})", i / 2))
+                        .await
+                        .expect("delete");
+                }
+            }
+        }));
+    }
+    let mut churn = WsClient::connect(&primary, KG).await.expect("connect");
+    for i in 0..10 {
+        churn
+            .commit(&format!(".kg create tmp{i}"))
+            .await
+            .expect("create");
+        churn.commit(&format!("+t({i})")).await.expect("insert");
+        churn.commit(&format!(".kg use {KG}")).await.expect("use");
+        if i % 2 == 0 {
+            churn
+                .commit(&format!(".kg drop tmp{i}"))
+                .await
+                .expect("drop");
+        }
+    }
+    for task in tasks {
+        task.await.expect("writer");
+    }
+    caught_up(&follower).await;
+    for kg in ["g0", "g1", "g2"] {
+        let query = "?fact(X, Y)";
+        let expected = {
+            let mut c = WsClient::connect(&primary, kg).await.expect("connect");
+            c.query(query).await.expect("query").rows
+        };
+        let found = {
+            let mut c = WsClient::connect(&follower, kg).await.expect("connect");
+            c.query(query).await.expect("query").rows
+        };
+        let set = |rows: Vec<Value>| rows.iter().map(Value::to_string).collect::<BTreeSet<_>>();
+        assert_eq!(set(found), set(expected), "graph {kg}");
+    }
+    assert_eq!(
+        converge(&primary, &follower, ".kg list").await.len(),
+        rows(&primary, ".kg list").await.len()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn api_keys_issued_and_revoked_on_the_primary_apply_on_the_follower() {
+    let primary = primary(None).await;
+    let follower = follower(primary.http_url(), TOKEN, primary.api_key()).await;
+    caught_up(&follower).await;
+    // A session open on the follower survives the credential changes.
+    let mut session = WsClient::connect(&follower, KG).await.expect("connect");
+
+    let mut admin = WsClient::connect(&primary, KG).await.expect("connect");
+    let created = admin.execute(".apikey create svc").await.expect("create");
+    let key = created.rows[0][1].as_str().expect("key").to_string();
+    caught_up(&follower).await;
+    let mut with_key = WsClient::connect_url(&follower.ws_url(KG), &key)
+        .await
+        .expect("the new key works on the follower");
+    with_key.query("?x(X)").await.expect("query");
+
+    admin.commit(".apikey revoke svc").await.expect("revoke");
+    caught_up(&follower).await;
+    assert!(
+        WsClient::connect_url(&follower.ws_url(KG), &key)
+            .await
+            .is_err(),
+        "a revoked key still works on the follower"
+    );
+    session
+        .query("?x(X)")
+        .await
+        .expect("the admin session on the follower is still open");
+}
