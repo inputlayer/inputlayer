@@ -446,7 +446,7 @@ function normalizeBody(conjuncts: BoolExpr[], contextKeys: ReadonlySet<string>, 
       );
     }
     const [col, lit] = first as [string, Literal];
-    const shared = sharedColumn(compileValue(lit.value), lit.value, neg.columnTypes[col], out, positiveKeys, ctx, neg.relation);
+    const shared = sharedColumn(compileValue(lit.value, neg.columnTypes[col]), lit.value, neg.columnTypes[col], out, positiveKeys, ctx, neg.relation);
     out[i] = astNot(anyExpr(neg.relation, neg.columns, neg.columnTypes, { ...neg.bindings, [col]: shared }, neg.alias));
   }
 
@@ -537,7 +537,7 @@ function compileAny(expr: AnyExpr, env: VarEnv): { atom: string; extra: string[]
     const b = expr.bindings[col];
     if (b === undefined) return env.isReferenced(own) ? env.getVar(own) : '_';
     if (isColumn(b)) return env.unify(b, own);
-    if (isLiteral(b) && !env.isReferenced(own)) return compileValue(b.value);
+    if (isLiteral(b) && !env.isReferenced(own)) return compileValue(b.value, expr.columnTypes[col]);
     const v = env.getVar(own);
     extra.push(`${v} = ${compileExpr(b, env)}`);
     return v;
@@ -618,7 +618,7 @@ export function compileInsert(
   persistent = true,
 ): string {
   const name = rel.relationName;
-  const values = rel.columns.map((c) => compileValue(fact[c]));
+  const values = rel.columns.map((c) => compileValue(fact[c], rel.columnTypes[c]));
   const prefix = persistent ? '+' : '';
   return `${prefix}${name}(${values.join(', ')})`;
 }
@@ -631,7 +631,7 @@ export function compileBulkInsert(
 ): string {
   const name = rel.relationName;
   const tuples = facts.map((fact) => {
-    const values = rel.columns.map((c) => compileValue(fact[c]));
+    const values = rel.columns.map((c) => compileValue(fact[c], rel.columnTypes[c]));
     return `(${values.join(', ')})`;
   });
   const prefix = persistent ? '+' : '';
@@ -643,7 +643,7 @@ export function compileBulkInsert(
 /** Compile a single fact deletion: -employee(1, "Alice", ...) */
 export function compileDelete(rel: RelationDef, fact: Fact): string {
   const name = rel.relationName;
-  const values = rel.columns.map((c) => compileValue(fact[c]));
+  const values = rel.columns.map((c) => compileValue(fact[c], rel.columnTypes[c]));
   return `-${name}(${values.join(', ')})`;
 }
 

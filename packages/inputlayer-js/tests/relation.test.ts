@@ -68,7 +68,9 @@ describe('compileValue', () => {
   });
 
   it('compiles vectors', () => {
-    expect(compileValue([1.0, 2.0, 3.0])).toBe('[1, 2, 3]');
+    expect(compileValue([1.0, 2.5, 3.0])).toBe('[1.0, 2.5, 3.0]');
+    expect(compileValue([2 ** 60])).toBe('[1.152921504606847e+18]');
+    expect(() => compileValue([1, 'x'])).toThrow(CompileError);
   });
 
   it('compiles timestamps', () => {
@@ -82,11 +84,25 @@ describe('compileValue', () => {
     }
   });
 
-  it('refuses integers outside the 64-bit range', () => {
-    expect(compileValue(-(2 ** 63))).toBe('-9223372036854775808');
-    expect(compileValue(2 ** 62)).toBe('4611686018427387904');
-    expect(() => compileValue(2 ** 63)).toThrow(CompileError);
-    expect(() => compileValue(-(2 ** 64))).toThrow(CompileError);
-    expect(() => compileValue(1e300)).toThrow(CompileError);
+  it('writes a whole number past 2^53 as a float literal, never refusing a finite float', () => {
+    expect(compileValue(1e20)).toBe('1e+20');
+    expect(compileValue(-1.5e19, 'float')).toBe('-1.5e+19');
+    expect(compileValue(1e300)).toBe('1e+300');
+    expect(compileValue(2 ** 60)).toBe('1.152921504606847e+18');
+  });
+
+  it('refuses an int past Number.MAX_SAFE_INTEGER, asking for a BigInt', () => {
+    expect(compileValue(Number.MAX_SAFE_INTEGER, 'int')).toBe('9007199254740991');
+    expect(() => compileValue(2 ** 53, 'int')).toThrow(/BigInt/);
+    expect(() => compileValue(-(2 ** 60), 'timestamp')).toThrow(CompileError);
+    expect(() => compileValue(new Timestamp(2 ** 60))).toThrow(CompileError);
+  });
+
+  it('writes a BigInt within the 64-bit range as exact digits and refuses one outside it', () => {
+    expect(compileValue(9007199254740993n, 'int')).toBe('9007199254740993');
+    expect(compileValue(-(2n ** 63n))).toBe('-9223372036854775808');
+    expect(compileValue(2n ** 63n - 1n)).toBe('9223372036854775807');
+    expect(() => compileValue(2n ** 63n)).toThrow(CompileError);
+    expect(() => compileValue(-(2n ** 63n) - 1n)).toThrow(CompileError);
   });
 });

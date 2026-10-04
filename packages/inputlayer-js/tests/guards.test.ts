@@ -148,7 +148,25 @@ describe('non-finite numbers', () => {
       kg.query({ select: [Shipment], where: NOT(any(Scored, { score: bad })) }),
     ).rejects.toThrow(CompileError);
     await expect(kg.program().insert(Scored, row).commit()).rejects.toThrow(CompileError);
+    await expect(kg.whyNot(Scored, row)).rejects.toThrow(CompileError);
     expect(sent).toEqual([]);
+  });
+
+  it('keeps large finite floats, and refuses an unsafe number only in an int column', async () => {
+    const { sent, kg } = refusing();
+    await kg.insert(Scored, { order: 1, tool: 't', score: 1e20 });
+    expect(sent).toEqual(['+attempt(1, "t", 1e+20)']);
+    await expect(kg.retract(Scored, { order: 2 ** 53 + 2 })).rejects.toThrow(/BigInt/);
+    await kg.delete(Scored, { order: 9007199254740993n, tool: 't', score: 0.5 });
+    expect(sent[1]).toBe('-attempt(9007199254740993, "t", 0.5)');
+  });
+
+  it('claim() reports a lost race when the holder holds a value past the encoder range', async () => {
+    const holder = [2 ** 63, 't', 1e300];
+    const conn = { execute: async () => ({ columns: [], rows: [holder] }) };
+    const kg = new KnowledgeGraph('kg', conn as unknown as Connection);
+    const got = await kg.claim(Scored, { order: 1, tool: 't', score: 0.5 }, { key: ['tool'] });
+    expect(got).toEqual({ won: false, holder: { order: 2 ** 63, tool: 't', score: 1e300 } });
   });
 });
 

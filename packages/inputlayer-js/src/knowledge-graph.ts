@@ -397,14 +397,22 @@ export class KnowledgeGraph {
       throw asConflict(e, iql);
     }
     const cols = rel.columns;
-    const ours = cols.map((c) => compileValue(fact[c]));
+    const types = cols.map((c) => rel.columnTypes[c]);
+    const ours = cols.map((c, i) => compileValue(fact[c], types[i]));
     const rows = result.rows.map((r) => {
       if (r.length !== cols.length) {
         throw new InternalError(`Unexpected claim reply: ${JSON.stringify(r)} for columns ${cols.join(', ')}`);
       }
       return r;
     });
-    if (rows.some((r) => r.every((v, i) => compileValue(v) === ours[i]))) {
+    const same = (v: unknown, i: number): boolean => {
+      try {
+        return compileValue(v, types[i]) === ours[i];
+      } catch {
+        return false;
+      }
+    };
+    if (rows.some((r) => r.every(same))) {
       return { won: true, holder: row };
     }
     const first = rows[0];
@@ -795,15 +803,7 @@ export class KnowledgeGraph {
   async whyNot(relation: RelationDef, fact: Fact): Promise<WhyNotResult> {
     const relName = relation.relationName;
     const cols = relation.columns;
-    const vals = cols
-      .map((col) => {
-        const v = fact[col];
-        if (v === null || v === undefined) return 'null';
-        if (typeof v === 'string') return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
-
-        return String(v);
-      })
-      .join(', ');
+    const vals = cols.map((col) => compileValue(fact[col], relation.columnTypes[col])).join(', ');
     const result = await this.conn.execute(meta.whyNot(`${relName}(${vals})`));
     const text = result.rows.map((row) => String(row[0])).join('\n');
     const explanation = (result.proof_trees?.[0] ?? null) as ProofTree | null;

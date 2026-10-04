@@ -75,6 +75,7 @@ export function toIQLType(type: IQLType): string {
 /** Any value that can appear in a relation fact. */
 export type FieldValue =
   | number
+  | bigint
   | string
   | boolean
   | null
