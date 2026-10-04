@@ -300,6 +300,27 @@ class TestProgram:
         ]
         assert (c.token_index, c.assert_index, c.write_indexes) == (1, 2, (5, 6))
 
+    def test_rule_constant_rows_count_as_their_own_statements(self) -> None:
+        class Allowed(Derived):
+            tool: str
+            rules: ClassVar[list] = []
+
+        Allowed.rules = [
+            From(ToolPolicy).where(~KillSwitch.any(tool="t")).select(tool=ToolPolicy.tool)
+        ]
+        p = Program().define_rules(Allowed).insert(KillSwitch(tool="x"))
+        c = p.compile(True, T)
+        lines = c.iql.split("\n")
+        assert lines[0] == '+il_const_s("t")'
+        assert c.write_indexes == (2,)
+        assert lines[2] == '+kill_switch("x")'
+
+        g = p.when(PackVersion.any(name="delivery")).compile(True, T)
+        glines = g.iql.split("\n")
+        assert g.write_indexes == (5,)
+        assert glines[3] == '+il_const_s("t")'
+        assert glines[5] == '-il_ghost(0), +kill_switch("x") <- il_txn("t-1")'
+
     def test_carries_a_negation_constant_through_a_positive_atom_carrying_it(self) -> None:
         p = (
             Program()

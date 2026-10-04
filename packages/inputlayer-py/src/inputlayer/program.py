@@ -27,7 +27,7 @@ from inputlayer.compiler import (
     compile_bulk_insert,
     compile_guard,
     compile_insert,
-    compile_rule,
+    compile_rule_clause,
     compile_schema,
 )
 from inputlayer.exceptions import CompileError, InternalError
@@ -267,17 +267,16 @@ class Program:
         """Add persistent rule clauses in the program (unconditional: needs the abort form)."""
         for target in targets:
             for clause in target.rules:
-                self._statements.append(
-                    _Plain(
-                        compile_rule(
-                            Relation._resolve_name(target),
-                            Relation._get_columns(target),
-                            clause.select_map,
-                            clause.relations,
-                            clause.condition,
-                            persistent=True,
-                        )
-                    )
+                compiled = compile_rule_clause(
+                    Relation._resolve_name(target),
+                    Relation._get_columns(target),
+                    clause.select_map,
+                    clause.relations,
+                    clause.condition,
+                    persistent=True,
+                )
+                self._statements.extend(
+                    _Plain(text) for text in [*compiled.constants, compiled.clause]
                 )
         return self
 
