@@ -197,7 +197,7 @@ impl RequestControl {
 
     /// A request arriving now with `timeout` to finish (`None`: no deadline).
     pub fn with_timeout(timeout: Option<Duration>) -> Arc<Self> {
-        Self::new(timeout.map(|t| Instant::now() + t))
+        Self::new(timeout.and_then(|t| Instant::now().checked_add(t)))
     }
 
     /// Most bytes the computation may hold; 0 = no limit.

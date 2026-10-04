@@ -23,6 +23,7 @@ use crate::execution::memory::thread_net_bytes;
 use crate::execution::{RequestControl, Stop};
 use crate::ir::{AggregateFunction, ArithOp, BuiltinFunction, IRExpression, IRNode, Predicate};
 use crate::semiring_types::{BooleanDiff, DiffType};
+use crate::size_limits::{MAX_COMPUTED_STRING_BYTES, MAX_LSH_DIMENSION};
 use differential_dataflow::collection::vec::Collection;
 use differential_dataflow::lattice::Lattice;
 use differential_dataflow::operators::iterate::Variable;
@@ -2325,7 +2326,7 @@ impl CodeGenerator {
 
                                 if *descending {
                                     let mut heap: BinaryHeap<Reverse<(Value, &Tuple)>> =
-                                        BinaryHeap::with_capacity(*k + 1);
+                                        BinaryHeap::with_capacity(top_k_capacity(*k, tuples.len()));
                                     for t in &tuples {
                                         let score = t
                                             .get(*order_col)
@@ -2352,7 +2353,7 @@ impl CodeGenerator {
                                     }
                                 } else {
                                     let mut heap: BinaryHeap<(Value, &Tuple)> =
-                                        BinaryHeap::with_capacity(*k + 1);
+                                        BinaryHeap::with_capacity(top_k_capacity(*k, tuples.len()));
                                     for t in &tuples {
                                         let score = t
                                             .get(*order_col)
@@ -2396,7 +2397,7 @@ impl CodeGenerator {
 
                                 if *descending {
                                     let mut heap: BinaryHeap<Reverse<(Value, &Tuple)>> =
-                                        BinaryHeap::with_capacity(*k + 1);
+                                        BinaryHeap::with_capacity(top_k_capacity(*k, tuples.len()));
                                     for t in &tuples {
                                         let score_f64 = t
                                             .get(*order_col)
@@ -2429,7 +2430,7 @@ impl CodeGenerator {
                                     }
                                 } else {
                                     let mut heap: BinaryHeap<(Value, &Tuple)> =
-                                        BinaryHeap::with_capacity(*k + 1);
+                                        BinaryHeap::with_capacity(top_k_capacity(*k, tuples.len()));
                                     for t in &tuples {
                                         let score_f64 = t
                                             .get(*order_col)
@@ -2651,7 +2652,7 @@ impl CodeGenerator {
                     if let Some(v) = arg_values[0].as_vector() {
                         let table_idx = arg_values[1].to_i64();
                         let hp = arg_values[2].to_i64();
-                        if hp < 0 {
+                        if hp < 0 || v.len() > MAX_LSH_DIMENSION {
                             return Value::Null;
                         }
                         let bucket = vector_ops::lsh_bucket(v, table_idx, hp as usize);
@@ -2816,7 +2817,7 @@ impl CodeGenerator {
                     if let Some(v) = arg_values[0].as_vector_int8() {
                         let table_idx = arg_values[1].to_i64();
                         let hp = arg_values[2].to_i64();
-                        if hp < 0 {
+                        if hp < 0 || v.len() > MAX_LSH_DIMENSION {
                             return Value::Null;
                         }
                         let bucket = vector_ops::lsh_bucket_int8(v, table_idx, hp as usize);
@@ -2850,7 +2851,7 @@ impl CodeGenerator {
                     if let Some(v) = arg_values[0].as_vector() {
                         let table_idx = arg_values[1].to_i64();
                         let hp = arg_values[2].to_i64();
-                        if hp < 0 {
+                        if hp < 0 || v.len() > MAX_LSH_DIMENSION {
                             return Value::Null;
                         }
                         let (bucket, _distances) =
@@ -2886,7 +2887,7 @@ impl CodeGenerator {
                         let table_idx = arg_values[1].to_i64();
                         let hp = arg_values[2].to_i64();
                         let np = arg_values[3].to_i64();
-                        if hp < 0 || np < 0 {
+                        if hp < 0 || np < 0 || v.len() > MAX_LSH_DIMENSION {
                             return Value::Null;
                         }
                         let probes =
@@ -2904,7 +2905,7 @@ impl CodeGenerator {
                         let table_idx = arg_values[1].to_i64();
                         let hp = arg_values[2].to_i64();
                         let np = arg_values[3].to_i64();
-                        if hp < 0 || np < 0 {
+                        if hp < 0 || np < 0 || v.len() > MAX_LSH_DIMENSION {
                             return Value::Null;
                         }
                         let probes = vector_ops::lsh_multi_probe_int8(
@@ -3242,6 +3243,11 @@ impl CodeGenerator {
                         arg_values[1].as_str(),
                         arg_values[2].as_str(),
                     ) {
+                        if replaced_len(s, find, replacement)
+                            .is_none_or(|len| len > MAX_COMPUTED_STRING_BYTES)
+                        {
+                            return Value::Null;
+                        }
                         return Value::String(s.replace(find, replacement).into());
                     }
                 }
@@ -3250,12 +3256,16 @@ impl CodeGenerator {
             BuiltinFunction::Concat => {
                 let mut result = String::new();
                 for v in &arg_values {
-                    match v {
-                        Value::String(s) => result.push_str(s),
-                        Value::Int64(n) => result.push_str(&n.to_string()),
-                        Value::Float64(f) => result.push_str(&f.to_string()),
-                        _ => result.push_str(&format!("{v}")),
+                    let part = match v {
+                        Value::String(s) => std::borrow::Cow::Borrowed(&**s),
+                        Value::Int64(n) => n.to_string().into(),
+                        Value::Float64(f) => f.to_string().into(),
+                        _ => format!("{v}").into(),
+                    };
+                    if result.len().saturating_add(part.len()) > MAX_COMPUTED_STRING_BYTES {
+                        return Value::Null;
                     }
+                    result.push_str(&part);
                 }
                 Value::String(result.into())
             }
@@ -3694,6 +3704,24 @@ impl Default for CodeGenerator {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Capacity of a top-k heap over `n` tuples: it holds at most k + 1 entries,
+/// and never more than the group has.
+fn top_k_capacity(k: usize, n: usize) -> usize {
+    k.min(n).saturating_add(1)
+}
+
+/// Byte length of `s.replace(find, replacement)`, without building it; `None`
+/// when it overflows `usize`.
+fn replaced_len(s: &str, find: &str, replacement: &str) -> Option<usize> {
+    // An empty pattern matches before every char and at the end.
+    let matches = if find.is_empty() {
+        s.chars().count() + 1
+    } else {
+        s.matches(find).count()
+    };
+    (s.len() - matches * find.len()).checked_add(matches.checked_mul(replacement.len())?)
 }
 
 #[cfg(test)]
@@ -5907,6 +5935,54 @@ mod tests {
         assert!(scores.contains(&8.0), "Missing score 8.0");
         assert!(scores.contains(&7.0), "Missing score 7.0");
         assert!(scores.contains(&5.0), "Missing score 5.0");
+    }
+
+    /// Regression: `with_capacity(k + 1)` with a huge k aborted the process.
+    #[test]
+    fn test_top_k_huge_k_holds_only_the_group() {
+        let mut codegen = CodeGenerator::new();
+        codegen.add_input_tuples(
+            "items".to_string(),
+            (0..4)
+                .map(|i| Tuple::new(vec![Value::Int32(i), Value::Float64(f64::from(i))]))
+                .collect(),
+        );
+        for descending in [true, false] {
+            let ir = IRNode::Aggregate {
+                input: Box::new(IRNode::Scan {
+                    relation: "items".to_string(),
+                    schema: vec!["id".to_string(), "score".to_string()],
+                }),
+                group_by: vec![],
+                aggregations: vec![(
+                    AggregateFunction::TopK {
+                        k: usize::MAX,
+                        order_col: 1,
+                        output_cols: vec![0, 1],
+                        descending,
+                    },
+                    0,
+                )],
+                output_schema: vec!["id".to_string(), "score".to_string()],
+            };
+            assert_eq!(codegen.generate_and_execute_tuples(&ir).unwrap().len(), 4);
+        }
+    }
+
+    #[test]
+    fn test_replaced_len_matches_replace() {
+        for (s, find, rep) in [
+            ("abcabc", "b", "xyz"),
+            ("abcabc", "", "-"),
+            ("héllo", "", "ab"),
+            ("aaaa", "aa", ""),
+            ("", "", "x"),
+            ("abc", "zz", "y"),
+        ] {
+            assert_eq!(replaced_len(s, find, rep), Some(s.replace(find, rep).len()));
+        }
+        let huge = "x".repeat(1 << 16);
+        assert_eq!(replaced_len("abc", "", &huge), Some(3 + 4 * huge.len()));
     }
 
     #[test]

@@ -13,6 +13,7 @@ use crate::index_manager::{
     TupleId, INDEX_DEFINITIONS_FILE,
 };
 use crate::schema::SchemaType;
+use crate::size_limits::{MAX_EF_CONSTRUCTION, MAX_EF_SEARCH};
 use crate::statement::IndexCreateOptions;
 use crate::value::Tuple;
 use std::collections::{HashMap, HashSet};
@@ -109,11 +110,17 @@ impl KnowledgeGraph {
                 config.m
             ));
         }
-        if config.ef_construction < 1 {
-            return Err("HNSW parameter ef_construction must be >= 1".to_string());
+        if !(1..=MAX_EF_CONSTRUCTION).contains(&config.ef_construction) {
+            return Err(format!(
+                "HNSW parameter ef_construction must be between 1 and {MAX_EF_CONSTRUCTION}, got {}",
+                config.ef_construction
+            ));
         }
-        if config.ef_search < 1 {
-            return Err("HNSW parameter ef_search must be >= 1".to_string());
+        if !(1..=MAX_EF_SEARCH).contains(&config.ef_search) {
+            return Err(format!(
+                "HNSW parameter ef_search must be between 1 and {MAX_EF_SEARCH}, got {}",
+                config.ef_search
+            ));
         }
         Ok(RegisteredIndex {
             name: opts.name.clone(),

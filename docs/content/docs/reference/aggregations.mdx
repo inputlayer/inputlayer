@@ -134,7 +134,7 @@ top_k<K, OrderVariable, desc>     // Descending order (highest K)
 ```
 
 **Parameters:**
-- `K` - Number of results to return (integer)
+- `K` - Number of results to return (integer, at most 1,000,000)
 - `OrderVariable` - Variable to order by
 - `desc` - Optional: use descending order
 
@@ -165,7 +165,7 @@ top_k_threshold<K, Threshold, OrderVariable, desc>     // Descending
 ```
 
 **Parameters:**
-- `K` - Maximum number of results (integer)
+- `K` - Maximum number of results (integer, at most 1,000,000)
 - `Threshold` - Minimum (or maximum for desc) value to include (float)
 - `OrderVariable` - Variable to order by (with optional `:desc`/`:asc` suffix)
 
