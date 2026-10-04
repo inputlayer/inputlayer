@@ -34,10 +34,12 @@
 //! `max_result_rows` allows. A lifted query computes every binding's rows,
 //! subscribed or not, and every view waits for it. A family therefore shares
 //! only while a round is about as fast as its views' own evaluations would
-//! be, run in parallel on the compute permits: it starts sharing once it has
-//! a view's own cost to compare with, stops when a round is slower, and
-//! probes again later. While sharing, a view evaluates its own query now and
-//! then to keep that cost current.
+//! be, run in parallel on the compute permits. Costs count only evaluations
+//! that reused a compiled plan. A family starts sharing once it has a view's
+//! own cost to compare with, stops when a round is slower, and probes again
+//! after some commits, waiting longer after each probe that fails. While
+//! sharing, a view evaluates its own query now and then to keep that cost
+//! current.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -68,8 +70,12 @@ const PARAM_PREFIX: &str = "_L";
 /// be before the family stops sharing.
 const STOP_MARGIN_PERCENT: u64 = 20;
 
-/// Own evaluations before a family that stopped sharing tries again.
+/// Commits before a family that stopped sharing tries again.
 const PROBE_AFTER: u64 = 256;
+
+/// A family that keeps failing its probes waits at most this many doublings
+/// of [`PROBE_AFTER`] between them.
+const MAX_PROBE_BACKOFF: u64 = 6;
 
 /// Rounds between a view's own evaluations while sharing.
 const SAMPLE_EVERY: u64 = 64;
@@ -82,6 +88,16 @@ fn keeps_sharing(shared_us: u64, own_us: u64, bindings: u64, permits: u64) -> bo
     let unshared = own_us.saturating_mul(bindings.div_ceil(permits.max(1)).max(1));
     own_us == 0
         || shared_us.saturating_mul(100) <= unshared.saturating_mul(100 + STOP_MARGIN_PERCENT)
+}
+
+/// Own evaluations, summed over a family's `bindings` views, before a family
+/// that stopped sharing `stops` times in a row probes again: every commit
+/// evaluates every view, so [`PROBE_AFTER`] commits, doubled after each stop
+/// past the first, up to [`MAX_PROBE_BACKOFF`] times.
+fn probe_after(bindings: u64, stops: u64) -> u64 {
+    PROBE_AFTER
+        .saturating_mul(bindings.max(1))
+        .saturating_mul(1 << stops.saturating_sub(1).min(MAX_PROBE_BACKOFF))
 }
 
 /// How the engine matches a lifted constant.
@@ -352,6 +368,8 @@ pub struct Family {
     sharing: AtomicBool,
     /// Own evaluations since sharing stopped.
     own_since_stop: AtomicU64,
+    /// Times sharing stopped since a round last kept it.
+    stops: AtomicU64,
     /// Recent cost of a view's own evaluation, in microseconds (0: unknown).
     own_cost_us: AtomicU64,
     /// Rounds evaluated.
@@ -463,7 +481,7 @@ impl Family {
         let shared = (ran.cost + partitioning.elapsed()).as_micros() as u64;
         let bindings = self.bindings.load(Ordering::Relaxed) as u64;
         let permits = self.handler.compute_permits() as u64;
-        if !keeps_sharing(shared, own, bindings, permits) {
+        if ran.plan_cached && !keeps_sharing(shared, own, bindings, permits) {
             debug!(
                 query = %self.shape.query,
                 shared_us = shared,
@@ -473,8 +491,13 @@ impl Family {
                 "subscription_family_stops_sharing"
             );
             self.stop_sharing();
-        } else if (self.rounds.fetch_add(1, Ordering::Relaxed) + 1).is_multiple_of(SAMPLE_EVERY) {
-            self.sample_due.store(true, Ordering::Relaxed);
+        } else if ran.plan_cached {
+            if self.stops.load(Ordering::Relaxed) != 0 {
+                self.stops.store(0, Ordering::Relaxed);
+            }
+            if (self.rounds.fetch_add(1, Ordering::Relaxed) + 1).is_multiple_of(SAMPLE_EVERY) {
+                self.sample_due.store(true, Ordering::Relaxed);
+            }
         }
         Ok(Arc::new(Partitions {
             revision,
@@ -494,24 +517,32 @@ impl Family {
 
     fn stop_sharing(&self) {
         self.own_since_stop.store(0, Ordering::Relaxed);
+        self.stops.fetch_add(1, Ordering::Relaxed);
         self.sharing.store(false, Ordering::Relaxed);
     }
 
-    /// Note a view's own evaluation of `cost`; at the first, and after
-    /// enough of them since sharing stopped, try sharing.
-    fn record_own(&self, cost: Duration) {
-        let cost = (cost.as_micros() as u64).max(1);
+    /// Note a view's own evaluation: its cost when it reused a compiled plan
+    /// (`None` when it compiled one). At the first cost, and after enough own
+    /// evaluations since sharing stopped, try sharing.
+    fn record_own(&self, cost: Option<Duration>) {
         let average = self.own_cost_us.load(Ordering::Relaxed);
-        let next = if average == 0 {
-            cost
-        } else {
-            (average * 7 + cost) / 8
-        };
-        self.own_cost_us.store(next, Ordering::Relaxed);
-        if !self.sharing.load(Ordering::Relaxed)
-            && (average == 0
-                || self.own_since_stop.fetch_add(1, Ordering::Relaxed) + 1 >= PROBE_AFTER)
-        {
+        if let Some(cost) = cost {
+            let cost = (cost.as_micros() as u64).max(1);
+            let next = if average == 0 {
+                cost
+            } else {
+                (average * 7 + cost) / 8
+            };
+            self.own_cost_us.store(next, Ordering::Relaxed);
+        }
+        if self.sharing.load(Ordering::Relaxed) {
+            return;
+        }
+        let first = average == 0 && cost.is_some();
+        let since_stop = self.own_since_stop.fetch_add(1, Ordering::Relaxed) + 1;
+        let bindings = self.bindings.load(Ordering::Relaxed) as u64;
+        let stops = self.stops.load(Ordering::Relaxed);
+        if first || (average > 0 && since_stop >= probe_after(bindings, stops)) {
             self.sharing.store(true, Ordering::Relaxed);
         }
     }
@@ -557,6 +588,7 @@ impl Families {
                         latest: ArcSwapOption::empty(),
                         sharing: AtomicBool::new(false),
                         own_since_stop: AtomicU64::new(0),
+                        stops: AtomicU64::new(0),
                         own_cost_us: AtomicU64::new(0),
                         rounds: AtomicU64::new(0),
                         sample_due: AtomicBool::new(false),
@@ -611,7 +643,8 @@ impl MemberQuery {
         let snapshot = self.own.current_snapshot()?;
         let rules = Arc::clone(snapshot.persistent_rules());
         let evaluated = self.own.evaluate_on(snapshot).await?;
-        self.family.record_own(evaluated.cost);
+        self.family
+            .record_own(evaluated.plan_cached.then_some(evaluated.cost));
         self.validated = Some(rules);
         Ok(self.own.adopt(evaluated))
     }
@@ -648,6 +681,7 @@ impl MemberQuery {
             dependencies: partitions.dependencies.clone(),
             revision: partitions.revision,
             cost: Duration::ZERO,
+            plan_cached: false,
         })
     }
 }

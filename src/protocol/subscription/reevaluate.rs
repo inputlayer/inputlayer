@@ -44,9 +44,11 @@ pub struct Evaluated {
     pub result: Arc<ResultSet>,
     pub dependencies: Dependencies,
     pub revision: u64,
-    /// Engine time of the evaluation (excluding compiling its plan and waits
-    /// for a compute permit).
+    /// Engine time of the evaluation (excluding waits for a compute permit).
     pub cost: Duration,
+    /// Whether the evaluation reused a compiled plan: `cost` includes no
+    /// compilation.
+    pub plan_cached: bool,
 }
 
 impl ReevaluatingQuery {
@@ -125,6 +127,7 @@ impl ReevaluatingQuery {
             dependencies,
             revision,
             cost: _,
+            plan_cached: _,
         } = evaluated;
         if let Some(columns) = columns {
             self.columns = columns;
@@ -166,6 +169,7 @@ pub async fn evaluate(
         dependencies,
         revision,
         cost: ran.cost,
+        plan_cached: ran.plan_cached,
     })
 }
 
@@ -175,9 +179,12 @@ pub struct QueryRows {
     pub columns: Option<Vec<String>>,
     /// Every row, as the engine returned it (distinct as engine values).
     pub rows: Vec<Row>,
-    /// Engine time of the evaluation (excluding compiling its plan and waits
-    /// for a compute permit), plus converting its rows.
+    /// Engine time of the evaluation (excluding waits for a compute permit),
+    /// plus converting its rows.
     pub cost: Duration,
+    /// Whether the evaluation reused a compiled plan: `cost` includes no
+    /// compilation.
+    pub plan_cached: bool,
 }
 
 /// Run `query` on `snapshot` of `knowledge_graph`; a capped result is an
@@ -189,7 +196,7 @@ pub async fn run_query(
     snapshot: Arc<KnowledgeGraphSnapshot>,
 ) -> Result<QueryRows, String> {
     let started = Instant::now();
-    let result = handler
+    let (result, plan_cached) = handler
         .query_snapshot(knowledge_graph, snapshot, query, None)
         .await?;
     // A capped result is not the result set: adopting it would announce
@@ -202,14 +209,7 @@ pub async fn run_query(
     }
     let engine = result.timing_breakdown.as_ref().map_or_else(
         || started.elapsed(),
-        |timing| {
-            let compiling = timing.parse_us
-                + timing.sip_us
-                + timing.magic_sets_us
-                + timing.ir_build_us
-                + timing.optimize_us;
-            Duration::from_micros(timing.total_us.saturating_sub(compiling))
-        },
+        |timing| Duration::from_micros(timing.total_us),
     );
     let converting = Instant::now();
     let columns =
@@ -223,6 +223,7 @@ pub async fn run_query(
         columns,
         rows,
         cost: engine + converting.elapsed(),
+        plan_cached,
     })
 }
 

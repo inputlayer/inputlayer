@@ -157,7 +157,23 @@ fn a_round_shares_while_no_slower_than_the_views_own_evaluations_in_parallel() {
     assert!(keeps_sharing(1_000_000, 0, 2, 4));
 }
 
+#[test]
+fn probes_wait_a_number_of_commits_that_doubles_with_each_failed_probe() {
+    // Every commit evaluates every view: the wait scales with the bindings.
+    assert_eq!(probe_after(200, 1), PROBE_AFTER * 200);
+    assert_eq!(probe_after(1, 1), PROBE_AFTER);
+    assert_eq!(probe_after(0, 1), PROBE_AFTER);
+    assert_eq!(probe_after(10, 0), PROBE_AFTER * 10);
+    assert_eq!(probe_after(10, 2), PROBE_AFTER * 20);
+    assert_eq!(probe_after(10, 3), PROBE_AFTER * 40);
+    let longest = (PROBE_AFTER * 10) << MAX_PROBE_BACKOFF;
+    assert_eq!(probe_after(10, MAX_PROBE_BACKOFF + 1), longest);
+    assert_eq!(probe_after(10, 1_000), longest);
+    assert_eq!(probe_after(u64::MAX, 3), u64::MAX);
+}
+
 mod rounds {
+    use std::sync::atomic::Ordering;
     use std::sync::Arc;
 
     use serde_json::json;
@@ -212,10 +228,19 @@ mod rounds {
         let mut one = member(&families, &handler, &metrics, r#"?item("s1", X)"#);
         let mut two = member(&families, &handler, &metrics, r#"?item("s2", X)"#);
         assert!(!one.family.shares(), "no own cost to compare a round with");
-        // First refreshes evaluate each view's own query.
+        // First refreshes evaluate each view's own query, compiling its plan:
+        // not a cost to compare a round with.
         assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 1])]);
         assert_eq!(inserted(&two.refresh().await.unwrap()), [json!(["s2", 2])]);
-        assert_eq!(metrics.shared_evaluations(), 0);
+        assert_eq!(one.family.own_cost_us.load(Ordering::Relaxed), 0);
+        assert!(!one.family.shares());
+        // Their next evaluations reuse the plans: their cost starts sharing.
+        write(&handler, "+item[(\"s1\", 2), (\"s2\", 3)]").await;
+        assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 2])]);
+        assert_eq!(inserted(&two.refresh().await.unwrap()), [json!(["s2", 3])]);
+        assert!(one.family.own_cost_us.load(Ordering::Relaxed) > 0);
+        assert!(one.family.shares());
+        let before = metrics.shared_evaluations();
 
         write(&handler, "+item[(\"s1\", 3), (\"s2\", 4)]").await;
         let first = one.refresh().await.unwrap();
@@ -223,7 +248,11 @@ mod rounds {
         assert_eq!(inserted(&first), [json!(["s1", 3])]);
         assert_eq!(inserted(&second), [json!(["s2", 4])]);
         assert_eq!(first.revision, second.revision);
-        assert_eq!(metrics.shared_evaluations(), 1, "one round for both views");
+        assert_eq!(
+            metrics.shared_evaluations(),
+            before + 1,
+            "one round for both views"
+        );
         let round = one.family.latest.load_full().unwrap();
         assert!(
             round.snapshot.load().is_none(),
@@ -234,7 +263,7 @@ mod rounds {
         drop(two);
         write(&handler, "+item(\"s1\", 5)").await;
         assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 5])]);
-        assert_eq!(metrics.shared_evaluations(), 1);
+        assert_eq!(metrics.shared_evaluations(), before + 1);
     }
 
     #[tokio::test(flavor = "multi_thread")]

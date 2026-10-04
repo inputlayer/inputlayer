@@ -22,7 +22,7 @@ use crate::storage_engine::{KnowledgeGraphSnapshot, StorageEngine};
 use crate::value::{Tuple, Value};
 use crate::Config;
 use parking_lot::RwLock;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
@@ -506,9 +506,10 @@ struct QueryJob {
     /// When set, the query reads this snapshot of its knowledge graph instead
     /// of the one current when it runs.
     pinned: Option<Arc<KnowledgeGraphSnapshot>>,
-    /// Reuse the query's compiled plan while the rules stay the same (for
-    /// queries evaluated again and again: standing queries).
-    cache_plan: bool,
+    /// When set, reuse the query's compiled plan while the rules stay the
+    /// same (for queries evaluated again and again: standing queries), and
+    /// note here whether the plan came from the cache.
+    cache_plan: Option<Arc<AtomicBool>>,
 }
 
 impl QueryJob {
@@ -914,7 +915,7 @@ impl Handler {
             start_time: self.start_time,
             timing_histograms: Arc::clone(&self.timing_histograms),
             pinned: None,
-            cache_plan: false,
+            cache_plan: None,
         }
     }
 
@@ -3402,8 +3403,13 @@ impl QueryJob {
                     session_fact_tuples,
                     timing_mode,
                 )
-            } else if self.cache_plan {
-                snapshot.execute_with_rules_tuples_cached(&query_program, timing_mode)
+            } else if let Some(plan_cached) = &self.cache_plan {
+                snapshot
+                    .execute_with_rules_tuples_cached(&query_program, timing_mode)
+                    .map(|(tuples, timing, cached)| {
+                        plan_cached.store(cached, Ordering::Relaxed);
+                        (tuples, timing)
+                    })
             } else {
                 snapshot.execute_with_rules_tuples_profiled(&query_program, timing_mode)
             }
@@ -3976,14 +3982,15 @@ impl Handler {
     /// admitted and authorized the same way, but reading `snapshot` instead of
     /// whatever is current when the query runs. The result is therefore the
     /// query's exact answer at `snapshot.revision`. The query's compiled plan
-    /// is kept and reused on later snapshots until the rules change.
+    /// is kept and reused on later snapshots until the rules change; the flag
+    /// tells whether this run reused it.
     pub async fn query_snapshot(
         &self,
         knowledge_graph: &str,
         snapshot: Arc<KnowledgeGraphSnapshot>,
         query: &str,
         auth: Option<&crate::auth::Principal>,
-    ) -> Result<QueryResult, String> {
+    ) -> Result<(QueryResult, bool), String> {
         let identity = auth
             .map(crate::auth::Principal::identity)
             .transpose()
@@ -3996,9 +4003,10 @@ impl Handler {
             return Err("A snapshot query must be a single query".to_string());
         }
         self.authorize_program(identity.as_ref(), Some(knowledge_graph), &statements)?;
+        let plan_cached = Arc::new(AtomicBool::new(false));
         let job = QueryJob {
             pinned: Some(snapshot),
-            cache_plan: true,
+            cache_plan: Some(Arc::clone(&plan_cached)),
             ..self.make_query_job()
         };
         let control = self.request_control(None);
@@ -4011,7 +4019,8 @@ impl Handler {
                 &control,
             )
             .await?;
-        settle_result(result, auth, true).map_err(|e| e.message)
+        let result = settle_result(result, auth, true).map_err(|e| e.message)?;
+        Ok((result, plan_cached.load(Ordering::Relaxed)))
     }
 
     async fn run_execute_program(
