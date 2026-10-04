@@ -237,8 +237,13 @@ mod rounds {
         // Their next evaluations reuse the plans: their cost starts sharing.
         write(&handler, "+item[(\"s1\", 2), (\"s2\", 3)]").await;
         assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 2])]);
-        assert_eq!(inserted(&two.refresh().await.unwrap()), [json!(["s2", 3])]);
         assert!(one.family.own_cost_us.load(Ordering::Relaxed) > 0);
+        assert!(one.family.shares());
+        // Own evaluations slower than any round here: the guard keeps sharing.
+        one.family
+            .own_cost_us
+            .store(1_000_000_000, Ordering::Relaxed);
+        assert_eq!(inserted(&two.refresh().await.unwrap()), [json!(["s2", 3])]);
         assert!(one.family.shares());
         let before = metrics.shared_evaluations();
 
@@ -276,5 +281,30 @@ mod rounds {
         let two = member(&families, &handler, &metrics, r#"?item("s2", X)"#);
         assert!(!Arc::ptr_eq(&one.family, &int.family));
         assert!(Arc::ptr_eq(&one.family, &two.family));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_slow_round_stops_sharing_even_when_it_compiled_its_plan() {
+        let (handler, _tmp) = handler();
+        write(&handler, "+item[(\"s1\", 1), (\"s2\", 2)]").await;
+        let families = Families::default();
+        let metrics = Arc::new(SubscriptionMetrics::default());
+        let mut one = member(&families, &handler, &metrics, r#"?item("s1", X)"#);
+        let mut two = member(&families, &handler, &metrics, r#"?item("s2", X)"#);
+        one.refresh().await.unwrap();
+        two.refresh().await.unwrap();
+        // Own evaluations far faster than any round.
+        one.family.own_cost_us.store(1, Ordering::Relaxed);
+        one.family.sharing.store(true, Ordering::Relaxed);
+        assert!(one.family.shares());
+
+        write(&handler, "+item(\"s1\", 3)").await;
+        assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 3])]);
+        assert_eq!(
+            metrics.shared_evaluations(),
+            1,
+            "the round compiled its plan"
+        );
+        assert!(!one.family.shares(), "and was still judged too slow");
     }
 }
