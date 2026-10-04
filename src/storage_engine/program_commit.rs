@@ -142,12 +142,14 @@ impl KnowledgeGraph {
             let effect = match statement.changes {
                 StagedChanges::Catalog(change) => {
                     let outcome = catalog.apply(kg, &change).map_err(rejected)?;
-                    let edited = match &outcome {
-                        CatalogOutcome::RulesDropped(names) => names.clone(),
-                        _ => change.name().map(str::to_string).into_iter().collect(),
-                    };
-                    for name in edited {
-                        rule_edited_by.insert(name, statement.index);
+                    if change.edits_rules() {
+                        let edited = match &outcome {
+                            CatalogOutcome::RulesDropped(names) => names.clone(),
+                            _ => change.name().map(str::to_string).into_iter().collect(),
+                        };
+                        for name in edited {
+                            rule_edited_by.insert(name, statement.index);
+                        }
                     }
                     StatementEffect::Catalog(outcome)
                 }

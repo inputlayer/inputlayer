@@ -443,6 +443,17 @@ async fn a_program_may_remove_a_negated_rule_with_its_negators_in_any_order() {
     );
     let rules = run(&handler, ".rule list").await.expect("list").rows;
     assert_eq!(rules.len(), 3, "{rules:?}");
+    // A later schema statement on the dropped name is not blamed for it.
+    let result = run(&handler, ".rule drop blocked\n+blocked(t: string)")
+        .await
+        .expect("program result");
+    let errors: Vec<(usize, ErrorCode)> = result.errors.iter().map(|e| (e.index, e.code)).collect();
+    assert_eq!(
+        errors,
+        vec![(0, ErrorCode::Conflict)],
+        "{:?}",
+        result.errors
+    );
 
     // Removed together, the negated rule may come first.
     let result = run(&handler, ".rule drop blocked\n.rule drop allowed")
