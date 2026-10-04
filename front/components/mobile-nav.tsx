@@ -6,6 +6,8 @@ import { Menu, X, ExternalLink } from "lucide-react"
 
 const navLinks: { label: string; href: string; external?: boolean }[] = [
   { label: "Docs", href: "/docs/" },
+  { label: "What it replaces", href: "/#replaces" },
+  { label: "Compare", href: "/compare/" },
   { label: "Blog", href: "/blog/" },
   { label: "Quickstart", href: "/docs/guides/quickstart/" },
 ]

@@ -8,7 +8,7 @@ author: "InputLayer"
 
 # Building a Voice Agent That Knows
 
-This is a reference architecture for a production voice agent built on InputLayer, the live knowledge graph for AI agents, and the InputLayer voicestack runtime. It specifies the demo-ready system end to end: the cascade of models, the knowledge graph beside it, the rules that derive what the agent says and does, the subscriptions that deliver those derivations, the agenda that turns them into speech, the executor that turns them into tool calls, and the failure and concurrency semantics of every hop.
+This is a reference architecture for a production voice agent built on InputLayer, the live rules engine for AI agents, and the InputLayer voicestack runtime. It specifies the demo-ready system end to end: the cascade of models, the knowledge graph beside it, the rules that derive what the agent says and does, the subscriptions that deliver those derivations, the agenda that turns them into speech, the executor that turns them into tool calls, and the failure and concurrency semantics of every hop.
 
 The positioning is one sentence: **Models think. InputLayer knows.** Every model in the cascade stays. Speech-to-text, the intent model, the language model and text-to-speech do what only models can do. InputLayer holds what the system has accepted and concluded: runtime data from your systems, the session's goals, the rules that connect them, the policy for every tool, and the state of every piece of work in flight. The cascade orchestrates around that graph instead of around a transcript.
 

@@ -10,6 +10,8 @@ interface FooterLink {
 
 const footerLinks: Record<string, FooterLink[]> = {
   Product: [
+    { label: "What it replaces", href: "/#replaces" },
+    { label: "Where it sits", href: "/#where" },
     { label: "How it works", href: "/#how" },
     { label: "Get started", href: "/#start" },
     { label: "Compare", href: "/compare/" },
@@ -73,7 +75,7 @@ export function SiteFooter() {
             <span className="text-sm text-muted-foreground">Source-available, Elastic License 2.0</span>
           </div>
           <p className="text-xs text-muted-foreground">
-            The live knowledge graph for AI agents.
+            The live rules engine for AI agents.
           </p>
         </div>
       </div>

@@ -6,7 +6,7 @@ import type { Metadata } from "next"
 export const metadata: Metadata = {
   title: "Commercial Licensing - InputLayer",
   description:
-    "Commercial licensing for InputLayer, the live knowledge graph for AI agents. Core source-available under the Elastic License 2.0; client SDKs Apache 2.0. Commercial license available for offering InputLayer as a hosted or managed service.",
+    "Commercial licensing for InputLayer, the live rules engine for AI agents. Core source-available under the Elastic License 2.0; client SDKs Apache 2.0. Commercial license available for offering InputLayer as a hosted or managed service.",
 }
 
 export default function CommercialPage() {
@@ -107,8 +107,8 @@ export default function CommercialPage() {
       </section>
 
       <CTABanner
-        heading="Models think. InputLayer knows."
-        description="The live knowledge graph for AI agents. Self-hosted and source-available under the Elastic License 2.0."
+        heading="Take the rules out of your prompts."
+        description="The live rules engine for AI agents. Self-hosted and source-available under the Elastic License 2.0."
         buttons={[
           { label: "Quickstart", href: "/docs/guides/quickstart/" },
           { label: "Read the docs", href: "/docs/", variant: "secondary" },

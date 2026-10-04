@@ -10,7 +10,7 @@ Your vector database finds content that looks like your query. InputLayer follow
 
 A shopper asks "ink for my printer." Every cartridge in the catalog is semantically similar to "printer ink" - a Canon PG-245 and an Epson 202 are nearly identical in embedding space. But only one fits the printer the shopper bought eight months ago. That connection - purchase history to compatibility matrix to live inventory - is a chain of structured facts, not a similarity match.
 
-InputLayer traces that chain in a single query and keeps the answer current as inventory changes. It is the live knowledge graph for AI agents: when stock runs out, the agent is told the recommendation was withdrawn instead of finding out on its next run.
+InputLayer traces that chain in a single query and keeps the answer current as inventory changes. It is the live rules engine for AI agents: when stock runs out, the agent is told the recommendation was withdrawn instead of finding out on its next run.
 
 ## What each system does
 
@@ -19,7 +19,7 @@ InputLayer traces that chain in a single query and keeps the answer current as i
 | Find similar content | Native, optimized at scale | Native | Use either or both |
 | Follow chains of relationships | Outside scope | Native | InputLayer handles this |
 | Evaluate rules recursively | Outside scope | Native | InputLayer handles this |
-| Update conclusions when facts change | Re-index | Native (6.83ms per change) | InputLayer handles this |
+| Update conclusions when facts change | Re-index | Native (6.83ms in the recursive benchmark) | InputLayer handles this |
 | Retract stale conclusions automatically | Outside scope | Native | InputLayer handles this |
 | Enforce access policies in the query | Metadata filters only | Recursive logic | InputLayer handles hierarchies |
 
