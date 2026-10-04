@@ -214,8 +214,12 @@ async fn decider_key_writes_only_its_relations() {
 #[tokio::test]
 async fn scoped_key_lists_only_its_own_kgs_acl() {
     let (handler, _tmp) = fixture().await;
-    handler.handle_user_create("bob", "bob-pw", "viewer").unwrap();
-    admin(&handler, ".kg acl grant other bob editor").await.unwrap();
+    handler
+        .handle_user_create("bob", "bob-pw", "viewer")
+        .unwrap();
+    admin(&handler, ".kg acl grant other bob editor")
+        .await
+        .unwrap();
     let key = create_key(&handler, "agent role decider on shop relations attempt").await;
     let agent = handler.authenticate_api_key(&key).unwrap();
 
