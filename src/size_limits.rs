@@ -32,10 +32,6 @@ pub const MAX_LSH_BITS: usize = 62;
 /// [`MAX_LSH_BITS`] bits).
 pub const MAX_LSH_PROBES: usize = lsh_probe_count(MAX_LSH_BITS);
 
-/// Largest vector an LSH function hashes. Its hyperplanes take
-/// `bits * dimension` floats, cached.
-pub const MAX_LSH_DIMENSION: usize = 16_384;
-
 /// Largest string `concat` or `replace` builds; beyond it they return null.
 pub const MAX_COMPUTED_STRING_BYTES: usize = 16 * 1024 * 1024;
 

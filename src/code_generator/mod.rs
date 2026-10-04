@@ -23,7 +23,7 @@ use crate::execution::memory::thread_net_bytes;
 use crate::execution::{RequestControl, Stop};
 use crate::ir::{AggregateFunction, ArithOp, BuiltinFunction, IRExpression, IRNode, Predicate};
 use crate::semiring_types::{BooleanDiff, DiffType};
-use crate::size_limits::{MAX_COMPUTED_STRING_BYTES, MAX_LSH_DIMENSION};
+use crate::size_limits::MAX_COMPUTED_STRING_BYTES;
 use differential_dataflow::collection::vec::Collection;
 use differential_dataflow::lattice::Lattice;
 use differential_dataflow::operators::iterate::Variable;
@@ -2652,7 +2652,7 @@ impl CodeGenerator {
                     if let Some(v) = arg_values[0].as_vector() {
                         let table_idx = arg_values[1].to_i64();
                         let hp = arg_values[2].to_i64();
-                        if hp < 0 || v.len() > MAX_LSH_DIMENSION {
+                        if hp < 0 {
                             return Value::Null;
                         }
                         let bucket = vector_ops::lsh_bucket(v, table_idx, hp as usize);
@@ -2817,7 +2817,7 @@ impl CodeGenerator {
                     if let Some(v) = arg_values[0].as_vector_int8() {
                         let table_idx = arg_values[1].to_i64();
                         let hp = arg_values[2].to_i64();
-                        if hp < 0 || v.len() > MAX_LSH_DIMENSION {
+                        if hp < 0 {
                             return Value::Null;
                         }
                         let bucket = vector_ops::lsh_bucket_int8(v, table_idx, hp as usize);
@@ -2851,7 +2851,7 @@ impl CodeGenerator {
                     if let Some(v) = arg_values[0].as_vector() {
                         let table_idx = arg_values[1].to_i64();
                         let hp = arg_values[2].to_i64();
-                        if hp < 0 || v.len() > MAX_LSH_DIMENSION {
+                        if hp < 0 {
                             return Value::Null;
                         }
                         let (bucket, _distances) =
@@ -2887,7 +2887,7 @@ impl CodeGenerator {
                         let table_idx = arg_values[1].to_i64();
                         let hp = arg_values[2].to_i64();
                         let np = arg_values[3].to_i64();
-                        if hp < 0 || np < 0 || v.len() > MAX_LSH_DIMENSION {
+                        if hp < 0 || np < 0 {
                             return Value::Null;
                         }
                         let probes =
@@ -2905,7 +2905,7 @@ impl CodeGenerator {
                         let table_idx = arg_values[1].to_i64();
                         let hp = arg_values[2].to_i64();
                         let np = arg_values[3].to_i64();
-                        if hp < 0 || np < 0 || v.len() > MAX_LSH_DIMENSION {
+                        if hp < 0 || np < 0 {
                             return Value::Null;
                         }
                         let probes = vector_ops::lsh_multi_probe_int8(
