@@ -240,6 +240,12 @@ function compileIn(expr: InExpr | NegatedIn, negated: boolean, env: VarEnv): str
         'e.g. Employee.col("id").in(Manager.col("employeeId"))',
     );
   }
+  if (!expr.targetColumns.includes(target.name)) {
+    throw new Error(
+      `in()/notIn(): column '${target.name}' does not exist on relation '${target.relation}'. ` +
+        `Available: ${expr.targetColumns.join(', ')}`,
+    );
+  }
   const value = compileExpr(expr.column, env);
   const args = expr.targetColumns.map((c) => (c === target.name ? value : '_'));
   return `${negated ? '!' : ''}${target.relation}(${args.join(', ')})`;

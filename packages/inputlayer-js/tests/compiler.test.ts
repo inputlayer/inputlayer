@@ -413,6 +413,22 @@ describe('in / notIn', () => {
     ).toBe('?employee(Id, Name, Department, Salary, Active), manager(Id, _)');
   });
 
+  it('rejects a target column the target relation does not have', () => {
+    const [m] = Manager.refs(1);
+    expect(() =>
+      compileConditionalDelete(Employee, Employee.col('id').in(m.col('employeId'))),
+    ).toThrow(/'employeId' does not exist on relation 'manager'/);
+    expect(() =>
+      compileRule(
+        'managed',
+        ['name'],
+        from(Employee, Manager)
+          .where((e, mm) => e.col('id').notIn(mm.col('employeId')))
+          .select({ name: Employee.col('name') }),
+      ),
+    ).toThrow(/does not exist/);
+  });
+
   it('rejects a target column with no relation definition', () => {
     const target = { _tag: 'Column', relation: 'manager', name: 'employeeId' } as const;
     expect(() =>
