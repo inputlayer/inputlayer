@@ -101,4 +101,3 @@ class ResultSet:
             # caller gets a partial object instead of a crash. The mismatch
             # is almost certainly a server-side bug.
             return SimpleNamespace(**dict(zip(self.columns, row, strict=False)))
-
