@@ -783,7 +783,8 @@ impl Config {
             },
             "optimization": {},
             "logging": {},
-            "http": { "gui": {}, "auth": {}, "rate_limit": {} }
+            "http": { "gui": {}, "auth": {}, "rate_limit": {} },
+            "subscriptions": {}
         });
         serde_json::from_value(minimal).expect("minimal config seed must deserialize")
     }
@@ -797,7 +798,13 @@ impl Config {
     /// strict parsing turned any of them into a startup failure (#92). The
     /// TOML sources stay strict; only the env source is filtered.
     fn env_source() -> Env {
-        const SECTIONS: [&str; 4] = ["storage", "optimization", "logging", "http"];
+        const SECTIONS: [&str; 5] = [
+            "storage",
+            "optimization",
+            "logging",
+            "http",
+            "subscriptions",
+        ];
         Env::prefixed("INPUTLAYER_")
             .filter(|key| {
                 let key = key.as_str().to_ascii_lowercase();
@@ -1083,6 +1090,17 @@ mod tests {
             jail.set_env("INPUTLAYER_API_KEY", "client-key");
             let config = Config::from_file("server.toml").expect("parse must succeed");
             assert_eq!(config.storage.data_dir, PathBuf::from("/tmp/x"));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_env_override_switches_parameterized_sharing_off() {
+        figment::Jail::expect_with(|jail| {
+            assert!(Config::load().unwrap().subscriptions.share_parameterized);
+            jail.set_env("INPUTLAYER_SUBSCRIPTIONS__SHARE_PARAMETERIZED", "false");
+            let config = Config::load().expect("load must succeed with no file");
+            assert!(!config.subscriptions.share_parameterized);
             Ok(())
         });
     }
