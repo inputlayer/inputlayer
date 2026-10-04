@@ -45,9 +45,9 @@ Deterministic components in between: the engine, the write gate, the agenda, the
 
 ## 3. The target architecture
 
-![The cascade as one pipeline around the graph](/blog/voice-agent/cascade.svg)
+![The cascade around the graph: InputLayer is the hub](/blog/voice-agent/cascade.svg)
 
-The runtime is **one pipeline** from microphone to loudspeaker. Its data lane carries audio, transcripts, voice edges and claim markers downstream through VAD, STT, the barge-in stage, the intent stage, the agenda, the realizer, TTS and the pump. Its system lane carries `Interrupt` downstream from the barge-in stage and, for supersession, from the agenda. The graph sits beside the lane: the intent gate, the agenda and the pump exchange programs and deltas with it; the adapters and the watchdog write world facts into it; a separate executor process consumes work deltas from it and calls tools.
+InputLayer is the hub, and every other component sits around it. The runtime is still **one pipeline** from microphone to loudspeaker: its data lane carries audio, transcripts, voice edges and claim markers downstream through VAD, STT, the barge-in stage, the intent stage, the agenda, the realizer, TTS and the pump, and its system lane carries `Interrupt` downstream from the barge-in stage and, for supersession, from the agenda. Coordination does not travel on those lanes; it goes through the graph. Facts go in as guarded programs: the intent gate writes goals and consents, the adapters and the watchdog write world facts and health flips, the agenda writes reservations, the pump writes playback receipts, the executor writes attempts and outcomes. Conclusions come out as standing-query deltas: `speech` rows to the agenda, `work` rows to a separate executor process that claims each row under a guard, runs the items in parallel against the tools, and writes the results back as facts. That is where multitasking dispatch comes from: a work item is a row a rule derived, not a task id a model remembered, and the speech lane keeps talking while the rows are worked.
 
 Ownership is split three ways, and the split is a contract:
 
