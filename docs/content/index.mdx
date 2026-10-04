@@ -4,19 +4,34 @@ title: InputLayer Documentation
 
 # InputLayer
 
-*The live rules engine for AI agents.* Take the rules out of your prompts.
+*The live rules engine for AI agents.*
 
-**Your agents act on what's true now.** You write facts as they change and declare the reasoning as rules - compatibility, ownership, access policies - and the engine derives what follows. Facts and rules live outside the prompt, so your agent is not limited by the context window: when a fact changes, only the affected conclusions are recomputed, a conclusion that stops being true is withdrawn, and every result traces back to the rules and facts that produced it. A knowledge graph is what the engine holds: the facts and rule-derived conclusions of one domain.
+**Take the rules out of your prompts. Your agents act on what's true now.**
 
-For what InputLayer replaces in an agent stack, what it keeps and where it sits, see the [project README](https://github.com/inputlayer/inputlayer#readme).
+Declare your facts and rules once. InputLayer keeps every conclusion current as facts change, tells your agents what changed, and records an agent's action only while the rules allow it, so the tool runs only then.
 
-These docs cover the mechanism: facts, rules, queries, and the [standing queries](/docs/guides/websocket-api) (subscriptions) that push changes to your agent.
+A rules engine, made live: a conclusion is retracted when its facts stop supporting it, the exact change is pushed to every subscribed agent, and any row can be explained with a proof, on request. The model proposes; the rules decide.
+
+The facts and rule-derived conclusions of one domain form a **knowledge graph**: the thing InputLayer holds, not a memory store. One server holds many knowledge graphs.
+
+**Replaces:** the trigger service and the crons that re-check data for changes (a check that waits on time keeps a one-line clock writer); the precomputed eligibility flags you cache and invalidate; the business rules you wrote into system prompts and tool handlers (and the eligibility logic that ended up in OPA policies); the "already handled" rows and `claimed_by` columns that keep two agents from doing the same work. See [What InputLayer Replaces](/docs/guides/what-it-replaces).
+
+**Keeps:** your models and gateway, LangGraph, MCP tool servers, Zep, pgvector, Redis for plain lookups, your systems of record, Debezium/Kafka and webhooks (they feed InputLayer), OPA for who may call, NeMo for content safety, Temporal for durable effects (its workflow id becomes the claim key), LangSmith/OTel.
+
+**Where it sits.** Facts arrive from your CDC feed and webhooks through a small adapter you run, with per-key revisions, so a late or replayed event never overwrites a newer one. InputLayer is not in your tool's call path: your agent claims the action in InputLayer, the claim is recorded only if the rules hold at that instant, and your handler or Temporal runs the tool only if the claim won, with the claim as its idempotency key. If a supporting fact changes afterwards, the need is retracted and the running work is cancelled; an effect that already landed is yours to compensate, as it is today. How stale is too stale is a rule too: a claim can require a fresh source and is refused while that source is stale. It is one node today: facts are durable in its write-ahead log, a restart resumes from it, and while it is unreachable no claim can win, so gated tools wait rather than run unchecked. See [Where It Sits](/docs/guides/where-it-sits). The [project README](https://github.com/inputlayer/inputlayer#readme) has the same first screen with the hero code.
+
+Self-hosted, single node. Measured today for tens of concurrent agent sessions per knowledge graph, with per-session subscriptions; a change that lifts this is in progress (draft): https://github.com/inputlayer/inputlayer/pull/232. The Python and TypeScript SDKs install from source; `subscribe()` and `claim()` arrive with the upcoming SDK release, and standing queries and guarded writes run over the [WebSocket API](/docs/guides/websocket-api) today.
 
 ## Get Started
 
 - [Quick Start](/docs/guides/quickstart) - Install the engine and run your first query
 - [Installation](/docs/guides/installation) - Install InputLayer on your platform
 - [Your First Program](/docs/guides/first-program) - Write your first InputLayer program
+
+## Understand It
+
+- [What InputLayer Replaces](/docs/guides/what-it-replaces) - The glue code it takes over, shown on today's engine
+- [Where It Sits](/docs/guides/where-it-sits) - Ingestion, the gate, staleness and availability
 
 ## Core Concepts
 
@@ -29,3 +44,9 @@ These docs cover the mechanism: facts, rules, queries, and the [standing queries
 - [Commands](/docs/reference/commands) - Complete command reference
 - [Functions](/docs/reference/functions) - All built-in functions
 - [Syntax](/docs/reference/syntax) - Query language syntax reference
+
+## Beside the Model
+
+*Decision models judge. Language models think. InputLayer knows.*
+
+The model keeps the thinking. InputLayer holds the facts and rules, keeps the conclusions current and decides whether an action may be recorded. In the reference architecture a model's output never authorizes an action by itself.

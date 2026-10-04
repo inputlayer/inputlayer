@@ -4,7 +4,7 @@ Feed InputLayer from the systems that already hold your data. This guide walks t
 
 - **Postgres change data capture.** Debezium Server reads Postgres logical replication and posts every row insert, update and delete to a small adapter.
 - **SaaS webhooks.** The same adapter accepts signed webhook events, for example from a billing system.
-- **Reactive answers.** The adapter turns both feeds into fact inserts and retractions. Rules derive an answer from them, and a watching client (an AI agent, say) receives every change to that answer as it happens.
+- **Live answers.** The adapter turns both feeds into fact inserts and retractions. Rules derive an answer from them, and a watching client (an AI agent, say) receives every change to that answer as it happens.
 
 ```
 Postgres --logical replication--> Debezium Server --POST /cdc------------+

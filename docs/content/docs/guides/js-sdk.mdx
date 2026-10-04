@@ -599,7 +599,7 @@ await kg.session.clear();
 
 ## Notifications
 
-Subscribe to live events as data changes in the knowledge graph. This is useful for building reactive pipelines, dashboards, or audit logs.
+Subscribe to live events as data changes in the knowledge graph. This is useful for event-driven pipelines, dashboards, or audit logs. To be told when a rule-derived answer changes, use a [standing query](/docs/guides/websocket-api#standing-queries) over the WebSocket API; `subscribe()` arrives in the SDK with the upcoming release.
 
 ```typescript
 // Register a callback for a specific relation

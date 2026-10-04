@@ -1,0 +1,157 @@
+# What InputLayer Replaces
+
+InputLayer is the live rules engine for AI agents. Every agent stack grows glue code around its products: services that decide when to wake an agent, flags someone has to invalidate, business rules written into prompts, and locks that keep two agents off the same work. Each piece does part of a rules engine's job by hand. InputLayer takes that job over. The products themselves stay.
+
+This page names the four pieces it replaces, shows the replacement running on today's engine, and states where each replacement stops. For how InputLayer connects to the rest of your stack (ingestion, where the gate sits, staleness, availability), see [Where It Sits](/docs/guides/where-it-sits).
+
+## The map
+
+| What you run today | What replaces it | Available |
+|---|---|---|
+| **The trigger service** that decides which agent to wake, and **the crons that re-check data for changes** (a check that waits on time keeps a one-line clock writer) | A [standing query](/docs/guides/websocket-api#standing-queries) on a rule-derived view. The engine pushes the exact change when the answer changes and nothing when it does not. | Today over the WebSocket API. `kg.subscribe()` in the upcoming SDK release. |
+| **The precomputed eligibility flags** you cache, and the handlers that invalidate them | A rule. "Late", "eligible" and "allowed" become views the engine keeps current. A conclusion is retracted when its facts stop supporting it. | Today |
+| **The business rules in system prompts and tool handlers**, and the eligibility logic that ended up in OPA policies | Policy as facts and rules, enforced where the agent's action is recorded: the action is recorded only while the rules allow it at commit. A refusal comes back with the condition that failed. | Today as a guarded write in IQL. `kg.claim()` in the upcoming SDK release. |
+| **The "already handled" rows and `claimed_by` columns** that keep two agents from doing the same work | A claim: a guarded insert that one agent wins. The others see that they lost. | Today as a guarded write in IQL. `kg.claim()` in the upcoming SDK release. Locks with a timeout need leases, planned for a later SDK release. |
+
+**Keeps:** your models and gateway, LangGraph, MCP tool servers, Zep, pgvector, Redis for plain lookups, your systems of record, Debezium/Kafka and webhooks (they feed InputLayer), OPA for who may call, NeMo for content safety, Temporal for durable effects (its workflow id becomes the claim key), LangSmith/OTel.
+
+The SDK calls named above (`kg.subscribe()`, `kg.watch()`, `kg.claim()`) are being built and are not in a release yet. Everything this page runs works today: IQL statements in the [REPL](/docs/guides/repl) or over the [WebSocket API](/docs/guides/websocket-api), which is what the SDKs send under the hood.
+
+## One example, start to finish
+
+An agent checks with the carrier when a shipment's ETA slips past the date promised to the customer. An operator can switch the automatic check off. Today that takes a cron job that scans for late orders, a `needs_check` flag, an "only auto-check when..." paragraph in the system prompt, and a lock so two agent workers do not both call the carrier.
+
+The facts and the rule, in IQL:
+
+```iql
++shipment(order: string, shipment: string)
++eta(shipment: string, due: int)
++promised(order: string, due: int)
++tool_policy(tool: string, mode: string)
++kill_switch(tool: string)
++attempt(order: string, tool: string, attempt: string)
+
+// The rule: replaces the needs_check flag, the cron that rebuilt it,
+// and the policy paragraph in the prompt.
++check_needed(Order, Shipment) <-
+  shipment(Order, Shipment), eta(Shipment, Due), promised(Order, Promised),
+  Due > Promised,
+  tool_policy(Tool, "auto"), Tool = "carrier_check", !kill_switch(Tool)
+
++shipment("ORD-4821", "SHP-77")
++promised("ORD-4821", 20261006)
++tool_policy("carrier_check", "auto")
++eta("SHP-77", 20261005)
+```
+
+The ETA is a day early, so `check_needed` is empty. The sections below change the world one fact at a time.
+
+### 1. The trigger service and cron re-checks
+
+The agent subscribes to the conclusion instead of polling for it. Over the WebSocket API:
+
+```json
+{"type": "execute", "program": ".subscribe needs_check ?check_needed(Order, Shipment)"}
+```
+
+The snapshot is empty. The carrier feed then moves the ETA past the promise:
+
+```iql
+-eta("SHP-77", 20261005), +eta("SHP-77", 20261009) <- eta("SHP-77", 20261005)
+```
+
+The engine pushes exactly the row that entered the view:
+
+```json
+{"type": "subscription_delta", "subscription": "needs_check",
+ "columns": ["Order", "Shipment"], "inserted": [["ORD-4821", "SHP-77"]], "retracted": [], "...": "..."}
+```
+
+A write to a relation the query does not depend on causes no evaluation, and a write that leaves the answer unchanged pushes nothing. There is no schedule to tune and no service mapping events to agents.
+
+Where it stops:
+
+- **Time does not trigger a standing query.** Writes do. A cron that exists because time passes (an SLA that expires after 48 hours, "no reply in 2 hours") does not disappear: it shrinks to a small job that writes a tick or status fact, and the re-check logic moves into the rule that reads it.
+- **Someone holds the subscription.** An agent that is started per task, rather than running continuously, needs one small long-lived process that holds the subscription and starts the run. It replaces the trigger service's logic, not the need for that process.
+
+### 2. Precomputed flags and their invalidation
+
+`check_needed` is the flag, and the engine maintains it. When an operator flips the kill switch:
+
+```iql
++kill_switch("carrier_check")
+```
+
+the subscriber receives the retraction in the same way:
+
+```json
+{"type": "subscription_delta", "subscription": "needs_check",
+ "columns": ["Order", "Shipment"], "inserted": [], "retracted": [["ORD-4821", "SHP-77"]], "...": "..."}
+```
+
+Nobody wrote an invalidation handler for the kill switch, and nobody has to find the keys it affects two joins away. A derived row is retracted only when every derivation that supported it is gone. Removing the switch (`-kill_switch("carrier_check")`) brings the row back with another delta. Redis can keep caching raw rows if you want it to; what goes is the derived flag and its invalidation code.
+
+### 3. Business rules in prompts and tool handlers
+
+The policy is not prose in a system prompt or an `if` in a tool handler. It is facts (`tool_policy`, `kill_switch`) that operators change at runtime, and a rule the engine evaluates. Because it is a rule, every conclusion can be explained. `.why` returns the proof tree for a derived row:
+
+```iql
+.why ?check_needed("ORD-4821", Shipment)
+```
+
+and `.why_not` names the condition that blocks a missing one:
+
+```iql
+.why_not check_needed("ORD-4821", "SHP-77")
+```
+
+```
+check_needed("ORD-4821", "SHP-77") was NOT derived:
+
+  Rule: check_needed (clause 0)
+    check_needed(Order, Shipment) <- shipment(Order, Shipment), eta(Shipment, Due), promised(Order, Promised), Due > Promised, tool_policy(Tool, "auto"), Tool = "carrier_check", !kill_switch(Tool)
+    Blocker: Negated kill_switch("carrier_check") exists
+```
+
+A rule the model can read is still only a suggestion. The rule is enforced at the point where the agent's action is recorded, which is the claim in the next section. See [Explainability](/docs/guides/explainability) for the proof format.
+
+Where it stops: OPA, Cedar and similar engines decide who may call a tool, from the request. That stays. Eligibility and other rules that depend on the current state of your data, written in Rego because OPA was the only policy component, are the candidates to move into views.
+
+### 4. "Already handled" rows and claimed_by columns
+
+Before an agent calls the carrier, it claims the check. The claim is a guarded write: it inserts an `attempt` row only if the order still needs a check and nobody has claimed it.
+
+```iql
+-attempt("", "", ""), +attempt(Order, "carrier_check", "a1") <-
+  check_needed(Order, _), Order = "ORD-4821",
+  !attempt(Order, "carrier_check", _)
+```
+
+The first agent gets `Update: 0 deleted, 1 inserted.` and calls the carrier. A second agent sending the same claim with its own attempt id gets `Update: 0 deleted, 0 inserted.` and does nothing. The guard is checked at commit against the live view, so a claim sent after the kill switch was flipped inserts nothing either. In a test, twenty connections racing one claim produced one winner, nineteen no-ops and no errors.
+
+The leading `-attempt("", "", "")` deletes a row that never exists. It is there because a statement with a single `+` head and a body registers a persistent rule; the delete head makes the statement a one-time [conditional update](/docs/guides/core-concepts#pattern-3-atomic-update) instead.
+
+The claim is not in your tool's call path. The tool runs in your own handler or in Temporal, and only if the claim won, with the attempt id as its idempotency key. When the need is retracted (section 2), the agent cancels the running work and deletes its `attempt` row so the need can be claimed again. See [Where It Sits](/docs/guides/where-it-sits#the-gate) for the full pattern.
+
+Where it stops:
+
+- **Today's claim has no expiry.** If the agent that holds a claim dies, its `attempt` row stays until something deletes it. It replaces "already handled" rows and `claimed_by` columns, not a lock with a timeout (Redis `SET NX PX`): until leases arrive in a later SDK release, a process has to clear the claims of dead holders.
+- **The effect is outside the engine.** InputLayer records the decision atomically. Deduplicating the effect itself is the job of the system that performs it, keyed by the claim. Temporal keeps doing that.
+
+## What it can absorb (optional)
+
+These are available but are not why you would adopt InputLayer:
+
+- **LangGraph checkpoints and memory.** `InputLayerCheckpointer` is a one-line swap from `PostgresSaver`. See the [LangGraph Integration](/docs/guides/langgraph).
+- **Agent coordination state.** Which agent owns a session or a task is a set of rows, and a view joined on it empties as soon as ownership changes.
+- **"Why did it do that?"** A proof over facts and rules for the row the agent acted on, next to your traces.
+
+## What you add
+
+- One engine (a single Rust server; see [Installation](/docs/guides/installation) and [Deployment](/docs/guides/deployment)).
+- One adapter per set of source systems, feeding facts from CDC and webhooks (see [Ingestion](/docs/guides/ingestion)).
+- The Python or TypeScript SDK in each agent, installed from source until the packages are published.
+- If a claim must require a fresh source: adapters that renew a health lease, and a watchdog process (see [How stale a conclusion can be](/docs/guides/where-it-sits#how-stale-a-conclusion-can-be)).
+- One more stateful service to run and back up: a single writer on a single node (see [Backup and Restore](/docs/guides/backup)).
+
+Measured today for tens of concurrent agent sessions per knowledge graph, with per-session subscriptions; a change that lifts this is in progress (draft): https://github.com/inputlayer/inputlayer/pull/232.

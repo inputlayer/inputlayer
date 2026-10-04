@@ -1,0 +1,74 @@
+# Where It Sits
+
+InputLayer runs beside the systems you already have. Your systems of record stay the source of truth and feed it facts. Your agents read its conclusions and claim their actions in it. Your tools keep running where they run today. This page covers the four questions that decide whether it fits: how facts get in, where the gate sits, how stale a conclusion can be, and what happens when the engine is down.
+
+In short: facts arrive from your CDC feed and webhooks through a small adapter you run, with per-key revisions, so a late or replayed event never overwrites a newer one. InputLayer is not in your tool's call path: your agent claims the action in InputLayer, the claim is recorded only if the rules hold at that instant, and your handler or Temporal runs the tool only if the claim won, with the claim as its idempotency key. If a supporting fact changes afterwards, the need is retracted and the running work is cancelled; an effect that already landed is yours to compensate, as it is today. How stale is too stale is a rule too: a claim can require a fresh source and is refused while that source is stale. It is one node today: facts are durable in its write-ahead log, a restart resumes from it and the adapter's revisions make a replayed feed safe, and while it is unreachable no claim can win, so gated tools wait rather than run unchecked.
+
+```
+Postgres / SaaS --CDC, webhooks--> adapter --facts--> InputLayer --deltas--> agent
+                                                         ^                    |
+                                                         +------- claim ------+
+                                                                              |
+                                                     your handler / Temporal <+ (only if the claim won)
+```
+
+The examples below continue the shipment example from [What InputLayer Replaces](/docs/guides/what-it-replaces).
+
+## Facts in
+
+InputLayer is never the system of record. An adapter turns the changes from your databases and SaaS systems into fact inserts and retractions. The [ingestion recipe](/docs/guides/ingestion) ships one for Debezium Server (Postgres change data capture) and signed webhooks:
+
+- Every change carries a revision that increases per key: the Postgres LSN for CDC, a per-object sequence for webhooks. The last applied revision is stored in the same transaction as the data, so a replayed or late event at or below it is skipped and a replayed insert cannot resurrect a deleted fact.
+- Delivery is at least once; duplicates are skipped by the revision check.
+- An event the adapter cannot map stops the CDC stream at that event (fail closed), so later changes never overtake it.
+- The adapter is the single writer of the relations it owns.
+
+Operators and agents can write facts directly too, for example the `tool_policy` and `kill_switch` facts in the example.
+
+## The gate
+
+InputLayer does not sit between your agent and Shopify, the carrier API or Temporal. The pattern is claim, then run:
+
+1. The agent sees a conclusion it should act on (a [standing query](/docs/guides/websocket-api#standing-queries) delta, or a query).
+2. It sends a claim: a guarded write that is recorded only while the rules hold at the moment of commit, and only for one claimant (see [What InputLayer Replaces](/docs/guides/what-it-replaces#4-already-handled-rows-and-claimedby-columns)).
+3. Your handler or Temporal workflow runs the tool only if the claim won, and passes the claim's id to the backend as its idempotency key.
+
+The engine records the decision atomically. The external effect happens outside the engine, so it is deduplicated where it runs, by that key. A tool that runs without claiming first is outside this guarantee.
+
+## When a fact changes mid-run
+
+The agent that claimed the work keeps its subscription open. If a supporting fact changes while the tool is running (the ETA recovers, an operator flips the kill switch, the order is cancelled), the conclusion is retracted and the agent receives the retraction as a delta. The same loop that started the work cancels it and deletes its claim, so the need can be claimed again if it comes back. Cancellation is derived from the state of the facts, not left to the model.
+
+An effect that already landed before the retraction is not undone by the engine. Compensating it is your code's job, as it is today.
+
+## How stale a conclusion can be
+
+A conclusion is as fresh as the last fact the adapter delivered. How stale is too stale is something you declare, not something you hope for. Give each source a health lease that the adapter renews while it is delivering, and make the claim require an unexpired lease explicitly:
+
+```iql
++source_lease(source: string, expires: int)    // Unix ms; renewed by the adapter while it delivers
+
+-attempt("", "", ""), +attempt(Order, "carrier_check", "a1") <-
+  check_needed(Order, _), Order = "ORD-4821",
+  !attempt(Order, "carrier_check", _),
+  source_lease(Src, Expires), Src = "carrier_feed", Expires > time_now()
+```
+
+The guard is evaluated at commit, so while `carrier_feed`'s lease has expired the claim inserts nothing and the tool does not run. Once the lease is renewed, the same claim wins. Because the guard compares the lease with the clock at commit, a dead adapter blocks claims as soon as its lease runs out; a status fact such as `source_health("carrier_feed", "ok")` would stay "ok" until something changed it.
+
+Rules that a standing query watches are re-evaluated when facts change, not when the clock moves (see [Time does not trigger a standing query](/docs/guides/what-it-replaces#1-the-trigger-service-and-cron-re-checks)). Use `time_now()` in the claim's guard, as above. If subscribers must also see a source go stale, run a watchdog process that writes a status fact when a lease expires, and let the rules read that fact. Declared freshness requirements per tool are planned for a later SDK release.
+
+## When it is down or behind
+
+- **One node.** InputLayer is a single writer per data directory. Run one replica; there is no high availability today (see [Deployment](/docs/guides/deployment#single-writer)).
+- **Durable.** Every committed transaction is in the write-ahead log, and a restart replays it (see [Persistence](/docs/guides/persistence)). Back it up online or offline (see [Backup and Restore](/docs/guides/backup)).
+- **Safe to replay.** After an outage, the adapter's per-key revisions let Debezium and webhook senders redeliver without overwriting newer facts.
+- **Unreachable means wait.** While the engine is unreachable, no claim can win, so a tool gated by a claim waits instead of running unchecked. This follows from the claim-then-run pattern; a tool that skips the claim does not wait.
+
+## Beside the model
+
+*Decision models judge. Language models think. InputLayer knows.*
+
+The model keeps the thinking: it reads conclusions and proposes actions. InputLayer holds the facts and rules, keeps the conclusions current, and records an action only while the rules allow it. In the reference architecture a model's output never authorizes an action by itself.
+
+Measured today for tens of concurrent agent sessions per knowledge graph, with per-session subscriptions; a change that lifts this is in progress (draft): https://github.com/inputlayer/inputlayer/pull/232.
