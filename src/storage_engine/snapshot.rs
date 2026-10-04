@@ -27,7 +27,7 @@ use arc_swap::ArcSwap;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tracing::info;
 
 /// Last revision handed to a snapshot, across all knowledge graphs.
@@ -97,6 +97,15 @@ pub struct PersistentRules {
     /// `prefix` parsed once, as every query would parse it.
     rules: Result<Vec<Rule>, String>,
     plans: ArcSwap<HashMap<String, Arc<CachedPlan>>>,
+}
+
+/// How [`KnowledgeGraphSnapshot::execute_with_rules_tuples_cached`] ran.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CachedRun {
+    /// Whether the plan came from the cache.
+    pub plan_cached: bool,
+    /// Time spent executing the plan, excluding compiling it.
+    pub executing: Duration,
 }
 
 /// Plans kept per rule set; past this many, a new plan evicts an arbitrary one.
@@ -448,13 +457,14 @@ impl KnowledgeGraphSnapshot {
     /// [`Self::execute_with_rules_tuples_profiled`] reusing the plan compiled
     /// for `program` on any snapshot of the same rules, compiling and keeping
     /// it on a miss. For programs evaluated again and again (standing
-    /// queries); a hit's timing breakdown has no compile stages. The flag
-    /// tells whether the plan came from the cache.
+    /// queries); a hit's timing breakdown has no compile stages. The
+    /// [`CachedRun`] tells whether the plan came from the cache and how long
+    /// executing it took, whatever the timing mode.
     pub fn execute_with_rules_tuples_cached(
         &self,
         program: &str,
         timing_mode: TimingMode,
-    ) -> Result<(Vec<Tuple>, Option<TimingBreakdown>, bool), String> {
+    ) -> Result<(Vec<Tuple>, Option<TimingBreakdown>, CachedRun), String> {
         let start = Instant::now();
         let (plan, compiled_now) = match self.persistent.plan(program, &self.optimization) {
             Some(plan) => (plan, false),
@@ -471,10 +481,12 @@ impl KnowledgeGraphSnapshot {
                 (plan, true)
             }
         };
+        let executing = Instant::now();
         let mut engine = self.new_engine();
         engine.set_timing_mode(timing_mode);
         engine.set_inputs(self.inputs(plan.relations.iter().map(String::as_str)));
         let (tuples, _, mut timing) = engine.execute_compiled_profiled(&plan.compiled)?;
+        let executing = executing.elapsed();
         if let (true, Some(timing)) = (compiled_now, timing.as_mut()) {
             let compile = plan.compiled.compile_timing();
             timing.parse_us = compile.parse_us;
@@ -490,7 +502,11 @@ impl KnowledgeGraphSnapshot {
             elapsed_ms = start.elapsed().as_millis() as u64,
             "snapshot_execute_cached"
         );
-        Ok((tuples, timing, !compiled_now))
+        let run = CachedRun {
+            plan_cached: !compiled_now,
+            executing,
+        };
+        Ok((tuples, timing, run))
     }
 
     /// Execute a query with rules, returning tuples, all derived relation data,

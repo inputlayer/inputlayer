@@ -90,12 +90,7 @@ impl ConnectionSubscriptions {
             knowledge_graph: knowledge_graph.to_string(),
             query: query.trim().to_string(),
         };
-        let share = self
-            .handler
-            .config()
-            .http
-            .rate_limit
-            .subscription_share_parameterized;
+        let share = self.handler.config().subscriptions.share_parameterized;
         let view = self.hub().standing_query(view, share);
         Ok(self.opening(key, id, view))
     }

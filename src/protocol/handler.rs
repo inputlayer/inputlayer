@@ -22,7 +22,7 @@ use crate::storage_engine::{KnowledgeGraphSnapshot, StorageEngine};
 use crate::value::{Tuple, Value};
 use crate::Config;
 use parking_lot::RwLock;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, info, warn};
@@ -514,8 +514,8 @@ struct QueryJob {
     pinned: Option<Arc<KnowledgeGraphSnapshot>>,
     /// When set, reuse the query's compiled plan while the rules stay the
     /// same (for queries evaluated again and again: standing queries), and
-    /// note here whether the plan came from the cache.
-    cache_plan: Option<Arc<AtomicBool>>,
+    /// note here how the run went.
+    cache_plan: Option<Arc<std::sync::OnceLock<crate::storage_engine::CachedRun>>>,
 }
 
 impl QueryJob {
@@ -3429,11 +3429,11 @@ impl QueryJob {
                     session_fact_tuples,
                     timing_mode,
                 )
-            } else if let Some(plan_cached) = &self.cache_plan {
+            } else if let Some(cache_plan) = &self.cache_plan {
                 snapshot
                     .execute_with_rules_tuples_cached(&query_program, timing_mode)
-                    .map(|(tuples, timing, cached)| {
-                        plan_cached.store(cached, Ordering::Relaxed);
+                    .map(|(tuples, timing, run)| {
+                        let _ = cache_plan.set(run);
                         (tuples, timing)
                     })
             } else {
@@ -4008,8 +4008,9 @@ impl Handler {
     /// admitted and authorized the same way, but reading `snapshot` instead of
     /// whatever is current when the query runs. The result is therefore the
     /// query's exact answer at `snapshot.revision`. The query's compiled plan
-    /// is kept and reused on later snapshots until the rules change; the flag
-    /// tells whether this run reused it. A `probe` (of standing-query
+    /// is kept and reused on later snapshots until the rules change; the
+    /// [`CachedRun`](crate::storage_engine::CachedRun) tells whether this run
+    /// reused it and how long executing it took. A `probe` (of standing-query
     /// sharing) computes under a probe permit instead of a compute permit.
     pub async fn query_snapshot(
         &self,
@@ -4018,7 +4019,7 @@ impl Handler {
         query: &str,
         auth: Option<&crate::auth::Principal>,
         probe: bool,
-    ) -> Result<(QueryResult, bool), String> {
+    ) -> Result<(QueryResult, crate::storage_engine::CachedRun), String> {
         let identity = auth
             .map(crate::auth::Principal::identity)
             .transpose()
@@ -4031,10 +4032,10 @@ impl Handler {
             return Err("A snapshot query must be a single query".to_string());
         }
         self.authorize_program(identity.as_ref(), Some(knowledge_graph), &statements)?;
-        let plan_cached = Arc::new(AtomicBool::new(false));
+        let cache_plan = Arc::new(std::sync::OnceLock::new());
         let job = QueryJob {
             pinned: Some(snapshot),
-            cache_plan: Some(Arc::clone(&plan_cached)),
+            cache_plan: Some(Arc::clone(&cache_plan)),
             ..self.make_query_job()
         };
         let control = self.request_control(None);
@@ -4053,7 +4054,7 @@ impl Handler {
             )
             .await?;
         let result = settle_result(result, auth, true).map_err(|e| e.message)?;
-        Ok((result, plan_cached.load(Ordering::Relaxed)))
+        Ok((result, cache_plan.get().copied().unwrap_or_default()))
     }
 
     async fn run_execute_program(

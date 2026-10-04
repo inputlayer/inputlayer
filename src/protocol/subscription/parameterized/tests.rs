@@ -142,19 +142,24 @@ fn an_ambiguous_row_fails_the_partition() {
 #[test]
 fn a_round_shares_while_no_slower_than_the_views_own_evaluations_in_parallel() {
     // 8 bindings on 4 permits: two waves of own evaluations, 200us.
-    assert!(keeps_sharing(150, 100, 8, 4), "within the bound");
-    assert!(keeps_sharing(240, 100, 8, 4), "at the margin");
-    assert!(!keeps_sharing(241, 100, 8, 4), "past the margin");
+    assert!(keeps_sharing(150, 100, 8, 4), "faster");
+    assert!(keeps_sharing(200, 100, 8, 4), "as fast");
+    assert!(!keeps_sharing(201, 100, 8, 4), "slower");
     assert!(!keeps_sharing(1_000, 100, 8, 4));
-    // No more bindings than permits: one own evaluation.
-    assert!(keeps_sharing(120, 100, 3, 4));
-    assert!(!keeps_sharing(121, 100, 3, 4));
-    assert!(!keeps_sharing(121, 100, 4, 4));
     // Many more bindings than permits.
-    assert!(keeps_sharing(6_000, 100, 200, 4));
-    assert!(!keeps_sharing(6_001, 100, 200, 4));
+    assert!(keeps_sharing(5_000, 100, 200, 4));
+    assert!(!keeps_sharing(5_001, 100, 200, 4));
     // An unknown own cost keeps sharing.
     assert!(keeps_sharing(1_000_000, 0, 2, 4));
+}
+
+#[test]
+fn costs_are_smoothed_so_one_outlier_does_not_decide() {
+    let average = AtomicU64::new(0);
+    assert_eq!(smooth(&average, Duration::from_micros(800)), 800, "first");
+    assert_eq!(smooth(&average, Duration::from_micros(1_600)), 900);
+    assert_eq!(smooth(&average, Duration::ZERO), 787, "at least 1us");
+    assert_eq!(average.load(Ordering::Relaxed), 787);
 }
 
 #[test]
@@ -189,8 +194,9 @@ mod rounds {
 
     const KG: &str = "rounds";
 
+    /// The fewest compute permits with which families probe.
     fn handler() -> (Arc<Handler>, TempDir) {
-        handler_with(4)
+        handler_with(super::super::MIN_PERMITS_FOR_PROBES)
     }
 
     fn handler_with(permits: usize) -> (Arc<Handler>, TempDir) {
@@ -223,6 +229,20 @@ mod rounds {
         families.member(own, lifted(query).unwrap(), metrics)
     }
 
+    /// Views of `queries` that never refresh: bindings that, with the
+    /// views a test refreshes, outnumber [`handler`]'s compute permits.
+    fn idle(
+        families: &Families,
+        handler: &Arc<Handler>,
+        metrics: &Arc<SubscriptionMetrics>,
+        queries: &[&str],
+    ) -> Vec<MemberQuery> {
+        queries
+            .iter()
+            .map(|query| member(families, handler, metrics, query))
+            .collect()
+    }
+
     fn inserted(refresh: &Refresh) -> Vec<serde_json::Value> {
         refresh.inserted.iter().map(|row| json!(row)).collect()
     }
@@ -242,6 +262,12 @@ mod rounds {
         let metrics = Arc::new(SubscriptionMetrics::default());
         let mut one = member(&families, &handler, &metrics, r#"?item("s1", X)"#);
         let mut two = member(&families, &handler, &metrics, r#"?item("s2", X)"#);
+        let _idle = idle(
+            &families,
+            &handler,
+            &metrics,
+            &[r#"?item("s3", X)"#, r#"?item("s4", X)"#],
+        );
         assert!(!one.family.shares(), "no own cost to compare a round with");
         // First refreshes evaluate each view's own query, compiling its plan:
         // not a cost to compare a round with.
@@ -281,7 +307,7 @@ mod rounds {
             "the evaluated round dropped its snapshot"
         );
 
-        // A view leaving the family leaves one binding: nothing to share.
+        // A view leaving the family leaves no more bindings than permits.
         drop(two);
         write(&handler, "+item(\"s1\", 5)").await;
         assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 5])]);
@@ -308,6 +334,12 @@ mod rounds {
         let metrics = Arc::new(SubscriptionMetrics::default());
         let mut one = member(&families, &handler, &metrics, r#"?item("s1", X)"#);
         let mut two = member(&families, &handler, &metrics, r#"?item("s2", X)"#);
+        let _idle = idle(
+            &families,
+            &handler,
+            &metrics,
+            &[r#"?item("s3", X)"#, r#"?item("s4", X)"#],
+        );
         one.refresh().await.unwrap();
         two.refresh().await.unwrap();
         // Own evaluations far faster than any round.
@@ -351,6 +383,12 @@ mod rounds {
         let metrics = Arc::new(SubscriptionMetrics::default());
         let mut one = member(&families, &handler, &metrics, r#"?reach("n398", Y)"#);
         let mut two = member(&families, &handler, &metrics, r#"?reach("n399", Y)"#);
+        let _idle = idle(
+            &families,
+            &handler,
+            &metrics,
+            &[r#"?reach("n396", Y)"#, r#"?reach("n397", Y)"#],
+        );
         one.refresh().await.unwrap();
         two.refresh().await.unwrap();
         assert_eq!(metrics.shared_evaluations(), 0);
@@ -425,6 +463,7 @@ mod rounds {
         let metrics = Arc::new(SubscriptionMetrics::default());
         let mut one = member(&families, &handler, &metrics, r#"?item("s1", X)"#);
         let mut two = member(&families, &handler, &metrics, r#"?item("s2", X)"#);
+        let _idle = idle(&families, &handler, &metrics, &[r#"?item("s3", X)"#]);
         one.refresh().await.unwrap();
         two.refresh().await.unwrap();
 
@@ -451,6 +490,12 @@ mod rounds {
         let metrics = Arc::new(SubscriptionMetrics::default());
         let mut one = member(&families, &handler, &metrics, r#"?item("s1", X)"#);
         let mut two = member(&families, &handler, &metrics, r#"?item("s2", X)"#);
+        let _idle = idle(
+            &families,
+            &handler,
+            &metrics,
+            &[r#"?item("s3", X)"#, r#"?item("s4", X)"#],
+        );
         one.refresh().await.unwrap();
         two.refresh().await.unwrap();
         one.family
@@ -468,5 +513,50 @@ mod rounds {
         assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 3])]);
         assert_eq!(inserted(&two.refresh().await.unwrap()), [json!(["s2", 4])]);
         assert_eq!(metrics.shared_evaluations(), 2, "views read one round");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_family_whose_views_fit_on_the_compute_permits_never_shares() {
+        // 3 sessions on 4 compute permits: their own evaluations run at once.
+        let (handler, _tmp) = handler_with(4);
+        write(&handler, "+item[(\"s1\", 1), (\"s2\", 2), (\"s3\", 3)]").await;
+        let families = Families::default();
+        let metrics = Arc::new(SubscriptionMetrics::default());
+        let mut views: Vec<_> = (1..=3)
+            .map(|i| {
+                member(
+                    &families,
+                    &handler,
+                    &metrics,
+                    &format!("?item(\"s{i}\", X)"),
+                )
+            })
+            .collect();
+        let family = Arc::clone(&views[0].family);
+        for view in &mut views {
+            view.refresh().await.unwrap();
+        }
+        for round in 10..13 {
+            write(
+                &handler,
+                &format!("+item[(\"s1\", {round}), (\"s2\", {round}), (\"s3\", {round})]"),
+            )
+            .await;
+            for view in &mut views {
+                assert_eq!(inserted(&view.refresh().await.unwrap()).len(), 1);
+                // Own evaluations slower than any round here.
+                family.own_cost_us.store(1_000_000_000, Ordering::Relaxed);
+                assert!(!family.probing.load(Ordering::Relaxed), "no probe");
+            }
+        }
+        // Not even when sharing was judged to pay with more views.
+        family.sharing.store(true, Ordering::Relaxed);
+        assert!(!family.shares());
+        write(&handler, "+item(\"s1\", 99)").await;
+        assert_eq!(
+            inserted(&views[0].refresh().await.unwrap()),
+            [json!(["s1", 99])]
+        );
+        assert_eq!(metrics.shared_evaluations(), 0);
     }
 }

@@ -43,6 +43,8 @@ pub struct Config {
     pub logging: LoggingConfig,
     #[serde(default)]
     pub http: HttpConfig,
+    #[serde(default)]
+    pub subscriptions: SubscriptionsConfig,
 }
 
 /// Storage engine configuration
@@ -367,6 +369,27 @@ pub struct LoggingConfig {
     pub format: String,
 }
 
+/// Standing-query (`.subscribe`) configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SubscriptionsConfig {
+    /// Share one evaluation per commit among standing queries that differ
+    /// only in bound constants (`?speech("s-1", ...)`, `?speech("s-2", ...)`),
+    /// routing each subscriber exactly its own rows. A family whose shared
+    /// query is slower than its members' own run in parallel stops sharing
+    /// by itself.
+    #[serde(default = "default_true")]
+    pub share_parameterized: bool,
+}
+
+impl Default for SubscriptionsConfig {
+    fn default() -> Self {
+        Self {
+            share_parameterized: true,
+        }
+    }
+}
+
 /// HTTP server configuration for WebSocket API and GUI
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -504,14 +527,6 @@ pub struct RateLimitConfig {
     /// At most [`MAX_SUBSCRIPTION_COALESCE_MS`].
     #[serde(default)]
     pub subscription_coalesce_ms: u64,
-
-    /// Share one evaluation per commit among standing queries that differ
-    /// only in bound constants (`?speech("s-1", ...)`, `?speech("s-2", ...)`),
-    /// routing each subscriber exactly its own rows. A family whose shared
-    /// query is slower than its members' own run in parallel stops sharing
-    /// by itself.
-    #[serde(default = "default_true")]
-    pub subscription_share_parameterized: bool,
 
     /// Notification broadcast channel buffer size (per-subscriber queue depth)
     #[serde(default = "default_notification_buffer_size")]
@@ -706,7 +721,6 @@ impl Default for RateLimitConfig {
             ws_max_subscriptions: default_ws_max_subscriptions(),
             ws_max_in_flight_requests: default_ws_max_in_flight_requests(),
             subscription_coalesce_ms: 0,
-            subscription_share_parameterized: true,
             notification_buffer_size: default_notification_buffer_size(),
             per_ip_max_rps: default_per_ip_max_rps(),
             ws_max_preauth_per_ip: default_ws_max_preauth_per_ip(),
@@ -974,6 +988,7 @@ impl Config {
                 format: "text".to_string(),
             },
             http: HttpConfig::default(),
+            subscriptions: SubscriptionsConfig::default(),
         }
     }
 }

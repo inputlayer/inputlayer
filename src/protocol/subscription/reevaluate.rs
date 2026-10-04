@@ -44,8 +44,8 @@ pub struct Evaluated {
     pub result: Arc<ResultSet>,
     pub dependencies: Dependencies,
     pub revision: u64,
-    /// Engine time of the evaluation (excluding waits for a compute permit
-    /// and the compile stages the timing breakdown measured).
+    /// Engine time of the evaluation, excluding waits for a compute permit
+    /// and compiling its plan.
     pub cost: Duration,
     /// Whether the evaluation reused a compiled plan: `cost` includes no
     /// compilation.
@@ -180,9 +180,8 @@ pub struct QueryRows {
     pub columns: Option<Vec<String>>,
     /// Every row, as the engine returned it (distinct as engine values).
     pub rows: Vec<Row>,
-    /// Engine time of the evaluation (excluding waits for a compute permit
-    /// and the compile stages the timing breakdown measured), plus converting
-    /// its rows.
+    /// Engine time of the evaluation, excluding waits for a compute permit
+    /// and compiling its plan, plus converting its rows.
     pub cost: Duration,
     /// Whether the evaluation reused a compiled plan: `cost` includes no
     /// compilation.
@@ -198,8 +197,7 @@ pub async fn run_query(
     snapshot: Arc<KnowledgeGraphSnapshot>,
     probe: bool,
 ) -> Result<QueryRows, String> {
-    let started = Instant::now();
-    let (result, plan_cached) = handler
+    let (result, run) = handler
         .query_snapshot(knowledge_graph, snapshot, query, None, probe)
         .await?;
     // A capped result is not the result set: adopting it would announce
@@ -210,17 +208,6 @@ pub async fn run_query(
             handler.config().storage.performance.max_result_rows,
         ));
     }
-    let engine = result.timing_breakdown.as_ref().map_or_else(
-        || started.elapsed(),
-        |timing| {
-            let compiling = timing.parse_us
-                + timing.sip_us
-                + timing.magic_sets_us
-                + timing.ir_build_us
-                + timing.optimize_us;
-            Duration::from_micros(timing.total_us.saturating_sub(compiling))
-        },
-    );
     let converting = Instant::now();
     let columns =
         (!result.schema.is_empty()).then(|| result.schema.into_iter().map(|c| c.name).collect());
@@ -232,8 +219,8 @@ pub async fn run_query(
     Ok(QueryRows {
         columns,
         rows,
-        cost: engine + converting.elapsed(),
-        plan_cached,
+        cost: run.executing + converting.elapsed(),
+        plan_cached: run.plan_cached,
     })
 }
 

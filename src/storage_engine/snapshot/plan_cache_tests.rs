@@ -68,11 +68,11 @@ fn a_plan_is_compiled_once_and_reused() {
 fn an_execution_tells_whether_its_plan_came_from_the_cache() {
     let first = snapshot_after(&[(1, 2), (2, 3)], TWO_HOP, None);
     let plan_cached = |snapshot: &KnowledgeGraphSnapshot| {
-        let (_, timing, plan_cached) = snapshot
+        let (_, timing, run) = snapshot
             .execute_with_rules_tuples_cached(QUERY, TimingMode::Off)
             .unwrap();
         assert!(timing.is_none());
-        plan_cached
+        run.plan_cached
     };
     assert!(!plan_cached(&first), "the first execution compiles");
     assert!(plan_cached(&first));

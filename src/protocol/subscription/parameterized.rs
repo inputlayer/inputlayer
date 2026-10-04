@@ -32,17 +32,19 @@
 //! so its errors are exactly its own. It also evaluates its own query when the
 //! round fails, is truncated, or holds more rows for it than
 //! `max_result_rows` allows. A lifted query computes every binding's rows,
-//! subscribed or not, and every view waits for it. A family therefore shares
-//! only while a round is about as fast as its views' own evaluations would
-//! be, run in parallel on the compute permits. A view's own cost counts only
-//! evaluations that reused a compiled plan; a round's leaves out compiling
-//! its plan. Once it has a view's own cost to compare with, a family probes:
-//! it evaluates a round no view waits for, under the server's probe permit
-//! rather than a compute permit, and starts sharing only when that round is
-//! fast enough. With too few compute permits for that, a family decides
-//! from its shape instead: it shares unless a parameter binds an atom that
-//! reads a recursive relation, where the constant lets Magic Sets restrict
-//! the work. It stops when a round is slower, and probes (or decides) again
+//! subscribed or not, and every view waits for it. A family therefore never
+//! shares while its views' own evaluations fit on the compute permits at
+//! once, and otherwise shares only while a round is, on average, no slower
+//! than those evaluations run in parallel on the permits. Costs leave out
+//! waiting for a permit and compiling a plan, and a view's own cost counts
+//! only evaluations that reused a compiled plan. Once it has a view's own
+//! cost to compare with, a family probes: it evaluates a round no view waits
+//! for, under the server's probe permit rather than a compute permit, and
+//! starts sharing only when that round is fast enough. With too few compute
+//! permits for that, a family decides from its shape instead: it shares
+//! unless a parameter binds an atom that reads a recursive relation, where
+//! the constant lets Magic Sets restrict the work. It stops when rounds are
+//! slower on average, and probes (or decides) again
 //! after some commits, waiting longer after each failure. While sharing, a
 //! view evaluates its own query now and then to keep that cost current.
 
@@ -72,10 +74,6 @@ use super::{Dependencies, ReevaluatingQuery, Refresh, ResultSet, Row, StandingQu
 /// Name prefix of lifted parameters; queries using it are not lifted.
 const PARAM_PREFIX: &str = "_L";
 
-/// How much slower than its views' own evaluations, in percent, a round may
-/// be before the family stops sharing.
-const STOP_MARGIN_PERCENT: u64 = 20;
-
 /// Commits before a family that stopped sharing tries again.
 const PROBE_AFTER: u64 = 256;
 
@@ -90,14 +88,26 @@ const MAX_PROBE_BACKOFF: u64 = 6;
 /// Rounds between a view's own evaluations while sharing.
 const SAMPLE_EVERY: u64 = 64;
 
-/// Whether a family keeps sharing after a round of `shared_us`: unless the
-/// round is slower, by more than [`STOP_MARGIN_PERCENT`], than its `bindings`
-/// views' own evaluations of `own_us` each, run `permits` at a time. An
-/// unknown own cost (0) keeps sharing.
+/// Whether a family keeps sharing with rounds of `shared_us`: unless they
+/// are slower than its `bindings` views' own evaluations of `own_us` each,
+/// run `permits` at a time. An unknown own cost (0) keeps sharing.
 fn keeps_sharing(shared_us: u64, own_us: u64, bindings: u64, permits: u64) -> bool {
     let unshared = own_us.saturating_mul(bindings.div_ceil(permits.max(1)).max(1));
-    own_us == 0
-        || shared_us.saturating_mul(100) <= unshared.saturating_mul(100 + STOP_MARGIN_PERCENT)
+    own_us == 0 || shared_us <= unshared
+}
+
+/// Fold `cost` into the running `average` of costs in microseconds (0: none
+/// yet), a new cost weighing an eighth, and return the new average.
+fn smooth(average: &AtomicU64, cost: Duration) -> u64 {
+    let cost = (cost.as_micros() as u64).max(1);
+    let previous = average.load(Ordering::Relaxed);
+    let next = if previous == 0 {
+        cost
+    } else {
+        (previous.saturating_mul(7) + cost) / 8
+    };
+    average.store(next, Ordering::Relaxed);
+    next
 }
 
 /// Whether a parameter of `shape` binds an atom that reads, through
@@ -415,6 +425,9 @@ pub struct Family {
     stops: AtomicU64,
     /// Recent cost of a view's own evaluation, in microseconds (0: unknown).
     own_cost_us: AtomicU64,
+    /// Recent cost of a round since sharing last stopped, in microseconds
+    /// (0: none yet).
+    shared_cost_us: AtomicU64,
     /// Rounds evaluated.
     rounds: AtomicU64,
     /// Whether the next view to refresh evaluates its own query.
@@ -422,10 +435,17 @@ pub struct Family {
 }
 
 impl Family {
-    /// Whether views should read rounds now: more than one binding, and
-    /// sharing pays.
+    /// Whether views should read rounds now: more bindings than compute
+    /// permits, and sharing pays.
     fn shares(&self) -> bool {
-        self.bindings.load(Ordering::Relaxed) > 1 && self.sharing.load(Ordering::Relaxed)
+        self.outnumbers_permits() && self.sharing.load(Ordering::Relaxed)
+    }
+
+    /// Whether the family has more bindings than compute permits. With no
+    /// more, its views' own evaluations all run at once, and a round, which
+    /// computes every binding's rows, is no faster.
+    fn outnumbers_permits(&self) -> bool {
+        self.bindings.load(Ordering::Relaxed) > self.handler.compute_permits().max(1)
     }
 
     fn join(&self, binding: &Binding) {
@@ -525,7 +545,7 @@ impl Family {
             self.stop_sharing();
         })?;
         let own = self.own_cost_us.load(Ordering::Relaxed);
-        let shared = (ran.cost + partitioning.elapsed()).as_micros() as u64;
+        let shared = smooth(&self.shared_cost_us, ran.cost + partitioning.elapsed());
         let bindings = self.bindings.load(Ordering::Relaxed) as u64;
         let permits = self.handler.compute_permits() as u64;
         if !keeps_sharing(shared, own, bindings, permits) {
@@ -565,32 +585,29 @@ impl Family {
 
     fn stop_sharing(&self) {
         self.own_since_stop.store(0, Ordering::Relaxed);
+        self.shared_cost_us.store(0, Ordering::Relaxed);
         self.stops.fetch_add(1, Ordering::Relaxed);
         self.sharing.store(false, Ordering::Relaxed);
     }
 
     /// Note a view's own evaluation: its cost when it reused a compiled plan
     /// (`None` when it compiled one). Whether to probe: the own cost is known,
-    /// there is more than one binding, and the family never shared or enough
-    /// own evaluations passed since it stopped.
+    /// there are more bindings than compute permits, and the family never
+    /// shared or enough own evaluations passed since it stopped.
     fn record_own(&self, cost: Option<Duration>) -> bool {
-        let mut average = self.own_cost_us.load(Ordering::Relaxed);
-        if let Some(cost) = cost {
-            let cost = (cost.as_micros() as u64).max(1);
-            average = if average == 0 {
-                cost
-            } else {
-                (average * 7 + cost) / 8
-            };
-            self.own_cost_us.store(average, Ordering::Relaxed);
-        }
+        let average = match cost {
+            Some(cost) => smooth(&self.own_cost_us, cost),
+            None => self.own_cost_us.load(Ordering::Relaxed),
+        };
         if self.sharing.load(Ordering::Relaxed) {
             return false;
         }
         let since_stop = self.own_since_stop.fetch_add(1, Ordering::Relaxed) + 1;
         let bindings = self.bindings.load(Ordering::Relaxed) as u64;
         let stops = self.stops.load(Ordering::Relaxed);
-        average > 0 && bindings > 1 && (stops == 0 || since_stop >= probe_after(bindings, stops))
+        average > 0
+            && self.outnumbers_permits()
+            && (stops == 0 || since_stop >= probe_after(bindings, stops))
     }
 
     /// Evaluate a round at `snapshot` that no view waits for, at most one at
@@ -666,6 +683,7 @@ impl Families {
                         own_since_stop: AtomicU64::new(0),
                         stops: AtomicU64::new(0),
                         own_cost_us: AtomicU64::new(0),
+                        shared_cost_us: AtomicU64::new(0),
                         rounds: AtomicU64::new(0),
                         sample_due: AtomicBool::new(false),
                     });

@@ -77,6 +77,19 @@ impl Member {
     }
 }
 
+/// Subscribers of `shape` (`S` for the session) for sessions `s{first}`
+/// up to one more than the compute permits: with them, a family has more
+/// bindings than permits, its own evaluations no longer all run at once, and
+/// a round pays even on a many-core host.
+async fn idle(server: &Server, shape: &str, first: usize) -> Vec<Member> {
+    let mut idle = Vec::new();
+    for session in first..=server.handler.compute_permits() + 1 {
+        let query = shape.replace('S', &format!(r#""s{session}""#));
+        idle.push(Member::subscribe(server, &query).await);
+    }
+    idle
+}
+
 const RULES: &str = "+view(S, X, Kind) <- item(S, X), kind(X, Kind)";
 
 #[tokio::test(flavor = "multi_thread")]
@@ -91,13 +104,7 @@ async fn bound_subscriptions_share_one_evaluation_and_get_only_their_rows() {
     let mut three = Member::subscribe(&server, r#"?view("s3", X, "a")"#).await;
     assert_eq!(one.rows.len(), 1);
     assert!(three.rows.is_empty());
-    // More bindings than compute permits: their own evaluations no longer
-    // all run at once, so a round pays even on a many-core host.
-    let mut idle = Vec::new();
-    for session in 4..=server.handler.compute_permits() + 1 {
-        let query = format!(r#"?view("s{session}", X, "a")"#);
-        idle.push(Member::subscribe(&server, &query).await);
-    }
+    let _idle = idle(&server, r#"?view(S, X, "a")"#, 4).await;
 
     // The views' first evaluations compiled their plans; the next ones give
     // the cost a shared evaluation is compared with.
@@ -157,6 +164,7 @@ async fn every_subscriber_follows_its_own_query_through_mixed_writes() {
             members.push(Member::subscribe(&server, &query).await);
         }
     }
+    let _idle = idle(&server, "?view(S, X, K)", 4).await;
     let writes = [
         r#"+item[("s1", 1), ("s2", 2), ("s3", 3)]"#,
         r#"+kind[(1, "a"), (2, "b"), (3, "a")]"#,
@@ -192,6 +200,7 @@ async fn a_family_of_one_binding_evaluates_on_its_own() {
     // The same binding spelled differently is another view of one binding.
     let mut same = Member::subscribe(&server, r#"?view("s1",X,"a")"#).await;
     let mut two = Member::subscribe(&server, r#"?view("s2", X, "a")"#).await;
+    let idle = idle(&server, r#"?view(S, X, "a")"#, 3).await;
     for write in [
         "+item[(\"s1\", 2), (\"s2\", 2)]\n+kind(2, \"a\")",
         "+item(\"s1\", 4)\n+kind(4, \"a\")",
@@ -205,9 +214,10 @@ async fn a_family_of_one_binding_evaluates_on_its_own() {
     let after_shared = shared(&server);
     assert!(after_shared > 0);
 
-    // With s2 gone, one binding is left: nothing to share.
+    // With s2 and the idle views gone, one binding is left: nothing to share.
     let reply = two.client.execute(".unsubscribe s").await;
     assert_eq!(reply["type"], "result", "{reply}");
+    drop(idle);
     server.wait_for_active(2).await;
     server.write("+item(\"s1\", 3)\n+kind(3, \"a\")").await;
     for member in [&mut one, &mut same] {
@@ -263,7 +273,7 @@ fn expected_rows(sessions: &[&str], xs: &[i64]) -> BTreeSet<String> {
 #[tokio::test(flavor = "multi_thread")]
 async fn sharing_can_be_switched_off() {
     let server = start_server_with(64, |config| {
-        config.http.rate_limit.subscription_share_parameterized = false;
+        config.subscriptions.share_parameterized = false;
     })
     .await;
     server.write(RULES).await;
