@@ -501,6 +501,9 @@ struct QueryJob {
     /// When set, the query reads this snapshot of its knowledge graph instead
     /// of the one current when it runs.
     pinned: Option<Arc<KnowledgeGraphSnapshot>>,
+    /// Reuse the query's compiled plan while the rules stay the same (for
+    /// queries evaluated again and again: standing queries).
+    cache_plan: bool,
 }
 
 impl QueryJob {
@@ -904,6 +907,7 @@ impl Handler {
             start_time: self.start_time,
             timing_histograms: Arc::clone(&self.timing_histograms),
             pinned: None,
+            cache_plan: false,
         }
     }
 
@@ -3386,6 +3390,8 @@ impl QueryJob {
                     session_fact_tuples,
                     timing_mode,
                 )
+            } else if self.cache_plan {
+                snapshot.execute_with_rules_tuples_cached(&query_program, timing_mode)
             } else {
                 snapshot.execute_with_rules_tuples_profiled(&query_program, timing_mode)
             }
@@ -3940,7 +3946,8 @@ impl Handler {
     /// `knowledge_graph`, as `auth` would run it with `execute_program`:
     /// admitted and authorized the same way, but reading `snapshot` instead of
     /// whatever is current when the query runs. The result is therefore the
-    /// query's exact answer at `snapshot.revision`.
+    /// query's exact answer at `snapshot.revision`. The query's compiled plan
+    /// is kept and reused on later snapshots until the rules change.
     pub async fn query_snapshot(
         &self,
         knowledge_graph: &str,
@@ -3962,6 +3969,7 @@ impl Handler {
         self.authorize_program(identity.as_ref(), Some(knowledge_graph), &statements)?;
         let job = QueryJob {
             pinned: Some(snapshot),
+            cache_plan: true,
             ..self.make_query_job()
         };
         let control = self.request_control(None);
