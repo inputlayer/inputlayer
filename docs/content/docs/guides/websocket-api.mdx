@@ -128,7 +128,7 @@ Values are typed by their JSON form, or explicitly with a one-key object:
 
 Nothing is converted silently. JavaScript writes `1.0` as `1`, so send a float with an integral value as `{"float": 1}`; send an int beyond JavaScript's safe integer range as a decimal string, `{"int": "..."}`. A frame whose `params` cannot be bound exactly gets an `invalid_request` error naming the parameter, and nothing runs: `null` (what `JSON.stringify` writes for `NaN` and the infinities), an integer outside int64, a bare integral number of magnitude 2^63 or more, `{"float": n}` for an integer no float equals, `{"int": ...}` with a fraction, an unknown type tag, a name given twice, or a name that is not an identifier (`[A-Za-z_][A-Za-z0-9_]*`, at most 64 bytes).
 
-Every parameter the program references must be given, and every one given must be referenced; otherwise the request fails with code `validation` (a missing one is reported in `validation_errors` against its statement) and nothing runs. A value that cannot stand where it is referenced, such as a string in arithmetic, fails the same way. Parameter values count toward `storage.performance.max_query_size_bytes` and are never logged.
+Every parameter the program references must be given, and every one given must be referenced; otherwise the request fails with code `validation` (a missing one is reported in `validation_errors` against its statement) and nothing runs. A value that cannot stand where it is referenced, such as a string in arithmetic, fails the same way. Parameter values count toward `storage.performance.max_query_size_bytes`. The request log records the program text and the number of parameters, not their values.
 
 ### Request IDs
 

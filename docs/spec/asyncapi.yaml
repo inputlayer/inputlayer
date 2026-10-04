@@ -1058,7 +1058,8 @@ components:
         a bare integral number of magnitude 2^63 or more, `{"float": n}` for an integer
         no float equals, `{"int": ...}` with a fraction, unknown type tags, a name given
         twice, or a name that is not an identifier. Parameter values count toward
-        `storage.performance.max_query_size_bytes` and are never logged.
+        `storage.performance.max_query_size_bytes`. The request log records the program
+        text and the number of parameters, not their values.
       propertyNames:
         pattern: '^[A-Za-z_][A-Za-z0-9_]{0,63}$'
       additionalProperties:

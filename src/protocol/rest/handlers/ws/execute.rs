@@ -28,8 +28,8 @@ const INLINE_FRAME_ROWS: usize = 256;
 const LOG_PREVIEW_CHARS: usize = 80;
 
 /// Run `program` with `params` in `session_id` as `auth` for the request
-/// `id`, under `control`; returns its reply frames. Parameter values are
-/// never logged.
+/// `id`, under `control`; returns its reply frames. The request log records
+/// how many parameters it had, not their values.
 pub(super) async fn execute(
     handler: Arc<Handler>,
     session_id: String,
