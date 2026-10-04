@@ -22,10 +22,12 @@ export interface Column extends Expr {
   readonly relation: string;
   readonly name: string;
   readonly refAlias?: string;
+  /** The column's IQL type, when it came from a typed relation definition. */
+  readonly type?: string;
 }
 
-export function column(relation: string, name: string, refAlias?: string): Column {
-  return { _tag: 'Column', relation, name, refAlias };
+export function column(relation: string, name: string, refAlias?: string, type?: string): Column {
+  return type === undefined ? { _tag: 'Column', relation, name, refAlias } : { _tag: 'Column', relation, name, refAlias, type };
 }
 
 /** A constant value. */

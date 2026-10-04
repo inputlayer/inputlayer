@@ -138,6 +138,15 @@ describe('deserializeMessage', () => {
   });
 });
 
+describe('integers past 2^53', () => {
+  it('decode to an exact BigInt; other numbers and digit strings stay as they are', () => {
+    const msg = deserializeMessage(
+      '{"type":"result","columns":["a","b","c","d","e"],"rows":[[9007199254740993,-9223372036854775808,1e300,42,"12345678901234567"]]}',
+    );
+    expect(msg.type === 'result' && msg.rows).toEqual([[9007199254740993n, -(2n ** 63n), 1e300, 42, '12345678901234567']]);
+  });
+});
+
 describe('request ids and pushes', () => {
   it('serializes an optional request id', () => {
     expect(JSON.parse(serializeMessage({ type: 'ping', id: 'p' }))).toEqual({

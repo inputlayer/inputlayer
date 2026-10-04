@@ -74,7 +74,7 @@ export class RelationDef<T extends ColumnTypes = ColumnTypes> {
           `Available: ${this.columns.join(', ')}`,
       );
     }
-    return new ColumnProxy(this.relationName, name, undefined, this.columns);
+    return new ColumnProxy(this.relationName, name, undefined, this.columns, this.columnTypes[name]);
   }
 
   /** A row of this relation exists with the given column values: see `any()`. */

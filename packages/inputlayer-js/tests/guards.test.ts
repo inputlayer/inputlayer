@@ -20,6 +20,7 @@ import {
 } from '../src/index';
 import { compileQueryPlan } from '../src/compiler';
 import { compileClaim, parseWriteMessage } from '../src/program';
+import { deserializeMessage, type ResultResponse } from '../src/protocol';
 
 const Shipment = relation('Shipment', { order: 'string', shipment: 'string' });
 const Eta = relation('Eta', { shipment: 'string', due: 'string' });
@@ -167,6 +168,26 @@ describe('non-finite numbers', () => {
     const kg = new KnowledgeGraph('kg', conn as unknown as Connection);
     const got = await kg.claim(Scored, { order: 1, tool: 't', score: 0.5 }, { key: ['tool'] });
     expect(got).toEqual({ won: false, holder: { order: 2 ** 63, tool: 't', score: 1e300 } });
+  });
+
+  it('claim() wins when the engine returns our own row holding a BigInt past 2^53', async () => {
+    const frame = '{"type":"result","columns":["order","tool","score"],"rows":[[9007199254740993,"t",0.5]]}';
+    const conn = { execute: async () => deserializeMessage(frame) as ResultResponse };
+    const kg = new KnowledgeGraph('kg', conn as unknown as Connection);
+    const got = await kg.claim(Scored, { order: 9007199254740993n, tool: 't', score: 0.5 }, { key: ['order'] });
+    expect(got.won).toBe(true);
+  });
+
+  it('compiles a literal compared with a typed column as a value of its type', async () => {
+    const { sent, kg } = refusing();
+    await expect(kg.query({ select: [Scored], where: Scored.col('order').eq(2 ** 60) })).rejects.toThrow(/BigInt/);
+    await expect(kg.delete(Scored, Scored.col('order').ge(2 ** 60))).rejects.toThrow(/BigInt/);
+    const [ref] = Scored.refs(1);
+    await expect(kg.query({ select: [ref!.col('tool')], join: [ref!], where: ref!.col('order').lt(-(2 ** 60)) })).rejects.toThrow(/BigInt/);
+    expect(sent).toEqual([]);
+    await kg.query({ select: [Scored], where: AND(Scored.col('order').eq(2n ** 60n), Scored.col('score').gt(2 ** 60)) });
+    expect(sent[0]).toContain('1152921504606846976');
+    expect(sent[0]).toContain('> 1.152921504606847e+18');
   });
 });
 

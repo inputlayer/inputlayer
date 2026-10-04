@@ -252,9 +252,15 @@ function compileComparison(
     env.unify(comp.left, comp.right);
     return '';
   }
-  const left = compileExpr(comp.left, env);
-  const right = compileExpr(comp.right, env);
+  const left = compileOperand(comp.left, comp.right, env);
+  const right = compileOperand(comp.right, comp.left, env);
   return `${left} ${comp.op} ${right}`;
+}
+
+/** A literal compared with a typed column is compiled as a value of that column's type. */
+function compileOperand(expr: Expr, other: Expr, env: VarEnv): string {
+  if (isLiteral(expr) && isColumn(other)) return compileValue(expr.value, other.type);
+  return compileExpr(expr, env);
 }
 
 /**
@@ -488,7 +494,7 @@ function sharedColumn(
   for (const c of out) {
     if (!isComparison(c) || c.op !== '=') continue;
     for (const [a, b] of [[c.left, c.right], [c.right, c.left]]) {
-      if (isColumn(a) && isLiteral(b) && compileValue(b.value) === text && positiveKeys.has(atomKey(a))) {
+      if (isColumn(a) && isLiteral(b) && compileValue(b.value, a.type) === text && positiveKeys.has(atomKey(a))) {
         return a;
       }
     }
@@ -498,7 +504,7 @@ function sharedColumn(
     const p = out[j];
     if (!isAnyExpr(p)) continue;
     for (const [col, b] of Object.entries(p.bindings)) {
-      if (!isLiteral(b) || compileValue(b.value) !== text) continue;
+      if (!isLiteral(b) || compileValue(b.value, p.columnTypes[col]) !== text) continue;
       const { [col]: _, ...rest } = p.bindings;
       out[j] = anyExpr(p.relation, p.columns, p.columnTypes, rest, p.alias);
       const own = astColumn(p.relation, col, p.alias);
