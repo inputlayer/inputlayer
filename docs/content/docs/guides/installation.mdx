@@ -28,15 +28,9 @@ cargo --version
 
 ## Installation Options
 
-### Option 1: Install from crates.io (Recommended)
+### Option 1: Build from Source (Recommended)
 
-```bash
-cargo install inputlayer --bin inputlayer-client
-```
-
-This installs the `inputlayer-client` binary to `~/.cargo/bin/`.
-
-### Option 2: Build from Source
+InputLayer is not published to crates.io yet, so build it from a checkout:
 
 ```bash
 # Clone the repository
@@ -51,7 +45,13 @@ cargo build --release
 ./target/release/inputlayer-client   # Then connect with client
 ```
 
-### Option 3: Run without Installing
+To put the binaries on your `PATH` (`~/.cargo/bin/`), install them from the same checkout:
+
+```bash
+cargo install --path . --bin inputlayer-server --bin inputlayer-client --bin il
+```
+
+### Option 2: Run without Installing
 
 For quick testing without installing:
 
@@ -60,13 +60,19 @@ cargo run --release --bin inputlayer-server &
 cargo run --release --bin inputlayer-client
 ```
 
+### Option 3: Docker
+
+```bash
+docker run -p 8080:8080 ghcr.io/inputlayer/inputlayer:latest
+```
+
 ## Verify Installation
 
 Start the server, then connect with the client:
 
 ```bash
-inputlayer-server &
-inputlayer-client
+./target/release/inputlayer-server &
+./target/release/inputlayer-client
 ```
 
 You should see:

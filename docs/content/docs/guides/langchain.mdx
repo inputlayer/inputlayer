@@ -9,7 +9,9 @@ This guide walks through the integration from first install to reasoning-powered
 ## Installation
 
 ```bash
-pip install inputlayer-client-dev[langchain]
+# from a source checkout (the SDK is not on PyPI yet)
+git clone https://github.com/inputlayer/inputlayer.git
+pip install "./inputlayer/packages/inputlayer-py[langchain]"
 ```
 
 This pulls in `langchain-core` alongside the InputLayer SDK. You'll also need an embeddings provider (like `langchain-openai`) and a running InputLayer server.

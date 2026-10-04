@@ -8,8 +8,11 @@ The migration system solves this. It works like Django migrations: you define yo
 
 Migrations run through the `il` CLI as `il migration <verb>` (generate, apply, revert, status). The underlying tool ships with the Python SDK (as the `inputlayer-migrate` entry point, which `il migration` delegates to):
 
+The SDK is not on PyPI yet; install it from a source checkout of the repository:
+
 ```bash
-pip install inputlayer-client-dev
+git clone https://github.com/inputlayer/inputlayer.git
+pip install ./inputlayer/packages/inputlayer-py
 ```
 
 Verify it's available:
@@ -341,7 +344,7 @@ jobs:
   migrate-staging:
     steps:
       - uses: actions/checkout@v4
-      - run: pip install inputlayer-client-dev
+      - run: pip install "inputlayer-client-dev @ git+https://github.com/inputlayer/inputlayer.git#subdirectory=packages/inputlayer-py"
       - run: |
           il migration apply \
             --url ${{ secrets.STAGING_WS_URL }} \
@@ -352,7 +355,7 @@ jobs:
     needs: migrate-staging
     steps:
       - uses: actions/checkout@v4
-      - run: pip install inputlayer-client-dev
+      - run: pip install "inputlayer-client-dev @ git+https://github.com/inputlayer/inputlayer.git#subdirectory=packages/inputlayer-py"
       - run: |
           il migration apply \
             --url ${{ secrets.PROD_WS_URL }} \

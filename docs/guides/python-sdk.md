@@ -4,11 +4,14 @@ InputLayer ships a Python Object-Logic Mapper (OLM) that lets you define schemas
 
 ## Installation
 
-```bash
-pip install inputlayer
+The SDK is not published to PyPI yet. Install it from a source checkout of the repository:
 
-# With pandas support
-pip install inputlayer[pandas]
+```bash
+git clone https://github.com/inputlayer/inputlayer.git
+pip install ./inputlayer/packages/inputlayer-py
+
+# With pandas DataFrame support
+pip install "./inputlayer/packages/inputlayer-py[pandas]"
 ```
 
 **Requirements**: Python 3.10+, a running InputLayer server.

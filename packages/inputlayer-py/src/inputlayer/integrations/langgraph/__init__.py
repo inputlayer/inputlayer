@@ -45,7 +45,7 @@ def __getattr__(name: str) -> object:
         except ImportError as exc:
             raise ImportError(
                 "InputLayerCheckpointer requires the langgraph extra. "
-                "Install it with: pip install inputlayer-client-dev[langgraph]"
+                "Install it with: pip install './packages/inputlayer-py[langgraph]' (from an InputLayer checkout)"
             ) from exc
         return InputLayerCheckpointer
     if name == "InputLayerMemory":
@@ -54,7 +54,7 @@ def __getattr__(name: str) -> object:
         except ImportError as exc:
             raise ImportError(
                 "InputLayerMemory requires the langgraph extra. "
-                "Install it with: pip install inputlayer-client-dev[langgraph]"
+                "Install it with: pip install './packages/inputlayer-py[langgraph]' (from an InputLayer checkout)"
             ) from exc
         return InputLayerMemory
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

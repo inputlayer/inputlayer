@@ -9,7 +9,7 @@ Provides:
 
 Requires the ``langchain`` extra::
 
-    pip install inputlayer-client-dev[langchain]
+    pip install './packages/inputlayer-py[langchain]' (from an InputLayer checkout)
 """
 
 try:
@@ -17,7 +17,7 @@ try:
 except ImportError as exc:
     raise ImportError(
         "The LangChain integration requires langchain-core. "
-        "Install it with: pip install inputlayer-client-dev[langchain]"
+        "Install it with: pip install './packages/inputlayer-py[langchain]' (from an InputLayer checkout)"
     ) from exc
 
 from inputlayer.integrations.langchain.params import bind_params, iql_literal

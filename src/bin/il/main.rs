@@ -259,7 +259,7 @@ fn migration(cmd: &MigrationCommand) -> Result<()> {
     {
         Ok(status) => std::process::exit(status.code().unwrap_or(1)),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => anyhow::bail!(
-            "inputlayer-migrate not found - migrations are provided by the Python SDK:\n  pip install inputlayer-client-dev"
+            "inputlayer-migrate not found - migrations are provided by the Python SDK:\n  pip install ./packages/inputlayer-py  (from an InputLayer source checkout)"
         ),
         Err(err) => Err(err).context("failed to run inputlayer-migrate"),
     }

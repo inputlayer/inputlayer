@@ -148,9 +148,13 @@ The `il` CLI builds with the engine (`cargo build --bin il`) and talks to the se
 
 ## SDKs
 
-**Python:**
+The SDKs are not on PyPI or npm yet; install them from a source checkout of this repository.
+
+**Python** (3.10+):
 ```bash
-pip install inputlayer
+git clone https://github.com/inputlayer/inputlayer.git
+pip install ./inputlayer/packages/inputlayer-py
+# extras: pip install "./inputlayer/packages/inputlayer-py[pandas,langchain,langgraph]"
 ```
 
 ```python
@@ -161,9 +165,12 @@ async with InputLayer() as il:
     result = await kg.query(CanReach)
 ```
 
-**TypeScript:**
+**TypeScript** (Node.js 18+):
 ```bash
-npm install inputlayer-js
+# build and pack the SDK from the checkout
+(cd inputlayer/packages/inputlayer-js && npm ci && npm run build && npm pack)
+# then, in your project, install the tarball under the name `inputlayer`
+npm install inputlayer@file:/path/to/inputlayer/packages/inputlayer-js/inputlayer-js-dev-0.1.1.tgz
 ```
 
 See [Python SDK docs](https://inputlayer.ai/docs/guides/python-sdk/) and [TypeScript SDK docs](https://inputlayer.ai/docs/guides/js-sdk/).

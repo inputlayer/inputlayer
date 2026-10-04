@@ -82,7 +82,7 @@ class ResultSet:
         except ImportError:
             raise ImportError(
                 "pandas is required for to_df(). "
-                "Install with: pip install inputlayer[pandas]"
+                "Install with: pip install \"./packages/inputlayer-py[pandas]\" (from an InputLayer checkout)"
             ) from None
         return pd.DataFrame(self.rows, columns=self.columns)
 

@@ -6,11 +6,14 @@ The SDK connects over WebSocket, so you get persistent connections, live notific
 
 ## Installation
 
+The SDK is not published to PyPI yet. Install it from a source checkout of the repository:
+
 ```bash
-pip install inputlayer-client-dev
+git clone https://github.com/inputlayer/inputlayer.git
+pip install ./inputlayer/packages/inputlayer-py
 
 # With pandas DataFrame support
-pip install inputlayer-client-dev[pandas]
+pip install "./inputlayer/packages/inputlayer-py[pandas]"
 ```
 
 Requirements: Python 3.10+ and a running InputLayer server.
@@ -179,7 +182,7 @@ await kg.insert(Employee, data=[
 
 ### Inserting from pandas DataFrames
 
-If you installed with `pip install inputlayer-client-dev[pandas]`, you can load data directly from DataFrames:
+If you installed with the `[pandas]` extra, you can load data directly from DataFrames:
 
 ```python
 import pandas as pd
