@@ -352,6 +352,18 @@ describe('subscribe', () => {
     await sub.close();
   });
 
+  it('closed while its .subscribe reply is lost past the deadline, it still unsubscribes', async () => {
+    const kg = await graph({ timeoutGraceMs: 20 });
+    engine!.hold = true;
+    const sub = kg.subscribe(E, { timeoutMs: 50 });
+    const first = sub.next();
+    await waitFor(() => engine!.programs.some((p) => p.startsWith(`.subscribe ${sub.id}`)));
+    engine!.hold = false;
+    await sub.close();
+    expect((await first).done).toBe(true);
+    await waitFor(() => engine!.programs.includes(`.unsubscribe ${sub.id}`));
+  });
+
   it('ends with ConnectionLostError when the connection is gone for good', async () => {
     const kg = await graph({ autoReconnect: false });
     const sub = kg.subscribe(E);

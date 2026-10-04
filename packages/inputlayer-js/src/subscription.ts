@@ -411,7 +411,10 @@ export class Subscription<T = Row> implements AsyncIterableIterator<Change<T>> {
       reply = await this.conn.execute(meta.subscribe(this.id, this.shape.query), { timeoutMs: this.timeoutMs });
     } catch (e) {
       route.close();
-      if (transient(e) && !(e instanceof ConnectionLostError)) this.registered = true;
+      if (transient(e) && !(e instanceof ConnectionLostError)) {
+        this.registered = true;
+        if (this.state === 'closed') this.unsubscribe();
+      }
       throw refusal(e as Error);
     }
     if (this.state === 'closed') {
