@@ -43,6 +43,17 @@ import { HnswIndex } from './index-def.js';
 import { ResultSet } from './result.js';
 import { Session } from './session.js';
 import { meta, ruleClauses, ruleList } from './meta.js';
+import {
+  Subscription,
+  runCallback,
+  watchChanges,
+  type Change,
+  type Live,
+  type Row,
+  type SubscribeOptions,
+  type SubscriptionHandle,
+  type SubscriptionTarget,
+} from './subscription.js';
 
 // ── Data types ──────────────────────────────────────────────────────
 
@@ -499,6 +510,54 @@ export class KnowledgeGraph {
         return obj;
       });
     }
+  }
+
+  // ── Subscriptions ───────────────────────────────────────────────
+
+  /**
+   * Subscribe to a relation or view, a query, or raw IQL (`{ iql: "?..." }`):
+   * an async iterator of `Change` events (`snapshot`, then `delta`s, with
+   * `unverified` and `resync` around anything that broke the stream; see
+   * `subscription.ts`). It opens on the first `next()`; leaving the loop or
+   * `close()` ends it.
+   *
+   * Refused with `SubscriptionRejectedError` for a query with `limit` or
+   * `offset`, an OR condition, an aggregate, or a session rule, which a
+   * standing query cannot track; declare a persistent rule instead.
+   *
+   * @example
+   * for await (const change of kg.subscribe(Late)) {
+   *   for (const row of change.retracted) cancel(row);
+   *   for (const row of change.inserted) start(row);
+   *   if (!change.verified) pause();
+   * }
+   */
+  subscribe<T = Row>(target: SubscriptionTarget, opts?: SubscribeOptions): Subscription<T> {
+    return new Subscription<T>(this.conn, target, opts, () => this._session.listRules());
+  }
+
+  /**
+   * The whole current result of `target` each time it changes, with its
+   * revision. `verified` is false from a lost connection (or any other
+   * `unverified` event) until the fresh result arrives: act on nothing new
+   * meanwhile. Coalesced commits are seen as one change.
+   */
+  watch<T = Row>(target: SubscriptionTarget, opts?: SubscribeOptions): AsyncIterableIterator<Live<T>> {
+    return watchChanges(this.subscribe<T>(target, opts));
+  }
+
+  /**
+   * Call `callback` with every `Change` of `target`, one at a time (an async
+   * callback is awaited). Errors it throws, and the error that ends the
+   * subscription, go to `onError` (default: `console.error`).
+   */
+  on<T = Row>(
+    target: SubscriptionTarget,
+    callback: (change: Change<T>) => unknown,
+    opts: SubscribeOptions & { onError?: (error: unknown) => void } = {},
+  ): SubscriptionHandle {
+    const onError = opts.onError ?? ((error: unknown) => console.error('inputlayer: subscription callback', error));
+    return runCallback(this.subscribe<T>(target, opts), callback, onError);
   }
 
   // ── Vector search ───────────────────────────────────────────────

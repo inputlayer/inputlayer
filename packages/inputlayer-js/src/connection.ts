@@ -157,6 +157,7 @@ export interface ConnectionStats {
  *   (`replay_gap`, `notifications_missed`, or `no_cursor` after a reconnect
  *   with no notification seen before the drop): re-read the state you track;
  * - `closed` `{ error }`: reconnecting gave up; the connection is closed.
+ *   `close()` emits it too, without an `error`.
  */
 export type ConnectionEventType =
   | 'disconnected'
@@ -197,6 +198,7 @@ interface Call {
 
 interface Route {
   sink: (push: SubscriptionPushMessage) => void;
+  onStale?: () => void;
   generation?: number;
   early: SubscriptionPushMessage[];
 }
@@ -375,6 +377,7 @@ export class Connection {
   /** Close the connection; pending calls fail with `ConnectionLostError`. */
   async close(): Promise<void> {
     const ws = this.ws;
+    const wasClosed = this.state === 'closed';
     this.state = 'closed';
     this.ws = null;
     this.stopKeepalive();
@@ -384,6 +387,7 @@ export class Connection {
     this.failInFlight('closed', 'Connection closed by the client');
     this.failQueued(new ConnectionError('Connection closed'));
     if (ws) drop(ws);
+    if (!wasClosed) this.emit('closed', {});
   }
 
   /**
@@ -881,13 +885,15 @@ export class Connection {
    * Route a subscription's pushes to `sink`. Register the route before
    * sending `.subscribe`, then call `setGeneration` with the generation its
    * reply names: pushes that arrive before that are held and then filtered,
-   * and pushes of any other generation are dropped and counted.
+   * and pushes of any other generation are dropped and counted (also by
+   * `onStale`, when given).
    */
   routeSubscription(
     subscription: string,
     sink: (push: SubscriptionPushMessage) => void,
+    onStale?: () => void,
   ): SubscriptionRoute {
-    const route: Route = { sink, early: [] };
+    const route: Route = { sink, onStale, early: [] };
     this.routes.set(subscription, route);
     return {
       setGeneration: (generation: number) => {
@@ -917,6 +923,7 @@ export class Connection {
   private deliver(route: Route, push: SubscriptionPushMessage): void {
     if (push.generation !== route.generation) {
       this._stats.stalePushes += 1;
+      route.onStale?.();
       return;
     }
     try {

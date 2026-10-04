@@ -304,3 +304,34 @@ export class ConflictError extends QueryError {
     this.iql = iql;
   }
 }
+
+/**
+ * Why a subscription was refused: by the SDK before anything was sent
+ * (`limit_offset`, `or_branches`, `session_view`), or by the engine
+ * (`result_cap`, `access_denied`, `id_taken`, `subscription_limit`, and
+ * `rejected` for any other refusal, such as an invalid query).
+ */
+export type SubscriptionRejectedReason =
+  | 'limit_offset'
+  | 'or_branches'
+  | 'session_view'
+  | 'result_cap'
+  | 'access_denied'
+  | 'id_taken'
+  | 'subscription_limit'
+  | 'rejected';
+
+/**
+ * A subscription could not be opened, or could not be re-opened after it
+ * lost its verified state. Fix or narrow the query; retrying it as it is
+ * fails the same way.
+ */
+export class SubscriptionRejectedError extends InputLayerError {
+  constructor(
+    message: string,
+    readonly reason: SubscriptionRejectedReason,
+  ) {
+    super(message);
+    this.name = 'SubscriptionRejectedError';
+  }
+}
