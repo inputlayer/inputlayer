@@ -12,6 +12,8 @@ const WEBSOCKET_DOCS_URL = "/docs/guides/websocket-api/"
 const INGESTION_DOCS_URL = "/docs/guides/ingestion/"
 const PERSISTENCE_DOCS_URL = "/docs/guides/persistence/"
 const DEPLOYMENT_DOCS_URL = "/docs/guides/deployment/"
+const REPLACES_DOCS_URL = "/docs/guides/what-it-replaces/"
+const WHERE_DOCS_URL = "/docs/guides/where-it-sits/"
 const PYTHON_SDK_URL = "/docs/guides/python-sdk/"
 const BENCHMARK_URL = "/blog/benchmarks-1587x-faster-recursive-queries/"
 const ARTICLE_URL = "/blog/building-a-voice-agent-that-knows/"
@@ -208,6 +210,13 @@ export default function LandingPage() {
               </p>
             </Card>
           </div>
+          <p className="mt-6 text-sm text-muted-foreground max-w-3xl">
+            Each replaced piece, with what it looks like before and after:{" "}
+            <Link href={REPLACES_DOCS_URL} className="text-primary hover:underline">
+              What it replaces
+            </Link>
+            .
+          </p>
         </Section>
 
         {/* ── Where it sits ──────────────────────────────────────────── */}
@@ -241,6 +250,13 @@ export default function LandingPage() {
               </Link>
               , a restart resumes from it and the adapter&apos;s revisions make a replayed feed safe, and while it is
               unreachable no claim can win, so gated tools wait rather than run unchecked.
+            </p>
+            <p className="text-sm">
+              The details, hop by hop:{" "}
+              <Link href={WHERE_DOCS_URL} className="text-primary hover:underline">
+                Where it sits
+              </Link>
+              .
             </p>
           </div>
         </Section>
