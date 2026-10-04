@@ -214,7 +214,7 @@ impl PersistWal {
     /// # Errors
     /// [`StorageError::OutcomeUnknown`] when the cut can be neither made nor
     /// recorded, so a restart may recover the transaction, and when the record went
-    /// to a file no longer at the WAL's path (see [`Self::check_in_place`]).
+    /// to a file no longer at the WAL's path (see `check_in_place`).
     pub fn append(&mut self, txn: &Transaction, durable: bool) -> StorageResult<()> {
         let record = wal_record::encode(txn)?;
         self.ensure_writer()?;
