@@ -371,6 +371,62 @@ describe.skipIf(!SERVER_URL)('js-sdk.mdx query examples', () => {
     expect(why.proofTrees).toHaveLength(2);
   });
 
+  it('why returns a column of the second joined relation', async () => {
+    const why = await kg.why({
+      select: [Employee.col('name').toAst(), Department.col('budget').toAst()],
+      join: [Employee, Department],
+      on: Employee.col('department').eq(Department.col('name')),
+      where: Employee.col('salary').gt(115000),
+    });
+    expect(why.results.columns).toEqual(['Name', 'Budget']);
+    expect(why.results.toTuples().sort()).toEqual([
+      ['Alice', 1000000],
+      ['Dana', 1000000],
+    ]);
+    expect(why.proofTrees).toHaveLength(2);
+  });
+
+  it('why returns a computed column', async () => {
+    const why = await kg.why({
+      select: [Employee.col('name').toAst()],
+      join: [Employee],
+      where: Employee.col('department').eq('hr'),
+      computed: { doubled: Employee.col('salary').mul(2) },
+    });
+    expect(why.results.columns).toEqual(['Name', 'Doubled']);
+    expect(why.results.toTuples().sort()).toEqual([
+      ['Bob', 180000],
+      ['Eve', 190000],
+    ]);
+  });
+
+  it('why orders and paginates like query', async () => {
+    const opts = {
+      select: [Employee.col('name').toAst()],
+      join: [Employee],
+      orderBy: Employee.col('salary').desc(),
+      limit: 2,
+      offset: 1,
+    };
+    const why = await kg.why(opts);
+    expect(why.results.toTuples()).toEqual((await kg.query(opts)).toTuples());
+    expect(why.results.toTuples()).toEqual([['Alice'], ['Charlie']]);
+    expect(why.proofTrees).toHaveLength(2);
+  });
+
+  it('why orders and limits an aggregate query like query', async () => {
+    const opts = {
+      select: [Employee.col('department').toAst(), count(Employee.col('id'))],
+      join: [Employee],
+      orderBy: Employee.col('department').desc(),
+      limit: 1,
+    };
+    const why = await kg.why(opts);
+    expect(why.results.toTuples()).toEqual((await kg.query(opts)).toTuples());
+    expect(why.results.toTuples()).toEqual([['hr', 2]]);
+    expect(why.proofTrees).toHaveLength(1);
+  });
+
   it('Raw IQL', async () => {
     const result = await kg.execute('?employee(Id, Name, _, Salary, _), Salary > 100000');
     expect(result.rows.map((r) => r[1]).sort()).toEqual(['Alice', 'Charlie', 'Dana']);

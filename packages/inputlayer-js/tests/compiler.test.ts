@@ -196,7 +196,7 @@ describe('compileQuery', () => {
       '?employee(Id, Name, Department, Salary:desc, Active), Department = "hr", limit(4)',
       '?employee(Id, Name, Department, Salary:desc, Active), Salary > 115000, limit(4)',
     ]);
-    expect(plan.merge).toEqual({ order: { variable: 'Salary', descending: true }, limit: 3, offset: 1 });
+    expect(plan.page).toEqual({ order: { variable: 'Salary', descending: true }, limit: 3, offset: 1 });
   });
 
   it('compiles an aggregation query to a program-local rule', () => {
@@ -215,7 +215,7 @@ describe('compileQuery', () => {
         '?il_sdk_agg(Department:asc, CountId, AvgSalary), limit(5)',
     ]);
     expect(plan.outputs.map((o) => o.label)).toEqual(['Department', 'CountId', 'AvgSalary']);
-    expect(plan.explain).toBe(
+    expect(plan.debug).toBe(
       'il_sdk_agg(Department, count<Id>, avg<Salary>) <- employee(Id, Name, Department, Salary, Active)',
     );
   });

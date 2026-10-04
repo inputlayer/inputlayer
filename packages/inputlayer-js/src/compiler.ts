@@ -406,14 +406,16 @@ export interface QueryPlan {
   /** IQL programs to execute; several when an OR condition splits the query. */
   programs: string[];
   /**
-   * The one statement `.debug` and `.why` take: the query of the first
-   * program, or for an aggregate its rule, whose rows are the outputs by
-   * position. They see no rule defined beside it, so an OR split shows its
-   * first branch only.
+   * The one statement `.debug` takes: the query of the first program, or an
+   * aggregate's rule. `.debug` and `.why` see no rule defined beside it, so
+   * an OR split shows its first branch only.
    */
-  explain: string;
-  /** Whether the query aggregates. */
-  aggregate: boolean;
+  debug: string;
+  /**
+   * The rule `.why` takes, and the variable of each of its result columns,
+   * by position.
+   */
+  why: { statement: string; columns: string[] };
   /** Result columns, in select order. */
   outputs: QueryOutput[];
   /**
@@ -425,8 +427,11 @@ export interface QueryPlan {
   goalVars: string[];
   /** Variables of every relation atom; rows from OR branches are deduplicated on them. */
   rowVars: string[];
-  /** Ordering and pagination applied after an OR split merges its branches. */
-  merge?: {
+  /**
+   * Ordering and pagination of the result. The engine applies them to a
+   * single program; the SDK applies them to merged OR branches and to `.why`.
+   */
+  page: {
     order?: { variable: string; descending: boolean };
     limit?: number;
     offset?: number;
@@ -441,6 +446,8 @@ export interface QueryPlan {
 const AGG_RULE = 'il_sdk_agg';
 /** Program-local rule holding the union of an OR split, aggregated by AGG_RULE. */
 const AGG_SOURCE_RULE = 'il_sdk_agg_src';
+/** Name of the rule `.why` evaluates for a query without aggregates. */
+const WHY_RULE = 'il_sdk_why';
 
 /**
  * Compile a query to IQL.
@@ -610,17 +617,26 @@ function compilePlainPlan(
   }
   const head = [`${relations[0].name}(${goal.join(', ')})`, ...atoms.slice(1), ...bindings];
 
+  // The why rule keeps every atom variable, so it derives a row for each
+  // binding the query returns.
+  const whyColumns = [...new Set([...outputs.map((o) => o.variable), ...shape.rowVars])];
+  const whyBody = [...atoms, ...bindings, ...(shape.orBranches?.[0] ?? shape.whereParts)];
   const plan = {
     outputs: uniqueLabels(outputs),
-    aggregate: false,
+    why: { statement: `${WHY_RULE}(${whyColumns.join(', ')}) <- ${whyBody.join(', ')}`, columns: whyColumns },
     goalVars: atomVars[0],
     rowVars: shape.rowVars,
+    page: {
+      order: orderVar !== undefined ? { variable: orderVar, descending: order!.descending } : undefined,
+      limit: shape.limit,
+      offset: shape.offset,
+    },
   };
 
   if (shape.orBranches === undefined) {
     const body = [...head, ...shape.whereParts, ...limitAtom(shape.limit, shape.offset)];
     const program = `?${body.join(', ')}`;
-    return { ...plan, programs: [program], explain: program };
+    return { ...plan, programs: [program], debug: program };
   }
 
   // Each branch returns its own first limit + offset rows in order; the
@@ -632,12 +648,7 @@ function compilePlainPlan(
   return {
     ...plan,
     programs,
-    explain: programs[0],
-    merge: {
-      order: orderVar !== undefined ? { variable: orderVar, descending: order!.descending } : undefined,
-      limit: shape.limit,
-      offset: shape.offset,
-    },
+    debug: programs[0],
   };
 }
 
@@ -709,6 +720,7 @@ function compileAggPlan(
     return v;
   });
   const queryArgs = [...queryVars];
+  let pageOrder: QueryPlan['page']['order'];
   if (order !== undefined) {
     const orderVar = env.getVar(order.column);
     const i = outputs.findIndex((o) => o.variable === orderVar);
@@ -716,6 +728,7 @@ function compileAggPlan(
       throw new Error(`In an aggregate query, orderBy must be a selected column (${order.column.name} is not)`);
     }
     queryArgs[i] = `${queryVars[i]}${order.descending ? ':desc' : ':asc'}`;
+    pageOrder = { variable: queryVars[i], descending: order.descending };
   }
 
   const aggHead = `${AGG_RULE}(${head.join(', ')})`;
@@ -735,11 +748,12 @@ function compileAggPlan(
 
   return {
     programs: [[...rules, query].join('\n')],
-    explain,
-    aggregate: true,
+    debug: explain,
+    why: { statement: explain, columns: queryVars },
     outputs: uniqueLabels(outputs.map((o, i) => ({ label: o.label, variable: queryVars[i] }))),
     goalVars: [],
     rowVars: [],
+    page: { order: pageOrder, limit: shape.limit, offset: shape.offset },
   };
 }
 
