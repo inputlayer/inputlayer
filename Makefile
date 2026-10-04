@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test js-test-live python-sdk-live front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi bench-sessions test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test js-test-live python-sdk-live front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -635,6 +635,12 @@ perf-gate:
 # GENBI_ARGS="--cases priority --repeat 3".
 bench-genbi:
 	./scripts/bench-genbi.sh $(GENBI_ARGS)
+
+# Standing-query cost as sessions grow, on the voice-agent reference pack; see
+# perf-gate/README.md. Options via SESSIONS_ARGS, e.g.
+# SESSIONS_ARGS="--baseline-rev origin/main --sessions 10,100".
+bench-sessions:
+	./scripts/bench-sessions.sh $(SESSIONS_ARGS)
 
 # Lint and unit-test the performance gate tool itself (its own workspace)
 perf-gate-check:

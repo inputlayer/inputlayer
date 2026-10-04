@@ -104,6 +104,7 @@ pub fn run(args: &GenbiArgs) -> Result<ExitCode> {
     let spec = ServerSpec {
         binary: binary.clone(),
         cpus: args.server_cpus.clone(),
+        env: Vec::new(),
     };
     let options = scenario::Options {
         quiet: Duration::from_millis(args.quiet_ms),

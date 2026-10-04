@@ -1,0 +1,114 @@
+// World, written by observation adapters and the watchdog
++shipment(order: string, shipment: string, src_rev: int)
++promised(order: string, due: string, src_rev: int)
++customer_order(user: string, order: string, src_rev: int)
++eta(shipment: string, due: string, src_rev: int, observed: int)
++carrier_note(shipment: string, reason: string, src_rev: int, observed: int)
++source(source: string)
++source_cursor(source: string, partition: string, rev: int)
++source_health(source: string, status: string, until: int)
+
+// Session, written by the intent gate and the session manager
++session(session: string, user: string, status: string)
++utterance_cursor(session: string, last: int)
++goal(session: string, goal: string, kind: string, subject: string)
++requested_date(session: string, goal: string, due: string)
++consent(session: string, goal: string, tool: string, arg: string, utterance: int)
++declined(session: string, goal: string, tool: string, arg: string)
+
+// Speech, written by the speech owner and the pump
++speech_owner(session: string, owner: string, epoch: int)
++speech_until(session: string, until: int)
++playback(session: string, pb: int, goal: string, topic: string, subject: string, value: string, epoch: int, status: string)
++playback_time(session: string, pb: int, completed_at: int)
++playback_text(session: string, pb: int, text: string)
++audible(status: string)
++partial(status: string)
+
+// Work, written by the executor
++lease_owner(session: string, executor: string, epoch: int)
++lease_until(session: string, until: int)
++attempt(session: string, goal: string, tool: string, subject: string, arg: string, episode: int, attempt: string, executor: string, epoch: int, ordinal: int)
++attempt_task(attempt: string, task: string)
++attempt_done(attempt: string, status: string, retryable: string, ready_at: int, detail: string)
++attempt_unknown(attempt: string, revisit_at: int)
++attempt_unconfirmed(attempt: string)
+
+// Policy, written by the deployment credential
++tool_policy(tool: string, mode: string)
++max_attempts(tool: string, n: int)
++kill_switch(tool: string)
++tool_requires(tool: string, source: string)
++topic_priority(topic: string, prio: int)
++topic_source(topic: string, source: string)
++pack_version(name: string, version: string, hash: string)
+
++audible[("playing"), ("completed"), ("interrupted"), ("superseded"), ("uncertain")]
++partial[("interrupted"), ("uncertain")]
++tool_policy[("carrier_check", "auto"), ("reschedule_delivery", "confirm")]
++max_attempts[("carrier_check", 2), ("reschedule_delivery", 1)]
++tool_requires[("reschedule_delivery", "orders")]
++topic_priority[("eta", 2), ("eta_last_known", 2), ("carrier_reason", 2), ("unknown_order", 2), ("clarify", 2), ("confirm", 2), ("action_pending", 3), ("action_unconfirmed", 2), ("action_failed", 2), ("cannot_run", 2), ("answer", 5)]
++topic_source[("eta", "carrier")]
++source[("carrier"), ("orders")]
++pack_version("delivery_support", "2026.10.3", "sha256:3c1f")
+
+// Knowledge and integrity
++late(O) <- shipment(O, S, _), eta(S, D, _, _), promised(O, P, _), D > P
++on_time(O) <- shipment(O, S, _), eta(S, D, _, _), promised(O, P, _), D <= P
++eta_conflict(S) <- eta(S, D1, R1, A1), eta(S, D2, R2, A2), D1 != D2
++note_conflict(S) <- carrier_note(S, A, R1, T1), carrier_note(S, B, R2, T2), A != B
++policy_conflict(T) <- tool_policy(T, M1), tool_policy(T, M2), M1 != M2
++fresh(Src) <- source_health(Src, "ok", _)
++stale(Src) <- source_health(Src, St, _), St != "ok"
++stale(Src) <- source(Src), !source_health(Src, _, _)
++authorized(Sess, O) <- session(Sess, U, "open"), customer_order(U, O, _)
++latest_note_at(S, max<At>) <- carrier_note(S, _, _, At)
++note_covers(S) <- latest_note_at(S, NoteAt), eta(S, _, _, EtaAt), NoteAt >= EtaAt
+
+// Claims
++claim(Sess, G, "eta", O, D) <- goal(Sess, G, "delivery_status", O), authorized(Sess, O), shipment(O, S, _), eta(S, D, _, _), !eta_conflict(S), topic_source("eta", Src), fresh(Src)
++claim(Sess, G, "eta", O, "unknown") <- goal(Sess, G, "delivery_status", O), authorized(Sess, O), shipment(O, S, _), !eta(S, _, _, _), topic_source("eta", Src), fresh(Src)
++claim(Sess, G, "eta_last_known", O, D) <- goal(Sess, G, "delivery_status", O), authorized(Sess, O), shipment(O, S, _), eta(S, D, _, _), !eta_conflict(S), topic_source("eta", Src), stale(Src)
++claim(Sess, G, "eta_last_known", O, "unknown") <- goal(Sess, G, "delivery_status", O), authorized(Sess, O), shipment(O, S, _), !eta(S, _, _, _), topic_source("eta", Src), stale(Src)
++claim(Sess, G, "carrier_reason", O, Why) <- goal(Sess, G, "delivery_status", O), authorized(Sess, O), shipment(O, S, _), late(O), carrier_note(S, Why, _, _), !note_conflict(S)
++claim(Sess, G, "unknown_order", O, O) <- goal(Sess, G, "delivery_status", O), session(Sess, _, "open"), !authorized(Sess, O)
++claim(Sess, G, "clarify", "order", "which") <- goal(Sess, G, "clarify_order", _), session(Sess, _, "open")
++claim(Sess, G, "confirm", "reschedule_delivery", D) <- goal(Sess, G, "reschedule", O), authorized(Sess, O), requested_date(Sess, G, D), tool_policy("reschedule_delivery", "confirm"), !consent(Sess, G, "reschedule_delivery", D, _), !declined(Sess, G, "reschedule_delivery", D)
++claim(Sess, G, "answer", Q, "") <- goal(Sess, G, "open_question", Q), session(Sess, _, "open")
++unconfirmed_need(Sess, G, T, Subj, Arg, Ep) <- attempt(Sess, G, T, Subj, Arg, Ep, Id, _, _, _), attempt_unconfirmed(Id)
++claim(Sess, G, "action_pending", T, Subj) <- work_intent(Sess, G, T, Subj, Arg, Ep), satisfied(Sess, G, T, Subj, Arg, Ep), !unconfirmed_need(Sess, G, T, Subj, Arg, Ep)
++claim(Sess, G, "action_unconfirmed", T, Subj) <- work_intent(Sess, G, T, Subj, Arg, Ep), unconfirmed_need(Sess, G, T, Subj, Arg, Ep)
++claim(Sess, G, "action_failed", T, Subj) <- work_intent(Sess, G, T, Subj, Arg, Ep), exhausted(Sess, G, T, Subj, Arg, Ep)
++claim(Sess, G, "cannot_run", T, Subj) <- work_intent(Sess, G, T, Subj, Arg, Ep), !tool_ready(T)
+
+// Heard, asked, and speech
++heard_pb(Sess, G, T, Subj, max<Pb>) <- playback(Sess, Pb, G, T, Subj, _, _, St), audible(St)
++heard(Sess, G, T, Subj, V) <- playback(Sess, Pb, G, T, Subj, V, _, _), heard_pb(Sess, G, T, Subj, Pb)
++incomplete(Sess, G, T, Subj) <- playback(Sess, Pb, G, T, Subj, _, _, St), heard_pb(Sess, G, T, Subj, Pb), partial(St)
++asked_latest(Sess, G, max<Pb>) <- playback(Sess, Pb, G, "confirm", _, _, _, "completed")
++asked(Sess, G, T, A, Pb) <- playback(Sess, Pb, G, "confirm", T, A, _, "completed"), asked_latest(Sess, G, Pb)
++speech(Sess, G, T, Subj, V, "supported", 9) <- claim(Sess, G, T, Subj, V)
++speech(Sess, G, T, Subj, V, "state", P) <- claim(Sess, G, T, Subj, V), !heard(Sess, G, T, Subj, _), topic_priority(T, P)
++speech(Sess, G, T, Subj, V, "correction", P1) <- claim(Sess, G, T, Subj, V), heard(Sess, G, T, Subj, H), H != V, topic_priority(T, P), P1 = P - 1
++speech(Sess, G, T, Subj, V, "restate", P2) <- claim(Sess, G, T, Subj, V), heard(Sess, G, T, Subj, V), incomplete(Sess, G, T, Subj), topic_priority(T, P), P2 = P + 1
+
+// Work
++work_intent(Sess, G, "carrier_check", S, "", Rev) <- goal(Sess, G, "delivery_status", O), authorized(Sess, O), shipment(O, S, _), late(O), eta(S, _, Rev, _), !eta_conflict(S), !note_covers(S)
++work_intent(Sess, G, "reschedule_delivery", O, D, Utt) <- goal(Sess, G, "reschedule", O), authorized(Sess, O), requested_date(Sess, G, D), consent(Sess, G, "reschedule_delivery", D, Utt), promised(O, P, _), P != D
++unresolved(Sess, G, T, Subj, Arg, Ep, Id) <- attempt(Sess, G, T, Subj, Arg, Ep, Id, _, _, _), !attempt_done(Id, _, _, _, _)
++satisfied(Sess, G, T, Subj, Arg, Ep) <- attempt(Sess, G, T, Subj, Arg, Ep, Id, _, _, _), attempt_done(Id, "ok", _, _, _)
++failures(Sess, G, T, Subj, Arg, Ep, count<Id>) <- attempt(Sess, G, T, Subj, Arg, Ep, Id, _, _, _), attempt_done(Id, "failed", _, _, _)
++exhausted(Sess, G, T, Subj, Arg, Ep) <- failures(Sess, G, T, Subj, Arg, Ep, N), max_attempts(T, M), N >= M
++exhausted(Sess, G, T, Subj, Arg, Ep) <- attempt(Sess, G, T, Subj, Arg, Ep, Id, _, _, _), attempt_done(Id, "failed", "no", _, _)
++tool_enabled(T) <- tool_policy(T, M), M != "disabled", !tool_policy(T, "disabled"), !kill_switch(T), !policy_conflict(T)
++tool_ready(T) <- tool_enabled(T), !tool_requires(T, _)
++tool_ready(T) <- tool_enabled(T), tool_requires(T, Src), fresh(Src)
++eligible(Sess, G, T, Subj, Arg, Ep) <- work_intent(Sess, G, T, Subj, Arg, Ep), tool_ready(T), !unresolved(Sess, G, T, Subj, Arg, Ep, _), !satisfied(Sess, G, T, Subj, Arg, Ep), !exhausted(Sess, G, T, Subj, Arg, Ep)
++run_ok(Id) <- attempt(Sess, G, T, Subj, Arg, Ep, Id, _, _, _), unresolved(Sess, G, T, Subj, Arg, Ep, Id), work_intent(Sess, G, T, Subj, Arg, Ep), tool_enabled(T)
++cancel_due(Id) <- unresolved(_, _, _, _, _, _, Id), !run_ok(Id)
++work("start", Sess, G, T, Subj, Arg, Ep, "") <- eligible(Sess, G, T, Subj, Arg, Ep)
++work("cancel", Sess, G, T, Subj, Arg, Ep, Id) <- attempt(Sess, G, T, Subj, Arg, Ep, Id, _, _, _), cancel_due(Id)
++work("reconcile", Sess, G, T, Subj, Arg, Ep, Id) <- attempt(Sess, G, T, Subj, Arg, Ep, Id, _, Epoch, _), unresolved(Sess, G, T, Subj, Arg, Ep, Id), lease_owner(Sess, _, Cur), Epoch < Cur
++work("reconcile", Sess, G, T, Subj, Arg, Ep, Id) <- attempt(Sess, G, T, Subj, Arg, Ep, Id, _, _, _), attempt_unknown(Id, _), !attempt_done(Id, _, _, _, _)
++work("reconcile", Sess, G, T, Subj, Arg, Ep, Id) <- attempt(Sess, G, T, Subj, Arg, Ep, Id, _, _, _), attempt_done(Id, "ok", _, _, _), work_intent(Sess, G, T, Subj, Arg, Ep), !attempt_unconfirmed(Id)

@@ -257,6 +257,57 @@ result mismatches and unsupported checks. `--fault drop-retractions` (or
 retractions must then fail, which proves the checks catch a broken delta
 path.
 
+## Session-scale benchmark
+
+`make bench-sessions` measures what standing queries cost as the sessions on
+one knowledge graph grow. The workload is the voice-agent reference
+architecture (`content/blog/building-a-voice-agent-that-knows.mdx`). It uses the
+Appendix A rule pack verbatim (`src/sessions/pack.iql`) and repeats the
+method of the architecture's hostile review. It is a scaling benchmark, not a
+baseline comparison; it does not replace `make perf-gate`.
+
+```bash
+make bench-sessions                                          # 1,10,25,50,100,200 sessions
+make bench-sessions SESSIONS_ARGS="--baseline-rev origin/main"   # before/after, same host
+make bench-sessions SESSIONS_ARGS="--sessions 100 --max-delta-p99-ms 100"  # voice budget
+scripts/bench-sessions.sh --help
+```
+
+Each size runs on a fresh server with the gate's configuration. The one extra
+setting is no cap on unauthenticated connections per address (hundreds of
+local sockets). Session connections authenticate with an API key, because
+concurrent password logins from one address are throttled by design.
+
+- **World.** Per session: an order, its shipment with an on-time ETA, an open
+  session with a `delivery_status` goal, a speech owner and an executor lease.
+- **Subscriptions.** Every session, on its own connection, subscribes to the
+  article's speech query `?speech("s-i", ...), speech_owner("s-i", "sp-i", 1)`.
+  One executor connection subscribes to `work` for all sessions. With
+  `--mode shared-view`, one connection instead subscribes to the unbound
+  speech query and routes rows by session in the client: the review's
+  comparison point.
+- **Probe.** An adapter connection replaces a random session's ETA (the
+  article's section 4.1 revision) and times the commit reply and the arrival
+  of that session's delta. The delta must carry the new ETA as a `state`
+  row. Without load, 40 probes run 20 ms apart. Then a probe runs every
+  150 ms for `--load-secs`, after a 2 s warm-up.
+- **Load.** Every session commits a receipt (`playback`, `playback_time`)
+  about once per second (`--rate`), with ±50% jitter, on its own connection.
+  The receipts name a goal no claim reads. Each write is in every speech
+  query's dependencies yet changes no result, which isolates the cost that
+  sessions impose on each other.
+- **Measured.** Write-to-delta and commit latency percentiles with and
+  without load, receipt commit latency, achieved receipts per second, and
+  server CPU (user plus system, from `/proc`) over the loaded window, plus
+  peak RSS.
+
+A run fails when a probe's delta does not arrive within 10 s, when any delta
+arrives that no probe caused, or on an error. `--max-delta-p99-ms`
+additionally fails the working tree's run at any size up to
+`--budget-sessions` whose loaded write-to-delta p99 is over budget.
+`target/bench-sessions/latest/` holds `result.json` (schema
+`inputlayer-perf-gate/sessions/v1`) and `summary.md`.
+
 ## Extending
 
 New fixtures go in `src/fixtures/`. Add a variant to `Fixture`, add its
