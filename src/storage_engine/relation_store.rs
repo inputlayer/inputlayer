@@ -99,7 +99,7 @@ impl RelationStore {
         &self.relations
     }
 
-    /// Estimated bytes all stored tuples occupy; see [`stored_bytes`].
+    /// Estimated bytes all stored tuples occupy; see `stored_bytes`.
     pub fn bytes(&self) -> usize {
         self.bytes
     }

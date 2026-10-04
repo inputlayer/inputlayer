@@ -33,8 +33,8 @@ pub enum ErrorCode {
     OutcomeUnknown,
     /// The request would go over a memory limit: its query held more than
     /// the per-query limit or grew past the server's query memory budget, or
-    /// its writes would grow the knowledge graph past
-    /// its memory budget. It was refused and nothing was applied.
+    /// its writes would grow the knowledge graph past its memory budget. It
+    /// was refused and nothing was applied.
     ResourceExhausted,
 }
 
