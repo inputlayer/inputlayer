@@ -41,6 +41,7 @@ import {
   type ErrorResponse,
   type NoticeResponse,
   type NotificationResponse,
+  type Params,
   type PushMessage,
   type ResultResponse,
   type ResultStartResponse,
@@ -48,6 +49,7 @@ import {
   serializeMessage,
   deserializeMessage,
   isPush,
+  PARAMS_PROTOCOL_VERSION,
 } from './protocol.js';
 import {
   AuthenticationError,
@@ -115,6 +117,11 @@ export interface ConnectionOptions {
 
 /** Per-call options. */
 export interface ExecuteOptions {
+  /**
+   * Values of the program's `$name` references, sent beside its text and
+   * bound by the engine without being parsed (protocol version 4).
+   */
+  params?: Params;
   /** Deadline in milliseconds; overrides `defaultTimeoutMs` (0 for none). */
   timeoutMs?: number;
   /** Abort to cancel the call: `CancelledError` unless it was already committing. */
@@ -178,6 +185,7 @@ interface Stream {
 
 interface Call {
   program: string;
+  params?: Params;
   /** `performance.now()` at the call's deadline. */
   expiresAt?: number;
   signal?: AbortSignal;
@@ -235,6 +243,7 @@ export class Connection {
   /** Ends the reconnect backoff early, when the connection is closed. */
   private wake?: () => void;
   private _sessionId?: string;
+  private _protocolVersion?: number;
   private _serverVersion?: string;
   private _role?: string;
   private _currentKg?: string;
@@ -461,6 +470,7 @@ export class Connection {
     if (response.type === 'authenticated') {
       this._sessionId = response.session_id;
       this._serverVersion = response.version;
+      this._protocolVersion = response.protocol_version;
       this._role = response.role;
       this._currentKg = response.knowledge_graph;
       this._boundKg = response.knowledge_graph;
@@ -526,6 +536,7 @@ export class Connection {
       const timeoutMs = opts.timeoutMs ?? this.defaultTimeoutMs;
       const call: Call = {
         program,
+        params: opts.params !== undefined && Object.keys(opts.params).length > 0 ? opts.params : undefined,
         signal: opts.signal,
         resolve,
         reject: (error) => reject(withIql(error, program)),
@@ -549,11 +560,23 @@ export class Connection {
   private pump(): void {
     while (this.state === 'open' && this.queue.length > 0 && this.inFlight.size < this.maxInFlight) {
       const call = this.queue.shift()!;
+      if (call.params !== undefined && (this._protocolVersion ?? 0) < PARAMS_PROTOCOL_VERSION) {
+        // An older engine ignores params and fails on the `$name` references.
+        this.settle(call);
+        call.reject(
+          new ConnectionError(
+            `The engine speaks /ws protocol ${this._protocolVersion ?? 'unknown'}; ` +
+              `parameters need version ${PARAMS_PROTOCOL_VERSION}. Upgrade the engine.`,
+          ),
+        );
+        continue;
+      }
       const id = this.newId('r');
       call.id = id;
       call.stream = undefined;
       this.inFlight.set(id, call);
       const msg: ClientMessage = { type: 'execute', id, program: call.program };
+      if (call.params !== undefined) msg.params = call.params;
       if (call.expiresAt !== undefined) {
         msg.timeout_ms = Math.max(1, Math.ceil(call.expiresAt - performance.now()));
       }

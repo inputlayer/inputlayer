@@ -7,7 +7,7 @@ export { Timestamp } from './types.js';
 export type { Vector, VectorInt8, IQLType, FieldValue, Fact, ColumnDef, RelationSchema } from './types.js';
 
 // Relation system
-export { relation, any, RelationDef, compileValue, resolveRelationName, getColumns, getColumnTypes } from './relation.js';
+export { relation, any, RelationDef, compileValue, compileLiteral, withParams, resolveRelationName, getColumns, getColumnTypes } from './relation.js';
 export type { ColumnTypes, RowOf, ValueOf, Binding } from './relation.js';
 
 // Programs, guards and claims
@@ -182,9 +182,12 @@ export type {
   RuleTiming,
   ErrorCode,
   StatementError,
+  ParamValue,
+  Params,
 } from './protocol.js';
 export {
   PROTOCOL_VERSION,
+  PARAMS_PROTOCOL_VERSION,
   serializeMessage,
   deserializeMessage,
   isPush,

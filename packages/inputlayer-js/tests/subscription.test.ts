@@ -80,7 +80,7 @@ class Engine {
     if (msg.type === 'login' || msg.type === 'authenticate') {
       send({
         type: 'authenticated', session_id: 's', knowledge_graph: 'kg', version: 'test',
-        role: 'admin', protocol_version: 3, stream_epoch: 'e1',
+        role: 'admin', protocol_version: 4, stream_epoch: 'e1',
       });
       return;
     }
