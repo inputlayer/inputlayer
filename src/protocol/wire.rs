@@ -336,8 +336,12 @@ pub struct QueryResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub statements: Vec<StatementCounts>,
     /// Revision the program's committed writes are visible at: the revision
-    /// standing-query pushes carry. Present only when the program's writes
-    /// to persistent state committed.
+    /// standing-query pushes carry. Present only when the program changed
+    /// persistent state of a knowledge graph: committed fact, schema and rule
+    /// writes, `.rel drop`, `.clear prefix`, `.index create|drop|rebuild`,
+    /// `.kg create` and `.ontology install|remove|upgrade`; with several, the
+    /// last one's. Session schemas, facts and rules, queries, and writes that
+    /// were rolled back carry none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<u64>,
 }
