@@ -38,7 +38,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwapOption;
 use futures_util::future::BoxFuture;
@@ -320,14 +320,11 @@ impl Partitions {
 
 /// One evaluation of a family's lifted query, at one revision.
 struct Round {
-    snapshot: Arc<KnowledgeGraphSnapshot>,
+    revision: u64,
+    /// The snapshot to evaluate, until its evaluation takes it: the latest
+    /// round of an idle family must not keep old data alive.
+    snapshot: ArcSwapOption<KnowledgeGraphSnapshot>,
     outcome: OnceCell<Result<Arc<Partitions>, String>>,
-}
-
-impl Round {
-    fn revision(&self) -> u64 {
-        self.snapshot.revision
-    }
 }
 
 /// The views sharing one lifted query.
@@ -375,15 +372,13 @@ impl Family {
     /// round when it is at least as new, else a new round at `snapshot`.
     fn round_for(&self, snapshot: Arc<KnowledgeGraphSnapshot>) -> Arc<Round> {
         let fresh = Arc::new(Round {
-            snapshot,
+            revision: snapshot.revision,
+            snapshot: ArcSwapOption::from(Some(snapshot)),
             outcome: OnceCell::new(),
         });
         let mut current = self.latest.load_full();
         loop {
-            if let Some(round) = current
-                .as_ref()
-                .filter(|r| r.revision() >= fresh.revision())
-            {
+            if let Some(round) = current.as_ref().filter(|r| r.revision >= fresh.revision) {
                 return Arc::clone(round);
             }
             let previous = self
@@ -404,7 +399,19 @@ impl Family {
     async fn outcome(&self, round: &Round) -> Result<Arc<Partitions>, String> {
         round
             .outcome
-            .get_or_init(|| self.evaluate(Arc::clone(&round.snapshot)))
+            .get_or_init(|| async {
+                // An evaluation cancelled after taking the snapshot leaves
+                // none: a newer one serves the round's readers as well.
+                let snapshot = match round.snapshot.swap(None) {
+                    Some(snapshot) => snapshot,
+                    None => self
+                        .handler
+                        .get_storage()
+                        .get_snapshot_for(&self.knowledge_graph)
+                        .map_err(|e| format!("Knowledge graph '{}': {e}", self.knowledge_graph))?,
+                };
+                self.evaluate(snapshot).await
+            })
             .await
             .clone()
     }
@@ -431,8 +438,13 @@ impl Family {
                 return Err(e);
             }
         };
+        let partitioning = Instant::now();
+        let parts = Partitions::build(&self.shape, ran.rows).inspect_err(|e| {
+            debug!(query = %self.shape.query, error = %e, "subscription_family_stops_sharing");
+            self.stop_sharing();
+        })?;
         let own = self.own_cost_us.load(Ordering::Relaxed);
-        let shared = ran.cost.as_micros() as u64;
+        let shared = (ran.cost + partitioning.elapsed()).as_micros() as u64;
         let bindings = self.bindings.load(Ordering::Relaxed) as u64;
         let worth = own
             .saturating_mul(MAX_COST_RATIO)
@@ -447,10 +459,6 @@ impl Family {
             );
             self.stop_sharing();
         }
-        let parts = Partitions::build(&self.shape, ran.rows).inspect_err(|e| {
-            debug!(query = %self.shape.query, error = %e, "subscription_family_stops_sharing");
-            self.stop_sharing();
-        })?;
         Ok(Arc::new(Partitions {
             revision,
             rules,

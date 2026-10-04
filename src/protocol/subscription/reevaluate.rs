@@ -174,7 +174,8 @@ pub struct QueryRows {
     pub columns: Option<Vec<String>>,
     /// Every row, as the engine returned it (distinct as engine values).
     pub rows: Vec<Row>,
-    /// Engine time of the evaluation (excluding waits for a compute permit).
+    /// Engine time of the evaluation (excluding waits for a compute permit),
+    /// plus converting its rows.
     pub cost: Duration,
 }
 
@@ -198,10 +199,11 @@ pub async fn run_query(
             handler.config().storage.performance.max_result_rows,
         ));
     }
-    let cost = result.timing_breakdown.as_ref().map_or_else(
+    let engine = result.timing_breakdown.as_ref().map_or_else(
         || started.elapsed(),
         |timing| Duration::from_micros(timing.total_us),
     );
+    let converting = Instant::now();
     let columns =
         (!result.schema.is_empty()).then(|| result.schema.into_iter().map(|c| c.name).collect());
     let rows = result
@@ -212,7 +214,7 @@ pub async fn run_query(
     Ok(QueryRows {
         columns,
         rows,
-        cost,
+        cost: engine + converting.elapsed(),
     })
 }
 

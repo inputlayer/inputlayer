@@ -138,3 +138,83 @@ fn an_ambiguous_row_fails_the_partition() {
     let rows = vec![vec![json!("x"), json!(1e17), json!(1)]];
     assert!(Partitions::build(&shape, rows).is_err());
 }
+
+mod rounds {
+    use std::sync::Arc;
+
+    use serde_json::json;
+    use tempfile::TempDir;
+
+    use super::super::{Families, MemberQuery};
+    use super::lifted;
+    use crate::protocol::subscription::{
+        ReevaluatingQuery, Refresh, StandingQuery, SubscriptionMetrics,
+    };
+    use crate::protocol::Handler;
+    use crate::Config;
+
+    const KG: &str = "rounds";
+
+    fn handler() -> (Arc<Handler>, TempDir) {
+        let tmp = TempDir::new().unwrap();
+        let mut config = Config::default();
+        config.storage.data_dir = tmp.path().join("data");
+        let handler = Arc::new(Handler::from_config(config).unwrap());
+        handler.get_storage().create_knowledge_graph(KG).unwrap();
+        (handler, tmp)
+    }
+
+    async fn write(handler: &Handler, program: &str) {
+        handler
+            .execute_program(None, Some(KG.to_string()), program.to_string(), None)
+            .await
+            .unwrap();
+    }
+
+    fn member(
+        families: &Families,
+        handler: &Arc<Handler>,
+        metrics: &Arc<SubscriptionMetrics>,
+        query: &str,
+    ) -> MemberQuery {
+        let own = ReevaluatingQuery::new(Arc::clone(handler), KG, query).unwrap();
+        families.member(own, lifted(query).unwrap(), metrics)
+    }
+
+    fn inserted(refresh: &Refresh) -> Vec<serde_json::Value> {
+        refresh.inserted.iter().map(|row| json!(row)).collect()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn views_share_a_round_that_lets_its_snapshot_go() {
+        let (handler, _tmp) = handler();
+        write(&handler, "+item[(\"s1\", 1), (\"s2\", 2)]").await;
+        let families = Families::default();
+        let metrics = Arc::new(SubscriptionMetrics::default());
+        let mut one = member(&families, &handler, &metrics, r#"?item("s1", X)"#);
+        let mut two = member(&families, &handler, &metrics, r#"?item("s2", X)"#);
+        // First refreshes evaluate each view's own query.
+        assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 1])]);
+        assert_eq!(inserted(&two.refresh().await.unwrap()), [json!(["s2", 2])]);
+        assert_eq!(metrics.shared_evaluations(), 0);
+
+        write(&handler, "+item[(\"s1\", 3), (\"s2\", 4)]").await;
+        let first = one.refresh().await.unwrap();
+        let second = two.refresh().await.unwrap();
+        assert_eq!(inserted(&first), [json!(["s1", 3])]);
+        assert_eq!(inserted(&second), [json!(["s2", 4])]);
+        assert_eq!(first.revision, second.revision);
+        assert_eq!(metrics.shared_evaluations(), 1, "one round for both views");
+        let round = one.family.latest.load_full().unwrap();
+        assert!(
+            round.snapshot.load().is_none(),
+            "the evaluated round dropped its snapshot"
+        );
+
+        // A view leaving the family leaves one binding: nothing to share.
+        drop(two);
+        write(&handler, "+item(\"s1\", 5)").await;
+        assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 5])]);
+        assert_eq!(metrics.shared_evaluations(), 1);
+    }
+}
