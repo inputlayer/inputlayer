@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test js-test-live front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test js-test-live python-sdk-live front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -451,6 +451,35 @@ js-test-live:
 		INPUTLAYER_TEST_USER=admin \
 		INPUTLAYER_TEST_PASSWORD=admin \
 		npx vitest run tests/docs-queries.integration.test.ts tests/integration.test.ts; \
+	TEST_EXIT=$$?; \
+	cd - > /dev/null; \
+	kill $$SERVER_PID 2>/dev/null || true; \
+	wait $$SERVER_PID 2>/dev/null || true; \
+	rm -rf $$DATA_DIR; \
+	exit $$TEST_EXIT
+
+# python-sdk-live runs every query example in the Python SDK guide
+# (docs/content/docs/guides/python-sdk.mdx) against a live server, with the
+# pins of the SDK's query compile rules, so a query form the engine rejects
+# fails here rather than in a user's hands.
+PY_LIVE_PORT ?= 8092
+python-sdk-live:
+	@cargo build --release --bin inputlayer-server
+	@cd packages/inputlayer-py && uv sync --extra dev
+	@DATA_DIR=$$(mktemp -d -t il-py-sdk-live-XXXXXX); \
+	INPUTLAYER_ADMIN_PASSWORD=admin ./target/release/inputlayer-server \
+		--host 127.0.0.1 --data-dir $$DATA_DIR --port $(PY_LIVE_PORT) \
+		> /tmp/il_py_sdk_live_server.log 2>&1 & \
+	SERVER_PID=$$!; \
+	for i in $$(seq 1 40); do \
+		if curl -sf http://127.0.0.1:$(PY_LIVE_PORT)/health > /dev/null 2>&1; then break; fi; \
+		sleep 0.5; \
+	done; \
+	cd packages/inputlayer-py && \
+		INPUTLAYER_TEST_SERVER=ws://127.0.0.1:$(PY_LIVE_PORT)/ws \
+		INPUTLAYER_TEST_USER=admin \
+		INPUTLAYER_TEST_PASSWORD=admin \
+		uv run --extra dev pytest tests/docs_queries_live.py -v; \
 	TEST_EXIT=$$?; \
 	cd - > /dev/null; \
 	kill $$SERVER_PID 2>/dev/null || true; \

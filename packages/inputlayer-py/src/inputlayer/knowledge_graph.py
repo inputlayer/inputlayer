@@ -12,12 +12,12 @@ from inputlayer._ast import Column as AstColumn
 from inputlayer._proxy import ColumnProxy, RelationProxy, RelationRef
 from inputlayer.auth import AclEntry
 from inputlayer.compiler import (
-    AggCompiled,
+    QueryPlan,
     compile_bulk_insert,
     compile_conditional_delete,
     compile_delete,
     compile_insert,
-    compile_query,
+    compile_query_plan,
     compile_rule,
     compile_schema,
 )
@@ -56,37 +56,6 @@ def _column_relation_class(expr: Any) -> type | None:
             if Relation._resolve_name(grand) == rel_name:
                 return grand
     return None
-
-
-def _resolve_sort_column(
-    order_ast: Any, columns: list[str]
-) -> tuple[str | None, bool]:
-    """Resolve an ``order_by`` AST to a (result_column, descending) pair.
-
-    Returns ``(None, False)`` if the column cannot be located in the
-    result set, in which case the caller should leave the rows alone.
-    """
-    descending = False
-    target: AstColumn | None = None
-    if isinstance(order_ast, OrderedColumn):
-        descending = order_ast.descending
-        if isinstance(order_ast.column, AstColumn):
-            target = order_ast.column
-    elif isinstance(order_ast, AstColumn):
-        target = order_ast
-    if target is None:
-        return None, descending
-    # Engine returns either schema-column casing or the capitalized variable
-    # form, depending on whether computed expressions are present. Try
-    # both before giving up.
-    candidates = [target.name, target.name[:1].upper() + target.name[1:]]
-    for cand in candidates:
-        if cand in columns:
-            return cand, descending
-    lower_lookup = {c.lower(): c for c in columns}
-    if target.name.lower() in lower_lookup:
-        return lower_lookup[target.name.lower()], descending
-    return None, descending
 
 
 # ── Data classes ──────────────────────────────────────────────────────
@@ -307,10 +276,9 @@ class KnowledgeGraph:
     # ── Schema ────────────────────────────────────────────────────────
 
     async def define(self, *relations: type[Relation]) -> None:
-        """Deploy schema definitions. Idempotent."""
-        for rel in relations:
-            iql = compile_schema(rel)
-            await self._execute(iql)
+        """Deploy schema definitions in one program. Idempotent."""
+        if relations:
+            await self._execute("\n".join(compile_schema(rel) for rel in relations))
 
     async def relations(self) -> list[RelationInfo]:
         """List all relations in this KG.
@@ -410,9 +378,8 @@ class KnowledgeGraph:
             condition = where(proxy)
             iql = compile_conditional_delete(rel_cls, condition)
         elif isinstance(facts, list):
-            for fact in facts:
-                iql = compile_delete(fact)
-                await self._execute(iql)
+            if facts:
+                await self._execute("\n".join(compile_delete(fact) for fact in facts))
             return DeleteResult(count=len(facts))
         elif isinstance(facts, Relation):
             iql = compile_delete(facts)
@@ -435,10 +402,58 @@ class KnowledgeGraph:
         offset: int | None = None,
         **computed: Expr,
     ) -> ResultSet:
-        """Query the knowledge graph."""
-        # Convert ColumnProxy to AST
-        ast_select = []
-        relations = join or []
+        """Query the knowledge graph.
+
+        One call sends one program. The result has the selected columns in
+        select order, labelled by column name (computed columns by their
+        keyword, aggregates as ``<func>_<column>``); a projection is a set.
+        Ordering and pagination run in the engine.
+        """
+        plan, relation_cls = self._plan(
+            *select, join=join, on=on, where=where, order_by=order_by,
+            limit=limit, offset=offset, **computed,
+        )
+        result = await self._execute(plan.program)
+        rows = plan.shape(result.rows)
+        reshaped = len(rows) != len(result.rows)
+        rs = ResultSet(
+            columns=plan.labels,
+            rows=rows,
+            row_count=len(rows),
+            total_count=(
+                len(rows)
+                if plan.dedupe and plan.limit is None and plan.offset is None
+                else result.total_count
+            ),
+            truncated=result.truncated,
+            execution_time_ms=result.execution_time_ms,
+            row_provenance=None if reshaped else result.row_provenance,
+            timing_breakdown=result.timing_breakdown,
+            _relation_cls=relation_cls,
+        )
+        if result.metadata:
+            rs.has_ephemeral = result.metadata.get("has_ephemeral", False)
+            rs.ephemeral_sources = result.metadata.get("ephemeral_sources", [])
+            rs.warnings = result.metadata.get("warnings", [])
+        return rs
+
+    def _plan(
+        self,
+        *select: Any,
+        join: list[type[Relation] | RelationRef] | None = None,
+        on: Callable | None = None,
+        where: Callable | None = None,
+        order_by: ColumnProxy | OrderedColumn | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        **computed: Any,
+    ) -> tuple[QueryPlan, type | None]:
+        """Compile the arguments of ``query``, ``debug`` and ``why`` alike.
+
+        Returns the plan and, when the query selects one whole relation and
+        nothing else, that relation's class for typed rows.
+        """
+        relations: list[type[Relation] | RelationRef] = list(join or [])
 
         def _maybe_add_relation(cls: type | None) -> None:
             if cls is None:
@@ -451,6 +466,13 @@ class KnowledgeGraph:
                 return
             relations.append(cls)
 
+        def _add_agg_relations(agg: AggExpr) -> None:
+            # An aggregate's columns name their relation only; join it.
+            for col in (agg.column, agg.order_column, *agg.passthrough):
+                if col is not None:
+                    _maybe_add_relation(_column_relation_class(col))
+
+        ast_select: list[Any] = []
         for s in select:
             if isinstance(s, ColumnProxy):
                 ast_select.append(s._to_ast())
@@ -460,63 +482,38 @@ class KnowledgeGraph:
                 _maybe_add_relation(s)
             elif isinstance(s, AggExpr):
                 ast_select.append(s)
-                # Aggregates wrap a column - if the column came from a
-                # Relation class proxy, auto-add that relation to the
-                # join list so the body atom is included.
-                if s.column is not None:
-                    _agg_cls = _column_relation_class(s.column)
-                    _maybe_add_relation(_agg_cls)
+                _add_agg_relations(s)
             else:
                 ast_select.append(s)
 
-        # Convert computed columns and harvest any embedded Relation refs.
-        ast_computed = {}
+        ast_computed: dict[str, Expr] = {}
         for k, v in computed.items():
             if isinstance(v, ColumnProxy):
                 ast_computed[k] = v._to_ast()
                 _maybe_add_relation(v.relation_cls)
             elif isinstance(v, AggExpr):
                 ast_computed[k] = v
-                if v.column is not None:
-                    _maybe_add_relation(_column_relation_class(v.column))
+                _add_agg_relations(v)
             else:
                 ast_computed[k] = v
 
-        # Build on condition
-        on_condition = None
-        if on and relations:
-            proxies = [
-                RelationProxy(
-                    r.relation_name if isinstance(r, RelationRef) else Relation._resolve_name(r),
-                    ref_alias=r.alias if isinstance(r, RelationRef) else None,
-                )
-                for r in relations
-            ]
-            on_condition = on(*proxies)
+        proxies = [
+            RelationProxy(
+                r.relation_name if isinstance(r, RelationRef) else Relation._resolve_name(r),
+                ref_alias=r.alias if isinstance(r, RelationRef) else None,
+            )
+            for r in relations
+        ]
+        on_condition = on(*proxies) if on and relations else None
+        where_condition = where(*proxies) if where and relations else None
 
-        # Build where condition
-        where_condition = None
-        if where and relations:
-            proxies = [
-                RelationProxy(
-                    r.relation_name if isinstance(r, RelationRef) else Relation._resolve_name(r),
-                    ref_alias=r.alias if isinstance(r, RelationRef) else None,
-                )
-                for r in relations
-            ]
-            where_condition = where(*proxies)
+        order_ast: Expr | None = None
+        if isinstance(order_by, ColumnProxy):
+            order_ast = order_by._to_ast()
+        elif order_by is not None:
+            order_ast = order_by
 
-        # Convert order_by
-        order_ast = None
-        if order_by is not None:
-            if isinstance(order_by, ColumnProxy):
-                order_ast = order_by.asc()
-            elif isinstance(order_by, OrderedColumn):
-                order_ast = order_by
-            else:
-                order_ast = order_by
-
-        compiled = compile_query(
+        plan = compile_query_plan(
             *ast_select,
             relations=relations,
             on_condition=on_condition,
@@ -526,68 +523,12 @@ class KnowledgeGraph:
             offset=offset,
             computed=ast_computed or None,
         )
-
-        if isinstance(compiled, AggCompiled):
-            # Aggregate query: register a temporary session rule, query
-            # it, and best-effort drop it. The rule lives in the session
-            # so a leak only persists for the lifetime of the connection.
-            await self._execute(compiled.setup)
-            try:
-                result = await self._execute(compiled.query)
-                rs = ResultSet(
-                    columns=result.columns,
-                    rows=result.rows,
-                    row_count=result.row_count,
-                    total_count=result.total_count,
-                    truncated=result.truncated,
-                    execution_time_ms=result.execution_time_ms,
-                )
-            finally:
-                import contextlib
-
-                with contextlib.suppress(Exception):
-                    await self._execute(f".rule drop {compiled.rule_name}")
-        elif isinstance(compiled, list):
-            # OR split → execute each and union
-            all_rows: list[list] = []
-            columns: list[str] = []
-            for q in compiled:
-                result = await self._execute(q)
-                if not columns:
-                    columns = result.columns
-                all_rows.extend(result.rows)
-            rs = ResultSet(columns=columns, rows=all_rows)
-        else:
-            result = await self._execute(compiled)
-            rs = ResultSet(
-                columns=result.columns,
-                rows=result.rows,
-                row_count=result.row_count,
-                total_count=result.total_count,
-                truncated=result.truncated,
-                execution_time_ms=result.execution_time_ms,
-                row_provenance=result.row_provenance,
-                timing_breakdown=result.timing_breakdown,
-            )
-            if result.metadata:
-                rs.has_ephemeral = result.metadata.get("has_ephemeral", False)
-                rs.ephemeral_sources = result.metadata.get("ephemeral_sources", [])
-                rs.warnings = result.metadata.get("warnings", [])
-
-        # Apply client-side order_by + offset slicing. The compiler does
-        # not include order_by in the query body because IQL only allows
-        # ordering inside aggregate heads.
-        if order_ast is not None and rs.rows:
-            sort_col, descending = _resolve_sort_column(order_ast, rs.columns)
-            if sort_col is not None:
-                idx = rs.columns.index(sort_col)
-                rs.rows.sort(
-                    key=lambda r, _i=idx: (r[_i] is None, r[_i]),
-                    reverse=descending,
-                )
-        if offset is not None and offset > 0:
-            rs.rows = rs.rows[offset:]
-        return rs
+        whole = (
+            ast_select[0]
+            if len(ast_select) == 1 and not ast_computed and isinstance(ast_select[0], type)
+            else None
+        )
+        return plan, whole
 
     async def query_stream(
         self,
@@ -700,21 +641,21 @@ class KnowledgeGraph:
     # ── Rules ─────────────────────────────────────────────────────────
 
     async def define_rules(self, *targets: type[Derived]) -> None:
-        """Deploy persistent rule definitions."""
-
-        for target in targets:
-            head_name = Relation._resolve_name(target)
-            head_columns = Relation._get_columns(target)
-            for clause in target.rules:
-                iql = compile_rule(
-                    head_name,
-                    head_columns,
-                    clause.select_map,
-                    clause.relations,
-                    clause.condition,
-                    persistent=True,
-                )
-                await self._execute(iql)
+        """Deploy persistent rule definitions in one program."""
+        clauses = [
+            compile_rule(
+                Relation._resolve_name(target),
+                Relation._get_columns(target),
+                clause.select_map,
+                clause.relations,
+                clause.condition,
+                persistent=True,
+            )
+            for target in targets
+            for clause in target.rules
+        ]
+        if clauses:
+            await self._execute("\n".join(clauses))
 
     async def list_rules(self) -> list[RuleInfo]:
         """List all rules in this KG."""
@@ -744,9 +685,7 @@ class KnowledgeGraph:
         await self._execute(f".rule remove {name} {index}")
 
     async def edit_rule_clause(self, name: str | type, index: int, clause: Any) -> None:
-        """Replace a specific rule clause (remove + re-add)."""
-        await self.drop_rule_clause(name, index)
-        # Re-add: compile the new clause
+        """Replace a specific rule clause: remove and re-add in one program."""
         if isinstance(name, type):
             head_name = Relation._resolve_name(name)
             head_columns = Relation._get_columns(name)
@@ -761,7 +700,7 @@ class KnowledgeGraph:
             clause.condition,
             persistent=True,
         )
-        await self._execute(iql)
+        await self._execute(f".rule remove {head_name} {index}\n{iql}")
 
     async def clear_rule(self, name: str | type) -> None:
         """Clear a rule's materialized data."""
@@ -834,38 +773,45 @@ class KnowledgeGraph:
     # ── Meta ──────────────────────────────────────────────────────────
 
     async def debug(self, *select: Any, **kwargs: Any) -> DebugResult:
-        """Show the query plan without executing."""
-        compiled = compile_query(*select, **kwargs)
-        if isinstance(compiled, list):
-            compiled = compiled[0]
-        result = await self._execute(f".debug {compiled}")
+        """Show the query plan without executing.
+
+        Takes the arguments of ``query``. ``.debug`` takes one statement:
+        the query, an aggregate's rule, or the first branch of an OR split.
+        """
+        plan, _ = self._plan(*select, **kwargs)
+        result = await self._execute(f".debug {plan.debug}")
         plan_text = "\n".join(row[0] for row in result.rows)
-        return DebugResult(iql=compiled, plan=plan_text)
+        return DebugResult(iql=plan.debug, plan=plan_text)
 
     async def why(self, *select: Any, full: bool = False, **kwargs: Any) -> WhyResult:
         """Show proof trees explaining why query results were derived.
 
-        Returns structured proof trees alongside the result data.
-        Each result row has a corresponding proof tree explaining its derivation.
+        Takes the arguments of ``query`` and returns its rows (ordered and
+        paginated the same way; an OR split explains its first branch),
+        each with the proof tree of its derivation.
         """
-        compiled = compile_query(*select, **kwargs)
-        if isinstance(compiled, list):
-            compiled = compiled[0]
-        cmd = f".why full {compiled}" if full else f".why {compiled}"
+        plan, _ = self._plan(*select, **kwargs)
+        cmd = f".why full {plan.why}" if full else f".why {plan.why}"
         result = await self._execute(cmd)
+        raw_graphs = getattr(result, "proof_trees", None) or []
+        picked = plan.shape_why(result.rows)
+        rows = [plan.project_why(result.rows[i]) for i in picked]
+        graphs = [
+            ProofTree.from_dict(raw_graphs[i]) if isinstance(raw_graphs[i], dict) else raw_graphs[i]
+            for i in picked
+            if i < len(raw_graphs)
+        ]
         result_set = ResultSet(
-            columns=result.columns,
-            rows=result.rows,
-            row_count=len(result.rows),
+            columns=plan.labels,
+            rows=rows,
+            row_count=len(rows),
             total_count=result.total_count,
             execution_time_ms=result.execution_time_ms,
         )
-        raw_graphs = getattr(result, "proof_trees", None) or []
-        graphs = [ProofTree.from_dict(g) if isinstance(g, dict) else g for g in raw_graphs]
         return WhyResult(
             results=result_set,
             proof_trees=graphs,
-            result_count=len(result.rows),
+            result_count=len(rows),
         )
 
     async def why_not(self, relation: type, **values: Any) -> WhyNotResult:

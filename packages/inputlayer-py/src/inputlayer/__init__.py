@@ -29,6 +29,7 @@ from inputlayer.derived import Derived, From, RuleClause
 from inputlayer.exceptions import (
     AuthenticationError,
     CannotDropError,
+    CompileError,
     ConnectionError,
     IndexNotFoundError,
     InputLayerConnectionError,
@@ -94,6 +95,7 @@ __all__ = [
     "CannotDropError",
     "ClearResult",
     "ColumnInfo",
+    "CompileError",
     "ConnectionError",
     "DebugResult",
     "DeleteResult",

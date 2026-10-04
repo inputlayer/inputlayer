@@ -27,10 +27,12 @@ from inputlayer.compiler import (
     compile_expr,
     compile_insert,
     compile_query,
+    compile_query_plan,
     compile_rule,
     compile_schema,
     compile_value,
 )
+from inputlayer.exceptions import CompileError, InternalError
 from inputlayer.relation import Relation
 from inputlayer.types import Timestamp, Vector
 
@@ -312,145 +314,344 @@ class TestVarEnv:
 
 # ── compile_query ─────────────────────────────────────────────────────
 
-class TestCompileQuery:
-    def test_full_relation(self):
-        result = compile_query(
-            Employee,
-            relations=[Employee],
-        )
-        # The compiler now emits the body-only ``?body`` form because
-        # IQL does not accept the ``?head <- body`` query syntax.
-        assert result == "?employee(Id, Name, Department, Salary, Active)"
 
-    def test_select_columns(self):
-        result = compile_query(
-            AstColumn("employee", "name"),
-            AstColumn("employee", "salary"),
-            relations=[Employee],
-        )
-        assert isinstance(result, str)
-        assert "Name" in result
-        assert "Salary" in result
+def _emp(col: str) -> AstColumn:
+    return AstColumn("employee", col)
+
+
+def _dept(col: str) -> AstColumn:
+    return AstColumn("department", col)
+
+
+EMP_ATOM = "employee(Id, Name, Department, Salary, Active)"
+
+
+class TestCompileQuery:
+    """R-QUERY: one ``?`` query binding every column of every atom."""
+
+    def test_full_relation(self):
+        result = compile_query(Employee, relations=[Employee])
+        assert result == f"?{EMP_ATOM}"
+
+    def test_selecting_a_relation_joins_it(self):
+        assert compile_query(Employee) == f"?{EMP_ATOM}"
+
+    def test_select_columns_binds_every_column(self):
+        plan = compile_query_plan(_emp("name"), _emp("salary"), relations=[Employee])
+        assert plan.program == f"?{EMP_ATOM}"
+        assert plan.columns == ("Id", "Name", "Department", "Salary", "Active")
+        assert plan.labels == ["name", "salary"]
+        assert plan.dedupe
 
     def test_with_filter(self):
-        cond = Comparison("=", AstColumn("employee", "department"), Literal("eng"))
-        result = compile_query(
-            Employee,
-            relations=[Employee],
-            where_condition=cond,
-        )
-        assert isinstance(result, str)
-        assert 'Department = "eng"' in result
+        cond = Comparison("=", _emp("department"), Literal("eng"))
+        result = compile_query(Employee, relations=[Employee], where_condition=cond)
+        assert result == f'?{EMP_ATOM}, Department = "eng"'
 
     def test_with_limit(self):
-        result = compile_query(
-            Employee,
-            relations=[Employee],
-            limit=10,
-        )
-        assert "limit(10)" in result
+        assert compile_query(Employee, limit=10) == f"?{EMP_ATOM}, limit(10)"
 
     def test_with_limit_offset(self):
-        result = compile_query(
-            Employee,
-            relations=[Employee],
-            limit=10,
-            offset=20,
-        )
-        assert "limit(10, 20)" in result
+        assert compile_query(Employee, limit=10, offset=20) == f"?{EMP_ATOM}, limit(10, 20)"
 
-    def test_with_order_by_is_client_side(self):
-        # ``order_by`` is intentionally not compiled into the query body:
-        # IQL only supports ordering inside aggregate heads. The SDK
-        # applies ``order_by`` client-side in ``KnowledgeGraph.query``.
-        result = compile_query(
-            Employee,
-            relations=[Employee],
-            order_by=OrderedColumn(AstColumn("employee", "salary"), descending=True),
-        )
-        assert isinstance(result, str)
-        assert ":desc" not in result
-        assert ":asc" not in result
-
-    def test_join(self):
-        on_cond = Comparison(
-            "=",
-            AstColumn("employee", "department"),
-            AstColumn("department", "name"),
-        )
-        result = compile_query(
-            AstColumn("employee", "name"),
-            AstColumn("department", "budget"),
+    def test_join_shares_a_variable(self):
+        on_cond = Comparison("=", _emp("department"), _dept("name"))
+        plan = compile_query_plan(
+            _emp("name"), _dept("budget"),
             relations=[Employee, Department],
             on_condition=on_cond,
         )
-        assert isinstance(result, str)
-        # After unification, department.name and employee.department share a variable
-        assert "employee(" in result
-        assert "department(" in result
+        assert plan.program == f"?{EMP_ATOM}, department(Department, Budget)"
+        assert plan.columns == ("Id", "Name", "Department", "Salary", "Active", "Budget")
+        assert plan.labels == ["name", "budget"]
 
-    def test_aggregation_count(self):
-        from inputlayer.compiler import AggCompiled
+    def test_self_join_keeps_inequality_and_suffixes_labels(self):
+        from inputlayer._proxy import RelationRef
 
-        agg = AggExpr(func="count", column=AstColumn("employee", "id"))
-        result = compile_query(
-            agg,
-            relations=[Employee],
+        e1, e2 = RelationRef(Employee, "e1"), RelationRef(Employee, "e2")
+        on = And(
+            Comparison("=", AstColumn("employee", "department", "e1"),
+                       AstColumn("employee", "department", "e2")),
+            Comparison("!=", AstColumn("employee", "id", "e1"), AstColumn("employee", "id", "e2")),
         )
-        # Aggregate queries return an AggCompiled (rule + query) pair
-        # because IQL does not allow aggregates in ad-hoc query bodies.
-        assert isinstance(result, AggCompiled)
-        assert "count<Id>" in result.setup
-        assert result.setup.startswith(result.rule_name + "(")
-        assert result.query.startswith("?" + result.rule_name + "(")
-
-    def test_aggregation_with_groupby(self):
-        from inputlayer.compiler import AggCompiled
-
-        agg = AggExpr(func="count", column=AstColumn("employee", "id"))
-        result = compile_query(
-            AstColumn("employee", "department"),
-            agg,
-            relations=[Employee],
+        plan = compile_query_plan(
+            AstColumn("employee", "name", "e1"), AstColumn("employee", "name", "e2"),
+            relations=[e1, e2], on_condition=on,
         )
-        assert isinstance(result, AggCompiled)
-        assert "Department" in result.setup
-        assert "count<Id>" in result.setup
-        # The grouping key shows up first in the head column projection.
-        assert result.head_columns[0] == "Department"
-
-    def test_or_condition_splits(self):
-        cond = Or(
-            Comparison("=", AstColumn("employee", "department"), Literal("eng")),
-            Comparison("=", AstColumn("employee", "department"), Literal("sales")),
+        assert plan.program == (
+            "?employee(Id, Name, Department, Salary, Active), "
+            "employee(Id_1, Name_2, Department, Salary_3, Active_4), Id != Id_1"
         )
-        result = compile_query(
-            Employee,
-            relations=[Employee],
-            where_condition=cond,
-        )
-        # OR → list of queries
-        assert isinstance(result, list)
-        assert len(result) == 2
+        assert plan.labels == ["name", "name_2"]
 
     def test_negation(self):
-        cond = Not(Comparison("=", AstColumn("employee", "active"), Literal(False)))
+        cond = Not(Comparison("=", _emp("active"), Literal(False)))
+        result = compile_query(Employee, relations=[Employee], where_condition=cond)
+        assert result == f"?{EMP_ATOM}, !(Active = false)"
+
+    def test_computed_column_is_a_binding_after_the_atoms(self):
+        plan = compile_query_plan(
+            _emp("name"),
+            relations=[Employee],
+            computed={"bonus": Arithmetic("*", _emp("salary"), Literal(0.1))},
+        )
+        assert plan.program == f"?{EMP_ATOM}, Bonus = Salary * 0.1"
+        assert plan.columns[-1] == "Bonus"
+        assert plan.labels == ["name", "bonus"]
+
+    def test_no_relation_is_a_compile_error(self):
+        with pytest.raises(CompileError):
+            compile_query(_emp("name"))
+
+    def test_shape_picks_columns_by_position(self):
+        plan = compile_query_plan(_emp("salary"), _emp("name"), relations=[Employee])
+        rows = [[1, "A", "eng", 10.0, True], [2, "B", "hr", 20.0, False]]
+        assert plan.shape(rows) == [[10.0, "A"], [20.0, "B"]]
+
+    def test_projection_is_a_set(self):
+        plan = compile_query_plan(_emp("department"), relations=[Employee])
+        rows = [[1, "A", "eng", 10.0, True], [2, "B", "eng", 20.0, True], [3, "C", "hr", 5.0, True]]
+        assert plan.shape(rows) == [["eng"], ["hr"]]
+
+    def test_shape_refuses_an_unexpected_width(self):
+        plan = compile_query_plan(Employee)
+        with pytest.raises(InternalError):
+            plan.shape([[1, "A"]])
+
+
+class TestCompileQuerySort:
+    """R-SORT: annotations on the first atom, never client-side."""
+
+    def test_order_by_annotates_the_first_atom(self):
         result = compile_query(
             Employee,
             relations=[Employee],
+            order_by=OrderedColumn(_emp("salary"), descending=True),
+            limit=10,
+        )
+        assert result == "?employee(Id, Name, Department, Salary:desc, Active), limit(10)"
+
+    def test_ordered_relation_moves_first(self):
+        plan = compile_query_plan(
+            Employee, Department,
+            relations=[Employee, Department],
+            on_condition=Comparison("=", _emp("department"), _dept("name")),
+            order_by=OrderedColumn(_dept("budget"), descending=False),
+            limit=3,
+        )
+        assert plan.program == (
+            f"?department(Department, Budget:asc), {EMP_ATOM}, limit(3)"
+        )
+        assert plan.columns == ("Department", "Budget", "Id", "Name", "Salary", "Active")
+        assert plan.labels == ["id", "name", "department", "salary", "active", "name_2", "budget"]
+
+    def test_offset_without_limit_pages_in_the_engine(self):
+        plan = compile_query_plan(
+            Employee, order_by=OrderedColumn(_emp("salary"), descending=True), offset=3
+        )
+        assert plan.program == (
+            "?employee(Id, Name, Department, Salary:desc, Active), "
+            "limit(9223372036854775807, 3)"
+        )
+
+    def test_page_of_a_projection_goes_through_the_query_rule(self):
+        # A limit over a projection counts distinct projected rows.
+        plan = compile_query_plan(
+            _emp("department"),
+            relations=[Employee],
+            order_by=OrderedColumn(_emp("department"), descending=False),
+            limit=2,
+            offset=1,
+        )
+        assert plan.program == (
+            f"il_q(Department) <- {EMP_ATOM}\n"
+            "?il_q(Department:asc), limit(2, 1)"
+        )
+        assert plan.columns == ("Department",)
+
+    @pytest.mark.parametrize("page", [{"limit": 2}, {"offset": 1}])
+    def test_paging_a_projection_ordered_by_an_unselected_column_is_a_compile_error(
+        self, page
+    ):
+        with pytest.raises(CompileError, match="ordering by a column you do not select"):
+            compile_query_plan(
+                _emp("name"),
+                relations=[Employee],
+                order_by=OrderedColumn(_emp("salary"), descending=True),
+                **page,
+            )
+
+    def test_why_keeps_one_proof_per_distinct_projected_row(self):
+        plan = compile_query_plan(
+            _emp("department"),
+            relations=[Employee],
+            order_by=OrderedColumn(_emp("department"), descending=False),
+            limit=2,
+        )
+        assert plan.why_columns == ("Department", "Id", "Name", "Salary", "Active")
+        rows = [
+            ["hr", 2, "Bob", 90000.0, True],
+            ["eng", 1, "Alice", 120000.0, True],
+            ["hr", 5, "Eve", 95000.0, True],
+            ["eng", 3, "Charlie", 110000.0, False],
+        ]
+        picked = plan.shape_why(rows)
+        assert picked == [1, 0]
+        assert [plan.project_why(rows[i]) for i in picked] == [["eng"], ["hr"]]
+
+    def test_projection_ordered_by_an_unselected_column_without_a_page(self):
+        plan = compile_query_plan(
+            _emp("name"),
+            relations=[Employee],
+            order_by=OrderedColumn(_emp("salary"), descending=True),
+        )
+        assert plan.program == "?employee(Id, Name, Department, Salary:desc, Active)"
+        assert plan.dedupe
+
+    def test_order_by_an_unjoined_relation_is_a_compile_error(self):
+        with pytest.raises(CompileError):
+            compile_query(Employee, order_by=_dept("budget"))
+
+
+class TestCompileQueryOr:
+    """An OR split is one program: a union rule the engine orders and pages."""
+
+    def test_or_branches_union_in_one_program(self):
+        cond = Or(
+            Comparison("=", _emp("department"), Literal("hr")),
+            Comparison(">", _emp("salary"), Literal(115000)),
+        )
+        plan = compile_query_plan(
+            _emp("name"),
+            _emp("salary"),
+            relations=[Employee],
+            where_condition=cond,
+            order_by=OrderedColumn(_emp("salary"), descending=True),
+            limit=3,
+        )
+        assert plan.program == (
+            f'il_q(Name, Salary) <- {EMP_ATOM}, Department = "hr"\n'
+            f"il_q(Name, Salary) <- {EMP_ATOM}, Salary > 115000\n"
+            "?il_q(Name, Salary:desc), limit(3)"
+        )
+        assert plan.debug == f'?{EMP_ATOM}, Department = "hr"'
+
+    def test_or_over_whole_rows_keeps_every_column(self):
+        cond = Or(
+            Comparison("=", _emp("department"), Literal("eng")),
+            Comparison("=", _emp("department"), Literal("sales")),
+        )
+        plan = compile_query_plan(Employee, where_condition=cond)
+        assert plan.program == (
+            f'il_q(Id, Name, Department, Salary, Active) <- {EMP_ATOM}, Department = "eng"\n'
+            f'il_q(Id, Name, Department, Salary, Active) <- {EMP_ATOM}, Department = "sales"\n'
+            "?il_q(Id, Name, Department, Salary, Active)"
+        )
+        assert not plan.dedupe
+
+    def test_or_in_a_join_condition_is_a_compile_error(self):
+        with pytest.raises(CompileError):
+            compile_query(
+                Employee, Department,
+                on_condition=Or(
+                    Comparison("=", _emp("department"), _dept("name")),
+                    Comparison("=", _emp("name"), _dept("name")),
+                ),
+            )
+
+
+class TestCompileQueryAggregates:
+    """R-AGG: a program-local rule and its query, fresh variable per position."""
+
+    def test_two_measures_of_one_column(self):
+        # Fix-report item 1: ?il_agg_x(Department, Salary, Salary) joined the
+        # two measures as equal and dropped every group where they differ.
+        plan = compile_query_plan(
+            _emp("department"),
+            AggExpr(func="avg", column=_emp("salary")),
+            AggExpr(func="max", column=_emp("salary")),
+            relations=[Employee],
+        )
+        assert plan.program == (
+            f"il_q(Department, avg<Salary>, max<Salary>) <- {EMP_ATOM}\n"
+            "?il_q(Department, AvgSalary, MaxSalary)"
+        )
+        assert plan.labels == ["department", "avg_salary", "max_salary"]
+
+    def test_count_without_a_column_counts_the_first_variable(self):
+        # Fix-report item 5: count<> is rejected by the engine.
+        plan = compile_query_plan(AggExpr(func="count"), relations=[Employee])
+        assert plan.program == f"il_q(count<Id>) <- {EMP_ATOM}\n?il_q(Count)"
+        assert plan.labels == ["count"]
+
+    def test_rule_and_query_are_one_program(self):
+        # Fix-report item 2: no separate setup statement, nothing to clean up.
+        program = compile_query(AggExpr(func="count", column=_emp("id")), relations=[Employee])
+        assert program == f"il_q(count<Id>) <- {EMP_ATOM}\n?il_q(CountId)"
+
+    def test_keyword_names_the_aggregate(self):
+        plan = compile_query_plan(
+            _emp("department"),
+            relations=[Employee],
+            computed={"n": AggExpr(func="count", column=_emp("id"))},
+        )
+        assert plan.program == f"il_q(Department, count<Id>) <- {EMP_ATOM}\n?il_q(Department, N)"
+        assert plan.labels == ["department", "n"]
+
+    def test_order_and_limit_on_the_query_atom(self):
+        plan = compile_query_plan(
+            _emp("department"),
+            AggExpr(func="count", column=_emp("id")),
+            relations=[Employee],
+            order_by=OrderedColumn(_emp("department"), descending=True),
+            limit=1,
+        )
+        assert plan.program == (
+            f"il_q(Department, count<Id>) <- {EMP_ATOM}\n"
+            "?il_q(Department:desc, CountId), limit(1)"
+        )
+
+    def test_order_by_an_unselected_column_is_a_compile_error(self):
+        with pytest.raises(CompileError):
+            compile_query(
+                _emp("department"),
+                AggExpr(func="count", column=_emp("id")),
+                relations=[Employee],
+                order_by=_emp("salary"),
+            )
+
+    def test_top_k_contributes_its_columns(self):
+        plan = compile_query_plan(
+            _emp("department"),
+            AggExpr(
+                func="top_k", params=(3,), passthrough=(_emp("name"),),
+                order_column=_emp("salary"), desc=True,
+            ),
+            relations=[Employee],
+        )
+        assert plan.program == (
+            f"il_q(Department, top_k<3, Name, Salary:desc>) <- {EMP_ATOM}\n"
+            "?il_q(Department, Name, Salary)"
+        )
+        assert plan.labels == ["department", "name", "salary"]
+
+    def test_or_aggregates_the_union(self):
+        cond = Or(
+            Comparison("=", _emp("department"), Literal("hr")),
+            Comparison(">", _emp("salary"), Literal(100)),
+        )
+        plan = compile_query_plan(
+            AggExpr(func="count", column=_emp("id")),
+            relations=[Employee],
             where_condition=cond,
         )
-        assert isinstance(result, str)
-        assert "!" in result
-
-    def test_computed_column(self):
-        result = compile_query(
-            AstColumn("employee", "name"),
-            relations=[Employee],
-            computed={"bonus": Arithmetic("*", AstColumn("employee", "salary"), Literal(0.1))},
+        src = "il_q_src(Id, Name, Department, Salary, Active)"
+        assert plan.program == (
+            f'{src} <- {EMP_ATOM}, Department = "hr"\n'
+            f"{src} <- {EMP_ATOM}, Salary > 100\n"
+            f"il_q(count<Id>) <- {src}\n"
+            "?il_q(CountId)"
         )
-        assert isinstance(result, str)
-        assert "Salary * 0.1" in result
 
 
 # ── compile_rule ──────────────────────────────────────────────────────
@@ -468,6 +669,15 @@ class TestCompileRule:
             persistent=True,
         )
         assert result == "+reachable(Src, Dst) <- edge(Src, Dst)"
+
+    def test_count_without_a_column_counts_the_first_column(self):
+        result = compile_rule(
+            "edge_count",
+            ["n"],
+            {"n": AggExpr(func="count")},
+            [(Edge._resolve_name(), Edge, None)],
+        )
+        assert result == "+edge_count(count<Src>) <- edge(Src, _)"
 
     def test_session_rule(self):
         result = compile_rule(
@@ -515,7 +725,9 @@ class TestCompileRule:
             condition=cond,
             persistent=True,
         )
-        assert result == '+eng_member(Name) <- employee(_, Name, Department, _, _), Department = "eng"'
+        assert result == (
+            '+eng_member(Name) <- employee(_, Name, Department, _, _), Department = "eng"'
+        )
 
     def test_recursive(self):
         # reachable(Src, Dst) <- reachable(Src, Mid), edge(Mid, Dst)
