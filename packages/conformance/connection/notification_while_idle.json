@@ -1,0 +1,35 @@
+{
+  "name": "notification_while_idle",
+  "description": "Notifications arrive while no call is in flight.",
+  "calls": [],
+  "server": [
+    {
+      "send": {
+        "type": "persistent_update",
+        "seq": 1,
+        "timestamp_ms": 0,
+        "knowledge_graph": "default",
+        "relation": "demo",
+        "operation": "insert",
+        "count": 1
+      }
+    },
+    {
+      "send": {
+        "type": "persistent_update",
+        "seq": 2,
+        "timestamp_ms": 0,
+        "knowledge_graph": "default",
+        "relation": "demo",
+        "operation": "insert",
+        "count": 1
+      }
+    }
+  ],
+  "expect": {
+    "notifications": [
+      1,
+      2
+    ]
+  }
+}

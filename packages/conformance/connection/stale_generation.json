@@ -1,0 +1,107 @@
+{
+  "name": "stale_generation",
+  "description": "A route registered before .subscribe adopts the generation of its reply; pushes of another generation or an unknown subscription are dropped and counted.",
+  "routes": [
+    "s1"
+  ],
+  "calls": [
+    {
+      "execute": ".subscribe s1 ?a(X)",
+      "expect": {
+        "rows": []
+      }
+    }
+  ],
+  "server": [
+    {
+      "recv": {
+        "type": "execute"
+      },
+      "as": "q"
+    },
+    {
+      "send": {
+        "type": "result",
+        "columns": [],
+        "rows": [],
+        "row_count": 0,
+        "total_count": 0,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "id": "$q",
+        "subscribed": {
+          "subscription": "s1",
+          "generation": 2,
+          "revision": 5
+        }
+      }
+    },
+    {
+      "send": {
+        "type": "subscription_delta",
+        "subscription": "s1",
+        "generation": 1,
+        "knowledge_graph": "default",
+        "seq": 1,
+        "revision": 6,
+        "columns": [
+          "X"
+        ],
+        "inserted": [
+          [
+            0
+          ]
+        ],
+        "retracted": []
+      }
+    },
+    {
+      "send": {
+        "type": "subscription_delta",
+        "subscription": "s1",
+        "generation": 2,
+        "knowledge_graph": "default",
+        "seq": 1,
+        "revision": 6,
+        "columns": [
+          "X"
+        ],
+        "inserted": [
+          [
+            1
+          ]
+        ],
+        "retracted": []
+      }
+    },
+    {
+      "send": {
+        "type": "subscription_delta",
+        "subscription": "s9",
+        "generation": 1,
+        "knowledge_graph": "default",
+        "seq": 1,
+        "revision": 6,
+        "columns": [
+          "X"
+        ],
+        "inserted": [
+          [
+            2
+          ]
+        ],
+        "retracted": []
+      }
+    }
+  ],
+  "expect": {
+    "pushes": [
+      {
+        "subscription": "s1",
+        "generation": 2,
+        "seq": 1
+      }
+    ],
+    "stale_pushes": 2
+  }
+}

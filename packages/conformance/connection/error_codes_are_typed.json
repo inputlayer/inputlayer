@@ -1,0 +1,117 @@
+{
+  "name": "error_codes_are_typed",
+  "description": "Each wire error code maps to its typed error; a code-less error stays a plain query error.",
+  "calls": [
+    {
+      "execute": "?a(X)",
+      "expect": {
+        "error": "deadline_exceeded",
+        "code": "deadline_exceeded"
+      }
+    },
+    {
+      "execute": "?b(X)",
+      "expect": {
+        "error": "cancelled",
+        "code": "cancelled"
+      }
+    },
+    {
+      "execute": "+c(1)",
+      "expect": {
+        "error": "outcome_unknown",
+        "code": "outcome_unknown"
+      }
+    },
+    {
+      "execute": "?d(",
+      "expect": {
+        "error": "query",
+        "code": "validation"
+      }
+    },
+    {
+      "execute": "?e(X)",
+      "expect": {
+        "error": "query",
+        "code": null
+      }
+    }
+  ],
+  "server": [
+    {
+      "recv": {
+        "type": "execute",
+        "program": "?a(X)"
+      },
+      "as": "a"
+    },
+    {
+      "send": {
+        "type": "error",
+        "id": "$a",
+        "code": "deadline_exceeded",
+        "message": "Deadline exceeded"
+      }
+    },
+    {
+      "recv": {
+        "type": "execute",
+        "program": "?b(X)"
+      },
+      "as": "b"
+    },
+    {
+      "send": {
+        "type": "error",
+        "id": "$b",
+        "code": "cancelled",
+        "message": "Cancelled"
+      }
+    },
+    {
+      "recv": {
+        "type": "execute",
+        "program": "+c(1)"
+      },
+      "as": "c"
+    },
+    {
+      "send": {
+        "type": "error",
+        "id": "$c",
+        "code": "outcome_unknown",
+        "message": "WAL fsync failed"
+      }
+    },
+    {
+      "recv": {
+        "type": "execute",
+        "program": "?d("
+      },
+      "as": "d"
+    },
+    {
+      "send": {
+        "type": "error",
+        "id": "$d",
+        "code": "validation",
+        "message": "parse error"
+      }
+    },
+    {
+      "recv": {
+        "type": "execute",
+        "program": "?e(X)"
+      },
+      "as": "e"
+    },
+    {
+      "send": {
+        "type": "error",
+        "id": "$e",
+        "message": "Server shutting down"
+      }
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "name": "replies_routed_by_id",
+  "description": "Two pipelined queries; the server answers the second first. Each reply reaches the call that sent its id.",
+  "calls": [
+    {
+      "execute": "?a(X)",
+      "expect": {
+        "rows": [
+          [
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "execute": "?b(X)",
+      "expect": {
+        "rows": [
+          [
+            2
+          ]
+        ]
+      }
+    }
+  ],
+  "server": [
+    {
+      "recv": {
+        "type": "execute",
+        "program": "?a(X)"
+      },
+      "as": "a"
+    },
+    {
+      "recv": {
+        "type": "execute",
+        "program": "?b(X)"
+      },
+      "as": "b"
+    },
+    {
+      "send": {
+        "type": "result",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            2
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "id": "$b"
+      }
+    },
+    {
+      "send": {
+        "type": "result",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            1
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "id": "$a"
+      }
+    }
+  ]
+}

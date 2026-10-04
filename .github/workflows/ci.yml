@@ -29,6 +29,7 @@ jobs:
       pull-requests: read
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
+      python: ${{ steps.filter.outputs.python }}
     steps:
       - uses: actions/checkout@v4
 
@@ -52,6 +53,10 @@ jobs:
               - 'config.toml'
               - 'clippy.toml'
               - 'Makefile'
+              - '.github/workflows/ci.yml'
+            python:
+              - 'packages/inputlayer-py/**'
+              - 'packages/conformance/**'
               - '.github/workflows/ci.yml'
 
   fmt:
@@ -153,3 +158,28 @@ jobs:
 
       - name: Run unit + integration tests
         run: make unit-test
+
+  # The Python SDK's unit tests, including the connection core against a
+  # mock server replaying packages/conformance. The live tests run in the
+  # full suite (make python-test-live), which builds the engine.
+  python-sdk:
+    name: Python SDK
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Run unit tests
+        run: make python-test

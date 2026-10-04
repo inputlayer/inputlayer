@@ -166,8 +166,8 @@ class KnowledgeGraphSync:
     def clear_prefix(self, prefix: str) -> ClearResult:
         return run_sync(self._kg.clear_prefix(prefix))
 
-    def execute(self, iql: str) -> ResultSet:
-        return run_sync(self._kg.execute(iql))
+    def execute(self, iql: str, *, timeout: float | None = None) -> ResultSet:
+        return run_sync(self._kg.execute(iql, timeout=timeout))
 
 
 class InputLayerSync:
@@ -184,6 +184,10 @@ class InputLayerSync:
         reconnect_delay: float = 1.0,
         max_reconnect_attempts: int = 10,
         initial_kg: str | None = None,
+        last_seq: int | None = None,
+        epoch: str | None = None,
+        default_timeout: float | None = 30.0,
+        keepalive: float | None = 20.0,
     ) -> None:
         self._client = InputLayer(
             url,
@@ -194,6 +198,10 @@ class InputLayerSync:
             reconnect_delay=reconnect_delay,
             max_reconnect_attempts=max_reconnect_attempts,
             initial_kg=initial_kg,
+            last_seq=last_seq,
+            epoch=epoch,
+            default_timeout=default_timeout,
+            keepalive=keepalive,
         )
 
     def connect(self) -> None:

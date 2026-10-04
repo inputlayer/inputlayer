@@ -1,0 +1,31 @@
+{
+  "name": "closing_notice",
+  "description": "A closing notice names why every pending call failed.",
+  "calls": [
+    {
+      "execute": "?a(X)",
+      "expect": {
+        "error": "connection_lost",
+        "code": "idle_timeout"
+      }
+    }
+  ],
+  "server": [
+    {
+      "recv": {
+        "type": "execute"
+      },
+      "as": "q"
+    },
+    {
+      "send": {
+        "type": "notice",
+        "code": "idle_timeout",
+        "message": "Idle timeout"
+      }
+    },
+    {
+      "close": 1000
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "name": "chunked_result_count_mismatch",
+  "description": "The end frame announces more rows than the chunks carried: an internal error, never a short result.",
+  "calls": [
+    {
+      "execute": "?a(X)",
+      "expect": {
+        "error": "internal"
+      }
+    }
+  ],
+  "server": [
+    {
+      "recv": {
+        "type": "execute"
+      },
+      "as": "q"
+    },
+    {
+      "send": {
+        "type": "result_start",
+        "id": "$q",
+        "columns": [
+          "x"
+        ],
+        "total_count": 3,
+        "truncated": false,
+        "execution_time_ms": 1
+      }
+    },
+    {
+      "send": {
+        "type": "result_chunk",
+        "id": "$q",
+        "rows": [
+          [
+            1
+          ],
+          [
+            2
+          ]
+        ],
+        "chunk_index": 0
+      }
+    },
+    {
+      "send": {
+        "type": "result_end",
+        "id": "$q",
+        "row_count": 3,
+        "chunk_count": 1
+      }
+    }
+  ]
+}

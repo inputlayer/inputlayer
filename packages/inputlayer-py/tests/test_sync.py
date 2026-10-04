@@ -468,7 +468,7 @@ def test_knowledge_graph_sync_execute_delegates() -> None:
 
     assert result.row_count == 2
     assert result.rows == [[1], [2]]
-    mock_kg.execute.assert_awaited_once_with("?edge(X, Y)")
+    mock_kg.execute.assert_awaited_once_with("?edge(X, Y)", timeout=None)
 
 
 def test_knowledge_graph_sync_insert_delegates() -> None:

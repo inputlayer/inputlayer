@@ -21,7 +21,7 @@ from inputlayer.auth import (
 )
 from inputlayer.connection import Connection
 from inputlayer.knowledge_graph import KnowledgeGraph
-from inputlayer.notifications import NotificationEvent
+from inputlayer.notifications import EventDispatcher, NotificationDispatcher, NotificationEvent
 
 
 class InputLayer:
@@ -37,6 +37,14 @@ class InputLayer:
                          salary=120000.0, active=True)
             )
             result = await kg.query(Employee)
+
+    Each knowledge graph handle has its own connection, bound to that graph
+    when it opens (on first use) and rebound to it on every reconnect, so
+    handles never switch a shared connection between graphs and the
+    subscriptions of one survive queries on another. ``connect()`` opens the
+    client's own connection (bound to ``initial_kg``, or the server's
+    default), which serves user, key and graph administration; no handle
+    uses it.
     """
 
     def __init__(
@@ -51,18 +59,30 @@ class InputLayer:
         max_reconnect_attempts: int = 10,
         initial_kg: str | None = None,
         last_seq: int | None = None,
+        epoch: str | None = None,
+        default_timeout: float | None = 30.0,
+        keepalive: float | None = 20.0,
     ) -> None:
+        self._dispatcher = NotificationDispatcher()
+        self._events = EventDispatcher()
+        self._options: dict[str, Any] = {
+            "username": username,
+            "password": password,
+            "api_key": api_key,
+            "auto_reconnect": auto_reconnect,
+            "reconnect_delay": reconnect_delay,
+            "max_reconnect_attempts": max_reconnect_attempts,
+            "default_timeout": default_timeout,
+            "keepalive": keepalive,
+            "dispatcher": self._dispatcher,
+            "events": self._events,
+        }
+        self._url = url
         self._conn = Connection(
-            url,
-            username=username,
-            password=password,
-            api_key=api_key,
-            auto_reconnect=auto_reconnect,
-            reconnect_delay=reconnect_delay,
-            max_reconnect_attempts=max_reconnect_attempts,
-            initial_kg=initial_kg,
-            last_seq=last_seq,
+            url, initial_kg=initial_kg, last_seq=last_seq, epoch=epoch, **self._options
         )
+        # One connection per knowledge graph, opened on first use.
+        self._pool: dict[str, Connection] = {}
         self._kgs: dict[str, KnowledgeGraph] = {}
 
     # ── Connection lifecycle ──────────────────────────────────────────
@@ -72,8 +92,11 @@ class InputLayer:
         await self._conn.connect()
 
     async def close(self) -> None:
-        """Close the connection."""
-        await self._conn.close()
+        """Close every connection of this client."""
+        for conn in [self._conn, *self._pool.values()]:
+            await conn.close()
+        self._dispatcher.end()
+        self._events.end()
 
     async def __aenter__(self) -> InputLayer:
         await self.connect()
@@ -102,14 +125,61 @@ class InputLayer:
 
     @property
     def last_seq(self) -> int:
-        return self._conn.last_seq
+        return self._dispatcher.last_seq
+
+    @property
+    def events(self) -> EventDispatcher:
+        """Connection events of every connection: ``disconnected``,
+        ``reconnected``, ``session_reset``, ``notification_gap``, ``closed``."""
+        return self._events
 
     # ── KG management ─────────────────────────────────────────────────
 
+    def _connection_for(self, name: str) -> Connection:
+        conn = self._pool.get(name)
+        if conn is None:
+            conn = Connection(
+                self._url, initial_kg=name, lazy=True, create_kg=self._create_kg,
+                ends_notifications=False, **self._options,
+            )
+            self._pool[name] = conn
+        return conn
+
+    async def _admin_execute(self, program: str) -> None:
+        """Run a graph-switching command (``.kg create`` switches its session)
+        on a short-lived connection no handle uses, bound to the server's
+        default graph."""
+        conn = Connection(
+            self._url,
+            username=self._options["username"],
+            password=self._options["password"],
+            api_key=self._options["api_key"],
+            auto_reconnect=False,
+            default_timeout=self._options["default_timeout"],
+            keepalive=None,
+        )
+        await conn.connect()
+        try:
+            await conn.execute(program)
+        finally:
+            await conn.close()
+
+    async def _create_kg(self, name: str) -> bool:
+        """Create *name*; ``True`` if created."""
+        await self._admin_execute(f".kg create {name}")
+        return True
+
     def knowledge_graph(self, name: str, *, create: bool = True) -> KnowledgeGraph:
-        """Get a KnowledgeGraph handle. Switches the session's active KG."""
+        """Get a KnowledgeGraph handle, with its own connection bound to *name*.
+
+        The connection opens on the handle's first call; a missing graph is
+        created then when ``create`` is true.
+        """
         if name not in self._kgs:
-            self._kgs[name] = KnowledgeGraph(name, self._conn)
+            conn = self._connection_for(name)
+            if not create:
+                conn._create_kg = None
+            self._kgs[name] = KnowledgeGraph(name, conn)
         return self._kgs[name]
 
     async def list_knowledge_graphs(self) -> list[str]:
@@ -141,18 +211,19 @@ class InputLayer:
     async def drop_knowledge_graph(self, name: str) -> None:
         """Drop a knowledge graph and all its data.
 
-        The server rejects dropping the currently active KG, so we
-        switch to ``default`` first if needed. Both commands run under
-        a single lock hold to prevent another coroutine from switching
-        the KG between the use-default and the drop.
+        The handle's connection to it is closed for good, so a handle kept
+        from before raises ``ConnectionLost`` rather than re-creating the
+        graph. The client's own connection, when bound to it, moves to
+        ``default``; the drop itself runs on a short-lived connection bound to
+        the server's default graph.
         """
-        if self._conn.current_kg == name:
-            await self._conn.execute_sequence(
-                [".kg use default", f".kg drop {name}"]
-            )
-        else:
-            await self._conn.execute(f".kg drop {name}")
         self._kgs.pop(name, None)
+        conn = self._pool.pop(name, None)
+        if conn is not None:
+            await conn.close(final=True)
+        if self._conn.current_kg == name:
+            await self._conn.execute(".kg use default")
+        await self._admin_execute(f".kg drop {name}")
 
     # ── User management ───────────────────────────────────────────────
 
@@ -206,11 +277,11 @@ class InputLayer:
         knowledge_graph: str | None = None,
     ) -> Callable:
         """Register a notification callback. Use as a decorator."""
-        return self._conn.dispatcher.on(
+        return self._dispatcher.on(
             event_type, relation=relation, knowledge_graph=knowledge_graph
         )
 
     async def notifications(self) -> AsyncIterator[NotificationEvent]:
         """Async iterator yielding notification events."""
-        async for event in self._conn.dispatcher:
+        async for event in self._dispatcher:
             yield event

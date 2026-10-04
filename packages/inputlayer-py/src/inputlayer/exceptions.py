@@ -23,6 +23,28 @@ class InputLayerConnectionError(InputLayerError):
 ConnectionError = InputLayerConnectionError
 
 
+class ConnectionLost(InputLayerConnectionError):
+    """The connection closed before a request was answered.
+
+    ``code`` is the server's closing notice (``idle_timeout``,
+    ``server_shutdown``, ...) when it sent one. ``may_have_committed`` is
+    ``True`` for a request that could write and had been sent: read the state
+    back before retrying it (fact writes are idempotent, so resending the same
+    write is safe). Queries, pings and requests never sent are ``False``.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str | None = None,
+        may_have_committed: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.may_have_committed = may_have_committed
+
+
 class AuthenticationError(InputLayerError):
     """Authentication failed (bad credentials or API key)."""
 
@@ -90,12 +112,14 @@ class QueryError(InputLayerError):
 
 
 class OutcomeUnknownError(QueryError):
-    """Write outcome unknown; the store may be read-only until restart.
+    """Write outcome unknown; read the data back before retrying the write.
 
-    If so, a following write raises ``StoreReadOnlyError``.
-
-    The transaction may or may not survive restart; read the recovered data
-    before retrying it. ``result`` holds the server's response when it has one.
+    The server raises it when a commit's outcome is unknown; the store may
+    then be read-only until restart (a following write raises
+    ``StoreReadOnlyError``) and the transaction may or may not survive
+    restart. The SDK raises it when a write reached its deadline and neither
+    a reply nor a cancel confirmation arrived: the server may still have
+    committed it. ``result`` holds the server's response when it has one.
     """
 
     def __init__(self, message: str, result: ResultResponse | None = None) -> None:
@@ -138,6 +162,47 @@ class StatementFailedError(QueryError):
         )
         self.errors = errors
         self.result = result
+
+
+class DeadlineExceeded(QueryError, QueryTimeoutError):
+    """The request's deadline passed before it began committing; nothing it
+    would have changed is applied. Retry if the answer is still wanted.
+
+    A query that gets no reply at all by its deadline (the server is silent
+    and the SDK cancelled it) raises it too; a write in that case raises
+    ``OutcomeUnknownError`` instead, since it may have committed."""
+
+    def __init__(self, message: str, *, query: str | None = None) -> None:
+        super().__init__(message, query=query, code="deadline_exceeded")
+
+
+class Cancelled(QueryError):
+    """The request was cancelled before it began committing; nothing it would
+    have changed is applied."""
+
+    def __init__(self, message: str, *, query: str | None = None) -> None:
+        super().__init__(message, query=query, code="cancelled")
+
+
+class RateLimited(QueryError):
+    """The server refused the request before running it: too many messages
+    per second on this connection. The SDK has already retried it once."""
+
+    def __init__(self, message: str, *, query: str | None = None) -> None:
+        super().__init__(message, query=query, code="rate_limited")
+
+
+class ProtocolError(QueryError):
+    """The server could not read the request (``invalid_request``). Nothing ran.
+
+    This is a bug in the SDK, not in the program: please report it."""
+
+    def __init__(self, message: str, *, query: str | None = None) -> None:
+        super().__init__(
+            f"{message} (the server could not read the SDK's request; this is an SDK bug)",
+            query=query,
+            code="invalid_request",
+        )
 
 
 class InputLayerPermissionError(InputLayerError):

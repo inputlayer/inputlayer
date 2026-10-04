@@ -1,0 +1,58 @@
+{
+  "name": "notification_before_reply",
+  "description": "A notification sent between a request and its reply is delivered, and the reply still reaches its call.",
+  "calls": [
+    {
+      "execute": "?a(X)",
+      "expect": {
+        "rows": [
+          [
+            1
+          ]
+        ]
+      }
+    }
+  ],
+  "server": [
+    {
+      "recv": {
+        "type": "execute"
+      },
+      "as": "q"
+    },
+    {
+      "send": {
+        "type": "persistent_update",
+        "seq": 7,
+        "timestamp_ms": 0,
+        "knowledge_graph": "default",
+        "relation": "demo",
+        "operation": "insert",
+        "count": 1
+      }
+    },
+    {
+      "send": {
+        "type": "result",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            1
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "id": "$q"
+      }
+    }
+  ],
+  "expect": {
+    "notifications": [
+      7
+    ]
+  }
+}

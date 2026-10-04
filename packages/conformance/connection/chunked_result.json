@@ -1,0 +1,80 @@
+{
+  "name": "chunked_result",
+  "description": "A streamed result is assembled in chunk order and checked against the counts its end announces.",
+  "calls": [
+    {
+      "execute": "?a(X)",
+      "expect": {
+        "rows": [
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ]
+        ],
+        "columns": [
+          "x"
+        ]
+      }
+    }
+  ],
+  "server": [
+    {
+      "recv": {
+        "type": "execute"
+      },
+      "as": "q"
+    },
+    {
+      "send": {
+        "type": "result_start",
+        "id": "$q",
+        "columns": [
+          "x"
+        ],
+        "total_count": 3,
+        "truncated": false,
+        "execution_time_ms": 1
+      }
+    },
+    {
+      "send": {
+        "type": "result_chunk",
+        "id": "$q",
+        "rows": [
+          [
+            1
+          ],
+          [
+            2
+          ]
+        ],
+        "chunk_index": 0
+      }
+    },
+    {
+      "send": {
+        "type": "result_chunk",
+        "id": "$q",
+        "rows": [
+          [
+            3
+          ]
+        ],
+        "chunk_index": 1
+      }
+    },
+    {
+      "send": {
+        "type": "result_end",
+        "id": "$q",
+        "row_count": 3,
+        "chunk_count": 2
+      }
+    }
+  ]
+}

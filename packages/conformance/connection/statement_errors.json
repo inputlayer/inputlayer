@@ -1,0 +1,49 @@
+{
+  "name": "statement_errors",
+  "description": "A result with errors[] is a statement failure, never data.",
+  "calls": [
+    {
+      "execute": "+a(1)\n.rel drop x",
+      "expect": {
+        "error": "statement_failed",
+        "code": "not_found"
+      }
+    }
+  ],
+  "server": [
+    {
+      "recv": {
+        "type": "execute"
+      },
+      "as": "q"
+    },
+    {
+      "send": {
+        "type": "result",
+        "columns": [
+          "message"
+        ],
+        "rows": [
+          [
+            "Inserted 1 fact(s) into 'a'."
+          ],
+          [
+            "Relation 'x' not found."
+          ]
+        ],
+        "row_count": 2,
+        "total_count": 2,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "id": "$q",
+        "errors": [
+          {
+            "index": 1,
+            "code": "not_found",
+            "message": "Relation 'x' not found."
+          }
+        ]
+      }
+    }
+  ]
+}

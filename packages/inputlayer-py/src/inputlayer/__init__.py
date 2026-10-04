@@ -28,9 +28,12 @@ from inputlayer.derived import Derived, From, RuleClause
 # Exceptions
 from inputlayer.exceptions import (
     AuthenticationError,
+    Cancelled,
     CannotDropError,
     CompileError,
     ConnectionError,
+    ConnectionLost,
+    DeadlineExceeded,
     IndexNotFoundError,
     InputLayerConnectionError,
     InputLayerError,
@@ -40,8 +43,10 @@ from inputlayer.exceptions import (
     KnowledgeGraphNotFoundError,
     OutcomeUnknownError,
     PermissionError,
+    ProtocolError,
     QueryError,
     QueryTimeoutError,
+    RateLimited,
     RelationNotFoundError,
     RuleNotFoundError,
     SchemaConflictError,
@@ -74,7 +79,7 @@ from inputlayer.knowledge_graph import (
 )
 
 # Notifications
-from inputlayer.notifications import NotificationEvent
+from inputlayer.notifications import ConnectionEvent, NotificationEvent
 
 # Relation system
 from inputlayer.relation import Relation
@@ -92,11 +97,15 @@ __all__ = [
     "AclEntry",
     "ApiKeyInfo",
     "AuthenticationError",
+    "Cancelled",
     "CannotDropError",
     "ClearResult",
     "ColumnInfo",
     "CompileError",
     "ConnectionError",
+    "ConnectionEvent",
+    "ConnectionLost",
+    "DeadlineExceeded",
     "DebugResult",
     "DeleteResult",
     "Derived",
@@ -125,8 +134,10 @@ __all__ = [
     "PermissionError",
     "ProofNode",
     "ProofTree",
+    "ProtocolError",
     "QueryError",
     "QueryTimeoutError",
+    "RateLimited",
     # Relation
     "Relation",
     "RelationDescription",
