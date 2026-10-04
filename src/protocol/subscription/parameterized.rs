@@ -93,10 +93,10 @@ const SAMPLE_EVERY: u64 = 64;
 
 /// Whether a family keeps sharing with rounds of `shared_us`: unless they
 /// are slower than its `bindings` views' own evaluations of `own_us` each,
-/// run `permits` at a time. An unknown own cost (0) keeps sharing.
+/// run `permits` at a time.
 fn keeps_sharing(shared_us: u64, own_us: u64, bindings: u64, permits: u64) -> bool {
     let unshared = own_us.saturating_mul(bindings.div_ceil(permits.max(1)).max(1));
-    own_us == 0 || shared_us <= unshared
+    shared_us <= unshared
 }
 
 /// Fold `cost` into the running `average` of costs in microseconds (0: none
@@ -550,7 +550,8 @@ impl Family {
     }
 
     /// Evaluate a round at `snapshot`, as a `probe` or for views waiting on
-    /// it, and judge whether views share.
+    /// it, and judge whether views share: only while the family's costs are
+    /// still those of `snapshot`'s rules and a view's own cost is known.
     async fn evaluate(
         &self,
         snapshot: Arc<KnowledgeGraphSnapshot>,
@@ -572,39 +573,50 @@ impl Family {
             probe,
         )
         .await;
+        let current = self
+            .judged
+            .load()
+            .as_ref()
+            .is_some_and(|judged| Arc::ptr_eq(&judged.rules, &rules));
         let ran = match ran {
             Ok(ran) => ran,
             Err(e) => {
-                self.stop_sharing();
+                if current {
+                    self.stop_sharing();
+                }
                 return Err(e);
             }
         };
         let partitioning = Instant::now();
         let parts = Partitions::build(&self.shape, ran.rows).inspect_err(|e| {
             debug!(query = %self.shape.query, error = %e, "subscription_family_stops_sharing");
-            self.stop_sharing();
+            if current {
+                self.stop_sharing();
+            }
         })?;
         let own = self.own_cost_us.load(Ordering::Relaxed);
-        let shared = smooth(&self.shared_cost_us, ran.cost + partitioning.elapsed());
-        let bindings = self.bindings.load(Ordering::Relaxed) as u64;
-        let permits = self.handler.compute_permits() as u64;
-        if !keeps_sharing(shared, own, bindings, permits) {
-            debug!(
-                query = %self.shape.query,
-                shared_us = shared,
-                own_us = own,
-                bindings,
-                permits,
-                "subscription_family_stops_sharing"
-            );
-            self.stop_sharing();
-        } else {
-            if self.stops.load(Ordering::Relaxed) != 0 {
-                self.stops.store(0, Ordering::Relaxed);
-            }
-            self.sharing.store(true, Ordering::Relaxed);
-            if (self.rounds.fetch_add(1, Ordering::Relaxed) + 1).is_multiple_of(SAMPLE_EVERY) {
-                self.sample_due.store(true, Ordering::Relaxed);
+        if current && own > 0 {
+            let shared = smooth(&self.shared_cost_us, ran.cost + partitioning.elapsed());
+            let bindings = self.bindings.load(Ordering::Relaxed) as u64;
+            let permits = self.handler.compute_permits() as u64;
+            if !keeps_sharing(shared, own, bindings, permits) {
+                debug!(
+                    query = %self.shape.query,
+                    shared_us = shared,
+                    own_us = own,
+                    bindings,
+                    permits,
+                    "subscription_family_stops_sharing"
+                );
+                self.stop_sharing();
+            } else {
+                if self.stops.load(Ordering::Relaxed) != 0 {
+                    self.stops.store(0, Ordering::Relaxed);
+                }
+                self.sharing.store(true, Ordering::Relaxed);
+                if (self.rounds.fetch_add(1, Ordering::Relaxed) + 1).is_multiple_of(SAMPLE_EVERY) {
+                    self.sample_due.store(true, Ordering::Relaxed);
+                }
             }
         }
         Ok(Arc::new(Partitions {

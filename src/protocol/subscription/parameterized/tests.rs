@@ -149,8 +149,6 @@ fn a_round_shares_while_no_slower_than_the_views_own_evaluations_in_parallel() {
     // Many more bindings than permits.
     assert!(keeps_sharing(5_000, 100, 200, 4));
     assert!(!keeps_sharing(5_001, 100, 200, 4));
-    // An unknown own cost keeps sharing.
-    assert!(keeps_sharing(1_000_000, 0, 2, 4));
 }
 
 #[test]
@@ -482,6 +480,45 @@ mod rounds {
     #[tokio::test(flavor = "multi_thread")]
     async fn without_permits_to_probe_a_recursion_bound_family_never_shares() {
         recursion_bound_family_never_evaluates_its_lifted_query(2, 4).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_round_from_before_a_rule_change_does_not_share_again() {
+        let (handler, _tmp) = handler();
+        write(&handler, "+item[(\"s1\", 1), (\"s2\", 2)]").await;
+        let families = Families::default();
+        let metrics = Arc::new(SubscriptionMetrics::default());
+        let mut views: Vec<_> = (1..=4)
+            .map(|i| {
+                member(
+                    &families,
+                    &handler,
+                    &metrics,
+                    &format!("?item(\"s{i}\", X)"),
+                )
+            })
+            .collect();
+        let family = Arc::clone(&views[0].family);
+        for view in &mut views {
+            view.refresh().await.unwrap();
+        }
+        write(&handler, "+item(\"s1\", 3)").await;
+        family.own_cost_us.store(1_000_000_000, Ordering::Relaxed);
+        views[0].refresh().await.unwrap();
+        probed(&family).await;
+        assert!(family.shares());
+        let before = views[0].own.current_snapshot().unwrap();
+
+        write(&handler, "+tagged(S) <- item(S, 1)").await;
+        views[0].refresh().await.unwrap();
+        assert!(!family.shares());
+        // A probe of a snapshot from before the change is judged without a
+        // cost measured under its rules.
+        Family::probe(&family, before);
+        probed(&family).await;
+        assert!(!family.shares(), "no own cost to compare the round with");
+        assert_eq!(family.stops.load(Ordering::Relaxed), 0, "not a failure");
+        assert_eq!(family.shared_cost_us.load(Ordering::Relaxed), 0);
     }
 
     #[tokio::test(flavor = "multi_thread")]
