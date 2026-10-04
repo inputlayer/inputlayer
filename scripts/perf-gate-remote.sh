@@ -10,6 +10,8 @@
 #   --dir DIR       the host's clone (default bench/inputlayer, under its home)
 #   --attach STAMP  follow a run that is already going (after a dropped
 #                   connection) and copy its results back
+#   --wait-lock S   wait up to S seconds for another benchmark's lock to
+#                   clear instead of refusing at once
 #   Everything else goes to scripts/perf-gate.sh: --aa, --rounds N,
 #   --baseline-rev REV, --fixtures LIST, --profile NAME, --server-cpus LIST,
 #   --gate-cpus LIST, --no-verdict. A working tree is never measured, only
@@ -43,6 +45,7 @@ HOST=${PERF_GATE_HOST:-sam-dev-benchmarks}
 REV=HEAD
 DIR=bench/inputlayer
 ATTACH=""
+WAIT_LOCK=0
 GATE_ARGS=()
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -50,12 +53,13 @@ while [ $# -gt 0 ]; do
         --rev) REV=$2; shift 2 ;;
         --dir) DIR=$2; shift 2 ;;
         --attach) ATTACH=$2; shift 2 ;;
+        --wait-lock) WAIT_LOCK=$2; shift 2 ;;
         --baseline-rev)
             # Resolved here, so the host measures exactly this commit.
             GATE_ARGS+=("$1" "$(git rev-parse --verify "$2^{commit}")"); shift 2 ;;
         --rounds|--profile|--fixtures|--server-cpus|--gate-cpus) GATE_ARGS+=("$1" "$2"); shift 2 ;;
         --aa|--no-verdict) GATE_ARGS+=("$1"); shift ;;
-        -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,34p' "$0"; exit 0 ;;
         *) echo "perf-gate-remote: unknown option $1" >&2; exit 3 ;;
     esac
 done
@@ -92,12 +96,13 @@ if [ -z "$ATTACH" ]; then
     fi
 
     # The host-side runner, started detached. Positional arguments: the
-    # clone, the state directory, the stamp, the commit, then the gate's.
+    # clone, the state directory, the stamp, the commit, the lock wait, then
+    # the gate's.
     "${SSH[@]}" "mkdir -p $STATE && cat > $STATE/run.sh" <<'REMOTE'
 #!/usr/bin/env bash
 set -uo pipefail
-DIR=$1 STATE=$2 STAMP=$3 SHA=$4
-shift 4
+DIR=$1 STATE=$2 STAMP=$3 SHA=$4 WAIT_LOCK=$5
+shift 5
 export PATH=$HOME/.cargo/bin:$PATH
 LOG=$HOME/$STATE/$STAMP.log
 STATUS_FILE=$HOME/$STATE/$STAMP.status
@@ -107,7 +112,10 @@ finish() { echo "$1" > "$STATUS_FILE"; exit "$1"; }
 # One benchmark at a time on this host.
 exec 9> "$HOME/$STATE/lock"
 if ! flock -n 9; then
-    echo "perf-gate-remote: another perf-gate run holds $HOME/$STATE/lock"; finish 4
+    echo "perf-gate-remote: another benchmark holds $HOME/$STATE/lock; waiting up to ${WAIT_LOCK}s"
+    if ! flock -w "$WAIT_LOCK" 9; then
+        echo "perf-gate-remote: lock still held"; finish 4
+    fi
 fi
 if pgrep -x inputlayer-serv > /dev/null; then
     echo "perf-gate-remote: an inputlayer-server is already running here:"
@@ -161,7 +169,7 @@ finish "$STATUS"
 REMOTE
 
     echo "=== $HOST: run $STAMP (scripts/perf-gate.sh ${GATE_ARGS[*]}) ==="
-    "${SSH[@]}" "setsid nohup bash $STATE/run.sh $DIR $STATE $STAMP $SHA ${GATE_ARGS[*]} < /dev/null > /dev/null 2>&1 &"
+    "${SSH[@]}" "setsid nohup bash $STATE/run.sh $DIR $STATE $STAMP $SHA $WAIT_LOCK ${GATE_ARGS[*]} < /dev/null > /dev/null 2>&1 &"
 else
     STAMP=$ATTACH
 fi

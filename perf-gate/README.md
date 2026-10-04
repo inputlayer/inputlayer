@@ -43,7 +43,9 @@ collects it), and copies `run.json`, `report.md`, `verdict.json`,
 follows the host's rules (`~/README-bench.txt`): one benchmark at a time (a
 lock, and a refusal while any `inputlayer-server` runs), `nproc`, the commit
 and the command recorded in `bench.txt` with every result, and no server left
-running afterwards. The gate's clients run on CPUs 0-7 and the servers on
+running afterwards. The lock is `~/perf-gate-remote/lock` on the host: any
+other benchmark there should hold it too (`flock`), and `--wait-lock
+<seconds>` queues a run behind one that does. The gate's clients run on CPUs 0-7 and the servers on
 8-31, whole SMT core pairs each (`--gate-cpus`, `--server-cpus`).
 `PERF_GATE_HOST` selects another host.
 
