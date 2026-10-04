@@ -16,10 +16,14 @@
  * transport with a WebSocket ping (no answer drops the connection, failing
  * the call with `ConnectionLostError`). The engine's reply normally follows
  * (typed, e.g. `DeadlineExceededError`, or the committed result of a write
- * that was already committing); without one by `timeoutGraceMs` later, the
- * call fails locally: `DeadlineExceededError` for a query, and
+ * that was already committing); without one (or, while a reply streams, its
+ * next part) within `timeoutGraceMs`, the call fails locally: `DeadlineExceededError` for a query, and
  * `OutcomeUnknownError` for a program that may write. A later reply is
  * dropped and counted.
+ *
+ * Keepalive: a ping goes out whenever nothing was sent for `keepaliveMs`,
+ * calls in flight or not; one unanswered within `timeoutGraceMs` means the
+ * socket is half-open, so it is dropped and the connection reconnects.
  *
  * Reconnect: exponential backoff with jitter, re-opened on the same knowledge
  * graph (`?kg=`) with the notification cursor (`last_seq` and `epoch`), then
@@ -81,7 +85,12 @@ export interface ConnectionOptions {
   defaultTimeoutMs?: number;
   /** Wait past a deadline, after cancelling, before failing the call locally (default 2 000). */
   timeoutGraceMs?: number;
-  /** Ping when nothing was sent for this long, so the server's idle timeout never ends a connection that only listens (default 20 000; 0 disables). */
+  /**
+   * Ping when nothing was sent for this long, so the server's idle timeout
+   * never ends a connection that only listens; a ping unanswered within
+   * `timeoutGraceMs` drops the connection, which then reconnects (default
+   * 20 000; 0 disables).
+   */
   keepaliveMs?: number;
   /**
    * Requests in flight at most (default 15). Keep it below the server's
@@ -173,6 +182,8 @@ interface Call {
   stream?: Stream;
   deadline?: ReturnType<typeof setTimeout>;
   cancelId?: string;
+  /** Its deadline passed: it is in the grace period for the reply. */
+  graced?: boolean;
   /** What sent the call's `cancel`: its deadline or its signal. */
   cancelledBy?: 'deadline' | 'signal';
   retried: boolean;
@@ -235,9 +246,8 @@ export class Connection {
   private readonly control = new Map<string, (reply: ServerMessage | Error) => void>();
   /**
    * Ids of calls settled before their reply ended (a broken stream, or no
-   * reply past the deadline), by whether that reply counts as stale. The
-   * engine still holds each one, so it counts against `maxInFlight` until its
-   * final frame arrives.
+   * reply past the deadline), by whether that reply counts as stale. Their
+   * late frames are dropped; they take no slot of `maxInFlight`.
    */
   private readonly abandoned = new Map<string, boolean>();
   private readonly routes = new Map<string, Route>();
@@ -528,11 +538,7 @@ export class Connection {
 
   /** Send queued calls while the in-flight bound allows. */
   private pump(): void {
-    while (
-      this.state === 'open' &&
-      this.queue.length > 0 &&
-      this.inFlight.size + this.abandoned.size < this.maxInFlight
-    ) {
+    while (this.state === 'open' && this.queue.length > 0 && this.inFlight.size < this.maxInFlight) {
       const call = this.queue.shift()!;
       const id = this.newId('r');
       call.id = id;
@@ -558,7 +564,8 @@ export class Connection {
       // The engine's own deadline answers now; cancel in case it does not.
       this.sendCancel(call, 'deadline');
       this.probeServer();
-      call.deadline = setTimeout(() => this.overdue(call), this.timeoutGraceMs);
+      call.graced = true;
+      this.armOverdue(call);
       return;
     }
     // Queued, or waiting to be resent after `rate_limited`: nothing ran.
@@ -568,10 +575,15 @@ export class Connection {
     call.reject(new DeadlineExceededError('The deadline passed before the request was sent; nothing was applied'));
   }
 
-  /** The grace period past the deadline ended: fail locally unless the reply is streaming in. */
+  /** Past the deadline, wait a grace period for the reply (or its next streamed part). */
+  private armOverdue(call: Call): void {
+    if (call.deadline) clearTimeout(call.deadline);
+    call.deadline = setTimeout(() => this.overdue(call), this.timeoutGraceMs);
+  }
+
+  /** A grace period past the deadline ended with nothing more of the reply: fail locally. */
   private overdue(call: Call): void {
     call.deadline = undefined;
-    if (call.stream) return;
     // The reply and the cancel's ack, if they come, are dropped and counted.
     if (call.cancelId) this.control.delete(call.cancelId);
     this.abandoned.set(call.id!, true);
@@ -621,7 +633,7 @@ export class Connection {
     if (!ws || this.probe) return;
     const timer = setTimeout(() => {
       this.probe = undefined;
-      const outstanding = this.inFlight.size + this.abandoned.size + this.control.size;
+      const outstanding = this.inFlight.size + this.control.size;
       if (this.ws === ws && outstanding < this.maxInFlight) ws.terminate();
     }, Math.max(1, Math.floor(this.timeoutGraceMs / 2)));
     this.probe = { timer, ws };
@@ -675,7 +687,6 @@ export class Connection {
         if (msg.type === 'result' || msg.type === 'result_end' || msg.type === 'error') {
           this.abandoned.delete(id);
           if (stale) this._stats.staleReplies += 1;
-          this.pump();
         }
       } else {
         this._stats.staleReplies += 1;
@@ -709,6 +720,7 @@ export class Connection {
           return;
         }
         call.stream = { start: msg, rows: [], provenance: [], chunks: 0 };
+        if (call.graced) this.armOverdue(call);
         return;
       case 'result_chunk': {
         const stream = call.stream;
@@ -725,6 +737,7 @@ export class Connection {
         stream.chunks += 1;
         stream.rows.push(...msg.rows);
         if (msg.row_provenance) stream.provenance.push(...msg.row_provenance);
+        if (call.graced) this.armOverdue(call);
         return;
       }
       case 'result_end': {
@@ -1023,10 +1036,12 @@ export class Connection {
     if (this.keepaliveMs <= 0) return;
     const period = Math.max(10, Math.floor(this.keepaliveMs / 2));
     this.keepalive = setInterval(() => {
-      if (this.state !== 'open' || this.inFlight.size > 0) return;
+      if (this.state !== 'open') return;
       if (Date.now() - this.lastSentAt < this.keepaliveMs) return;
-      this.ping().catch(() => {
-        // A failed ping surfaces as a close
+      const ws = this.ws;
+      const id = this.newId('p');
+      this.request({ type: 'ping', id }, id, Math.max(1, this.timeoutGraceMs)).catch(() => {
+        if (ws && this.ws === ws) ws.terminate();
       });
     }, period);
     this.keepalive.unref?.();

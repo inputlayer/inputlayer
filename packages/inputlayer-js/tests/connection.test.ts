@@ -397,21 +397,16 @@ describe('deadline probe', () => {
     expect(c.connected).toBe(true);
   });
 
-  it('a call failed locally holds its slot until the engine replies', async () => {
-    const c = await open({ maxInFlight: 1, timeoutGraceMs: 50 });
-    const first = c.execute('?a(X)', { timeoutMs: 50 }).catch((e: unknown) => e);
-    const second = c.execute('?b(X)', { timeoutMs: 0 });
-    expect(await first).toBeInstanceOf(sdk.DeadlineExceededError);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(executes(server!.last)).toHaveLength(1);
-    const reply = (id: unknown) =>
-      server!.last.socket.send(JSON.stringify({ type: 'result', id, columns: [], rows: [],
-        row_count: 0, total_count: 0, truncated: false, execution_time_ms: 0, errors: [] }));
-    reply(executes(server!.last)[0].id);
-    await server!.until(() => executes(server!.last).length === 2);
-    reply(executes(server!.last)[1].id);
-    await second;
-    expect(c.stats.staleReplies).toBe(1);
+  it('calls failed locally on a server that never replies do not block new calls', async () => {
+    const c = await open({ maxInFlight: 2, timeoutGraceMs: 50 });
+    const lost = ['?a(X)', '?b(X)'].map((p) => c.execute(p, { timeoutMs: 50 }).catch((e: unknown) => e));
+    for (const error of await Promise.all(lost)) expect(error).toBeInstanceOf(sdk.DeadlineExceededError);
+    const next = c.execute('?c(X)', { timeoutMs: 0 });
+    await server!.until(() => executes(server!.last).length === 3);
+    const id = executes(server!.last)[2].id;
+    server!.last.socket.send(JSON.stringify({ type: 'result', id, columns: ['x'], rows: [[1]],
+      row_count: 1, total_count: 1, truncated: false, execution_time_ms: 0, errors: [] }));
+    expect((await next).rows).toEqual([[1]]);
   });
 });
 
@@ -421,13 +416,16 @@ describe('keepalive', () => {
     await server!.until(() => server!.last.received.some((f) => f.type === 'ping'), 2000);
   });
 
-  it('does not ping while requests are in flight', async () => {
-    const c = await open({ keepaliveMs: 40 });
-    const pending = c.execute('?slow(X)').catch(() => undefined);
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(server!.last.received.filter((f) => f.type === 'ping')).toEqual([]);
-    await c.close();
-    await pending;
+  it('a half-open socket is dropped and reconnected, failing calls in flight', async () => {
+    const c = await open({ keepaliveMs: 100, timeoutGraceMs: 100, autoReconnect: true, reconnectDelay: 0.01 });
+    const reconnected = new Promise((resolve) => c.events.addEventListener('reconnected', resolve));
+    const pending = c.execute('?slow(X)', { timeoutMs: 0 }).catch((e: unknown) => e);
+    await server!.until(() => executes(server!.last).length === 1);
+    stall(server!.last);
+    expect(await pending).toBeInstanceOf(ConnectionLostError);
+    await reconnected;
+    expect(server!.connections).toHaveLength(2);
+    expect(c.connected).toBe(true);
   });
 });
 
