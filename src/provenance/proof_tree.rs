@@ -164,6 +164,9 @@ pub struct ProofTree {
     /// The query that produced this graph (for self-documenting exports).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query: Option<String>,
+    /// Revision of the knowledge-graph snapshot the proof was evaluated on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
     /// Root node IDs (entry points - one per queried result tuple).
     pub roots: Vec<NodeId>,
     /// All nodes keyed by their unique ID.
@@ -176,6 +179,7 @@ impl ProofTree {
         Self {
             version: 1,
             query: None,
+            revision: None,
             roots: Vec::new(),
             nodes: HashMap::new(),
         }
@@ -574,6 +578,7 @@ impl ProofTreeBuilder {
         ProofTree {
             version: 1,
             query: None,
+            revision: None,
             roots,
             nodes: self.nodes,
         }

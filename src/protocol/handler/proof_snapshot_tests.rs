@@ -37,11 +37,16 @@ fn execute(handler: &Handler, program: &str) -> QueryResult {
     result
 }
 
-/// The rows and proof DAGs of a proof result.
+/// The rows and proof DAGs of a proof result. Revisions count publishes
+/// across knowledge graphs, so they are left out.
 fn proof_of(result: &QueryResult) -> serde_json::Value {
+    let mut trees = result.proof_trees.clone();
+    for tree in trees.iter_mut().flatten() {
+        tree.revision = None;
+    }
     serde_json::json!({
         "rows": result.rows,
-        "proof_trees": result.proof_trees,
+        "proof_trees": trees,
     })
 }
 

@@ -434,6 +434,8 @@ mod test_hook {
         /// After a proof captured its snapshot and released the guard, before
         /// proof search.
         ProofSearch,
+        /// After a program's writes staged, before they commit.
+        Commit,
     }
 
     type Hooks = HashMap<Point, Box<dyn FnOnce() + Send>>;
@@ -479,6 +481,9 @@ mod guard_reentry_tests;
 
 #[cfg(test)]
 mod proof_snapshot_tests;
+
+#[cfg(test)]
+mod pinned_proof_tests;
 
 #[cfg(test)]
 mod revocation_tests;
@@ -597,6 +602,34 @@ impl ProofSnapshot {
         })
     }
 
+    /// The proof state of a program whose writes committed against `base`
+    /// (see [`ProgramCommit::base`](crate::storage_engine::ProgramCommit)).
+    fn pinned(
+        storage: &StorageEngine,
+        kg: &str,
+        base: Arc<KnowledgeGraphSnapshot>,
+    ) -> Result<Self, String> {
+        let index_metrics = storage
+            .index_metrics_on(kg)
+            .map_err(|e| format!("Failed to access knowledge graph: {e}"))?;
+        Ok(Self {
+            snapshot: base,
+            index_metrics,
+        })
+    }
+
+    /// Evaluate `proof` on this snapshot.
+    fn explain(
+        self,
+        proof: Proof,
+        timing_mode: crate::execution::TimingMode,
+    ) -> Result<QueryResult, String> {
+        match proof {
+            Proof::Why { query, full } => self.why(&query, full, timing_mode),
+            Proof::WhyNot(input) => self.why_not(&input, timing_mode),
+        }
+    }
+
     /// Build proof trees explaining why query results were derived.
     ///
     /// Returns a QueryResult with both the result rows AND proof trees
@@ -700,6 +733,7 @@ impl ProofSnapshot {
                 }
             };
             graph.query = Some(query.to_string());
+            graph.revision = Some(self.snapshot.revision);
             graphs.push(graph);
         }
         let proof_us = proof_start.elapsed().as_micros() as u64;
@@ -752,6 +786,7 @@ impl ProofSnapshot {
         // Build the rich proof tree (for structured export/GUI)
         let mut graph = explain_why_not(&relation, &tuple, &ctx);
         graph.query = Some(format!(".why_not {input}"));
+        graph.revision = Some(self.snapshot.revision);
         let explain_us = explain_start.elapsed().as_micros() as u64;
 
         // Derive text from the graph (no duplicated logic)
@@ -775,6 +810,22 @@ impl ProofSnapshot {
             errors: Vec::new(),
             statements: Vec::new(),
         })
+    }
+}
+
+/// A proof command: `.why` (`full` for `.why full`) or `.why_not`.
+enum Proof {
+    Why { query: String, full: bool },
+    WhyNot(String),
+}
+
+impl Proof {
+    /// The prefix of the proof's error message.
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Why { .. } => "Why error",
+            Self::WhyNot(_) => "Why-not error",
+        }
     }
 }
 
@@ -2425,6 +2476,9 @@ impl QueryJob {
         // A program that writes commits all its writes as one transaction;
         // a statement that cannot join it fails the program before anything runs.
         let transactional = program_boundary::is_transactional(&statements);
+        // A proof that ends a program that writes runs after the commit, on
+        // the snapshot the writes committed against.
+        let pins_proof = program_boundary::has_pinned_proof(&statements);
         if let Err(violation) = program_boundary::check(&statements) {
             let text = program_text
                 .lines()
@@ -2477,24 +2531,32 @@ impl QueryJob {
 
         // A proof reads only the snapshot captured under `storage`, so the
         // guard is released before proof search; a failed proof re-acquires
-        // it for the statements that follow.
+        // it for the statements that follow. A pinned proof waits for the
+        // commit.
         let timing_mode = self.config.storage.performance.timing_mode;
+        let mut pinned_proof: Option<(usize, Proof)> = None;
         macro_rules! run_proof {
-            ($label:literal, $kg:expr, |$proof:ident| $eval:expr) => {{
-                match ProofSnapshot::capture(&storage, $kg) {
-                    Ok($proof) => {
-                        drop(storage);
-                        #[cfg(test)]
-                        test_hook::run(test_hook::Point::ProofSearch);
-                        match $eval {
-                            Ok(qr) => return Ok(QueryResult { errors, ..qr }),
-                            Err(e) => {
-                                storage = self.storage.read();
-                                fail!(ErrorCode::Validation, format!("{}: {e}", $label));
+            ($kg:expr, $proof:expr) => {{
+                let proof: Proof = $proof;
+                if pins_proof {
+                    pinned_proof = Some((stmt_index, proof));
+                } else {
+                    let label = proof.label();
+                    match ProofSnapshot::capture(&storage, $kg) {
+                        Ok(snapshot) => {
+                            drop(storage);
+                            #[cfg(test)]
+                            test_hook::run(test_hook::Point::ProofSearch);
+                            match snapshot.explain(proof, timing_mode) {
+                                Ok(qr) => return Ok(QueryResult { errors, ..qr }),
+                                Err(e) => {
+                                    storage = self.storage.read();
+                                    fail!(ErrorCode::Validation, format!("{label}: {e}"));
+                                }
                             }
                         }
+                        Err(e) => fail!(ErrorCode::Validation, format!("{label}: {e}")),
                     }
-                    Err(e) => fail!(ErrorCode::Validation, format!("{}: {e}", $label)),
                 }
             }};
         }
@@ -2974,28 +3036,31 @@ impl QueryJob {
                                             Ok(t) => t.query,
                                             Err(_) => query,
                                         };
-                                        run_proof!("Why error", kg, |proof| proof.why(
-                                            &why_q,
-                                            false,
-                                            timing_mode
-                                        ));
+                                        run_proof!(
+                                            kg,
+                                            Proof::Why {
+                                                query: why_q,
+                                                full: false
+                                            }
+                                        );
                                     }
                                     MetaCommand::WhyFull(query) => {
                                         let why_q = match transform_query_shorthand(&query) {
                                             Ok(t) => t.query,
                                             Err(_) => query,
                                         };
-                                        run_proof!("Why error", kg, |proof| proof.why(
-                                            &why_q,
-                                            true,
-                                            timing_mode
-                                        ));
+                                        run_proof!(
+                                            kg,
+                                            Proof::Why {
+                                                query: why_q,
+                                                full: true
+                                            }
+                                        );
                                     }
 
                                     // === Why Not (negative explanation) command ===
                                     MetaCommand::WhyNot(input) => {
-                                        run_proof!("Why-not error", kg, |proof| proof
-                                            .why_not(&input, timing_mode));
+                                        run_proof!(kg, Proof::WhyNot(input));
                                     }
 
                                     // === Agent commands ===
@@ -3262,10 +3327,14 @@ impl QueryJob {
         }
         // Counts of the fact statements committed below.
         let mut statement_counts = Vec::new();
+        let mut committed = None;
         if !write_run.is_empty() {
             if errors.is_empty() {
                 match self.commit_write_run(&storage, &kg_name, &mut write_run, &mut messages) {
-                    Ok(counts) => statement_counts = counts,
+                    Ok((base, counts)) => {
+                        committed = Some(base);
+                        statement_counts = counts;
+                    }
                     Err(failure) => {
                         stmt_index = failure.index;
                         fail!(failure.code, failure.message);
@@ -3289,6 +3358,40 @@ impl QueryJob {
                 session_rules = session_rules.len(),
                 "query_statement_exec_complete"
             );
+        }
+
+        // A pinned proof explains the snapshot the program's writes committed
+        // against: the state its guard passed on. The reply keeps the
+        // statements' messages and carries the proof's trees. A failed proof
+        // fails its statement; the writes stay committed.
+        if let (Some((index, proof)), Some(base), true) =
+            (pinned_proof, committed, errors.is_empty())
+        {
+            let snapshot = ProofSnapshot::pinned(&storage, &kg_name, base);
+            drop(storage);
+            #[cfg(test)]
+            test_hook::run(test_hook::Point::ProofSearch);
+            let label = proof.label();
+            let (mut proof_trees, mut timing_breakdown) = (None, None);
+            match snapshot.and_then(|snapshot| snapshot.explain(proof, timing_mode)) {
+                Ok(explained) => {
+                    proof_trees = Some(explained.proof_trees.unwrap_or_default());
+                    timing_breakdown = explained.timing_breakdown;
+                }
+                Err(e) => {
+                    stmt_index = index;
+                    fail!(ErrorCode::Validation, format!("{label}: {e}"));
+                }
+            }
+            return Ok(QueryResult {
+                proof_trees,
+                timing_breakdown,
+                switched_kg: switched_kg_result,
+                errors,
+                statements: statement_counts,
+                execution_time_ms: start.elapsed().as_millis() as u64,
+                ..Handler::messages_result(messages)
+            });
         }
 
         // Return messages if no query, or if a transactional program failed:

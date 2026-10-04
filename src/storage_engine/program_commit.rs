@@ -48,7 +48,8 @@ impl StorageEngine {
         self.persist.check_writable().map_err(CommitError::from)?;
         let handle = self.kg_handle(kg).map_err(CommitError::from)?;
         let mut db = Self::lock_live(&handle, kg).map_err(CommitError::from)?;
-        if !program.read_holds_in(&db.snapshot.load()) {
+        let base = db.snapshot.load_full();
+        if !program.read_holds_in(&base) {
             return Err(CommitError::Stale);
         }
 
@@ -79,6 +80,7 @@ impl StorageEngine {
             return Ok(ProgramCommit {
                 statements,
                 relations: Vec::new(),
+                base,
             });
         }
         if let Some(control) = control {
@@ -110,6 +112,7 @@ impl StorageEngine {
         Ok(ProgramCommit {
             statements,
             relations: relations.map_err(CommitError::Unknown)?,
+            base,
         })
     }
 }

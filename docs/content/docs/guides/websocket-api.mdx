@@ -183,7 +183,7 @@ A program that changes facts, schemas or rules commits all of those changes as o
 }
 ```
 
-A command that cannot join the transaction (`.kg use`, `.rel drop`, `.index`, `.compact`, inspection commands and the like) in a program that writes fails the program with code `unsupported` before any statement runs. A program without writes runs every statement and keeps going past a failure:
+A program that writes may end with a `.why`, `.why full` or `.why_not`: its `result` keeps the statements' message rows and carries the proof in `proof_trees`, evaluated on the snapshot the writes committed against (see [Proofs of a Guarded Write](explainability#proofs-of-a-guarded-write)). A command that cannot join the transaction (`.kg use`, `.rel drop`, `.index`, `.compact`, inspection commands and the like), or a proof that is not the program's last statement, in a program that writes fails the program with code `unsupported` before any statement runs. A program without writes runs every statement and keeps going past a failure:
 
 ```json
 {
