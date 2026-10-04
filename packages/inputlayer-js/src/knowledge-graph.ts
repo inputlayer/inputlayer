@@ -327,14 +327,17 @@ export class KnowledgeGraph {
     }
 
     const result = await this.conn.execute(plan.programs[0]);
+    // The engine paginates only with a limit; an offset alone is applied here.
+    const skip = plan.page.limit === undefined ? (plan.page.offset ?? 0) : 0;
+    const rows = projectRows(plan, result.columns, result.rows, outputVars).slice(skip);
     const rs = new ResultSet({
       columns,
-      rows: projectRows(plan, result.columns, result.rows, outputVars),
-      rowCount: result.row_count,
+      rows,
+      rowCount: skip > 0 ? rows.length : result.row_count,
       totalCount: result.total_count,
       truncated: result.truncated,
       executionTimeMs: result.execution_time_ms,
-      rowProvenance: result.row_provenance,
+      rowProvenance: result.row_provenance?.slice(skip),
       timingBreakdown: result.timing_breakdown,
     });
     if (result.metadata) {

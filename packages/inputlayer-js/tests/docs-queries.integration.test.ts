@@ -400,6 +400,23 @@ describe.skipIf(!SERVER_URL)('js-sdk.mdx query examples', () => {
     ]);
   });
 
+  it('an offset without a limit skips rows in query, why and OR merges alike', async () => {
+    const opts = {
+      select: [Employee.col('name').toAst()],
+      join: [Employee],
+      orderBy: Employee.col('salary').desc(),
+      offset: 3,
+    };
+    const expected = [['Eve'], ['Bob']];
+    expect((await kg.query(opts)).toTuples()).toEqual(expected);
+    expect((await kg.why(opts)).results.toTuples()).toEqual(expected);
+    const merged = await kg.query({
+      ...opts,
+      where: OR(Employee.col('department').eq('hr'), Employee.col('salary').gt(100000)),
+    });
+    expect(merged.toTuples()).toEqual(expected);
+  });
+
   it('why orders and paginates like query', async () => {
     const opts = {
       select: [Employee.col('name').toAst()],
