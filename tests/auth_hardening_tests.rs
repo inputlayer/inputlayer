@@ -371,3 +371,52 @@ fn unsaved_generated_api_key_still_creates_admin() {
     });
     assert!(handler.authenticate_user("admin", PASSWORD).is_ok());
 }
+
+#[test]
+fn blank_configured_password_is_generated_and_saved() {
+    for blank in ["", "   "] {
+        let (handler, _tmp) =
+            handler(|c| c.http.auth.bootstrap_admin_password = Some(blank.to_string()));
+        let path = handler.config().storage.data_dir.join("credentials.toml");
+        let creds = read_credentials(&path);
+        let password = creds["admin_password"].as_str().unwrap();
+        assert_eq!(password.len(), 64, "{blank:?}");
+        assert!(handler.authenticate_user("admin", password).is_ok());
+        assert!(handler.authenticate_user("admin", blank).is_err());
+    }
+}
+
+#[test]
+fn short_configured_password_refuses_startup() {
+    let tmp = TempDir::new().unwrap();
+    let mut config = Config::default();
+    config.storage.data_dir = tmp.path().join("data");
+    config.http.auth.bootstrap_admin_password = Some("eleven-char".to_string());
+    let Err(err) = Handler::from_config(config) else {
+        panic!("a short bootstrap password must refuse startup");
+    };
+    assert!(err.contains("12 characters"), "{err}");
+    assert!(!tmp.path().join("data").join("credentials.toml").exists());
+}
+
+#[test]
+fn user_passwords_need_twelve_characters() {
+    let (handler, _tmp) = handler(|_| {});
+    let err = handler
+        .handle_user_create("bob", "eleven-char", "viewer")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("12 characters"), "{err}");
+    assert!(handler.authenticate_user("bob", "eleven-char").is_err());
+
+    handler
+        .handle_user_create("bob", "twelve-chars", "viewer")
+        .unwrap();
+    let err = handler
+        .handle_user_password("bob", "short")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("12 characters"), "{err}");
+    assert!(handler.authenticate_user("bob", "twelve-chars").is_ok());
+    assert!(handler.authenticate_user("bob", "short").is_err());
+}

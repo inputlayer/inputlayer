@@ -19,7 +19,7 @@ async def main():
             print(f"  {u.username} ({u.role})")
 
         # Create a new user
-        await il.create_user("analyst", "pass123", role="viewer")
+        await il.create_user("analyst", "analyst-password", role="viewer")
         print("\nCreated user 'analyst' with role 'viewer'")
 
         # Create API key

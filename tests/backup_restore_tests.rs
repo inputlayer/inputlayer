@@ -98,7 +98,7 @@ async fn populate(dir: &Path) {
         }
     }
     handler
-        .handle_user_create("mallory", "password-m", "viewer")
+        .handle_user_create("mallory", "password-mallory", "viewer")
         .unwrap();
     handler
         .handle_kg_acl_grant("graph", "mallory", "viewer")
@@ -186,7 +186,9 @@ async fn restored_directory_serves_exactly_what_the_original_served() {
 
     // ACLs are enforced, not just listed: the restored viewer reads `graph`
     // with its restored password and is denied `hr`.
-    let mallory = handler.authenticate_user("mallory", "password-m").unwrap();
+    let mallory = handler
+        .authenticate_user("mallory", "password-mallory")
+        .unwrap();
     let read = |kg: &str| {
         handler.execute_program(None, Some(kg.into()), "?edge(X, Y)".into(), Some(&mallory))
     };
@@ -271,7 +273,9 @@ async fn online_export_of_a_running_server_restores_what_it_served() {
     let admin = admin(&handler);
 
     // Only admins may write backups on the server's filesystem.
-    let mallory = handler.authenticate_user("mallory", "password-m").unwrap();
+    let mallory = handler
+        .authenticate_user("mallory", "password-mallory")
+        .unwrap();
     for command in [".backup", ".backup status"] {
         let denied = handler
             .execute_program(None, Some("graph".into()), command.into(), Some(&mallory))

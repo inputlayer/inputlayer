@@ -350,6 +350,10 @@ snapshot-test: e2e-test
 python-test:
 	cd packages/inputlayer-py && uv run --extra dev pytest tests/ -v
 
+# Admin password of the throwaway servers the live SDK targets start; the
+# engine refuses passwords shorter than 12 characters.
+LIVE_ADMIN_PASSWORD ?= live-test-admin-pw
+
 # python-test-live runs the full Python suite including the live
 # integration tests under tests/test_langchain.py::TestLive*. Requires
 # the release server binary. Starts the server, sets up unique data
@@ -363,7 +367,7 @@ python-test-live:
 	rm -rf $$DATA_DIR && mkdir -p $$DATA_DIR; \
 	echo "[python-test-live] data dir: $$DATA_DIR"; \
 	lsof -ti :8080 | xargs -r kill -9 2>/dev/null || true; \
-	INPUTLAYER_ADMIN_PASSWORD=admin ./target/release/inputlayer-server \
+	INPUTLAYER_ADMIN_PASSWORD=$(LIVE_ADMIN_PASSWORD) ./target/release/inputlayer-server \
 		--data-dir $$DATA_DIR --port 8080 \
 		> /tmp/il_python_live_server.log 2>&1 & \
 	SERVER_PID=$$!; \
@@ -380,7 +384,7 @@ python-test-live:
 		INPUTLAYER_TEST_SERVER=ws://localhost:8080/ws \
 		INPUTLAYER_URL=ws://localhost:8080/ws \
 		INPUTLAYER_USER=admin \
-		INPUTLAYER_PASSWORD=admin \
+		INPUTLAYER_PASSWORD=$(LIVE_ADMIN_PASSWORD) \
 		uv run --extra dev pytest \
 			tests/test_langchain.py tests/test_integration.py tests/test_connection_live.py -v; \
 	TEST_EXIT=$$?; \
@@ -398,7 +402,7 @@ python-test-examples:
 	@DATA_DIR=$$(mktemp -d -t il-py-ex-XXXXXX); \
 	rm -rf $$DATA_DIR && mkdir -p $$DATA_DIR; \
 	lsof -ti :8080 | xargs -r kill -9 2>/dev/null || true; \
-	INPUTLAYER_ADMIN_PASSWORD=admin ./target/release/inputlayer-server \
+	INPUTLAYER_ADMIN_PASSWORD=$(LIVE_ADMIN_PASSWORD) ./target/release/inputlayer-server \
 		--data-dir $$DATA_DIR --port 8080 \
 		> /tmp/il_python_examples_server.log 2>&1 & \
 	SERVER_PID=$$!; \
@@ -409,7 +413,7 @@ python-test-examples:
 	cd packages/inputlayer-py && \
 		INPUTLAYER_URL=ws://localhost:8080/ws \
 		INPUTLAYER_USER=admin \
-		INPUTLAYER_PASSWORD=admin \
+		INPUTLAYER_PASSWORD=$(LIVE_ADMIN_PASSWORD) \
 		uv run --extra dev python -m examples.langchain.runner 1 2 3; \
 	TEST_EXIT=$$?; \
 	cd - > /dev/null; \
@@ -442,7 +446,7 @@ js-test-live:
 	@cargo build --release --bin inputlayer-server
 	@cd packages/inputlayer-js && npm ci --ignore-scripts
 	@DATA_DIR=$$(mktemp -d -t il-js-live-XXXXXX); \
-	INPUTLAYER_ADMIN_PASSWORD=admin ./target/release/inputlayer-server \
+	INPUTLAYER_ADMIN_PASSWORD=$(LIVE_ADMIN_PASSWORD) ./target/release/inputlayer-server \
 		--host 127.0.0.1 --data-dir $$DATA_DIR --port $(JS_LIVE_PORT) \
 		> /tmp/il_js_live_server.log 2>&1 & \
 	SERVER_PID=$$!; \
@@ -453,7 +457,7 @@ js-test-live:
 	cd packages/inputlayer-js && \
 		INPUTLAYER_TEST_SERVER=ws://127.0.0.1:$(JS_LIVE_PORT)/ws \
 		INPUTLAYER_TEST_USER=admin \
-		INPUTLAYER_TEST_PASSWORD=admin \
+		INPUTLAYER_TEST_PASSWORD=$(LIVE_ADMIN_PASSWORD) \
 		npx vitest run tests/docs-queries.integration.test.ts tests/integration.test.ts tests/connection.integration.test.ts tests/guards.integration.test.ts tests/subscriptions.integration.test.ts; \
 	TEST_EXIT=$$?; \
 	cd - > /dev/null; \
@@ -475,7 +479,7 @@ python-sdk-live:
 	@cargo build --release --bin inputlayer-server
 	@cd packages/inputlayer-py && uv sync --extra dev
 	@DATA_DIR=$$(mktemp -d -t il-py-sdk-live-XXXXXX); \
-	INPUTLAYER_ADMIN_PASSWORD=admin ./target/release/inputlayer-server \
+	INPUTLAYER_ADMIN_PASSWORD=$(LIVE_ADMIN_PASSWORD) ./target/release/inputlayer-server \
 		--host 127.0.0.1 --data-dir $$DATA_DIR --port $(PY_LIVE_PORT) \
 		> /tmp/il_py_sdk_live_server.log 2>&1 & \
 	SERVER_PID=$$!; \
@@ -486,7 +490,7 @@ python-sdk-live:
 	cd packages/inputlayer-py && \
 		INPUTLAYER_TEST_SERVER=ws://127.0.0.1:$(PY_LIVE_PORT)/ws \
 		INPUTLAYER_TEST_USER=admin \
-		INPUTLAYER_TEST_PASSWORD=admin \
+		INPUTLAYER_TEST_PASSWORD=$(LIVE_ADMIN_PASSWORD) \
 		uv run --extra dev pytest tests/docs_queries_live.py tests/compile_rules_live.py \
 			tests/subscriptions_live.py tests/guards_live.py -v; \
 	TEST_EXIT=$$?; \

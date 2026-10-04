@@ -64,13 +64,15 @@ spec:
               value: "true"
             - name: INPUTLAYER_LOGGING__LEVEL
               value: info
+            # Required: the pod does not start without the secret, and the
+            # engine refuses a password shorter than 12 characters.
             - name: INPUTLAYER_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: inputlayer-secrets
                   key: admin-password
-            # Optional. Without it the engine generates a key on first boot
-            # and stores it in <data_dir>/credentials.toml.
+            # Optional, 12+ characters. Without it the engine generates a key
+            # on first boot and stores it in <data_dir>/credentials.toml.
             - name: INPUTLAYER_BOOTSTRAP_API_KEY
               valueFrom:
                 secretKeyRef:

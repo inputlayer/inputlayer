@@ -158,7 +158,7 @@ async fn info_logs_carry_no_credentials_or_session_ids() {
     let session_id = auth["session_id"].as_str().unwrap().to_string();
 
     for program in [
-        ".user create bob bobs-pw-123 viewer",
+        ".user create bob bobs-pw-12345 viewer",
         ".user password bob bobs-new-pw-456",
         ".USER create carol carols-pw-789 viewer",
         ".User Password carol carols-new-pw-012",

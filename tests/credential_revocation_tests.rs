@@ -135,7 +135,7 @@ async fn failed_replacement_leaves_credentials_intact_over_ws() {
                 )
                 .unwrap();
             let argument = if operation == "password" {
-                "new-pw"
+                "new-password"
             } else {
                 "admin"
             };
@@ -354,7 +354,7 @@ async fn password_change_ends_sessions_on_the_old_password_only() {
 
     server
         .handler
-        .handle_user_password("bob", "rotated")
+        .handle_user_password("bob", "rotated-password")
         .unwrap();
 
     assert_revoked(&old_password.drain().await);
@@ -362,7 +362,7 @@ async fn password_change_ends_sessions_on_the_old_password_only() {
     other_user.assert_live().await;
     let (_, reply) = Client::try_connect(&server, KG, Login::Password("bob", BOB_PASSWORD)).await;
     assert_eq!(reply["type"], "auth_error", "{reply}");
-    Client::connect(&server, Login::Password("bob", "rotated"))
+    Client::connect(&server, Login::Password("bob", "rotated-password"))
         .await
         .assert_live()
         .await;
@@ -381,10 +381,10 @@ async fn revoking_your_own_credential_withholds_the_reply() {
 
     let mut client = Client::connect(&server, Login::Password("admin", ADMIN_PASSWORD)).await;
     client
-        .send(json!({"type": "execute", "program": ".user password admin changed-pw"}))
+        .send(json!({"type": "execute", "program": ".user password admin changed-password"}))
         .await;
     assert_revoked(&client.drain().await);
-    Client::connect(&server, Login::Password("admin", "changed-pw")).await;
+    Client::connect(&server, Login::Password("admin", "changed-password")).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

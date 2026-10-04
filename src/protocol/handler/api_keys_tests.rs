@@ -221,7 +221,7 @@ fn revoking_or_dropping_the_owner_deletes_key_times() {
     let tmp = tempfile::tempdir().unwrap();
     let handler = open(tmp.path());
     handler
-        .handle_user_create("carol", "carol-pw", "editor")
+        .handle_user_create("carol", "carol-password", "editor")
         .unwrap();
     handler
         .create_api_key("mine", "admin", Some(Duration::from_secs(60)))

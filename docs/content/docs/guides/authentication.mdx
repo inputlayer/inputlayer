@@ -7,9 +7,9 @@ InputLayer requires authentication for all connections. The server bootstraps an
 On first launch, the server creates a default admin account:
 
 - **Username**: `admin`
-- **Password**: Set via `INPUTLAYER_ADMIN_PASSWORD` environment variable, or auto-generated (printed to stderr) if unset
+- **Password**: Set via `INPUTLAYER_ADMIN_PASSWORD` environment variable, or generated if unset and saved to `credentials.toml` in the data directory
 
-> **Important**: Always set `INPUTLAYER_ADMIN_PASSWORD` in production deployments.
+A supplied password needs at least 12 characters: the server refuses to start with a shorter one and names the setting. An empty or whitespace-only value counts as unset, so the server generates the password as on a first boot without one. `INPUTLAYER_BOOTSTRAP_API_KEY` follows the same rules.
 
 ```bash
 INPUTLAYER_ADMIN_PASSWORD=my-secure-password inputlayer-server
@@ -32,6 +32,8 @@ Manage users via REPL commands (requires admin privileges):
 .user create alice secretpassword viewer
 ```
 
+Passwords need at least 12 characters, here and in `.user password`.
+
 Roles: `admin`, `editor`, `viewer`
 
 ### List Users
@@ -49,7 +51,7 @@ Roles: `admin`, `editor`, `viewer`
 ### Change Password
 
 ```
-.user password alice new-secret
+.user password alice new-secret-password
 ```
 
 Changing a password ends every live session that logged in with the old one (see [Revocation](#revocation)). Sessions opened with the user's API keys keep working.
@@ -325,7 +327,7 @@ async with InputLayer(
 
 ## Security Best Practices
 
-1. **Change the default admin password** immediately after deployment
+1. **Supply a strong admin password or keep the generated one**, and keep `credentials.toml` private. An empty password never signs in, so an admin created with one by an older release can sign in only after `.user password admin <new password>` (run it with the bootstrap API key)
 2. **Use TLS** via a reverse proxy (see [Deployment](deployment)) - credentials are sent in plaintext over WebSocket
 3. **Create per-user accounts** rather than sharing the admin account
 4. **Use API keys** for automated services and CI/CD pipelines

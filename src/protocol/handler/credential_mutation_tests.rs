@@ -9,10 +9,12 @@ fn fixture() -> (Arc<Handler>, tempfile::TempDir) {
     let temp = tempfile::tempdir().unwrap();
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
-    config.http.auth.bootstrap_admin_password = Some("pw".into());
+    config.http.auth.bootstrap_admin_password = Some("test-password".into());
     let handler = Arc::new(Handler::from_config(config).unwrap());
     handler.bootstrap_auth();
-    handler.handle_user_create("bob", "pw", "editor").unwrap();
+    handler
+        .handle_user_create("bob", "test-password", "editor")
+        .unwrap();
     handler
         .storage
         .read()
@@ -36,10 +38,12 @@ fn spawn_mutation(
             0 => worker.create_api_key("new_key", "bob", None).map(|_| ()),
             1 => worker.handle_apikey_revoke("key").map(|_| ()),
             2 => worker
-                .handle_user_create("alice", "pw", "viewer")
+                .handle_user_create("alice", "test-password", "viewer")
                 .map(|_| ()),
             3 => worker.handle_user_drop("bob").map(|_| ()),
-            4 => worker.handle_user_password("bob", "new_pw").map(|_| ()),
+            4 => worker
+                .handle_user_password("bob", "new-test-password")
+                .map(|_| ()),
             5 => worker.handle_user_role("bob", "viewer").map(|_| ()),
             _ => worker
                 .handle_kg_acl_grant("finance", "bob", "viewer")
@@ -156,14 +160,14 @@ fn restart(handler: Arc<Handler>) -> Arc<Handler> {
 fn failed_user_replacement_changes_nothing() {
     for password_change in [true, false] {
         let (handler, _temp) = fixture();
-        let password = handler.authenticate_user("bob", "pw").unwrap();
+        let password = handler.authenticate_user("bob", "test-password").unwrap();
         let key = handler.create_api_key("key", "bob", None).unwrap();
         let principal = handler.authenticate_api_key(&key).unwrap();
         let users = internal_rows(&handler, "users");
         let keys = internal_rows(&handler, "api_keys");
         break_relation(&handler, "users");
         let result = if password_change {
-            handler.handle_user_password("bob", "new_pw")
+            handler.handle_user_password("bob", "new-test-password")
         } else {
             handler.handle_user_role("bob", "viewer")
         };
@@ -177,7 +181,7 @@ fn failed_user_replacement_changes_nothing() {
         assert!(principal.ended().is_none());
         assert_eq!(principal.role().unwrap(), Role::Editor);
         assert!(handler.authenticate_api_key(&key).is_ok());
-        assert!(handler.authenticate_user("bob", "pw").is_ok());
+        assert!(handler.authenticate_user("bob", "test-password").is_ok());
     }
 }
 
@@ -189,7 +193,9 @@ fn recreated_user_does_not_inherit_dropped_access() {
         .unwrap();
     let key = handler.create_api_key("old-key", "bob", None).unwrap();
     handler.handle_user_drop("bob").unwrap();
-    handler.handle_user_create("bob", "pw", "viewer").unwrap();
+    handler
+        .handle_user_create("bob", "test-password", "viewer")
+        .unwrap();
     let inherits_nothing = |handler: &Handler| {
         assert!(handler.authenticate_api_key(&key).is_err());
         assert_eq!(
@@ -215,7 +221,9 @@ fn access_cannot_be_given_to_an_unknown_user() {
         .iter()
         .any(owned_by(2, "alice")));
 
-    handler.handle_user_create("alice", "pw", "viewer").unwrap();
+    handler
+        .handle_user_create("alice", "test-password", "viewer")
+        .unwrap();
     handler
         .handle_kg_acl_grant("finance", "alice", "viewer")
         .unwrap();
@@ -263,7 +271,7 @@ fn upgraded_data_dir_never_reissues_a_revoked_bootstrap_key() {
     delete_internal_rows(&handler, "users", owned_by(0, "admin"));
 
     let handler = restart(handler);
-    assert!(handler.authenticate_user("admin", "pw").is_ok());
+    assert!(handler.authenticate_user("admin", "test-password").is_ok());
     assert!(handler.authenticate_api_key(&key).is_err());
     let handler = restart(handler);
     assert!(handler.authenticate_api_key(&key).is_err());
@@ -274,7 +282,7 @@ fn partial_first_boot_issues_a_working_key_on_the_next_boot() {
     let temp = tempfile::tempdir().unwrap();
     let mut config = Config::default();
     config.storage.data_dir = temp.path().to_path_buf();
-    config.http.auth.bootstrap_admin_password = Some("pw".into());
+    config.http.auth.bootstrap_admin_password = Some("test-password".into());
     let handler = Handler::from_config(config.clone()).unwrap();
     handler
         .storage
@@ -283,7 +291,7 @@ fn partial_first_boot_issues_a_working_key_on_the_next_boot() {
         .unwrap();
     break_relation(&handler, "users");
     handler.bootstrap_auth();
-    assert!(handler.authenticate_user("admin", "pw").is_err());
+    assert!(handler.authenticate_user("admin", "test-password").is_err());
     handler
         .storage
         .read()
@@ -296,22 +304,26 @@ fn partial_first_boot_issues_a_working_key_on_the_next_boot() {
     handler.bootstrap_auth();
     let key = bootstrap_key(&config);
     assert!(handler.authenticate_api_key(&key).is_ok());
-    assert!(handler.authenticate_user("admin", "pw").is_ok());
+    assert!(handler.authenticate_user("admin", "test-password").is_ok());
 }
 
 #[test]
 fn successful_credential_mutations_preserve_live_identity() {
     let (handler, _temp) = fixture();
-    let password = handler.authenticate_user("bob", "pw").unwrap();
+    let password = handler.authenticate_user("bob", "test-password").unwrap();
     let key = handler.create_api_key("key", "bob", None).unwrap();
     let principal = handler.authenticate_api_key(&key).unwrap();
     handler.handle_user_role("bob", "viewer").unwrap();
     assert_eq!(password.role().unwrap(), Role::Viewer);
     assert_eq!(principal.role().unwrap(), Role::Viewer);
-    handler.handle_user_password("bob", "new_pw").unwrap();
+    handler
+        .handle_user_password("bob", "new-test-password")
+        .unwrap();
     assert_eq!(password.ended(), Some(CredentialEnded::Revoked));
     assert!(principal.ended().is_none());
-    assert!(handler.authenticate_user("bob", "new_pw").is_ok());
+    assert!(handler
+        .authenticate_user("bob", "new-test-password")
+        .is_ok());
     handler.handle_apikey_revoke("key").unwrap();
     let replacement = handler.create_api_key("key", "bob", None).unwrap();
     assert_eq!(principal.ended(), Some(CredentialEnded::Revoked));

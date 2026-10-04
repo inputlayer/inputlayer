@@ -1325,13 +1325,18 @@ impl Handler {
         let persisted = auth::PersistedCredentials::load(&credentials_path).unwrap_or_default();
 
         // Precedence: env var / config > persisted file > generated. Supplied
-        // secrets are never written to disk.
-        let supplied_password = std::env::var("INPUTLAYER_ADMIN_PASSWORD")
-            .ok()
-            .or_else(|| self.config.http.auth.bootstrap_admin_password.clone());
-        let supplied_api_key = std::env::var("INPUTLAYER_BOOTSTRAP_API_KEY")
-            .ok()
-            .filter(|k| !k.is_empty());
+        // secrets are never written to disk; blank ones count as unset.
+        let supplied = auth::supplied_admin_password(
+            self.config.http.auth.bootstrap_admin_password.as_deref(),
+        )
+        .and_then(|password| Ok((password, auth::supplied_bootstrap_api_key()?)));
+        let (supplied_password, supplied_api_key) = match supplied {
+            Ok(supplied) => supplied,
+            Err(e) => {
+                eprintln!("ERROR: {e} Admin user not created.");
+                return;
+            }
+        };
         let mut to_persist = auth::PersistedCredentials::default();
         let resolve =
             |supplied: Option<String>, persisted: Option<String>, slot: &mut Option<String>| {
@@ -1669,6 +1674,7 @@ impl Handler {
         use std::str::FromStr;
 
         let role = auth::Role::from_str(role_str)?;
+        auth::check_password_strength(password)?;
         let password_hash = auth::hash_password(password)?;
 
         let _credential_writes = self.credential_writes.lock();
@@ -1815,6 +1821,7 @@ impl Handler {
         use crate::auth;
         use crate::value::Value;
 
+        auth::check_password_strength(new_password)?;
         let new_hash = auth::hash_password(new_password)?;
         let _credential_writes = self.credential_writes.lock();
         let storage = self.storage.read();
@@ -5748,16 +5755,18 @@ mod tests {
         use crate::storage::persist::wal::WalFault;
         let (mut config, _temp) = make_test_config();
         config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
-        config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+        config.http.auth.bootstrap_admin_password = Some("password-0123".to_string());
         let handler = Handler::from_config(config).unwrap();
         handler.bootstrap_auth();
         handler
-            .handle_user_create("editor", "password123", "editor")
+            .handle_user_create("editor", "password-0123", "editor")
             .unwrap();
         handler
             .handle_kg_acl_grant("default", "editor", "editor")
             .unwrap();
-        let principal = handler.authenticate_user("editor", "password123").unwrap();
+        let principal = handler
+            .authenticate_user("editor", "password-0123")
+            .unwrap();
         let session = handler
             .create_session_with_auth("default", &principal)
             .unwrap();
@@ -5899,11 +5908,11 @@ mod tests {
         for with_key in [true, false] {
             let (mut config, _temp) = make_test_config();
             config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
-            config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+            config.http.auth.bootstrap_admin_password = Some("password-0123".to_string());
             let handler = Handler::from_config(config.clone()).unwrap();
             handler.bootstrap_auth();
             handler
-                .handle_user_create("bob", "password123", "viewer")
+                .handle_user_create("bob", "password-0123", "viewer")
                 .unwrap();
             handler
                 .storage
@@ -5934,12 +5943,12 @@ mod tests {
                 with_key
             );
             assert!(handler
-                .handle_user_create("bob", "password456", "viewer")
+                .handle_user_create("bob", "password-0456", "viewer")
                 .is_err());
 
             handler.handle_user_drop("bob").unwrap();
             handler
-                .handle_user_create("bob", "password456", "viewer")
+                .handle_user_create("bob", "password-0456", "viewer")
                 .unwrap();
             assert!(handler
                 .get_kg_role_for_user("private", "bob", &Role::Viewer)
@@ -5951,7 +5960,7 @@ mod tests {
             drop(handler);
             let reopened = Handler::from_config(config).unwrap();
             reopened.bootstrap_auth();
-            assert!(reopened.authenticate_user("bob", "password456").is_ok());
+            assert!(reopened.authenticate_user("bob", "password-0456").is_ok());
             assert!(reopened
                 .get_kg_role_for_user("private", "bob", &Role::Viewer)
                 .is_none());
@@ -5974,12 +5983,12 @@ mod tests {
         ] {
             let (mut config, _temp) = make_test_config();
             config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
-            config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+            config.http.auth.bootstrap_admin_password = Some("password-0123".to_string());
             let handler = Handler::from_config(config).unwrap();
             handler.bootstrap_auth();
             handler.storage.write().create_knowledge_graph("g").unwrap();
             handler
-                .handle_user_create("bob", "password123", "viewer")
+                .handle_user_create("bob", "password-0123", "viewer")
                 .unwrap();
             handler.handle_kg_acl_grant("g", "bob", "viewer").unwrap();
             for fault in faults {
@@ -6020,11 +6029,11 @@ mod tests {
 
         let (mut config, _temp) = make_test_config();
         config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
-        config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+        config.http.auth.bootstrap_admin_password = Some("password-0123".to_string());
         let handler = Handler::from_config(config).unwrap();
         handler.bootstrap_auth();
         handler
-            .handle_user_create("bob", "password123", "viewer")
+            .handle_user_create("bob", "password-0123", "viewer")
             .unwrap();
         handler.create_api_key("old-key", "bob", None).unwrap();
         handler
@@ -6047,9 +6056,9 @@ mod tests {
     async fn durability_admin_protocol_preserves_outcome_types() {
         use crate::storage::persist::wal::WalFault;
         for command in [
-            ".user create alice password123 viewer",
+            ".user create alice password-0123 viewer",
             ".user drop bob",
-            ".user password bob password456",
+            ".user password bob password-0456",
             ".user role bob editor",
             ".apikey create new-key",
             ".apikey revoke old-key",
@@ -6058,11 +6067,11 @@ mod tests {
         ] {
             let (mut config, _temp) = make_test_config();
             config.storage.persist.durability_mode = crate::config::DurabilityMode::Immediate;
-            config.http.auth.bootstrap_admin_password = Some("password123".to_string());
+            config.http.auth.bootstrap_admin_password = Some("password-0123".to_string());
             let handler = Handler::from_config(config).unwrap();
             handler.bootstrap_auth();
             handler
-                .handle_user_create("bob", "password123", "viewer")
+                .handle_user_create("bob", "password-0123", "viewer")
                 .unwrap();
             handler.create_api_key("old-key", "bob", None).unwrap();
             handler
@@ -6107,7 +6116,7 @@ mod tests {
     #[tokio::test]
     async fn test_login_outcome_recorded_after_caller_gives_up() {
         let (mut config, _tmp) = make_test_config();
-        config.http.auth.bootstrap_admin_password = Some("pw".to_string());
+        config.http.auth.bootstrap_admin_password = Some("test-password".to_string());
         let handler = Arc::new(Handler::from_config(config).expect("handler creation failed"));
         handler.bootstrap_auth();
         let peer = std::net::IpAddr::from([192, 0, 2, 1]);
@@ -6115,7 +6124,7 @@ mod tests {
             let attempt = handler.login_throttle.begin(peer, "admin").unwrap();
             handler.login_throttle.fail(&attempt);
         }
-        let login = handler.login("admin", "pw", peer);
+        let login = handler.login("admin", "test-password", peer);
         assert!(tokio::time::timeout(Duration::ZERO, login).await.is_err());
         // Wait for the abandoned login to settle.
         let _all = handler

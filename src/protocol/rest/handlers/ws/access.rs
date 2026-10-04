@@ -79,13 +79,13 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let mut config = Config::default();
         config.storage.data_dir = tmp.path().join("data");
-        config.http.auth.bootstrap_admin_password = Some("admin-pw".to_string());
+        config.http.auth.bootstrap_admin_password = Some("admin-password".to_string());
         config.http.auth.credentials_file = Some(tmp.path().join("credentials.toml"));
         let handler = Handler::from_config(config).unwrap();
         handler.bootstrap_auth();
         handler.get_storage().create_knowledge_graph(KG).unwrap();
         handler
-            .handle_user_create("bob", "bob-pw", "editor")
+            .handle_user_create("bob", "bob-password", "editor")
             .unwrap();
         handler.handle_kg_acl_grant(KG, "bob", "viewer").unwrap();
         let key = handler.create_api_key("bob-key", "bob", None).unwrap();

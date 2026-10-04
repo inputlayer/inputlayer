@@ -34,10 +34,10 @@ async fn setup() -> (Handler, TempDir) {
     let handler = Handler::new(StorageEngine::new(config).unwrap());
     handler.bootstrap_auth();
     handler
-        .handle_user_create("mallory", "password-m", "viewer")
+        .handle_user_create("mallory", "password-mallory", "viewer")
         .unwrap();
     handler
-        .handle_user_create("eve", "password-e", "editor")
+        .handle_user_create("eve", "password-eve", "editor")
         .unwrap();
 
     let a = admin(&handler);

@@ -16,7 +16,7 @@ async fn handler_with_proof_fixture() -> (Arc<Handler>, String, tempfile::TempDi
     let tmp = tempfile::tempdir().expect("failed to create temp dir");
     let mut config = Config::default();
     config.storage.data_dir = tmp.path().join("data");
-    config.http.auth.bootstrap_admin_password = Some("admin-pw".to_string());
+    config.http.auth.bootstrap_admin_password = Some("admin-password".to_string());
     config.http.auth.credentials_file = Some(tmp.path().join("credentials.toml"));
     let handler = Arc::new(Handler::from_config(config).expect("handler creation failed"));
     handler.bootstrap_auth();
@@ -26,7 +26,7 @@ async fn handler_with_proof_fixture() -> (Arc<Handler>, String, tempfile::TempDi
         .create_knowledge_graph(KG)
         .expect("knowledge graph creation failed");
     handler
-        .handle_user_create("bob", "bob-pw", "editor")
+        .handle_user_create("bob", "bob-password", "editor")
         .expect("user creation failed");
     handler
         .handle_kg_acl_grant(KG, "bob", "viewer")

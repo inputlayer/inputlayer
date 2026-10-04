@@ -5,8 +5,11 @@ services:
     volumes:
       - inputlayer-data:/var/lib/inputlayer/data
     environment:
-      INPUTLAYER_ADMIN_PASSWORD: ${INPUTLAYER_ADMIN_PASSWORD:-}
-      INPUTLAYER_BOOTSTRAP_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:-}
+      # REQUIRED, at least 12 characters each (the engine refuses shorter
+      # ones). Compose refuses to start without them; the gateway uses the
+      # API key to reach the engine.
+      INPUTLAYER_ADMIN_PASSWORD: ${INPUTLAYER_ADMIN_PASSWORD:?Set INPUTLAYER_ADMIN_PASSWORD (at least 12 characters) in .env}
+      INPUTLAYER_BOOTSTRAP_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:?Set INPUTLAYER_BOOTSTRAP_API_KEY (at least 12 characters) in .env}
       INPUTLAYER_HTTP__HOST: "0.0.0.0"
       # The engine fetches ontology packs on .ontology install. HTTPS index
       # URL, or a local path (mount a registry clone) for deployments with
@@ -29,13 +32,12 @@ services:
       GATEWAY_HOST: "0.0.0.0"
       GATEWAY_PORT: "8081"
       INPUTLAYER_URL: "http://inputlayer:8080"
-      INPUTLAYER_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:-}
+      INPUTLAYER_API_KEY: ${INPUTLAYER_BOOTSTRAP_API_KEY:?Set INPUTLAYER_BOOTSTRAP_API_KEY (at least 12 characters) in .env}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # REQUIRED here: this compose file publishes the gateway to the
       # internet via Caddy, and an unauthenticated gateway spends your
       # model-provider budget for anyone who finds it. Compose refuses to
-      # start without it. (The no-TLS compose, meant for local/private
-      # networks, leaves it optional.)
+      # start without it.
       GATEWAY_API_KEY: ${GATEWAY_API_KEY:?GATEWAY_API_KEY is required for the public TLS deployment - clients authenticate with Authorization Bearer}
       # Every ontology published in the registry index is loaded at startup
       # and pinned by version and digest; each request selects one via the
