@@ -37,16 +37,19 @@
 //! once, and otherwise shares only while a round is, on average, no slower
 //! than those evaluations run in parallel on the permits. Costs leave out
 //! waiting for a permit and compiling a plan, and a view's own cost counts
-//! only evaluations that reused a compiled plan. Once it has a view's own
-//! cost to compare with, a family probes: it evaluates a round no view waits
-//! for, under the server's probe permit rather than a compute permit, and
-//! starts sharing only when that round is fast enough. With too few compute
-//! permits for that, a family decides from its shape instead: it shares
-//! unless a parameter binds an atom that reads a recursive relation, where
-//! the constant lets Magic Sets restrict the work. It stops when rounds are
-//! slower on average, and probes (or decides) again
-//! after some commits, waiting longer after each failure. While sharing, a
-//! view evaluates its own query now and then to keep that cost current.
+//! only evaluations that reused a compiled plan. Costs hold under the rules
+//! they were measured with: a rule change stops sharing and starts them
+//! over. A family never evaluates its lifted query while a parameter binds
+//! an atom that reads, under the current rules, a recursive relation: the
+//! constant lets Magic Sets restrict the work, and the lifted query may
+//! compute the whole closure. Otherwise, once it has a view's own cost to
+//! compare with, a family probes: it evaluates a round no view waits for,
+//! under the server's probe permit rather than a compute permit, and starts
+//! sharing only when that round is fast enough. With too few compute permits
+//! for that, a family shares without a probe. It stops when rounds are
+//! slower on average, and probes (or decides) again after some commits,
+//! waiting longer after each failure. While sharing, a view evaluates its
+//! own query now and then to keep that cost current.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -78,7 +81,7 @@ const PARAM_PREFIX: &str = "_L";
 const PROBE_AFTER: u64 = 256;
 
 /// Fewest compute permits with which families probe: with fewer, a probe
-/// would take CPU views need, so families decide from their shape.
+/// would take CPU views need, so families share without one.
 const MIN_PERMITS_FOR_PROBES: usize = 3;
 
 /// A family that keeps failing its probes waits at most this many doublings
@@ -432,6 +435,16 @@ pub struct Family {
     rounds: AtomicU64,
     /// Whether the next view to refresh evaluates its own query.
     sample_due: AtomicBool,
+    /// The rules the costs were measured under, and the shape's verdict
+    /// under them.
+    judged: ArcSwapOption<Judged>,
+}
+
+/// A family's verdict under one set of rules.
+struct Judged {
+    rules: Arc<PersistentRules>,
+    /// Whether a parameter binds an atom that reads a recursive relation.
+    binds_recursion: bool,
 }
 
 impl Family {
@@ -463,6 +476,29 @@ impl Family {
             }
         }
         self.bindings.store(members.len(), Ordering::Relaxed);
+    }
+
+    /// Whether, under `snapshot`'s rules, a parameter binds an atom that
+    /// reads a recursive relation. The first call under new rules starts the
+    /// costs over and stops sharing, without counting a failure.
+    fn binds_recursion(&self, snapshot: &KnowledgeGraphSnapshot) -> bool {
+        let rules = snapshot.persistent_rules();
+        if let Some(judged) = &*self.judged.load() {
+            if Arc::ptr_eq(&judged.rules, rules) {
+                return judged.binds_recursion;
+            }
+        }
+        let binds = binds_recursion(&self.shape, &snapshot.rules);
+        self.judged.store(Some(Arc::new(Judged {
+            rules: Arc::clone(rules),
+            binds_recursion: binds,
+        })));
+        self.sharing.store(false, Ordering::Relaxed);
+        self.own_cost_us.store(0, Ordering::Relaxed);
+        self.shared_cost_us.store(0, Ordering::Relaxed);
+        self.own_since_stop.store(0, Ordering::Relaxed);
+        self.stops.store(0, Ordering::Relaxed);
+        binds
     }
 
     /// The round to read for a view that must see `snapshot`: the latest
@@ -520,6 +556,10 @@ impl Family {
         snapshot: Arc<KnowledgeGraphSnapshot>,
         probe: bool,
     ) -> Result<Arc<Partitions>, String> {
+        if self.binds_recursion(&snapshot) {
+            self.sharing.store(false, Ordering::Relaxed);
+            return Err("a parameter binds a recursive relation".to_string());
+        }
         self.metrics.record_shared_evaluation();
         let rules = Arc::clone(snapshot.persistent_rules());
         let dependencies = Dependencies::for_query(&self.shape.goal, &snapshot.rules);
@@ -590,11 +630,15 @@ impl Family {
         self.sharing.store(false, Ordering::Relaxed);
     }
 
-    /// Note a view's own evaluation: its cost when it reused a compiled plan
-    /// (`None` when it compiled one). Whether to probe: the own cost is known,
-    /// there are more bindings than compute permits, and the family never
-    /// shared or enough own evaluations passed since it stopped.
-    fn record_own(&self, cost: Option<Duration>) -> bool {
+    /// Note a view's own evaluation on `snapshot`: its cost when it reused a
+    /// compiled plan (`None` when it compiled one). Whether to probe: no
+    /// parameter binds recursion under `snapshot`'s rules, the own cost is
+    /// known, there are more bindings than compute permits, and the family
+    /// never shared or enough own evaluations passed since it stopped.
+    fn record_own(&self, cost: Option<Duration>, snapshot: &KnowledgeGraphSnapshot) -> bool {
+        if self.binds_recursion(snapshot) {
+            return false;
+        }
         let average = match cost {
             Some(cost) => smooth(&self.own_cost_us, cost),
             None => self.own_cost_us.load(Ordering::Relaxed),
@@ -613,14 +657,10 @@ impl Family {
     /// Evaluate a round at `snapshot` that no view waits for, at most one at
     /// a time, under the server's probe permit: the guard judging it decides
     /// whether views share. With too few compute permits to spare the CPU,
-    /// decide from the family's shape and `snapshot`'s rules instead.
+    /// share without one.
     fn probe(family: &Arc<Family>, snapshot: Arc<KnowledgeGraphSnapshot>) {
         if family.handler.compute_permits() < MIN_PERMITS_FOR_PROBES {
-            if binds_recursion(&family.shape, &snapshot.rules) {
-                family.stop_sharing();
-            } else {
-                family.sharing.store(true, Ordering::Relaxed);
-            }
+            family.sharing.store(true, Ordering::Relaxed);
             return;
         }
         if family.probing.swap(true, Ordering::Relaxed) {
@@ -686,6 +726,7 @@ impl Families {
                         shared_cost_us: AtomicU64::new(0),
                         rounds: AtomicU64::new(0),
                         sample_due: AtomicBool::new(false),
+                        judged: ArcSwapOption::empty(),
                     });
                     families.insert(key, Arc::downgrade(&family));
                     family
@@ -739,7 +780,7 @@ impl MemberQuery {
         let evaluated = self.own.evaluate_on(Arc::clone(&snapshot)).await?;
         if self
             .family
-            .record_own(evaluated.plan_cached.then_some(evaluated.cost))
+            .record_own(evaluated.plan_cached.then_some(evaluated.cost), &snapshot)
         {
             Family::probe(&self.family, snapshot);
         }

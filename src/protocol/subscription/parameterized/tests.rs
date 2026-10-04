@@ -200,9 +200,18 @@ mod rounds {
     }
 
     fn handler_with(permits: usize) -> (Arc<Handler>, TempDir) {
+        handler_capped(
+            permits,
+            Config::default().storage.performance.max_result_rows,
+        )
+    }
+
+    /// A handler of `permits` whose results hold at most `max_result_rows`.
+    fn handler_capped(permits: usize, max_result_rows: usize) -> (Arc<Handler>, TempDir) {
         let tmp = TempDir::new().unwrap();
         let mut config = Config::default();
         config.storage.data_dir = tmp.path().join("data");
+        config.storage.performance.max_result_rows = max_result_rows;
         let handler = Arc::new(
             Handler::from_config(config)
                 .unwrap()
@@ -378,16 +387,16 @@ mod rounds {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_probe_too_slow_to_share_never_makes_a_view_wait() {
         let (handler, _tmp) = handler();
-        chain(&handler, 400).await;
+        write(&handler, "+item[(\"s1\", 1), (\"s2\", 2)]").await;
         let families = Families::default();
         let metrics = Arc::new(SubscriptionMetrics::default());
-        let mut one = member(&families, &handler, &metrics, r#"?reach("n398", Y)"#);
-        let mut two = member(&families, &handler, &metrics, r#"?reach("n399", Y)"#);
+        let mut one = member(&families, &handler, &metrics, r#"?item("s1", X)"#);
+        let mut two = member(&families, &handler, &metrics, r#"?item("s2", X)"#);
         let _idle = idle(
             &families,
             &handler,
             &metrics,
-            &[r#"?reach("n396", Y)"#, r#"?reach("n397", Y)"#],
+            &[r#"?item("s3", X)"#, r#"?item("s4", X)"#],
         );
         one.refresh().await.unwrap();
         two.refresh().await.unwrap();
@@ -397,15 +406,15 @@ mod rounds {
         let family = Arc::clone(&one.family);
         let gate = family.probe_gate.write().await;
         // A plan-cached own evaluation makes a probe due.
-        write(&handler, "+edge(\"x1\", \"y1\")").await;
+        write(&handler, "+item(\"x\", 1)").await;
         one.refresh().await.unwrap();
         assert!(family.probing.load(Ordering::Relaxed), "probe started");
         // Own evaluations far faster than any round.
         family.own_cost_us.store(1, Ordering::Relaxed);
         // While it is held, views evaluate their own queries without waiting.
-        write(&handler, "+edge(\"n399\", \"z\")").await;
+        write(&handler, "+item(\"s2\", 3)").await;
         let refresh = two.refresh().await.unwrap();
-        assert_eq!(inserted(&refresh), [json!(["n399", "z"])]);
+        assert_eq!(inserted(&refresh), [json!(["s2", 3])]);
         assert!(!family.shares());
         assert_eq!(metrics.shared_evaluations(), 0, "the probe is held");
         drop(gate);
@@ -414,22 +423,25 @@ mod rounds {
         assert_eq!(metrics.shared_evaluations(), 1, "only the probe's round");
         assert!(!family.shares(), "the probe was judged too slow");
         assert_eq!(family.stops.load(Ordering::Relaxed), 1);
-        write(&handler, "+edge(\"n398\", \"w\")").await;
-        let refresh = one.refresh().await.unwrap();
-        let mut rows = inserted(&refresh);
-        rows.sort_by_key(ToString::to_string);
-        assert_eq!(rows, [json!(["n398", "w"]), json!(["n398", "z"])]);
+        write(&handler, "+item(\"s1\", 4)").await;
+        assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 4])]);
         assert!(!family.probing.load(Ordering::Relaxed), "backing off");
         assert_eq!(metrics.shared_evaluations(), 1);
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn without_permits_to_probe_a_recursion_bound_family_never_shares() {
-        let (handler, _tmp) = handler_with(2);
+    /// Views of `?reach("nK", Y)` for `bindings` nodes near the end of a
+    /// 300-edge chain on a handler of `permits`, refreshed over a few
+    /// commits: none evaluates the lifted, unbound closure, whose 45k rows
+    /// the row cap would refuse anyway.
+    async fn recursion_bound_family_never_evaluates_its_lifted_query(
+        permits: usize,
+        bindings: usize,
+    ) {
+        let (handler, _tmp) = handler_capped(permits, 1_000);
         chain(&handler, 300).await;
         let families = Families::default();
         let metrics = Arc::new(SubscriptionMetrics::default());
-        let mut views: Vec<_> = (295..299)
+        let mut views: Vec<_> = (299 - bindings..299)
             .map(|i| {
                 member(
                     &families,
@@ -442,17 +454,86 @@ mod rounds {
         for view in &mut views {
             view.refresh().await.unwrap();
         }
+        let family = Arc::clone(&views[0].family);
         for round in 0..3 {
             write(&handler, &format!("+edge(\"n300\", \"t{round}\")")).await;
             for view in &mut views {
                 assert_eq!(inserted(&view.refresh().await.unwrap()).len(), 1);
-                assert!(!view.family.probing.load(Ordering::Relaxed));
+                // Own evaluations slower than any round here.
+                family.own_cost_us.store(1_000_000_000, Ordering::Relaxed);
+                assert!(!family.probing.load(Ordering::Relaxed), "no probe");
             }
         }
-        assert!(views[0].family.own_cost_us.load(Ordering::Relaxed) > 0);
-        assert!(!views[0].family.shares());
-        assert!(views[0].family.stops.load(Ordering::Relaxed) > 0, "decided");
+        // Not even when told to share.
+        family.sharing.store(true, Ordering::Relaxed);
+        write(&handler, "+edge(\"n300\", \"u\")").await;
+        for view in &mut views {
+            assert_eq!(inserted(&view.refresh().await.unwrap()).len(), 1);
+        }
+        assert!(!family.shares());
         assert_eq!(metrics.shared_evaluations(), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_recursion_bound_family_never_evaluates_its_lifted_query() {
+        recursion_bound_family_never_evaluates_its_lifted_query(8, 9).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn without_permits_to_probe_a_recursion_bound_family_never_shares() {
+        recursion_bound_family_never_evaluates_its_lifted_query(2, 4).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_rule_change_starts_the_costs_over_and_judges_the_shape_again() {
+        let (handler, _tmp) = handler();
+        write(
+            &handler,
+            "+edge[(\"n1\", \"n2\"), (\"n2\", \"n3\")]\n+reach(X, Y) <- edge(X, Y)",
+        )
+        .await;
+        let families = Families::default();
+        let metrics = Arc::new(SubscriptionMetrics::default());
+        let mut views: Vec<_> = (1..=4)
+            .map(|i| {
+                member(
+                    &families,
+                    &handler,
+                    &metrics,
+                    &format!("?reach(\"n{i}\", Y)"),
+                )
+            })
+            .collect();
+        let family = Arc::clone(&views[0].family);
+        for view in &mut views {
+            view.refresh().await.unwrap();
+        }
+        write(&handler, "+edge(\"n4\", \"n5\")").await;
+        family.own_cost_us.store(1_000_000_000, Ordering::Relaxed);
+        views[0].refresh().await.unwrap();
+        probed(&family).await;
+        assert!(family.shares(), "not recursive: the probe kept sharing");
+        let shared = metrics.shared_evaluations();
+
+        // The rule change makes `reach` recursive.
+        write(&handler, "+reach(X, Z) <- reach(X, Y), edge(Y, Z)").await;
+        views[0].refresh().await.unwrap();
+        assert!(!family.shares(), "costs of the old rules no longer hold");
+        assert_eq!(family.own_cost_us.load(Ordering::Relaxed), 0);
+        assert_eq!(family.stops.load(Ordering::Relaxed), 0, "not a failure");
+        for view in &mut views[1..] {
+            view.refresh().await.unwrap();
+        }
+        for round in 0..2 {
+            write(&handler, &format!("+edge(\"n5\", \"t{round}\")")).await;
+            for view in &mut views {
+                view.refresh().await.unwrap();
+                family.own_cost_us.store(1_000_000_000, Ordering::Relaxed);
+                assert!(!family.probing.load(Ordering::Relaxed), "no probe");
+            }
+        }
+        assert!(!family.shares());
+        assert_eq!(metrics.shared_evaluations(), shared);
     }
 
     #[tokio::test(flavor = "multi_thread")]
