@@ -301,7 +301,36 @@ subscription_coalesce_ms = 0
 
 # Notification ring buffer size for reconnect replay
 notification_buffer_size = 4096
+
+# =============================================================================
+# WARM-STANDBY REPLICATION
+# =============================================================================
+[replication]
+# standalone (default), primary, or follower. A primary streams every committed
+# change to followers; a follower applies the stream, serves reads and
+# subscriptions, and refuses writes.
+role = "standalone"
+
+# Shared secret followers present to the primary (at least 16 characters).
+# Required for primary and follower. Prefer INPUTLAYER_REPLICATION__TOKEN.
+# token = "..."
+
+# Primary: bytes of recent changes kept in memory for followers to catch up
+# from (default 64 MiB). A follower further behind resyncs from a checkpoint.
+retain_bytes = 67108864
+
+# Primary: heartbeat interval on an idle stream, in ms.
+heartbeat_ms = 500
+
+# Follower: the primary's HTTP base URL.
+# primary_url = "http://primary:8080"
+
+# Follower: silence from the primary after which the follower reconnects, in
+# ms (detects a dead primary or a network partition). Must exceed heartbeat_ms.
+timeout_ms = 3000
 ```
+
+See [Replication](replication) for how a warm standby works.
 
 ## Environment Variables
 
@@ -332,6 +361,11 @@ export INPUTLAYER_HTTP__RATE_LIMIT__WS_MAX_MESSAGES_PER_SEC=500
 
 # Logging
 export INPUTLAYER_LOGGING__LEVEL=debug
+
+# Replication
+export INPUTLAYER_REPLICATION__ROLE=follower
+export INPUTLAYER_REPLICATION__TOKEN=your-replication-secret
+export INPUTLAYER_REPLICATION__PRIMARY_URL=http://primary:8080
 ```
 
 **Note:** Use double underscores (`__`) to separate nested config sections.

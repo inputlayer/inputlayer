@@ -16,6 +16,7 @@
   "temporal": "Temporal Reasoning",
   "persistence": "Persistence",
   "backup": "Backup and Restore",
+  "replication": "Replication (Warm Standby)",
   "ingestion": "Ingestion (CDC & Webhooks)",
   "configuration": "Configuration",
   "rest-api": "REST API",

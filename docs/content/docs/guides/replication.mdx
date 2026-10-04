@@ -1,0 +1,125 @@
+# Replication (Warm Standby)
+
+A **follower** is a second server that keeps a live copy of a **primary**. The
+primary streams every committed change to it. The follower applies the
+changes in commit order and serves queries and subscriptions on the copy. It
+refuses every write.
+
+This release ships the stream and the follower. Shipping is **asynchronous**:
+the primary acknowledges a write once it is durable on the primary, then
+sends it on. Promotion (turning a follower into the primary) and automatic
+failover are not part of this release.
+
+## Setting Up
+
+Both servers need the same shared secret. On the primary:
+
+```toml
+[replication]
+role = "primary"
+token = "a-long-random-secret"   # or INPUTLAYER_REPLICATION__TOKEN
+```
+
+On the follower, which has its own, empty data directory:
+
+```toml
+[replication]
+role = "follower"
+token = "a-long-random-secret"
+primary_url = "http://primary:8080"
+```
+
+The follower connects to `GET /v1/replication/stream` on the primary's HTTP
+port. It copies the primary's whole state, then applies changes as they
+commit. Users and API keys live in the replicated `_internal` graph, so the
+primary's API keys work on the follower too. The follower creates no admin
+user of its own.
+
+## What Replicates
+
+Every durable change, in the order it committed:
+
+- fact inserts and deletes
+- persistent rules and schemas
+- knowledge graph creation and drops
+- relation drops
+- vector index creation and drops (the follower builds each index from its
+  own copy of the facts)
+
+Session rules, session facts and session schemas stay on the server that holds
+the session. API key "last used" times are not saved on a follower.
+
+Each change applies on the follower as one transaction, exactly as it
+committed on the primary. A query on the follower therefore sees the
+primary's state as of some earlier commit, never half of a commit.
+Subscriptions on the follower get deltas for replicated commits. Revisions
+on the follower are the follower's own: they increase, but they are not the
+primary's numbers.
+
+## Recovery Point (RPO)
+
+With asynchronous shipping, a write the primary acknowledged can be lost if
+the primary is lost before the follower applied it. The window is the
+follower's lag. That lag is usually a few milliseconds, and the status
+endpoint reports it at any time. A follower that cannot hear the primary
+(the primary died or the network is cut) notices after `timeout_ms`. Writes
+the primary accepts during that time reach the follower only once the
+connection is back.
+
+Synchronous shipping, where the primary acknowledges a write only once a
+follower holds it (RPO zero), is planned.
+
+## When Things Go Wrong
+
+| Event | What the follower does |
+|---|---|
+| The primary is killed | Keeps exactly the changes it applied: a prefix of the primary's commits. It reconnects with backoff (100 ms up to 2 s). |
+| The primary restarts | Copies the primary's state again (a *resync*), then streams. |
+| Network partition | Notices the silence after `timeout_ms`, keeps reconnecting, and catches up from where it stopped once the network is back. |
+| The follower restarts | Resumes from its saved position (`replication/follower.json` in its data directory). |
+| The follower falls further behind than `retain_bytes` | Resyncs. |
+| A change fails to apply | Clears its position and resyncs. |
+
+A resync brings the follower's whole state to a consistent copy of the
+primary. Facts, rules, schemas, graphs and indexes the primary no longer has
+are removed. A partly applied or stale follower is repaired the same way as
+an empty one.
+
+## Monitoring
+
+`GET /v1/replication/status` (any valid API key) reports this server's role.
+
+On a primary it reports:
+
+- `primary.stream_id`: this run of the primary
+- `primary.head_lsn`: the number of the newest change
+- for each connected follower: `sent_lsn`, `acked_lsn` and `lag_events`
+
+On a follower it reports:
+
+- `follower.state`: `connecting`, `resyncing` or `streaming`
+- `applied_lsn` and `primary_head_lsn`
+- `lag_events`
+- `last_contact_ms`: time since the primary was last heard
+- `resyncs` and `reconnects`, counted since the follower started
+- `last_error`
+
+```bash
+curl -H "Authorization: Bearer $INPUTLAYER_API_KEY" http://follower:8080/v1/replication/status
+```
+
+## Settings
+
+| Setting | Role | Default | Meaning |
+|---|---|---|---|
+| `role` | both | `standalone` | `standalone`, `primary` or `follower` |
+| `token` | both | none | shared secret, at least 16 characters |
+| `retain_bytes` | primary | 64 MiB | recent changes kept in memory for followers to catch up from |
+| `heartbeat_ms` | primary | 500 | heartbeat interval on an idle stream |
+| `primary_url` | follower | none | the primary's HTTP base URL |
+| `timeout_ms` | follower | 3000 | silence after which the follower reconnects; must exceed `heartbeat_ms` |
+
+Keep the primary on `durability_mode = "immediate"` (the default). With
+`batched` durability a crash can lose commits that the primary already sent.
+The follower would then hold commits that the restarted primary no longer
+has. The resync that follows removes them from the follower.

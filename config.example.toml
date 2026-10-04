@@ -277,3 +277,30 @@ notification_buffer_size = 4096
 # ?speech("s-2", ...)) share one evaluation per commit; each subscriber still gets
 # exactly its own rows. Turns itself off per query shape when sharing is slower.
 share_parameterized = true
+
+# =============================================================================
+# WARM-STANDBY REPLICATION
+# =============================================================================
+[replication]
+# standalone (default), primary, or follower. A primary streams every committed
+# change to followers; a follower applies the stream, serves reads and
+# subscriptions, and refuses writes.
+role = "standalone"
+
+# Shared secret followers present to the primary (at least 16 characters).
+# Required for primary and follower. Prefer INPUTLAYER_REPLICATION__TOKEN.
+# token = "..."
+
+# Primary: bytes of recent changes kept in memory for followers to catch up
+# from (default 64 MiB). A follower further behind resyncs from a checkpoint.
+retain_bytes = 67108864
+
+# Primary: heartbeat interval on an idle stream, in ms.
+heartbeat_ms = 500
+
+# Follower: the primary's HTTP base URL.
+# primary_url = "http://primary:8080"
+
+# Follower: silence from the primary after which the follower reconnects, in
+# ms (detects a dead primary or a network partition). Must exceed heartbeat_ms.
+timeout_ms = 3000
