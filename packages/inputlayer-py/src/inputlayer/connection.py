@@ -36,6 +36,7 @@ import websockets
 from websockets.asyncio.client import ClientConnection
 
 from inputlayer._protocol import (
+    PARAMS_PROTOCOL_VERSION,
     AuthenticatedResponse,
     AuthenticateMessage,
     AuthErrorResponse,
@@ -270,6 +271,7 @@ class Connection:
         self._ws: ClientConnection | None = None
         self._session_id: str | None = None
         self._server_version: str | None = None
+        self._protocol_version: int | None = None
         self._role: str | None = None
         self._current_kg: str | None = None
         self._state: _State = "idle"
@@ -494,6 +496,7 @@ class Connection:
             if isinstance(response, AuthenticatedResponse):
                 self._session_id = response.session_id
                 self._server_version = response.version
+                self._protocol_version = response.protocol_version
                 self._role = response.role
                 self._current_kg = response.knowledge_graph
                 if self._epoch != response.stream_epoch:
@@ -512,8 +515,18 @@ class Connection:
         self._next_id += 1
         return f"r{self._next_id}"
 
-    async def execute(self, program: str, *, timeout: float | None = None) -> ResultResponse:
+    async def execute(
+        self,
+        program: str,
+        *,
+        timeout: float | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> ResultResponse:
         """Send a program and await its result.
+
+        ``params`` are the values of the program's ``$name`` references, sent
+        beside its text and bound by the engine without being parsed
+        (protocol version 4; see :func:`inputlayer._literal.collect_params`).
 
         ``timeout`` (seconds, default the connection's ``default_timeout``)
         becomes the request's deadline, covering any wait for a connection
@@ -525,17 +538,26 @@ class Connection:
         if timeout is None:
             timeout = self._default_timeout
         deadline = None if timeout is None else asyncio.get_running_loop().time() + timeout
+        params = params or None
         try:
-            return await self._execute_once(program, deadline)
+            return await self._execute_once(program, deadline, params)
         except RateLimited:
             remaining = self._remaining(deadline)
             if remaining is not None and remaining <= _RATE_LIMIT_WINDOW:
                 raise
             await asyncio.sleep(_RATE_LIMIT_WINDOW)
-            return await self._execute_once(program, deadline)
+            return await self._execute_once(program, deadline, params)
 
-    async def _execute_once(self, program: str, deadline: float | None) -> ResultResponse:
+    async def _execute_once(
+        self, program: str, deadline: float | None, params: dict[str, Any] | None
+    ) -> ResultResponse:
         await self._ensure_open(deadline, program)
+        if params is not None and (self._protocol_version or 0) < PARAMS_PROTOCOL_VERSION:
+            # An older engine ignores params and fails on the `$name` references.
+            raise ConnectionError(
+                f"The engine speaks /ws protocol {self._protocol_version}; parameters need "
+                f"version {PARAMS_PROTOCOL_VERSION}. Upgrade the engine."
+            )
         slots, _, _ = self._primitives()
         try:
             await slots.acquire(self._remaining(deadline))
@@ -547,7 +569,9 @@ class Connection:
         pending = self._register("execute", program=program, holds_slot=True)
         remaining = self._remaining(deadline)
         timeout_ms = None if remaining is None else max(1, int(remaining * 1000))
-        await self._send(ExecuteMessage(program=program, id=pending.id, timeout_ms=timeout_ms))
+        await self._send(
+            ExecuteMessage(program=program, id=pending.id, timeout_ms=timeout_ms, params=params)
+        )
         result: ResultResponse = await self._await_reply(pending, deadline)
         return result
 

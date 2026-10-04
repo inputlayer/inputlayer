@@ -19,12 +19,23 @@ of sending text the engine would misread:
 
 A fuzz test (``tests/compile_rules_live.py``) round-trips random values
 through a live engine: encode, insert, read back, compare.
+
+Writes send their values out of band instead (protocol version 4): inside
+:func:`collect_params`, :func:`encode` returns a ``$pN`` reference and
+collects the value as a parameter, which the engine binds to the parsed
+program without parsing it. The literal is still computed, so every
+refusal above holds, and it names the value: equal literals share one
+parameter, so compiled text compares as before.
 """
 
 from __future__ import annotations
 
 import math
 import numbers
+import re
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -40,7 +51,82 @@ _ESCAPES = str.maketrans({"\\": "\\\\", '"': '\\"', "\n": "\\n", "\t": "\\t", "\
 
 
 def encode(value: Any) -> str:
-    """The IQL literal for *value*; raises :class:`CompileError` when IQL has none."""
+    """The IQL for *value*: its literal, or inside :func:`collect_params` a
+    ``$pN`` reference to it. Raises :class:`CompileError` when IQL has no
+    literal for it."""
+    text = literal(value)
+    sink = _ACTIVE.get()
+    return text if sink is None else sink.reference(text, value)
+
+
+class _ParamSink:
+    """A program's parameter values, each distinct value once."""
+
+    def __init__(self) -> None:
+        self.params: dict[str, Any] = {}
+        self._names: dict[str, str] = {}
+
+    def reference(self, text: str, value: Any) -> str:
+        name = self._names.get(text)
+        if name is None:
+            name = f"p{len(self._names)}"
+            self.params[name] = wire_value(value)
+            self._names[text] = name
+        return f"${name}"
+
+
+_ACTIVE: ContextVar[_ParamSink | None] = ContextVar("inputlayer_params", default=None)
+
+
+@contextmanager
+def collect_params() -> Iterator[dict[str, Any]]:
+    """Compile with values out of band: within the block, :func:`encode`
+    writes ``$pN`` references, and the yielded dict fills with their values,
+    the request's ``params``::
+
+        with collect_params() as params:
+            iql = compile_insert(fact)
+        await conn.execute(iql, params=params)
+    """
+    sink = _ParamSink()
+    token = _ACTIVE.set(sink)
+    try:
+        yield sink.params
+    finally:
+        _ACTIVE.reset(token)
+
+
+_REFERENCE = re.compile(r"\$(p[0-9]+)\b")
+
+
+def params_of(iql: str, params: dict[str, Any]) -> dict[str, Any]:
+    """The parameters of *params* that *iql*, one statement of a program
+    compiled in one :func:`collect_params` block, references: for sending the
+    statements as separate requests (the engine refuses an unused parameter)."""
+    return {name: params[name] for name in dict.fromkeys(_REFERENCE.findall(iql)) if name in params}
+
+
+def wire_value(value: Any) -> Any:
+    """The ``params`` value for *value*, whose literal compiled: the type its
+    literal denotes, exactly. A float JSON would read back as ambiguous (an
+    integral value of 2^63 or more) takes the explicit ``{"float": x}`` form."""
+    if isinstance(value, (str, bool)):
+        return value
+    if isinstance(value, numbers.Integral):
+        return int(value)
+    if isinstance(value, numbers.Real):
+        f = float(value)
+        return {"float": f} if f.is_integer() and abs(f) >= 2.0**63 else f
+    if isinstance(value, datetime):
+        return datetime_to_ms(value)
+    if isinstance(value, (list, tuple)):
+        return [float(v) for v in value]
+    raise CompileError(f"Cannot send a {type(value).__name__} value: {value!r}")
+
+
+def literal(value: Any) -> str:
+    """The IQL literal for *value*, never a parameter: for the places IQL takes
+    no parameter (an aggregate's settings, ``limit``, meta commands)."""
     if isinstance(value, str):
         return encode_string(value)
     if isinstance(value, bool):
