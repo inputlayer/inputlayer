@@ -53,6 +53,19 @@ where
     F: FnOnce() -> Result<T, ProgramError> + Send + 'static,
 {
     let permit = admit(permits, control).await?;
+    run_admitted(permit, control, job).await
+}
+
+/// [`run_blocking`] for a job already holding its compute `permit`.
+pub(super) async fn run_admitted<T, F>(
+    permit: OwnedSemaphorePermit,
+    control: &Arc<RequestControl>,
+    job: F,
+) -> Result<T, ProgramError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, ProgramError> + Send + 'static,
+{
     let job_control = Arc::clone(control);
     let task = tokio::task::spawn_blocking(move || {
         // Stopped while queued on the blocking pool: never start.

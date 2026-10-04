@@ -190,10 +190,18 @@ mod rounds {
     const KG: &str = "rounds";
 
     fn handler() -> (Arc<Handler>, TempDir) {
+        handler_with(4)
+    }
+
+    fn handler_with(permits: usize) -> (Arc<Handler>, TempDir) {
         let tmp = TempDir::new().unwrap();
         let mut config = Config::default();
         config.storage.data_dir = tmp.path().join("data");
-        let handler = Arc::new(Handler::from_config(config).unwrap());
+        let handler = Arc::new(
+            Handler::from_config(config)
+                .unwrap()
+                .with_compute_permits(permits),
+        );
         handler.get_storage().create_knowledge_graph(KG).unwrap();
         (handler, tmp)
     }
@@ -317,15 +325,14 @@ mod rounds {
         assert!(!one.family.shares(), "and was still judged too slow");
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_probe_too_slow_to_share_never_makes_a_view_wait() {
-        let (handler, _tmp) = handler();
-        // Each bound reach is a short chain; the unbound closure is quadratic.
-        let edges: Vec<String> = (0..400)
+    /// A chain of `n` edges, reachable as `reach`: a bound reach is short
+    /// near its end, the unbound closure quadratic.
+    async fn chain(handler: &Handler, n: usize) {
+        let edges: Vec<String> = (0..n)
             .map(|i| format!("(\"n{i}\", \"n{}\")", i + 1))
             .collect();
         write(
-            &handler,
+            handler,
             &format!(
                 "+edge[{}]\n\
                  +reach(X, Y) <- edge(X, Y)\n\
@@ -334,6 +341,12 @@ mod rounds {
             ),
         )
         .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_probe_too_slow_to_share_never_makes_a_view_wait() {
+        let (handler, _tmp) = handler();
+        chain(&handler, 400).await;
         let families = Families::default();
         let metrics = Arc::new(SubscriptionMetrics::default());
         let mut one = member(&families, &handler, &metrics, r#"?reach("n398", Y)"#);
@@ -342,32 +355,95 @@ mod rounds {
         two.refresh().await.unwrap();
         assert_eq!(metrics.shared_evaluations(), 0);
 
+        // Hold the probe until the views have refreshed.
+        let family = Arc::clone(&one.family);
+        let gate = family.probe_gate.write().await;
         // A plan-cached own evaluation makes a probe due.
         write(&handler, "+edge(\"x1\", \"y1\")").await;
         one.refresh().await.unwrap();
-        assert!(one.family.probing.load(Ordering::Relaxed), "probe running");
+        assert!(family.probing.load(Ordering::Relaxed), "probe started");
         // Own evaluations far faster than any round.
-        one.family.own_cost_us.store(1, Ordering::Relaxed);
-        // While it runs, views evaluate their own queries without waiting.
+        family.own_cost_us.store(1, Ordering::Relaxed);
+        // While it is held, views evaluate their own queries without waiting.
         write(&handler, "+edge(\"n399\", \"z\")").await;
         let refresh = two.refresh().await.unwrap();
         assert_eq!(inserted(&refresh), [json!(["n399", "z"])]);
-        assert!(
-            one.family.probing.load(Ordering::Relaxed),
-            "the refresh did not wait for the probe"
-        );
-        assert!(!one.family.shares());
-        assert_eq!(metrics.shared_evaluations(), 1, "only the probe's round");
+        assert!(!family.shares());
+        assert_eq!(metrics.shared_evaluations(), 0, "the probe is held");
+        drop(gate);
 
-        probed(&one.family).await;
-        assert!(!one.family.shares(), "the probe was judged too slow");
-        assert_eq!(one.family.stops.load(Ordering::Relaxed), 1);
+        probed(&family).await;
+        assert_eq!(metrics.shared_evaluations(), 1, "only the probe's round");
+        assert!(!family.shares(), "the probe was judged too slow");
+        assert_eq!(family.stops.load(Ordering::Relaxed), 1);
         write(&handler, "+edge(\"n398\", \"w\")").await;
         let refresh = one.refresh().await.unwrap();
         let mut rows = inserted(&refresh);
         rows.sort_by_key(ToString::to_string);
         assert_eq!(rows, [json!(["n398", "w"]), json!(["n398", "z"])]);
-        assert!(!one.family.probing.load(Ordering::Relaxed), "backing off");
+        assert!(!family.probing.load(Ordering::Relaxed), "backing off");
         assert_eq!(metrics.shared_evaluations(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn with_no_permit_to_spare_families_never_probe() {
+        let (handler, _tmp) = handler_with(2);
+        chain(&handler, 300).await;
+        let families = Families::default();
+        let metrics = Arc::new(SubscriptionMetrics::default());
+        let mut views: Vec<_> = (295..299)
+            .map(|i| {
+                member(
+                    &families,
+                    &handler,
+                    &metrics,
+                    &format!("?reach(\"n{i}\", Y)"),
+                )
+            })
+            .collect();
+        for view in &mut views {
+            view.refresh().await.unwrap();
+        }
+        for round in 0..3 {
+            write(&handler, &format!("+edge(\"n300\", \"t{round}\")")).await;
+            for view in &mut views {
+                assert_eq!(inserted(&view.refresh().await.unwrap()).len(), 1);
+                assert!(!view.family.probing.load(Ordering::Relaxed));
+            }
+        }
+        assert!(views[0].family.own_cost_us.load(Ordering::Relaxed) > 0);
+        assert!(!views[0].family.shares());
+        assert_eq!(metrics.shared_evaluations(), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_probe_due_while_every_permit_is_taken_is_skipped() {
+        let (handler, _tmp) = handler();
+        write(&handler, "+item[(\"s1\", 1), (\"s2\", 2)]").await;
+        let families = Families::default();
+        let metrics = Arc::new(SubscriptionMetrics::default());
+        let mut one = member(&families, &handler, &metrics, r#"?item("s1", X)"#);
+        let mut two = member(&families, &handler, &metrics, r#"?item("s2", X)"#);
+        one.refresh().await.unwrap();
+        two.refresh().await.unwrap();
+        one.family
+            .own_cost_us
+            .store(1_000_000_000, Ordering::Relaxed);
+
+        let held: Vec<_> = std::iter::from_fn(|| handler.try_compute_permit()).collect();
+        assert_eq!(held.len(), 4);
+        Family::probe(&one.family, two.own.current_snapshot().unwrap());
+        assert!(!one.family.probing.load(Ordering::Relaxed), "skipped");
+        drop(held);
+        assert_eq!(metrics.shared_evaluations(), 0);
+        assert_eq!(one.family.stops.load(Ordering::Relaxed), 0);
+
+        // The next due point probes again, and views still refresh.
+        write(&handler, "+item[(\"s1\", 3), (\"s2\", 4)]").await;
+        assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 3])]);
+        probed(&one.family).await;
+        assert_eq!(metrics.shared_evaluations(), 1);
+        assert!(one.family.shares());
+        assert_eq!(inserted(&two.refresh().await.unwrap()), [json!(["s2", 4])]);
     }
 }

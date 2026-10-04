@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::future::BoxFuture;
+use tokio::sync::OwnedSemaphorePermit;
 
 use crate::protocol::rest::handlers::wire_value_to_json;
 use crate::protocol::Handler;
@@ -163,7 +164,7 @@ pub async fn evaluate(
 ) -> Result<Evaluated, String> {
     let dependencies = Dependencies::for_query(goal, &snapshot.rules);
     let revision = snapshot.revision;
-    let ran = run_query(handler, knowledge_graph, query, snapshot).await?;
+    let ran = run_query(handler, knowledge_graph, query, snapshot, None).await?;
     Ok(Evaluated {
         columns: ran.columns,
         result: Arc::new(ran.rows.into_iter().collect()),
@@ -189,17 +190,18 @@ pub struct QueryRows {
     pub plan_cached: bool,
 }
 
-/// Run `query` on `snapshot` of `knowledge_graph`; a capped result is an
-/// error.
+/// Run `query` on `snapshot` of `knowledge_graph`, under `permit` or a
+/// compute permit it waits for; a capped result is an error.
 pub async fn run_query(
     handler: &Handler,
     knowledge_graph: &str,
     query: &str,
     snapshot: Arc<KnowledgeGraphSnapshot>,
+    permit: Option<OwnedSemaphorePermit>,
 ) -> Result<QueryRows, String> {
     let started = Instant::now();
     let (result, plan_cached) = handler
-        .query_snapshot(knowledge_graph, snapshot, query, None)
+        .query_snapshot(knowledge_graph, snapshot, query, None, permit)
         .await?;
     // A capped result is not the result set: adopting it would announce
     // every cut row as retracted. Fail before touching state, so the last

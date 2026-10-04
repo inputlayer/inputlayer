@@ -47,7 +47,9 @@ pub async fn start_server_with(
     config.http.rate_limit.ws_max_messages_per_sec = 0;
     config.http.gui.enabled = false;
     configure(&mut config);
-    let handler = Arc::new(Handler::from_config(config).unwrap());
+    let handler = Handler::from_config(config).unwrap();
+    let permits = handler.compute_permits().max(4);
+    let handler = Arc::new(handler.with_compute_permits(permits));
     handler.bootstrap_auth();
     handler.get_storage().create_knowledge_graph(KG).unwrap();
     let app = create_router(Arc::clone(&handler), &handler.config().http);

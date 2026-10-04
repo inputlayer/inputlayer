@@ -37,8 +37,9 @@
 //! be, run in parallel on the compute permits. A view's own cost counts only
 //! evaluations that reused a compiled plan; a round's leaves out compiling
 //! its plan. Once it has a view's own cost to compare with, a family probes:
-//! it evaluates a round no view waits for, and starts sharing only when that
-//! round is fast enough. It stops when a round is slower, and probes again
+//! it evaluates a round no view waits for, on a compute permit free at the
+//! time (it never waits for one), and starts sharing only when that round
+//! is fast enough. It stops when a round is slower, and probes again
 //! after some commits, waiting longer after each probe that fails. While
 //! sharing, a view evaluates its own query now and then to keep that cost
 //! current.
@@ -52,7 +53,7 @@ use arc_swap::ArcSwapOption;
 use futures_util::future::BoxFuture;
 use parking_lot::Mutex;
 use serde_json::Value;
-use tokio::sync::OnceCell;
+use tokio::sync::{OnceCell, OwnedSemaphorePermit};
 use tracing::debug;
 
 use crate::ast::{Atom, BodyPredicate, Term};
@@ -74,6 +75,10 @@ const STOP_MARGIN_PERCENT: u64 = 20;
 
 /// Commits before a family that stopped sharing tries again.
 const PROBE_AFTER: u64 = 256;
+
+/// Fewest compute permits with which families probe: with fewer, a probe
+/// would take a permit views need, so families never start sharing.
+const MIN_PERMITS_FOR_PROBES: usize = 3;
 
 /// A family that keeps failing its probes waits at most this many doublings
 /// of [`PROBE_AFTER`] between them.
@@ -370,6 +375,9 @@ pub struct Family {
     sharing: AtomicBool,
     /// Whether a probe is evaluating.
     probing: AtomicBool,
+    /// Held by a test to keep a probe from evaluating.
+    #[cfg(test)]
+    probe_gate: tokio::sync::RwLock<()>,
     /// Own evaluations since sharing stopped.
     own_since_stop: AtomicU64,
     /// Times sharing stopped since a round last kept it.
@@ -448,15 +456,18 @@ impl Family {
                         .get_snapshot_for(&self.knowledge_graph)
                         .map_err(|e| format!("Knowledge graph '{}': {e}", self.knowledge_graph))?,
                 };
-                self.evaluate(snapshot).await
+                self.evaluate(snapshot, None).await
             })
             .await
             .clone()
     }
 
+    /// Evaluate a round at `snapshot`, under `permit` or a compute permit it
+    /// waits for, and judge whether views share.
     async fn evaluate(
         &self,
         snapshot: Arc<KnowledgeGraphSnapshot>,
+        permit: Option<OwnedSemaphorePermit>,
     ) -> Result<Arc<Partitions>, String> {
         self.metrics.record_shared_evaluation();
         let rules = Arc::clone(snapshot.persistent_rules());
@@ -467,6 +478,7 @@ impl Family {
             &self.knowledge_graph,
             &self.shape.query,
             snapshot,
+            permit,
         )
         .await;
         let ran = match ran {
@@ -551,14 +563,26 @@ impl Family {
     }
 
     /// Evaluate a round at `snapshot` that no view waits for, at most one at
-    /// a time: the guard judging it decides whether views share.
+    /// a time: the guard judging it decides whether views share. A probe
+    /// never waits for a compute permit: with none free now, or too few
+    /// permits for views to spare one, it does not start.
     fn probe(family: &Arc<Family>, snapshot: Arc<KnowledgeGraphSnapshot>) {
-        if family.probing.swap(true, Ordering::Relaxed) {
+        if family.handler.compute_permits() < MIN_PERMITS_FOR_PROBES
+            || family.probing.swap(true, Ordering::Relaxed)
+        {
             return;
         }
+        let Some(permit) = family.handler.try_compute_permit() else {
+            family.probing.store(false, Ordering::Relaxed);
+            return;
+        };
         let family = Arc::clone(family);
         tokio::spawn(async move {
-            let _ = family.evaluate(snapshot).await;
+            #[cfg(test)]
+            let gate = family.probe_gate.read().await;
+            let _ = family.evaluate(snapshot, Some(permit)).await;
+            #[cfg(test)]
+            drop(gate);
             family.probing.store(false, Ordering::Relaxed);
         });
     }
@@ -604,6 +628,8 @@ impl Families {
                         latest: ArcSwapOption::empty(),
                         sharing: AtomicBool::new(false),
                         probing: AtomicBool::new(false),
+                        #[cfg(test)]
+                        probe_gate: tokio::sync::RwLock::default(),
                         own_since_stop: AtomicU64::new(0),
                         stops: AtomicU64::new(0),
                         own_cost_us: AtomicU64::new(0),

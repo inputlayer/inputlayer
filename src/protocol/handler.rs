@@ -944,6 +944,19 @@ impl Handler {
         self.compute_permits
     }
 
+    /// A compute permit, if one is free now.
+    pub fn try_compute_permit(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        Arc::clone(&self.query_semaphore).try_acquire_owned().ok()
+    }
+
+    /// This handler running `permits` queries at once (by default, one per
+    /// core not reserved for I/O).
+    pub fn with_compute_permits(mut self, permits: usize) -> Self {
+        self.query_semaphore = Arc::new(tokio::sync::Semaphore::new(permits));
+        self.compute_permits = permits;
+        self
+    }
+
     /// Standing-query counters.
     pub fn subscription_metrics(&self) -> &super::subscription::SubscriptionMetrics {
         &self.subscription_metrics
@@ -2308,12 +2321,14 @@ impl Handler {
             program,
             statements,
             control,
+            None,
         )
         .await
     }
 
-    /// Run `job` for `program` on the blocking pool under a compute permit and
-    /// the request's deadline and cancellation.
+    /// Run `job` for `program` on the blocking pool under a compute permit
+    /// (`permit`, or one it waits for) and the request's deadline and
+    /// cancellation.
     async fn run_job(
         &self,
         job: QueryJob,
@@ -2321,6 +2336,7 @@ impl Handler {
         program: String,
         statements: Option<Vec<statement::Statement>>,
         control: &Arc<RequestControl>,
+        permit: Option<tokio::sync::OwnedSemaphorePermit>,
     ) -> Result<QueryResult, ProgramError> {
         let program_len = program.len();
         let query_start = Instant::now();
@@ -2342,13 +2358,16 @@ impl Handler {
         // request's one deadline; see `supervise`.
         #[cfg(test)]
         let hook = test_hook::take();
-        let result = supervise::run_blocking(&self.query_semaphore, control, move || {
+        let run = move || {
             #[cfg(test)]
             let _hook = test_hook::install(hook);
             job.execute(knowledge_graph, program, statements)
                 .map_err(ProgramError::from)
-        })
-        .await;
+        };
+        let result = match permit {
+            Some(permit) => supervise::run_admitted(permit, control, run).await,
+            None => supervise::run_blocking(&self.query_semaphore, control, run).await,
+        };
         let compute_ms = query_start.elapsed().as_millis() as u64;
         info!(
             program_len,
@@ -3983,13 +4002,15 @@ impl Handler {
     /// whatever is current when the query runs. The result is therefore the
     /// query's exact answer at `snapshot.revision`. The query's compiled plan
     /// is kept and reused on later snapshots until the rules change; the flag
-    /// tells whether this run reused it.
+    /// tells whether this run reused it. With `permit`, the query computes
+    /// under it instead of waiting for one.
     pub async fn query_snapshot(
         &self,
         knowledge_graph: &str,
         snapshot: Arc<KnowledgeGraphSnapshot>,
         query: &str,
         auth: Option<&crate::auth::Principal>,
+        permit: Option<tokio::sync::OwnedSemaphorePermit>,
     ) -> Result<(QueryResult, bool), String> {
         let identity = auth
             .map(crate::auth::Principal::identity)
@@ -4017,6 +4038,7 @@ impl Handler {
                 query.to_string(),
                 Some(statements),
                 &control,
+                permit,
             )
             .await?;
         let result = settle_result(result, auth, true).map_err(|e| e.message)?;
