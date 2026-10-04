@@ -286,6 +286,7 @@ class Connection:
         self._close_notice: NoticeResponse | None = None
         self._loop_last_send = 0.0
         self._closing = False
+        self._reopenable = False
 
     # ── Properties ────────────────────────────────────────────────────
 
@@ -360,6 +361,7 @@ class Connection:
             if self._state == "open":
                 return
             self._closing = False
+            self._reopenable = False
             self._state = "connecting"
             try:
                 await self._open_bound(first=True)
@@ -369,9 +371,14 @@ class Connection:
             self._state = "open"
             ready.set()
 
-    async def close(self) -> None:
-        """Close the connection. Pending calls fail with ``ConnectionLost``."""
+    async def close(self, *, final: bool = False) -> None:
+        """Close the connection. Pending calls fail with ``ConnectionLost``.
+
+        A lazy connection reopens on its next call once closed, unless the
+        close is ``final``.
+        """
         self._closing = True
+        self._reopenable = False
         self._state = "closed"
         if self._reconnect_task is not None and not self._reconnect_task.done():
             self._reconnect_task.cancel()
@@ -389,6 +396,7 @@ class Connection:
         self._teardown(ws, ConnectionLost("Connection closed"))
         if self._ready is not None:
             self._ready.set()
+        self._reopenable = not final
 
     def _url_for(self, kg: str | None) -> str:
         params = []
@@ -552,7 +560,7 @@ class Connection:
             # Opens it (lazy), or waits for the connect in progress.
             await self.connect()
             return
-        if self._state == "closed" and self._closing and self._lazy:
+        if self._state == "closed" and self._reopenable and self._lazy:
             # Closed by close(), not given up: the next call reopens it.
             await self.connect()
             return

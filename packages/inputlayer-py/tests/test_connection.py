@@ -651,8 +651,10 @@ class TestPool:
                 assert [r.rows for r in rows] == [
                     [["sales", "?s(X)"]], [["ops", "?o(X)"]], [["default", "?d(X)"]],
                 ]
-            # The client's own connection serves "default"; no .kg use was sent.
-            assert sorted(p.params.get("kg", "") for p in server.peers) == ["", "ops", "sales"]
+            # Every handle has its own connection; no .kg use was sent.
+            assert sorted(p.params.get("kg", "") for p in server.peers) == [
+                "", "default", "ops", "sales",
+            ]
             assert not [f for f in server.received if f.get("program", "").startswith(".kg use")]
 
     async def test_missing_graph_is_created_then_bound(self) -> None:
@@ -731,14 +733,53 @@ class TestPool:
                 assert (await b.execute("?x(X)")).rows == [["b"]]
                 assert (await a.execute("?x(X)")).rows == [["a"]]
                 assert il._conn.current_kg == "a"
-                await il.drop_knowledge_graph("a")
-                assert il._conn.current_kg == "a"
             assert created == ["b"]
-            admin = [
-                p for p in server.peers if "kg" not in p.params
-            ]
-            assert len(admin) == 2
+            assert len([p for p in server.peers if "kg" not in p.params]) == 1
             assert not [f for f in server.received if f.get("program", "").startswith(".kg use")]
+
+    async def test_dropping_a_graph_leaves_nothing_bound_to_it(self) -> None:
+        graphs = {"default", "a"}
+
+        async def handler(peer: Peer) -> None:
+            kg = peer.params.get("kg", "default")
+            if kg not in graphs:
+                login = await peer.recv()
+                await peer.send({
+                    "type": "auth_error", "id": login["id"],
+                    "message": f"Knowledge graph '{kg}' not found",
+                })
+                return
+            await peer.authenticate()
+
+            def answer(program: str) -> dict[str, Any]:
+                verb, _, name = program.partition(" ")[2].partition(" ")
+                if verb == "create":
+                    graphs.add(name)
+                    return result([["created"]], ["message"], switched_kg=name)
+                if verb == "use":
+                    return result([["switched"]], ["message"], switched_kg=name)
+                if verb == "drop":
+                    graphs.discard(name)
+                    return result([["dropped"]], ["message"])
+                return result([[kg]], ["kg"])
+
+            await peer.serve_results(answer)
+
+        async with MockServer(handler) as server:
+            async with InputLayer(server.url, username="a", password="b", initial_kg="a") as il:
+                stale = il.knowledge_graph("a")
+                await stale.execute("?x(X)")
+                await il.drop_knowledge_graph("a")
+                assert graphs == {"default"}
+                assert il._conn.current_kg == "default"
+                with pytest.raises(ConnectionLost):
+                    await stale.execute("+x(1)")
+                assert graphs == {"default"}
+                fresh = il.knowledge_graph("a")
+                assert fresh is not stale
+            # The client's own connection and the handle's; no reopen after the drop.
+            assert len([p for p in server.peers if p.params.get("kg") == "a"]) == 2
+            assert not [f for f in server.received if f.get("program") == ".kg create a"]
 
     async def test_losing_one_graph_does_not_end_the_client_notifications(self) -> None:
         go = asyncio.Event()
@@ -790,3 +831,20 @@ class TestPool:
                 assert (await sales.execute("?a(X)")).rows == [["sales"]]
                 assert (await default.execute("?a(X)")).rows == [["default"]]
                 assert (await il.knowledge_graph("sales").execute("?a(X)")).rows == [["sales"]]
+
+    async def test_a_call_during_close_does_not_reopen(self) -> None:
+        async with MockServer(_serve) as server:
+            conn = _conn(server, lazy=True)
+            await conn.execute("?a(X)")
+            closing = asyncio.ensure_future(conn.close())
+            await asyncio.sleep(0)
+            with pytest.raises(ConnectionLost):
+                await conn.execute("?b(X)")
+            await closing
+            assert len(server.peers) == 1
+            assert (await conn.execute("?c(X)")).rows == []
+            assert len(server.peers) == 2
+            await conn.close(final=True)
+            with pytest.raises(ConnectionLost):
+                await conn.execute("?d(X)")
+            assert len(server.peers) == 2

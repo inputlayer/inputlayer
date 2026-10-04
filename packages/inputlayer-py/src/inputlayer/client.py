@@ -43,8 +43,8 @@ class InputLayer:
     handles never switch a shared connection between graphs and the
     subscriptions of one survive queries on another. ``connect()`` opens the
     client's own connection (bound to ``initial_kg``, or the server's
-    default), which serves user, key and graph administration and the handle
-    for that graph.
+    default), which serves user, key and graph administration; no handle
+    uses it.
     """
 
     def __init__(
@@ -93,8 +93,7 @@ class InputLayer:
 
     async def close(self) -> None:
         """Close every connection of this client."""
-        conns = [self._conn, *(c for c in self._pool.values() if c is not self._conn)]
-        for conn in conns:
+        for conn in [self._conn, *self._pool.values()]:
             await conn.close()
         self._dispatcher.end()
         self._events.end()
@@ -137,8 +136,6 @@ class InputLayer:
     # ── KG management ─────────────────────────────────────────────────
 
     def _connection_for(self, name: str) -> Connection:
-        if self._conn.current_kg == name:
-            return self._conn
         conn = self._pool.get(name)
         if conn is None:
             conn = Connection(
@@ -180,7 +177,7 @@ class InputLayer:
         """
         if name not in self._kgs:
             conn = self._connection_for(name)
-            if not create and conn is not self._conn:
+            if not create:
                 conn._create_kg = None
             self._kgs[name] = KnowledgeGraph(name, conn)
         return self._kgs[name]
@@ -214,15 +211,19 @@ class InputLayer:
     async def drop_knowledge_graph(self, name: str) -> None:
         """Drop a knowledge graph and all its data.
 
-        The handle's own connection to it is closed first. The drop runs on a
-        short-lived connection bound to the server's default graph, so no
-        handle's connection is switched.
+        The handle's connection to it is closed for good, so a handle kept
+        from before raises ``ConnectionLost`` rather than re-creating the
+        graph. The client's own connection, when bound to it, moves to
+        ``default``; the drop itself runs on a short-lived connection bound to
+        the server's default graph.
         """
-        conn = self._pool.pop(name, None)
-        if conn is not None and conn is not self._conn:
-            await conn.close()
-        await self._admin_execute(f".kg drop {name}")
         self._kgs.pop(name, None)
+        conn = self._pool.pop(name, None)
+        if conn is not None:
+            await conn.close(final=True)
+        if self._conn.current_kg == name:
+            await self._conn.execute(".kg use default")
+        await self._admin_execute(f".kg drop {name}")
 
     # ── User management ───────────────────────────────────────────────
 
