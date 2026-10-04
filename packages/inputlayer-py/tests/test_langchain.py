@@ -1601,6 +1601,55 @@ class TestReadOnlyGuard:
         _check_read_only("?fact(X, Y)")
         _check_read_only("?a(X), b(X, Y)")
         _check_read_only(".why ?fact(X)")
+        _check_read_only(".why full ?fact(X)")
+        _check_read_only('.why_not fact(1, "a")')
+
+    @pytest.mark.parametrize(
+        "program",
+        [
+            # Dot-commands the old denylist let through (F18).
+            ".rule clear",
+            ".rule drop flagged",
+            ".rel drop employee",
+            ".clear employee",
+            ".kg drop prod",
+            ".kg create scratch",
+            ".index drop idx",
+            ".session clear",
+            ".load facts.json",
+            ".debug ?fact(X)",
+            ".subscribe ?fact(X)",
+            # Writes, rules and declarations that do not start with + or -.
+            "flagged(X) <- fact(X, Y)",
+            "fact(1, 2)",
+            "type Id: int.",
+            "-fact(X, Y) <- fact(X, Y)",
+            # A write hidden after a query, a comment or a continuation.
+            "?fact(X)\n.rel drop fact",
+            "?fact(X)\r\n+fact(1)",
+            "// harmless\n.kg drop prod",
+            "?fact(X)\n\n\t\n.rule clear",
+            # Look-alikes of the allowed commands.
+            ".whyx ?fact(X)",
+            ".why_notes",
+            # Nothing to run.
+            "",
+            "// only a comment",
+        ],
+    )
+    def test_check_read_only_blocks_everything_but_reads(self, program: str) -> None:
+        from inputlayer.integrations.langchain.tool import _check_read_only
+
+        with pytest.raises(ValueError, match="read_only guard"):
+            _check_read_only(program)
+
+    def test_check_read_only_allows_multi_statement_reads(self) -> None:
+        from inputlayer.integrations.langchain.tool import _check_read_only
+
+        _check_read_only("?a(X)\n.why ?a(X)\n.why_not a(1)")
+        _check_read_only("// find pairs\n?a(X),\n    b(X, Y)")
+        _check_read_only("?a(X)\n  .rel drop a")  # a continuation of the query
+        _check_read_only(".WHY ?a(X)")
 
     @pytest.mark.asyncio
     async def test_tool_read_only_rejects_write(self) -> None:
@@ -1608,6 +1657,21 @@ class TestReadOnlyGuard:
         tool = InputLayerIQLTool(kg=kg, read_only=True)
         with pytest.raises(ValueError, match="read_only guard"):
             await tool._arun("+fact(1, 2, 3)")
+
+    @pytest.mark.asyncio
+    async def test_tool_default_rejects_drop_before_engine(self) -> None:
+        kg = _mock_kg(["x"], [[1]])
+        tool = InputLayerIQLTool(kg=kg)
+        with pytest.raises(ValueError, match="read_only guard"):
+            await tool._arun(".rel drop fact")
+        kg.execute.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_tool_read_only_false_allows_drop(self) -> None:
+        kg = _mock_kg(["x"], [[1]])
+        tool = InputLayerIQLTool(kg=kg, read_only=False)
+        await tool._arun(".rel drop fact")
+        kg.execute.assert_awaited_once_with(".rel drop fact")
 
     @pytest.mark.asyncio
     async def test_tool_read_only_false_allows_write(self) -> None:

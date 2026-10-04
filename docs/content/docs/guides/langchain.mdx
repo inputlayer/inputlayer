@@ -287,7 +287,7 @@ The agent decides which filters to apply based on the question. It never sees or
 
 ### Raw IQL tool (escape hatch)
 
-For analyst-style agents that need full query flexibility, `InputLayerIQLTool` lets the agent write IQL directly. By default it runs in read-only mode, rejecting any writes or schema changes:
+For analyst-style agents that need full query flexibility, `InputLayerIQLTool` lets the agent write IQL directly. By default it is read-only: every statement the agent sends must be a query (`?...`), a `.why` or a `.why_not`. Anything else, including inserts (`+`), retractions (`-`), rules and every other dot-command such as `.rel drop`, `.rule clear` or `.kg drop`, raises `ValueError` before it reaches the engine:
 
 ```python
 from inputlayer.integrations.langchain import InputLayerIQLTool
@@ -311,6 +311,12 @@ tool = InputLayerIQLTool(
     description="Find employees in a department.",
     query_template="?employee(Id, Name, Dept, Salary), Dept = :input",
 )
+```
+
+To let the agent write, opt in with `read_only=False`. The tool then runs whatever IQL the agent sends, including drops, limited only by the rights of the connection's user. Connect as a user with no more access to the knowledge graph than the agent needs:
+
+```python
+tool = InputLayerIQLTool(kg=kg, read_only=False)
 ```
 
 ## Part 4: Reasoning-powered retrieval
