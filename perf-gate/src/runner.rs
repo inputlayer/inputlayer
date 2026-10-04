@@ -63,7 +63,18 @@ pub async fn run(plan: &Plan, mut environment: Environment) -> Result<RunRecord>
             profile: plan.profile.name.to_string(),
             rounds: plan.rounds,
             fixtures: plan.fixtures.iter().map(|f| f.name().to_string()).collect(),
-            server_overrides: recorded_overrides(),
+            server_overrides: {
+                let mut overrides = recorded_overrides();
+                for fixture in &plan.fixtures {
+                    for (key, value) in fixture.server_env() {
+                        overrides.insert(
+                            format!("{key} [{} only]", fixture.name()),
+                            (*value).to_string(),
+                        );
+                    }
+                }
+                overrides
+            },
             parameters: serde_json::to_value(&plan.profile)?,
         },
         arms: plan.arms.iter().map(|spec| spec.arm.clone()).collect(),
@@ -80,8 +91,10 @@ async fn run_one(plan: &Plan, spec: &ArmSpec, round: u32, fixture: Fixture) -> F
     };
     let name = format!("r{round}-{}-{}", fixture.name(), spec.arm.name);
     let outcome = tokio::time::timeout(FIXTURE_TIMEOUT, async {
-        let server = RunningServer::start(&spec.server, &plan.data_root, &name).await?;
-        fixture.run(&server, &plan.profile).await
+        let mut server =
+            RunningServer::start_with(&spec.server, &plan.data_root, &name, fixture.server_env())
+                .await?;
+        fixture.run(&mut server, &plan.profile).await
     })
     .await
     .unwrap_or_else(|_| Err(anyhow::anyhow!("timed out after {FIXTURE_TIMEOUT:?}")));

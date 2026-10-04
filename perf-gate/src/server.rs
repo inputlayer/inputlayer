@@ -65,51 +65,42 @@ pub struct RunningServer {
     child: Child,
     pub addr: SocketAddr,
     dir: PathBuf,
+    spec: ServerSpec,
+    /// Fixture-specific environment on top of [`SERVER_OVERRIDES`] and the
+    /// spec's.
+    env: Vec<(String, String)>,
 }
 
 impl RunningServer {
     /// Start `spec` in a fresh directory under `root` and wait until it
     /// accepts a login.
     pub async fn start(spec: &ServerSpec, root: &Path, name: &str) -> Result<Self> {
+        Self::start_with(spec, root, name, &[]).await
+    }
+
+    /// [`Self::start`] with extra environment for this server only.
+    pub async fn start_with(
+        spec: &ServerSpec,
+        root: &Path,
+        name: &str,
+        env: &[(&str, &str)],
+    ) -> Result<Self> {
         let dir = root.join(name);
         if dir.exists() {
             std::fs::remove_dir_all(&dir).with_context(|| format!("clear {}", dir.display()))?;
         }
         std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
-        let port = free_port()?;
-        let log = File::create(dir.join("server.log")).context("create server log")?;
-        let mut command = match &spec.cpus {
-            Some(cpus) => {
-                let mut command = Command::new("taskset");
-                command.arg("-c").arg(cpus).arg(&spec.binary);
-                command
-            }
-            None => Command::new(&spec.binary),
-        };
-        command
-            .arg("--port")
-            .arg(port.to_string())
-            .arg("--data-dir")
-            .arg(dir.join("store"))
-            // An empty cwd: no stray config.toml / config.local.toml.
-            .current_dir(&dir)
-            .env("INPUTLAYER_ADMIN_PASSWORD", ADMIN_PASSWORD)
-            .stdin(Stdio::null())
-            .stdout(log.try_clone().context("clone log handle")?)
-            .stderr(log);
-        for (key, value, _) in SERVER_OVERRIDES {
-            command.env(key, value);
-        }
-        for (key, value) in &spec.env {
-            command.env(key, value);
-        }
-        let child = command
-            .spawn()
-            .with_context(|| format!("spawn {}", spec.binary.display()))?;
+        let env: Vec<(String, String)> = env
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+            .collect();
+        let (child, addr) = spawn(spec, &dir, &env)?;
         let mut server = Self {
             child,
-            addr: SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
+            addr,
             dir,
+            spec: spec.clone(),
+            env,
         };
         server.wait_ready().await?;
         Ok(server)
@@ -126,6 +117,18 @@ impl RunningServer {
         let ticks: u64 =
             fields.get(11)?.parse::<u64>().ok()? + fields.get(12)?.parse::<u64>().ok()?;
         Some(ticks as f64 / 100.0)
+    }
+
+    /// Kill the process without warning (SIGKILL, as a crash would) and start
+    /// it again on the same data directory. Returns once the new process
+    /// accepts a login; the caller times that as recovery.
+    pub async fn crash_and_restart(&mut self) -> Result<()> {
+        self.child.kill().context("kill server")?;
+        self.child.wait().context("reap server")?;
+        let (child, addr) = spawn(&self.spec, &self.dir, &self.env)?;
+        self.child = child;
+        self.addr = addr;
+        self.wait_ready().await
     }
 
     /// Peak resident set size so far, from `/proc/<pid>/status`.
@@ -178,6 +181,46 @@ impl Drop for RunningServer {
         // Logs are kept for diagnosis; the data directory is not.
         let _ = std::fs::remove_dir_all(self.dir.join("store"));
     }
+}
+
+/// Launch `spec` in `dir` (its data in `dir/store`) on a fresh port.
+fn spawn(spec: &ServerSpec, dir: &Path, env: &[(String, String)]) -> Result<(Child, SocketAddr)> {
+    let port = free_port()?;
+    let log = File::options()
+        .create(true)
+        .append(true)
+        .open(dir.join("server.log"))
+        .context("open server log")?;
+    let mut command = match &spec.cpus {
+        Some(cpus) => {
+            let mut command = Command::new("taskset");
+            command.arg("-c").arg(cpus).arg(&spec.binary);
+            command
+        }
+        None => Command::new(&spec.binary),
+    };
+    command
+        .arg("--port")
+        .arg(port.to_string())
+        .arg("--data-dir")
+        .arg(dir.join("store"))
+        // An empty cwd: no stray config.toml / config.local.toml.
+        .current_dir(dir)
+        .env("INPUTLAYER_ADMIN_PASSWORD", ADMIN_PASSWORD)
+        .stdin(Stdio::null())
+        .stdout(log.try_clone().context("clone log handle")?)
+        .stderr(log);
+    for (key, value, _) in SERVER_OVERRIDES {
+        command.env(key, value);
+    }
+    // The spec's environment, then the fixture's on top.
+    for (key, value) in spec.env.iter().chain(env) {
+        command.env(key, value);
+    }
+    let child = command
+        .spawn()
+        .with_context(|| format!("spawn {}", spec.binary.display()))?;
+    Ok((child, SocketAddr::from((Ipv4Addr::LOCALHOST, port))))
 }
 
 fn free_port() -> Result<u16> {

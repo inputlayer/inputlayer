@@ -19,25 +19,30 @@ const SOURCE: u64 = 1;
 pub async fn cheap(server: &RunningServer, params: &QueryParams) -> Result<Measurement> {
     let graph = Graph::random(params.nodes, params.edges, SEED);
     let query = format!("?edge({SOURCE}, Y)");
-    measure(server, params, &graph, &query, graph.out_degree(SOURCE)).await
+    let expected = graph.out_degree(SOURCE);
+    measure(server, params, &graph, &REACH_RULES, &query, expected).await
 }
 
 /// `?reach(1, Y)`: bound transitive closure.
 pub async fn bound(server: &RunningServer, params: &QueryParams) -> Result<Measurement> {
     let graph = Graph::random(params.nodes, params.edges, SEED);
     let query = format!("?reach({SOURCE}, Y)");
-    measure(server, params, &graph, &query, graph.reachable(SOURCE)).await
+    let expected = graph.reachable(SOURCE);
+    measure(server, params, &graph, &REACH_RULES, &query, expected).await
 }
 
-async fn measure(
+/// Load `graph` and `rules`, then time `query` (which must return
+/// `expected` rows) serially and from concurrent clients.
+pub(super) async fn measure(
     server: &RunningServer,
     params: &QueryParams,
     graph: &Graph,
+    rules: &[&str],
     query: &str,
     expected: usize,
 ) -> Result<Measurement> {
     let mut client = create_kg(server).await?;
-    load(&mut client, graph, &REACH_RULES).await?;
+    load(&mut client, graph, rules).await?;
 
     for _ in 0..params.warmup {
         let (_, reply) = client.execute(query).await?;
