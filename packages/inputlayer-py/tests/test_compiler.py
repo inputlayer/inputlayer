@@ -445,12 +445,14 @@ class TestCompileQuerySort:
         assert plan.columns == ("Department", "Budget", "Id", "Name", "Salary", "Active")
         assert plan.labels == ["id", "name", "department", "salary", "active", "name_2", "budget"]
 
-    def test_offset_without_limit_is_skipped_by_the_sdk(self):
+    def test_offset_without_limit_pages_in_the_engine(self):
         plan = compile_query_plan(
             Employee, order_by=OrderedColumn(_emp("salary"), descending=True), offset=3
         )
-        assert plan.program == "?employee(Id, Name, Department, Salary:desc, Active)"
-        assert plan.skip == 3
+        assert plan.program == (
+            "?employee(Id, Name, Department, Salary:desc, Active), "
+            "limit(9223372036854775807, 3)"
+        )
 
     def test_page_of_a_projection_goes_through_the_query_rule(self):
         # A limit over a projection counts distinct projected rows.
@@ -467,17 +469,44 @@ class TestCompileQuerySort:
         )
         assert plan.columns == ("Department",)
 
-    def test_hidden_sort_column_rides_in_the_rule_head(self):
+    @pytest.mark.parametrize("page", [{"limit": 2}, {"offset": 1}])
+    def test_paging_a_projection_ordered_by_an_unselected_column_is_a_compile_error(
+        self, page
+    ):
+        with pytest.raises(CompileError, match="ordering by a column you do not select"):
+            compile_query_plan(
+                _emp("name"),
+                relations=[Employee],
+                order_by=OrderedColumn(_emp("salary"), descending=True),
+                **page,
+            )
+
+    def test_why_keeps_one_proof_per_distinct_projected_row(self):
+        plan = compile_query_plan(
+            _emp("department"),
+            relations=[Employee],
+            order_by=OrderedColumn(_emp("department"), descending=False),
+            limit=2,
+        )
+        assert plan.why_columns == ("Department", "Id", "Name", "Salary", "Active")
+        rows = [
+            ["hr", 2, "Bob", 90000.0, True],
+            ["eng", 1, "Alice", 120000.0, True],
+            ["hr", 5, "Eve", 95000.0, True],
+            ["eng", 3, "Charlie", 110000.0, False],
+        ]
+        picked = plan.shape_why(rows)
+        assert picked == [1, 0]
+        assert [plan.project_why(rows[i]) for i in picked] == [["eng"], ["hr"]]
+
+    def test_projection_ordered_by_an_unselected_column_without_a_page(self):
         plan = compile_query_plan(
             _emp("name"),
             relations=[Employee],
             order_by=OrderedColumn(_emp("salary"), descending=True),
-            limit=2,
         )
-        assert plan.program == (
-            f"il_q(Name, Salary) <- {EMP_ATOM}\n?il_q(Name, Salary:desc), limit(2)"
-        )
-        assert plan.labels == ["name"]
+        assert plan.program == "?employee(Id, Name, Department, Salary:desc, Active)"
+        assert plan.dedupe
 
     def test_order_by_an_unjoined_relation_is_a_compile_error(self):
         with pytest.raises(CompileError):
@@ -494,6 +523,7 @@ class TestCompileQueryOr:
         )
         plan = compile_query_plan(
             _emp("name"),
+            _emp("salary"),
             relations=[Employee],
             where_condition=cond,
             order_by=OrderedColumn(_emp("salary"), descending=True),

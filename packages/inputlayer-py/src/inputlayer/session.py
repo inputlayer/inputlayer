@@ -23,18 +23,22 @@ class Session:
         self._conn = connection
 
     async def insert(self, facts: Relation | list[Relation]) -> None:
-        """Insert ephemeral session facts (no + prefix), in one program.
+        """Insert ephemeral session facts (no + prefix), one program per fact.
 
-        The engine has no bulk form for session facts, so each fact is its
-        own statement.
+        The engine has no bulk form for session facts, and it keeps session
+        facts only from a single-statement program: in a multi-statement
+        program they last only for that request.
         """
         batch = facts if isinstance(facts, list) else [facts]
-        if batch:
-            await self._conn.execute("\n".join(compile_insert(f, persistent=False) for f in batch))
+        for fact in batch:
+            await self._conn.execute(compile_insert(fact, persistent=False))
 
     async def define_rules(self, *targets: type[Derived]) -> None:
-        """Define session-scoped rules (no + prefix)."""
+        """Define session-scoped rules (no + prefix), one program per clause.
 
+        The engine keeps session rules only from a single-statement program:
+        in a multi-statement program they last only for that request.
+        """
         for target in targets:
             head_name = Relation._resolve_name(target)
             head_columns = Relation._get_columns(target)

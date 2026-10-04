@@ -290,7 +290,7 @@ for row in result:
 
 ### Ordering and Pagination
 
-Ordering and pagination run in the engine, so a page is exact however large the result.
+Ordering and pagination run in the engine, so the engine sends only the requested page. To page a projection, select the column you order by: ordering a page by a column you do not select is ambiguous, so the SDK raises `CompileError`.
 
 ```python
 # Top 10 highest paid
@@ -375,7 +375,7 @@ df = result.to_df()           # pandas DataFrame (requires pandas)
 
 ### Query Plans
 
-To understand how a query will execute without running it, use `debug()`. It takes the same arguments as `query()`, and so does `why()`, which returns the query's rows with a proof tree for each:
+To understand how a query will execute without running it, use `debug()`. It takes the same arguments as `query()`, and so does `why()`, which returns the query's rows with a proof tree for each. The engine does not paginate `.why`, so `why()` fetches every row and applies `order_by`, `limit` and `offset` in the SDK:
 
 ```python
 plan = await kg.debug(

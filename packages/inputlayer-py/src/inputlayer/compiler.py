@@ -428,11 +428,9 @@ class QueryOutput:
 class QueryPlan:
     """A compiled query: the one program to send and how to shape its reply.
 
-    ``columns`` are the variables the engine returns, by position. The
-    SDK applies ``skip`` (an offset without a limit, which the engine does
-    not paginate) and, when ``dedupe`` is set, removes repeated rows of a
-    projection: IQL is set-valued, and a projection of distinct tuples can
-    repeat.
+    ``columns`` are the variables the engine returns, by position. When
+    ``dedupe`` is set the SDK removes repeated rows of a projection: IQL is
+    set-valued, and a projection of distinct tuples can repeat.
     """
 
     program: str
@@ -448,7 +446,6 @@ class QueryPlan:
     order: tuple[str, bool] | None
     limit: int | None
     offset: int | None
-    skip: int
     dedupe: bool
 
     @property
@@ -457,7 +454,6 @@ class QueryPlan:
 
     def shape(self, rows: list[list[Any]]) -> list[list[Any]]:
         """Pick the selected columns out of the engine's rows, by position."""
-        rows = rows[self.skip :] if self.skip else rows
         if rows and len(rows[0]) != len(self.columns):
             raise InternalError(
                 f"The engine returned {len(rows[0])} columns for a query binding "
@@ -481,6 +477,11 @@ class QueryPlan:
             order_var, descending = self.order
             at = self.why_columns.index(order_var)
             picked = _sorted_by(picked, lambda i: rows[i][at], descending=descending)
+        if self.dedupe:
+            firsts: dict[Any, int] = {}
+            for i in picked:
+                firsts.setdefault(_row_key(self.project_why(rows[i])), i)
+            picked = list(firsts.values())
         start = self.offset or 0
         end = start + self.limit if self.limit is not None else None
         return picked[start:end]
@@ -526,11 +527,6 @@ class _Shape:
     order: tuple[AstColumn, bool] | None
     limit: int | None
     offset: int | None
-
-    @property
-    def skip(self) -> int:
-        # The engine paginates only with a limit; an offset alone is the SDK's.
-        return (self.offset or 0) if self.limit is None else 0
 
     def first_branch(self) -> list[str]:
         return self.branches[0] if self.branches is not None else self.conditions
@@ -685,7 +681,6 @@ def _compile_plain_plan(
             order=(order_var, shape.order[1]) if order_var and shape.order else None,
             limit=shape.limit,
             offset=shape.offset,
-            skip=shape.skip,
             dedupe=lossy,
         )
 
@@ -696,6 +691,12 @@ def _compile_plain_plan(
         return [f"{v}{suffix}" if v == order_var else v for v in vars_]
 
     paged = shape.limit is not None or shape.offset is not None
+    if paged and order_var is not None and order_var not in out_vars:
+        raise CompileError(
+            "ordering by a column you do not select with limit is ambiguous; "
+            "select it or drop limit",
+            hint="add the order_by column to the selection, or drop limit and offset",
+        )
     if shape.branches is None and not (lossy and paged):
         # The plain form: one ``?`` query with the sort on its first atom.
         first = f"{shape.relations[0][0]}({', '.join(annotate(shape.atom_vars[0]))})"
@@ -706,7 +707,7 @@ def _compile_plain_plan(
     # An OR split, or a page of a projection: a program-local rule collects
     # the rows (the union of the branches; the distinct projected rows), so
     # the engine deduplicates, orders and paginates them in one program.
-    head = _unique([*out_vars, *([order_var] if order_var else [])]) if lossy else all_vars
+    head = out_vars if lossy and (order_var is None or order_var in out_vars) else all_vars
     head_text = f"{QUERY_RULE}({', '.join(head)})"
     clauses = [
         f"{head_text} <- {', '.join([*shape.atoms, *bindings, *branch])}"
@@ -814,7 +815,6 @@ def _compile_agg_plan(
         order=order,
         limit=shape.limit,
         offset=shape.offset,
-        skip=shape.skip,
         dedupe=False,
     )
 
@@ -849,9 +849,17 @@ def _resolve_order(order_by: Expr | None) -> tuple[AstColumn, bool] | None:
     )
 
 
+# The largest limit the engine parses, sent with an offset that has no
+# limit so the engine still pages. The server's own max_result_rows cap
+# still bounds the rows and sets truncated.
+MAX_LIMIT = 9223372036854775807
+
+
 def _limit_atom(limit: int | None, offset: int | None) -> list[str]:
     if limit is None:
-        return []
+        if not offset:
+            return []
+        limit = MAX_LIMIT
     return [f"limit({limit}, {offset})" if offset else f"limit({limit})"]
 
 
@@ -882,15 +890,20 @@ def _distinct(rows: list[list[Any]]) -> list[list[Any]]:
     seen: set[Any] = set()
     out: list[list[Any]] = []
     for row in rows:
-        try:
-            key: Any = tuple(row)
-            hash(key)
-        except TypeError:  # a vector value is a list
-            key = repr(row)
+        key = _row_key(row)
         if key not in seen:
             seen.add(key)
             out.append(row)
     return out
+
+
+def _row_key(row: list[Any]) -> Any:
+    try:
+        key: Any = tuple(row)
+        hash(key)
+    except TypeError:  # a vector value is a list
+        key = repr(row)
+    return key
 
 
 def _sorted_by(items: list[int], key: Any, *, descending: bool) -> list[int]:

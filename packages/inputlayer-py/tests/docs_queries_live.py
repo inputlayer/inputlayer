@@ -38,6 +38,7 @@ from inputlayer import (
     top_k,
 )
 from inputlayer import functions as fn
+from inputlayer.exceptions import CompileError
 
 SERVER_URL = os.environ.get("INPUTLAYER_TEST_SERVER", "")
 USERNAME = os.environ.get("INPUTLAYER_TEST_USER", "admin")
@@ -480,17 +481,20 @@ async def test_why_returns_a_computed_column(kg: KnowledgeGraph) -> None:
     assert sorted(why.results.to_tuples()) == [("Bob", 180000.0), ("Eve", 190000.0)]
 
 
-async def test_an_offset_without_a_limit_skips_rows(kg: KnowledgeGraph) -> None:
+async def test_an_offset_without_a_limit_pages_in_the_engine(kg: KnowledgeGraph) -> None:
     opts = {
         "join": [Employee],
         "order_by": Employee.salary.desc(),
         "offset": 3,
     }
-    expected = [("Eve",), ("Bob",)]
-    assert (await kg.query(Employee.name, **opts)).to_tuples() == expected
-    assert (await kg.why(Employee.name, **opts)).results.to_tuples() == expected
+    plan = await kg.debug(Employee, **opts)
+    assert "limit(9223372036854775807, 3)" in plan.iql
+    expected = [("Eve", 95000.0), ("Bob", 90000.0)]
+    assert (await kg.query(Employee.name, Employee.salary, **opts)).to_tuples() == expected
+    assert (await kg.why(Employee.name, Employee.salary, **opts)).results.to_tuples() == expected
     merged = await kg.query(
         Employee.name,
+        Employee.salary,
         where=lambda e: (e.department == "hr") | (e.salary > 100000),
         **opts,
     )
@@ -499,10 +503,32 @@ async def test_an_offset_without_a_limit_skips_rows(kg: KnowledgeGraph) -> None:
 
 async def test_why_orders_and_paginates_like_query(kg: KnowledgeGraph) -> None:
     opts = {"join": [Employee], "order_by": Employee.salary.desc(), "limit": 2, "offset": 1}
-    why = await kg.why(Employee.name, **opts)
-    assert why.results.to_tuples() == (await kg.query(Employee.name, **opts)).to_tuples()
-    assert why.results.to_tuples() == [("Alice",), ("Charlie",)]
+    why = await kg.why(Employee.name, Employee.salary, **opts)
+    query = await kg.query(Employee.name, Employee.salary, **opts)
+    assert why.results.to_tuples() == query.to_tuples()
+    assert why.results.to_tuples() == [("Alice", 120000.0), ("Charlie", 110000.0)]
     assert len(why.proof_trees) == 2
+
+
+async def test_why_returns_the_distinct_rows_of_a_projection_like_query(
+    kg: KnowledgeGraph,
+) -> None:
+    opts = {"join": [Employee], "order_by": Employee.department.asc(), "limit": 2}
+    why = await kg.why(Employee.department, **opts)
+    query = await kg.query(Employee.department, **opts)
+    assert why.results.to_tuples() == query.to_tuples() == [("eng",), ("hr",)]
+    assert len(why.proof_trees) == 2
+    unpaged = await kg.why(Employee.department, join=[Employee])
+    assert sorted(unpaged.results.to_tuples()) == [("eng",), ("hr",)]
+
+
+async def test_paging_a_projection_ordered_by_an_unselected_column_is_refused(
+    kg: KnowledgeGraph,
+) -> None:
+    with pytest.raises(CompileError, match="ordering by a column you do not select"):
+        await kg.query(
+            Employee.department, join=[Employee], order_by=Employee.salary.desc(), limit=2
+        )
 
 
 async def test_why_orders_and_limits_an_aggregate_query_like_query(kg: KnowledgeGraph) -> None:
@@ -543,6 +569,17 @@ async def test_sessions_session_facts_mix_with_persistent_data(kg: KnowledgeGrap
     assert len(result) == 6
 
 
+async def test_session_insert_keeps_every_fact(kg: KnowledgeGraph) -> None:
+    await kg.session.insert([
+        Employee(id=997, name="TempA", department="eng", salary=0.0, active=True),
+        Employee(id=998, name="TempB", department="hr", salary=0.0, active=True),
+    ])
+    names = [e.name for e in await kg.query(Employee)]
+    assert "TempA" in names
+    assert "TempB" in names
+    assert len(names) == 7
+
+
 # ── Built-in Functions ────────────────────────────────────────────────
 
 
@@ -580,6 +617,7 @@ async def test_temporal_functions(kg: KnowledgeGraph) -> None:
 async def test_or_conditions_merge_their_branches(kg: KnowledgeGraph) -> None:
     result = await kg.query(
         Employee.name,
+        Employee.salary,
         join=[Employee],
         where=lambda e: (e.department == "hr") | (e.salary > 115000),
         order_by=Employee.salary.desc(),

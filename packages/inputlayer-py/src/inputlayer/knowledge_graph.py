@@ -415,12 +415,16 @@ class KnowledgeGraph:
         )
         result = await self._execute(plan.program)
         rows = plan.shape(result.rows)
-        reshaped = plan.skip > 0 or len(rows) != len(result.rows)
+        reshaped = len(rows) != len(result.rows)
         rs = ResultSet(
             columns=plan.labels,
             rows=rows,
             row_count=len(rows),
-            total_count=len(rows) if plan.dedupe and plan.limit is None else result.total_count,
+            total_count=(
+                len(rows)
+                if plan.dedupe and plan.limit is None and plan.offset is None
+                else result.total_count
+            ),
             truncated=result.truncated,
             execution_time_ms=result.execution_time_ms,
             row_provenance=None if reshaped else result.row_provenance,
