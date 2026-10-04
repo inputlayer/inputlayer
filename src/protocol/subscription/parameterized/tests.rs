@@ -179,7 +179,7 @@ mod rounds {
     use serde_json::json;
     use tempfile::TempDir;
 
-    use super::super::{Families, MemberQuery};
+    use super::super::{Families, Family, MemberQuery};
     use super::lifted;
     use crate::protocol::subscription::{
         ReevaluatingQuery, Refresh, StandingQuery, SubscriptionMetrics,
@@ -219,6 +219,13 @@ mod rounds {
         refresh.inserted.iter().map(|row| json!(row)).collect()
     }
 
+    /// Wait for `family`'s probe, if any, to be judged.
+    async fn probed(family: &Family) {
+        while family.probing.load(Ordering::Relaxed) {
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn views_share_a_round_that_lets_its_snapshot_go() {
         let (handler, _tmp) = handler();
@@ -233,18 +240,20 @@ mod rounds {
         assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 1])]);
         assert_eq!(inserted(&two.refresh().await.unwrap()), [json!(["s2", 2])]);
         assert_eq!(one.family.own_cost_us.load(Ordering::Relaxed), 0);
+        assert!(!one.family.probing.load(Ordering::Relaxed));
         assert!(!one.family.shares());
-        // Their next evaluations reuse the plans: their cost starts sharing.
+        // Their next evaluations reuse the plans: their cost starts a probe.
+        // Own evaluations slower than any round here: the guard keeps sharing.
         write(&handler, "+item[(\"s1\", 2), (\"s2\", 3)]").await;
         assert_eq!(inserted(&one.refresh().await.unwrap()), [json!(["s1", 2])]);
-        assert!(one.family.own_cost_us.load(Ordering::Relaxed) > 0);
-        assert!(one.family.shares());
-        // Own evaluations slower than any round here: the guard keeps sharing.
+        let own = one.family.own_cost_us.load(Ordering::Relaxed);
+        assert!(own > 0);
         one.family
             .own_cost_us
-            .store(1_000_000_000, Ordering::Relaxed);
+            .store(own.max(1_000_000_000), Ordering::Relaxed);
         assert_eq!(inserted(&two.refresh().await.unwrap()), [json!(["s2", 3])]);
-        assert!(one.family.shares());
+        probed(&one.family).await;
+        assert!(one.family.shares(), "the probe kept sharing");
         let before = metrics.shared_evaluations();
 
         write(&handler, "+item[(\"s1\", 3), (\"s2\", 4)]").await;
@@ -306,5 +315,59 @@ mod rounds {
             "the round compiled its plan"
         );
         assert!(!one.family.shares(), "and was still judged too slow");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_probe_too_slow_to_share_never_makes_a_view_wait() {
+        let (handler, _tmp) = handler();
+        // Each bound reach is a short chain; the unbound closure is quadratic.
+        let edges: Vec<String> = (0..400)
+            .map(|i| format!("(\"n{i}\", \"n{}\")", i + 1))
+            .collect();
+        write(
+            &handler,
+            &format!(
+                "+edge[{}]\n\
+                 +reach(X, Y) <- edge(X, Y)\n\
+                 +reach(X, Z) <- reach(X, Y), edge(Y, Z)",
+                edges.join(", ")
+            ),
+        )
+        .await;
+        let families = Families::default();
+        let metrics = Arc::new(SubscriptionMetrics::default());
+        let mut one = member(&families, &handler, &metrics, r#"?reach("n398", Y)"#);
+        let mut two = member(&families, &handler, &metrics, r#"?reach("n399", Y)"#);
+        one.refresh().await.unwrap();
+        two.refresh().await.unwrap();
+        assert_eq!(metrics.shared_evaluations(), 0);
+
+        // A plan-cached own evaluation makes a probe due.
+        write(&handler, "+edge(\"x1\", \"y1\")").await;
+        one.refresh().await.unwrap();
+        assert!(one.family.probing.load(Ordering::Relaxed), "probe running");
+        // Own evaluations far faster than any round.
+        one.family.own_cost_us.store(1, Ordering::Relaxed);
+        // While it runs, views evaluate their own queries without waiting.
+        write(&handler, "+edge(\"n399\", \"z\")").await;
+        let refresh = two.refresh().await.unwrap();
+        assert_eq!(inserted(&refresh), [json!(["n399", "z"])]);
+        assert!(
+            one.family.probing.load(Ordering::Relaxed),
+            "the refresh did not wait for the probe"
+        );
+        assert!(!one.family.shares());
+        assert_eq!(metrics.shared_evaluations(), 1, "only the probe's round");
+
+        probed(&one.family).await;
+        assert!(!one.family.shares(), "the probe was judged too slow");
+        assert_eq!(one.family.stops.load(Ordering::Relaxed), 1);
+        write(&handler, "+edge(\"n398\", \"w\")").await;
+        let refresh = one.refresh().await.unwrap();
+        let mut rows = inserted(&refresh);
+        rows.sort_by_key(ToString::to_string);
+        assert_eq!(rows, [json!(["n398", "w"]), json!(["n398", "z"])]);
+        assert!(!one.family.probing.load(Ordering::Relaxed), "backing off");
+        assert_eq!(metrics.shared_evaluations(), 1);
     }
 }

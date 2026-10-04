@@ -81,7 +81,7 @@ const RULES: &str = "+view(S, X, Kind) <- item(S, X), kind(X, Kind)";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn bound_subscriptions_share_one_evaluation_and_get_only_their_rows() {
-    let server = start_server(64).await;
+    let server = start_server(256).await;
     server.write(RULES).await;
     server
         .write("+item[(\"s1\", 1), (\"s2\", 2)]\n+kind[(1, \"a\"), (2, \"a\")]")
@@ -91,6 +91,13 @@ async fn bound_subscriptions_share_one_evaluation_and_get_only_their_rows() {
     let mut three = Member::subscribe(&server, r#"?view("s3", X, "a")"#).await;
     assert_eq!(one.rows.len(), 1);
     assert!(three.rows.is_empty());
+    // More bindings than compute permits: their own evaluations no longer
+    // all run at once, so a round pays even on a many-core host.
+    let mut idle = Vec::new();
+    for session in 4..=server.handler.compute_permits() + 1 {
+        let query = format!(r#"?view("s{session}", X, "a")"#);
+        idle.push(Member::subscribe(&server, &query).await);
+    }
 
     // The views' first evaluations compiled their plans; the next ones give
     // the cost a shared evaluation is compared with.
@@ -101,6 +108,13 @@ async fn bound_subscriptions_share_one_evaluation_and_get_only_their_rows() {
         let expected = member.oracle().await;
         member.converge(&expected).await;
     }
+    // That cost starts a probe no view waits for; let it be judged.
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    while shared(&server) == 0 {
+        assert!(tokio::time::Instant::now() < deadline, "no probe");
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
 
     let before = shared(&server);
     server.write("+item(\"s1\", 3)\n+kind(3, \"a\")").await;

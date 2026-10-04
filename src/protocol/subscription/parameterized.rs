@@ -36,8 +36,9 @@
 //! only while a round is about as fast as its views' own evaluations would
 //! be, run in parallel on the compute permits. A view's own cost counts only
 //! evaluations that reused a compiled plan; a round's leaves out compiling
-//! its plan. A family starts sharing once it has a view's
-//! own cost to compare with, stops when a round is slower, and probes again
+//! its plan. Once it has a view's own cost to compare with, a family probes:
+//! it evaluates a round no view waits for, and starts sharing only when that
+//! round is fast enough. It stops when a round is slower, and probes again
 //! after some commits, waiting longer after each probe that fails. While
 //! sharing, a view evaluates its own query now and then to keep that cost
 //! current.
@@ -367,6 +368,8 @@ pub struct Family {
     bindings: AtomicUsize,
     latest: ArcSwapOption<Round>,
     sharing: AtomicBool,
+    /// Whether a probe is evaluating.
+    probing: AtomicBool,
     /// Own evaluations since sharing stopped.
     own_since_stop: AtomicU64,
     /// Times sharing stopped since a round last kept it.
@@ -496,6 +499,7 @@ impl Family {
             if self.stops.load(Ordering::Relaxed) != 0 {
                 self.stops.store(0, Ordering::Relaxed);
             }
+            self.sharing.store(true, Ordering::Relaxed);
             if (self.rounds.fetch_add(1, Ordering::Relaxed) + 1).is_multiple_of(SAMPLE_EVERY) {
                 self.sample_due.store(true, Ordering::Relaxed);
             }
@@ -523,29 +527,40 @@ impl Family {
     }
 
     /// Note a view's own evaluation: its cost when it reused a compiled plan
-    /// (`None` when it compiled one). At the first cost, and after enough own
-    /// evaluations since sharing stopped, try sharing.
-    fn record_own(&self, cost: Option<Duration>) {
-        let average = self.own_cost_us.load(Ordering::Relaxed);
+    /// (`None` when it compiled one). Whether to probe: the own cost is known,
+    /// there is more than one binding, and the family never shared or enough
+    /// own evaluations passed since it stopped.
+    fn record_own(&self, cost: Option<Duration>) -> bool {
+        let mut average = self.own_cost_us.load(Ordering::Relaxed);
         if let Some(cost) = cost {
             let cost = (cost.as_micros() as u64).max(1);
-            let next = if average == 0 {
+            average = if average == 0 {
                 cost
             } else {
                 (average * 7 + cost) / 8
             };
-            self.own_cost_us.store(next, Ordering::Relaxed);
+            self.own_cost_us.store(average, Ordering::Relaxed);
         }
         if self.sharing.load(Ordering::Relaxed) {
-            return;
+            return false;
         }
-        let first = average == 0 && cost.is_some();
         let since_stop = self.own_since_stop.fetch_add(1, Ordering::Relaxed) + 1;
         let bindings = self.bindings.load(Ordering::Relaxed) as u64;
         let stops = self.stops.load(Ordering::Relaxed);
-        if first || (average > 0 && since_stop >= probe_after(bindings, stops)) {
-            self.sharing.store(true, Ordering::Relaxed);
+        average > 0 && bindings > 1 && (stops == 0 || since_stop >= probe_after(bindings, stops))
+    }
+
+    /// Evaluate a round at `snapshot` that no view waits for, at most one at
+    /// a time: the guard judging it decides whether views share.
+    fn probe(family: &Arc<Family>, snapshot: Arc<KnowledgeGraphSnapshot>) {
+        if family.probing.swap(true, Ordering::Relaxed) {
+            return;
         }
+        let family = Arc::clone(family);
+        tokio::spawn(async move {
+            let _ = family.evaluate(snapshot).await;
+            family.probing.store(false, Ordering::Relaxed);
+        });
     }
 }
 
@@ -588,6 +603,7 @@ impl Families {
                         bindings: AtomicUsize::new(0),
                         latest: ArcSwapOption::empty(),
                         sharing: AtomicBool::new(false),
+                        probing: AtomicBool::new(false),
                         own_since_stop: AtomicU64::new(0),
                         stops: AtomicU64::new(0),
                         own_cost_us: AtomicU64::new(0),
@@ -643,9 +659,13 @@ impl MemberQuery {
         }
         let snapshot = self.own.current_snapshot()?;
         let rules = Arc::clone(snapshot.persistent_rules());
-        let evaluated = self.own.evaluate_on(snapshot).await?;
-        self.family
-            .record_own(evaluated.plan_cached.then_some(evaluated.cost));
+        let evaluated = self.own.evaluate_on(Arc::clone(&snapshot)).await?;
+        if self
+            .family
+            .record_own(evaluated.plan_cached.then_some(evaluated.cost))
+        {
+            Family::probe(&self.family, snapshot);
+        }
         self.validated = Some(rules);
         Ok(self.own.adopt(evaluated))
     }
