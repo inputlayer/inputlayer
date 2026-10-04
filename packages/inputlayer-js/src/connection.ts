@@ -13,8 +13,8 @@
  * when the call is sent goes as `timeout_ms`, and a call still waiting to be
  * sent when it passes fails with `DeadlineExceededError`. If a sent call has
  * no reply at its deadline, the connection sends `cancel` and probes the
- * transport with a WebSocket ping (no answer drops the connection, failing
- * the call with `ConnectionLostError`). The engine's reply normally follows
+ * transport with a WebSocket ping (no answer within `timeoutGraceMs` drops
+ * the connection). The engine's reply normally follows
  * (typed, e.g. `DeadlineExceededError`, or the committed result of a write
  * that was already committing); without one (or, while a reply streams, its
  * next part) within `timeoutGraceMs`, the call fails locally: `DeadlineExceededError` for a query, and
@@ -24,8 +24,10 @@
  * Keepalive: whenever nothing was sent for `keepaliveMs`, an application ping
  * resets the server's idle timer (only with no call in flight, as its pong
  * waits behind earlier replies), and the transport is probed, calls in flight
- * or not: no pong and no frame within the probe window means the socket is
- * half-open, so it is dropped and the connection reconnects.
+ * or not: no pong and no frame within `timeoutGraceMs` means the socket is
+ * half-open, so it is dropped and the connection reconnects. No verdict is
+ * taken while the request window is full (the engine then reads nothing):
+ * each call's deadline bounds it, and freed slots let the probe run.
  *
  * Reconnect: exponential backoff with jitter, re-opened on the same knowledge
  * graph (`?kg=`) with the notification cursor (`last_seq` and `epoch`), then
@@ -91,7 +93,8 @@ export interface ConnectionOptions {
    * Ping when nothing was sent for this long, so the server's idle timeout
    * never ends a connection that only listens, and probe the transport: no
    * WebSocket pong and no frame within `timeoutGraceMs` drops the connection,
-   * which then reconnects (default 20 000; 0 disables).
+   * which then reconnects; no verdict is taken while the request window is
+   * full, when each call's deadline bounds it (default 20 000; 0 disables).
    */
   keepaliveMs?: number;
   /**
@@ -626,9 +629,10 @@ export class Connection {
   /**
    * Ping the transport: a live server answers at once, even while computing,
    * unless its request window is full (it then reads nothing more). Any frame
-   * from it answers the probe too. No answer within half the grace period
-   * while the window has room means the connection is dead: drop it, so its
-   * calls fail with `ConnectionLostError` and it reconnects.
+   * from it answers the probe too. No answer within `timeoutGraceMs` while
+   * the window has room means the connection is dead: drop it, so it
+   * reconnects. While the window is full no verdict is taken: each call's
+   * deadline bounds it, and freed slots let the next probe judge.
    */
   private probeServer(): void {
     const ws = this.ws;
@@ -637,7 +641,7 @@ export class Connection {
       this.probe = undefined;
       const outstanding = this.inFlight.size + this.control.size;
       if (this.ws === ws && outstanding < this.maxInFlight) ws.terminate();
-    }, Math.max(1, Math.floor(this.timeoutGraceMs / 2)));
+    }, Math.max(1, this.timeoutGraceMs));
     this.probe = { timer, ws };
     ws.once('pong', () => {
       if (this.probe?.ws === ws) this.clearProbe();

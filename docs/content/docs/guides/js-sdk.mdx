@@ -63,7 +63,8 @@ const il = new InputLayer({
   reconnectDelay: 1.0,          // first backoff in seconds, doubled with jitter up to 30 (default: 1.0)
   maxReconnectAttempts: 10,     // give up after N failures (default: 10)
   defaultTimeoutMs: 30_000,     // deadline of a call without its own (default: 30 000; 0 for none)
-  keepaliveMs: 20_000,          // ping a silent connection so it is never idle-closed; reconnect a half-open one (default: 20 000)
+  keepaliveMs: 20_000,          // ping a silent connection so it is never idle-closed; reconnect one with no pong or frame
+                                // within timeoutGraceMs, unless the request window is full (call deadlines bound it then) (default: 20 000)
 });
 ```
 
