@@ -536,6 +536,32 @@ async def test_reconnect_gives_unverified_at_once_then_a_resync() -> None:
     await _teardown(server, il)
 
 
+async def test_a_transient_failure_of_the_first_open_is_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("inputlayer.subscription.RESUBSCRIBE_DELAY", 0.01)
+    engine = Engine([[1, 1]])
+    server, il, kg = await _setup(engine)
+    answer = engine._answer
+    dropped: list[str] = []
+
+    async def drop_first_subscribe(peer: Peer, frame: dict[str, Any]) -> None:
+        if frame["program"].startswith(".subscribe") and not dropped:
+            dropped.append(frame["program"])
+            await peer.close()
+            return
+        await answer(peer, frame)
+
+    engine._answer = drop_first_subscribe  # type: ignore[method-assign]
+    sub = kg.subscribe(Edge)
+    snap = await _next(sub)
+    assert (snap.kind, snap.verified, _values(snap.inserted)) == ("snapshot", True, [(1, 1)])
+    assert dropped and engine.subscribes() == [".subscribe"]
+    assert len(server.peers) == 2
+    await sub.close()
+    await _teardown(server, il)
+
+
 async def test_connection_closed_for_good_ends_with_connection_lost() -> None:
     engine = Engine([[1, 1]])
     server, il, kg = await _setup(engine, auto_reconnect=False)

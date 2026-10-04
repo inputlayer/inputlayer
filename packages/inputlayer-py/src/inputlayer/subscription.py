@@ -451,10 +451,7 @@ class Subscription(Generic[T]):
         self._state = "opening"
         self._conn.add_link_listener(self._on_link)
         try:
-            await self._check_persistent()
-            await self._open("snapshot")
-        except Exception as e:
-            self._fail(e)
+            await self._open_with_backoff("snapshot")
         except BaseException:
             self._end()
             raise
@@ -531,42 +528,47 @@ class Subscription(Generic[T]):
         self._reopen_task = asyncio.ensure_future(self._reopen_loop())
 
     async def _reopen_loop(self) -> None:
-        delay = RESUBSCRIBE_DELAY
         try:
-            while self._state == "unverified":
-                try:
-                    if self._unsubscribing is not None:
-                        with contextlib.suppress(Exception):
-                            await self._unsubscribing
-                    if self._registered:
-                        try:
-                            await self._conn.execute(
-                                _meta.unsubscribe(self.id), timeout=self._timeout
-                            )
-                        except Exception as e:
-                            if _transient(e):
-                                raise
-                            # Gone already on the server (reset, or a new connection).
-                        self._registered = False
-                    await self._open("resync")
-                    state: _State = self._state  # _open moved it on
-                    if state == "live":
-                        self._stats.resubscribes += 1
-                    return
-                except Exception as e:
-                    if self._state != "unverified":
-                        return
-                    if not _transient(e):
-                        self._fail(e)
-                        return
-                # Jitter in [delay/2, delay], ended early by close().
-                self._wake = asyncio.Event()
-                with contextlib.suppress(asyncio.TimeoutError):
-                    await asyncio.wait_for(self._wake.wait(), delay * random.uniform(0.5, 1.0))
-                self._wake = None
-                delay = min(delay * 2, MAX_RESUBSCRIBE_DELAY)
+            await self._open_with_backoff("resync")
+            state: _State = self._state  # _open moved it on
+            if state == "live":
+                self._stats.resubscribes += 1
         finally:
             self._reopen_task = None
+
+    async def _open_with_backoff(self, kind: Literal["snapshot", "resync"]) -> None:
+        """Open until it works, is refused, or the subscription ends."""
+        waiting: _State = "opening" if kind == "snapshot" else "unverified"
+        delay = RESUBSCRIBE_DELAY
+        while self._state == waiting:
+            try:
+                if self._unsubscribing is not None:
+                    with contextlib.suppress(Exception):
+                        await self._unsubscribing
+                if self._registered:
+                    try:
+                        await self._conn.execute(_meta.unsubscribe(self.id), timeout=self._timeout)
+                    except Exception as e:
+                        if _transient(e):
+                            raise
+                        # Gone already on the server (reset, or a new connection).
+                    self._registered = False
+                if kind == "snapshot":
+                    await self._check_persistent()
+                await self._open(kind)
+                return
+            except Exception as e:
+                if self._state != waiting:
+                    return
+                if not _transient(e):
+                    self._fail(e)
+                    return
+            # Jitter in [delay/2, delay], ended early by close().
+            self._wake = asyncio.Event()
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(self._wake.wait(), delay * random.uniform(0.5, 1.0))
+            self._wake = None
+            delay = min(delay * 2, MAX_RESUBSCRIBE_DELAY)
 
     # ── Pushes ────────────────────────────────────────────────────────
 
