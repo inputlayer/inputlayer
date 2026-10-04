@@ -654,6 +654,34 @@ mod tests {
     }
 
     #[test]
+    fn floats_parse_exactly_as_rust_parses_their_text() {
+        // Found by the Python SDK's round-trip fuzz: the default serde_json
+        // parser reads this one ULP off.
+        let text = "6.076327178933334e-236";
+        let ParamValue::Float(f) = one(text).unwrap() else {
+            panic!("not a float");
+        };
+        assert_eq!(f.to_bits(), text.parse::<f64>().unwrap().to_bits());
+
+        // Every finite bit pattern, written the shortest way (as JS and
+        // Python write floats), reads back to the same bits.
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        for _ in 0..20_000 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let value = f64::from_bits(state);
+            if !value.is_finite() || (value.fract() == 0.0 && value.abs() >= TWO_POW_63) {
+                continue;
+            }
+            for text in [format!("{value:?}"), format!("{value:e}")] {
+                let parsed = one(&text).unwrap();
+                assert_eq!(parsed, ParamValue::Float(value), "{text}");
+            }
+        }
+    }
+
+    #[test]
     fn invalid_reports_non_finite_values() {
         assert!(ParamValue::Float(f64::NAN).invalid().is_some());
         assert!(ParamValue::Vector(vec![1.0, f64::INFINITY])
