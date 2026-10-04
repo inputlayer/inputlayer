@@ -4,7 +4,7 @@ Python SDK for [InputLayer](https://github.com/inputlayer/inputlayer), the live 
 
 Take the rules out of your prompts: declare facts and rules as typed Python classes, and InputLayer keeps every conclusion current as facts change. Write Python, no query syntax required: the SDK compiles your classes into IQL, InputLayer's rule language, and sends it over WebSocket. A knowledge graph (`il.knowledge_graph("support")`) is the facts and rule-derived conclusions of one domain.
 
-**Today and next.** This package declares relations and rules (`Relation`, `Derived`, `From`), writes and deletes facts, and queries the derived views. It also subscribes to them: `kg.subscribe()` (the engine pushes each change to the agent), `kg.watch()` and `kg.on()`, described in the [Python SDK guide](../../docs/content/docs/guides/python-sdk.mdx#subscriptions). Phase 1 of the new SDK also adds `kg.claim()` (an agent's action is recorded only while the rules allow it): in progress, not merged yet. The [main README](../../README.md) shows both forms side by side.
+**Today and next.** This package declares relations and rules (`Relation`, `Derived`, `From`), writes and deletes facts, and queries the derived views. It also subscribes to them: `kg.subscribe()` (the engine pushes each change to the agent), `kg.watch()` and `kg.on()`, described in the [Python SDK guide](../../docs/content/docs/guides/python-sdk.mdx#subscriptions). And it has `kg.claim()` (an agent's action is recorded only while the rules allow it), built on guarded programs (`kg.program().when()`, committed whole or not at all) and `R.any()` / `~R.any()` existence checks; these are not in a release yet. The [main README](../../README.md) shows both forms side by side.
 
 ## Installation
 
