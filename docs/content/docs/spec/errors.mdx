@@ -226,3 +226,16 @@ Code `deadline_exceeded`. The request's deadline (`storage.performance.query_tim
 - Increasing the timeout in config, or the request's `timeout_ms`
 
 A request cancelled by the client fails the same way with code `cancelled`. Code `outcome_unknown` means a commit failed in a way that may have applied it: read the state back before retrying.
+
+### Memory Limit Exceeded
+
+```
+Error: Request exceeded the per-query memory limit (storage.performance.max_query_memory_bytes) before it began committing; nothing was applied. Narrow the query or bind more of its arguments
+```
+
+Code `resource_exhausted`. The query's computation held more than `storage.performance.max_query_memory_bytes` and was stopped instead of growing the server, so nothing was applied. A recursive rule queried with no argument bound (the whole transitive closure of a large graph) is the usual cause. Try:
+- Binding an argument (`?reach("a", Y)` rather than `?reach(X, Y)`)
+- Adding filters to reduce data
+- Raising the limit in config, if the server has the memory for it
+
+A write fails with the same code when it would grow its knowledge graph's facts past `storage.performance.max_graph_memory_bytes`. Nothing is applied; deleting facts is always allowed, so free space and retry.

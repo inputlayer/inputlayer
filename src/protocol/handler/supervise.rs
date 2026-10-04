@@ -28,6 +28,7 @@ pub(crate) fn stop_code(stop: Stop) -> ErrorCode {
     match stop {
         Stop::Deadline => ErrorCode::DeadlineExceeded,
         Stop::Cancelled => ErrorCode::Cancelled,
+        Stop::MemoryExhausted => ErrorCode::ResourceExhausted,
     }
 }
 

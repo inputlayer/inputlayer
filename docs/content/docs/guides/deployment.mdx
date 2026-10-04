@@ -75,6 +75,8 @@ max_query_size_bytes = 1048576      # 1 MB
 max_insert_tuples = 10000
 max_result_rows = 100000
 slow_query_log_ms = 5000
+max_query_memory_bytes = 1073741824 # 1 GiB per query; refused past it
+max_graph_memory_bytes = 4294967296 # 4 GiB of facts per graph
 
 [logging]
 level = "info"

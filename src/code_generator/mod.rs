@@ -19,7 +19,8 @@
 mod static_input;
 
 use crate::boolean_specialization::SemiringType;
-use crate::execution::RequestControl;
+use crate::execution::memory::thread_net_bytes;
+use crate::execution::{RequestControl, Stop};
 use crate::ir::{AggregateFunction, ArithOp, BuiltinFunction, IRExpression, IRNode, Predicate};
 use crate::semiring_types::{BooleanDiff, DiffType};
 use differential_dataflow::collection::vec::Collection;
@@ -46,32 +47,100 @@ use crate::vector_ops;
 
 mod scc;
 
-// The running request's deadline and cancellation, for cooperative stops.
-// Set by the handler before computation, checked in spin loops.
+/// The running request's control on this thread, with the thread's net
+/// allocation when it was set: what the request holds is the growth since.
+type ThreadControl = Option<(Arc<RequestControl>, i64)>;
+
+// The running request's deadline, cancellation and memory limit, for
+// cooperative stops. Set by the handler before computation, checked in spin
+// loops.
 thread_local! {
-    static REQUEST_CONTROL: RefCell<Option<Arc<RequestControl>>> = const { RefCell::new(None) };
+    static REQUEST_CONTROL: RefCell<ThreadControl> = const { RefCell::new(None) };
 }
 
-/// Set the running request's control for the current thread.
+/// Set the running request's control for the current thread, metering the
+/// thread's allocations against its memory limit from now on.
 /// Called from `spawn_blocking` before starting computation.
 pub fn set_request_control(control: Option<Arc<RequestControl>>) {
-    REQUEST_CONTROL.with(|cell| {
-        *cell.borrow_mut() = control;
-    });
+    replace_thread_control(control.map(|c| (c, thread_net_bytes())));
+}
+
+fn replace_thread_control(control: ThreadControl) -> ThreadControl {
+    REQUEST_CONTROL.with(|cell| cell.replace(control))
 }
 
 /// The current thread's request control.
 pub(crate) fn current_request_control() -> Option<Arc<RequestControl>> {
-    REQUEST_CONTROL.with(|cell| cell.borrow().clone())
+    REQUEST_CONTROL.with(|cell| cell.borrow().as_ref().map(|(c, _)| Arc::clone(c)))
 }
 
-/// Whether the current request was stopped (deadline or cancel).
+/// Whether the current request was stopped (deadline, cancel, or memory).
+/// Charges what this thread allocated since its request started against the
+/// request's memory limit first.
 fn is_query_cancelled() -> bool {
-    REQUEST_CONTROL.with(|cell| cell.borrow().as_ref().is_some_and(|c| c.is_stopped()))
+    REQUEST_CONTROL.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .is_some_and(|(c, baseline)| c.charge_memory(thread_net_bytes() - baseline))
+    })
 }
 
 /// Error returned when a query stops on its request's deadline or cancel.
 const QUERY_CANCELLED: &str = "Query stopped: deadline exceeded or cancelled";
+
+/// The error of a query its request stopped.
+fn query_stopped_error() -> String {
+    match current_request_control().and_then(|c| c.stopped()) {
+        Some(Stop::MemoryExhausted) => Stop::MemoryExhausted.message().to_string(),
+        _ => QUERY_CANCELLED.to_string(),
+    }
+}
+
+/// Unwinding payload that aborts a stopped query from inside a dataflow
+/// step; see [`stop_point`].
+struct QueryStopped;
+
+/// Pass `collection` through, aborting the query between its batches once
+/// its request is stopped (deadline, cancel, or memory). One step of an
+/// iterative scope can run a whole fixpoint, far longer than the step loop
+/// can wait to check, so recursive loops check at every batch here. The
+/// abort unwinds out of the dataflow without the panic hook, and
+/// [`dataflow_error`] turns it into the stop's error.
+fn stop_point<G, D, R>(collection: Collection<G, D, R>) -> Collection<G, D, R>
+where
+    G: Scope,
+    D: Clone + 'static,
+    R: Clone + 'static,
+{
+    collection.inspect_batch(|_, _| {
+        if is_query_cancelled() {
+            std::panic::resume_unwind(Box::new(QueryStopped));
+        }
+    })
+}
+
+/// The error of a dataflow that unwound: the stop's error if a
+/// [`stop_point`] aborted it, otherwise an internal error.
+fn dataflow_error(payload: Box<dyn std::any::Any + Send>) -> String {
+    if payload.is::<QueryStopped>() {
+        return query_stopped_error();
+    }
+    format!(
+        "Internal error in query execution: {}",
+        format_panic_payload(payload)
+    )
+}
+
+/// Drop the worker's dataflows if the query was stopped, so that
+/// `execute_directly` returns now instead of running them to completion
+/// after the step loop gave up on them.
+fn abandon_if_stopped<A: timely::communication::Allocate>(worker: &mut timely::worker::Worker<A>) {
+    if is_query_cancelled() {
+        for dataflow in worker.installed_dataflows() {
+            worker.drop_dataflow(dataflow);
+        }
+    }
+}
 
 /// Collects a dataflow's output rows. Full at `limit` rows (0 = unlimited),
 /// which stops only this dataflow and leaves the query cancel flag alone.
@@ -109,7 +178,7 @@ impl RowSink {
     /// The collected rows, or the cancellation error.
     fn finish(self) -> Result<Vec<Tuple>, String> {
         if is_query_cancelled() {
-            return Err(QUERY_CANCELLED.to_string());
+            return Err(query_stopped_error());
         }
         Ok(std::mem::take(&mut *self.rows.lock()))
     }
@@ -342,14 +411,10 @@ impl CodeGenerator {
                         last_log = Instant::now();
                     }
                 }
+                abandon_if_stopped(worker);
             });
         }))
-        .map_err(|e| {
-            format!(
-                "Internal error in query execution: {}",
-                format_panic_payload(e)
-            )
-        })?;
+        .map_err(dataflow_error)?;
 
         sink.finish()
     }
@@ -673,6 +738,7 @@ impl CodeGenerator {
                         let next = base_case.concat(recursive).distinct_core::<R>();
 
                         // Set variable for next iteration
+                        let next = stop_point(next);
                         variable.set(next.clone());
 
                         // Leave scope with final result
@@ -697,14 +763,10 @@ impl CodeGenerator {
                     worker.step();
                     std::thread::yield_now();
                 }
+                abandon_if_stopped(worker);
             });
         }))
-        .map_err(|e| {
-            format!(
-                "Internal error in query execution: {}",
-                format_panic_payload(e)
-            )
-        })?;
+        .map_err(dataflow_error)?;
 
         sink.finish()
     }
@@ -825,6 +887,8 @@ impl CodeGenerator {
                         });
                         let next = base_case.concat(recursive).distinct_core::<R>();
 
+                        let next = stop_point(next);
+
                         variable.set(next.clone());
                         next.leave()
                     });
@@ -845,14 +909,10 @@ impl CodeGenerator {
                     worker.step();
                     std::thread::yield_now();
                 }
+                abandon_if_stopped(worker);
             });
         }))
-        .map_err(|e| {
-            format!(
-                "Internal error in query execution: {}",
-                format_panic_payload(e)
-            )
-        })?;
+        .map_err(dataflow_error)?;
 
         sink.finish()
     }
@@ -1050,6 +1110,7 @@ impl CodeGenerator {
                         let next = Self::fixpoint_dedup(combined, agg_in_loop.as_ref());
 
                         // Set variable for next iteration
+                        let next = stop_point(next);
                         variable.set(next.clone());
 
                         // Leave scope with final result
@@ -1074,14 +1135,10 @@ impl CodeGenerator {
                     worker.step();
                     std::thread::yield_now();
                 }
+                abandon_if_stopped(worker);
             });
         }))
-        .map_err(|e| {
-            format!(
-                "Internal error in query execution: {}",
-                format_panic_payload(e)
-            )
-        })?;
+        .map_err(dataflow_error)?;
 
         sink.finish()
     }
@@ -1126,14 +1183,14 @@ impl CodeGenerator {
         let all_results: Vec<Result<Vec<Tuple>, String>> = partitioned_inputs
             .into_par_iter()
             .map(|partition| {
-                let prev = current_request_control();
-                set_request_control(control.clone());
+                // Each worker meters its own allocations from here.
+                let prev = replace_thread_control(control.clone().map(|c| (c, thread_net_bytes())));
                 let mut temp_codegen = CodeGenerator::new();
                 temp_codegen.set_semiring_type(semiring_type);
                 temp_codegen.set_max_result_rows(limit);
                 temp_codegen.set_inputs(partition);
                 let result = temp_codegen.generate_and_execute_tuples(ir);
-                set_request_control(prev);
+                replace_thread_control(prev);
                 result
             })
             .collect();
@@ -3465,6 +3522,7 @@ impl CodeGenerator {
                         let next = edges_in_scope.concat(recursive).distinct();
 
                         // Set variable for next iteration
+                        let next = stop_point(next);
                         variable.set(next.clone());
 
                         // Leave scope with final result
@@ -3489,14 +3547,10 @@ impl CodeGenerator {
                     worker.step();
                     std::thread::yield_now();
                 }
+                abandon_if_stopped(worker);
             });
         }))
-        .map_err(|e| {
-            format!(
-                "Internal error in query execution: {}",
-                format_panic_payload(e)
-            )
-        })?;
+        .map_err(dataflow_error)?;
 
         sink.finish()
     }
@@ -3584,6 +3638,7 @@ impl CodeGenerator {
                         let next = sources_in_scope.concat(recursive).distinct();
 
                         // Set variable for next iteration
+                        let next = stop_point(next);
                         variable.set(next.clone());
 
                         // Leave scope with final result
@@ -3608,14 +3663,10 @@ impl CodeGenerator {
                     worker.step();
                     std::thread::yield_now();
                 }
+                abandon_if_stopped(worker);
             });
         }))
-        .map_err(|e| {
-            format!(
-                "Internal error in query execution: {}",
-                format_panic_payload(e)
-            )
-        })?;
+        .map_err(dataflow_error)?;
 
         sink.finish()
     }
@@ -8460,6 +8511,39 @@ mod tests {
         assert_eq!(result.unwrap_err(), QUERY_CANCELLED);
 
         set_request_control(None);
+    }
+
+    /// A computation that grows past its request's memory limit stops at
+    /// the next checkpoint and fails with the memory error, stopping the
+    /// request; the same computation under a roomy limit completes.
+    #[test]
+    fn test_memory_limit_stops_the_computation() {
+        let run = |limit: u64| {
+            let control = RequestControl::limited(None, limit);
+            set_request_control(Some(Arc::clone(&control)));
+            let mut codegen = CodeGenerator::new();
+            codegen.add_input(
+                "data".to_string(),
+                (0..20_000)
+                    .map(|i| Tuple::new(vec![Value::Int64(i), Value::Int64(i + 1)]))
+                    .collect(),
+            );
+            let ir = IRNode::Scan {
+                relation: "data".to_string(),
+                schema: vec!["x".to_string(), "y".to_string()],
+            };
+            let result = codegen.execute(&ir);
+            set_request_control(None);
+            (result, control.stopped())
+        };
+
+        let (result, stopped) = run(64 << 10);
+        assert_eq!(result.unwrap_err(), Stop::MemoryExhausted.message());
+        assert_eq!(stopped, Some(Stop::MemoryExhausted));
+
+        let (result, stopped) = run(1 << 30);
+        assert_eq!(result.unwrap().len(), 20_000);
+        assert_eq!(stopped, None);
     }
 
     /// Inputs share tuples with the caller's map; adding a relation to the

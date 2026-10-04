@@ -3,11 +3,21 @@
 //! Data lives in a [`RelationMap`] whose relations share chunks with every
 //! published snapshot. Each relation also has a hash index (writer only, never
 //! copied into snapshots) so set-semantics dedup on insert is O(1) per tuple.
+//! The store keeps a running estimate of the bytes its tuples occupy, which
+//! the knowledge graph's memory budget is checked against.
 
 use crate::value::{Relation, RelationMap, Tuple};
 use std::collections::hash_map::RandomState;
 use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasher;
+
+/// Estimated index bytes per stored tuple: one hash slot and its position.
+const INDEX_BYTES_PER_TUPLE: usize = 32;
+
+/// Estimated bytes one stored tuple occupies, its index entry included.
+pub fn stored_bytes(tuple: &Tuple) -> usize {
+    tuple.estimated_bytes() + INDEX_BYTES_PER_TUPLE
+}
 
 /// Positions of tuples sharing one hash.
 #[derive(Debug, Clone)]
@@ -37,6 +47,8 @@ impl Slot {
 struct TupleIndex {
     hasher: RandomState,
     slots: HashMap<u64, Slot>,
+    /// Estimated bytes of the indexed relation; see [`stored_bytes`].
+    bytes: usize,
 }
 
 impl TupleIndex {
@@ -44,6 +56,7 @@ impl TupleIndex {
         let mut index = Self::default();
         for (position, tuple) in relation.iter().enumerate() {
             index.add(index.hasher.hash_one(tuple), position);
+            index.bytes += stored_bytes(tuple);
         }
         index
     }
@@ -71,6 +84,8 @@ impl TupleIndex {
 pub struct RelationStore {
     relations: RelationMap,
     indexes: HashMap<String, TupleIndex>,
+    /// Sum of every index's `bytes`.
+    bytes: usize,
 }
 
 impl RelationStore {
@@ -82,6 +97,11 @@ impl RelationStore {
     /// All relations. Cloning the map shares tuples.
     pub fn relations(&self) -> &RelationMap {
         &self.relations
+    }
+
+    /// Estimated bytes all stored tuples occupy; see [`stored_bytes`].
+    pub fn bytes(&self) -> usize {
+        self.bytes
     }
 
     /// Tuples of `relation`, if present.
@@ -97,8 +117,7 @@ impl RelationStore {
     /// Replace a relation's contents wholesale (used when loading).
     pub fn set(&mut self, relation: &str, tuples: Vec<Tuple>) {
         let tuples = Relation::from(tuples);
-        self.indexes
-            .insert(relation.to_string(), TupleIndex::build(&tuples));
+        self.replace_index(relation, TupleIndex::build(&tuples));
         self.relations.insert(relation.to_string(), tuples);
     }
 
@@ -117,6 +136,9 @@ impl RelationStore {
                 continue;
             }
             index.add(hash, data.len());
+            let bytes = stored_bytes(&tuple);
+            index.bytes += bytes;
+            self.bytes += bytes;
             added.push(tuple.clone());
             data.push(tuple);
         }
@@ -147,7 +169,9 @@ impl RelationStore {
             return Vec::new();
         }
         data.retain(|t| !remove_set.contains(t));
-        *index = TupleIndex::build(data);
+        let rebuilt = TupleIndex::build(data);
+        self.bytes = self.bytes - index.bytes + rebuilt.bytes;
+        *index = rebuilt;
         remove_set.into_iter().cloned().collect()
     }
 
@@ -158,15 +182,24 @@ impl RelationStore {
         };
         let count = data.len();
         *data = Relation::new();
-        self.indexes
-            .insert(relation.to_string(), TupleIndex::default());
+        self.replace_index(relation, TupleIndex::default());
         count
     }
 
     /// Drop a relation entirely. Returns whether it existed.
     pub fn remove(&mut self, relation: &str) -> bool {
-        self.indexes.remove(relation);
+        if let Some(index) = self.indexes.remove(relation) {
+            self.bytes -= index.bytes;
+        }
         self.relations.remove(relation).is_some()
+    }
+
+    /// Install `index` as `relation`'s, keeping the byte total in step.
+    fn replace_index(&mut self, relation: &str, index: TupleIndex) {
+        self.bytes += index.bytes;
+        if let Some(old) = self.indexes.insert(relation.to_string(), index) {
+            self.bytes -= old.bytes;
+        }
     }
 
     /// Relation names.
@@ -244,6 +277,28 @@ mod tests {
         store.delete("e", &[t(1, 1)]);
         assert_eq!(reader["e"].to_vec(), vec![t(1, 1)]);
         assert_eq!(store.get("e").unwrap().to_vec(), vec![t(2, 2)]);
+    }
+
+    #[test]
+    fn test_relation_store_bytes_follow_every_change() {
+        let mut store = RelationStore::new();
+        let one = stored_bytes(&t(1, 1));
+        assert!(one > 0);
+        store.insert("e", vec![t(1, 1), t(2, 2), t(1, 1)]);
+        assert_eq!(store.bytes(), 2 * one);
+        store.set("f", vec![t(1, 1), t(2, 2), t(3, 3)]);
+        assert_eq!(store.bytes(), 5 * one);
+        store.set("f", vec![t(1, 1)]);
+        assert_eq!(store.bytes(), 3 * one);
+        store.delete("e", &[t(1, 1), t(9, 9)]);
+        assert_eq!(store.bytes(), 2 * one);
+        store.clear("f");
+        assert_eq!(store.bytes(), one);
+        assert!(store.remove("e"));
+        assert_eq!(store.bytes(), 0);
+
+        let text = Tuple::new(vec![Value::String("x".repeat(1000).into())]);
+        assert!(stored_bytes(&text) > 1000);
     }
 
     #[test]

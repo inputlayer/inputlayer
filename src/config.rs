@@ -264,6 +264,21 @@ pub struct PerformanceConfig {
     #[serde(default)]
     pub max_query_cost: u64,
 
+    /// Most heap bytes one request's computation may hold on a thread.
+    /// A query that grows past it is stopped and refused with
+    /// `resource_exhausted`; nothing it would have changed is applied.
+    /// Size the container for every compute permit running a query this
+    /// large at once, plus the knowledge graphs' budgets. 0 = no limit.
+    #[serde(default = "default_max_query_memory_bytes")]
+    pub max_query_memory_bytes: u64,
+
+    /// Memory budget of each knowledge graph's stored facts, as estimated
+    /// from their tuples. A write that would grow a graph past it is refused
+    /// with `resource_exhausted`; writes that do not grow it (deletes) are
+    /// always accepted, and recovery loads a graph over budget. 0 = no limit.
+    #[serde(default)]
+    pub max_graph_memory_bytes: u64,
+
     /// Timing profiling mode for query execution.
     /// "off" = no overhead, "summary" = stage totals (default), "detailed" = per-rule breakdown.
     #[serde(default)]
@@ -637,6 +652,9 @@ fn default_max_insert_tuples() -> usize {
 fn default_max_result_rows() -> usize {
     100_000
 }
+fn default_max_query_memory_bytes() -> u64 {
+    4 << 30 // 4 GiB
+}
 fn default_max_string_value_bytes() -> usize {
     65_536 // 64 KB
 }
@@ -926,6 +944,12 @@ impl Config {
                  Unbounded queries may exhaust server memory."
             );
         }
+        if self.storage.performance.max_query_memory_bytes == 0 {
+            eprintln!(
+                "WARNING: max_query_memory_bytes = 0 (unlimited). \
+                 One runaway query can take the whole server's memory."
+            );
+        }
         if self.http.cors_allow_all {
             eprintln!(
                 "WARNING: cors_allow_all = true. \
@@ -984,6 +1008,8 @@ impl Config {
                     max_result_rows: default_max_result_rows(),
                     slow_query_log_ms: 5000,
                     max_query_cost: 0,
+                    max_query_memory_bytes: default_max_query_memory_bytes(),
+                    max_graph_memory_bytes: 0,
                     timing_mode: crate::execution::TimingMode::default(),
                 },
                 max_knowledge_graphs: 1000,
@@ -1020,6 +1046,8 @@ impl Default for PerformanceConfig {
             max_result_rows: default_max_result_rows(),
             slow_query_log_ms: default_slow_query_log_ms(),
             max_query_cost: 0, // 0 = unlimited
+            max_query_memory_bytes: default_max_query_memory_bytes(),
+            max_graph_memory_bytes: 0, // 0 = unlimited
             timing_mode: crate::execution::TimingMode::default(),
         }
     }

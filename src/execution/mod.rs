@@ -2,8 +2,10 @@
 //!
 //! Provides production-grade query execution with:
 //! - Deadlines and cancellation via cooperative checks ([`RequestControl`])
+//! - A per-query memory limit, metered per thread ([`memory`])
 
 pub mod hnsw_resolve;
+pub mod memory;
 mod request_control;
 pub mod timing;
 

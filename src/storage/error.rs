@@ -142,6 +142,21 @@ pub enum StorageError {
     #[error("store read-only until restart recovery")]
     StoreReadOnly,
 
+    /// A write that would grow a knowledge graph past its memory budget.
+    #[error(
+        "Knowledge graph '{kg}' would hold about {projected} bytes of facts, over its \
+         memory budget of {budget} bytes (storage.performance.max_graph_memory_bytes); \
+         nothing was applied. Delete facts or raise the budget."
+    )]
+    MemoryBudgetExceeded {
+        /// The knowledge graph written to
+        kg: String,
+        /// Estimated bytes of its facts had the write been applied
+        projected: usize,
+        /// Its budget
+        budget: u64,
+    },
+
     /// Generic error
     #[error("{0}")]
     Other(String),

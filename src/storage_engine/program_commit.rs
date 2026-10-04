@@ -2,6 +2,7 @@
 //! delta of facts and catalogs, one WAL transaction, one snapshot publish.
 
 use super::catalog_change::{CatalogDelta, CatalogOutcome, StagedCatalog};
+use super::relation_store::stored_bytes;
 use super::write_program::{
     CommitError, FactChange, FactCount, ProgramCommit, RelationChange, StagedChanges,
     StatementEffect, StatementOutcome, WriteProgram,
@@ -72,6 +73,10 @@ impl StorageEngine {
             catalog,
             statements,
         } = db.resolve(kg, program)?;
+        let budget = self.config.storage.performance.max_graph_memory_bytes;
+        if budget > 0 {
+            db.check_memory_budget(kg, budget, &facts, &statements)?;
+        }
         if facts.is_empty() && !catalog.is_durable() {
             if !catalog.is_empty() {
                 // Session schemas only: nothing to persist or publish.
@@ -176,6 +181,43 @@ impl KnowledgeGraph {
             facts: delta.into_changed(),
             catalog: catalog.into_delta(),
             statements,
+        })
+    }
+
+    /// Refuse a fact delta that grows the KG's estimated fact bytes past
+    /// `budget`. A delta that does not grow them passes even when the KG is
+    /// already over, so deletes always work. The refusal is blamed on the
+    /// last statement that inserted facts.
+    fn check_memory_budget(
+        &self,
+        kg: &str,
+        budget: u64,
+        facts: &[(String, RelationDelta)],
+        statements: &[StatementOutcome],
+    ) -> Result<(), CommitError> {
+        let (mut added, mut removed) = (0usize, 0usize);
+        for (_, changes) in facts {
+            added += changes.added().map(stored_bytes).sum::<usize>();
+            removed += changes.removed.iter().map(stored_bytes).sum::<usize>();
+        }
+        let current = self.store.bytes();
+        let projected = (current + added).saturating_sub(removed);
+        if projected <= current || projected as u64 <= budget {
+            return Ok(());
+        }
+        let statement = statements
+            .iter()
+            .rev()
+            .find(|s| matches!(&s.effect, StatementEffect::Facts(count) if count.inserted > 0))
+            .map_or(0, |s| s.index);
+        warn!(kg = %kg, projected, budget, "graph_memory_budget_exceeded");
+        Err(CommitError::Rejected {
+            statement,
+            error: StorageError::MemoryBudgetExceeded {
+                kg: kg.to_string(),
+                projected,
+                budget,
+            },
         })
     }
 

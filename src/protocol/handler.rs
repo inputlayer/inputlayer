@@ -1074,7 +1074,10 @@ impl Handler {
             (Some(client), Some(server)) => Some(client.min(server)),
             (client, server) => client.or(server),
         };
-        RequestControl::with_timeout(ms.map(std::time::Duration::from_millis))
+        RequestControl::limited(
+            ms.map(|ms| Instant::now() + std::time::Duration::from_millis(ms)),
+            self.config.storage.performance.max_query_memory_bytes,
+        )
     }
 
     /// Get reference to the handler's configuration.
@@ -5508,6 +5511,7 @@ fn storage_error_code(error: &crate::storage::StorageError, default: ErrorCode) 
     match error {
         StorageError::OutcomeUnknown { .. } => ErrorCode::OutcomeUnknown,
         StorageError::StoreReadOnly => ErrorCode::StoreReadOnly,
+        StorageError::MemoryBudgetExceeded { .. } => ErrorCode::ResourceExhausted,
         StorageError::KnowledgeGraphNotFound(_) | StorageError::RelationNotFound(..) => {
             ErrorCode::NotFound
         }

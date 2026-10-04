@@ -7,6 +7,7 @@
 //! ```text
 //! Running ──deadline──▶ Stopped(Deadline)
 //!    │ ────cancel────▶ Stopped(Cancelled)
+//!    │ ────memory────▶ Stopped(MemoryExhausted)
 //!    │ ──begin_commit─▶ Committing   (durable work started: not interruptible)
 //!    └────finish──────▶ Finished     (result computed: too late to stop)
 //! ```
@@ -16,7 +17,10 @@
 //! always runs to completion and reports what it committed.
 //!
 //! Computation polls [`RequestControl::is_stopped`] at its existing
-//! cooperative checkpoints: one relaxed atomic load, no lock.
+//! cooperative checkpoints: one relaxed atomic load, no lock. At the same
+//! checkpoints the evaluator reports what its thread holds through
+//! [`RequestControl::charge_memory`], which stops a request over its memory
+//! limit.
 
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
@@ -29,6 +33,17 @@ const STOPPED_DEADLINE: u8 = 1;
 const STOPPED_CANCELLED: u8 = 2;
 const COMMITTING: u8 = 3;
 const FINISHED: u8 = 4;
+const STOPPED_MEMORY: u8 = 5;
+
+/// The stop a state records, if it is a stopped state.
+fn stop_of(state: u8) -> Option<Stop> {
+    match state {
+        STOPPED_DEADLINE => Some(Stop::Deadline),
+        STOPPED_CANCELLED => Some(Stop::Cancelled),
+        STOPPED_MEMORY => Some(Stop::MemoryExhausted),
+        _ => None,
+    }
+}
 
 /// Why a request was stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,6 +52,8 @@ pub enum Stop {
     Deadline,
     /// The client cancelled it.
     Cancelled,
+    /// Its computation went over the per-query memory limit.
+    MemoryExhausted,
 }
 
 impl Stop {
@@ -47,6 +64,11 @@ impl Stop {
                 "Request deadline exceeded before it began committing; nothing was applied"
             }
             Self::Cancelled => "Request cancelled before it began committing; nothing was applied",
+            Self::MemoryExhausted => {
+                "Request exceeded the per-query memory limit \
+                 (storage.performance.max_query_memory_bytes) before it began committing; \
+                 nothing was applied. Narrow the query or bind more of its arguments"
+            }
         }
     }
 }
@@ -66,6 +88,8 @@ pub enum Halt {
 #[derive(Debug)]
 pub struct RequestControl {
     deadline: Option<Instant>,
+    /// Most bytes the computation may hold on one thread; 0 = no limit.
+    memory_limit: u64,
     state: AtomicU8,
     /// Wakes [`Self::interrupted`] on an explicit cancel.
     cancelled: Notify,
@@ -74,8 +98,15 @@ pub struct RequestControl {
 impl RequestControl {
     /// A running request that must finish by `deadline`, if any.
     pub fn new(deadline: Option<Instant>) -> Arc<Self> {
+        Self::limited(deadline, 0)
+    }
+
+    /// A running request that must finish by `deadline`, if any, holding at
+    /// most `memory_limit` bytes while it computes (0: no limit).
+    pub fn limited(deadline: Option<Instant>, memory_limit: u64) -> Arc<Self> {
         Arc::new(Self {
             deadline,
+            memory_limit,
             state: AtomicU8::new(RUNNING),
             cancelled: Notify::new(),
         })
@@ -86,6 +117,11 @@ impl RequestControl {
         Self::new(timeout.map(|t| Instant::now() + t))
     }
 
+    /// Most bytes the computation may hold on one thread; 0 = no limit.
+    pub fn memory_limit(&self) -> u64 {
+        self.memory_limit
+    }
+
     /// When the request must have finished, if it has a deadline.
     pub fn deadline(&self) -> Option<Instant> {
         self.deadline
@@ -93,19 +129,35 @@ impl RequestControl {
 
     /// Why the request was stopped, if it was.
     pub fn stopped(&self) -> Option<Stop> {
-        match self.state.load(Ordering::Acquire) {
-            STOPPED_DEADLINE => Some(Stop::Deadline),
-            STOPPED_CANCELLED => Some(Stop::Cancelled),
-            _ => None,
-        }
+        stop_of(self.state.load(Ordering::Acquire))
     }
 
     /// Whether computation should stop now. The hot-path check.
     pub fn is_stopped(&self) -> bool {
         matches!(
             self.state.load(Ordering::Relaxed),
-            STOPPED_DEADLINE | STOPPED_CANCELLED
+            STOPPED_DEADLINE | STOPPED_CANCELLED | STOPPED_MEMORY
         )
+    }
+
+    /// Report that the computation now holds `held` bytes on the calling
+    /// thread, stopping the request if that is over its memory limit.
+    /// Returns whether the request is stopped, for whatever reason. A
+    /// request that began committing is not stopped: its computation is
+    /// done, and its commit always runs to completion.
+    pub fn charge_memory(&self, held: i64) -> bool {
+        if self.memory_limit > 0
+            && held > 0
+            && held as u64 > self.memory_limit
+            && self.stop(STOPPED_MEMORY) == Halt::Stopped
+        {
+            tracing::warn!(
+                held_bytes = held,
+                limit_bytes = self.memory_limit,
+                "query_memory_limit_exceeded"
+            );
+        }
+        self.is_stopped()
     }
 
     /// Whether the request began durable work, which is not interrupted.
@@ -142,9 +194,7 @@ impl RequestControl {
             .compare_exchange(RUNNING, stopped, Ordering::AcqRel, Ordering::Acquire)
         {
             Ok(_) => Halt::Stopped,
-            Err(STOPPED_DEADLINE) => Halt::AlreadyStopped(Stop::Deadline),
-            Err(STOPPED_CANCELLED) => Halt::AlreadyStopped(Stop::Cancelled),
-            Err(_) => Halt::TooLate,
+            Err(state) => stop_of(state).map_or(Halt::TooLate, Halt::AlreadyStopped),
         }
     }
 
@@ -160,10 +210,8 @@ impl RequestControl {
             .compare_exchange(RUNNING, COMMITTING, Ordering::AcqRel, Ordering::Acquire)
         {
             Ok(_) | Err(COMMITTING) => Ok(()),
-            Err(STOPPED_DEADLINE) => Err(Stop::Deadline),
-            Err(STOPPED_CANCELLED) => Err(Stop::Cancelled),
             // Finished requests do not commit again; treat as a stop.
-            Err(_) => Err(Stop::Cancelled),
+            Err(state) => Err(stop_of(state).unwrap_or(Stop::Cancelled)),
         }
     }
 
@@ -176,8 +224,7 @@ impl RequestControl {
             .compare_exchange(RUNNING, FINISHED, Ordering::AcqRel, Ordering::Acquire)
         {
             Ok(_) | Err(COMMITTING | FINISHED) => Ok(()),
-            Err(STOPPED_DEADLINE) => Err(Stop::Deadline),
-            Err(_) => Err(Stop::Cancelled),
+            Err(state) => Err(stop_of(state).unwrap_or(Stop::Cancelled)),
         }
     }
 
@@ -191,9 +238,7 @@ impl RequestControl {
             cancelled.as_mut().enable();
             match self.state.load(Ordering::Acquire) {
                 RUNNING => {}
-                STOPPED_DEADLINE => return Some(Stop::Deadline),
-                STOPPED_CANCELLED => return Some(Stop::Cancelled),
-                _ => return None,
+                state => return stop_of(state),
             }
             match self.deadline {
                 Some(deadline) => {
@@ -278,6 +323,39 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(stop, Some(Stop::Cancelled));
+    }
+
+    #[test]
+    fn going_over_the_memory_limit_stops_the_request() {
+        let control = RequestControl::limited(None, 1000);
+        assert_eq!(control.memory_limit(), 1000);
+        assert!(!control.charge_memory(1000));
+        assert!(!control.charge_memory(-5000));
+        assert!(control.charge_memory(1001));
+        assert_eq!(control.stopped(), Some(Stop::MemoryExhausted));
+        assert_eq!(control.finish(), Err(Stop::MemoryExhausted));
+        assert_eq!(control.begin_commit(), Err(Stop::MemoryExhausted));
+        assert_eq!(
+            control.cancel(),
+            Halt::AlreadyStopped(Stop::MemoryExhausted)
+        );
+    }
+
+    #[test]
+    fn no_memory_limit_or_a_commit_in_progress_is_never_stopped_for_memory() {
+        let unlimited = RequestControl::new(None);
+        assert!(!unlimited.charge_memory(i64::MAX));
+
+        let committing = RequestControl::limited(None, 10);
+        committing.begin_commit().unwrap();
+        assert!(!committing.charge_memory(1 << 30));
+        assert!(committing.is_committing());
+
+        // A stop that already happened is reported, whatever the charge.
+        let cancelled = RequestControl::limited(None, 10);
+        cancelled.cancel();
+        assert!(cancelled.charge_memory(0));
+        assert_eq!(cancelled.stopped(), Some(Stop::Cancelled));
     }
 
     #[tokio::test]

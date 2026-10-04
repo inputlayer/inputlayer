@@ -119,13 +119,16 @@ ErrorCode = Literal[
     "deadline_exceeded",
     "cancelled",
     "outcome_unknown",
+    "resource_exhausted",
 ]
 """Why the engine rejected a statement or request (``code`` on ``error`` and ``errors[]``).
 
 ``invalid_request`` and ``rate_limited`` reject a whole request before it runs.
 ``deadline_exceeded`` and ``cancelled`` stop it before it began committing, so
 nothing was applied; ``outcome_unknown`` means its commit failed in a way that
-leaves the changes possibly applied: read the state back before retrying."""
+leaves the changes possibly applied: read the state back before retrying.
+``resource_exhausted`` refuses a query over the engine's per-query memory limit,
+or a write past its knowledge graph's memory budget; nothing was applied."""
 
 
 @dataclass(frozen=True)

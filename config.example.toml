@@ -88,6 +88,16 @@ max_result_rows = 100000
 # Maximum query cost budget (0 = unlimited)
 max_query_cost = 0
 
+# Most heap bytes one query may hold while it computes; a query that grows
+# past it is refused with `resource_exhausted` (0 = unlimited). Size the
+# container for this many bytes per concurrent query plus the graph budgets.
+max_query_memory_bytes = 4294967296
+
+# Memory budget of each knowledge graph's stored facts (estimated from their
+# tuples); writes that would grow a graph past it are refused with
+# `resource_exhausted`, deletes are always accepted (0 = unlimited)
+max_graph_memory_bytes = 0
+
 [optimization]
 # Enable join spanning tree planning
 # Optimizes join order for better performance

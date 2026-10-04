@@ -810,6 +810,23 @@ impl Tuple {
         self.values.len()
     }
 
+    /// Estimated bytes this tuple occupies: its value slots plus the heap
+    /// data of its strings and vectors (counted in full even when shared).
+    pub fn estimated_bytes(&self) -> usize {
+        let heap: usize = self
+            .values
+            .iter()
+            .map(|value| match value {
+                // Arc header: strong and weak counts.
+                Value::String(s) => 16 + s.len(),
+                Value::Vector(v) => 16 + std::mem::size_of::<Vec<f32>>() + 4 * v.len(),
+                Value::VectorInt8(v) => 16 + std::mem::size_of::<Vec<i8>>() + v.len(),
+                _ => 0,
+            })
+            .sum();
+        std::mem::size_of::<Self>() + std::mem::size_of_val(self.values.as_slice()) + heap
+    }
+
     pub fn get(&self, index: usize) -> Option<&Value> {
         self.values.get(index)
     }
@@ -1119,6 +1136,17 @@ impl TupleSchema {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_tuple_estimated_bytes_counts_slots_and_heap_data() {
+        let ints = Tuple::new(vec![Value::Int64(1), Value::Int64(2)]);
+        let base = ints.estimated_bytes();
+        assert!(base >= 2 * std::mem::size_of::<Value>());
+        let text = Tuple::new(vec![Value::Int64(1), Value::string(&"x".repeat(500))]);
+        assert!(text.estimated_bytes() >= base + 500);
+        let vector = Tuple::new(vec![Value::Int64(1), Value::vector(vec![0.0; 256])]);
+        assert!(vector.estimated_bytes() >= base + 4 * 256);
+    }
 
     #[test]
     fn test_value_types() {

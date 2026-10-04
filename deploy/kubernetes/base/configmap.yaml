@@ -21,6 +21,12 @@ data:
     # 0 = one worker per CPU the process sees (the whole node when no CPU
     # limit is set). Set it to the CPUs requested in statefulset.yaml.
     num_threads = 0
+    # Memory limits, refused with `resource_exhausted` rather than grown
+    # into. Keep the sum inside the memory limit in statefulset.yaml: every
+    # graph's budget, plus max_query_memory_bytes for each query running at
+    # once (up to about three quarters of the CPUs), plus the server itself.
+    max_query_memory_bytes = 536870912 # 512 MiB
+    max_graph_memory_bytes = 1073741824 # 1 GiB
 
     [logging]
     format = "json"

@@ -97,6 +97,10 @@
 //! | `recursion` | Recursion detection & stratification |
 //! | `storage_engine` | Multi-knowledge-graph persistence |
 
+// Meters each thread's heap use for the per-query memory limit.
+#[global_allocator]
+static ALLOCATOR: execution::memory::MeteredAllocator = execution::memory::MeteredAllocator;
+
 // AST and IR modules (consolidated from crates/)
 pub mod ast;
 pub mod derived_relations; // Derived relation materialization

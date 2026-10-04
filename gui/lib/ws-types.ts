@@ -142,6 +142,7 @@ export type WsErrorCode =
   | "cancelled"
   | "outcome_unknown"
   | "store_read_only"
+  | "resource_exhausted"
 
 /** A failed statement of a multi-statement program (0-based `index`). */
 export interface WsStatementError {
