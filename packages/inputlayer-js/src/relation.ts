@@ -15,17 +15,39 @@
  * This returns a RelationDef with column accessors, insert helpers, etc.
  */
 
-import type { IQLType, Fact } from './types.js';
+import type { IQLType, Fact, FieldValue, Timestamp as TimestampValue } from './types.js';
 import { Timestamp } from './types.js';
 import { camelToSnake } from './naming.js';
-import { ColumnProxy } from './proxy.js';
+import { ColumnProxy, wrap } from './proxy.js';
 import { RelationRef } from './proxy.js';
+import { anyExpr, type AnyExpr, type Expr } from './ast.js';
+import { CompileError } from './errors.js';
 
 /** Column type shorthand map for the schema definition DSL. */
 export type ColumnTypes = Record<string, IQLType>;
 
+/** The TypeScript value of a column of IQL type `T`. */
+export type ValueOf<T extends IQLType> = T extends 'string'
+  ? string
+  : T extends 'int' | 'float'
+    ? number
+    : T extends 'bool'
+      ? boolean
+      : T extends 'timestamp'
+        ? number | Date | TimestampValue
+        : number[];
+
+/**
+ * The row type of a relation definition:
+ * `RowOf<typeof Attempt>` is `{ order: string; tool: string; attempt: string }`.
+ */
+export type RowOf<R> = R extends RelationDef<infer T> ? { [K in keyof T]: ValueOf<T[K]> } : never;
+
+/** What a column of `any()` can be bound to: a value, or a column of another atom. */
+export type Binding = FieldValue | ColumnProxy | Expr;
+
 /** A relation definition created by `relation()`. */
-export class RelationDef {
+export class RelationDef<T extends ColumnTypes = ColumnTypes> {
   /** The IQL relation name (snake_case). */
   readonly relationName: string;
   /** Original class-style name. */
@@ -33,9 +55,9 @@ export class RelationDef {
   /** Ordered column names. */
   readonly columns: string[];
   /** Column name -> IQL type. */
-  readonly columnTypes: Record<string, IQLType>;
+  readonly columnTypes: T;
 
-  constructor(className: string, columnTypes: ColumnTypes, name?: string) {
+  constructor(className: string, columnTypes: T, name?: string) {
     this.className = className;
     this.relationName = name ?? camelToSnake(className);
     this.columns = Object.keys(columnTypes);
@@ -51,6 +73,11 @@ export class RelationDef {
       );
     }
     return new ColumnProxy(this.relationName, name, undefined, this.columns);
+  }
+
+  /** A row of this relation exists with the given column values: see `any()`. */
+  any(bindings: Partial<Record<keyof T & string, Binding>> = {}): AnyExpr {
+    return any(this, bindings);
   }
 
   /**
@@ -91,12 +118,39 @@ export class RelationDef {
  *   active: "bool",
  * });
  */
-export function relation(
+export function relation<T extends ColumnTypes>(
   className: string,
-  columnTypes: ColumnTypes,
+  columnTypes: T,
   opts?: { name?: string },
-): RelationDef {
+): RelationDef<T> {
   return new RelationDef(className, columnTypes, opts?.name);
+}
+
+/**
+ * A row of `rel` exists whose columns equal `bindings`; unbound columns match
+ * anything. A binding is a value or a column of another atom in the same body.
+ * `NOT(any(...))` is true when no such row exists.
+ *
+ * @example
+ * from(ToolPolicy).where((t) => AND(t.col("mode").eq("auto"), NOT(any(KillSwitch, { tool: t.col("tool") }))))
+ * kg.claim(Attempt, row, { when: [any(CheckNeeded, { order: "ORD-1" })], unless: any(Attempt, { order: "ORD-1" }) })
+ */
+export function any<T extends ColumnTypes>(
+  rel: RelationDef<T>,
+  bindings: Partial<Record<keyof T & string, Binding>> = {},
+): AnyExpr {
+  const bound: Record<string, Expr> = {};
+  for (const [col, value] of Object.entries(bindings)) {
+    if (!(col in rel.columnTypes)) {
+      throw new CompileError(
+        `any(): column '${col}' does not exist on relation '${rel.relationName}'`,
+        `Available: ${rel.columns.join(', ')}`,
+      );
+    }
+    if (value === undefined) continue;
+    bound[col] = wrap(value);
+  }
+  return anyExpr(rel.relationName, rel.columns, rel.columnTypes, bound);
 }
 
 /** Compile a value to its IQL literal representation. */

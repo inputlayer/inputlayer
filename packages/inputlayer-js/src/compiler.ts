@@ -13,6 +13,8 @@ import {
   type OrderedColumn,
   type InExpr,
   type NegatedIn,
+  type AnyExpr,
+  type Literal,
   isColumn,
   isLiteral,
   isArithmetic,
@@ -26,8 +28,14 @@ import {
   isInExpr,
   isNegatedIn,
   isMatchExpr,
+  isAnyExpr,
   column as astColumn,
+  comparison,
+  literal,
+  not as astNot,
+  anyExpr,
 } from './ast.js';
+import { CompileError } from './errors.js';
 import { columnToVariable, snakeToCamel } from './naming.js';
 import { RelationDef, compileValue, resolveRelationName, getColumns, getColumnTypes } from './relation.js';
 import { RelationRef } from './proxy.js';
@@ -83,10 +91,16 @@ class VarEnv {
   unify(colA: Column, colB: Column): string {
     const keyA = `${colA.refAlias ?? colA.relation}.${colA.name}`;
     const keyB = `${colB.refAlias ?? colB.relation}.${colB.name}`;
+    // Keep a variable either side already has, so text compiled before the
+    // unification still names the same variable.
+    const before = this.map.get(this.find(keyA)) ?? this.map.get(this.find(keyB));
     this.union(keyA, keyB);
     const root = this.find(keyA);
-    const existing = this.map.get(root);
-    if (existing !== undefined) return existing;
+    const existing = this.map.get(root) ?? before;
+    if (existing !== undefined) {
+      this.map.set(root, existing);
+      return existing;
+    }
 
     let varName = columnToVariable(colA.name);
     const usedVars = new Set(this.map.values());
@@ -111,6 +125,17 @@ class VarEnv {
     const key = `${col.refAlias ?? col.relation}.${col.name}`;
     const root = this.find(key);
     return this.map.get(root);
+  }
+
+  /** Columns some expression refers to; an any() atom gives them a variable instead of `_`. */
+  private referenced = new Set<string>();
+
+  reference(keys: Iterable<string>): void {
+    for (const k of keys) this.referenced.add(k);
+  }
+
+  isReferenced(col: Column): boolean {
+    return this.referenced.has(`${col.refAlias ?? col.relation}.${col.name}`);
   }
 
   /** Direct-set a variable for conditional delete setup. */
@@ -212,6 +237,10 @@ export function compileBoolExpr(expr: BoolExpr, env: VarEnv): string[] {
   if (isMatchExpr(expr)) {
     return [compileMatch(expr, env)];
   }
+  if (isAnyExpr(expr)) {
+    const { atom, extra } = compileAny(expr, env);
+    return [atom, ...extra];
+  }
   throw new TypeError(`Cannot compile boolean expression: ${JSON.stringify(expr)}`);
 }
 
@@ -271,6 +300,297 @@ export function compileOrBranches(expr: BoolExpr, env: VarEnv): string[][] {
     ];
   }
   return [compileBoolExpr(expr, env)];
+}
+
+// ── Bodies: any(), NOT(any()) and canonical order (R-NEG) ─────────
+
+/**
+ * How a body binds a negated constant that shares no variable with a
+ * positive atom (R-NEG): through a program-local session fact on the read
+ * path, through a persistent row staged around a write program (an update
+ * body cannot see session facts), and not at all in a rule.
+ */
+type BodyMode = 'query' | 'write' | 'rule';
+
+/** A constant row the body reads through `relation(k)`. */
+export interface ConstRow {
+  relation: string;
+  /** The IQL literal. */
+  literal: string;
+}
+
+/** Relation suffix of an IQL column type, for the typed constant relations. */
+const CONST_SUFFIX: Record<string, string> = { string: 's', int: 'i', timestamp: 'i', float: 'f', bool: 'b' };
+
+/** Read path: a session fact in the same program as the query. */
+const QUERY_CONST = 'il_const_';
+/** Write path: a persistent row inserted before the guard and deleted last. */
+const WRITE_CONST = 'il_txn_const_';
+
+class BodyContext {
+  private n = 0;
+  readonly consts: ConstRow[] = [];
+
+  constructor(readonly mode: BodyMode) {}
+
+  /** A key for an atom's own columns that no relation or other atom uses. */
+  alias(): string {
+    return `il_any_${++this.n}`;
+  }
+
+  addConst(row: ConstRow): void {
+    if (!this.consts.some((c) => c.relation === row.relation && c.literal === row.literal)) {
+      this.consts.push(row);
+    }
+  }
+}
+
+/** Key of the atom a column belongs to: its alias, else its relation. */
+function atomKey(col: Column): string {
+  return `${col.refAlias ?? col.relation}`;
+}
+
+/** The conjuncts of an AND tree, in order. */
+export function flattenAnd(expr: BoolExpr): BoolExpr[] {
+  return isAnd(expr) ? [...flattenAnd(expr.left), ...flattenAnd(expr.right)] : [expr];
+}
+
+/** The branches of a top-level OR tree, in order. */
+function splitOr(expr: BoolExpr): BoolExpr[] {
+  return isOr(expr) ? [...splitOr(expr.left), ...splitOr(expr.right)] : [expr];
+}
+
+function isNegatedAny(e: BoolExpr): e is BoolExpr & { operand: AnyExpr } {
+  return isNot(e) && isAnyExpr(e.operand);
+}
+
+/** `relation.column` keys of every column an expression tree refers to. */
+function collectColumnKeys(nodes: ReadonlyArray<Expr | BoolExpr>, out = new Set<string>()): Set<string> {
+  const visit = (n: Expr | BoolExpr | undefined): void => {
+    if (n === undefined) return;
+    if (isColumn(n as Expr)) {
+      const c = n as Column;
+      out.add(`${atomKey(c)}.${c.name}`);
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const o = n as any;
+    if (isAnyExpr(n as BoolExpr)) {
+      for (const b of Object.values((n as AnyExpr).bindings)) visit(b);
+      return;
+    }
+    for (const field of ['left', 'right', 'operand', 'column', 'targetColumn', 'orderColumn']) visit(o[field]);
+    for (const field of ['args', 'passthrough']) for (const a of o[field] ?? []) visit(a);
+    if (o.bindings) for (const b of Object.values(o.bindings)) visit(b as Expr);
+  };
+  for (const n of nodes) visit(n);
+  return out;
+}
+
+/**
+ * Prepare a body's conjuncts for compilation (R-NEG):
+ *
+ * - each any() atom gets a key for its own columns; a positive atom of a
+ *   relation the body does not otherwise use keeps the relation's name, so
+ *   `R.col("x")` refers to its columns;
+ * - a negated atom bound only to constants is made to share a variable:
+ *   with a positive atom's column already equal to the constant (an
+ *   equality in the body, or the same constant in a positive any() atom,
+ *   which then binds a variable to it); otherwise through a constant row,
+ *   per `ctx.mode`. Each rewrite keeps the body's meaning.
+ * - a negated atom bound to a column no positive atom has is refused.
+ *
+ * `contextKeys` are the keys of the body's relation atoms.
+ */
+function normalizeBody(conjuncts: BoolExpr[], contextKeys: ReadonlySet<string>, ctx: BodyContext): BoolExpr[] {
+  const positiveKeys = new Set(contextKeys);
+  const out = conjuncts.map((c) => {
+    if (isAnyExpr(c)) {
+      const alias = positiveKeys.has(c.relation) ? ctx.alias() : undefined;
+      positiveKeys.add(alias ?? c.relation);
+      return anyExpr(c.relation, c.columns, c.columnTypes, c.bindings, alias);
+    }
+    if (isNegatedAny(c)) {
+      const a = c.operand;
+      return astNot(anyExpr(a.relation, a.columns, a.columnTypes, a.bindings, ctx.alias()));
+    }
+    return c;
+  });
+
+  for (let i = 0; i < out.length; i++) {
+    const c = out[i];
+    if (!isNegatedAny(c)) continue;
+    const neg = c.operand;
+    const entries = Object.entries(neg.bindings);
+    for (const [col, b] of entries) {
+      if (isColumn(b)) {
+        if (!positiveKeys.has(atomKey(b))) {
+          throw new CompileError(
+            `NOT(any(${neg.relation})): column '${col}' is bound to ${b.relation}.${b.name}, which no positive atom of this body has`,
+            'Bind it to a column of a relation the body joins, or to a value',
+          );
+        }
+      } else if (!isLiteral(b)) {
+        throw new CompileError(
+          `NOT(any(${neg.relation})): column '${col}' is bound to an expression`,
+          'Bind a negated column to a value or to a column of a positive atom',
+        );
+      }
+    }
+    if (entries.some(([, b]) => isColumn(b))) continue;
+    const first = entries[0];
+    if (first === undefined) {
+      throw new CompileError(
+        `NOT(any(${neg.relation})) binds no column, so it shares no variable with a positive atom`,
+        'Bind at least one column to a value or to a column of a positive atom',
+      );
+    }
+    const [col, lit] = first as [string, Literal];
+    const shared = sharedColumn(compileValue(lit.value), lit.value, neg.columnTypes[col], out, positiveKeys, ctx, neg.relation);
+    out[i] = astNot(anyExpr(neg.relation, neg.columns, neg.columnTypes, { ...neg.bindings, [col]: shared }, neg.alias));
+  }
+
+  if (ctx.mode === 'write') {
+    // A guard has no relation atoms of its own: a condition may only use
+    // columns of its positive any() atoms.
+    for (const c of out) {
+      if (isAnyExpr(c) || isNegatedAny(c)) continue;
+      if (isOr(c)) {
+        throw new CompileError('A guard cannot hold OR', 'Write one guarded program per alternative');
+      }
+      for (const key of collectColumnKeys([c])) {
+        if (!positiveKeys.has(key.slice(0, key.lastIndexOf('.')))) {
+          throw new CompileError(
+            `Guard condition uses column ${key}, which no positive any() of the guard binds`,
+            'Add any(Relation, {...}) for that relation to the guard',
+          );
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * A column of a positive atom equal to the constant `text`, adding to `out`
+ * what makes it so.
+ */
+function sharedColumn(
+  text: string,
+  value: unknown,
+  type: string,
+  out: BoolExpr[],
+  positiveKeys: Set<string>,
+  ctx: BodyContext,
+  negated: string,
+): Column {
+  // An equality already pins a positive column to the constant.
+  for (const c of out) {
+    if (!isComparison(c) || c.op !== '=') continue;
+    for (const [a, b] of [[c.left, c.right], [c.right, c.left]]) {
+      if (isColumn(a) && isLiteral(b) && compileValue(b.value) === text && positiveKeys.has(atomKey(a))) {
+        return a;
+      }
+    }
+  }
+  // A positive any() atom carries the constant: bind a variable to it there.
+  for (let j = 0; j < out.length; j++) {
+    const p = out[j];
+    if (!isAnyExpr(p)) continue;
+    for (const [col, b] of Object.entries(p.bindings)) {
+      if (!isLiteral(b) || compileValue(b.value) !== text) continue;
+      const { [col]: _, ...rest } = p.bindings;
+      out[j] = anyExpr(p.relation, p.columns, p.columnTypes, rest, p.alias);
+      const own = astColumn(p.relation, col, p.alias);
+      out.push(comparison('=', own, b));
+      return own;
+    }
+  }
+  if (ctx.mode === 'rule') {
+    throw new CompileError(
+      `NOT(any(${negated})) binds only constants, so it shares no variable with a positive atom`,
+      `Bind the negated column to a column of a joined relation, e.g. NOT(any(${negated}, { col: r.col("col") })) with r.col("col").eq(value)`,
+    );
+  }
+  const suffix = CONST_SUFFIX[type];
+  if (suffix === undefined) {
+    throw new CompileError(
+      `NOT(any(${negated})): a ${type} constant cannot be bound through a constant row`,
+      'Bind the negated column to a column of a positive atom',
+    );
+  }
+  const relation = `${ctx.mode === 'query' ? QUERY_CONST : WRITE_CONST}${suffix}`;
+  const alias = ctx.alias();
+  positiveKeys.add(alias);
+  ctx.addConst({ relation, literal: text });
+  const own = astColumn(relation, 'k', alias);
+  out.push(anyExpr(relation, ['k'], { k: type }, {}, alias));
+  out.push(comparison('=', own, literal(value)));
+  return own;
+}
+
+/** One any() atom: bound columns take their value, referenced ones a variable, the rest `_`. */
+function compileAny(expr: AnyExpr, env: VarEnv): { atom: string; extra: string[] } {
+  const extra: string[] = [];
+  const args = expr.columns.map((col) => {
+    const own = astColumn(expr.relation, col, expr.alias);
+    const b = expr.bindings[col];
+    if (b === undefined) return env.isReferenced(own) ? env.getVar(own) : '_';
+    if (isColumn(b)) return env.unify(b, own);
+    if (isLiteral(b) && !env.isReferenced(own)) return compileValue(b.value);
+    const v = env.getVar(own);
+    extra.push(`${v} = ${compileExpr(b, env)}`);
+    return v;
+  });
+  return { atom: `${expr.relation}(${args.join(', ')})`, extra };
+}
+
+/**
+ * A body's compiled parts, in the canonical order: positive atoms, then
+ * negated atoms, then comparisons and equalities.
+ */
+function compileBody(conjuncts: BoolExpr[], env: VarEnv): string[] {
+  const positive: string[] = [];
+  const negated: string[] = [];
+  const conditions: string[] = [];
+  for (const c of conjuncts) {
+    if (isAnyExpr(c)) {
+      const { atom, extra } = compileAny(c, env);
+      positive.push(atom);
+      conditions.push(...extra);
+    } else if (isNegatedAny(c)) {
+      negated.push(`!${compileAny(c.operand, env).atom}`);
+    } else if (isInExpr(c)) {
+      positive.push(compileIn(c, false, env));
+    } else if (isNegatedIn(c)) {
+      negated.push(compileIn(c, true, env));
+    } else if (isMatchExpr(c)) {
+      (c.negated ? negated : positive).push(compileMatch(c, env));
+    } else {
+      conditions.push(...compileBoolExpr(c, env).filter((p) => p !== ''));
+    }
+  }
+  return [...positive, ...negated, ...conditions];
+}
+
+/** A compiled write guard: its body and the constant rows staged around it. */
+export interface CompiledGuard {
+  /** Body text; empty when there is no condition. */
+  body: string;
+  /** Rows to insert before the guard and delete after it (`il_txn_const_<type>`). */
+  constRows: ConstRow[];
+}
+
+/**
+ * Compile guard conditions (`when`, `unless`) to an update body. Conditions
+ * are any()/NOT(any()) atoms and comparisons over the columns of those atoms.
+ */
+export function compileGuard(conditions: BoolExpr[]): CompiledGuard {
+  const env = new VarEnv();
+  const ctx = new BodyContext('write');
+  const conjuncts = normalizeBody(conditions.flatMap(flattenAnd), new Set(), ctx);
+  env.reference(collectColumnKeys(conjuncts));
+  return { body: compileBody(conjuncts, env).join(', '), constRows: ctx.consts };
 }
 
 // ── Schema compilation ──────────────────────────────────────────────
@@ -343,8 +663,9 @@ export function compileConditionalDelete(
   }
 
   const bodyRel = `${name}(${vars.join(', ')})`;
-  const condParts = compileBoolExpr(condition, env).filter((p) => p !== '');
-  const allBody = [bodyRel, ...condParts];
+  const conjuncts = normalizeBody(flattenAnd(condition), new Set([name]), new BodyContext('rule'));
+  env.reference(collectColumnKeys(conjuncts));
+  const allBody = [bodyRel, ...compileBody(conjuncts, env)];
   return `${head} <- ${allBody.join(', ')}`;
 }
 
@@ -459,6 +780,11 @@ export interface QueryPlan {
     limit?: number;
     offset?: number;
   };
+  /**
+   * Session facts the programs state before the query, binding a negated
+   * constant (R-NEG). `debug` and `why` statements cannot carry them.
+   */
+  constFacts?: string[];
 }
 
 /**
@@ -498,24 +824,32 @@ export function compileQueryPlan(opts: QueryOptions): QueryPlan {
 
   // Join conditions first, so unified columns share a variable. Their
   // other comparisons (e1.id != e2.id) filter like a where condition.
-  let onParts: string[] = [];
   if (opts.on) {
     if (hasOr(opts.on)) {
       throw new Error('OR is not supported in a join condition; put it in where');
     }
     processJoinCondition(opts.on, env);
-    onParts = compileBoolExpr(opts.on, env).filter((p) => p !== '');
   }
+  const onConjuncts = opts.on ? flattenAnd(opts.on) : [];
 
-  let whereParts: string[] = [];
-  let orBranches: string[][] | undefined;
-  if (opts.where) {
-    if (hasOr(opts.where)) {
-      orBranches = compileOrBranches(opts.where, env).map((b) => b.filter((p) => p !== ''));
-    } else {
-      whereParts = compileBoolExpr(opts.where, env).filter((p) => p !== '');
-    }
-  }
+  // Each body (one, or one per OR branch) is normalized for any() atoms
+  // and compiled in the canonical order.
+  const ctx = new BodyContext('query');
+  const contextKeys = new Set(relations.map((r) => r.alias ?? r.name));
+  const branches = (opts.where && hasOr(opts.where) ? splitOr(opts.where) : [opts.where]).map((b) =>
+    normalizeBody([...onConjuncts, ...(b ? flattenAnd(b) : [])], contextKeys, ctx),
+  );
+  env.reference(
+    collectColumnKeys([
+      ...branches.flat(),
+      ...opts.select.filter((x): x is Expr => !(x instanceof RelationDef)),
+      ...Object.values(opts.computed ?? {}),
+      ...(opts.orderBy ? [opts.orderBy] : []),
+    ]),
+  );
+  const compiled = branches.map((b) => compileBody(b, env));
+  const whereParts = compiled.length === 1 ? compiled[0] : [];
+  const orBranches = compiled.length > 1 ? compiled : undefined;
 
   const computed = opts.computed ?? {};
   const isAgg =
@@ -545,15 +879,20 @@ export function compileQueryPlan(opts: QueryOptions): QueryPlan {
     atomVars,
     atoms,
     rowVars,
-    whereParts: [...onParts, ...whereParts],
-    orBranches: orBranches?.map((branch) => [...onParts, ...branch]),
+    whereParts,
+    orBranches,
     order,
     limit: opts.limit,
     offset: opts.offset,
   };
-  return isAgg
+  const plan = isAgg
     ? compileAggPlan(shape, opts.select, computed)
     : compilePlainPlan(shape, opts.select, computed);
+  if (ctx.consts.length === 0) return plan;
+  // Negated constants bind through session facts that live only for the
+  // program that states them.
+  const facts = ctx.consts.map((c) => `${c.relation}(${c.literal})`);
+  return { ...plan, programs: plan.programs.map((p) => [...facts, p].join('\n')), constFacts: facts };
 }
 
 interface QueryShape {
@@ -819,10 +1158,12 @@ export function compileRule(
   persistent = true,
 ): string {
   const env = new VarEnv();
-
-  if (clause.condition) {
-    processJoinCondition(clause.condition, env);
-  }
+  const contextKeys = new Set(clause.relations.map((r) => r.alias ?? r.name));
+  const conjuncts = clause.condition
+    ? normalizeBody(flattenAnd(clause.condition), contextKeys, new BodyContext('rule'))
+    : [];
+  env.reference(collectColumnKeys([...conjuncts, ...Object.values(clause.selectMap)]));
+  for (const c of conjuncts) processJoinCondition(c, env);
 
   // Build head. A column-less count() counts the first body column.
   const first = clause.relations[0];
@@ -837,10 +1178,7 @@ export function compileRule(
 
   // Compile filter conditions before the atoms, so a column a condition
   // uses gets its variable in the atom rather than `_`.
-  let condParts: string[] = [];
-  if (clause.condition) {
-    condParts = compileBoolExpr(clause.condition, env).filter((p) => p !== '');
-  }
+  const condParts = compileBody(conjuncts, env);
 
   // Build body atoms
   const bodyAtoms: string[] = [];

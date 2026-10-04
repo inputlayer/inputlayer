@@ -255,3 +255,52 @@ export class InternalError extends InputLayerError {
     this.name = 'InternalError';
   }
 }
+
+/**
+ * The SDK refused to compile a call; nothing was sent. `hint` says how to
+ * write it so it compiles.
+ */
+export class CompileError extends InputLayerError {
+  readonly hint?: string;
+
+  constructor(message: string, hint?: string) {
+    super(hint ? `${message}. ${hint}` : message);
+    this.name = 'CompileError';
+    this.hint = hint;
+  }
+}
+
+/**
+ * A guarded program's guard did not hold at commit, so nothing was applied.
+ * Re-read the state before retrying: the intent is stale.
+ */
+export class PreconditionFailed extends QueryError {
+  /** The program that was sent. */
+  readonly iql: string;
+  readonly result: ResultResponse;
+
+  constructor(iql: string, result: ResultResponse) {
+    super('Precondition failed: the program guard did not hold, nothing was applied', {
+      code: 'validation',
+    });
+    this.name = 'PreconditionFailed';
+    this.iql = iql;
+    this.result = result;
+  }
+}
+
+/**
+ * The engine could not evaluate a conditional write against a stable state
+ * (concurrent commits kept changing what its guard reads). Nothing was
+ * applied; retry with backoff.
+ */
+export class ConflictError extends QueryError {
+  /** The program that was sent. */
+  readonly iql: string;
+
+  constructor(message: string, iql: string) {
+    super(message, { code: 'conflict' });
+    this.name = 'ConflictError';
+    this.iql = iql;
+  }
+}

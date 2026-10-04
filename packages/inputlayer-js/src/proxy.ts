@@ -168,14 +168,14 @@ export class ColumnProxy {
 
 // ── BoolExpr combinators ────────────────────────────────────────────
 
-/** Combine two boolean expressions with AND. */
-export function AND(left: BoolExpr, right: BoolExpr): And {
-  return astAnd(left, right);
+/** Combine boolean expressions with AND. */
+export function AND(first: BoolExpr, second: BoolExpr, ...rest: BoolExpr[]): And {
+  return rest.reduce<And>((acc, e) => astAnd(acc, e), astAnd(first, second));
 }
 
-/** Combine two boolean expressions with OR. */
-export function OR(left: BoolExpr, right: BoolExpr): Or {
-  return astOr(left, right);
+/** Combine boolean expressions with OR. */
+export function OR(first: BoolExpr, second: BoolExpr, ...rest: BoolExpr[]): Or {
+  return rest.reduce<Or>((acc, e) => astOr(acc, e), astOr(first, second));
 }
 
 /** Negate a boolean expression. */
