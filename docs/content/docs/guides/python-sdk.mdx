@@ -582,9 +582,34 @@ session_rules = await kg.session.list_rules()
 await kg.session.clear()
 ```
 
+## Subscriptions
+
+`kg.subscribe()` takes the arguments of `query()` (or raw IQL as `iql="?..."`) and returns an async iterator of `Change` events that keeps the result exact on the client. Every event has the same fields (`kind`, `inserted`, `retracted`, `revision`, `seq`, `verified`), so a loop that applies `retracted` and `inserted` is always correct:
+
+```python
+async for change in kg.subscribe(Late):
+    for row in change.retracted:
+        cancel(row)
+    for row in change.inserted:
+        start(row)
+    if not change.verified:
+        pause()
+```
+
+- `snapshot`: the first event, the whole result with every row in `inserted`.
+- `delta`: the set difference between consecutive results. An unchanged result delivers nothing, and commits that coalesce arrive as one delta, so a row that appears and disappears between two evaluations is never seen.
+- `unverified`: the result may no longer be current (`reason` is `connection_lost`, `seq_gap`, `broken_stream`, `subscription_reset`, `subscription_error` or `slow_consumer`). Both lists are empty; act on nothing new until the resync arrives. The SDK subscribes again with backoff.
+- `resync`: the exact difference between the rows you hold and the fresh result.
+
+Rows are instances of the relation when one whole relation is selected, otherwise immutable `Row` records (`row.order` or `row["order"]`). A projected subscription reports a row only when the first engine tuple behind it appears or the last one goes away. `queue` (default 1024) bounds the events held for a slow reader: a reader that falls further behind gets `unverified` (`slow_consumer`) and then a `resync`, and the connection never blocks. Leaving the loop or calling `close()` ends the subscription, and `sub.stats` counts dropped stale pushes and resubscribes.
+
+A standing query tracks the whole result of persistent rules, so `subscribe()` raises `SubscriptionRejected` with a `reason`: `limit_offset`, `or_branches` or `session_view` (a session rule, an aggregate or a negated constant) before anything is sent, or the engine's `result_cap`, `access_denied`, `id_taken`, `subscription_limit` or `rejected`. To subscribe to such a query, declare a persistent rule and subscribe to that rule instead.
+
+`kg.watch()` yields the whole current result (`Live`: `rows`, `revision`, `verified`) each time it changes. `kg.on(Late, callback)` calls `callback` with every `Change` and returns a handle; `await handle.close()` stops it. On `InputLayerSync`, `kg.subscribe()` and `kg.watch()` are blocking iterators, and the `on()` callback runs on the client's background thread.
+
 ## Notifications
 
-Subscribe to live events as data changes in the knowledge graph. This is useful for event-driven pipelines, dashboards, or audit logs. To be told when a rule-derived answer changes, use a [standing query](/docs/guides/websocket-api#standing-queries) over the WebSocket API; `subscribe()` arrives in the SDK with the upcoming release.
+Subscribe to live events as data changes in the knowledge graph. This is useful for event-driven pipelines, dashboards, or audit logs. To be told when a rule-derived answer changes, use [subscriptions](#subscriptions).
 
 ```python
 # Register a callback for a specific relation

@@ -465,8 +465,10 @@ js-test-live:
 # python-sdk-live runs every query example in the Python SDK guide
 # (docs/content/docs/guides/python-sdk.mdx) against a live server, with the
 # pins of the SDK's compile rules (the shared meta-command fixture in
-# packages/conformance and a literal round-trip fuzz included), so a form the
-# engine rejects fails here rather than in a user's hands.
+# packages/conformance and a literal round-trip fuzz included) and the
+# subscription tests (snapshot plus deltas over random histories, gaps,
+# resets, slow consumers, reconnect, ACL revoke), so a form the engine
+# rejects fails here rather than in a user's hands.
 PY_LIVE_PORT ?= 8092
 python-sdk-live:
 	@cargo build --release --bin inputlayer-server
@@ -484,7 +486,8 @@ python-sdk-live:
 		INPUTLAYER_TEST_SERVER=ws://127.0.0.1:$(PY_LIVE_PORT)/ws \
 		INPUTLAYER_TEST_USER=admin \
 		INPUTLAYER_TEST_PASSWORD=admin \
-		uv run --extra dev pytest tests/docs_queries_live.py tests/compile_rules_live.py -v; \
+		uv run --extra dev pytest tests/docs_queries_live.py tests/compile_rules_live.py \
+			tests/subscriptions_live.py -v; \
 	TEST_EXIT=$$?; \
 	cd - > /dev/null; \
 	kill $$SERVER_PID 2>/dev/null || true; \
