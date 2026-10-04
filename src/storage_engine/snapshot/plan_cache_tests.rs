@@ -141,8 +141,7 @@ fn the_cache_is_bounded() {
             )
             .unwrap();
     }
-    assert!(snapshot.persistent_rules().cached_plans() <= MAX_CACHED_PLANS);
-    assert!(snapshot.persistent_rules().cached_plans() >= 1);
+    assert_eq!(snapshot.persistent_rules().cached_plans(), MAX_CACHED_PLANS);
 }
 
 #[test]
