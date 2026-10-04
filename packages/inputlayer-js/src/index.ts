@@ -75,7 +75,23 @@ export {
   CompileError,
   PreconditionFailed,
   ConflictError,
+  SubscriptionRejectedError,
 } from './errors.js';
+export type { SubscriptionRejectedReason } from './errors.js';
+
+// Subscriptions
+export { Subscription } from './subscription.js';
+export type {
+  Change,
+  ChangeKind,
+  Live,
+  Row,
+  SubscribeOptions,
+  SubscriptionHandle,
+  SubscriptionStats,
+  SubscriptionTarget,
+  UnverifiedReason,
+} from './subscription.js';
 
 // Result
 export { ResultSet } from './result.js';
