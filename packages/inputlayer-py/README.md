@@ -1,8 +1,10 @@
 # inputlayer-client-dev
 
-Python Object-Logic Mapper (OLM) for [InputLayer](https://github.com/inputlayer/inputlayer) - the live knowledge graph for AI agents.
+Python SDK for [InputLayer](https://github.com/inputlayer/inputlayer), the live rules engine for AI agents.
 
-Write Python. No query syntax required. The OLM compiles typed Python classes into InputLayer queries over WebSocket.
+Take the rules out of your prompts: declare facts and rules as typed Python classes, and InputLayer keeps every conclusion current as facts change. Write Python, no query syntax required: the SDK compiles your classes into IQL, InputLayer's rule language, and sends it over WebSocket. A knowledge graph (`il.knowledge_graph("support")`) is the facts and rule-derived conclusions of one domain.
+
+**Today and next.** This package declares relations and rules (`Relation`, `Derived`, `From`), writes and deletes facts, and queries the derived views. Phase 1 of the new SDK adds `kg.subscribe()` (the engine pushes each change to the agent) and `kg.claim()` (an agent's action is recorded only while the rules allow it): in progress, not merged yet. Until then, standing queries run over the [WebSocket API](https://inputlayer.ai/docs/guides/websocket-api/). The [main README](../../README.md) shows both forms side by side.
 
 ## Installation
 

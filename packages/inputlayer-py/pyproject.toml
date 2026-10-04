@@ -5,7 +5,8 @@ build-backend = "hatchling.build"
 [project]
 name = "inputlayer-client-dev"
 version = "0.1.0"
-description = "Python Object-Logic Mapper for InputLayer knowledge graph engine"
+description = "Python SDK for InputLayer, the live rules engine for AI agents"
+keywords = ["inputlayer", "rules-engine", "ai-agents", "knowledge-graph", "iql", "langgraph", "langchain"]
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"

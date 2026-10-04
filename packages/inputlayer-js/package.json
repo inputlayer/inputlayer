@@ -1,7 +1,7 @@
 {
   "name": "inputlayer-js-dev",
   "version": "0.1.1",
-  "description": "TypeScript Object-Logic Mapper for InputLayer knowledge graph engine",
+  "description": "TypeScript SDK for InputLayer, the live rules engine for AI agents",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
@@ -50,9 +50,10 @@
   },
   "keywords": [
     "inputlayer",
+    "rules-engine",
+    "ai-agents",
     "knowledge-graph",
     "iql",
-    "reasoning",
     "typescript",
     "vector-search"
   ],
