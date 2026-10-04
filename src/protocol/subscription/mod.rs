@@ -27,6 +27,9 @@
 //! - [`reevaluate`] - today's strategy: re-run the query against a snapshot and
 //!   diff with the previous result. A differential-dataflow strategy can
 //!   replace it behind the same trait and protocol.
+//! - [`parameterized`] - views whose queries differ only in bound constants
+//!   share one evaluation of the query with the constants lifted to
+//!   parameters, each taking exactly its own rows.
 //! - [`result_set`] - a result under set semantics, keyed collision-safely.
 //! - [`dependencies`] / [`change`] - which relations a query reads, through
 //!   persistent rules, and which ones a commit touched.
@@ -38,6 +41,7 @@ pub mod change;
 pub mod connection;
 pub mod dependencies;
 pub mod hub;
+pub mod parameterized;
 pub mod publication;
 pub mod reevaluate;
 pub mod result_set;
@@ -66,6 +70,7 @@ pub use views::{Attach, Completed, Dispatch, ViewKey, ViewRegistry};
 #[derive(Debug, Default)]
 pub struct SubscriptionMetrics {
     evaluations: AtomicU64,
+    shared_evaluations: AtomicU64,
     active: AtomicU64,
     views: AtomicU64,
 }
@@ -75,6 +80,12 @@ impl SubscriptionMetrics {
     /// shared view however many subscribers it has.
     pub fn evaluations(&self) -> u64 {
         self.evaluations.load(Ordering::SeqCst)
+    }
+
+    /// Evaluations of lifted queries, each serving every view of its family
+    /// at one revision (see [`parameterized`]).
+    pub fn shared_evaluations(&self) -> u64 {
+        self.shared_evaluations.load(Ordering::SeqCst)
     }
 
     /// Subscriptions currently registered across all connections.
@@ -89,6 +100,10 @@ impl SubscriptionMetrics {
 
     pub(crate) fn record_evaluation(&self) {
         self.evaluations.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub(crate) fn record_shared_evaluation(&self) {
+        self.shared_evaluations.fetch_add(1, Ordering::SeqCst);
     }
 
     pub(crate) fn add_active(&self, count: u64) {

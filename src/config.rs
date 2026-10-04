@@ -505,6 +505,13 @@ pub struct RateLimitConfig {
     #[serde(default)]
     pub subscription_coalesce_ms: u64,
 
+    /// Share one evaluation per commit among standing queries that differ
+    /// only in bound constants (`?speech("s-1", ...)`, `?speech("s-2", ...)`),
+    /// routing each subscriber exactly its own rows. A family whose shared
+    /// query costs much more than its members' own stops sharing by itself.
+    #[serde(default = "default_true")]
+    pub subscription_share_parameterized: bool,
+
     /// Notification broadcast channel buffer size (per-subscriber queue depth)
     #[serde(default = "default_notification_buffer_size")]
     pub notification_buffer_size: usize,
@@ -698,6 +705,7 @@ impl Default for RateLimitConfig {
             ws_max_subscriptions: default_ws_max_subscriptions(),
             ws_max_in_flight_requests: default_ws_max_in_flight_requests(),
             subscription_coalesce_ms: 0,
+            subscription_share_parameterized: true,
             notification_buffer_size: default_notification_buffer_size(),
             per_ip_max_rps: default_per_ip_max_rps(),
             ws_max_preauth_per_ip: default_ws_max_preauth_per_ip(),

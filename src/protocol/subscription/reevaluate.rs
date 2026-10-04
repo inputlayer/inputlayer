@@ -1,10 +1,10 @@
 //! Re-evaluation strategy: run the query against the current snapshot and diff
 //! with the previous result.
 //!
-//! Bound queries go through Magic Sets, so a re-run touches only the relevant
-//! slice of the KG. Each evaluation pins the KG's current snapshot and runs
-//! the query on it through the normal query path ([`Handler::query_snapshot`]),
-//! which runs on the blocking pool under the query semaphore.
+//! Each evaluation pins the KG's current snapshot and runs the query on it
+//! through the normal query path ([`Handler::query_snapshot`]), which runs on
+//! the blocking pool under the query semaphore and reuses the query's compiled
+//! plan while the rules stay the same.
 //!
 //! The evaluation runs for no one in particular: its rows depend only on the
 //! knowledge graph (data and persistent rules) and the query. Whoever receives
@@ -15,12 +15,14 @@
 //! [`super::ViewKey`].
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use futures_util::future::BoxFuture;
 
 use crate::protocol::rest::handlers::wire_value_to_json;
 use crate::protocol::Handler;
 use crate::statement::{parse_query, QueryGoal};
+use crate::storage_engine::KnowledgeGraphSnapshot;
 
 use super::{Dependencies, Refresh, ResultSet, Row, StandingQuery};
 
@@ -33,6 +35,17 @@ pub struct ReevaluatingQuery {
     columns: Vec<String>,
     /// The last complete result.
     current: Arc<ResultSet>,
+}
+
+/// A query's complete result on one snapshot, before it is diffed.
+pub struct Evaluated {
+    /// Result columns; `None` for an empty result, which names none.
+    pub columns: Option<Vec<String>>,
+    pub result: Arc<ResultSet>,
+    pub dependencies: Dependencies,
+    pub revision: u64,
+    /// Engine time of the evaluation (excluding waits for a compute permit).
+    pub cost: Duration,
 }
 
 impl ReevaluatingQuery {
@@ -64,51 +77,143 @@ impl ReevaluatingQuery {
         &self.goal
     }
 
-    async fn evaluate(&mut self) -> Result<Refresh, String> {
-        // One snapshot for everything: its rules give the dependencies, the
-        // query reads its data, and its revision names the result.
-        let snapshot = self
-            .handler
+    /// The query text.
+    pub fn query(&self) -> &str {
+        &self.query
+    }
+
+    /// The knowledge graph the query reads.
+    pub fn knowledge_graph(&self) -> &str {
+        &self.knowledge_graph
+    }
+
+    /// The handler the query runs on.
+    pub fn handler(&self) -> &Arc<Handler> {
+        &self.handler
+    }
+
+    /// The knowledge graph's current snapshot.
+    pub fn current_snapshot(&self) -> Result<Arc<KnowledgeGraphSnapshot>, String> {
+        self.handler
             .get_storage()
             .get_snapshot_for(&self.knowledge_graph)
-            .map_err(|e| format!("Knowledge graph '{}': {e}", self.knowledge_graph))?;
-        let dependencies = Dependencies::for_query(&self.goal, &snapshot.rules);
-        let revision = snapshot.revision;
+            .map_err(|e| format!("Knowledge graph '{}': {e}", self.knowledge_graph))
+    }
 
-        let result = self
-            .handler
-            .query_snapshot(&self.knowledge_graph, snapshot, &self.query, None)
-            .await?;
-        // A capped result is not the result set: adopting it would announce
-        // every cut row as retracted. Fail before touching state, so the last
-        // complete result stays the base for the next delta.
-        if result.truncated {
-            return Err(incomplete_result_error(
-                self.handler.config().storage.performance.max_result_rows,
-            ));
+    /// Evaluate the query on `snapshot`: its rules give the dependencies, the
+    /// query reads its data, and its revision names the result.
+    pub async fn evaluate_on(
+        &self,
+        snapshot: Arc<KnowledgeGraphSnapshot>,
+    ) -> Result<Evaluated, String> {
+        evaluate(
+            &self.handler,
+            &self.knowledge_graph,
+            &self.query,
+            &self.goal,
+            snapshot,
+        )
+        .await
+    }
+
+    /// Make `evaluated` the current result: the change since the previous one.
+    pub fn adopt(&mut self, evaluated: Evaluated) -> Refresh {
+        let Evaluated {
+            columns,
+            result: next,
+            dependencies,
+            revision,
+            cost: _,
+        } = evaluated;
+        if let Some(columns) = columns {
+            self.columns = columns;
         }
-        if !result.schema.is_empty() {
-            self.columns = result.schema.into_iter().map(|c| c.name).collect();
-        }
-        let next: Arc<ResultSet> = Arc::new(
-            result
-                .rows
-                .into_iter()
-                .map(|row| -> Row { row.values.into_iter().map(wire_value_to_json).collect() })
-                .collect(),
-        );
         let inserted = next.difference(&self.current);
         let retracted = self.current.difference(&next);
         self.current = Arc::clone(&next);
-        Ok(Refresh {
+        Refresh {
             columns: self.columns.clone(),
             inserted,
             retracted,
             dependencies,
             revision,
             result: next,
-        })
+        }
     }
+
+    async fn reevaluate(&mut self) -> Result<Refresh, String> {
+        let snapshot = self.current_snapshot()?;
+        let evaluated = self.evaluate_on(snapshot).await?;
+        Ok(self.adopt(evaluated))
+    }
+}
+
+/// Run `query` (parsed: `goal`) on `snapshot` of `knowledge_graph`.
+pub async fn evaluate(
+    handler: &Handler,
+    knowledge_graph: &str,
+    query: &str,
+    goal: &QueryGoal,
+    snapshot: Arc<KnowledgeGraphSnapshot>,
+) -> Result<Evaluated, String> {
+    let dependencies = Dependencies::for_query(goal, &snapshot.rules);
+    let revision = snapshot.revision;
+    let ran = run_query(handler, knowledge_graph, query, snapshot).await?;
+    Ok(Evaluated {
+        columns: ran.columns,
+        result: Arc::new(ran.rows.into_iter().collect()),
+        dependencies,
+        revision,
+        cost: ran.cost,
+    })
+}
+
+/// A query's complete result rows on one snapshot.
+pub struct QueryRows {
+    /// Result columns; `None` for an empty result, which names none.
+    pub columns: Option<Vec<String>>,
+    /// Every row, as the engine returned it (distinct as engine values).
+    pub rows: Vec<Row>,
+    /// Engine time of the evaluation (excluding waits for a compute permit).
+    pub cost: Duration,
+}
+
+/// Run `query` on `snapshot` of `knowledge_graph`; a capped result is an
+/// error.
+pub async fn run_query(
+    handler: &Handler,
+    knowledge_graph: &str,
+    query: &str,
+    snapshot: Arc<KnowledgeGraphSnapshot>,
+) -> Result<QueryRows, String> {
+    let started = Instant::now();
+    let result = handler
+        .query_snapshot(knowledge_graph, snapshot, query, None)
+        .await?;
+    // A capped result is not the result set: adopting it would announce
+    // every cut row as retracted. Fail before touching state, so the last
+    // complete result stays the base for the next delta.
+    if result.truncated {
+        return Err(incomplete_result_error(
+            handler.config().storage.performance.max_result_rows,
+        ));
+    }
+    let cost = result.timing_breakdown.as_ref().map_or_else(
+        || started.elapsed(),
+        |timing| Duration::from_micros(timing.total_us),
+    );
+    let columns =
+        (!result.schema.is_empty()).then(|| result.schema.into_iter().map(|c| c.name).collect());
+    let rows = result
+        .rows
+        .into_iter()
+        .map(|row| -> Row { row.values.into_iter().map(wire_value_to_json).collect() })
+        .collect();
+    Ok(QueryRows {
+        columns,
+        rows,
+        cost,
+    })
 }
 
 /// Error for a result cut at `max_result_rows`.
@@ -121,6 +226,6 @@ fn incomplete_result_error(max_result_rows: usize) -> String {
 
 impl StandingQuery for ReevaluatingQuery {
     fn refresh(&mut self) -> BoxFuture<'_, Result<Refresh, String>> {
-        Box::pin(self.evaluate())
+        Box::pin(self.reevaluate())
     }
 }

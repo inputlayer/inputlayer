@@ -6,6 +6,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod harness;
+mod parameterized;
 mod sharing;
 
 use std::collections::BTreeSet;
