@@ -34,8 +34,9 @@
 //! `max_result_rows` allows. A lifted query computes every binding's rows,
 //! subscribed or not, and every view waits for it. A family therefore shares
 //! only while a round is about as fast as its views' own evaluations would
-//! be, run in parallel on the compute permits. Costs count only evaluations
-//! that reused a compiled plan. A family starts sharing once it has a view's
+//! be, run in parallel on the compute permits. A view's own cost counts only
+//! evaluations that reused a compiled plan; a round's leaves out compiling
+//! its plan. A family starts sharing once it has a view's
 //! own cost to compare with, stops when a round is slower, and probes again
 //! after some commits, waiting longer after each probe that fails. While
 //! sharing, a view evaluates its own query now and then to keep that cost
@@ -481,7 +482,7 @@ impl Family {
         let shared = (ran.cost + partitioning.elapsed()).as_micros() as u64;
         let bindings = self.bindings.load(Ordering::Relaxed) as u64;
         let permits = self.handler.compute_permits() as u64;
-        if ran.plan_cached && !keeps_sharing(shared, own, bindings, permits) {
+        if !keeps_sharing(shared, own, bindings, permits) {
             debug!(
                 query = %self.shape.query,
                 shared_us = shared,
@@ -491,7 +492,7 @@ impl Family {
                 "subscription_family_stops_sharing"
             );
             self.stop_sharing();
-        } else if ran.plan_cached {
+        } else {
             if self.stops.load(Ordering::Relaxed) != 0 {
                 self.stops.store(0, Ordering::Relaxed);
             }
