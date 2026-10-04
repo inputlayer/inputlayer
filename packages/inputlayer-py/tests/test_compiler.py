@@ -725,7 +725,9 @@ class TestCompileRule:
             condition=cond,
             persistent=True,
         )
-        assert result == '+eng_member(Name) <- employee(_, Name, Department, _, _), Department = "eng"'
+        assert result == (
+            '+eng_member(Name) <- employee(_, Name, Department, _, _), Department = "eng"'
+        )
 
     def test_recursive(self):
         # reachable(Src, Dst) <- reachable(Src, Mid), edge(Mid, Dst)

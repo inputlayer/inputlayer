@@ -454,7 +454,7 @@ The autodetector diffs your current Python models against the last migration's s
 | `grant_access(username, role)` | Grant per-KG access |
 | `revoke_access(username)` | Revoke per-KG access |
 | `list_acl()` | List access control entries |
-| `explain(*select, ...)` | Show query plan without executing |
+| `debug(*select, ...)` | Show query plan without executing (same arguments as `query`) |
 | `execute(iql)` | Execute raw IQL |
 | `status()` | Get server status |
 | `compact()` | Trigger storage compaction |
