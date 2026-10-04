@@ -67,7 +67,8 @@ pub struct ScenarioRun {
     pub series: BTreeMap<String, Vec<u64>>,
     /// `load_statements`; `converged_mutations` (send to every agent
     /// converged, serial writer; a mutation any live subscription diverged
-    /// on is not counted, and retired questions do not count).
+    /// on is not counted, nor one with no live subscription; retired
+    /// questions do not count).
     pub rates: BTreeMap<String, Rate>,
     /// `rss_after_load_kb`, `rss_after_subscribe_kb`, `rss_end_kb`,
     /// `peak_rss_kb`, `seed_statements`, `seed_failed`, `subscriptions`.

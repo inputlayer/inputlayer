@@ -207,7 +207,8 @@ subscription error. Missing ground truth (including truncated re-queries) never
 counts as convergence or contributes a convergence latency sample. A question
 whose re-query fails is retired: its subscriptions are reported as `retired`
 and no longer count toward convergence, so later mutations still converge on
-the remaining answers. A subscription error stops counting once a later
+the remaining answers; a mutation with every question retired measured nothing
+and is not counted. A subscription error stops counting once a later
 re-query of its question succeeds.
 
 The summary lists the reactive-path categories first (multiple supports and

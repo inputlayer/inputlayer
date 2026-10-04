@@ -499,9 +499,10 @@ fn record_deltas(
 
 /// Time from sending a mutation until every subscription converged: the
 /// latest delta arrival, or zero when no delta was due. `None` when any
-/// subscription diverged: that mutation did not converge.
+/// subscription diverged, or when there was no live subscription to measure:
+/// that mutation did not converge.
 fn convergence_time(sent: Instant, arrivals: &[(bool, Option<Instant>)]) -> Option<Duration> {
-    if arrivals.iter().any(|(converged, _)| !converged) {
+    if arrivals.is_empty() || arrivals.iter().any(|(converged, _)| !converged) {
         return None;
     }
     let end = arrivals.iter().filter_map(|(_, last)| *last).max();
@@ -638,6 +639,31 @@ mod tests {
             before = truth;
         }
         assert_eq!(run.rates["converged_mutations"].ops, 3);
+    }
+
+    #[tokio::test]
+    async fn a_mutation_with_every_question_retired_is_not_counted() {
+        let mut agents = vec![Agent::holding(vec![Subscription::new(
+            "q0",
+            vec![vec![json!(1)]],
+        )])];
+        let mut run = ScenarioRun::default();
+        let retired = BTreeMap::from([("q0".to_string(), "result truncated".to_string())]);
+        let before = answers(&[("q0", json!([[1]]))]);
+        deliver(&mut agents[0], "q0", json!(2));
+        let mut outcome = mutation("m1");
+        record_deltas(
+            &mut run,
+            &mut agents,
+            &before,
+            &retired,
+            &BTreeMap::new(),
+            Some(Instant::now()),
+            &mut outcome,
+        );
+        assert_eq!(outcome.subscriptions[0].convergence, Convergence::Retired);
+        assert!(!run.rates.contains_key("converged_mutations"));
+        assert_eq!(convergence_time(Instant::now(), &[]), None);
     }
 
     #[test]
