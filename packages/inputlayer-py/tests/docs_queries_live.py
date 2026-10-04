@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import re
 import time
 from collections.abc import AsyncIterator
 from typing import ClassVar
@@ -557,6 +558,39 @@ async def test_derived_relations_querying_a_recursive_rule(kg: KnowledgeGraph) -
     for row in result:
         reached.append(row.dst)
     assert sorted(reached) == [2, 3, 4]
+
+
+def _proved(why) -> list[list]:
+    """The conclusion of each row's proof tree, in row order."""
+    return [t.nodes[t.roots[0]].conclusion.args for t in why.proof_trees]
+
+
+async def test_why_explains_each_row_of_a_derived_relation(kg: KnowledgeGraph) -> None:
+    await kg.define_rules(Reachable)
+    why = await kg.why(Reachable, where=lambda r: r.src == 1)
+    assert why.results.columns == ["src", "dst"]
+    assert sorted(why.results.to_tuples()) == [(1, 2), (1, 3), (1, 4)]
+    assert sorted(_proved(why)) == [[1, 2], [1, 3], [1, 4]]
+
+
+async def test_why_orders_and_pages_a_derived_relation_with_its_proofs(kg: KnowledgeGraph) -> None:
+    await kg.define_rules(Reachable)
+    why = await kg.why(Reachable, order_by=Reachable.dst.desc(), limit=2)
+    assert [row[1] for row in why.results.to_tuples()] == [4, 4]
+    assert _proved(why) == [list(row) for row in why.results.to_tuples()]
+
+
+async def test_why_explains_an_aggregate_over_a_derived_relation(kg: KnowledgeGraph) -> None:
+    await kg.define_rules(Reachable)
+    why = await kg.why(Reachable.src, count(Reachable.dst), join=[Reachable])
+    assert sorted(why.results.to_tuples()) == [(1, 3), (2, 2), (3, 1)]
+    assert _proved(why) == [list(row) for row in why.results.to_tuples()]
+
+
+async def test_why_rejects_a_value_keyword_before_sending(kg: KnowledgeGraph) -> None:
+    await kg.define_rules(Reachable)
+    with pytest.raises(CompileError, match=re.escape("where=lambda r: r.src == 1")):
+        await kg.why(Reachable, src=1)
 
 
 async def test_sessions_session_facts_mix_with_persistent_data(kg: KnowledgeGraph) -> None:

@@ -488,8 +488,14 @@ class KnowledgeGraph:
             elif isinstance(v, AggExpr):
                 ast_computed[k] = v
                 _add_agg_relations(v)
-            else:
+            elif isinstance(v, Expr):
                 ast_computed[k] = v
+            else:
+                # A keyword names a computed column; a value is not one.
+                raise CompileError(
+                    f"{k}={v!r} is not an expression: keyword arguments name computed columns",
+                    hint=f"to filter on a value, pass where=lambda r: r.{k} == {v!r}",
+                )
 
         proxies = [
             RelationProxy(

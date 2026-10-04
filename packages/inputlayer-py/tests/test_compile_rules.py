@@ -378,3 +378,17 @@ class TestLiterals:
         await kg.vector_search(Doc, [1.0, 0.0], radius=0.5)
         (iql,), _ = kg._execute.await_args
         assert iql == "?doc(Id, Embedding), Dist = cosine(Embedding, [1.0, 0.0]), Dist <= 0.5"
+
+
+class TestKeywordArguments:
+    """A keyword argument names a computed column; a plain value is an error."""
+
+    @pytest.mark.parametrize("method", ["query", "why", "debug"])
+    async def test_a_value_keyword_is_a_compile_error_naming_where(self, method) -> None:
+        kg = KnowledgeGraph("default", MagicMock())
+        kg._execute = AsyncMock()
+        with pytest.raises(CompileError) as exc:
+            await getattr(kg, method)(Employee, department="eng")
+        assert "department='eng'" in str(exc.value)
+        assert "where=lambda r: r.department == 'eng'" in (exc.value.hint or "")
+        kg._execute.assert_not_awaited()
