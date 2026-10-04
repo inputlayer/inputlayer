@@ -1,0 +1,30 @@
+{
+  "name": "duplicate_id_rejection",
+  "about": "An invalid_request naming the call's id (the engine's answer to a reused id) fails it as an SDK bug, typed.",
+  "calls": [
+    "?a(X)"
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 1
+      }
+    },
+    {
+      "send": {
+        "type": "error",
+        "id": "$r0",
+        "code": "invalid_request",
+        "message": "Request id is already in use by an unanswered request"
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "error": "ProtocolError",
+        "code": "invalid_request"
+      }
+    ]
+  }
+}

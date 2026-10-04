@@ -1,0 +1,62 @@
+{
+  "name": "replay_gap_keeps_connection",
+  "about": "replay_gap and notifications_missed are announced as notification_gap events; the connection stays open.",
+  "calls": [
+    "?a(X)"
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 1
+      }
+    },
+    {
+      "send": {
+        "type": "notice",
+        "code": "replay_gap",
+        "message": "cursor from another run"
+      }
+    },
+    {
+      "send": {
+        "type": "notice",
+        "code": "notifications_missed",
+        "message": "dropped 3"
+      }
+    },
+    {
+      "send": {
+        "type": "result",
+        "id": "$r0",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            1
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "rows": [
+          [
+            1
+          ]
+        ]
+      }
+    ],
+    "events": [
+      "notification_gap",
+      "notification_gap"
+    ]
+  }
+}

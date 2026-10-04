@@ -18,6 +18,25 @@ export class ConnectionError extends InputLayerError {
   }
 }
 
+/**
+ * The connection closed while a call was pending, or reconnecting gave up.
+ *
+ * `code` is the server's closing notice (`idle_timeout`, `server_shutdown`,
+ * ...) when it sent one, else `closed`. `mayHaveCommitted` is set when the
+ * call was sent and may write: read the state back before resending it
+ * (fact writes are idempotent, so resending one is safe).
+ */
+export class ConnectionLostError extends ConnectionError {
+  constructor(
+    message: string,
+    readonly code: string,
+    readonly mayHaveCommitted = false,
+  ) {
+    super(message);
+    this.name = 'ConnectionLostError';
+  }
+}
+
 export class AuthenticationError extends InputLayerError {
   constructor(message: string) {
     super(message);
@@ -36,6 +55,8 @@ export class AuthenticationError extends InputLayerError {
 export class QueryError extends InputLayerError {
   readonly code?: ErrorCode;
   readonly validationErrors: Array<Record<string, unknown>>;
+  /** The program that was sent, set by the connection. */
+  iql?: string;
 
   constructor(
     message: string,
@@ -71,6 +92,46 @@ export class StoreReadOnlyError extends QueryError {
   constructor(message: string, readonly result?: ResultResponse) {
     super(message, { code: 'store_read_only' });
     this.name = 'StoreReadOnlyError';
+  }
+}
+
+/**
+ * The request's deadline (`timeoutMs`) passed before it began committing:
+ * nothing was applied. Resend it if it is still wanted.
+ */
+export class DeadlineExceededError extends QueryError {
+  constructor(message: string) {
+    super(message, { code: 'deadline_exceeded' });
+    this.name = 'DeadlineExceededError';
+  }
+}
+
+/**
+ * The request was cancelled (its `signal` aborted) before it began
+ * committing: nothing was applied.
+ */
+export class CancelledError extends QueryError {
+  constructor(message: string) {
+    super(message, { code: 'cancelled' });
+    this.name = 'CancelledError';
+  }
+}
+
+/** The server refused the request as malformed (`invalid_request`): an SDK bug. */
+export class ProtocolError extends QueryError {
+  constructor(message: string) {
+    super(`${message} (invalid_request: this is an SDK bug, please report it)`, {
+      code: 'invalid_request',
+    });
+    this.name = 'ProtocolError';
+  }
+}
+
+/** The connection's message rate limit refused the request; nothing ran. */
+export class RateLimitedError extends QueryError {
+  constructor(message: string) {
+    super(message, { code: 'rate_limited' });
+    this.name = 'RateLimitedError';
   }
 }
 

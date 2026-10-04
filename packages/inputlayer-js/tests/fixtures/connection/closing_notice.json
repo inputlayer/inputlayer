@@ -1,0 +1,32 @@
+{
+  "name": "closing_notice",
+  "about": "A closing notice names the reason the pending calls fail with.",
+  "calls": [
+    "?a(X)"
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 1
+      }
+    },
+    {
+      "send": {
+        "type": "notice",
+        "code": "server_shutdown",
+        "message": "Server shutting down"
+      }
+    },
+    {
+      "close": true
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "error": "ConnectionLostError",
+        "code": "server_shutdown"
+      }
+    ]
+  }
+}

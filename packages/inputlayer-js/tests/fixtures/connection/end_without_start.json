@@ -1,0 +1,29 @@
+{
+  "name": "end_without_start",
+  "about": "A result_end with no result_start fails the call.",
+  "calls": [
+    "?a(X)"
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 1
+      }
+    },
+    {
+      "send": {
+        "type": "result_end",
+        "id": "$r0",
+        "row_count": 0,
+        "chunk_count": 0
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "error": "InternalError"
+      }
+    ]
+  }
+}

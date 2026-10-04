@@ -1,0 +1,43 @@
+{
+  "name": "rate_limited_twice",
+  "about": "A second rate_limited is the caller's: RateLimitedError.",
+  "calls": [
+    "?a(X)"
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 1
+      }
+    },
+    {
+      "send": {
+        "type": "error",
+        "id": "$r0",
+        "code": "rate_limited",
+        "message": "Rate limit exceeded"
+      }
+    },
+    {
+      "await": {
+        "executes": 2
+      }
+    },
+    {
+      "send": {
+        "type": "error",
+        "id": "$r0",
+        "code": "rate_limited",
+        "message": "Rate limit exceeded"
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "error": "RateLimitedError",
+        "code": "rate_limited"
+      }
+    ]
+  }
+}

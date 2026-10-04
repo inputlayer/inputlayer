@@ -2,7 +2,7 @@
  * KnowledgeGraph - the primary workspace for data, queries, and rules.
  */
 
-import type { Connection } from './connection.js';
+import type { Connection, ExecuteOptions } from './connection.js';
 import type { ResultResponse } from './protocol.js';
 import type { Expr, BoolExpr, OrderedColumn } from './ast.js';
 import type { RelationDef } from './relation.js';
@@ -22,7 +22,7 @@ import {
   type QueryPlan,
   type RuleClause,
 } from './compiler.js';
-import { InternalError, QueryError } from './errors.js';
+import { InternalError } from './errors.js';
 import { HnswIndex } from './index-def.js';
 import { ResultSet } from './result.js';
 import { Session } from './session.js';
@@ -174,8 +174,6 @@ export class KnowledgeGraph {
   private readonly conn: Connection;
   private readonly _session: Session;
 
-  private kgActive = false;
-
   constructor(name: string, connection: Connection) {
     this._name = name;
     this.conn = connection;
@@ -190,20 +188,17 @@ export class KnowledgeGraph {
     return this._session;
   }
 
-  /** Ensure the connection is using this knowledge graph, creating it on first use. */
-  private async ensureKg(): Promise<void> {
-    if (this.conn.currentKg === this._name) return;
-    const use = `.kg use ${this._name}`;
-    try {
-      await this.conn.execute(use);
-    } catch (e) {
-      if (!(e instanceof QueryError) || e.code !== 'not_found') throw e;
-      await this.conn.execute(`.kg create ${this._name}`);
-      await this.conn.execute(use);
-    }
-    // Force-update currentKg since the server may not set switched_kg
-    // on .kg use responses.
-    this.conn.setCurrentKg(this._name);
+  /**
+   * The handle's own connection, bound to this knowledge graph at connect
+   * time (`?kg=`), so no call ever switches graphs under another.
+   */
+  get connection(): Connection {
+    return this.conn;
+  }
+
+  /** Open the handle's connection on first use, creating the knowledge graph if missing. */
+  private ensureKg(): Promise<void> {
+    return this.conn.connect();
   }
 
   // ── Schema ──────────────────────────────────────────────────────
@@ -705,10 +700,10 @@ export class KnowledgeGraph {
     };
   }
 
-  /** Execute raw IQL. */
-  async execute(iql: string): Promise<ResultSet> {
+  /** Execute raw IQL. `timeoutMs` and `signal` bound and cancel the call. */
+  async execute(iql: string, opts?: ExecuteOptions): Promise<ResultSet> {
     await this.ensureKg();
-    const result = await this.conn.execute(iql);
+    const result = await this.conn.execute(iql, opts);
     return new ResultSet({
       columns: result.columns,
       rows: result.rows,

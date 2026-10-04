@@ -62,6 +62,11 @@ export {
   StatementFailedError,
   OutcomeUnknownError,
   StoreReadOnlyError,
+  ConnectionLostError,
+  DeadlineExceededError,
+  CancelledError,
+  ProtocolError,
+  RateLimitedError,
 } from './errors.js';
 
 // Result
@@ -127,6 +132,7 @@ export type {
   LoginMessage,
   AuthenticateMessage,
   ExecuteMessage,
+  CancelMessage,
   PingMessage,
   AuthenticatedResponse,
   AuthErrorResponse,
@@ -136,6 +142,7 @@ export type {
   ResultChunkResponse,
   ResultEndResponse,
   PongResponse,
+  CancelAckResponse,
   NoticeCode,
   NoticeResponse,
   NotificationResponse,
@@ -161,4 +168,11 @@ export {
 
 // Connection (for advanced usage)
 export { Connection } from './connection.js';
-export type { ConnectionOptions } from './connection.js';
+export type {
+  ConnectionOptions,
+  ConnectionEventType,
+  ConnectionStats,
+  ExecuteOptions,
+  SubscriptionPushMessage,
+  SubscriptionRoute,
+} from './connection.js';

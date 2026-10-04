@@ -1,0 +1,150 @@
+{
+  "name": "interleaved_streams",
+  "about": "Two streamed results interleave chunk by chunk with a notification and a subscription push between them; each assembles whole, the notification is dispatched and the push (no route) is dropped and counted.",
+  "calls": [
+    "?a(X)",
+    "?b(X)"
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 2
+      }
+    },
+    {
+      "send": {
+        "type": "result_start",
+        "id": "$r0",
+        "columns": [
+          "x"
+        ],
+        "total_count": 0,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    },
+    {
+      "send": {
+        "type": "result_start",
+        "id": "$r1",
+        "columns": [
+          "x"
+        ],
+        "total_count": 0,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    },
+    {
+      "send": {
+        "type": "result_chunk",
+        "id": "$r1",
+        "rows": [
+          [
+            10
+          ]
+        ],
+        "chunk_index": 0
+      }
+    },
+    {
+      "send": {
+        "type": "persistent_update",
+        "seq": 7,
+        "timestamp_ms": 0,
+        "knowledge_graph": "default",
+        "relation": "a",
+        "operation": "insert",
+        "count": 1
+      }
+    },
+    {
+      "send": {
+        "type": "result_chunk",
+        "id": "$r0",
+        "rows": [
+          [
+            1
+          ]
+        ],
+        "chunk_index": 0
+      }
+    },
+    {
+      "send": {
+        "type": "subscription_delta",
+        "subscription": "s",
+        "generation": 1,
+        "knowledge_graph": "default",
+        "seq": 1,
+        "revision": 2,
+        "columns": [
+          "x"
+        ],
+        "inserted": [
+          [
+            1
+          ]
+        ],
+        "retracted": []
+      }
+    },
+    {
+      "send": {
+        "type": "result_chunk",
+        "id": "$r0",
+        "rows": [
+          [
+            2
+          ]
+        ],
+        "chunk_index": 1
+      }
+    },
+    {
+      "send": {
+        "type": "result_end",
+        "id": "$r1",
+        "row_count": 1,
+        "chunk_count": 1
+      }
+    },
+    {
+      "send": {
+        "type": "result_end",
+        "id": "$r0",
+        "row_count": 2,
+        "chunk_count": 2
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "rows": [
+          [
+            1
+          ],
+          [
+            2
+          ]
+        ]
+      },
+      {
+        "rows": [
+          [
+            10
+          ]
+        ]
+      }
+    ],
+    "notifications": [
+      7
+    ],
+    "stats": {
+      "stalePushes": 1
+    }
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "name": "duplicate_notification",
+  "about": "A notification seq seen twice in one epoch is dispatched once; the cursor is the highest seq.",
+  "calls": [
+    "?a(X)"
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 1
+      }
+    },
+    {
+      "send": {
+        "type": "persistent_update",
+        "seq": 4,
+        "timestamp_ms": 0,
+        "knowledge_graph": "default",
+        "relation": "a",
+        "operation": "insert",
+        "count": 1
+      }
+    },
+    {
+      "send": {
+        "type": "persistent_update",
+        "seq": 4,
+        "timestamp_ms": 0,
+        "knowledge_graph": "default",
+        "relation": "a",
+        "operation": "insert",
+        "count": 1
+      }
+    },
+    {
+      "send": {
+        "type": "persistent_update",
+        "seq": 5,
+        "timestamp_ms": 0,
+        "knowledge_graph": "default",
+        "relation": "a",
+        "operation": "insert",
+        "count": 1
+      }
+    },
+    {
+      "send": {
+        "type": "result",
+        "id": "$r0",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            1
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "rows": [
+          [
+            1
+          ]
+        ]
+      }
+    ],
+    "notifications": [
+      4,
+      5
+    ],
+    "lastSeq": 5
+  }
+}

@@ -60,10 +60,22 @@ const il = new InputLayer({
   username: "admin",
   password: "admin",
   autoReconnect: true,          // reconnect on disconnect (default: true)
-  reconnectDelay: 1.0,          // seconds between attempts (default: 1.0)
+  reconnectDelay: 1.0,          // first backoff in seconds, doubled with jitter up to 30 (default: 1.0)
   maxReconnectAttempts: 10,     // give up after N failures (default: 10)
+  defaultTimeoutMs: 30_000,     // deadline of a call without its own (default: 30 000; 0 for none)
+  keepaliveMs: 20_000,          // ping a silent connection so it is never idle-closed (default: 20 000)
 });
 ```
+
+Calls on one client run concurrently: every request carries an id and each reply is routed back to its call, so `Promise.all` over queries pipelines them on the connection. A call takes a deadline and an `AbortSignal`:
+
+```typescript
+const controller = new AbortController();
+const rows = await kg.execute("?path(X, Y)", { timeoutMs: 2000, signal: controller.signal });
+// DeadlineExceededError or CancelledError when stopped before committing: nothing was applied.
+```
+
+When the connection drops, calls in flight fail with `ConnectionLostError` (its `mayHaveCommitted` is set for a write that was sent: read the state back before resending it), calls not yet sent wait for the reconnect, and the client re-opens on the same knowledge graph, replaying the notifications you missed. `il.events` announces `disconnected`, `reconnected`, `session_reset` (session facts, rules and subscriptions are gone: re-create them) and `notification_gap`.
 
 Unlike the Python SDK which has separate sync and async clients, the TypeScript SDK is `async/await` throughout - which is the natural pattern for JavaScript.
 
@@ -79,12 +91,14 @@ const kg = il.knowledgeGraph("myapp");
 const graphs = await il.listKnowledgeGraphs();
 
 // Drop a knowledge graph and all its data
-await il.knowledgeGraph("default").execute(".kg use default");
 await il.dropKnowledgeGraph("myapp");
 ```
 
-The server refuses to drop the session's current knowledge graph. Switch to
-another graph first, as above; `dropKnowledgeGraph()` does not switch for you.
+Each handle has its own connection, bound to its graph when it first runs a
+call (the graph is created then if it is missing), so handles never switch
+graphs under one another. `dropKnowledgeGraph()` runs on the client's own
+connection, which stays on `initialKg` (the server's `default` unless set);
+the server refuses to drop that one.
 
 ## Defining Schemas
 
@@ -754,6 +768,10 @@ import {
   OutcomeUnknownError,          // commit outcome unknown; store may be read-only
   StoreReadOnlyError,           // write refused until restart recovery
   ConnectionError,              // network/connection issues
+  ConnectionLostError,          // closed with the call pending; see mayHaveCommitted
+  DeadlineExceededError,        // timeoutMs passed before committing; nothing applied
+  CancelledError,               // signal aborted before committing; nothing applied
+  RateLimitedError,             // still rate limited after one automatic resend
   AuthenticationError,          // bad credentials
   SchemaConflictError,          // schema mismatch on define()
   ValidationError,              // invalid data

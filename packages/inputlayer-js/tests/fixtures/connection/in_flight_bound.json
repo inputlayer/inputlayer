@@ -1,0 +1,154 @@
+{
+  "name": "in_flight_bound",
+  "about": "At most maxInFlight requests are unanswered; the rest wait client-side and go out as replies arrive.",
+  "options": {
+    "maxInFlight": 2
+  },
+  "calls": [
+    "?a(X)",
+    "?b(X)",
+    "?c(X)",
+    "?d(X)"
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 2
+      }
+    },
+    {
+      "sleep": 50
+    },
+    {
+      "assert": {
+        "executes": 2
+      }
+    },
+    {
+      "send": {
+        "type": "result",
+        "id": "$r0",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            1
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    },
+    {
+      "await": {
+        "executes": 3
+      }
+    },
+    {
+      "sleep": 50
+    },
+    {
+      "assert": {
+        "executes": 3
+      }
+    },
+    {
+      "send": {
+        "type": "result",
+        "id": "$r1",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            2
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    },
+    {
+      "send": {
+        "type": "result",
+        "id": "$r2",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            3
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    },
+    {
+      "await": {
+        "executes": 4
+      }
+    },
+    {
+      "send": {
+        "type": "result",
+        "id": "$r3",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            4
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "rows": [
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "rows": [
+          [
+            2
+          ]
+        ]
+      },
+      {
+        "rows": [
+          [
+            3
+          ]
+        ]
+      },
+      {
+        "rows": [
+          [
+            4
+          ]
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "name": "out_of_order_replies",
+  "about": "Replies are routed by id, not by arrival order: the second call's reply arrives first.",
+  "calls": [
+    "?a(X)",
+    "?b(X)"
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 2
+      }
+    },
+    {
+      "send": {
+        "type": "result",
+        "id": "$r1",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            2
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    },
+    {
+      "send": {
+        "type": "result",
+        "id": "$r0",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            1
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "rows": [
+          [
+            1
+          ]
+        ]
+      },
+      {
+        "rows": [
+          [
+            2
+          ]
+        ]
+      }
+    ]
+  }
+}

@@ -25,13 +25,23 @@ interface CallbackEntry {
   callback: NotificationCallback;
 }
 
+/** Notification `seq` numbers remembered per epoch to drop duplicates. */
+const SEEN_LIMIT = 4096;
+
 /**
- * Routes notification events to registered callbacks.
+ * Routes notification events to registered callbacks and iterators.
+ *
+ * One dispatcher may be fed by several connections (a client opens one per
+ * knowledge graph). Notification `seq` numbers belong to the engine's single
+ * stream within a `stream_epoch`, so a notification two connections both see
+ * (a `kg_change` for an admin) has the same `seq` and is dispatched once.
  */
 export class NotificationDispatcher {
   private callbacks: CallbackEntry[] = [];
   private _lastSeq = 0;
-  private waiters: Array<(event: NotificationEvent) => void> = [];
+  private readonly iterators = new Set<EventQueue>();
+  private epoch?: string;
+  private readonly seen = new Set<number>();
 
   get lastSeq(): number {
     return this._lastSeq;
@@ -62,15 +72,26 @@ export class NotificationDispatcher {
     this.callbacks = this.callbacks.filter((e) => e.callback !== callback);
   }
 
-  /** Dispatch a notification to matching callbacks. */
-  dispatch(event: NotificationEvent): void {
+  /**
+   * Dispatch a notification to matching callbacks and every iterator.
+   * `epoch` is the `stream_epoch` of the connection it arrived on; a
+   * notification already dispatched for that epoch is dropped.
+   */
+  dispatch(event: NotificationEvent, epoch?: string): void {
+    if (epoch !== undefined) {
+      if (epoch !== this.epoch) {
+        this.epoch = epoch;
+        this.seen.clear();
+      }
+      if (this.seen.has(event.seq)) return;
+      this.seen.add(event.seq);
+      if (this.seen.size > SEEN_LIMIT) {
+        this.seen.delete(this.seen.values().next().value as number);
+      }
+    }
     this._lastSeq = Math.max(this._lastSeq, event.seq);
 
-    // Notify any async iterators
-    for (const waiter of this.waiters) {
-      waiter(event);
-    }
-    this.waiters = [];
+    for (const queue of this.iterators) queue.push(event);
 
     // Call matching callbacks
     for (const entry of this.callbacks) {
@@ -86,21 +107,56 @@ export class NotificationDispatcher {
   }
 
   /** Wait for the next notification event. */
-  next(): Promise<NotificationEvent> {
-    return new Promise<NotificationEvent>((resolve) => {
-      this.waiters.push(resolve);
-    });
+  async next(): Promise<NotificationEvent> {
+    const queue = new EventQueue();
+    this.iterators.add(queue);
+    try {
+      return await queue.take();
+    } finally {
+      this.iterators.delete(queue);
+    }
   }
 
   /**
-   * Create an async iterable of notification events.
+   * Create an async iterable of notification events. Events that arrive
+   * while the consumer is busy are buffered, not dropped.
    *
    * Usage:
    *   for await (const event of dispatcher.events()) { ... }
    */
   async *events(): AsyncIterableIterator<NotificationEvent> {
-    while (true) {
-      yield await this.next();
+    const queue = new EventQueue();
+    this.iterators.add(queue);
+    try {
+      while (true) {
+        yield await queue.take();
+      }
+    } finally {
+      this.iterators.delete(queue);
     }
+  }
+}
+
+/** Events buffered for one iterator. */
+class EventQueue {
+  private readonly buffered: NotificationEvent[] = [];
+  private waiter?: (event: NotificationEvent) => void;
+
+  push(event: NotificationEvent): void {
+    const waiter = this.waiter;
+    if (waiter) {
+      this.waiter = undefined;
+      waiter(event);
+    } else {
+      this.buffered.push(event);
+    }
+  }
+
+  take(): Promise<NotificationEvent> {
+    const event = this.buffered.shift();
+    if (event) return Promise.resolve(event);
+    return new Promise((resolve) => {
+      this.waiter = resolve;
+    });
   }
 }
