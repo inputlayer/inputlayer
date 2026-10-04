@@ -535,6 +535,38 @@ mod rounds {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn an_own_cost_from_before_a_rule_change_is_dropped() {
+        let (handler, _tmp) = handler();
+        write(&handler, "+item[(\"s1\", 1), (\"s2\", 2)]").await;
+        let families = Families::default();
+        let metrics = Arc::new(SubscriptionMetrics::default());
+        let mut views: Vec<_> = (1..=4)
+            .map(|i| {
+                member(
+                    &families,
+                    &handler,
+                    &metrics,
+                    &format!("?item(\"s{i}\", X)"),
+                )
+            })
+            .collect();
+        let family = Arc::clone(&views[0].family);
+        for view in &mut views {
+            view.refresh().await.unwrap();
+        }
+        let before = views[0].own.current_snapshot().unwrap();
+
+        write(&handler, "+tagged(S) <- item(S, 1)").await;
+        views[0].refresh().await.unwrap();
+        assert_eq!(family.own_cost_us.load(Ordering::Relaxed), 0);
+        // An own evaluation of the old rules that finishes after the change.
+        let probe = family.record_own(Some(std::time::Duration::from_millis(5)), &before);
+        assert!(!probe);
+        assert_eq!(family.own_cost_us.load(Ordering::Relaxed), 0);
+        assert_eq!(family.own_since_stop.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn a_rule_change_starts_the_costs_over_and_judges_the_shape_again() {
         let (handler, _tmp) = handler();
         write(

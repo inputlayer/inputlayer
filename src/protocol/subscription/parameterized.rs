@@ -595,30 +595,26 @@ impl Family {
             probe,
         )
         .await;
-        let current = self
-            .judged
-            .load()
-            .as_ref()
-            .is_some_and(|judged| Arc::ptr_eq(&judged.rules, &rules));
         let ran = match ran {
             Ok(ran) => ran,
             Err(e) => {
-                if current {
-                    self.stop_sharing();
-                }
+                self.stop_sharing(&rules);
                 return Err(e);
             }
         };
         let partitioning = Instant::now();
         let parts = Partitions::build(&self.shape, ran.rows).inspect_err(|e| {
             debug!(query = %self.shape.query, error = %e, "subscription_family_stops_sharing");
-            if current {
-                self.stop_sharing();
-            }
+            self.stop_sharing(&rules);
         })?;
         let own = self.own_cost_us.load(Ordering::Relaxed);
-        if current && own > 0 {
-            let shared = smooth(&self.shared_cost_us, ran.cost + partitioning.elapsed());
+        let cost = ran.cost + partitioning.elapsed();
+        let shared = if own > 0 {
+            self.smooth(&self.shared_cost_us, cost, &rules)
+        } else {
+            None
+        };
+        if let Some(shared) = shared {
             let bindings = self.bindings.load(Ordering::Relaxed) as u64;
             let permits = self.handler.compute_permits() as u64;
             if !keeps_sharing(shared, own, bindings, permits) {
@@ -630,12 +626,11 @@ impl Family {
                     permits,
                     "subscription_family_stops_sharing"
                 );
-                self.stop_sharing();
-            } else {
+                self.stop_sharing(&rules);
+            } else if self.start_sharing(&rules) {
                 if self.stops.load(Ordering::Relaxed) != 0 {
                     self.stops.store(0, Ordering::Relaxed);
                 }
-                self.sharing.store(true, Ordering::Relaxed);
                 if (self.rounds.fetch_add(1, Ordering::Relaxed) + 1).is_multiple_of(SAMPLE_EVERY) {
                     self.sample_due.store(true, Ordering::Relaxed);
                 }
@@ -657,7 +652,42 @@ impl Family {
         self.sample_due.load(Ordering::Relaxed) && self.sample_due.swap(false, Ordering::Relaxed)
     }
 
-    fn stop_sharing(&self) {
+    /// Whether the family's costs are those of `rules`: samples measured
+    /// under other rules change nothing.
+    fn judges(&self, rules: &Arc<PersistentRules>) -> bool {
+        self.judged
+            .load()
+            .as_ref()
+            .is_some_and(|judged| Arc::ptr_eq(&judged.rules, rules))
+    }
+
+    /// [`smooth`] `cost`, measured under `rules`, into `average`, unless
+    /// the family no longer judges `rules`.
+    fn smooth(
+        &self,
+        average: &AtomicU64,
+        cost: Duration,
+        rules: &Arc<PersistentRules>,
+    ) -> Option<u64> {
+        self.judges(rules).then(|| smooth(average, cost))
+    }
+
+    /// Start sharing on a verdict under `rules`, unless the family no longer
+    /// judges them; whether it did.
+    fn start_sharing(&self, rules: &Arc<PersistentRules>) -> bool {
+        let judged = self.judges(rules);
+        if judged {
+            self.sharing.store(true, Ordering::Relaxed);
+        }
+        judged
+    }
+
+    /// Stop sharing on a verdict under `rules`, counting a failure, unless
+    /// the family no longer judges them.
+    fn stop_sharing(&self, rules: &Arc<PersistentRules>) {
+        if !self.judges(rules) {
+            return;
+        }
         self.own_since_stop.store(0, Ordering::Relaxed);
         self.shared_cost_us.store(0, Ordering::Relaxed);
         self.stops.fetch_add(1, Ordering::Relaxed);
@@ -670,11 +700,15 @@ impl Family {
     /// known, there are more bindings than compute permits, and the family
     /// never shared or enough own evaluations passed since it stopped.
     fn record_own(&self, cost: Option<Duration>, snapshot: &KnowledgeGraphSnapshot) -> bool {
-        if self.binds_recursion(snapshot) {
+        let rules = snapshot.persistent_rules();
+        if self.binds_recursion(snapshot) || !self.judges(rules) {
             return false;
         }
         let average = match cost {
-            Some(cost) => smooth(&self.own_cost_us, cost),
+            Some(cost) => match self.smooth(&self.own_cost_us, cost, rules) {
+                Some(average) => average,
+                None => return false,
+            },
             None => self.own_cost_us.load(Ordering::Relaxed),
         };
         if self.sharing.load(Ordering::Relaxed) {
@@ -694,7 +728,7 @@ impl Family {
     /// share without one.
     fn probe(family: &Arc<Family>, snapshot: Arc<KnowledgeGraphSnapshot>) {
         if family.handler.compute_permits() < MIN_PERMITS_FOR_PROBES {
-            family.sharing.store(true, Ordering::Relaxed);
+            family.start_sharing(snapshot.persistent_rules());
             return;
         }
         if family.probing.swap(true, Ordering::Relaxed) {
