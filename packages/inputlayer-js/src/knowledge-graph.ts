@@ -5,7 +5,7 @@
 import type { Connection, ExecuteOptions } from './connection.js';
 import type { ResultResponse } from './protocol.js';
 import type { Expr, BoolExpr, OrderedColumn } from './ast.js';
-import type { RelationDef } from './relation.js';
+import { compileValue, type ColumnTypes, type RelationDef, type RowOf } from './relation.js';
 import type { Fact } from './types.js';
 import type { ColumnProxy, RelationRef } from './proxy.js';
 import type { AclEntry } from './auth.js';
@@ -22,7 +22,23 @@ import {
   type QueryPlan,
   type RuleClause,
 } from './compiler.js';
-import { InternalError } from './errors.js';
+import {
+  CompileError,
+  ConflictError,
+  InternalError,
+  PreconditionFailed,
+  QueryError,
+  StatementFailedError,
+} from './errors.js';
+import {
+  GUARD_SCHEMAS,
+  Program,
+  compileClaim,
+  parseWriteMessage,
+  type Claim,
+  type ClaimOptions,
+  type ProgramResult,
+} from './program.js';
 import { HnswIndex } from './index-def.js';
 import { ResultSet } from './result.js';
 import { Session } from './session.js';
@@ -174,6 +190,9 @@ export class KnowledgeGraph {
   private readonly conn: Connection;
   private readonly _session: Session;
 
+  /** Whether this handle declared the guard relations (il_txn, il_txn_pending, il_assert). */
+  private guardRelationsDeclared = false;
+
   constructor(name: string, connection: Connection) {
     this._name = name;
     this.conn = connection;
@@ -198,12 +217,20 @@ export class KnowledgeGraph {
 
   // ── Schema ──────────────────────────────────────────────────────
 
-  /** Deploy schema definitions. Idempotent. */
+  /**
+   * Deploy schema definitions, with the relations guarded programs use
+   * (`il_txn`, `il_txn_pending`, `il_assert`), in one program. Idempotent.
+   */
   async define(...relations: RelationDef[]): Promise<void> {
-    for (const rel of relations) {
-      const iql = compileSchema(rel);
-      await this.conn.execute(iql);
-    }
+    await this.conn.execute([...relations.map(compileSchema), ...GUARD_SCHEMAS].join('\n'));
+    this.guardRelationsDeclared = true;
+  }
+
+  /** Declare the guard relations once per handle, for a graph defined elsewhere. */
+  private async ensureGuardRelations(): Promise<void> {
+    if (this.guardRelationsDeclared) return;
+    await this.conn.execute(GUARD_SCHEMAS.join('\n'));
+    this.guardRelationsDeclared = true;
   }
 
   /** List all relations in this KG. */
@@ -276,6 +303,102 @@ export class KnowledgeGraph {
       await this.conn.execute(iql);
     }
     return { count: facts.length };
+  }
+
+  /**
+   * Retract a row (every column given), or every row matching the given
+   * columns, as one program: `retract(Eta, { shipment: "S-77" })`.
+   */
+  async retract(rel: RelationDef, rowOrKey: Fact): Promise<DeleteResult> {
+    const result = await this.program().retract(rel, rowOrKey).commit();
+    return { count: result.deleted };
+  }
+
+  // ── Programs and claims ─────────────────────────────────────────
+
+  /**
+   * Start a program: statements committed as one request and one
+   * transaction. `.when()` makes the whole program conditional.
+   *
+   * @example
+   * await kg.program()
+   *   .insert(AttemptDone, { attempt: "att-9f3", status: "ok" })
+   *   .when(any(Attempt, { attempt: "att-9f3" }), NOT(any(AttemptDone, { attempt: "att-9f3" })))
+   *   .commit();
+   */
+  program(): Program {
+    return new Program((program, strict) => this.commitProgram(program, strict));
+  }
+
+  private async commitProgram(program: Program, strict: boolean): Promise<ProgramResult> {
+    if (program.guarded) await this.ensureGuardRelations();
+    const compiled = program.compile(strict);
+    const { iql } = compiled;
+    let result: ResultResponse;
+    try {
+      result = await this.conn.execute(iql);
+    } catch (e) {
+      if (
+        e instanceof StatementFailedError &&
+        compiled.assertIndex !== undefined &&
+        e.errors[0]?.index === compiled.assertIndex
+      ) {
+        throw new PreconditionFailed(iql, e.result);
+      }
+      throw asConflict(e, iql);
+    }
+    const message = (i: number) => String(result.rows[i]?.[0] ?? '');
+    let inserted = 0;
+    let deleted = 0;
+    for (const i of compiled.writeIndexes) {
+      const counts = parseWriteMessage(message(i));
+      inserted += counts.inserted;
+      deleted += counts.deleted;
+    }
+    const applied = compiled.tokenIndex === undefined || parseWriteMessage(message(compiled.tokenIndex)).inserted === 1;
+    if (strict && !applied) throw new PreconditionFailed(iql, result);
+    return { applied, inserted, deleted, iql };
+  }
+
+  /**
+   * Insert `row` only if the `when` conditions hold and no `unless` row
+   * exists, deciding at commit, and say who holds the key afterwards. One
+   * request: of many concurrent claims on one key, exactly one wins.
+   *
+   * @example
+   * const c = await kg.claim(Attempt, { order: "ORD-1", tool: "carrier_check", attempt: id }, {
+   *   when: [any(CheckNeeded, { order: "ORD-1" })],
+   *   unless: any(Attempt, { order: "ORD-1", tool: "carrier_check" }),
+   * });
+   * if (c.won) { ... }
+   */
+  async claim<T extends ColumnTypes>(
+    rel: RelationDef<T>,
+    row: RowOf<RelationDef<T>>,
+    opts: ClaimOptions<keyof T & string> = {},
+  ): Promise<Claim<RowOf<RelationDef<T>>>> {
+    const fact = row as unknown as Fact;
+    const { iql } = compileClaim(rel, fact, opts);
+    let result: ResultResponse;
+    try {
+      result = await this.conn.execute(iql);
+    } catch (e) {
+      throw asConflict(e, iql);
+    }
+    const cols = rel.columns;
+    const ours = cols.map((c) => compileValue(fact[c]));
+    const rows = result.rows.map((r) => {
+      if (r.length !== cols.length) {
+        throw new InternalError(`Unexpected claim reply: ${JSON.stringify(r)} for columns ${cols.join(', ')}`);
+      }
+      return r;
+    });
+    if (rows.some((r) => r.every((v, i) => compileValue(v) === ours[i]))) {
+      return { won: true, holder: row };
+    }
+    const first = rows[0];
+    const holder = first === undefined ? null : (Object.fromEntries(cols.map((c, i) => [c, first[i]])) as RowOf<RelationDef<T>>);
+    return { won: false, holder };
   }
 
   // ── Query ───────────────────────────────────────────────────────
@@ -681,6 +804,23 @@ export class KnowledgeGraph {
       timingBreakdown: result.timing_breakdown,
     });
   }
+}
+
+/** A `conflict` failure of a conditional write as `ConflictError`; anything else unchanged. */
+function asConflict(e: unknown, iql: string): unknown {
+  if (e instanceof QueryError && e.code === 'conflict') return new ConflictError(e.message, iql);
+  return e;
+}
+
+/** `.debug` and `.why` take one statement, so they cannot state the session facts a negated constant needs. */
+function explainable(plan: QueryPlan, what: string): QueryPlan {
+  if (plan.constFacts !== undefined) {
+    throw new CompileError(
+      `${what}() cannot explain a query whose NOT(any()) binds only constants`,
+      'Bind the negated column to a column of a joined relation',
+    );
+  }
+  return plan;
 }
 
 /** The engine's reply to one insert statement. */

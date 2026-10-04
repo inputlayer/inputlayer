@@ -7,8 +7,12 @@ export { Timestamp } from './types.js';
 export type { Vector, VectorInt8, IQLType, FieldValue, Fact, ColumnDef, RelationSchema } from './types.js';
 
 // Relation system
-export { relation, RelationDef, compileValue, resolveRelationName, getColumns, getColumnTypes } from './relation.js';
-export type { ColumnTypes } from './relation.js';
+export { relation, any, RelationDef, compileValue, resolveRelationName, getColumns, getColumnTypes } from './relation.js';
+export type { ColumnTypes, RowOf, ValueOf, Binding } from './relation.js';
+
+// Programs, guards and claims
+export { Program } from './program.js';
+export type { ProgramResult, Claim, ClaimOptions } from './program.js';
 
 // Derived relations / rule builder
 export { from } from './derived.js';
@@ -30,6 +34,7 @@ export type {
   InExpr,
   NegatedIn,
   MatchExpr,
+  AnyExpr,
 } from './ast.js';
 
 // Proxy system
@@ -67,6 +72,9 @@ export {
   CancelledError,
   ProtocolError,
   RateLimitedError,
+  CompileError,
+  PreconditionFailed,
+  ConflictError,
 } from './errors.js';
 
 // Result

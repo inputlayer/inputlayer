@@ -210,6 +210,32 @@ export function matchExpr(
   return { _tag: 'MatchExpr', relation, bindings, negated };
 }
 
+/**
+ * Existence of a row: `any(R, { col: value })` is an atom of R with each
+ * bound column set to its value (a literal, or a column of another atom)
+ * and `_` elsewhere. `NOT(any(...))` is the negated atom.
+ */
+export interface AnyExpr extends BoolExpr {
+  readonly _tag: 'AnyExpr';
+  readonly relation: string;
+  /** All columns of the relation, in order. */
+  readonly columns: readonly string[];
+  readonly columnTypes: Readonly<Record<string, string>>;
+  readonly bindings: Readonly<Record<string, Expr>>;
+  /** Key the atom's own columns are addressed by; assigned by the compiler. */
+  readonly alias?: string;
+}
+
+export function anyExpr(
+  relation: string,
+  columns: readonly string[],
+  columnTypes: Readonly<Record<string, string>>,
+  bindings: Readonly<Record<string, Expr>>,
+  alias?: string,
+): AnyExpr {
+  return { _tag: 'AnyExpr', relation, columns, columnTypes, bindings, alias };
+}
+
 // ── Type guards ─────────────────────────────────────────────────────
 
 export function isColumn(e: Expr): e is Column {
@@ -251,4 +277,7 @@ export function isNegatedIn(e: BoolExpr): e is NegatedIn {
 }
 export function isMatchExpr(e: BoolExpr): e is MatchExpr {
   return e._tag === 'MatchExpr';
+}
+export function isAnyExpr(e: BoolExpr): e is AnyExpr {
+  return e._tag === 'AnyExpr';
 }
