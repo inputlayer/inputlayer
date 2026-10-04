@@ -9,12 +9,17 @@
  * end the pending calls when they announce a close. The reader runs while no
  * call is in flight, so pushes are delivered to an idle client.
  *
- * Deadlines: a call's `timeoutMs` is sent as `timeout_ms`; if no reply has
- * arrived `timeoutGraceMs` after it, the connection sends `cancel` and probes
- * the transport with a WebSocket ping. A live server answers the probe and
- * then the call (typed, e.g. `DeadlineExceededError`, or with the committed
- * result of a write that was already committing); a dead one does not, and
- * the connection is dropped, failing the call with `ConnectionLostError`.
+ * Deadlines: a call's `timeoutMs` runs from `execute()`; what is left of it
+ * when the call is sent goes as `timeout_ms`, and a call still waiting to be
+ * sent when it passes fails with `DeadlineExceededError`. If a sent call has
+ * no reply at its deadline, the connection sends `cancel` and probes the
+ * transport with a WebSocket ping (no answer drops the connection, failing
+ * the call with `ConnectionLostError`). The engine's reply normally follows
+ * (typed, e.g. `DeadlineExceededError`, or the committed result of a write
+ * that was already committing); without one by `timeoutGraceMs` later, the
+ * call fails locally: `DeadlineExceededError` for a query, and
+ * `OutcomeUnknownError` for a program that may write. A later reply is
+ * dropped and counted.
  *
  * Reconnect: exponential backoff with jitter, re-opened on the same knowledge
  * graph (`?kg=`) with the notification cursor (`last_seq` and `epoch`), then
@@ -42,6 +47,7 @@ import {
   ConnectionError,
   ConnectionLostError,
   DeadlineExceededError,
+  InputLayerError,
   InternalError,
   OutcomeUnknownError,
   ProtocolError,
@@ -73,7 +79,7 @@ export interface ConnectionOptions {
   epoch?: string;
   /** Deadline of a call without its own `timeoutMs` (default 30 000; 0 for none). */
   defaultTimeoutMs?: number;
-  /** Wait past a deadline before cancelling and probing the server (default 2 000). */
+  /** Wait past a deadline, after cancelling, before failing the call locally (default 2 000). */
   timeoutGraceMs?: number;
   /** Ping when nothing was sent for this long, so the server's idle timeout never ends a connection that only listens (default 20 000; 0 disables). */
   keepaliveMs?: number;
@@ -119,7 +125,7 @@ export interface SubscriptionRoute {
 export interface ConnectionStats {
   /** Subscription pushes of a stale generation, or for no route. */
   stalePushes: number;
-  /** Replies to calls that no longer wait (abandoned after a protocol failure). */
+  /** Replies to calls that no longer wait (abandoned after a protocol failure or failed locally past their deadline). */
   staleReplies: number;
   /** Frames that were not JSON or had an unknown type. */
   malformedFrames: number;
@@ -134,7 +140,8 @@ export interface ConnectionStats {
  * - `session_reset`: session facts, session rules and subscriptions were
  *   lost with the old connection: re-create what you hold;
  * - `notification_gap` `{ code, message }`: notifications were missed
- *   (`replay_gap` or `notifications_missed`): re-read the state you track;
+ *   (`replay_gap`, `notifications_missed`, or `no_cursor` after a reconnect
+ *   with no notification seen before the drop): re-read the state you track;
  * - `closed` `{ error }`: reconnecting gave up; the connection is closed.
  */
 export type ConnectionEventType =
@@ -156,7 +163,8 @@ interface Stream {
 
 interface Call {
   program: string;
-  timeoutMs: number;
+  /** `performance.now()` at the call's deadline. */
+  expiresAt?: number;
   signal?: AbortSignal;
   onAbort?: () => void;
   resolve: (result: ResultResponse) => void;
@@ -164,8 +172,10 @@ interface Call {
   id?: string;
   stream?: Stream;
   deadline?: ReturnType<typeof setTimeout>;
+  cancelId?: string;
   cancelled: boolean;
   retried: boolean;
+  settled: boolean;
 }
 
 interface Route {
@@ -202,6 +212,9 @@ export class Connection {
   private ws: WebSocket | null = null;
   private state: State = 'idle';
   private opening?: Promise<void>;
+  private reconnecting?: Promise<void>;
+  /** Ends the reconnect backoff early, when the connection is closed. */
+  private wake?: () => void;
   private _sessionId?: string;
   private _serverVersion?: string;
   private _role?: string;
@@ -299,6 +312,11 @@ export class Connection {
   /** Open and authenticate. Concurrent callers share one attempt. */
   async connect(): Promise<void> {
     if (this.state === 'open') return;
+    if (this.state === 'closed') throw new ConnectionError('Connection closed');
+    if (this.reconnecting) {
+      await this.reconnecting;
+      return this.connect();
+    }
     if (this.opening) return this.opening;
     this.state = 'connecting';
     this.opening = this.openFirst().finally(() => {
@@ -318,7 +336,7 @@ export class Connection {
         await this.open();
       }
     } catch (e) {
-      this.state = 'idle';
+      if (this.state !== 'closed') this.state = 'idle';
       this.failQueued(e as Error);
       throw e;
     }
@@ -334,13 +352,11 @@ export class Connection {
     this.ws = null;
     this.stopKeepalive();
     this.clearProbe();
+    this.wake?.();
+    this.failControl(new ConnectionError('Connection closed'));
     this.failInFlight('closed', 'Connection closed by the client');
     this.failQueued(new ConnectionError('Connection closed'));
-    if (ws) {
-      ws.removeAllListeners();
-      ws.on('error', () => {});
-      ws.close();
-    }
+    if (ws) drop(ws);
   }
 
   /**
@@ -355,6 +371,10 @@ export class Connection {
     } catch (e) {
       throw new ConnectionError(`Failed to connect to ${wsUrl}: ${e}`);
     }
+    if (this.state === 'closed') {
+      drop(ws);
+      throw new ConnectionError('Connection closed');
+    }
     this.ws = ws;
     this.lastNotice = undefined;
     ws.on('message', (data: WebSocket.Data) => {
@@ -368,11 +388,10 @@ export class Connection {
     });
     try {
       await this.authenticate();
+      if ((this.state as State) === 'closed') throw new ConnectionError('Connection closed');
     } catch (e) {
       if (this.ws === ws) this.ws = null;
-      ws.removeAllListeners();
-      ws.on('error', () => {});
-      ws.close();
+      drop(ws);
       throw e;
     }
   }
@@ -460,7 +479,7 @@ export class Connection {
    */
   execute(program: string, opts: ExecuteOptions = {}): Promise<ResultResponse> {
     if (this.state === 'closed' || (this.state === 'idle' && !this.lazy)) {
-      return Promise.reject(new ConnectionError('Not connected'));
+      return Promise.reject(withIql(new ConnectionError('Not connected'), program));
     }
     if (this.state === 'idle') {
       // A lazy connection opens on its first call; the call waits in the queue.
@@ -472,15 +491,20 @@ export class Connection {
       return Promise.reject(withIql(new CancelledError('Cancelled before it was sent'), program));
     }
     return new Promise<ResultResponse>((resolve, reject) => {
+      const timeoutMs = opts.timeoutMs ?? this.defaultTimeoutMs;
       const call: Call = {
         program,
-        timeoutMs: opts.timeoutMs ?? this.defaultTimeoutMs,
         signal: opts.signal,
         resolve,
         reject: (error) => reject(withIql(error, program)),
         cancelled: false,
         retried: false,
+        settled: false,
       };
+      if (timeoutMs > 0) {
+        call.expiresAt = performance.now() + timeoutMs;
+        call.deadline = setTimeout(() => this.expire(call), timeoutMs);
+      }
       if (call.signal) {
         call.onAbort = () => this.abort(call);
         call.signal.addEventListener('abort', call.onAbort, { once: true });
@@ -499,25 +523,46 @@ export class Connection {
       call.stream = undefined;
       this.inFlight.set(id, call);
       const msg: ClientMessage = { type: 'execute', id, program: call.program };
-      if (call.timeoutMs > 0) msg.timeout_ms = call.timeoutMs;
+      if (call.expiresAt !== undefined) {
+        msg.timeout_ms = Math.max(1, Math.ceil(call.expiresAt - performance.now()));
+      }
       try {
         this.send(msg);
       } catch {
         // The socket is closing: its close handler fails the call.
         return;
       }
-      if (call.timeoutMs > 0) {
-        call.deadline = setTimeout(() => this.overdue(call), call.timeoutMs + this.timeoutGraceMs);
-      }
     }
   }
 
-  /** The call's deadline and grace passed without a reply. */
+  /** The call's deadline passed. */
+  private expire(call: Call): void {
+    call.deadline = undefined;
+    if (call.id && this.inFlight.get(call.id) === call) {
+      // The engine's own deadline answers now; cancel in case it does not.
+      this.sendCancel(call);
+      this.probeServer();
+      call.deadline = setTimeout(() => this.overdue(call), this.timeoutGraceMs);
+      return;
+    }
+    // Queued, or waiting to be resent after `rate_limited`: nothing ran.
+    const queued = this.queue.indexOf(call);
+    if (queued >= 0) this.queue.splice(queued, 1);
+    this.settle(call);
+    call.reject(new DeadlineExceededError('The deadline passed before the request was sent; nothing was applied'));
+  }
+
+  /** The grace period past the deadline ended without a reply: fail locally. */
   private overdue(call: Call): void {
     call.deadline = undefined;
-    if (!call.id || this.inFlight.get(call.id) !== call) return;
-    this.sendCancel(call);
-    this.probeServer();
+    // The reply and the cancel's ack, if they come, are dropped and counted.
+    if (call.cancelId) this.control.delete(call.cancelId);
+    const waited = `No reply ${this.timeoutGraceMs} ms past the deadline`;
+    this.finish(call, () => {
+      throw mayWrite(call.program)
+        ? new OutcomeUnknownError(`${waited}: the program may have committed; read the state back before retrying it`)
+        : new DeadlineExceededError(waited);
+    });
   }
 
   /** The caller aborted the call. */
@@ -536,6 +581,7 @@ export class Connection {
     if (call.cancelled || !call.id) return;
     call.cancelled = true;
     const id = this.newId('c');
+    call.cancelId = id;
     // The ack follows the target's own reply, which settles the call.
     this.control.set(id, () => {});
     try {
@@ -546,9 +592,9 @@ export class Connection {
   }
 
   /**
-   * Ping the transport: a live server answers at once, even while computing,
-   * and the overdue call's reply will follow the cancel. No answer within the
-   * grace period means the connection is dead: drop it.
+   * Ping the transport: a live server answers at once, even while computing.
+   * No answer within half the grace period means the connection is dead:
+   * drop it, so its calls fail with `ConnectionLostError` and it reconnects.
    */
   private probeServer(): void {
     const ws = this.ws;
@@ -556,17 +602,10 @@ export class Connection {
     const timer = setTimeout(() => {
       this.probe = undefined;
       if (this.ws === ws) ws.terminate();
-    }, this.timeoutGraceMs);
+    }, Math.max(1, Math.floor(this.timeoutGraceMs / 2)));
     this.probe = { timer, ws };
     ws.once('pong', () => {
-      if (this.probe?.ws !== ws) return;
-      this.clearProbe();
-      // The server is alive and has the cancel; the reply follows. Probe
-      // again after another grace period while a cancelled call still waits.
-      setTimeout(() => {
-        const waiting = [...this.inFlight.values()].some((call) => call.cancelled);
-        if (waiting && this.ws === ws) this.probeServer();
-      }, this.timeoutGraceMs).unref?.();
+      if (this.probe?.ws === ws) this.clearProbe();
     });
     try {
       ws.ping();
@@ -706,11 +745,10 @@ export class Connection {
   /** `rate_limited`: nothing ran. Resend once after the rate window. */
   private retryLater(call: Call, id: string): void {
     this.inFlight.delete(id);
-    if (call.deadline) clearTimeout(call.deadline);
-    call.deadline = undefined;
     call.retried = true;
     call.id = undefined;
     setTimeout(() => {
+      if (call.settled) return;
       if (call.signal?.aborted) {
         this.settle(call);
         call.reject(new CancelledError('Cancelled before it was resent'));
@@ -723,6 +761,7 @@ export class Connection {
   }
 
   private settle(call: Call): void {
+    call.settled = true;
     if (call.deadline) clearTimeout(call.deadline);
     call.deadline = undefined;
     if (call.signal && call.onAbort) call.signal.removeEventListener('abort', call.onAbort);
@@ -762,11 +801,11 @@ export class Connection {
   }
 
   private onNotice(notice: NoticeResponse): void {
-    this.lastNotice = notice;
     if (OPEN_NOTICES.has(notice.code)) {
       this.emit('notification_gap', { code: notice.code, message: notice.message });
       return;
     }
+    this.lastNotice = notice;
     // The server closes the connection next, which fails what waits with
     // this notice's code.
   }
@@ -847,10 +886,7 @@ export class Connection {
     const reason = this.lastNotice?.message ?? 'The connection closed';
     // Waiting control requests (an authentication in progress) fail now: a
     // close is transient, so a reconnect keeps trying.
-    for (const [id, waiter] of this.control) {
-      this.control.delete(id);
-      waiter(new ConnectionLostError(`Connection lost: ${reason}`, code));
-    }
+    this.failControl(new ConnectionLostError(`Connection lost: ${reason}`, code));
     this.failInFlight(code, reason);
     if (this.state !== 'open') return; // an open attempt reports its own failure
     this.emit('disconnected', { code });
@@ -860,7 +896,16 @@ export class Connection {
       return;
     }
     this.state = 'reconnecting';
-    void this.reconnect(code, reason);
+    this.reconnecting = this.reconnect(code, reason).finally(() => {
+      this.reconnecting = undefined;
+    });
+  }
+
+  private failControl(error: Error): void {
+    for (const [id, waiter] of this.control) {
+      this.control.delete(id);
+      waiter(error);
+    }
   }
 
   private failInFlight(code: string, reason: string): void {
@@ -879,36 +924,45 @@ export class Connection {
     const calls = this.queue.splice(0);
     for (const call of calls) {
       this.settle(call);
-      call.reject(error);
+      call.reject(copyError(error));
     }
   }
 
   private async reconnect(code: string, reason: string): Promise<void> {
+    const hadCursor = this._lastSeq !== undefined;
     let delay = this.reconnectDelay;
     let lastError: Error = new ConnectionLostError(`Connection lost: ${reason}`, code);
     for (let attempt = 1; attempt <= this.maxReconnectAttempts; attempt++) {
       // Full jitter in [delay/2, delay] so clients do not reconnect in step.
-      await sleep(delay * 1000 * (0.5 + Math.random() / 2));
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, delay * 1000 * (0.5 + Math.random() / 2));
+        this.wake = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+      });
+      this.wake = undefined;
       if (this.state !== 'reconnecting') return;
       try {
         await this.open();
       } catch (e) {
+        if (this.state !== 'reconnecting') return;
         lastError = e as Error;
         if (e instanceof AuthenticationError) break;
         delay = Math.min(delay * 2, this.maxReconnectDelay);
         continue;
-      }
-      if (this.state !== 'reconnecting') {
-        // Closed by the client meanwhile.
-        this.ws?.close();
-        this.ws = null;
-        return;
       }
       this.state = 'open';
       this._stats.reconnects += 1;
       this.startKeepalive();
       this.emit('reconnected', { attempt });
       this.emit('session_reset', {});
+      if (!hadCursor) {
+        this.emit('notification_gap', {
+          code: 'no_cursor',
+          message: 'Reconnected with no notification cursor: notifications sent while disconnected were not replayed',
+        });
+      }
       this.pump();
       return;
     }
@@ -970,6 +1024,13 @@ export class Connection {
   }
 }
 
+/** Close a socket whose frames no longer matter. */
+function drop(ws: WebSocket): void {
+  ws.removeAllListeners();
+  ws.on('error', () => {});
+  ws.close();
+}
+
 function createWebSocket(url: string): Promise<WebSocket> {
   return new Promise<WebSocket>((resolve, reject) => {
     const ws = new WebSocket(url);
@@ -1025,8 +1086,14 @@ function queryError(response: ErrorResponse): QueryError {
 }
 
 function withIql(error: Error, program: string): Error {
-  if (error instanceof QueryError && error.iql === undefined) error.iql = program;
+  if (error instanceof InputLayerError && error.iql === undefined) error.iql = program;
   return error;
+}
+
+/** A copy of `error` for one of several calls, so each carries its own program. */
+function copyError(error: Error): Error {
+  const copy = Object.create(Object.getPrototypeOf(error)) as Error;
+  return Object.assign(copy, error, { message: error.message, stack: error.stack });
 }
 
 /**
@@ -1038,9 +1105,5 @@ function mayWrite(program: string): boolean {
     .split('\n')
     .map((line) => line.trim())
     .some((line) => line !== '' && !line.startsWith('?') && !line.startsWith('//'));
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 

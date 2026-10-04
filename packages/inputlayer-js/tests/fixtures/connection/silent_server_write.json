@@ -1,0 +1,60 @@
+{
+  "name": "silent_server_write",
+  "about": "A live server answers transport pings but never replies: at the deadline plus grace the write fails locally with OutcomeUnknownError, the connection stays usable, and the late reply and cancel_ack are dropped and counted.",
+  "options": {
+    "timeoutMs": 50,
+    "timeoutGraceMs": 100
+  },
+  "calls": [
+    "+a(1)"
+  ],
+  "server": [
+    {
+      "await": {
+        "cancel": 0
+      }
+    },
+    {
+      "sleep": 200
+    },
+    {
+      "send": {
+        "type": "result",
+        "id": "$r0",
+        "columns": [
+          "x"
+        ],
+        "rows": [
+          [
+            1
+          ]
+        ],
+        "row_count": 1,
+        "total_count": 1,
+        "truncated": false,
+        "execution_time_ms": 0,
+        "errors": []
+      }
+    },
+    {
+      "send": {
+        "type": "cancel_ack",
+        "id": "$c0",
+        "target": "$r0",
+        "outcome": "too_late"
+      }
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "error": "OutcomeUnknownError",
+        "code": "outcome_unknown"
+      }
+    ],
+    "connected": true,
+    "stats": {
+      "staleReplies": 2
+    }
+  }
+}

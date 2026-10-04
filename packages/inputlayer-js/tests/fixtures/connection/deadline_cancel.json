@@ -1,6 +1,6 @@
 {
   "name": "deadline_cancel",
-  "about": "No reply by timeout + grace: the client sends cancel naming the call, and the engine's deadline_exceeded reply fails it typed; the ack after it is absorbed.",
+  "about": "No reply at the deadline: the client sends cancel naming the call, and the engine's deadline_exceeded reply within the grace period fails it typed; the ack after it is absorbed.",
   "options": {
     "timeoutMs": 50,
     "timeoutGraceMs": 50

@@ -1,0 +1,36 @@
+{
+  "name": "gap_notice_then_close",
+  "about": "A replay_gap notice keeps the connection open, so it is not the reason a later close without a notice gives: the pending call fails with code closed.",
+  "calls": [
+    "?a(X)"
+  ],
+  "server": [
+    {
+      "await": {
+        "executes": 1
+      }
+    },
+    {
+      "send": {
+        "type": "notice",
+        "code": "replay_gap",
+        "message": "cursor from another run"
+      }
+    },
+    {
+      "close": true
+    }
+  ],
+  "expect": {
+    "calls": [
+      {
+        "error": "ConnectionLostError",
+        "code": "closed"
+      }
+    ],
+    "events": [
+      "notification_gap",
+      "disconnected"
+    ]
+  }
+}

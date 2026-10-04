@@ -35,3 +35,4 @@ must reach. They are language-neutral so every SDK can replay them
   - `stats`: counters of dropped frames (`staleReplies`, `stalePushes`,
     `malformedFrames`);
   - `sentTimeoutMs`: the `timeout_ms` every `execute` carried.
+  - `connected`: the connection is still open and answers a ping afterwards.

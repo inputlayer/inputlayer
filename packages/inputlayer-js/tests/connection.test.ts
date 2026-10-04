@@ -35,6 +35,8 @@ class MockServer {
   refuseAuth = false;
   /** Answer authentication with a closing notice and close, as on `auth_timeout`. */
   closeOnAuth = false;
+  /** Record authentication but never answer it. */
+  holdAuth = false;
   private readonly server: WebSocketServer;
   private readonly waiters: Array<() => void> = [];
 
@@ -54,6 +56,11 @@ class MockServer {
         if ((msg.type === 'login' || msg.type === 'authenticate') && this.closeOnAuth) {
           socket.send(JSON.stringify({ type: 'notice', code: 'auth_timeout', message: 'Authentication timeout' }));
           socket.close();
+          return;
+        }
+        if ((msg.type === 'login' || msg.type === 'authenticate') && this.holdAuth) {
+          conn.received.push(msg);
+          for (const waiter of this.waiters.splice(0)) waiter();
           return;
         }
         if (msg.type === 'login' || msg.type === 'authenticate') {
@@ -154,6 +161,7 @@ interface Fixture {
     events?: string[];
     stats?: Record<string, number>;
     sentTimeoutMs?: number;
+    connected?: boolean;
   };
 }
 
@@ -220,6 +228,9 @@ describe('connection fixtures', () => {
         'interleaved_streams',
         'missing_chunk',
         'out_of_order_replies',
+        'queued_call_deadline',
+        'silent_server_query',
+        'silent_server_write',
       ]),
     );
   });
@@ -270,6 +281,11 @@ describe('connection fixtures', () => {
     }
     if (fixture.expect.lastSeq !== undefined) expect(c.lastSeq).toBe(fixture.expect.lastSeq);
     if (fixture.expect.events) expect(events).toEqual(fixture.expect.events);
+    if (fixture.expect.connected) {
+      // The ping's reply also follows every frame the server sent before it.
+      await c.ping();
+      expect(c.connected).toBe(true);
+    }
     if (fixture.expect.stats) {
       for (const [key, value] of Object.entries(fixture.expect.stats)) {
         expect(c.stats[key as keyof typeof c.stats], key).toBe(value);
@@ -407,7 +423,40 @@ describe('cancellation', () => {
   it('a call on a closed connection is refused', async () => {
     const c = await open();
     await c.close();
-    await expect(c.execute('?a(X)')).rejects.toBeInstanceOf(ConnectionError);
+    const error = await c.execute('?a(X)').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ConnectionError);
+    expect((error as ConnectionError).iql).toBe('?a(X)');
+  });
+
+  it('every call failed by a close carries its own program', async () => {
+    const c = await open({ maxInFlight: 1 });
+    const calls = ['+a(1)', '?b(X)', '?d(X)'].map((p) => c.execute(p).catch((e: unknown) => e));
+    await server!.until(() => executes(server!.last).length === 1);
+    await c.close();
+    const [sent, ...queued] = (await Promise.all(calls)) as ConnectionError[];
+    expect(sent).toBeInstanceOf(ConnectionLostError);
+    expect(sent.iql).toBe('+a(1)');
+    expect(queued.map((e) => e.constructor)).toEqual([ConnectionError, ConnectionError]);
+    expect(queued.map((e) => e.iql)).toEqual(['?b(X)', '?d(X)']);
+  });
+
+  it('a queued call is sent with what is left of its deadline', async () => {
+    const c = await open({ maxInFlight: 1 });
+    const first = c.execute('?a(X)');
+    const second = c.execute('?b(X)', { timeoutMs: 1000 });
+    await server!.until(() => executes(server!.last).length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const reply = (id: unknown) =>
+      server!.last.socket.send(JSON.stringify({ type: 'result', id, columns: [], rows: [],
+        row_count: 0, total_count: 0, truncated: false, execution_time_ms: 0, errors: [] }));
+    reply(executes(server!.last)[0].id);
+    await first;
+    await server!.until(() => executes(server!.last).length === 2);
+    const sent = executes(server!.last)[1];
+    expect(sent.timeout_ms).toBeGreaterThan(0);
+    expect(sent.timeout_ms).toBeLessThanOrEqual(700);
+    reply(sent.id);
+    await second;
   });
 
   it('close fails calls in flight with ConnectionLostError', async () => {
@@ -418,6 +467,28 @@ describe('cancellation', () => {
     const error = await call.catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ConnectionLostError);
     expect((error as ConnectionLostError).mayHaveCommitted).toBe(true);
+  });
+
+  it('a close during authentication ends the open at once', async () => {
+    server = await MockServer.start();
+    server.holdAuth = true;
+    conn = new Connection({ url: server.url, username: 'u', password: 'p', autoReconnect: false });
+    const opening = conn.connect().catch((e: unknown) => e);
+    await server.until(() => server!.connections.length === 1 && server!.last.received.length === 1);
+    await conn.close();
+    expect(await opening).toBeInstanceOf(ConnectionError);
+    expect(conn.connected).toBe(false);
+  });
+
+  it('a close before the socket opens leaves the connection closed', async () => {
+    server = await MockServer.start();
+    conn = new Connection({ url: server.url, username: 'u', password: 'p', autoReconnect: false });
+    const opening = conn.connect().catch((e: unknown) => e);
+    await conn.close();
+    expect(await opening).toBeInstanceOf(ConnectionError);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(conn.connected).toBe(false);
+    await expect(conn.connect()).rejects.toBeInstanceOf(ConnectionError);
   });
 
   it('an auth_error fails the connect', async () => {
@@ -471,6 +542,42 @@ describe('reconnect', () => {
     expect((await queued).rows).toEqual([[2]]);
     expect(events).toEqual(['disconnected', 'reconnected', 'session_reset']);
     expect(c.stats.reconnects).toBe(1);
+  });
+
+  it('connect during a reconnect waits for it instead of opening its own', async () => {
+    const c = await open({ autoReconnect: true, reconnectDelay: 0.3 });
+    const events: string[] = [];
+    for (const type of ['disconnected', 'reconnected', 'session_reset']) {
+      c.events.addEventListener(type, () => events.push(type));
+    }
+    const disconnected = new Promise((resolve) => c.events.addEventListener('disconnected', resolve));
+    server!.last.socket.close();
+    await disconnected;
+    await c.connect();
+    expect(c.connected).toBe(true);
+    expect(events).toEqual(['disconnected', 'reconnected', 'session_reset']);
+    expect(c.stats.reconnects).toBe(1);
+    expect(server!.connections).toHaveLength(2);
+  });
+
+  it('a closed connection does not reopen', async () => {
+    const c = await open({ autoReconnect: true, reconnectDelay: 0.3 });
+    server!.last.socket.close();
+    await server!.until(() => !c.connected);
+    await c.close();
+    await expect(c.connect()).rejects.toBeInstanceOf(ConnectionError);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(server!.connections).toHaveLength(1);
+  });
+
+  it('a reconnect with no notification cursor announces a notification gap', async () => {
+    const c = await open({ autoReconnect: true, reconnectDelay: 0.01 });
+    const gaps: Array<{ code: string }> = [];
+    c.events.addEventListener('notification_gap', (e) => gaps.push((e as CustomEvent).detail));
+    const reconnected = new Promise((resolve) => c.events.addEventListener('reconnected', resolve));
+    server!.last.socket.close();
+    await reconnected;
+    expect(gaps.map((g) => g.code)).toEqual(['no_cursor']);
   });
 
   it('a new engine run drops the old cursor', async () => {

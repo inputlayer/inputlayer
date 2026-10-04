@@ -5,6 +5,9 @@
 import type { ErrorCode, ResultResponse, StatementError } from './protocol.js';
 
 export class InputLayerError extends Error {
+  /** The program that was sent, set by the connection on a call's error. */
+  iql?: string;
+
   constructor(message: string) {
     super(message);
     this.name = 'InputLayerError';
@@ -55,8 +58,6 @@ export class AuthenticationError extends InputLayerError {
 export class QueryError extends InputLayerError {
   readonly code?: ErrorCode;
   readonly validationErrors: Array<Record<string, unknown>>;
-  /** The program that was sent, set by the connection. */
-  iql?: string;
 
   constructor(
     message: string,

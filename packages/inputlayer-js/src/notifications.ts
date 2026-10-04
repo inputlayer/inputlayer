@@ -82,6 +82,8 @@ export class NotificationDispatcher {
       if (epoch !== this.epoch) {
         this.epoch = epoch;
         this.seen.clear();
+        // `seq` restarts with every engine run.
+        this._lastSeq = 0;
       }
       if (this.seen.has(event.seq)) return;
       this.seen.add(event.seq);

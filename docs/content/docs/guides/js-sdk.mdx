@@ -75,7 +75,9 @@ const rows = await kg.execute("?path(X, Y)", { timeoutMs: 2000, signal: controll
 // DeadlineExceededError or CancelledError when stopped before committing: nothing was applied.
 ```
 
-When the connection drops, calls in flight fail with `ConnectionLostError` (its `mayHaveCommitted` is set for a write that was sent: read the state back before resending it), calls not yet sent wait for the reconnect, and the client re-opens on the same knowledge graph, replaying the notifications you missed. `il.events` announces `disconnected`, `reconnected`, `session_reset` (session facts, rules and subscriptions are gone: re-create them) and `notification_gap`.
+The deadline runs from the call, including time spent waiting to be sent. If the engine has not replied `timeoutGraceMs` (default 2 000) after it, the call fails locally: a query with `DeadlineExceededError`, a program that may write with `OutcomeUnknownError` (read the state back before retrying it). Every error a call rejects with carries the program it sent as `iql`.
+
+When the connection drops, calls in flight fail with `ConnectionLostError` (its `mayHaveCommitted` is set for a write that was sent: read the state back before resending it), calls not yet sent wait for the reconnect, and the client re-opens on the same knowledge graph, replaying the notifications you missed. `il.events` announces `disconnected`, `reconnected`, `session_reset` (session facts, rules and subscriptions are gone: re-create them) and `notification_gap` (also after a reconnect when no notification had arrived yet, since there was no cursor to replay from).
 
 Unlike the Python SDK which has separate sync and async clients, the TypeScript SDK is `async/await` throughout - which is the natural pattern for JavaScript.
 
