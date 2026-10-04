@@ -373,12 +373,6 @@ export class Subscription<T = Row> implements AsyncIterableIterator<Change<T>> {
     this.state = 'opening';
     this.conn.events.addEventListener('disconnected', this.onDisconnected);
     this.conn.events.addEventListener('closed', this.onClosed);
-    try {
-      await this.checkPersistent();
-    } catch (e) {
-      this.fail(e as Error);
-      return;
-    }
     await this.openWithBackoff('snapshot');
   }
 
@@ -462,6 +456,7 @@ export class Subscription<T = Row> implements AsyncIterableIterator<Change<T>> {
     for (;;) {
       if (this.state !== state) return;
       try {
+        if (kind === 'snapshot') await this.checkPersistent();
         await this.unsubscribing;
         if (this.registered) {
           await this.conn.execute(meta.unsubscribe(this.id), { timeoutMs: this.timeoutMs }).catch((e) => {

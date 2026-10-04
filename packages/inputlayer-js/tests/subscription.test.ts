@@ -42,6 +42,8 @@ class Engine {
     revision: 1,
   });
   sessionRules: string[] = [];
+  /** Drop the connection on the next `.session` request. */
+  dropOnSession = false;
   /** Requests not answered until `release()`. */
   hold = false;
   private held: Array<() => void> = [];
@@ -100,6 +102,10 @@ class Engine {
       });
     };
     if (program === '.session') {
+      if (this.dropOnSession) {
+        this.dropOnSession = false;
+        return socket.terminate();
+      }
       const rows = this.sessionRules.length === 0
         ? [['No session data defined.']]
         : [[`Session rules (${this.sessionRules.length}):`], ...this.sessionRules.map((r, i) => [`  ${i + 1}. ${r}`])];
@@ -334,6 +340,18 @@ describe('subscribe', () => {
     engine!.sockets[0].terminate();
     const [snapshot] = await first;
     expect(snapshot).toMatchObject({ kind: 'snapshot', inserted: [{ a: 1, b: 1 }], revision: 3, verified: true });
+    expect(engine!.sub.socket).toBe(engine!.sockets[1]);
+    await sub.close();
+  });
+
+  it('a connection lost during the session-rule check still yields the snapshot', async () => {
+    const kg = await graph({ autoReconnect: true });
+    engine!.dropOnSession = true;
+    engine!.snapshot = () => ({ columns: ['a', 'b'], rows: [[1, 1]], revision: 2 });
+    const sub = kg.subscribe(E);
+    const [snapshot] = await take(sub, 1);
+    expect(snapshot).toMatchObject({ kind: 'snapshot', inserted: [{ a: 1, b: 1 }], revision: 2 });
+    expect(engine!.programs.filter((p) => p === '.session')).toHaveLength(2);
     expect(engine!.sub.socket).toBe(engine!.sockets[1]);
     await sub.close();
   });
