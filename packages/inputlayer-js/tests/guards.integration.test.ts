@@ -323,7 +323,9 @@ describe.skipIf(!SERVER_URL)('guards and claims (live)', () => {
     const kgs = [kg];
     while (kgs.length < 20) kgs.push(await connectAnother());
     // Bind each handle to the graph before the race, so the claims go out together.
-    await Promise.all(kgs.map((k) => k.execute('?race_attempt(W, A)')));
+    // One at a time: each handle opens its own socket, and the engine caps
+    // unauthenticated sockets per address (ws_max_preauth_per_ip, 16).
+    for (const k of kgs) await k.execute('?race_attempt(W, A)');
     const claims = await Promise.all(
       kgs.map((k, i) => k.claim(Race, { work: 'w-1', attempt: `a-${i}` }, { key: ['work'] })),
     );
