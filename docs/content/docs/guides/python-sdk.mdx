@@ -64,9 +64,9 @@ await il.close()
 
 - **One connection per knowledge graph.** `il.knowledge_graph(name)` gets its own connection, bound to that graph when it opens (on first use; a missing graph is created then). Handles never switch a shared connection between graphs, so one graph's subscriptions and session state survive calls on another.
 - **Calls are pipelined.** Concurrent calls on one handle are sent without waiting for each other and their replies are matched by request id; at most 15 are unanswered at once, which keeps one of the server's 16 slots free for a cancel.
-- **Deadlines.** Every call runs under a deadline (`default_timeout`, or `timeout=` on `kg.execute(iql, timeout=2.0)`) that the engine enforces; past it the call raises `DeadlineExceeded` and nothing was applied. If no reply comes at all, the SDK cancels the request on the server. Cancelling the awaiting task cancels the request too.
+- **Deadlines.** Every call runs under a deadline (`default_timeout`, or `timeout=` on `kg.execute(iql, timeout=2.0)`) that the engine enforces (time spent waiting for a reconnect or a free request slot counts against it); past it the call raises `DeadlineExceeded` and nothing was applied. If no reply comes at all, the SDK cancels the request on the server: a query then raises `DeadlineExceeded`, but a write raises `OutcomeUnknownError` unless the server confirmed the cancel, because it may have committed, so read back before retrying it. Cancelling the awaiting task cancels the request too.
 - **Live while idle.** One reader task per connection always runs, so notifications arrive while no call is in flight, and a ping every `keepalive` idle seconds keeps a listening client under the server's idle timeout.
-- **Reconnects.** A dropped connection fails its pending calls with `ConnectionLost` (`may_have_committed` is set for a write that was sent: read back before retrying) and reconnects to the same knowledge graph, resuming notifications after the last `seq` seen. Session rules and facts do not survive it. `il.events` reports `disconnected`, `session_reset`, `reconnected`, `notification_gap` and `closed`:
+- **Reconnects.** A dropped connection fails its pending calls with `ConnectionLost` (`may_have_committed` is set for a write that was sent: read back before retrying) and reconnects to the same knowledge graph, resuming notifications after the last `seq` seen (a reconnect with no `seq` to resume from reports a `notification_gap`). Session rules and facts do not survive it. `il.events` reports `disconnected`, `session_reset`, `reconnected`, `notification_gap` and `closed`:
 
 ```python
 @il.events.on("session_reset")
@@ -737,7 +737,7 @@ from inputlayer import (
     ValidationError,           # invalid data
     QueryError,                # base class for program and commit errors
     StatementFailedError,      # some statements of a program failed
-    OutcomeUnknownError,       # commit outcome unknown; store may be read-only
+    OutcomeUnknownError,       # write outcome unknown; read back before retrying
     StoreReadOnlyError,        # write refused until restart recovery
     QueryTimeoutError,         # query took too long
     DeadlineExceeded,          # the call's deadline passed; nothing applied

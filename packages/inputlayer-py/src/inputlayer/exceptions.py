@@ -112,12 +112,14 @@ class QueryError(InputLayerError):
 
 
 class OutcomeUnknownError(QueryError):
-    """Write outcome unknown; the store may be read-only until restart.
+    """Write outcome unknown; read the data back before retrying the write.
 
-    If so, a following write raises ``StoreReadOnlyError``.
-
-    The transaction may or may not survive restart; read the recovered data
-    before retrying it. ``result`` holds the server's response when it has one.
+    The server raises it when a commit's outcome is unknown; the store may
+    then be read-only until restart (a following write raises
+    ``StoreReadOnlyError``) and the transaction may or may not survive
+    restart. The SDK raises it when a write reached its deadline and neither
+    a reply nor a cancel confirmation arrived: the server may still have
+    committed it. ``result`` holds the server's response when it has one.
     """
 
     def __init__(self, message: str, result: ResultResponse | None = None) -> None:
@@ -164,7 +166,11 @@ class StatementFailedError(QueryError):
 
 class DeadlineExceeded(QueryError, QueryTimeoutError):
     """The request's deadline passed before it began committing; nothing it
-    would have changed is applied. Retry if the answer is still wanted."""
+    would have changed is applied. Retry if the answer is still wanted.
+
+    A query that gets no reply at all by its deadline (the server is silent
+    and the SDK cancelled it) raises it too; a write in that case raises
+    ``OutcomeUnknownError`` instead, since it may have committed."""
 
     def __init__(self, message: str, *, query: str | None = None) -> None:
         super().__init__(message, query=query, code="deadline_exceeded")

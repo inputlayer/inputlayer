@@ -21,6 +21,8 @@ from inputlayer.exceptions import (
     ConnectionError,
     ConnectionLost,
     DeadlineExceeded,
+    OutcomeUnknownError,
+    RateLimited,
 )
 from inputlayer.notifications import ConnectionEvent
 
@@ -112,7 +114,9 @@ class TestRequests:
             await conn.execute("?a(X)")
             await conn.execute("?b(X)", timeout=0.25)
             executes = [f for f in server.received if f["type"] == "execute"]
-            assert [(f["id"], f["timeout_ms"]) for f in executes] == [("r2", 2500), ("r3", 250)]
+            assert [f["id"] for f in executes] == ["r2", "r3"]
+            assert 2400 <= executes[0]["timeout_ms"] <= 2500
+            assert 150 <= executes[1]["timeout_ms"] <= 250
             await conn.close()
 
     async def test_no_timeout_leaves_the_engine_default(self) -> None:
@@ -185,7 +189,7 @@ class TestDeadlines:
         async def handler(peer: Peer) -> None:
             await peer.authenticate()
             q = await peer.recv_type("execute")
-            assert q["timeout_ms"] == 100
+            assert 50 <= q["timeout_ms"] <= 100
             await peer.send({
                 "type": "error", "id": q["id"], "code": "deadline_exceeded",
                 "message": "Request deadline of 100 ms exceeded",
@@ -227,6 +231,87 @@ class TestDeadlines:
             # The one slot is held by the abandoned request until its reply.
             assert (await conn.execute("?next(X)", timeout=2)).rows == []
             assert conn.in_flight == 0
+            await conn.close()
+
+    async def test_silent_server_leaves_a_write_outcome_unknown(self) -> None:
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            q = await peer.recv_type("execute")
+            cancel = await peer.recv_type("cancel")
+            await asyncio.sleep(0.2)
+            await peer.send({**result([]), "id": q["id"]})
+            await peer.send({
+                "type": "cancel_ack", "id": cancel["id"], "target": q["id"],
+                "outcome": "not_found",
+            })
+            await peer.serve_results()
+
+        async with MockServer(handler) as server:
+            conn = _conn(server, deadline_grace=0.05)
+            await conn.connect()
+            with pytest.raises(OutcomeUnknownError) as caught:
+                await conn.execute("+a(1)", timeout=0.1)
+            assert not isinstance(caught.value, DeadlineExceeded)
+            await _until(lambda: conn.in_flight == 0)
+            await conn.close()
+
+    async def test_confirmed_cancel_of_a_silent_write_is_a_deadline(self) -> None:
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            q = await peer.recv_type("execute")
+            cancel = await peer.recv_type("cancel")
+            await peer.send({
+                "type": "cancel_ack", "id": cancel["id"], "target": q["id"],
+                "outcome": "cancelled",
+            })
+            await asyncio.sleep(0.2)
+            await peer.send(
+                {"type": "error", "id": q["id"], "code": "cancelled", "message": "Cancelled"}
+            )
+            await peer.serve_results()
+
+        async with MockServer(handler) as server:
+            conn = _conn(server, deadline_grace=0.05)
+            await conn.connect()
+            with pytest.raises(DeadlineExceeded):
+                await conn.execute("+a(1)", timeout=0.1)
+            await _until(lambda: conn.in_flight == 0)
+            await conn.close()
+
+    async def test_server_deadline_counts_the_wait_for_a_slot(self) -> None:
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            first = await peer.recv_type("execute")
+            await asyncio.sleep(0.4)
+            await peer.send({**result([]), "id": first["id"]})
+            await peer.serve_results()
+
+        async with MockServer(handler) as server:
+            conn = _conn(server, max_in_flight=1)
+            await conn.connect()
+            held = asyncio.ensure_future(conn.execute("?a(X)"))
+            await _until(lambda: conn.in_flight == 1)
+            await conn.execute("?b(X)", timeout=1.0)
+            await held
+            second = [f for f in server.received if f["type"] == "execute"][1]
+            assert second["timeout_ms"] <= 700
+            await conn.close()
+
+    async def test_rate_limited_is_not_retried_past_the_deadline(self) -> None:
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            q = await peer.recv_type("execute")
+            await peer.send({
+                "type": "error", "id": q["id"], "code": "rate_limited", "message": "slow down",
+            })
+            await peer.serve_results()
+
+        async with MockServer(handler) as server:
+            conn = _conn(server)
+            await conn.connect()
+            with pytest.raises(RateLimited):
+                await conn.execute("?a(X)", timeout=0.5)
+            assert len([f for f in server.received if f["type"] == "execute"]) == 1
             await conn.close()
 
     async def test_too_late_cancel_returns_the_committed_result(self) -> None:
@@ -346,6 +431,22 @@ class TestIdle:
             await _until(lambda: conn.in_flight == 0)
             await conn.close()
 
+    async def test_keepalive_does_not_ping_while_a_reply_is_owed(self) -> None:
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            q = await peer.recv_type("execute")
+            await asyncio.sleep(0.5)
+            await peer.send({**result([]), "id": q["id"]})
+            await peer.serve_results()
+
+        async with MockServer(handler) as server:
+            conn = _conn(server, keepalive=0.1)
+            await conn.connect()
+            await conn.execute("?slow(X)")
+            assert [f["type"] for f in server.received[1:]] == ["execute"]
+            await _until(lambda: any(f["type"] == "ping" for f in server.received))
+            await conn.close()
+
     async def test_keepalive_waits_while_requests_flow(self) -> None:
         async with MockServer(_serve) as server:
             conn = _conn(server, keepalive=0.3)
@@ -403,6 +504,52 @@ class TestReconnect:
             ]
             assert hooked == ["other"]
             assert (await conn.execute("?a(X)")).rows == []
+            await conn.close()
+
+    async def test_new_engine_run_restarts_the_cursor(self) -> None:
+        async def first(peer: Peer) -> None:
+            await peer.authenticate()
+            await peer.send(notification(100))
+            await asyncio.sleep(0.1)
+            await peer.close(1011)
+
+        async def second(peer: Peer) -> None:
+            await peer.authenticate(epoch="ffeeddccbbaa9988")
+            await peer.send({"type": "notice", "code": "replay_gap", "message": "new run"})
+            await peer.send(notification(5))
+            await asyncio.sleep(0.1)
+            await peer.close(1011)
+
+        async def third(peer: Peer) -> None:
+            await peer.authenticate(epoch="ffeeddccbbaa9988")
+            await peer.serve_results()
+
+        async with MockServer(first, second, third) as server:
+            conn = _conn(server, auto_reconnect=True, reconnect_delay=0.01)
+            await conn.connect()
+            await _until(lambda: len(server.peers) == 3 and conn.connected)
+            assert server.peers[2].params == {
+                "kg": "default", "last_seq": "5", "epoch": "ffeeddccbbaa9988",
+            }
+            assert conn.last_seq == 5
+            assert conn.dispatcher.last_seq == 5
+            await conn.close()
+
+    async def test_reconnect_without_a_cursor_reports_a_gap(self) -> None:
+        async def first(peer: Peer) -> None:
+            await peer.authenticate()
+            await peer.close(1011)
+
+        async with MockServer(first, _serve) as server:
+            conn = _conn(server, auto_reconnect=True, reconnect_delay=0.01)
+            events: list[ConnectionEvent] = []
+            conn.events.on(callback=events.append)
+            await conn.connect()
+            await _until(lambda: any(e.type == "notification_gap" for e in events))
+            assert "last_seq" not in server.peers[1].params
+            assert [e.type for e in events] == [
+                "disconnected", "session_reset", "reconnected", "notification_gap",
+            ]
             await conn.close()
 
     async def test_calls_during_a_reconnect_wait_for_it(self) -> None:
@@ -552,3 +699,94 @@ class TestPool:
                 assert len(server.peers) == 2
                 assert seen == [9]
                 assert il.last_seq == 9
+
+    async def test_creating_a_graph_does_not_switch_any_handle(self) -> None:
+        created: list[str] = []
+
+        async def handler(peer: Peer) -> None:
+            kg = peer.params.get("kg")
+            if kg == "b" and "b" not in created:
+                login = await peer.recv()
+                await peer.send({
+                    "type": "auth_error", "id": login["id"],
+                    "message": "Knowledge graph 'b' not found",
+                })
+                return
+            await peer.authenticate()
+
+            def answer(program: str) -> dict[str, Any]:
+                if program.startswith(".kg create "):
+                    name = program.split()[-1]
+                    created.append(name)
+                    return result([["created"]], ["message"], switched_kg=name)
+                if program.startswith(".kg drop "):
+                    return result([["dropped"]], ["message"])
+                return result([[kg]], ["kg"])
+
+            await peer.serve_results(answer)
+
+        async with MockServer(handler) as server:
+            async with InputLayer(server.url, username="a", password="b", initial_kg="a") as il:
+                a, b = il.knowledge_graph("a"), il.knowledge_graph("b")
+                assert (await b.execute("?x(X)")).rows == [["b"]]
+                assert (await a.execute("?x(X)")).rows == [["a"]]
+                assert il._conn.current_kg == "a"
+                await il.drop_knowledge_graph("a")
+                assert il._conn.current_kg == "a"
+            assert created == ["b"]
+            admin = [
+                p for p in server.peers if "kg" not in p.params
+            ]
+            assert len(admin) == 2
+            assert not [f for f in server.received if f.get("program", "").startswith(".kg use")]
+
+    async def test_losing_one_graph_does_not_end_the_client_notifications(self) -> None:
+        go = asyncio.Event()
+
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            if peer.params.get("kg") == "other":
+                q = await peer.recv_type("execute")
+                await peer.send({**result([]), "id": q["id"]})
+                await peer.close(1011)
+                return
+            await go.wait()
+            await peer.send(notification(7))
+            await peer.serve_results()
+
+        async with MockServer(handler) as server:
+            il = InputLayer(server.url, username="a", password="b", auto_reconnect=False)
+            closed: list[str | None] = []
+            il.events.on("closed", callback=lambda e: closed.append(e.knowledge_graph))
+            async with il:
+                seen: list[int] = []
+
+                async def consume() -> None:
+                    async for event in il.notifications():
+                        seen.append(event.seq)
+                        return
+
+                consumer = asyncio.ensure_future(consume())
+                await asyncio.sleep(0)
+                await il.knowledge_graph("other").execute("?a(X)")
+                await _until(lambda: closed == ["other"])
+                go.set()
+                await asyncio.wait_for(consumer, 2)
+                assert seen == [7]
+            assert len(server.peers) == 2
+
+    async def test_handles_work_again_after_close_and_connect(self) -> None:
+        async def handler(peer: Peer) -> None:
+            await peer.authenticate()
+            kg = peer.params.get("kg", "default")
+            await peer.serve_results(lambda program: result([[kg]], ["kg"]))
+
+        async with MockServer(handler) as server:
+            il = InputLayer(server.url, username="a", password="b")
+            async with il:
+                sales, default = il.knowledge_graph("sales"), il.knowledge_graph("default")
+                await sales.execute("?a(X)")
+            async with il:
+                assert (await sales.execute("?a(X)")).rows == [["sales"]]
+                assert (await default.execute("?a(X)")).rows == [["default"]]
+                assert (await il.knowledge_graph("sales").execute("?a(X)")).rows == [["sales"]]

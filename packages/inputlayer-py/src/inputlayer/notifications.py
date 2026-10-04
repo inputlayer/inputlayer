@@ -50,8 +50,9 @@ class ConnectionEvent:
       session facts lived on the old connection and are gone: recreate them.
     - ``notification_gap``: notifications were lost (``code`` is
       ``replay_gap`` when the reconnect cursor could not be honoured, or
-      ``notifications_missed`` when the client read too slowly). Re-read the
-      state you track.
+      ``notifications_missed`` when the client read too slowly; ``None`` after
+      a reconnect that had no cursor to resume from because no notification
+      had arrived yet). Re-read the state you track.
     - ``closed``: reconnecting gave up (or was not allowed); the connection
       stays closed.
     """
@@ -144,6 +145,7 @@ class NotificationDispatcher(_Broadcast[NotificationEvent]):
     def __init__(self) -> None:
         super().__init__()
         self._last_seq: int = 0
+        self._epoch: str | None = None
         self._seen: set[tuple[str | None, int]] = set()
         self._seen_order: deque[tuple[str | None, int]] = deque()
 
@@ -180,6 +182,11 @@ class NotificationDispatcher(_Broadcast[NotificationEvent]):
     def dispatch(self, event: NotificationEvent, *, epoch: str | None = None) -> None:
         """Dispatch a notification to matching callbacks and the iterators."""
         key = (epoch, event.seq)
+        if epoch is not None and epoch != self._epoch:
+            # The engine restarted: seqs count again from its new run.
+            if self._epoch is not None:
+                self._last_seq = 0
+            self._epoch = epoch
         if epoch is not None:
             if key in self._seen:
                 return

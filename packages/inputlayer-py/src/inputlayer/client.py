@@ -143,16 +143,33 @@ class InputLayer:
         if conn is None:
             conn = Connection(
                 self._url, initial_kg=name, lazy=True, create_kg=self._create_kg,
-                **self._options,
+                ends_notifications=False, **self._options,
             )
             self._pool[name] = conn
         return conn
 
+    async def _admin_execute(self, program: str) -> None:
+        """Run a graph-switching command (``.kg create`` switches its session)
+        on a short-lived connection no handle uses, bound to the server's
+        default graph."""
+        conn = Connection(
+            self._url,
+            username=self._options["username"],
+            password=self._options["password"],
+            api_key=self._options["api_key"],
+            auto_reconnect=False,
+            default_timeout=self._options["default_timeout"],
+            keepalive=None,
+        )
+        await conn.connect()
+        try:
+            await conn.execute(program)
+        finally:
+            await conn.close()
+
     async def _create_kg(self, name: str) -> bool:
-        """Create *name* on the client's own connection; ``True`` if created."""
-        if self._conn.state == "idle":
-            await self._conn.connect()
-        await self._conn.execute(f".kg create {name}")
+        """Create *name*; ``True`` if created."""
+        await self._admin_execute(f".kg create {name}")
         return True
 
     def knowledge_graph(self, name: str, *, create: bool = True) -> KnowledgeGraph:
@@ -197,17 +214,14 @@ class InputLayer:
     async def drop_knowledge_graph(self, name: str) -> None:
         """Drop a knowledge graph and all its data.
 
-        The handle's own connection to it is closed first. The server rejects
-        dropping the graph a connection is bound to, so when it is the
-        client's own connection's graph, that connection moves to
-        ``default`` first.
+        The handle's own connection to it is closed first. The drop runs on a
+        short-lived connection bound to the server's default graph, so no
+        handle's connection is switched.
         """
         conn = self._pool.pop(name, None)
         if conn is not None and conn is not self._conn:
             await conn.close()
-        if self._conn.current_kg == name:
-            await self._conn.execute(".kg use default")
-        await self._conn.execute(f".kg drop {name}")
+        await self._admin_execute(f".kg drop {name}")
         self._kgs.pop(name, None)
 
     # ── User management ───────────────────────────────────────────────

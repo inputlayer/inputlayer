@@ -207,6 +207,8 @@ class Connection:
     the connection on the first request instead of requiring ``connect()``.
     ``create_kg`` is called when the bound knowledge graph is missing at first
     connect; when it returns ``True`` the connect is retried once.
+    ``ends_notifications=False`` keeps this connection's giving up from ending
+    the iterators of a ``dispatcher`` that other connections also feed.
     """
 
     def __init__(
@@ -231,6 +233,7 @@ class Connection:
         dispatcher: NotificationDispatcher | None = None,
         events: EventDispatcher | None = None,
         create_kg: Callable[[str], Awaitable[bool]] | None = None,
+        ends_notifications: bool = True,
     ) -> None:
         if max_in_flight < 1:
             raise ValueError("max_in_flight must be at least 1")
@@ -249,6 +252,7 @@ class Connection:
         self._deadline_grace = deadline_grace
         self._lazy = lazy
         self._create_kg = create_kg
+        self._ends_notifications = ends_notifications
 
         # The notification cursor: the last seq seen on this connection and
         # the stream epoch it belongs to.
@@ -469,7 +473,10 @@ class Connection:
                 self._current_kg = response.knowledge_graph
                 if self._epoch != response.stream_epoch:
                     # A cursor from another engine run means nothing here; the
-                    # server answers it with a replay_gap notice.
+                    # server answers it with a replay_gap notice, and the
+                    # cursor counts again from the start of this run.
+                    if self._epoch is not None and self._last_seq is not None:
+                        self._last_seq = 0
                     self._epoch = response.stream_epoch
                 return
             raise AuthenticationError(f"Unexpected auth response: {response!r}")
@@ -484,32 +491,37 @@ class Connection:
         """Send a program and await its result.
 
         ``timeout`` (seconds, default the connection's ``default_timeout``)
-        becomes the request's server-side deadline; ``DeadlineExceeded``
-        means nothing was applied. A ``rate_limited`` refusal is retried once
-        after the rate window.
+        becomes the request's deadline, covering any wait for a connection
+        or a request slot; ``DeadlineExceeded`` means nothing was applied. A
+        write that gets no reply at all by then raises ``OutcomeUnknownError``.
+        A ``rate_limited`` refusal is retried once after the rate window, when
+        the deadline leaves time for it.
         """
-        try:
-            return await self._execute_once(program, timeout)
-        except RateLimited:
-            await asyncio.sleep(_RATE_LIMIT_WINDOW)
-            return await self._execute_once(program, timeout)
-
-    async def _execute_once(self, program: str, timeout: float | None) -> ResultResponse:
-        loop = asyncio.get_running_loop()
         if timeout is None:
             timeout = self._default_timeout
-        deadline = None if timeout is None else loop.time() + timeout
+        deadline = None if timeout is None else asyncio.get_running_loop().time() + timeout
+        try:
+            return await self._execute_once(program, deadline)
+        except RateLimited:
+            remaining = self._remaining(deadline)
+            if remaining is not None and remaining <= _RATE_LIMIT_WINDOW:
+                raise
+            await asyncio.sleep(_RATE_LIMIT_WINDOW)
+            return await self._execute_once(program, deadline)
+
+    async def _execute_once(self, program: str, deadline: float | None) -> ResultResponse:
         await self._ensure_open(deadline, program)
         slots, _, _ = self._primitives()
         try:
             await slots.acquire(self._remaining(deadline))
         except asyncio.TimeoutError:
             raise DeadlineExceeded(
-                f"No request slot freed within the {timeout}s deadline; nothing was sent",
+                "No request slot freed before the deadline; nothing was sent",
                 query=program,
             ) from None
         pending = self._register("execute", program=program, holds_slot=True)
-        timeout_ms = None if timeout is None else max(1, int(timeout * 1000))
+        remaining = self._remaining(deadline)
+        timeout_ms = None if remaining is None else max(1, int(remaining * 1000))
         await self._send(ExecuteMessage(program=program, id=pending.id, timeout_ms=timeout_ms))
         result: ResultResponse = await self._await_reply(pending, deadline)
         return result
@@ -538,6 +550,10 @@ class Connection:
             raise ConnectionError("Not connected")
         if self._state in ("idle", "connecting"):
             # Opens it (lazy), or waits for the connect in progress.
+            await self.connect()
+            return
+        if self._state == "closed" and self._closing and self._lazy:
+            # Closed by close(), not given up: the next call reopens it.
             await self.connect()
             return
         if self._state == "closed":
@@ -631,6 +647,7 @@ class Connection:
             waiting.add(ack_future)
         loop = asyncio.get_running_loop()
         give_up = loop.time() + self._deadline_grace
+        stopped = False
         while not pending.future.done():
             remaining = give_up - loop.time()
             if remaining <= 0:
@@ -638,17 +655,24 @@ class Connection:
             await asyncio.wait(waiting, timeout=remaining, return_when=asyncio.FIRST_COMPLETED)
             if ack_future is not None and ack_future.done():
                 waiting.discard(ack_future)
-                if (
-                    not ack_future.cancelled()
-                    and ack_future.exception() is None
-                    and ack_future.result().outcome == "too_late"
-                ):
+                outcome = (
+                    ack_future.result().outcome
+                    if not ack_future.cancelled() and ack_future.exception() is None
+                    else None
+                )
+                if outcome == "too_late":
                     # The write began committing: its reply reports it.
                     return await asyncio.shield(pending.future)
+                stopped = outcome == "cancelled"
                 ack_future = None
         if pending.future.done():
             return pending.future.result()
         pending.abandoned = True
+        if not stopped and pending.program is not None and _may_write(pending.program):
+            raise OutcomeUnknownError(
+                "No reply before the deadline and no confirmation that the cancel "
+                "stopped it; the write may have committed: read back before retrying"
+            )
         raise DeadlineExceeded(
             "No reply before the deadline; the request was cancelled",
             query=pending.program,
@@ -890,9 +914,15 @@ class Connection:
             if wait > 0:
                 await asyncio.sleep(wait)
                 continue
+            if self._pending:
+                # The server is not idle while it owes replies, and a ping
+                # would take the slot kept free for a cancel.
+                self._loop_last_send = loop.time()
+                continue
             pending = self._register("ping")
             pending.abandoned = True
             await self._send(PingMessage(id=pending.id))
+            self._loop_last_send = loop.time()
 
     # ── Losing the connection and getting it back ─────────────────────
 
@@ -941,11 +971,12 @@ class Connection:
         self._state = "closed"
         if self._ready is not None:
             self._ready.set()
-        self._dispatcher.fail(
-            ConnectionLost(
-                f"Connection to {self._current_kg!r} closed and not reconnected", code=code
+        if self._ends_notifications:
+            self._dispatcher.fail(
+                ConnectionLost(
+                    f"Connection to {self._current_kg!r} closed and not reconnected", code=code
+                )
             )
-        )
         self._events.emit(
             ConnectionEvent(type="closed", knowledge_graph=self._current_kg, code=code)
         )
@@ -961,6 +992,7 @@ class Connection:
             logger.info(
                 "Reconnecting (attempt %d/%d)...", attempt + 1, self._max_reconnect_attempts
             )
+            resumed = self._last_seq is not None
             try:
                 await self._open_bound(first=False)
             except AuthenticationError as e:
@@ -982,6 +1014,15 @@ class Connection:
                 except Exception:
                     logger.exception("Reconnect hook %r failed", hook)
             self._events.emit(ConnectionEvent(type="reconnected", knowledge_graph=kg))
+            if not resumed:
+                self._events.emit(
+                    ConnectionEvent(
+                        type="notification_gap",
+                        knowledge_graph=kg,
+                        message="Reconnected without a notification cursor; "
+                        "notifications sent while disconnected are lost",
+                    )
+                )
             return
         self._give_up(code)
 
