@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use super::record::{BenchRecord, CheckStatus, FindingKind, Reason, ScenarioRun};
+use super::record::{BenchRecord, CheckStatus, Convergence, FindingKind, Reason, ScenarioRun};
 use super::suite::Suite;
 use super::PRIORITY;
 use crate::stats::percentile;
@@ -37,7 +37,7 @@ pub fn verdict(record: &BenchRecord, strict: bool) -> Verdict {
         .iter()
         .flat_map(|s| &s.mutations)
         .flat_map(|m| &m.subscriptions)
-        .filter(|d| !d.converged)
+        .filter(|d| d.convergence == Convergence::Diverged)
         .count();
     let passed = delta_path_failures == 0
         && unconverged == 0

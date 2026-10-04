@@ -273,6 +273,10 @@ mod index_commands {
 /// Label of the API key admin bootstrap issues.
 const BOOTSTRAP_KEY_LABEL: &str = "bootstrap";
 
+fn bootstrap_key_row() -> Tuple {
+    Tuple::new(vec![Value::string(BOOTSTRAP_KEY_LABEL)])
+}
+
 /// Record that admin bootstrap has issued its API key, so it never issues
 /// another.
 fn record_bootstrap_key(storage: &StorageEngine) -> Result<(), String> {
@@ -280,31 +284,50 @@ fn record_bootstrap_key(storage: &StorageEngine) -> Result<(), String> {
         .insert_tuples_into(
             crate::auth::INTERNAL_KG,
             crate::auth::stored::BOOTSTRAP_KEYS,
-            vec![Tuple::new(vec![Value::string(BOOTSTRAP_KEY_LABEL)])],
+            vec![bootstrap_key_row()],
         )
         .map(drop)
         .map_err(|e| e.to_string())
 }
 
-/// Store `key` as admin's bootstrap API key, recording its issue first so a
-/// crash in between never lets bootstrap issue it again.
+/// Store `key` as admin's bootstrap API key together with the record of its
+/// issue, as one program: either both are stored or neither is.
 fn store_bootstrap_key(storage: &StorageEngine, key: &str) -> Result<(), String> {
     use crate::auth;
+    use crate::storage_engine::{FactChange, StagedChanges, WriteProgram};
 
-    record_bootstrap_key(storage)?;
-    api_keys::store_api_key(
-        storage,
-        &auth::ApiKeyRecord {
-            label: BOOTSTRAP_KEY_LABEL.to_string(),
-            key_hash: auth::hash_api_key(key),
-            username: "admin".to_string(),
-            times: auth::ApiKeyTimes {
-                created_at: Some(now_ms()),
-                ..auth::ApiKeyTimes::default()
-            },
+    let record = auth::ApiKeyRecord {
+        label: BOOTSTRAP_KEY_LABEL.to_string(),
+        key_hash: auth::hash_api_key(key),
+        username: "admin".to_string(),
+        times: auth::ApiKeyTimes {
+            created_at: Some(now_ms()),
+            ..auth::ApiKeyTimes::default()
         },
-    )
-    .map_err(|e| e.to_string())
+    };
+    let mut changes = vec![FactChange::Insert {
+        relation: auth::stored::BOOTSTRAP_KEYS.to_string(),
+        tuples: vec![bootstrap_key_row()],
+    }];
+    changes.extend(api_keys::api_key_inserts(&record));
+    storage
+        .commit_program(
+            auth::INTERNAL_KG,
+            WriteProgram::single(StagedChanges::Facts(changes)),
+            None,
+        )
+        .map(drop)
+        .map_err(|e| e.into_storage_error().to_string())
+}
+
+/// Whether `_internal` holds a user named `username`.
+fn user_exists(snapshot: &KnowledgeGraphSnapshot, username: &str) -> bool {
+    snapshot
+        .input_tuples
+        .get("users")
+        .into_iter()
+        .flatten()
+        .any(|t| t.values().first().and_then(Value::as_str) == Some(username))
 }
 
 /// Current epoch milliseconds.
@@ -1093,56 +1116,13 @@ impl Handler {
 
     /// Insert the bootstrap admin user when `_internal` has no users, with an
     /// API key only if bootstrap has never issued one for this data directory.
+    /// The key is saved to the credentials file and printed only once stored.
     fn seed_admin_credentials(&self) {
         use crate::auth;
 
-        let _credential_writes = self.credential_writes.lock();
-        let storage = self.storage.read();
-
-        // Create _internal KG if it doesn't exist
-        if storage.ensure_knowledge_graph(auth::INTERNAL_KG).is_err() {
-            // Try explicit create if ensure fails (auto_create might be off)
-            if let Err(e) = storage.create_knowledge_graph(auth::INTERNAL_KG) {
-                // Already exists is fine
-                if !format!("{e}").contains("already exists") {
-                    warn!(error = %e, "Failed to create _internal KG");
-                    return;
-                }
-            }
-        }
-
-        // Check if users relation already has data
-        let snapshot = match storage.get_snapshot_for(auth::INTERNAL_KG) {
-            Ok(s) => s,
-            Err(e) => {
-                warn!(error = %e, "Failed to get _internal snapshot");
-                return;
-            }
-        };
-
-        let has_users = snapshot
-            .input_tuples
-            .get("users")
-            .is_some_and(|t| !t.is_empty());
-        let key_recorded = snapshot
-            .input_tuples
-            .get(auth::stored::BOOTSTRAP_KEYS)
-            .is_some_and(|t| !t.is_empty());
-        let bootstrapped_before = has_users
-            || api_keys::read_api_keys(&snapshot)
-                .iter()
-                .any(|key| key.label == BOOTSTRAP_KEY_LABEL);
-        if !key_recorded && bootstrapped_before {
-            if let Err(e) = record_bootstrap_key(&storage) {
-                warn!(error = %e, "Failed to record bootstrap API key");
-            }
-        }
-
-        if has_users {
-            info!("Auth bootstrap: admin user already exists");
+        let Some(issue_api_key) = self.bootstrap_needed() else {
             return;
-        }
-        let issue_api_key = !key_recorded && !bootstrapped_before;
+        };
 
         let credentials_path = self
             .config
@@ -1185,32 +1165,32 @@ impl Handler {
             (None, false)
         };
 
-        let mut saved = false;
-        if password_generated || key_generated {
-            if let Err(e) = to_persist.save(&credentials_path) {
+        let hash = match auth::hash_password(&password) {
+            Ok(h) => h,
+            Err(e) => {
+                eprintln!("ERROR: Failed to hash admin password: {e}");
+                return;
+            }
+        };
+
+        // The password is saved before the user exists; the key only once
+        // stored.
+        if password_generated {
+            let password_only = auth::PersistedCredentials {
+                admin_password: to_persist.admin_password.clone(),
+                api_key: None,
+            };
+            if let Err(e) = password_only.save(&credentials_path) {
                 warn!(
                     error = %e,
                     path = %credentials_path.display(),
                     "Failed to save credentials file"
                 );
-                if password_generated {
-                    eprintln!(
-                        "ERROR: cannot save generated credentials to {}: {e}. Admin user not created.",
-                        credentials_path.display()
-                    );
-                    return;
-                }
                 eprintln!(
-                    "WARNING: cannot save generated API key to {}: {e}. Bootstrap API key not created.",
+                    "ERROR: cannot save generated credentials to {}: {e}. Admin user not created.",
                     credentials_path.display()
                 );
-                api_key = None;
-            } else {
-                saved = true;
-                info!(
-                    "Auth bootstrap: credentials saved to {}",
-                    credentials_path.display()
-                );
+                return;
             }
         } else if to_persist != auth::PersistedCredentials::default() {
             info!(
@@ -1219,13 +1199,8 @@ impl Handler {
             );
         }
 
-        let hash = match auth::hash_password(&password) {
-            Ok(h) => h,
-            Err(e) => {
-                eprintln!("ERROR: Failed to hash admin password: {e}");
-                return;
-            }
-        };
+        let _credential_writes = self.credential_writes.lock();
+        let storage = self.storage.read();
         if let Err(e) = self.create_user(
             &storage,
             auth::UserRecord {
@@ -1243,17 +1218,31 @@ impl Handler {
             if let Err(e) = store_bootstrap_key(&storage, key) {
                 warn!(error = %e, "Failed to insert bootstrap API key");
                 api_key = None;
-                if to_persist.api_key.take().is_some() {
-                    if let Err(e) = to_persist.save(&credentials_path) {
-                        warn!(error = %e, "Failed to remove unstored API key from credentials file");
-                    }
-                }
             } else {
                 info!("Auth bootstrap: API key 'bootstrap' created for admin");
             }
         }
 
-        if saved {
+        if api_key.is_some() && (password_generated || key_generated) {
+            if let Err(e) = to_persist.save(&credentials_path) {
+                warn!(
+                    error = %e,
+                    path = %credentials_path.display(),
+                    "Failed to save credentials file"
+                );
+                eprintln!(
+                    "WARNING: cannot save the bootstrap API key to {}: {e}.",
+                    credentials_path.display()
+                );
+                api_key = None;
+            }
+        }
+
+        if password_generated || (key_generated && api_key.is_some()) {
+            info!(
+                "Auth bootstrap: credentials saved to {}",
+                credentials_path.display()
+            );
             eprintln!();
             eprintln!("=== INITIAL ADMIN CREDENTIALS CREATED ===");
             if let Some(api_key) = &api_key {
@@ -1274,6 +1263,61 @@ impl Handler {
             eprintln!("Delete this file to generate new credentials on next boot.");
             eprintln!();
         }
+    }
+
+    /// Prepare `_internal` for bootstrap and backfill the record of an already
+    /// issued bootstrap key. `None` when admin bootstrap has nothing to do;
+    /// otherwise whether it should issue an API key.
+    fn bootstrap_needed(&self) -> Option<bool> {
+        use crate::auth;
+
+        let _credential_writes = self.credential_writes.lock();
+        let storage = self.storage.read();
+
+        // Create _internal KG if it doesn't exist
+        if storage.ensure_knowledge_graph(auth::INTERNAL_KG).is_err() {
+            // Try explicit create if ensure fails (auto_create might be off)
+            if let Err(e) = storage.create_knowledge_graph(auth::INTERNAL_KG) {
+                // Already exists is fine
+                if !format!("{e}").contains("already exists") {
+                    warn!(error = %e, "Failed to create _internal KG");
+                    return None;
+                }
+            }
+        }
+
+        // Check if users relation already has data
+        let snapshot = match storage.get_snapshot_for(auth::INTERNAL_KG) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(error = %e, "Failed to get _internal snapshot");
+                return None;
+            }
+        };
+
+        let has_users = snapshot
+            .input_tuples
+            .get("users")
+            .is_some_and(|t| !t.is_empty());
+        let key_recorded = snapshot
+            .input_tuples
+            .get(auth::stored::BOOTSTRAP_KEYS)
+            .is_some_and(|t| !t.is_empty());
+        let bootstrapped_before = has_users
+            || api_keys::read_api_keys(&snapshot)
+                .iter()
+                .any(|key| key.label == BOOTSTRAP_KEY_LABEL);
+        if !key_recorded && bootstrapped_before {
+            if let Err(e) = record_bootstrap_key(&storage) {
+                warn!(error = %e, "Failed to record bootstrap API key");
+            }
+        }
+
+        if has_users {
+            info!("Auth bootstrap: admin user already exists");
+            return None;
+        }
+        Some(!key_recorded && !bootstrapped_before)
     }
 
     /// Authenticate a user by username and password. Synchronous and
@@ -1464,19 +1508,11 @@ impl Handler {
             .get_snapshot_for(auth::INTERNAL_KG)
             .map_err(ProgramError::from)?;
 
-        let users = snapshot.input_tuples.get("users");
-        if let Some(users) = users {
-            for tuple in users {
-                if let Some(u) = tuple.values().first().and_then(|v| v.as_str()) {
-                    if u == username {
-                        return Err(format!("User '{username}' already exists").into());
-                    }
-                }
-            }
+        if user_exists(&snapshot, username) {
+            return Err(format!("User '{username}' already exists").into());
         }
 
         self.credentials.remove_user(username);
-        self.delete_user_access(storage, username)?;
         let tuple = Tuple::new(vec![
             Value::string(username),
             Value::string(&user.password_hash),
@@ -1490,9 +1526,8 @@ impl Handler {
     }
 
     /// Delete everything `username` holds besides its user row: its API keys
-    /// (revoking them), their times and its KG grants. Shared by user drop and
-    /// user creation, so a recreated username never inherits orphaned access.
-    /// Keys and grants are separate writes: a transient failure of one does not
+    /// (revoking them), their times and its KG grants, so a recreated username
+    /// never inherits them. Keys and grants are separate writes: a transient failure of one does not
     /// stop the other (strip as much access as possible), and its error is
     /// returned at the end; an unknown outcome or a read-only store returns at
     /// once.
@@ -1577,8 +1612,9 @@ impl Handler {
 
         let tuple = found.ok_or_else(|| format!("User '{username}' not found"))?;
 
-        // Keys, their times and KG grants go first, in one commit, so a failure
-        // leaves the user intact; the user row only after.
+        // Keys with their times, and KG grants, go first as separate
+        // best-effort writes; the user row only once both succeed, so a
+        // failure leaves the user intact.
         self.delete_user_access(&storage, username)?;
         self.credentials.remove_user(username);
         storage.delete_tuples_from(auth::INTERNAL_KG, "users", vec![tuple])?;
@@ -1821,6 +1857,7 @@ impl Handler {
             .parse()
             .map_err(|_| format!("Invalid KG role '{role}'. Valid: owner, editor, viewer"))?;
 
+        let _credential_writes = self.credential_writes.lock();
         let storage = self.storage.read();
 
         // Verify KG exists
@@ -1828,10 +1865,14 @@ impl Handler {
             .get_snapshot_for(kg_name)
             .map_err(|_| format!("Knowledge graph '{kg_name}' not found"))?;
 
-        // Remove existing ACL for this user+kg (if any)
         let snapshot = storage
             .get_snapshot_for(auth::INTERNAL_KG)
             .map_err(ProgramError::from)?;
+        if !user_exists(&snapshot, username) {
+            return Err(format!("User '{username}' not found").into());
+        }
+
+        // Remove existing ACL for this user+kg (if any)
 
         let empty_vec = crate::value::Relation::new();
         let acls = snapshot.input_tuples.get("kg_acls").unwrap_or(&empty_vec);
@@ -5824,6 +5865,9 @@ mod tests {
             let handler = Handler::from_config(config).unwrap();
             handler.bootstrap_auth();
             handler.storage.write().create_knowledge_graph("g").unwrap();
+            handler
+                .handle_user_create("bob", "password123", "viewer")
+                .unwrap();
             handler.handle_kg_acl_grant("g", "bob", "viewer").unwrap();
             for fault in faults {
                 handler.storage.read().inject_wal_fault(fault);

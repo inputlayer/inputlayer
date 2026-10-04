@@ -13,6 +13,11 @@ fn fixture() -> (Arc<Handler>, tempfile::TempDir) {
     let handler = Arc::new(Handler::from_config(config).unwrap());
     handler.bootstrap_auth();
     handler.handle_user_create("bob", "pw", "editor").unwrap();
+    handler
+        .storage
+        .read()
+        .create_knowledge_graph("finance")
+        .unwrap();
     (handler, temp)
 }
 
@@ -35,7 +40,10 @@ fn spawn_mutation(
                 .map(|_| ()),
             3 => worker.handle_user_drop("bob").map(|_| ()),
             4 => worker.handle_user_password("bob", "new_pw").map(|_| ()),
-            _ => worker.handle_user_role("bob", "viewer").map(|_| ()),
+            5 => worker.handle_user_role("bob", "viewer").map(|_| ()),
+            _ => worker
+                .handle_kg_acl_grant("finance", "bob", "viewer")
+                .map(|_| ()),
         };
         done_tx.send(result).unwrap();
     });
@@ -44,7 +52,7 @@ fn spawn_mutation(
 
 #[test]
 fn credential_mutations_are_serialized_with_each_other() {
-    for operation in 0..6 {
+    for operation in 0..7 {
         let (handler, _temp) = fixture();
         handler.create_api_key("key", "bob", None).unwrap();
         let in_progress = handler.credential_writes.lock();
@@ -65,7 +73,7 @@ fn credential_mutations_are_serialized_with_each_other() {
 
 #[test]
 fn credential_mutations_do_not_wait_for_readers() {
-    for operation in 0..6 {
+    for operation in 0..7 {
         let (handler, _temp) = fixture();
         handler.create_api_key("key", "bob", None).unwrap();
         // A query, proof or replay holding the storage read guard.
@@ -80,13 +88,15 @@ fn credential_mutations_do_not_wait_for_readers() {
     }
 }
 
-fn break_users_relation(handler: &Handler) {
+/// Make every insert into `relation` fail: its schema has the wrong arity.
+fn break_relation(handler: &Handler, relation: &str) {
     handler
         .storage
         .read()
         .register_schema_in(
             INTERNAL_KG,
-            RelationSchema::new("users").with_column(ColumnSchema::new("name", SchemaType::String)),
+            RelationSchema::new(relation)
+                .with_column(ColumnSchema::new("name", SchemaType::String)),
         )
         .unwrap();
 }
@@ -151,7 +161,7 @@ fn failed_user_replacement_changes_nothing() {
         let principal = handler.authenticate_api_key(&key).unwrap();
         let users = internal_rows(&handler, "users");
         let keys = internal_rows(&handler, "api_keys");
-        break_users_relation(&handler);
+        break_relation(&handler, "users");
         let result = if password_change {
             handler.handle_user_password("bob", "new_pw")
         } else {
@@ -172,65 +182,72 @@ fn failed_user_replacement_changes_nothing() {
 }
 
 #[test]
-fn orphaned_keys_cannot_rebind_after_recreation_or_bootstrap() {
-    for (username, revoke_first) in [("bob", false), ("admin", false), ("admin", true)] {
-        let (handler, _temp) = fixture();
-        let key = handler.create_api_key("old-key", username, None).unwrap();
-        let mut revoked_keys = vec![key];
-        let keeper = if username == "admin" {
-            handler.handle_user_drop("bob").unwrap();
-            revoked_keys.push(bootstrap_key(handler.config()));
-            None
-        } else {
-            Some(handler.create_api_key("keeper", "admin", None).unwrap())
-        };
-        if revoke_first {
-            handler.handle_apikey_revoke("old-key").unwrap();
-            handler.handle_apikey_revoke("bootstrap").unwrap();
-        }
-        delete_internal_rows(&handler, "users", owned_by(0, username));
-
-        let handler = restart(handler);
-        if username == "bob" {
-            handler.handle_user_create(username, "pw", "admin").unwrap();
-        }
-        for key in &revoked_keys {
-            assert!(handler.authenticate_api_key(key).is_err());
-        }
-        assert!(handler.authenticate_user(username, "pw").is_ok());
-        assert!(!internal_rows(&handler, "api_keys")
-            .iter()
-            .any(owned_by(2, username)));
-        let new_key = handler.create_api_key("old-key", username, None).unwrap();
-
-        let handler = restart(handler);
-        for key in &revoked_keys {
-            assert!(handler.authenticate_api_key(key).is_err());
-        }
-        assert!(handler.authenticate_api_key(&new_key).is_ok());
-        if let Some(key) = keeper {
-            assert!(handler.authenticate_api_key(&key).is_ok());
-        }
-    }
-}
-
-#[test]
-fn recreated_user_does_not_inherit_orphaned_grants() {
+fn recreated_user_does_not_inherit_dropped_access() {
     let (handler, _temp) = fixture();
-    handler
-        .storage
-        .read()
-        .create_knowledge_graph("finance")
-        .unwrap();
     handler
         .handle_kg_acl_grant("finance", "bob", "owner")
         .unwrap();
-    delete_internal_rows(&handler, "users", owned_by(0, "bob"));
+    let key = handler.create_api_key("old-key", "bob", None).unwrap();
+    handler.handle_user_drop("bob").unwrap();
     handler.handle_user_create("bob", "pw", "viewer").unwrap();
+    let inherits_nothing = |handler: &Handler| {
+        assert!(handler.authenticate_api_key(&key).is_err());
+        assert_eq!(
+            handler.get_kg_role_for_user("finance", "bob", &Role::Viewer),
+            None
+        );
+    };
+    inherits_nothing(&handler);
+    inherits_nothing(&restart(handler));
+}
+
+#[test]
+fn access_cannot_be_given_to_an_unknown_user() {
+    let (handler, _temp) = fixture();
+    let grant = handler.handle_kg_acl_grant("finance", "alice", "viewer");
+    assert_eq!(grant.unwrap_err().message, "User 'alice' not found");
+    let key = handler.create_api_key("alice-key", "alice", None);
+    assert_eq!(key.unwrap_err().message, "User 'alice' not found");
+    assert!(!internal_rows(&handler, "kg_acls")
+        .iter()
+        .any(owned_by(1, "alice")));
+    assert!(!internal_rows(&handler, "api_keys")
+        .iter()
+        .any(owned_by(2, "alice")));
+
+    handler.handle_user_create("alice", "pw", "viewer").unwrap();
+    handler
+        .handle_kg_acl_grant("finance", "alice", "viewer")
+        .unwrap();
+    let key = handler.create_api_key("alice-key", "alice", None).unwrap();
+    assert!(handler.authenticate_api_key(&key).is_ok());
     assert_eq!(
-        handler.get_kg_role_for_user("finance", "bob", &Role::Viewer),
-        None
+        handler.get_kg_role_for_user("finance", "alice", &Role::Viewer),
+        Some(crate::auth::KgRole::Viewer)
     );
+}
+
+#[test]
+fn bootstrap_key_that_fails_to_store_is_neither_recorded_nor_saved() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut config = Config::default();
+    config.storage.data_dir = temp.path().to_path_buf();
+    let handler = Handler::from_config(config.clone()).unwrap();
+    handler
+        .storage
+        .read()
+        .create_knowledge_graph(INTERNAL_KG)
+        .unwrap();
+    break_relation(&handler, "api_keys");
+    handler.bootstrap_auth();
+
+    let saved =
+        crate::auth::PersistedCredentials::load(&temp.path().join("credentials.toml")).unwrap();
+    assert_eq!(saved.api_key, None);
+    let password = saved.admin_password.unwrap();
+    assert!(handler.authenticate_user("admin", &password).is_ok());
+    assert!(internal_rows(&handler, crate::auth::stored::BOOTSTRAP_KEYS).is_empty());
+    assert!(internal_rows(&handler, crate::auth::stored::API_KEY_TIMES).is_empty());
 }
 
 #[test]
@@ -262,7 +279,7 @@ fn partial_first_boot_issues_a_working_key_on_the_next_boot() {
         .read()
         .create_knowledge_graph(INTERNAL_KG)
         .unwrap();
-    break_users_relation(&handler);
+    break_relation(&handler, "users");
     handler.bootstrap_auth();
     assert!(handler.authenticate_user("admin", "pw").is_err());
     handler

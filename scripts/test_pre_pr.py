@@ -3,12 +3,13 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-STUB = '''#!/usr/bin/env python3
+STUB = f'''#!{sys.executable}
 import json, os, sys, time
 name = os.path.basename(sys.argv[0])
 args = sys.argv[1:]
@@ -29,7 +30,7 @@ class PrePrRoutingTests(unittest.TestCase):
             shutil.copy(ROOT / 'Makefile', repo / 'Makefile')
             for path in ('packages/inputlayer-py', 'packages/inputlayer-js', 'perf-gate', 'src', 'scripts', 'bin'):
                 (repo / path).mkdir(parents=True, exist_ok=True)
-            for name in ('cargo', 'uv', 'npm'):
+            for name in ('cargo', 'uv', 'npm', 'python3'):
                 path = repo / 'bin' / name
                 path.write_text(STUB)
                 path.chmod(0o755)
@@ -67,6 +68,7 @@ class PrePrRoutingTests(unittest.TestCase):
             (['packages/inputlayer-py/change.py'], {'uv'}),
             (['packages/inputlayer-js/change.ts'], {'npm'}),
             (['perf-gate/change.rs'], {'test', 'clippy'}),
+            (['scripts/change.sh'], {'python3'}),
         ]
         for paths, expected in cases:
             with self.subTest(paths=paths):

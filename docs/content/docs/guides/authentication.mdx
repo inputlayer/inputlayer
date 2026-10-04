@@ -72,6 +72,8 @@ Control which users can access which knowledge graphs.
 .kg acl grant mydb alice owner
 ```
 
+The user must exist; granting access to an unknown user is rejected.
+
 ### Revoke Access
 
 ```
@@ -230,17 +232,18 @@ A password or role replacement commits the old user row's removal and its
 replacement as one write: if it fails, nothing changes, and the user's row, API
 keys and live sessions stay as they were. The exception is a write whose outcome
 is unknown (it reached the write-ahead log but was not applied): then the user's
-live credentials are revoked until restart. Creating a user removes any API keys
-or grants left under that username before publishing credentials, so a
-recreated user starts with no API keys and no grants. Admin bootstrap creates
-the admin the same way, so old keys cannot bind to it.
+live credentials are revoked until restart. Dropping a user deletes its API keys
+and grants before its user row, so a recreated user starts with no API keys and
+no grants. Grants and API keys can only be given to a user that exists:
+`.kg acl grant` and `.apikey create` reject an unknown user.
 
 Bootstrap issues its API key only once per data directory. It records the
 issue in the internal auth graph and never issues another key once that record
 exists, even after the key is revoked. A data directory that already has users
 or a bootstrap key when the server starts gets the record then, so upgrading
-never re-issues a key. The key is printed only after it is stored, and is
-removed from `credentials.toml` if storing it fails. For recovery, log in with
+never re-issues a key. The key and the record of its issue are stored as one
+write; only then is the key saved to `credentials.toml` and printed, so a key
+that failed to store is never saved or shown. For recovery, log in with
 the bootstrap password and create a new key instead.
 
 You can also set an API key for the CLI client via environment variable:

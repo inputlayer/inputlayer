@@ -13,11 +13,11 @@ use std::time::Duration;
 
 use tracing::{info, warn};
 
-use super::{now_ms, Handler, ProgramError};
+use super::{now_ms, user_exists, Handler, ProgramError};
 use crate::auth::{self, ApiKeyRecord, ApiKeyTimes, ExpireRejected, KeyUsage};
 use crate::protocol::wire::{ColumnDef, QueryResult, WireDataType, WireTuple, WireValue};
 use crate::storage::StorageError;
-use crate::storage_engine::{KnowledgeGraphSnapshot, StorageEngine};
+use crate::storage_engine::{FactChange, KnowledgeGraphSnapshot, StorageEngine};
 use crate::value::{Tuple, Value};
 
 use crate::auth::stored::{API_KEYS, API_KEY_TIMES, CREATED_AT, EXPIRES_AT, LAST_USED_AT};
@@ -59,20 +59,38 @@ pub(super) fn read_api_keys(snapshot: &KnowledgeGraphSnapshot) -> Vec<ApiKeyReco
     auth::stored_credentials(&snapshot.input_tuples).1
 }
 
+/// The stored rows of a new key's creation and expiry times.
+fn initial_time_rows(record: &ApiKeyRecord) -> Vec<Tuple> {
+    [
+        (CREATED_AT, record.times.created_at),
+        (EXPIRES_AT, record.times.expires_at),
+    ]
+    .into_iter()
+    .filter_map(|(field, at)| Some(time_row(&record.key_hash, field, at?)))
+    .collect()
+}
+
+/// A new key's rows as changes for a write program: its times, then the key.
+pub(super) fn api_key_inserts(record: &ApiKeyRecord) -> [FactChange; 2] {
+    [
+        FactChange::Insert {
+            relation: API_KEY_TIMES.to_string(),
+            tuples: initial_time_rows(record),
+        },
+        FactChange::Insert {
+            relation: API_KEYS.to_string(),
+            tuples: vec![key_row(record)],
+        },
+    ]
+}
+
 /// Persist a new key: its times first, so a crash never leaves it without
 /// its expiry.
 pub(super) fn store_api_key(
     storage: &StorageEngine,
     record: &ApiKeyRecord,
 ) -> Result<(), StorageError> {
-    let times: Vec<Tuple> = [
-        (CREATED_AT, record.times.created_at),
-        (EXPIRES_AT, record.times.expires_at),
-    ]
-    .into_iter()
-    .filter_map(|(field, at)| Some(time_row(&record.key_hash, field, at?)))
-    .collect();
-    storage.insert_tuples_into(auth::INTERNAL_KG, API_KEY_TIMES, times)?;
+    storage.insert_tuples_into(auth::INTERNAL_KG, API_KEY_TIMES, initial_time_rows(record))?;
     storage
         .insert_tuples_into(auth::INTERNAL_KG, API_KEYS, vec![key_row(record)])
         .map(drop)
@@ -191,6 +209,9 @@ impl Handler {
         let _credential_writes = self.credential_writes.lock();
         let storage = self.storage.read();
         let snapshot = storage.get_snapshot_for(auth::INTERNAL_KG)?;
+        if !user_exists(&snapshot, owner) {
+            return Err(format!("User '{owner}' not found").into());
+        }
         if read_api_keys(&snapshot)
             .iter()
             .any(|key| key.label == label)

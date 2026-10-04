@@ -166,8 +166,8 @@ lands):
 - Credential revocation. It is covered over a real `/ws` connection by
   `tests/credential_revocation_tests.rs`, not here. Handler unit tests in
   `src/protocol/handler/credential_mutation_tests.rs` also cover failed password
-  and role replacements followed by user recreation or admin bootstrap and
-  restart, including orphaned API keys and failed recreation attempts.
+  and role replacements, user drop and recreation across restart, grants and
+  API keys refused for unknown users, and a bootstrap key that fails to store.
 - Gateway finding additions, resolutions and authoritative reset.
 - Running the same histories against recompute and persistent-dataflow modes
   (R4). Until then, the differential oracle (`make oracle-test`) compares
@@ -223,6 +223,7 @@ Source-to-category mapping:
 | `make pre-pr` | [Pre-PR pipeline](CONTRIBUTING#pre-commit-checks) | Before every push to a PR |
 | `make perf-gate` | Paired latency/throughput gate over `/ws` vs the approved baseline | Every implementation PR (see `perf-gate/README.md`) |
 | `make perf-gate-check` | Clippy + unit tests of the gate tool | After changing `perf-gate/` |
+| `make pre-pr-selftest` | Behavioural tests of `make pre-pr` routing (`scripts/test_pre_pr.py`) | After changing `Makefile` or `scripts/` |
 | `make e2e-reactive` | Reactive agent path against real engines, latency samples | Subscription or wire changes |
 | `make oracle-test` | Differential correctness oracle only | Changing evaluation, subscriptions or rule maintenance |
 

@@ -14,7 +14,7 @@ use anyhow::{Context, Result};
 
 use super::agent::{row_set, Agent, Fault, RowSet};
 use super::checkpoint::score;
-use super::record::{DeltaOutcome, FindingKind, MutationRun, Reason, ScenarioRun};
+use super::record::{Convergence, DeltaOutcome, FindingKind, MutationRun, Reason, ScenarioRun};
 use super::suite::{Case, Expected, Mutation, Scenario, Seed, Suite, INITIAL_PHASE};
 use super::translate::{Catalog, Change, Standing, Unsupported};
 use crate::client::Client;
@@ -284,6 +284,7 @@ async fn apply(
         subscriptions: Vec::new(),
     };
     for agent in &mut live.agents {
+        agent.clear_errors(&live.truth);
         agent.take_activity();
     }
     let start = if program.is_empty() {
@@ -313,10 +314,18 @@ async fn apply(
     let truth = requery(run, live, plan, "requery_us").await?;
     for agent in &mut live.agents {
         agent
-            .drain_until(deadline, |a| a.diverged(&truth).is_empty())
+            .drain_until(deadline, |a| a.diverged(&truth, &live.failed).is_empty())
             .await?;
     }
-    let lost = record_deltas(run, live, &truth, start, &mut record);
+    let lost = record_deltas(
+        run,
+        &mut live.agents,
+        &live.truth,
+        &live.failed,
+        &truth,
+        start,
+        &mut record,
+    );
     live.truth = truth;
     run.mutations.push(record);
     Ok(Ok(lost))
@@ -395,10 +404,13 @@ async fn requery(
 }
 
 /// Record what every subscription saw for the write sent at `start`, against
-/// the new `truth`; returns the questions whose answer lost rows.
+/// the new `truth` and the answers `before` it; `retired` questions no longer
+/// count toward convergence. Returns the questions whose answer lost rows.
 fn record_deltas(
     run: &mut ScenarioRun,
-    live: &mut Live,
+    agents: &mut [Agent],
+    before: &BTreeMap<String, RowSet>,
+    retired: &BTreeMap<String, String>,
     truth: &BTreeMap<String, RowSet>,
     start: Option<Instant>,
     record: &mut MutationRun,
@@ -406,7 +418,7 @@ fn record_deltas(
     let lost: BTreeSet<String> = truth
         .iter()
         .filter(|(id, now)| {
-            live.truth
+            before
                 .get(*id)
                 .is_some_and(|before| before.keys().any(|k| !now.contains_key(k)))
         })
@@ -414,18 +426,27 @@ fn record_deltas(
         .collect();
     // Per subscription: converged, and when its last delta frame arrived.
     let mut arrivals = Vec::new();
-    for (index, agent) in live.agents.iter_mut().enumerate() {
-        let diverged = agent.diverged(truth);
+    for (index, agent) in agents.iter_mut().enumerate() {
+        let diverged = agent.diverged(truth, retired);
         for (id, activity) in agent.take_activity() {
-            let answer_changed = live.truth.get(&id) != truth.get(&id);
+            let answer_changed = before.get(&id) != truth.get(&id);
             let delta_us = match (start, activity.last) {
                 (Some(sent), Some(arrived)) if activity.frames > 0 => {
                     Some(elapsed_us(sent, arrived))
                 }
                 _ => None,
             };
-            let converged = !diverged.contains(&id);
-            arrivals.push((converged, activity.last.filter(|_| activity.frames > 0)));
+            let convergence = if retired.contains_key(&id) {
+                Convergence::Retired
+            } else if diverged.contains(&id) {
+                Convergence::Diverged
+            } else {
+                Convergence::Converged
+            };
+            let converged = convergence == Convergence::Converged;
+            if convergence != Convergence::Retired {
+                arrivals.push((converged, activity.last.filter(|_| activity.frames > 0)));
+            }
             if let (true, true, Some(micros)) = (answer_changed, converged, delta_us) {
                 run.sample("delta_us", micros);
                 // Propagation after the durable commit was acknowledged.
@@ -458,7 +479,7 @@ fn record_deltas(
                 frames: activity.frames,
                 rows_inserted: activity.inserted,
                 rows_retracted: activity.retracted,
-                converged,
+                convergence,
             });
         }
     }
@@ -518,7 +539,106 @@ fn gauge_rss(run: &mut ScenarioRun, server: &RunningServer, name: &str) {
 
 #[cfg(test)]
 mod tests {
+    use super::super::agent::Subscription;
     use super::*;
+    use serde_json::json;
+
+    fn answers(entries: &[(&str, serde_json::Value)]) -> BTreeMap<String, RowSet> {
+        entries
+            .iter()
+            .map(|(id, rows)| {
+                (
+                    id.to_string(),
+                    row_set(serde_json::from_value(rows.clone()).unwrap()),
+                )
+            })
+            .collect()
+    }
+
+    fn mutation(label: &str) -> MutationRun {
+        MutationRun {
+            label: label.into(),
+            statements: 1,
+            ack_us: Some(1),
+            error: None,
+            subscriptions: Vec::new(),
+        }
+    }
+
+    /// Deliver a delta inserting `row` into subscription `id`.
+    fn deliver(agent: &mut Agent, id: &str, row: serde_json::Value) {
+        let sub = agent.subscriptions.get_mut(id).unwrap();
+        sub.apply(Instant::now(), vec![vec![row]], vec![], None);
+    }
+
+    #[tokio::test]
+    async fn later_mutations_converge_after_a_question_is_retired() {
+        let mut agents = vec![Agent::holding(vec![
+            Subscription::new("q0", vec![vec![json!(1)]]),
+            Subscription::new("q3", vec![vec![json!(7)]]),
+        ])];
+        let mut run = ScenarioRun::default();
+        let mut retired = BTreeMap::new();
+        let mut before = answers(&[("q0", json!([[1]])), ("q3", json!([[7]]))]);
+
+        // m1: both questions evaluate; both answers converge.
+        deliver(&mut agents[0], "q0", json!(2));
+        deliver(&mut agents[0], "q3", json!(8));
+        let truth = answers(&[("q0", json!([[1], [2]])), ("q3", json!([[7], [8]]))]);
+        let mut m1 = mutation("m1");
+        record_deltas(
+            &mut run,
+            &mut agents,
+            &before,
+            &retired,
+            &truth,
+            Some(Instant::now()),
+            &mut m1,
+        );
+        assert!(m1
+            .subscriptions
+            .iter()
+            .all(|d| d.convergence == Convergence::Converged));
+        before = truth;
+
+        // m2 and m3: q3's re-query fails, so it is retired; its subscription
+        // errors and goes stale, and q0 still converges and counts.
+        retired.insert("q3".to_string(), "result truncated".to_string());
+        agents[0].subscriptions.get_mut("q3").unwrap().error = Some("result truncated".into());
+        for (label, row) in [("m2", 3), ("m3", 4)] {
+            deliver(&mut agents[0], "q0", json!(row));
+            let mut truth = before.clone();
+            truth.remove("q3");
+            let q0 = truth.get_mut("q0").unwrap();
+            q0.insert(json!([row]).to_string(), vec![json!(row)]);
+            assert!(agents[0].diverged(&truth, &retired).is_empty());
+            let mut outcome = mutation(label);
+            record_deltas(
+                &mut run,
+                &mut agents,
+                &before,
+                &retired,
+                &truth,
+                Some(Instant::now()),
+                &mut outcome,
+            );
+            let q3 = outcome
+                .subscriptions
+                .iter()
+                .find(|d| d.subscription == "q3")
+                .unwrap();
+            assert_eq!(q3.convergence, Convergence::Retired);
+            let q0 = outcome
+                .subscriptions
+                .iter()
+                .find(|d| d.subscription == "q0")
+                .unwrap();
+            assert_eq!(q0.convergence, Convergence::Converged);
+            run.mutations.push(outcome);
+            before = truth;
+        }
+        assert_eq!(run.rates["converged_mutations"].ops, 3);
+    }
 
     #[test]
     fn a_divergent_subscription_means_the_mutation_did_not_converge() {

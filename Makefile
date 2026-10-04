@@ -1,4 +1,4 @@
-.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js perf-gate perf-gate-check secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
+.PHONY: all ci fmt fmt-check lint pre-pr pre-pr-snapshots pre-pr-js pre-pr-selftest perf-gate perf-gate-check secret-check install-gitleaks install-hooks uninstall-hooks hooks-test bench-genbi test test-fast test-release unit-test integration-test oracle-test e2e-test e2e-reactive e2e-update test-affected doc doc-check check build build-release clean fix release snapshot-test test-all ci-test-all flush-dev docker docker-run docker-deploy docker-deploy-no-tls docker-logs docker-stop k8s-check deny python-test python-test-live python-test-examples vc-gate js-test front-build front-deploy gui-build run run-server demo coverage view-coverage static-analysis
 
 SHELL := /bin/bash
 
@@ -524,7 +524,8 @@ lint:
 # Pre-PR gate: affected fast checks run in parallel before every push to a PR,
 # then the same-host performance gate. Formatting always runs; PRE_PR_BASE
 # routes Rust inputs to lint, workspace tests and affected snapshots, SDK
-# inputs to their tests (plus JS type checking), and perf-gate/ to its checks.
+# inputs to their tests (plus JS type checking), perf-gate/ to its checks, and
+# Makefile or scripts/ changes to the pre-pr gate's own tests.
 PRE_PR_BASE ?= $(shell git merge-base HEAD origin/main 2>/dev/null)
 PRE_PR_RUST_INPUTS := src tests benches examples gateway ontology-client testkit ws-protocol docs/spec Cargo.toml Cargo.lock config.toml clippy.toml Makefile scripts/test-affected.sh scripts/run_snapshot_tests.sh
 pre-pr:
@@ -547,6 +548,9 @@ pre-pr:
 	if ! git diff --quiet "$(PRE_PR_BASE)" -- perf-gate; then \
 		targets="$$targets perf-gate-check"; \
 	fi; \
+	if ! git diff --quiet "$(PRE_PR_BASE)" -- Makefile scripts; then \
+		targets="$$targets pre-pr-selftest"; \
+	fi; \
 	$(MAKE) --no-print-directory -j6 --output-sync=target $$targets
 	$(MAKE) --no-print-directory perf-gate
 
@@ -555,6 +559,9 @@ pre-pr-snapshots:
 
 pre-pr-js: js-test
 	cd packages/inputlayer-js && npm run typecheck
+
+pre-pr-selftest:
+	python3 -m unittest scripts/test_pre_pr.py
 
 # Performance gate: this tree's server vs the approved baseline, same host.
 # Mandatory before calling a PR done; see perf-gate/README.md.
