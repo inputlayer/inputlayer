@@ -13,6 +13,8 @@ import {
   NOT,
   CompileError,
   Program,
+  KnowledgeGraph,
+  type Connection,
   compileRule,
   compileConditionalDelete,
 } from '../src/index';
@@ -111,6 +113,18 @@ describe('any() in queries', () => {
       where: AND(any(Eta, { shipment: Shipment.col('shipment') }), NOT(any(Attempt, { order: Shipment.col('order') }))),
     });
     expect(plan.programs).toEqual(['?shipment(Order, Shipment), eta(Shipment, _), !attempt(Order, _, _)']);
+  });
+});
+
+describe('debug() and why()', () => {
+  it('refuse a query whose NOT(any()) binds only constants, without contacting the engine', async () => {
+    const sent: string[] = [];
+    const conn = { execute: async (iql: string) => { sent.push(iql); throw new Error('unreachable'); } };
+    const kg = new KnowledgeGraph('kg', conn as unknown as Connection);
+    const opts = { select: [ToolPolicy], where: NOT(any(KillSwitch, { tool: 'carrier_check' })) };
+    await expect(kg.debug(opts)).rejects.toBeInstanceOf(CompileError);
+    await expect(kg.why(opts)).rejects.toBeInstanceOf(CompileError);
+    expect(sent).toEqual([]);
   });
 });
 

@@ -692,7 +692,7 @@ export class KnowledgeGraph {
 
   /** Show the query plan without executing. */
   async debug(opts: QueryOptions): Promise<DebugResult> {
-    const iql = compileQueryPlan(opts).debug;
+    const iql = explainable(compileQueryPlan(opts), 'debug').debug;
     const result = await this.conn.execute(`.debug ${iql}`);
     const planText = result.rows.map((row) => String(row[0])).join('\n');
     return { iql, plan: planText };
@@ -704,7 +704,7 @@ export class KnowledgeGraph {
    * Each result row has a corresponding proof tree explaining its derivation.
    */
   async why(opts: QueryOptions & { full?: boolean }): Promise<WhyResult> {
-    const plan = compileQueryPlan(opts);
+    const plan = explainable(compileQueryPlan(opts), 'why');
     const result = await this.conn.execute(meta.why(plan.why.statement, opts.full));
     // The rule's columns are its head variables by position.
     const at = (v: string) => plan.why.columns.indexOf(v);
