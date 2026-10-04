@@ -99,7 +99,7 @@ pub struct PersistentRules {
     plans: ArcSwap<HashMap<String, Arc<CachedPlan>>>,
 }
 
-/// Plans kept per rule set; past this many, a new plan replaces them all.
+/// Plans kept per rule set; past this many, a new plan evicts an arbitrary one.
 const MAX_CACHED_PLANS: usize = 256;
 
 /// A query program compiled with the persistent rules it depends on.
@@ -131,11 +131,13 @@ impl PersistentRules {
 
     fn remember(&self, program: &str, plan: Arc<CachedPlan>) {
         self.plans.rcu(|plans| {
-            let mut plans = if plans.len() >= MAX_CACHED_PLANS && !plans.contains_key(program) {
-                HashMap::new()
-            } else {
-                HashMap::clone(plans)
-            };
+            let mut plans = HashMap::clone(plans);
+            if plans.len() >= MAX_CACHED_PLANS && !plans.contains_key(program) {
+                // Arbitrary, not oldest: more queries than slots still mostly hit.
+                if let Some(evicted) = plans.keys().next().cloned() {
+                    plans.remove(&evicted);
+                }
+            }
             plans.insert(program.to_string(), Arc::clone(&plan));
             plans
         });
