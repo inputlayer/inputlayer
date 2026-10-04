@@ -255,7 +255,7 @@ impl Default for JoinGraph {
 /// A rooted Join Spanning Tree with computed join order
 #[derive(Debug, Clone)]
 pub struct RootedJST {
-    /// Join order (post-order traversal of the tree)
+    /// Join order (pre-order traversal of the tree: each node after its parent)
     pub join_order: Vec<usize>,
     /// Tree-width cost: max "planning variables" at any join step
     pub cost: usize,
@@ -302,19 +302,17 @@ impl RootedJST {
             }
         }
 
-        // Compute post-order traversal (children before parents)
+        // Pre-order traversal (parents before children). The joins are built
+        // left-deep in this order, so each relation must share a variable
+        // with one joined before it: its parent. A post-order would join the
+        // children of a node before the node, and siblings with no shared
+        // variable (`a(X)` and `b(Y)` under `hub(X, Y)`) as a cross product.
         let mut join_order = Vec::new();
-        let mut stack = vec![(root, false)];
-        while let Some((node, processed)) = stack.pop() {
-            if processed {
-                join_order.push(node);
-            } else {
-                stack.push((node, true));
-                if let Some(node_children) = children.get(&node) {
-                    for &child in node_children {
-                        stack.push((child, false));
-                    }
-                }
+        let mut stack = vec![root];
+        while let Some(node) = stack.pop() {
+            join_order.push(node);
+            if let Some(node_children) = children.get(&node) {
+                stack.extend(node_children.iter().rev());
             }
         }
 
@@ -1427,10 +1425,57 @@ mod tests {
         assert_eq!(jst1.join_order.len(), 3);
         assert_eq!(jst2.join_order.len(), 3);
 
-        // Root should be last in post-order
-        assert_eq!(*jst0.join_order.last().unwrap(), 0);
-        assert_eq!(*jst1.join_order.last().unwrap(), 1);
-        assert_eq!(*jst2.join_order.last().unwrap(), 2);
+        // Root comes first in pre-order
+        assert_eq!(jst0.join_order[0], 0);
+        assert_eq!(jst1.join_order[0], 1);
+        assert_eq!(jst2.join_order[0], 2);
+    }
+
+    /// True when some join in `ir` has no join keys: a cross product.
+    fn has_cross_product(ir: &IRNode) -> bool {
+        match ir {
+            IRNode::Join {
+                left,
+                right,
+                left_keys,
+                ..
+            } => left_keys.is_empty() || has_cross_product(left) || has_cross_product(right),
+            IRNode::Map { input, .. }
+            | IRNode::Filter { input, .. }
+            | IRNode::Distinct { input }
+            | IRNode::FlatMap { input, .. } => has_cross_product(input),
+            _ => false,
+        }
+    }
+
+    #[test]
+    fn test_hub_with_unrelated_spokes_has_no_cross_product() {
+        // shipment(O, S), promised(O, P), eta(S, D): the spokes share nothing,
+        // so they may only meet through the hub. Joining them first is an
+        // |promised| x |eta| cross product (it made a SIP rule of the
+        // voice-agent pack quadratic in the number of sessions).
+        let planner = JoinPlanner::new();
+        for order in [[0, 1, 2], [1, 0, 2], [0, 2, 1], [2, 0, 1]] {
+            let scans = [
+                make_scan("shipment", &["O", "S"]),
+                make_scan("promised", &["O", "P"]),
+                make_scan("eta", &["S", "D"]),
+            ];
+            let first = scans[order[0]].clone();
+            let ir = order[1..].iter().fold(first, |acc, &i| {
+                let shared = acc
+                    .output_schema()
+                    .into_iter()
+                    .find(|v| scans[i].output_schema().contains(v))
+                    .unwrap_or_default();
+                make_join(acc, scans[i].clone(), &shared)
+            });
+            let planned = planner.plan_joins(ir);
+            assert!(
+                !has_cross_product(&planned),
+                "order {order:?} planned a cross product: {planned:?}"
+            );
+        }
     }
 
     #[test]
@@ -1674,8 +1719,8 @@ mod tests {
         let graph = JoinGraph::from_ir(&ir);
         let mst = graph.compute_mst();
         let jst = RootedJST::from_mst(&graph, &mst, 0);
-        // Root is last in post-order
-        assert_eq!(*jst.join_order.last().unwrap(), 0);
+        // Root is first in pre-order
+        assert_eq!(jst.join_order[0], 0);
         // Root has one child (node 1), join_order should contain both nodes
         assert_eq!(jst.join_order.len(), 2);
     }
